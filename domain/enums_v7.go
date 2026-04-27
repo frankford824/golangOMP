@@ -55,7 +55,6 @@ const (
 	TaskPriorityNormal   TaskPriority = "normal"
 	TaskPriorityHigh     TaskPriority = "high"
 	TaskPriorityCritical TaskPriority = "critical"
-	TaskPriorityUrgent   TaskPriority = "urgent"
 )
 
 // MaterialMode for new product material selection.

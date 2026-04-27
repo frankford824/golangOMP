@@ -926,9 +926,9 @@ func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.Ap
 	}
 	if p.Priority != "" && !validTaskPriority(p.Priority) {
 		return taskCreateValidationError(
-			"priority must be low, normal, high, or urgent",
+			"priority must be low, normal, high, or critical",
 			p,
-			taskCreateViolation("priority", "invalid_priority", "priority must be low, normal, high, or urgent"),
+			taskCreateViolation("priority", "invalid_priority", "priority must be low, normal, high, or critical"),
 		)
 	}
 	if p.RequesterID != nil && *p.RequesterID <= 0 {
@@ -1259,7 +1259,7 @@ func validTaskSourceMode(mode domain.TaskSourceMode) bool {
 
 func validTaskPriority(priority domain.TaskPriority) bool {
 	switch priority {
-	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical, domain.TaskPriorityUrgent:
+	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
 		return true
 	default:
 		return false
