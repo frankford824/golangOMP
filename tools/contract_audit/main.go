@@ -81,12 +81,14 @@ type HandlerIndex struct {
 	ReturnTypes     map[string]string
 	ReturnTypeLists map[string][]string
 	FieldTypes      map[string]string
+	LocalStructs    map[string][]string
 }
 
 type StructIndex struct {
 	FieldsByType map[string][]string
 	FileByType   map[string]string
 	RawByType    map[string]*ast.StructType
+	Aliases      map[string]string
 }
 
 type OpenAPIDoc struct {
@@ -411,6 +413,7 @@ func BuildHandlerIndex(dir string) (HandlerIndex, error) {
 		ReturnTypes:     map[string]string{},
 		ReturnTypeLists: map[string][]string{},
 		FieldTypes:      map[string]string{},
+		LocalStructs:    map[string][]string{},
 	}
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -428,7 +431,7 @@ func BuildHandlerIndex(dir string) (HandlerIndex, error) {
 }
 
 func BuildStructIndex(roots []string) (StructIndex, error) {
-	idx := StructIndex{FieldsByType: map[string][]string{}, FileByType: map[string]string{}, RawByType: map[string]*ast.StructType{}}
+	idx := StructIndex{FieldsByType: map[string][]string{}, FileByType: map[string]string{}, RawByType: map[string]*ast.StructType{}, Aliases: map[string]string{}}
 	for _, root := range roots {
 		if root == "" {
 			continue
@@ -461,6 +464,8 @@ func BuildStructIndex(roots []string) (StructIndex, error) {
 					if st, ok := ts.Type.(*ast.StructType); ok {
 						idx.RawByType[ts.Name.Name] = st
 						idx.FileByType[ts.Name.Name] = path
+					} else if alias := baseTypeName(resultType(ts.Type)); alias != "" {
+						idx.Aliases[ts.Name.Name] = alias
 					}
 				}
 			}
@@ -472,6 +477,11 @@ func BuildStructIndex(roots []string) (StructIndex, error) {
 	}
 	for name, st := range idx.RawByType {
 		idx.FieldsByType[name] = idx.structFields(st, map[string]bool{name: true})
+	}
+	for name, alias := range idx.Aliases {
+		if fields := idx.FieldsByType[alias]; len(fields) > 0 {
+			idx.FieldsByType[name] = append([]string(nil), fields...)
+		}
 	}
 	return idx, nil
 }
@@ -498,6 +508,7 @@ func BuildReturnTypeIndex(roots []string) (map[string]string, map[string][]strin
 			if err != nil {
 				return err
 			}
+			pkgAlias := packageAliasFromPath(path)
 			for _, decl := range f.Decls {
 				switch x := decl.(type) {
 				case *ast.FuncDecl:
@@ -534,10 +545,15 @@ func BuildReturnTypeIndex(roots []string) (map[string]string, map[string][]strin
 								continue
 							}
 							results := resultTypes(ft.Results.List)
-							key := ts.Name.Name + "." + method.Names[0].Name
-							if len(results) > 0 {
-								out[key] = results[0]
-								lists[key] = results
+							keys := []string{ts.Name.Name + "." + method.Names[0].Name}
+							if pkgAlias != "" {
+								keys = append(keys, pkgAlias+"."+ts.Name.Name+"."+method.Names[0].Name)
+							}
+							for _, key := range keys {
+								if len(results) > 0 {
+									out[key] = results[0]
+									lists[key] = results
+								}
 							}
 						}
 					}
@@ -644,6 +660,10 @@ func ResolveHandlerResponseShapes(idx HandlerIndex, route Route) (shapes []Respo
 			return nil, "unmapped_handler", "response expression type not inferred"
 		}
 		shape := ResponseShape{Type: baseTypeName(typ)}
+		if fields := idx.LocalStructs[key+"."+shape.Type]; len(fields) > 0 {
+			shape.Fields = fields
+			shape.Direct = true
+		}
 		if resp.Pagination {
 			shape.ExtraFields = append(shape.ExtraFields, "pagination")
 		}
@@ -841,11 +861,40 @@ func indexFunctions(idx HandlerIndex, f *ast.File, path string) {
 			recv := baseTypeName(exprString(fn.Recv.List[0].Type))
 			idx.Funcs[recv+"."+fn.Name.Name] = fn
 			idx.FileByMethod[recv+"."+fn.Name.Name] = path
+			indexLocalStructs(idx, recv+"."+fn.Name.Name, fn)
 		}
 		if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
 			idx.ReturnTypes[fn.Name.Name] = resultType(fn.Type.Results.List[0].Type)
 		}
 	}
+}
+
+func indexLocalStructs(idx HandlerIndex, funcKey string, fn *ast.FuncDecl) {
+	if fn.Body == nil {
+		return
+	}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		decl, ok := n.(*ast.DeclStmt)
+		if !ok {
+			return true
+		}
+		gen, ok := decl.Decl.(*ast.GenDecl)
+		if !ok {
+			return true
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+			idx.LocalStructs[funcKey+"."+ts.Name.Name] = structFields(st)
+		}
+		return true
+	})
 }
 
 type respondExpr struct {
@@ -891,6 +940,9 @@ func respondExprs(fn *ast.FuncDecl) []respondExpr {
 }
 
 func responseFromPayload(expr ast.Expr) respondExpr {
+	if id, ok := expr.(*ast.Ident); ok && id.Name == "nil" {
+		return respondExpr{Direct: true}
+	}
 	if fields, ok := ginHFields(expr); ok {
 		return respondExpr{Fields: fields, Direct: true, KnownGap: "dynamic_payload_documented"}
 	}
@@ -947,6 +999,11 @@ func responseFromJSONPayload(expr ast.Expr) respondExpr {
 			continue
 		}
 		resp.ExtraFields = append(resp.ExtraFields, key)
+	}
+	if resp.Expr != nil && len(resp.ExtraFields) > 0 {
+		resp.Expr = nil
+		resp.Direct = true
+		resp.KnownGap = "dynamic_payload_documented"
 	}
 	if resp.Expr == nil && !resp.Direct {
 		resp.Fields = sortedExprKeys(fields)
@@ -1229,7 +1286,7 @@ func inconsistentFieldSets(sets [][]string) bool {
 func decideVerdict(code, openapi, onlyCode, onlyOpenAPI []string) string {
 	switch {
 	case len(code) == 0 && len(openapi) == 0:
-		return "clean_empty"
+		return "clean"
 	case len(onlyCode) == 0 && len(onlyOpenAPI) == 0:
 		return "clean"
 	case len(onlyCode) > 0 && len(onlyOpenAPI) == 0:
@@ -1387,6 +1444,18 @@ func resultTypes(fields []*ast.Field) []string {
 		}
 	}
 	return out
+}
+
+func packageAliasFromPath(path string) string {
+	dir := filepath.Dir(path)
+	base := filepath.Base(dir)
+	switch base {
+	case "org_move_request":
+		return "orgmovesvc"
+	case "task_draft":
+		return "taskdraftsvc"
+	}
+	return strings.ReplaceAll(base, "_", "")
 }
 
 func exprString(expr ast.Expr) string {
