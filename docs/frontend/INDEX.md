@@ -1,6 +1,20 @@
+> V1 Source of Truth: `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`
+
 # V1 前端联调接口文档索引
 
+> Revision: V1.1-A2 contract drift purge (2026-04-27)
+> Source: docs/api/openapi.yaml (post V1.1-A2)
+> 与 v1.21 生产实际响应对齐
+
+
 > Release: v1.21 · Backend: V1.0 + V1.1-A1 · Production detail P99 warm 32.933ms / cold 32.995ms。
+
+## 修订历史
+
+| 版本 | 日期 | 说明 |
+|---|---|---|
+| v1.21 release | 2026-04-25 | 首版 16 份 family 联调文档 |
+| V1.1-A2 contract drift purge | 2026-04-27 | 全量对齐 v1.21 实际响应 schema · detail 接口由 30+ 富字段更正为 5 段精简 · 共 6 处 P0/P1 schema 修订 |
 
 ## §0 Base URL 与鉴权
 

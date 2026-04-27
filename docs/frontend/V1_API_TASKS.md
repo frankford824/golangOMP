@@ -1,4 +1,13 @@
+> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
+> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
+
 # 任务主流程
+
+> Revision: V1.1-A2 contract drift purge (2026-04-27)
+> Source: docs/api/openapi.yaml (post V1.1-A2)
+> 与 v1.21 生产实际响应对齐
+
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -965,10 +974,11 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns the frontend aggregate detail. `/v1/tasks/{id}` exposes the lighter read model with workflow, `procurement_summary`, top-level `product_selection`, and canonical task org ownership. This detail route adds aggregate sections including governance summaries, design-asset detail, and supporting read models for the full page. `task_event_logs` remain the general task event stream; the override audit layer is governance-specific and read-only; the boundary layer is a placeholder governance summary rather than an approval or finance system. For `purchase_task`, `procurement_summary` remains the procurement-to-warehouse coordination summary and carries lightweight `product_selection`, while top-level and nested task-detail `product_selection` keep the full provenance contract.
+- `GET`: V1.1-A1 fast-path 首屏聚合接口。成功响应固定为 `data.{task, task_detail, modules, events, reference_file_refs}` 5 段。
+- 不再返回旧富详情字段集: `procurement_summary`、完整顶层 `product_selection`、`matched_rule_governance`、`governance_audit_summary`、`design_assets`、`asset_versions`、`sku_items`、`cost_override_summary`、`boundary_summary` 等。
 
 ### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- 需要 Bearer token(`Authorization: Bearer <token>`)。
 - `GET` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
@@ -977,27 +987,97 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `id` | path | integer | 是 | - |
+| `id` | path | integer | 是 | task id |
 
 请求体: 无请求体。
 
 ### 响应体 schema
 成功响应: `200 application/json`
 
+顶层 5 段:
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data.task` | `Task` | 是 | 主任务行,字段按 `domain.Task` json tag。 |
+| `data.task_detail` | `TaskDetail/null` | 否 | 详情行,字段按 `domain.TaskDetail` json tag;不存在时可为 `null` 或省略。 |
+| `data.modules` | `TaskAggregateModule[]` | 是 | 每个模块使用 `TaskAggregateModule` 字段集,包含 `visibility`, `allowed_actions`, `projection`。 |
+| `data.events` | module event array | 是 | 最近模块事件,服务端上限 50。 |
+| `data.reference_file_refs` | `ReferenceFileRefFlat[]` | 是 | 任务级参考文件关联。 |
+
+`task_detail` 中常见 nullable/omitempty 字段包括 `category_id`, `width`, `height`, `area`, `quantity`, `cost_price`, `estimated_cost`, `cost_rule_id`, `matched_rule_version`, `prefill_at`, `override_at`, `last_filing_attempt_at`, `last_filed_at`, `filed_at`, `missing_fields`, `missing_fields_summary_cn`, `base_sale_price`, `product_selection`。以 OpenAPI `TaskDetail` component 为准。
+
 ```json
 {
   "data": {
-    "id": 123,
-    "task_id": 123,
-    "task_no": "string",
-    "task_type": "original_product_development"
+    "task": {
+      "id": 123,
+      "task_no": "T202604250001",
+      "task_type": "new_product_development",
+      "task_status": "InProgress",
+      "sku_code": "NSKT000001",
+      "owner_department": "Design",
+      "owner_org_team": "design-team-1",
+      "is_outsource": false,
+      "customization_required": false,
+      "created_at": "2026-04-25T10:28:52Z",
+      "updated_at": "2026-04-25T10:28:52Z"
+    },
+    "task_detail": {
+      "id": 456,
+      "task_id": 123,
+      "demand_text": "poster resize",
+      "category_code": "KT_STANDARD",
+      "width": 10.0,
+      "height": 20.0,
+      "filing_status": "not_filed",
+      "created_at": "2026-04-25T10:28:52Z",
+      "updated_at": "2026-04-25T10:28:52Z"
+    },
+    "modules": [
+      {
+        "id": 1,
+        "task_id": 123,
+        "module_key": "design",
+        "state": "claimed",
+        "visibility": "visible",
+        "allowed_actions": ["submit"],
+        "projection": {}
+      }
+    ],
+    "events": [
+      {
+        "id": 99,
+        "task_id": 123,
+        "task_module_id": 1,
+        "module_key": "design",
+        "event_type": "module.claimed",
+        "payload": {},
+        "created_at": "2026-04-25T10:28:52Z"
+      }
+    ],
+    "reference_file_refs": [
+      {
+        "id": 7,
+        "task_id": 123,
+        "ref_id": "ref_abc",
+        "owner_module_key": "basic_info",
+        "attached_at": "2026-04-25T10:28:52Z"
+      }
+    ]
   }
 }
 ```
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | TaskDetail | 否 | - |
+### 富字段替代接口
+
+| 旧富字段/视图 | 请改用 |
+|---|---|
+| `procurement_summary` / procurement lifecycle | `PATCH /v1/tasks/{id}/procurement`, `POST /v1/tasks/{id}/procurement/advance`, 或任务 read model `/v1/tasks/{id}` |
+| 完整顶层 `product_selection` provenance | `/v1/tasks/{id}` 或 `GET/PATCH /v1/tasks/{id}/product-info` |
+| `matched_rule_governance` / cost governance | `/v1/tasks/{id}/cost-overrides` |
+| `design_assets` / `asset_versions` | `/v1/tasks/{id}/asset-center/*` 或 `/v1/assets/*` |
+| `sku_items` | `/v1/tasks` / `/v1/tasks/{id}` read model 中的批量 SKU 视图 |
+| `governance_audit_summary` / boundary summary | `/v1/tasks/{id}/cost-overrides` |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -1006,15 +1086,15 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 
 ### curl 示例
 ```bash
-curl -X GET https://api.example.com/v1/tasks/<id>/detail \
+curl -sS https://api.example.com/v1/tasks/123/detail \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践
-- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
-- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+- 首屏只消费 5 段结构,不要按旧富 schema 读取不存在字段。
+- 模块按钮状态以 `modules[].allowed_actions` 和后端动作接口返回为准。
+- 需要富详情时按上表调用专用接口,不要假设 detail 聚合会补齐所有读模型。
+- 失败时必须展示 `error.code` 或 `deny_code`,不要只显示 HTTP 状态码。
 
 ## GET /v1/tasks/{id}/cost-overrides
 

@@ -1,6 +1,16 @@
+> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
+> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
+
 # V1 API 速查表(203 path · 一行一条)
 
+> Revision: V1.1-A2 contract drift purge (2026-04-27)
+> Source: docs/api/openapi.yaml (post V1.1-A2)
+> 与 v1.21 生产实际响应对齐
+
+
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
+> 重要: V1.1-A2 已校准,如有第三方文档与此处不一致,以本表为准。
 > WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 203 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
@@ -53,7 +63,7 @@
 | POST | `/v1/tasks/{id}/filing/retry` | Retry task filing | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/tasks/{id}/procurement` | Update purchase-task procurement draft data | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/procurement/advance` | Advance purchase-task procurement lifecycle | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}/detail` | Get task aggregate detail | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/detail` | Get task aggregate detail (V1.1-A1 fast-path 5-section) | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/cost-overrides` | Get task cost-override governance audit timeline | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-overrides/{event_id}/review` | Upsert cost-override review placeholder boundary | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-overrides/{event_id}/finance-mark` | Upsert cost-override finance placeholder boundary | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

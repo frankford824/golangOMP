@@ -4,12 +4,27 @@
 > 前置:V1.1-A1 `/v1/tasks/{id}/detail` P99 architect-verified
 > 范围:给前端工程师 / 联调模型的 backend-only 入口说明。
 
+## §0 V1.1-A2 契约修订通告
+
+`docs/frontend/` 中 v1.21 frontend docs 已由 V1.1-A2 替换。前端实现如已按老 doc 编码,请优先校对以下影响最大的接口/组件:
+
+1. `GET /v1/tasks/{id}/detail`: 由旧 30+ 富字段 `TaskDetail` 更正为 5 段 `TaskAggregateDetailV2`。
+2. `PATCH /v1/tasks/{id}/product-info`: 成功响应 `TaskDetail` component 对齐 `domain.TaskDetail`。
+3. `PATCH /v1/tasks/{id}/cost-info`: 成功响应 `TaskDetail` component 对齐 `domain.TaskDetail`。
+4. `PATCH /v1/tasks/{id}/business-info`: 成功响应 `TaskDetail` component 对齐 `domain.TaskDetail`。
+5. `POST /v1/tasks/{id}/assign` / `POST /v1/tasks/{id}/warehouse/prepare`: 直接任务响应 `Task` component 新增 `is_outsource`,不再声明 phantom `workflow_lane`。
+
+
+## §0.1 V1.2 OpenAPI 清算通告
+
+V1.2 已完成 path-closure 真死 schema 清算:15 个 unreachable schema 已从 OpenAPI 删除,闭包不可达数为 0;29 条 deprecated path 均已决断并补 `x-removed-at: v1.3`;frontend docs 已追加 V1.2 修订标记。前端联调入口继续以 `docs/frontend/INDEX.md` 和 `docs/V1_BACKEND_SOURCE_OF_TRUTH.md` 为准。
+
 ## §1 Backend Status
 
 后端当前状态:
 
 ```text
-V1.1-A1_DONE_ARCHITECT_VERIFIED
+V1_2_AUTHORITY_PURGED_AND_GUARD_LIVE · 待架构师 verify
 detail cold p99=47.525ms
 detail warm p99=47.513ms
 detail final warm extended n=500 p99=47.126ms
@@ -20,7 +35,7 @@ prod_detail_p99_warm_ms=32.933
 prod_detail_p99_cold_ms=32.995
 prod_db=jst_erp
 test_db_jst_erp_r3_test=DROPPED
-frontend_docs=docs/frontend/INDEX.md (16 files / 203 /v1 paths + /ws/v1 note)
+frontend_docs=docs/frontend/INDEX.md (post V1.1-A2 / 16 files / 203 /v1 paths + /ws/v1 note)
 ```
 
 ## §2 Canonical Routes
@@ -104,7 +119,7 @@ WARMUP=100 N=500 \
 
 - 前端不得依赖 compatibility/deprecated 路由。
 - 前端请求失败必须展示后端 `error.code` / `deny_code`。
-- 任务详情首屏只调 `GET /v1/tasks/{id}/detail`,不要拆成多个旧接口拼装。
+- 任务详情首屏只调 `GET /v1/tasks/{id}/detail`;该接口 post V1.1-A2 只返回 5 段结构,富字段按 `docs/frontend/V1_API_TASKS.md` 对照表调用专用接口。
 - 模块按钮状态以 detail 返回的 modules/action/scope 为准,不要本地硬编码权限矩阵。
 - 批量 Excel parse 只做 preview,真正创建仍走 `POST /v1/tasks`。
 

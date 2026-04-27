@@ -4,23 +4,19 @@ info:
   version: 0.90.0
   description: |
     Current v0.9 MAIN backend contract.
-
     Read this OpenAPI together with:
     - `docs/V0_9_BACKEND_SOURCE_OF_TRUTH.md` for route classification and compatibility governance
     - `transport/http.go` for the mounted runtime
-
     Current canonical families include:
     - `/v1/auth/*`
     - `/v1/users*`
     - `/v1/erp/products*`
     - `/v1/tasks*`
     - `/v1/tasks/{id}/asset-center/*`
-
     Compatibility and deprecated routes remain documented only so existing callers can migrate safely.
     New frontend or new integrations must not start on deprecated or compatibility-only operations.
 servers:
   - url: /
-
 tags:
   - name: ReadyForFrontend
     description: V7 endpoints ready for frontend integration in the current iteration.
@@ -46,21 +42,17 @@ tags:
     description: Mock or prototype-only APIs kept for temporary flows and demos.
   - name: V6-Legacy
     description: Legacy public routes documented for compatibility or retirement tracking only. Do not use them as canonical MAIN routes or new integration targets.
-
 components:
   schemas:
     V7Role:
       type: string
       enum: [Member, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, TeamLead, DesignDirector, DesignReviewer, Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, ERP, Admin, DepartmentAdmin, CustomizationReviewer, CustomizationOperator]
-
     Department:
       type: string
       description: Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity and are not returned by `/v1/org/options` nor accepted by registration / user admin / task create inputs.
-
     PlaceholderAuthMode:
       type: string
       enum: [debug_header_role_enforced, session_token_role_enforced]
-
     RequestActor:
       type: object
       properties:
@@ -73,23 +65,6 @@ components:
         source: { type: string }
         auth_mode:
           $ref: '#/components/schemas/PlaceholderAuthMode'
-
-    RouteAccessPlaceholder:
-      type: object
-      properties:
-        readiness:
-          $ref: '#/components/schemas/APIReadiness'
-        required_roles:
-          type: array
-          items:
-            $ref: '#/components/schemas/V7Role'
-        auth_mode:
-          $ref: '#/components/schemas/PlaceholderAuthMode'
-        session_required:
-          type: boolean
-        debug_compatible:
-          type: boolean
-
     RouteAccessRule:
       type: object
       properties:
@@ -107,15 +82,12 @@ components:
           type: boolean
         debug_compatible:
           type: boolean
-
     UserStatus:
       type: string
       enum: [active, disabled]
-
     EmploymentType:
       type: string
       enum: [full_time, part_time]
-
     WorkflowUser:
       type: object
       properties:
@@ -156,7 +128,6 @@ components:
           format: date-time
         frontend_access:
           $ref: '#/components/schemas/FrontendAccess'
-
     CreateManagedUserRequest:
       type: object
       required: [username, display_name, department, team, mobile, password]
@@ -198,14 +169,12 @@ components:
           $ref: '#/components/schemas/UserStatus'
         employment_type:
           $ref: '#/components/schemas/EmploymentType'
-
     ResetUserPasswordRequest:
       type: object
       required: [password]
       properties:
         password:
           type: string
-
     FrontendAccess:
       type: object
       properties:
@@ -265,7 +234,6 @@ components:
           type: array
           items:
             type: string
-
     DepartmentOption:
       type: object
       properties:
@@ -284,7 +252,6 @@ components:
             $ref: '#/components/schemas/OrgTeamOption'
         enabled:
           type: boolean
-
     OrgTeamOption:
       type: object
       properties:
@@ -295,7 +262,6 @@ components:
           type: string
         enabled:
           type: boolean
-
     OrgDepartment:
       type: object
       properties:
@@ -312,7 +278,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     OrgTeam:
       type: object
       properties:
@@ -334,7 +299,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     CreateOrgDepartmentRequest:
       type: object
       required: [name]
@@ -342,7 +306,6 @@ components:
         name:
           type: string
           description: Unique department name in backend org master.
-
     UpdateOrgDepartmentRequest:
       type: object
       required: [enabled]
@@ -350,7 +313,6 @@ components:
         enabled:
           type: boolean
           description: Current backend update semantic is enable/disable only.
-
     CreateOrgTeamRequest:
       type: object
       required: [name]
@@ -368,7 +330,6 @@ components:
         name:
           type: string
           description: Globally unique team name in backend org master.
-
     UpdateOrgTeamRequest:
       type: object
       required: [enabled]
@@ -376,7 +337,6 @@ components:
         enabled:
           type: boolean
           description: Current backend update semantic is enable/disable only.
-
     RegistrationOptions:
       type: object
       properties:
@@ -384,7 +344,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DepartmentOption'
-
     ConfiguredUserAssignment:
       type: object
       properties:
@@ -412,7 +371,6 @@ components:
             type: string
         status:
           $ref: '#/components/schemas/UserStatus'
-
     OrgOptions:
       type: object
       description: Canonical org-options payload. `departments[].teams` is the authoritative shape as of v1.8.
@@ -440,7 +398,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ConfiguredUserAssignment'
-
     AuthSession:
       type: object
       properties:
@@ -450,7 +407,6 @@ components:
         expires_at:
           type: string
           format: date-time
-
     AuthResult:
       type: object
       properties:
@@ -458,7 +414,6 @@ components:
           $ref: '#/components/schemas/WorkflowUser'
         session:
           $ref: '#/components/schemas/AuthSession'
-
     RoleCatalogEntry:
       type: object
       properties:
@@ -470,7 +425,6 @@ components:
           type: array
           items:
             type: string
-
     PermissionLog:
       type: object
       properties:
@@ -512,11 +466,9 @@ components:
         created_at:
           type: string
           format: date-time
-
     OperationLogSource:
       type: string
       enum: [task_event, export_event, integration_call]
-
     OperationLogEntry:
       type: object
       properties:
@@ -536,7 +488,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     PolicyMode:
       type: string
       description: |
@@ -544,12 +495,10 @@ components:
         Indicates route-role visibility scaffolding only.
         This does not imply an identity provider, org sync, or full RBAC/ABAC engine.
       enum: [route_role_visibility_scaffolding]
-
     PolicyAPISurface:
       type: string
       description: Endpoint exposure classification used by policy scaffolding action summaries.
       enum: [frontend_ready, internal, admin, mock_placeholder]
-
     ActionPolicySummary:
       type: object
       description: Default action-level policy summary for scaffolding only.
@@ -564,7 +513,6 @@ components:
           $ref: '#/components/schemas/PolicyAPISurface'
         note:
           type: string
-
     ResourceAccessPolicy:
       type: object
       description: Default resource-level policy summary for scaffolding only.
@@ -581,7 +529,6 @@ components:
             $ref: '#/components/schemas/ActionPolicySummary'
         policy_mode:
           $ref: '#/components/schemas/PolicyMode'
-
     PolicyScopeSummary:
       type: object
       description: Cross-center policy scaffolding envelope. Not a real auth/org system.
@@ -600,19 +547,16 @@ components:
           type: boolean
         note:
           type: string
-
     PlatformEntryMode:
       type: string
       description: |
         Platform-entry boundary mode placeholder.
         This does not imply a BI platform, finance/accounting system, or report engine.
       enum: [scaffolding_only]
-
     PlatformEntryStatus:
       type: string
       description: Entry-readiness status for one platform-entry placeholder lane.
       enum: [candidate, conditional, not_applicable]
-
     KPIEntrySummary:
       type: object
       description: Placeholder KPI entry summary for future KPI docking. Not a real KPI computation module.
@@ -639,7 +583,6 @@ components:
           type: string
         note:
           type: string
-
     FinanceEntrySummary:
       type: object
       description: Placeholder finance entry summary for future finance docking. Not a real accounting/reconciliation/settlement/invoice system.
@@ -666,7 +609,6 @@ components:
           type: string
         note:
           type: string
-
     ReportEntrySummary:
       type: object
       description: Placeholder report/export entry summary for future report-platform docking. Not a real report-generation engine.
@@ -693,7 +635,6 @@ components:
           type: string
         note:
           type: string
-
     PlatformEntryBoundary:
       type: object
       description: Unified platform-entry boundary envelope reused across task, procurement, cost-governance, and export read models.
@@ -709,29 +650,24 @@ components:
         source_layer:
           type: string
         kpi_entry_summary:
-          allOf:
-            - $ref: '#/components/schemas/KPIEntrySummary'
+          allOf: [{ $ref: '#/components/schemas/KPIEntrySummary' }]
           nullable: true
         finance_entry_summary:
-          allOf:
-            - $ref: '#/components/schemas/FinanceEntrySummary'
+          allOf: [{ $ref: '#/components/schemas/FinanceEntrySummary' }]
           nullable: true
         report_entry_summary:
-          allOf:
-            - $ref: '#/components/schemas/ReportEntrySummary'
+          allOf: [{ $ref: '#/components/schemas/ReportEntrySummary' }]
           nullable: true
         is_placeholder:
           type: boolean
         note:
           type: string
-
     PaginationMeta:
       type: object
       properties:
         page: { type: integer }
         page_size: { type: integer }
         total: { type: integer }
-
     ServerLog:
       type: object
       properties:
@@ -740,32 +676,12 @@ components:
         msg: { type: string }
         details: { type: object }
         created_at: { type: string, format: date-time }
-
-    AvailableAction:
-      type: string
-      description: Frontend-only action suggestion derived from current aggregate state; server-side validation still applies.
-      enum:
-        - assign
-        - submit_design
-        - prepare_warehouse
-        - close
-        - claim_audit
-        - approve_audit
-        - reject_audit
-        - handover
-        - create_outsource
-        - warehouse_receive
-        - warehouse_reject
-        - warehouse_complete
-
     TaskBoardView:
       type: string
       enum: [all, ops, designer, audit, procurement, warehouse]
-
     TaskMainStatus:
       type: string
       enum: [draft, created, filed, pending_warehouse_receive, warehouse_processing, pending_close, closed]
-
     TaskSubStatusCode:
       type: string
       enum:
@@ -791,11 +707,9 @@ components:
         - final_ready
         - approved
         - reserved
-
     TaskSubStatusSource:
       type: string
       enum: [task_type, task_status, task_asset, warehouse_receipt, procurement_record, reserved]
-
     TaskSubStatusItem:
       type: object
       required: [code, label, source]
@@ -806,7 +720,6 @@ components:
           type: string
         source:
           $ref: '#/components/schemas/TaskSubStatusSource'
-
     TaskSubStatusSnapshot:
       type: object
       properties:
@@ -825,12 +738,10 @@ components:
           $ref: '#/components/schemas/TaskSubStatusItem'
         production:
           $ref: '#/components/schemas/TaskSubStatusItem'
-
     TaskSubStatusScope:
       type: string
       description: Canonical customization scope is `customization`; `outsource` remains a compatibility alias.
       enum: [design, audit, procurement, warehouse, customization, outsource, production]
-
     WorkflowReason:
       type: object
       required: [code, message]
@@ -865,7 +776,6 @@ components:
             - not_pending_close
         message:
           type: string
-
     TaskWorkflowSnapshot:
       type: object
       properties:
@@ -884,7 +794,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WorkflowReason'
-
     Product:
       type: object
       properties:
@@ -899,7 +808,6 @@ components:
         sync_time: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     ProductSearchMatchedMapping:
       type: object
       properties:
@@ -915,7 +823,6 @@ components:
         tertiary_condition_value: { type: string }
         is_primary: { type: boolean }
         priority: { type: integer }
-
     ProductSearchResult:
       allOf:
         - $ref: '#/components/schemas/Product'
@@ -929,7 +836,6 @@ components:
               description: First-level search-entry code used to position this local ERP product.
             matched_mapping_rule:
               $ref: '#/components/schemas/ProductSearchMatchedMapping'
-
     TaskProductSelectionSummary:
       type: object
       description: Lightweight original-product provenance summary for task list, task-board, and procurement-summary consumption. Local mapped-search provenance remains supported, and an additive ERP Bridge snapshot may be included for the selected external product.
@@ -963,11 +869,9 @@ components:
           type: string
           description: Persisted first-level ERP search-entry code used before the final product was selected.
         erp_product:
-          allOf:
-            - $ref: '#/components/schemas/ERPBridgeProductSnapshot'
+          allOf: [{ $ref: '#/components/schemas/ERPBridgeProductSnapshot' }]
           description: Primary SKU nested ERP snapshot object. Read nested sku/product fields from this object.
           nullable: true
-
     TaskProductSelectionContext:
       type: object
       description: Full original-product provenance contract for task read and detail views. It extends the lightweight summary with the local matched mapping snapshot and an additive ERP Bridge product snapshot.
@@ -984,8 +888,7 @@ components:
           type: string
           description: First-level search-entry code returned by `GET /v1/products/search` for original-product picker narrowing.
         matched_mapping_rule:
-          allOf:
-            - $ref: '#/components/schemas/ProductSearchMatchedMapping'
+          allOf: [{ $ref: '#/components/schemas/ProductSearchMatchedMapping' }]
           nullable: true
         source_product_id:
           type: integer
@@ -1005,11 +908,9 @@ components:
           type: string
           description: Persisted first-level ERP search-entry code used before the concrete product was selected.
         erp_product:
-          allOf:
-            - $ref: '#/components/schemas/ERPBridgeProductSnapshot'
+          allOf: [{ $ref: '#/components/schemas/ERPBridgeProductSnapshot' }]
           description: Primary SKU nested ERP snapshot object. Read nested sku/product fields from this object.
           nullable: true
-
     ERPBridgeProduct:
       type: object
       description: Normalized ERP product contract returned by the MAIN facade. `product_id` is the stable lookup key emitted by `GET /v1/erp/products` and accepted by `GET /v1/erp/products/{id}`. Empty strings mean the backend could not obtain that field from bridge/category normalization; frontend should render its own placeholder for empty `image_url`.
@@ -1060,12 +961,9 @@ components:
           type: string
           description: Warehouse dimension code resolved from ERP.
         currency: { type: string }
-
     ERPBridgeProductSnapshot:
-      allOf:
-        - $ref: '#/components/schemas/ERPBridgeProduct'
+      allOf: [{ $ref: '#/components/schemas/ERPBridgeProduct' }]
       description: Persisted ERP product snapshot stored inside task `product_selection`. This additive snapshot preserves the selected ERP lookup key plus display fields used by task bind/replay, even though task binding still lands on a local cached `products.id`.
-
     ERPBridgeProductSearchFilter:
       type: object
       description: "Normalized `/v1/erp/products` query echo. Supported filters are keyword contains-match, exact `sku_code`, exact `category_id` / `category_name`, and browse. Global search, suggestion, and sorting are not supported."
@@ -1087,7 +985,6 @@ components:
         query_mode:
           type: string
           description: Current normalized search mode such as `keyword`, `sku_code`, `category_auxiliary`, or `browse`.
-
     ERPBridgeCategory:
       type: object
       description: Normalized ERP category contract used by MAIN to validate exact category_id / category_name filters.
@@ -1096,7 +993,6 @@ components:
         category_name: { type: string }
         parent_id: { type: string }
         level: { type: integer }
-
     ERPProductUpsertPayload:
       type: object
       description: |
@@ -1198,7 +1094,6 @@ components:
             area: { type: number, nullable: true }
             quantity: { type: integer, nullable: true }
             cost_price: { type: number, nullable: true }
-
     ERPProductUpsertResult:
       type: object
       description: Normalized Bridge write result. Tolerant schema because upstream bridge may expose several response envelopes.
@@ -1220,7 +1115,6 @@ components:
         sync_log_id: { type: string }
         status: { type: string, description: 'e.g. accepted, stored locally, synced' }
         message: { type: string }
-
     ERPItemStyleUpdatePayload:
       type: object
       description: Style-update payload written through `POST /v1/erp/products/style/update`.
@@ -1253,7 +1147,6 @@ components:
             filed_at: { type: string, format: date-time }
             operator_id: { type: integer }
             remark: { type: string }
-
     ERPItemStyleUpdateResult:
       type: object
       properties:
@@ -1265,7 +1158,6 @@ components:
         sync_log_id: { type: string }
         status: { type: string }
         message: { type: string }
-
     ERPSyncLog:
       type: object
       description: Bridge-side ERP write sync log record.
@@ -1292,7 +1184,6 @@ components:
         error_message: { type: string }
         created_at: { type: string, format: date-time, nullable: true }
         updated_at: { type: string, format: date-time, nullable: true }
-
     ERPProductBatchMutationItem:
       type: object
       properties:
@@ -1306,7 +1197,6 @@ components:
         carry_id: { type: string }
         box_no: { type: string }
         qty: { type: integer, nullable: true }
-
     ERPProductBatchMutationPayload:
       type: object
       required: [items]
@@ -1317,7 +1207,6 @@ components:
             $ref: '#/components/schemas/ERPProductBatchMutationItem'
         reason: { type: string }
         source: { type: string }
-
     ERPProductBatchMutationResult:
       type: object
       properties:
@@ -1328,7 +1217,6 @@ components:
         sync_log_id: { type: string }
         status: { type: string }
         message: { type: string }
-
     ERPVirtualInventoryUpdateItem:
       type: object
       required: [virtual_qty]
@@ -1340,14 +1228,12 @@ components:
         warehouse_code: { type: string }
         wms_co_id: { type: string }
         virtual_qty: { type: integer }
-
     ERPWarehouse:
       type: object
       properties:
         name: { type: string }
         wms_co_id: { type: string }
         warehouse_type: { type: string }
-
     ERPVirtualInventoryUpdatePayload:
       type: object
       required: [items]
@@ -1358,7 +1244,6 @@ components:
             $ref: '#/components/schemas/ERPVirtualInventoryUpdateItem'
         reason: { type: string }
         source: { type: string }
-
     ERPVirtualInventoryUpdateResult:
       type: object
       properties:
@@ -1368,24 +1253,20 @@ components:
         sync_log_id: { type: string }
         status: { type: string }
         message: { type: string }
-
     JSTSyncPingResponse:
       type: object
       properties:
         status: { type: string }
         service: { type: string }
-
     JSTIncrementalSyncResponse:
       type: object
       properties:
         status: { type: string }
         run_id: { type: string }
         message: { type: string }
-
     CategoryType:
       type: string
       enum: [coded_style, board, paper, print, cloth, material, custom, manual_quote, other]
-
     Category:
       type: object
       properties:
@@ -1411,11 +1292,9 @@ components:
         remark: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     CategoryERPMatchType:
       type: string
       enum: [category_code, product_family, sku_prefix, keyword, external_id]
-
     CategoryERPMapping:
       type: object
       properties:
@@ -1449,16 +1328,13 @@ components:
         remark: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     CostRuleType:
       type: string
       enum: [fixed_unit_price, area_threshold_surcharge, minimum_billable_area, size_based_formula, manual_quote, special_process_surcharge]
-
     CostRuleGovernanceStatus:
       type: string
       description: Governance/effective-window status for one persisted cost-rule row. This is not an approval-state machine.
       enum: [inactive, scheduled, effective, expired, no_match]
-
     CostRuleVersionRef:
       type: object
       properties:
@@ -1476,7 +1352,6 @@ components:
           format: date-time
           nullable: true
         source: { type: string }
-
     CostRuleVersionChainSummary:
       type: object
       properties:
@@ -1487,7 +1362,6 @@ components:
         total_versions: { type: integer }
         supersession_depth: { type: integer }
         is_latest_version: { type: boolean }
-
     CostRule:
       type: object
       properties:
@@ -1552,18 +1426,15 @@ components:
         governance_status:
           $ref: '#/components/schemas/CostRuleGovernanceStatus'
         version_chain_summary:
-          allOf:
-            - $ref: '#/components/schemas/CostRuleVersionChainSummary'
+          allOf: [{ $ref: '#/components/schemas/CostRuleVersionChainSummary' }]
           nullable: true
           description: Derived lineage summary for this governed rule row.
         previous_version:
-          allOf:
-            - $ref: '#/components/schemas/CostRuleVersionRef'
+          allOf: [{ $ref: '#/components/schemas/CostRuleVersionRef' }]
           nullable: true
           description: Derived previous governed rule in the same lineage, if any.
         next_version:
-          allOf:
-            - $ref: '#/components/schemas/CostRuleVersionRef'
+          allOf: [{ $ref: '#/components/schemas/CostRuleVersionRef' }]
           nullable: true
           description: Derived next governed rule in the same lineage, if any.
         supersession_depth:
@@ -1573,7 +1444,6 @@ components:
         remark: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     CostRuleHistoryReadModel:
       type: object
       properties:
@@ -1584,11 +1454,9 @@ components:
           items:
             $ref: '#/components/schemas/CostRuleVersionRef'
         current_rule:
-          allOf:
-            - $ref: '#/components/schemas/CostRuleVersionRef'
+          allOf: [{ $ref: '#/components/schemas/CostRuleVersionRef' }]
           nullable: true
           description: Latest reachable governed rule in the same lineage at read time.
-
     Task:
       type: object
       properties:
@@ -1602,6 +1470,12 @@ components:
           nullable: true
         sku_code: { type: string }
         product_name_snapshot: { type: string }
+        task_type:
+          type: string
+          enum: [original_product_development, new_product_development, purchase_task]
+        operator_group_id:
+          type: integer
+          nullable: true
         owner_team:
           type: string
           description: Compatibility task owner team field.
@@ -1611,12 +1485,6 @@ components:
         owner_org_team:
           type: string
           description: Canonical task owner org team.
-        task_type:
-          type: string
-          enum: [original_product_development, new_product_development, purchase_task]
-        operator_group_id:
-          type: integer
-          nullable: true
         creator_id: { type: integer }
         requester_id:
           type: integer
@@ -1639,11 +1507,8 @@ components:
           format: date-time
           nullable: true
         need_outsource: { type: boolean }
+        is_outsource: { type: boolean }
         customization_required: { type: boolean }
-        workflow_lane:
-          type: string
-          enum: [normal, customization]
-          description: Explicit business lane projection derived from `customization_required`.
         customization_source_type:
           type: string
           enum: [new_product, existing_product]
@@ -1670,30 +1535,17 @@ components:
           enum: [not_applicable, pending, partial, completed, failed]
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     TaskDetail:
       type: object
+      description: Task supplemental demand information. Field names follow `domain.TaskDetail` json tags in `domain/task.go`.
       properties:
         id: { type: integer }
         task_id: { type: integer }
-        task_no:
-          type: string
-          description: "V1 task number. Source: V1_MODULE_ARCHITECTURE §9.2."
-        task_type:
-          type: string
-          enum: [original_product_development, new_product_development, purchase_task, retouch_task, customer_customization, regular_customization]
-          description: "Source: V1_MODULE_ARCHITECTURE §4."
-        workflow_blueprint_key:
-          type: string
-          description: "Source: V1_MODULE_ARCHITECTURE §4 / §9.2."
-        creator:
-          $ref: '#/components/schemas/Actor'
-        derived_status:
-          $ref: '#/components/schemas/DerivedStatus'
         demand_text: { type: string }
         copy_text: { type: string }
         style_keywords: { type: string }
         remark: { type: string }
+        note: { type: string }
         risk_flags_json: { type: string }
         category: { type: string }
         category_id:
@@ -1702,9 +1554,22 @@ components:
         category_code: { type: string }
         category_name: { type: string }
         product_selection:
-          allOf:
-            - $ref: '#/components/schemas/TaskProductSelectionContext'
+          allOf: [{ $ref: '#/components/schemas/TaskProductSelectionContext' }]
           nullable: true
+        change_request: { type: string }
+        design_requirement: { type: string }
+        product_short_name: { type: string }
+        material_mode: { type: string }
+        material_other: { type: string }
+        cost_price_mode: { type: string }
+        base_sale_price:
+          type: number
+          format: double
+          nullable: true
+        product_channel: { type: string }
+        reference_images_json: { type: string }
+        reference_file_refs_json: { type: string }
+        reference_link: { type: string }
         spec_text: { type: string }
         material: { type: string }
         size_text: { type: string }
@@ -1753,8 +1618,7 @@ components:
           format: date-time
           nullable: true
           description: Timestamp of the latest task-side preview/prefill snapshot. Historical tasks are not auto-recomputed later.
-        requires_manual_review:
-          type: boolean
+        requires_manual_review: { type: boolean }
         manual_cost_override:
           type: boolean
           description: Business data flag only. This is not a permission-system signal.
@@ -1781,34 +1645,138 @@ components:
           nullable: true
         erp_sync_required: { type: boolean }
         erp_sync_version: { type: integer, format: int64 }
-        missing_fields:
-          type: array
-          items: { type: string }
-        missing_fields_summary_cn: { type: string }
         filed_at:
           type: string
           format: date-time
           nullable: true
+        missing_fields:
+          type: array
+          nullable: true
+          items: { type: string }
+        missing_fields_summary_cn:
+          type: string
+          nullable: true
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    TaskAggregateModule:
+      type: object
+      description: V1.1-A1 detail fast-path module item. It embeds `domain.TaskModule` and adds visibility/action/projection fields from `task_aggregator.ModuleDetail`.
+      properties:
+        id: { type: integer }
+        task_id: { type: integer }
+        module_key:
+          type: string
+          enum: [basic_info, design, audit, warehouse, customization, procurement, retouch]
+        state:
+          $ref: '#/components/schemas/TaskModuleState'
+        pool_team_code:
+          type: string
+          nullable: true
+        claimed_by:
+          type: integer
+          nullable: true
+        claimed_team_code:
+          type: string
+          nullable: true
+        claimed_at:
+          type: string
+          format: date-time
+          nullable: true
+        actor_org_snapshot:
+          type: object
+          nullable: true
+          additionalProperties: true
+        entered_at: { type: string, format: date-time }
+        terminal_at:
+          type: string
+          format: date-time
+          nullable: true
+        data:
+          type: object
+          additionalProperties: true
+        updated_at: { type: string, format: date-time }
+        visibility: { type: string }
+        allowed_actions:
+          type: array
+          items: { type: string }
+        projection:
+          type: object
+          additionalProperties: true
+    TaskModuleEvent:
+      type: object
+      description: Recent task module event returned by V1.1-A1 detail fast path, capped by service at 50 events.
+      properties:
+        id: { type: integer }
+        task_id:
+          type: integer
+          nullable: true
+        task_module_id: { type: integer }
+        module_key:
+          type: string
+          nullable: true
+        event_type: { type: string }
+        from_state:
+          allOf: [{ $ref: '#/components/schemas/TaskModuleState' }]
+          nullable: true
+        to_state:
+          allOf: [{ $ref: '#/components/schemas/TaskModuleState' }]
+          nullable: true
+        actor_id:
+          type: integer
+          nullable: true
+        actor_snapshot:
+          type: object
+          nullable: true
+          additionalProperties: true
+        payload:
+          type: object
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+    ReferenceFileRefFlat:
+      type: object
+      description: Flat task reference-file relation returned by V1.1-A1 detail fast path.
+      properties:
+        id: { type: integer }
+        task_id: { type: integer }
+        sku_item_id:
+          type: integer
+          nullable: true
+        ref_id: { type: string }
+        owner_module_key: { type: string }
+        context:
+          type: string
+          nullable: true
+        attached_at: { type: string, format: date-time }
+    TaskAggregateDetailV2:
+      type: object
+      description: V1.1-A1 fast-path 5-section task aggregate detail.
+      properties:
+        task:
+          $ref: '#/components/schemas/Task'
+        task_detail:
+          allOf: [{ $ref: '#/components/schemas/TaskDetail' }]
+          nullable: true
         modules:
           type: array
-          description: "Moduleized task detail contract frozen in R1. Source: V1_MODULE_ARCHITECTURE §9.2."
           items:
-            $ref: '#/components/schemas/TaskModule'
-
+            $ref: '#/components/schemas/TaskAggregateModule'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskModuleEvent'
+        reference_file_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferenceFileRefFlat'
     ProcurementStatus:
       type: string
       enum: [draft, prepared, in_progress, completed]
-
     ProcurementAction:
       type: string
       enum: [prepare, start, complete, reopen]
-
     ProcurementCoordinationStatus:
       type: string
       enum: [preparing, awaiting_arrival, ready_for_warehouse, handed_to_warehouse, warehouse_completed]
-
     ProcurementRecord:
       type: object
       properties:
@@ -1832,7 +1800,6 @@ components:
           nullable: true
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     ProcurementSummary:
       type: object
       properties:
@@ -1898,24 +1865,19 @@ components:
           format: date-time
           nullable: true
         product_selection:
-          allOf:
-            - $ref: '#/components/schemas/TaskProductSelectionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskProductSelectionSummary' }]
           nullable: true
         matched_rule_governance:
-          allOf:
-            - $ref: '#/components/schemas/TaskMatchedRuleGovernance'
+          allOf: [{ $ref: '#/components/schemas/TaskMatchedRuleGovernance' }]
           nullable: true
         override_summary:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideSummary' }]
           nullable: true
         governance_audit_summary:
-          allOf:
-            - $ref: '#/components/schemas/TaskGovernanceAuditSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskGovernanceAuditSummary' }]
           nullable: true
         override_governance_boundary:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary' }]
           nullable: true
         policy_mode:
           $ref: '#/components/schemas/PolicyMode'
@@ -1930,8 +1892,7 @@ components:
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
         platform_entry_boundary:
-          allOf:
-            - $ref: '#/components/schemas/PlatformEntryBoundary'
+          allOf: [{ $ref: '#/components/schemas/PlatformEntryBoundary' }]
           nullable: true
         filing_status:
           type: string
@@ -1949,7 +1910,6 @@ components:
           nullable: true
         missing_fields_summary_cn: { type: string, nullable: true }
         filed_at: { type: string, format: date-time, nullable: true }
-
     TaskMatchedRuleSnapshot:
       type: object
       properties:
@@ -1966,39 +1926,31 @@ components:
           nullable: true
         requires_manual_review: { type: boolean }
         is_current_rule: { type: boolean }
-
     TaskMatchedRuleGovernance:
       type: object
       properties:
         matched_rule:
-          allOf:
-            - $ref: '#/components/schemas/TaskMatchedRuleSnapshot'
+          allOf: [{ $ref: '#/components/schemas/TaskMatchedRuleSnapshot' }]
           nullable: true
         current_rule:
-          allOf:
-            - $ref: '#/components/schemas/CostRuleVersionRef'
+          allOf: [{ $ref: '#/components/schemas/CostRuleVersionRef' }]
           nullable: true
         version_chain_summary:
-          allOf:
-            - $ref: '#/components/schemas/CostRuleVersionChainSummary'
+          allOf: [{ $ref: '#/components/schemas/CostRuleVersionChainSummary' }]
           nullable: true
         is_rule_outdated: { type: boolean }
         current_rule_version_hint:
           type: integer
           nullable: true
-
     TaskCostOverrideAuditEventType:
       type: string
       enum: [override_applied, override_updated, override_released]
-
     TaskCostOverrideReviewStatus:
       type: string
       enum: [not_required, pending, approved, rejected]
-
     TaskCostOverrideFinanceStatus:
       type: string
       enum: [not_required, pending, ready_for_view, marked_for_view]
-
     TaskCostOverrideBoundaryActionSummary:
       type: object
       description: Ready-for-frontend lightweight placeholder-boundary action summary. This is not a real approval or finance workflow event stream.
@@ -2016,7 +1968,6 @@ components:
         source:
           type: string
           description: Current source is either the persisted placeholder table or a derived fallback summary.
-
     TaskCostOverrideApprovalPlaceholderSummary:
       type: object
       description: Ready-for-frontend approval-placeholder summary layered above `cost_override_events`. This is not a real approval workflow.
@@ -2040,12 +1991,10 @@ components:
           format: date-time
           nullable: true
         latest_review_action:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary' }]
           nullable: true
         source: { type: string }
         is_placeholder_boundary_only: { type: boolean }
-
     TaskCostOverrideFinancePlaceholderSummary:
       type: object
       description: Ready-for-frontend finance-placeholder summary layered above `cost_override_events`. This is not a real finance, accounting, or settlement system.
@@ -2072,12 +2021,10 @@ components:
           type: boolean
           description: Placeholder-only indicator that the override may enter the future finance-facing layer. This is not a ledger-posted state.
         latest_finance_action:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary' }]
           nullable: true
         source: { type: string }
         is_placeholder_boundary_only: { type: boolean }
-
     TaskCostOverrideGovernanceBoundarySummary:
       type: object
       description: Ready-for-frontend unified governance-boundary summary reused across task/detail/procurement/timeline reads. This is not a real approval or finance system.
@@ -2090,12 +2037,10 @@ components:
           $ref: '#/components/schemas/TaskCostOverrideFinanceStatus'
         finance_view_ready: { type: boolean }
         latest_review_action:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary' }]
           nullable: true
         latest_finance_action:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary' }]
           nullable: true
         latest_boundary_actor: { type: string }
         latest_boundary_at:
@@ -2103,7 +2048,6 @@ components:
           format: date-time
           nullable: true
         is_placeholder_boundary_only: { type: boolean }
-
     TaskCostOverrideGovernanceBoundary:
       type: object
       description: Unified ready-for-frontend governance boundary layered above `cost_override_events`. It consolidates approval placeholder, finance placeholder, and latest-action summary reads without introducing a real approval workflow, finance system, or ERP writeback contract.
@@ -2146,12 +2090,10 @@ components:
           type: boolean
           description: Placeholder-only indicator that the override may enter the future finance-facing layer. This is not a ledger-posted state.
         latest_review_action:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary' }]
           nullable: true
         latest_finance_action:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideBoundaryActionSummary' }]
           nullable: true
         latest_boundary_actor: { type: string }
         latest_boundary_at:
@@ -2159,16 +2101,13 @@ components:
           format: date-time
           nullable: true
         governance_boundary_summary:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundarySummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundarySummary' }]
           nullable: true
         approval_placeholder_summary:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideApprovalPlaceholderSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideApprovalPlaceholderSummary' }]
           nullable: true
         finance_placeholder_summary:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideFinancePlaceholderSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideFinancePlaceholderSummary' }]
           nullable: true
         is_placeholder_boundary_only: { type: boolean }
         policy_mode:
@@ -2184,10 +2123,8 @@ components:
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
         platform_entry_boundary:
-          allOf:
-            - $ref: '#/components/schemas/PlatformEntryBoundary'
+          allOf: [{ $ref: '#/components/schemas/PlatformEntryBoundary' }]
           nullable: true
-
     TaskCostOverrideEventSummary:
       type: object
       properties:
@@ -2232,7 +2169,6 @@ components:
         occurred_at:
           type: string
           format: date-time
-
     TaskCostOverrideSummary:
       type: object
       properties:
@@ -2249,21 +2185,17 @@ components:
           nullable: true
         override_event_count: { type: integer }
         latest_override_event:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideEventSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideEventSummary' }]
           nullable: true
         latest_release_event:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideEventSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideEventSummary' }]
           nullable: true
         latest_audit_event:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideEventSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideEventSummary' }]
           nullable: true
         history_source:
           type: string
           description: Current summary source. This is a governance-audit skeleton only, not a dedicated approval flow.
-
     TaskGovernanceAuditSummary:
       type: object
       properties:
@@ -2278,7 +2210,6 @@ components:
           format: date-time
           nullable: true
         current_override_active: { type: boolean }
-
     TaskCostOverrideAuditEvent:
       type: object
       properties:
@@ -2327,10 +2258,8 @@ components:
           type: string
           format: date-time
         override_governance_boundary:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary' }]
           nullable: true
-
     TaskCostOverrideAuditTimeline:
       type: object
       properties:
@@ -2340,14 +2269,11 @@ components:
           items:
             $ref: '#/components/schemas/TaskCostOverrideAuditEvent'
         governance_audit_summary:
-          allOf:
-            - $ref: '#/components/schemas/TaskGovernanceAuditSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskGovernanceAuditSummary' }]
           nullable: true
         override_governance_boundary:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary' }]
           nullable: true
-
     TaskCostOverrideReviewRequest:
       type: object
       description: Placeholder-only review boundary update. This does not create a real approval workflow or identity approval chain.
@@ -2356,8 +2282,7 @@ components:
           type: boolean
           nullable: true
         review_status:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideReviewStatus'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideReviewStatus' }]
           nullable: true
         review_note: { type: string }
         review_actor:
@@ -2367,7 +2292,6 @@ components:
           type: string
           format: date-time
           nullable: true
-
     TaskCostOverrideFinanceMarkRequest:
       type: object
       description: Placeholder-only finance-boundary update. This does not create a real finance, accounting, reconciliation, settlement, or invoice system.
@@ -2376,8 +2300,7 @@ components:
           type: boolean
           nullable: true
         finance_status:
-          allOf:
-            - $ref: '#/components/schemas/TaskCostOverrideFinanceStatus'
+          allOf: [{ $ref: '#/components/schemas/TaskCostOverrideFinanceStatus' }]
           nullable: true
         finance_note: { type: string }
         finance_marked_by:
@@ -2387,27 +2310,6 @@ components:
           type: string
           format: date-time
           nullable: true
-
-    AuditRecord:
-      type: object
-      properties:
-        id: { type: integer }
-        task_id: { type: integer }
-        stage:
-          type: string
-          enum: [A, B, outsource_review]
-        action:
-          type: string
-          enum: [claim, approve, reject, transfer, handover, takeover]
-        auditor_id: { type: integer }
-        issue_types_json:
-          type: string
-          description: JSON array string of audit issue categories
-        comment: { type: string }
-        affects_launch: { type: boolean }
-        need_outsource: { type: boolean }
-        created_at: { type: string, format: date-time }
-
     AuditHandover:
       type: object
       properties:
@@ -2424,7 +2326,6 @@ components:
           enum: [pending_takeover, taken_over, cancelled]
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     OutsourceOrder:
       type: object
       properties:
@@ -2444,7 +2345,6 @@ components:
           nullable: true
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     WarehouseReceipt:
       type: object
       properties:
@@ -2481,10 +2381,8 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         warehouse_ready_version:
-          allOf:
-            - $ref: '#/components/schemas/DesignAssetVersion'
+          allOf: [{ $ref: '#/components/schemas/DesignAssetVersion' }]
           nullable: true
-
     CustomizationJob:
       type: object
       properties:
@@ -2536,8 +2434,7 @@ components:
           type: integer
           nullable: true
         pricing_worker_type:
-          allOf:
-            - $ref: '#/components/schemas/EmploymentType'
+          allOf: [{ $ref: '#/components/schemas/EmploymentType' }]
           nullable: true
           description: Execution-stage frozen settlement worker employment type captured at the pricing freeze point.
         status:
@@ -2551,7 +2448,6 @@ components:
           nullable: true
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     TaskEvent:
       type: object
       description: General task event stream. Payloads may include action-specific before/after task status, handler, and result context for business audit and troubleshooting.
@@ -2571,7 +2467,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     TaskAsset:
       type: object
       description: Task-scoped asset timeline item. Asset semantics are now canonicalized to `reference/source/delivery/preview`, while legacy input aliases remain compatibility-only.
@@ -2628,8 +2523,7 @@ components:
           nullable: true
           enum: [pending, not_applicable]
         storage_ref:
-          allOf:
-            - $ref: '#/components/schemas/AssetStorageRef'
+          allOf: [{ $ref: '#/components/schemas/AssetStorageRef' }]
           nullable: true
         uploaded_by: { type: integer }
         uploader_name:
@@ -2644,36 +2538,28 @@ components:
         created_at:
           type: string
           format: date-time
-
     DesignAssetUploadMode:
       type: string
       description: Compatibility-only internal upload-mode enum (`small`/`multipart`). New frontend integrations must use `upload_strategy` returned by upload-session creation instead of choosing this field.
       enum: [small, multipart]
-
     DesignAssetUploadStatus:
       type: string
       enum: [pending, uploaded, cancelled]
-
     DesignAssetPreviewStatus:
       type: string
       enum: [pending, not_applicable]
-
     DesignAssetSessionStatus:
       type: string
       enum: [created, completed, cancelled, expired]
-
     DesignAssetStorageProvider:
       type: string
       enum: [oss]
-
     DesignAssetAccessPolicy:
       type: string
       enum: [reference_direct, source_controlled, delivery_flow, preview_assist]
-
     DesignAssetSourceAccessMode:
       type: string
       enum: [standard]
-
     DesignAssetVersion:
       type: object
       properties:
@@ -2769,7 +2655,6 @@ components:
         notes:
           type: string
           nullable: true
-
     DesignAsset:
       type: object
       properties:
@@ -2817,18 +2702,14 @@ components:
           type: string
           format: date-time
         current_version:
-          allOf:
-            - $ref: '#/components/schemas/DesignAssetVersion'
+          allOf: [{ $ref: '#/components/schemas/DesignAssetVersion' }]
           nullable: true
         approved_version:
-          allOf:
-            - $ref: '#/components/schemas/DesignAssetVersion'
+          allOf: [{ $ref: '#/components/schemas/DesignAssetVersion' }]
           nullable: true
         warehouse_ready_version:
-          allOf:
-            - $ref: '#/components/schemas/DesignAssetVersion'
+          allOf: [{ $ref: '#/components/schemas/DesignAssetVersion' }]
           nullable: true
-
     UploadSession:
       type: object
       properties:
@@ -2878,7 +2759,6 @@ components:
         current_version_id:
           type: integer
           nullable: true
-
     RemoteUploadSessionPlan:
       type: object
       properties:
@@ -2931,46 +2811,36 @@ components:
           nullable: true
         is_stub:
           type: boolean
-
     AssetOwnerType:
       type: string
       enum: [task, task_asset, export_job, outsource_order, warehouse_receipt]
-
     AssetStorageAdapter:
       type: string
       enum: [mock_upload, placeholder_storage, export_placeholder, oss_upload_service]
-
     AssetStorageRefType:
       type: string
       enum: [task_asset_object, export_result, generic_object]
-
     UploadRequestStatus:
       type: string
       enum: [requested, bound, expired, cancelled]
-
     UploadRequestAdvanceAction:
       type: string
       enum: [cancel, expire]
-
     AssetStorageRefStatus:
       type: string
       enum: [recorded, superseded, archived]
-
     AdapterMode:
       type: string
       description: Cross-center adapter-boundary mode. The same term is reused across export, integration, and storage/upload, but each center may support only a subset of values.
       enum: [dispatch_then_attempt, call_log_then_execution, upload_request_then_storage_ref]
-
     DispatchMode:
       type: string
       description: Cross-center handoff/disposition mode. Reused across export dispatches, integration executions, and upload-request binding without implying one shared table or one shared worker.
       enum: [dispatch_record, execution_progress, upload_request_binding]
-
     BoundaryStorageMode:
       type: string
       description: Cross-center storage-side mode. Reused to express placeholder storage semantics without forcing export and asset storage to share one persistence model.
       enum: [lifecycle_managed_result_ref, asset_storage_ref]
-
     AdapterRefSummary:
       type: object
       description: Minimal shared adapter/connector/storage-adapter identity summary reused by export, integration, and storage/upload read models. This unifies language only; it does not imply the underlying tables or services are merged.
@@ -2983,7 +2853,6 @@ components:
           type: boolean
         note:
           type: string
-
     ResourceRefSummary:
       type: object
       description: Minimal shared resource-reference summary reused by export result references and asset storage references. It aligns placeholder resource language without forcing one table or one file-service model.
@@ -3010,7 +2879,6 @@ components:
           type: boolean
         note:
           type: string
-
     HandoffRefSummary:
       type: object
       description: Minimal shared handoff summary reused by export dispatches, integration executions, and upload requests. It unifies reference language for cross-boundary handoff state without merging those center-specific lifecycles.
@@ -3041,7 +2909,6 @@ components:
           type: boolean
         note:
           type: string
-
     AssetStorageRef:
       type: object
       description: Structured placeholder storage reference metadata for task assets and later shared file-like outputs. It aligns with export `result_ref` through shared `adapter_ref_summary` and `resource_ref_summary`. This is metadata only; it is not a real NAS handle, object-storage pointer, signed URL, or proof that bytes were uploaded.
@@ -3088,7 +2955,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     UploadRequest:
       type: object
       description: Placeholder upload-intent contract only. Upload requests are storage/upload handoff records aligned with shared export and integration boundary language, with lifecycle readiness hints for `requested -> bound|expired|cancelled`. Creating or advancing an upload request does not upload bytes and does not allocate a real object-storage or NAS location.
@@ -3195,7 +3061,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     CreateUploadRequestRequest:
       type: object
       required: [owner_type, owner_id, file_name]
@@ -3223,7 +3088,6 @@ components:
           type: string
         remark:
           type: string
-
     CreateTaskAssetUploadSessionRequest:
       type: object
       description: |
@@ -3307,7 +3171,6 @@ components:
         cancel_endpoint:
           type: string
           description: Canonical cancellation endpoint returned by the session creator.
-
     CreateAssetUploadSessionRequestCanonical:
       allOf:
         - $ref: '#/components/schemas/CreateTaskAssetUploadSessionRequest'
@@ -3329,7 +3192,6 @@ components:
           anyOf:
             - required: [file_name]
             - required: [filename]
-
     CompleteTaskAssetUploadSessionRequest:
       type: object
       properties:
@@ -3342,7 +3204,6 @@ components:
           description: Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload.
         remark:
           type: string
-
     CompleteTaskAssetUploadSessionResponseData:
       type: object
       properties:
@@ -3352,7 +3213,6 @@ components:
           $ref: '#/components/schemas/DesignAsset'
         version:
           $ref: '#/components/schemas/DesignAssetVersion'
-
     CancelTaskAssetUploadSessionRequest:
       type: object
       properties:
@@ -3360,7 +3220,6 @@ components:
           type: integer
         remark:
           type: string
-
     CreateTaskReferenceUploadSessionRequest:
       type: object
       required: [filename]
@@ -3380,7 +3239,6 @@ components:
           type: string
         remark:
           type: string
-
     CreateTaskReferenceUploadSessionResponseData:
       type: object
       properties:
@@ -3388,7 +3246,6 @@ components:
           $ref: '#/components/schemas/UploadSession'
         remote:
           $ref: '#/components/schemas/RemoteUploadSessionPlan'
-
     CompleteTaskReferenceUploadSessionRequest:
       type: object
       properties:
@@ -3398,7 +3255,6 @@ components:
           type: string
         remark:
           type: string
-
     CompleteTaskReferenceUploadSessionResponseData:
       type: object
       properties:
@@ -3411,7 +3267,6 @@ components:
           $ref: '#/components/schemas/AssetStorageRef'
         ref_object:
           $ref: '#/components/schemas/ReferenceFileRef'
-
     ReferenceFileRef:
       type: object
       required: [asset_id, source]
@@ -3457,7 +3312,6 @@ components:
           type: string
           nullable: true
           description: "V1 asset ownership extension. Source: V1_ASSET_OWNERSHIP §3."
-
     AdvanceUploadRequestRequest:
       type: object
       required: [action]
@@ -3466,7 +3320,6 @@ components:
           $ref: '#/components/schemas/UploadRequestAdvanceAction'
         remark:
           type: string
-
     TaskListItem:
       type: object
       properties:
@@ -3560,12 +3413,10 @@ components:
         workflow:
           $ref: '#/components/schemas/TaskWorkflowSnapshot'
         procurement_summary:
-          allOf:
-            - $ref: '#/components/schemas/ProcurementSummary'
+          allOf: [{ $ref: '#/components/schemas/ProcurementSummary' }]
           nullable: true
         product_selection:
-          allOf:
-            - $ref: '#/components/schemas/TaskProductSelectionSummary'
+          allOf: [{ $ref: '#/components/schemas/TaskProductSelectionSummary' }]
           nullable: true
         policy_mode:
           $ref: '#/components/schemas/PolicyMode'
@@ -3580,10 +3431,8 @@ components:
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
         platform_entry_boundary:
-          allOf:
-            - $ref: '#/components/schemas/PlatformEntryBoundary'
+          allOf: [{ $ref: '#/components/schemas/PlatformEntryBoundary' }]
           nullable: true
-
     TaskReadModel:
       allOf:
         - $ref: '#/components/schemas/Task'
@@ -3596,32 +3445,25 @@ components:
             workflow:
               $ref: '#/components/schemas/TaskWorkflowSnapshot'
             procurement:
-              allOf:
-                - $ref: '#/components/schemas/ProcurementRecord'
+              allOf: [{ $ref: '#/components/schemas/ProcurementRecord' }]
               nullable: true
             procurement_summary:
-              allOf:
-                - $ref: '#/components/schemas/ProcurementSummary'
+              allOf: [{ $ref: '#/components/schemas/ProcurementSummary' }]
               nullable: true
             product_selection:
-              allOf:
-                - $ref: '#/components/schemas/TaskProductSelectionContext'
+              allOf: [{ $ref: '#/components/schemas/TaskProductSelectionContext' }]
               nullable: true
             matched_rule_governance:
-              allOf:
-                - $ref: '#/components/schemas/TaskMatchedRuleGovernance'
+              allOf: [{ $ref: '#/components/schemas/TaskMatchedRuleGovernance' }]
               nullable: true
             override_summary:
-              allOf:
-                - $ref: '#/components/schemas/TaskCostOverrideSummary'
+              allOf: [{ $ref: '#/components/schemas/TaskCostOverrideSummary' }]
               nullable: true
             governance_audit_summary:
-              allOf:
-                - $ref: '#/components/schemas/TaskGovernanceAuditSummary'
+              allOf: [{ $ref: '#/components/schemas/TaskGovernanceAuditSummary' }]
               nullable: true
             override_governance_boundary:
-              allOf:
-                - $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary'
+              allOf: [{ $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary' }]
               nullable: true
             policy_mode:
               $ref: '#/components/schemas/PolicyMode'
@@ -3636,8 +3478,7 @@ components:
             policy_scope_summary:
               $ref: '#/components/schemas/PolicyScopeSummary'
             platform_entry_boundary:
-              allOf:
-                - $ref: '#/components/schemas/PlatformEntryBoundary'
+              allOf: [{ $ref: '#/components/schemas/PlatformEntryBoundary' }]
               nullable: true
             assignee_id:
               type: integer
@@ -3690,7 +3531,6 @@ components:
               description: Flattened design asset versions ordered by asset root and version order. Batch-task SKU scope is exposed by `scope_sku_code`.
               items:
                 $ref: '#/components/schemas/DesignAssetVersion'
-
     TaskSKUItem:
       type: object
       properties:
@@ -3743,7 +3583,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     TaskFilingStatusView:
       type: object
       properties:
@@ -3767,7 +3606,6 @@ components:
           items: { type: string }
         missing_fields_summary_cn: { type: string }
         can_retry: { type: boolean }
-
     RetryTaskFilingRequest:
       type: object
       properties:
@@ -3775,7 +3613,6 @@ components:
           type: integer
           nullable: true
         remark: { type: string }
-
     CreateTaskRequest:
       type: object
       description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, `retouch_task`, `customer_customization`, and `regular_customization`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
@@ -3856,8 +3693,7 @@ components:
         product_name_snapshot:
           type: string
         product_selection:
-          allOf:
-            - $ref: '#/components/schemas/TaskProductSelectionContext'
+          allOf: [{ $ref: '#/components/schemas/TaskProductSelectionContext' }]
           nullable: true
         change_request:
           type: string
@@ -3905,7 +3741,6 @@ components:
           type: string
         style_keywords:
           type: string
-
     CreateTaskBatchItem:
       type: object
       properties:
@@ -3944,7 +3779,6 @@ components:
           description: Optional per-batch-line reference uploads using the same object contract as top-level `reference_file_refs`. When `batch_sku_mode=multiple`, the server validates and persists each line and also maintains a deduplicated task-level union summary.
           items:
             $ref: '#/components/schemas/ReferenceFileRef'
-
     PrepareTaskProductCodesRequest:
       type: object
       required: [task_type]
@@ -3969,7 +3803,6 @@ components:
             properties:
               category_code:
                 type: string
-
     PrepareTaskProductCodesResponse:
       type: object
       properties:
@@ -3985,7 +3818,6 @@ components:
               sku_code:
                 type: string
                 description: "Auto-generated default task product code. Format: `NS` + two-letter uppercase category short code + 6-digit sequence (for example `NSKT000060`)."
-
     AssignTaskRequest:
       type: object
       description: |
@@ -3999,7 +3831,6 @@ components:
           type: integer
           description: Optional override for compatibility. Defaults to the current authenticated actor.
         remark: { type: string }
-
     SubmitDesignRequest:
       type: object
       description: |
@@ -4037,7 +3868,6 @@ components:
           minItems: 1
           items:
             $ref: '#/components/schemas/SubmitDesignBatchAssetItem'
-
     SubmitDesignBatchAssetItem:
       type: object
       required: [upload_session_id]
@@ -4068,7 +3898,6 @@ components:
           type: string
         oss_object_key:
           type: string
-
     SubmitDesignBatchResult:
       type: object
       properties:
@@ -4076,7 +3905,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CompleteTaskAssetUploadSessionResponseData'
-
     UpdateTaskBusinessInfoRequest:
       type: object
       description: |
@@ -4118,8 +3946,7 @@ components:
           nullable: true
         process: { type: string }
         product_selection:
-          allOf:
-            - $ref: '#/components/schemas/TaskProductSelectionContext'
+          allOf: [{ $ref: '#/components/schemas/TaskProductSelectionContext' }]
           nullable: true
         cost_price:
           type: number
@@ -4144,7 +3971,6 @@ components:
           nullable: true
           description: Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source.
         remark: { type: string }
-
     CreateCategoryRequest:
       type: object
       required: [category_code, category_name, category_type]
@@ -4170,7 +3996,6 @@ components:
         sort_order: { type: integer }
         source: { type: string }
         remark: { type: string }
-
     PatchCategoryRequest:
       type: object
       properties:
@@ -4194,7 +4019,6 @@ components:
         sort_order: { type: integer }
         source: { type: string }
         remark: { type: string }
-
     CreateCategoryERPMappingRequest:
       type: object
       required: [erp_match_type, erp_match_value]
@@ -4220,7 +4044,6 @@ components:
         priority: { type: integer }
         source: { type: string }
         remark: { type: string }
-
     PatchCategoryERPMappingRequest:
       type: object
       properties:
@@ -4245,7 +4068,6 @@ components:
         priority: { type: integer }
         source: { type: string }
         remark: { type: string }
-
     CreateCostRuleRequest:
       type: object
       required: [rule_name, rule_type]
@@ -4308,7 +4130,6 @@ components:
           description: Lightweight governance note only. This is not an approval workflow comment.
         source: { type: string }
         remark: { type: string }
-
     PatchCostRuleRequest:
       type: object
       properties:
@@ -4367,7 +4188,6 @@ components:
         governance_note: { type: string }
         source: { type: string }
         remark: { type: string }
-
     CostRulePreviewRequest:
       type: object
       properties:
@@ -4393,7 +4213,6 @@ components:
           nullable: true
         process: { type: string }
         notes: { type: string }
-
     CostRulePreviewMatch:
       type: object
       properties:
@@ -4406,13 +4225,11 @@ components:
         source: { type: string }
         governance_status:
           $ref: '#/components/schemas/CostRuleGovernanceStatus'
-
     CostRulePreviewResponse:
       type: object
       properties:
         matched_rule:
-          allOf:
-            - $ref: '#/components/schemas/CostRulePreviewMatch'
+          allOf: [{ $ref: '#/components/schemas/CostRulePreviewMatch' }]
           nullable: true
         matched_rule_id:
           type: integer
@@ -4433,52 +4250,6 @@ components:
           $ref: '#/components/schemas/CostRuleGovernanceStatus'
         requires_manual_review: { type: boolean }
         explanation: { type: string }
-
-    TaskProductInfo:
-      type: object
-      properties:
-        product_id: { type: integer, nullable: true }
-        sku_code: { type: string }
-        product_name_snapshot: { type: string }
-        product_selection:
-          allOf:
-            - $ref: '#/components/schemas/TaskProductSelectionContext'
-          nullable: true
-        category: { type: string }
-        category_id: { type: integer, nullable: true }
-        category_code: { type: string }
-        category_name: { type: string }
-        material: { type: string }
-        size_text: { type: string }
-        spec_text: { type: string }
-        reference_link: { type: string }
-        reference_file_refs:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReferenceFileRef'
-        note: { type: string }
-
-    TaskCostInfo:
-      type: object
-      properties:
-        cost_price: { type: number, format: double, nullable: true }
-        estimated_cost: { type: number, format: double, nullable: true }
-        cost_rule_id: { type: integer, nullable: true }
-        cost_rule_name: { type: string }
-        cost_rule_source: { type: string }
-        matched_rule_version: { type: integer, nullable: true }
-        prefill_source: { type: string }
-        prefill_at: { type: string, format: date-time, nullable: true }
-        requires_manual_review: { type: boolean }
-        manual_cost_override: { type: boolean }
-        manual_cost_override_reason: { type: string }
-        override_actor: { type: string }
-        override_at: { type: string, format: date-time, nullable: true }
-
-    TaskCostQuotePreviewResponse:
-      allOf:
-        - $ref: '#/components/schemas/CostRulePreviewResponse'
-
     AssetDownloadInfo:
       type: object
       properties:
@@ -4500,14 +4271,12 @@ components:
           format: date-time
           nullable: true
           description: Expiry time for signed direct URL when present.
-
     ValidationViolation:
       type: object
       properties:
         field: { type: string }
         code: { type: string }
         message: { type: string }
-
     ErrorResponse:
       type: object
       properties:
@@ -4528,7 +4297,6 @@ components:
               items:
                 $ref: '#/components/schemas/ValidationViolation'
             trace_id: { type: string }
-
     UpdateTaskProcurementRequest:
       type: object
       description: |
@@ -4555,7 +4323,6 @@ components:
           format: date-time
           nullable: true
         remark: { type: string }
-
     AdvanceTaskProcurementRequest:
       type: object
       description: |
@@ -4568,7 +4335,6 @@ components:
         action:
           $ref: '#/components/schemas/ProcurementAction'
         remark: { type: string }
-
     PrepareWarehouseRequest:
       type: object
       description: |
@@ -4578,7 +4344,6 @@ components:
           type: integer
           description: Optional override for compatibility. Defaults to the current authenticated actor.
         remark: { type: string }
-
     CloseTaskRequest:
       type: object
       description: |
@@ -4588,7 +4353,6 @@ components:
           type: integer
           description: Optional override for compatibility. Defaults to the current authenticated actor.
         remark: { type: string }
-
     MockUploadTaskAssetRequest:
       type: object
       description: |
@@ -4617,7 +4381,6 @@ components:
           type: string
           nullable: true
         remark: { type: string }
-
     ProductListResponse:
       type: object
       properties:
@@ -4627,7 +4390,6 @@ components:
             $ref: '#/components/schemas/ProductSearchResult'
         pagination:
           $ref: '#/components/schemas/PaginationMeta'
-
     ERPSyncRun:
       type: object
       properties:
@@ -4647,7 +4409,6 @@ components:
         started_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
-
     ERPSyncRunResult:
       type: object
       properties:
@@ -4665,7 +4426,6 @@ components:
           nullable: true
         started_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
-
     ERPSyncStatus:
       type: object
       properties:
@@ -4683,22 +4443,18 @@ components:
           type: boolean
           description: Whether `resolved_stub_file` currently exists as a readable file.
         latest_run:
-          allOf:
-            - $ref: '#/components/schemas/ERPSyncRun'
+          allOf: [{ $ref: '#/components/schemas/ERPSyncRun' }]
           nullable: true
-
     ERPSyncRunResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/ERPSyncRunResult'
-
     ERPSyncStatusResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/ERPSyncStatus'
-
     TaskListResponse:
       type: object
       properties:
@@ -4708,7 +4464,6 @@ components:
             $ref: '#/components/schemas/TaskListItem'
         pagination:
           $ref: '#/components/schemas/PaginationMeta'
-
     TaskQueryFilterDefinition:
       type: object
       description: Shared board/list filter contract. Queue `normalized_filters` map directly to `/v1/tasks` query semantics.
@@ -4783,7 +4538,6 @@ components:
           type: array
           items:
             type: string
-
     TaskQueryTemplate:
       type: object
       description: Direct board-to-list query template for `/v1/tasks`. Multi-value fields use comma-separated values.
@@ -4807,7 +4561,6 @@ components:
         overdue: { type: boolean }
         warehouse_prepare_ready: { type: boolean }
         warehouse_receive_ready: { type: boolean }
-
     TaskBoardFiltersSchema:
       type: object
       properties:
@@ -4829,7 +4582,6 @@ components:
           type: array
           items:
             type: string
-
     TaskBoardQueueSummary:
       type: object
       properties:
@@ -4875,7 +4627,6 @@ components:
             $ref: '#/components/schemas/ActionPolicySummary'
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
-
     TaskBoardSummary:
       type: object
       properties:
@@ -4903,13 +4654,11 @@ components:
             $ref: '#/components/schemas/ActionPolicySummary'
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
-
     TaskBoardSummaryResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/TaskBoardSummary'
-
     TaskBoardQueue:
       type: object
       properties:
@@ -4957,7 +4706,6 @@ components:
             $ref: '#/components/schemas/ActionPolicySummary'
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
-
     TaskBoardQueuesResponse:
       type: object
       properties:
@@ -4985,17 +4733,14 @@ components:
             $ref: '#/components/schemas/ActionPolicySummary'
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
-
     TaskBoardQueuesAPIResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/TaskBoardQueuesResponse'
-
     WorkbenchSortKey:
       type: string
       enum: [updated_at_desc]
-
     WorkbenchPreferences:
       type: object
       description: Effective saved workbench preferences resolved for the current session-backed user.
@@ -5014,7 +4759,6 @@ components:
           description: Effective page size for workbench queues. The response resolves the current default if no explicit value was saved.
         default_sort:
           $ref: '#/components/schemas/WorkbenchSortKey'
-
     WorkbenchPreferencesPatch:
       type: object
       description: Partial update payload for lightweight user-scoped saved workbench preferences. Empty string or `0` clears the saved queue/sort/page-size back to the current default.
@@ -5033,7 +4777,6 @@ components:
         default_sort:
           type: string
           enum: ['', updated_at_desc]
-
     WorkbenchQueueConfig:
       type: object
       properties:
@@ -5062,7 +4805,6 @@ components:
           $ref: '#/components/schemas/TaskQueryFilterDefinition'
         query_template:
           $ref: '#/components/schemas/TaskQueryTemplate'
-
     WorkbenchConfig:
       type: object
       properties:
@@ -5080,7 +4822,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WorkbenchQueueConfig'
-
     WorkbenchPreferencesEnvelope:
       type: object
       properties:
@@ -5090,54 +4831,35 @@ components:
           $ref: '#/components/schemas/WorkbenchPreferences'
         workbench_config:
           $ref: '#/components/schemas/WorkbenchConfig'
-
     WorkbenchPreferencesResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/WorkbenchPreferencesEnvelope'
-
     ExportType:
       type: string
       enum: [task_list, task_board_queue, procurement_summary, warehouse_receipts]
-
     ExportSourceQueryType:
       type: string
       enum: [task_query, task_board_queue, procurement_summary, warehouse_receipts]
-
     ExportJobStatus:
       type: string
       enum: [queued, running, ready, failed, cancelled]
-
     ExportJobProgressHint:
       type: string
       enum: [created, processing, download_ready, failed, cancelled]
-
     ExportJobStartMode:
       type: string
       enum: [explicit_internal_start]
       description: Current placeholder start-boundary mode for export jobs. This does not imply a real async runner platform.
-
     ExportJobExecutionMode:
       type: string
       enum: [manual_placeholder_runner]
       description: Current placeholder execution mode. Future real runners should replace this layer without changing handoff APIs.
-
-    ExportJobAdapterMode:
-      type: string
-      enum: [dispatch_then_attempt]
-      description: Current planning-only adapter mode between dispatch handoff and execution attempt layers.
-
-    ExportJobStorageMode:
-      type: string
-      enum: [lifecycle_managed_result_ref]
-      description: Current planning-only storage mode. `result_ref` is still placeholder metadata rather than a real file-storage binding.
-
     ExportJobDeliveryMode:
       type: string
       enum: [claim_read_refresh_handoff]
       description: Current planning-only delivery mode behind claim/read/refresh handoff APIs.
-
     ExportJobExecutionBoundary:
       type: object
       description: Planning-only execution-boundary read model. Clarifies which current layer starts execution, hands off dispatch, records attempts, and mints placeholder result state before any real runner platform is introduced.
@@ -5158,7 +4880,6 @@ components:
           type: boolean
         note:
           type: string
-
     ExportJobStorageBoundary:
       type: object
       description: Planning-only storage-boundary read model. Clarifies that current ready-state output is represented by `result_ref` metadata only, not real file persistence.
@@ -5177,7 +4898,6 @@ components:
           type: boolean
         note:
           type: string
-
     ExportJobDeliveryBoundary:
       type: object
       description: Planning-only delivery-boundary read model. Clarifies that claim/read/refresh currently deliver handoff metadata only and are the future replacement seam for a real download service.
@@ -5200,26 +4920,21 @@ components:
           type: boolean
         note:
           type: string
-
     ExportJobRunnerAdapterKey:
       type: string
       enum: [manual_placeholder_adapter]
       description: Current placeholder runner-adapter identity. Future real scheduler/runner integration should replace this layer rather than the export-job lifecycle contract.
-
     ExportJobAttemptStatus:
       type: string
       enum: [running, succeeded, failed, cancelled]
       description: Status of one concrete export-job execution attempt, separate from the export job lifecycle.
-
     ExportJobDispatchStatus:
       type: string
       enum: [submitted, received, rejected, expired, not_executed]
       description: Status of one placeholder adapter-dispatch handoff, separate from both export job lifecycle and attempt lifecycle.
-
     ExportJobAdvanceAction:
       type: string
       enum: [start, mark_ready, fail, cancel, requeue]
-
     ExportSourceFilters:
       type: object
       properties:
@@ -5237,7 +4952,6 @@ components:
         status:
           type: string
           description: Warehouse-receipt status filter when `source_query_type=warehouse_receipts`.
-
     ExportResultRef:
       type: object
       description: Structured placeholder download-handoff metadata only. This is not a real NAS path, signed URL, or storage integration. Its semantics align with task-asset `storage_ref` metadata, but the models remain separate.
@@ -5259,7 +4973,6 @@ components:
           type: boolean
         note:
           type: string
-
     ExportJobEventSummary:
       type: object
       properties:
@@ -5290,7 +5003,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     ExportJobEvent:
       allOf:
         - $ref: '#/components/schemas/ExportJobEventSummary'
@@ -5299,7 +5011,6 @@ components:
             payload:
               description: Freeform audit context only. This is not a full runner log stream.
               nullable: true
-
     ExportJobDownloadHandoff:
       type: object
       description: |
@@ -5357,13 +5068,11 @@ components:
           nullable: true
         last_read_by_actor_type:
           type: string
-
     ExportJobDownloadHandoffResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/ExportJobDownloadHandoff'
-
     ExportJobAttempt:
       type: object
       description: |
@@ -5413,7 +5122,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     ExportJobDispatch:
       type: object
       description: |
@@ -5466,7 +5174,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     ExportJobDispatchListResponse:
       type: object
       properties:
@@ -5474,7 +5181,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExportJobDispatch'
-
     ExportJobAttemptListResponse:
       type: object
       properties:
@@ -5482,7 +5188,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExportJobAttempt'
-
     ExportTemplate:
       type: object
       properties:
@@ -5502,7 +5207,6 @@ components:
           type: string
         placeholder_only:
           type: boolean
-
     ExportJobAdmissionDecision:
       type: object
       description: |
@@ -5522,7 +5226,6 @@ components:
           $ref: '#/components/schemas/ExportJobDispatchStatus'
         latest_attempt_status:
           $ref: '#/components/schemas/ExportJobAttemptStatus'
-
     ExportJob:
       type: object
       properties:
@@ -5650,8 +5353,7 @@ components:
         policy_scope_summary:
           $ref: '#/components/schemas/PolicyScopeSummary'
         platform_entry_boundary:
-          allOf:
-            - $ref: '#/components/schemas/PlatformEntryBoundary'
+          allOf: [{ $ref: '#/components/schemas/PlatformEntryBoundary' }]
           nullable: true
         remark:
           type: string
@@ -5665,7 +5367,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     CreateExportJobRequest:
       type: object
       required: [export_type, source_query_type]
@@ -5690,7 +5391,6 @@ components:
         `query_template` from `/v1/tasks` or the board queue handoff, optionally with `normalized_filters`. For
         `task_board_queue` exports, `source_filters.queue_key` is required. For `warehouse_receipts`, use
         `source_filters.task_id` / `receiver_id` / `status` instead of task-query fields.
-
     ExportTemplateListResponse:
       type: object
       properties:
@@ -5698,35 +5398,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExportTemplate'
-
     IntegrationConnectorKey:
       type: string
       enum: [erp_product_stub, erp_bridge_product_upsert, export_adapter_bridge]
-
     IntegrationCallDirection:
       type: string
       enum: [outbound, inbound]
-
     IntegrationCallStatus:
       type: string
       enum: [queued, sent, succeeded, failed, cancelled]
-
     IntegrationCallProgressHint:
       type: string
       enum: [queued, in_flight, succeeded, failed, cancelled]
-
     IntegrationExecutionMode:
       type: string
       enum: [manual_placeholder_adapter]
-
     IntegrationExecutionStatus:
       type: string
       enum: [prepared, dispatched, received, completed, failed, cancelled]
-
     IntegrationExecutionActionType:
       type: string
       enum: [start, retry, replay, compat]
-
     IntegrationConnector:
       type: object
       properties:
@@ -5740,7 +5432,6 @@ components:
           $ref: '#/components/schemas/IntegrationCallDirection'
         placeholder_only:
           type: boolean
-
     IntegrationConnectorListResponse:
       type: object
       properties:
@@ -5748,7 +5439,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IntegrationConnector'
-
     IntegrationCallLog:
       type: object
       description: Internal integration call log. It records the request envelope above execution attempts, exposes retry/replay admission hints, and is also used for the narrow ERP Bridge product-filing trace under connector `erp_bridge_product_upsert`.
@@ -5839,13 +5529,11 @@ components:
         updated_at:
           type: string
           format: date-time
-
     IntegrationCallLogResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/IntegrationCallLog'
-
     IntegrationCallLogListResponse:
       type: object
       properties:
@@ -5855,7 +5543,6 @@ components:
             $ref: '#/components/schemas/IntegrationCallLog'
         pagination:
           $ref: '#/components/schemas/PaginationMeta'
-
     IntegrationExecution:
       type: object
       description: One placeholder integration execution attempt beneath one call log. `action_type` distinguishes manual start, retry, replay, and compatibility actions on the same execution boundary. This is not an external worker, callback stream, or retry platform.
@@ -5918,7 +5605,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     IntegrationExecutionActionSummary:
       type: object
       description: Latest retry/replay action summary derived from persisted execution attempts. It reuses the execution boundary instead of introducing a second action-history subsystem.
@@ -5942,13 +5628,11 @@ components:
           type: string
           format: date-time
           nullable: true
-
     IntegrationExecutionResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/IntegrationExecution'
-
     IntegrationExecutionListResponse:
       type: object
       properties:
@@ -5956,7 +5640,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IntegrationExecution'
-
     CreateIntegrationCallLogRequest:
       type: object
       required: [connector_key, operation_key, direction]
@@ -5976,7 +5659,6 @@ components:
           nullable: true
         remark:
           type: string
-
     AdvanceIntegrationCallLogRequest:
       type: object
       required: [status]
@@ -5989,7 +5671,6 @@ components:
           type: string
         remark:
           type: string
-
     CreateIntegrationExecutionRequest:
       type: object
       properties:
@@ -5999,7 +5680,6 @@ components:
           type: string
         adapter_note:
           type: string
-
     AdvanceIntegrationExecutionRequest:
       type: object
       required: [status]
@@ -6014,7 +5694,6 @@ components:
           type: string
         retryable:
           type: boolean
-
     IntegrationExecutionActionRequest:
       type: object
       properties:
@@ -6022,7 +5701,6 @@ components:
           $ref: '#/components/schemas/IntegrationExecutionMode'
         adapter_note:
           type: string
-
     CreateExportJobDispatchRequest:
       type: object
       properties:
@@ -6036,7 +5714,6 @@ components:
           description: Optional placeholder dispatch expiry timestamp.
         remark:
           type: string
-
     AdvanceExportJobDispatchRequest:
       type: object
       required: [action]
@@ -6048,13 +5725,11 @@ components:
           type: string
         remark:
           type: string
-
     ExportJobResponse:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/ExportJob'
-
     ExportJobListResponse:
       type: object
       properties:
@@ -6064,7 +5739,6 @@ components:
             $ref: '#/components/schemas/ExportJob'
         pagination:
           $ref: '#/components/schemas/PaginationMeta'
-
     ExportJobEventListResponse:
       type: object
       properties:
@@ -6072,7 +5746,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExportJobEvent'
-
     AdvanceExportJobRequest:
       type: object
       required: [action]
@@ -6099,7 +5772,6 @@ components:
         and is not a real async runner, scheduler, or file-generation platform. `action=start` remains
         supported for backward compatibility, but `POST /v1/export-jobs/{id}/start` is now the formal
         placeholder runner-initiation boundary.
-
     OutsourceOrderListResponse:
       type: object
       properties:
@@ -6109,7 +5781,6 @@ components:
             $ref: '#/components/schemas/OutsourceOrder'
         pagination:
           $ref: '#/components/schemas/PaginationMeta'
-
     WarehouseReceiptListResponse:
       type: object
       properties:
@@ -6119,7 +5790,6 @@ components:
             $ref: '#/components/schemas/WarehouseReceipt'
         pagination:
           $ref: '#/components/schemas/PaginationMeta'
-
     CodeRule:
       type: object
       properties:
@@ -6140,18 +5810,15 @@ components:
         config_json: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
     CodePreview:
       type: object
       properties:
         rule_id: { type: integer }
         preview: { type: string }
         is_preview: { type: boolean }
-
     APIReadiness:
       type: string
       enum: [ready_for_frontend, internal_placeholder, mock_placeholder_only]
-
     OSSCompletePart:
       type: object
       properties:
@@ -6159,47 +5826,18 @@ components:
           type: integer
         etag:
           type: string
-
     TaskModuleState:
       type: string
       description: "Source: V1_MODULE_ARCHITECTURE §3 / §7 / V1_CUSTOMIZATION_WORKFLOW §2."
       enum: [active, pending_claim, in_progress, submitted, approved, rejected, closed, forcibly_closed, pending, preparing, received, completed]
-
-    TaskModuleScope:
-      type: object
-      description: "Source: V1_MODULE_ARCHITECTURE §6 Layer 2."
-      properties:
-        in_scope:
-          type: boolean
-        reason:
-          type: string
-          nullable: true
-
-    TaskModuleProjection:
-      type: object
-      description: "Opaque module projection payload. Source: V1_MODULE_ARCHITECTURE §3 / §9.2."
-      additionalProperties: true
-
     TaskModuleAction:
       type: string
       description: "Source: V1_MODULE_ARCHITECTURE §6 Layer 3 / R1 prompt §1.2."
       enum: [claim, submit, approve, reject, reassign, pool_reassign, asset_upload_session_create, update_reference_files, update_basic_info, update_deadline, update_priority, close_task, cancel_task]
-
-    TaskPriority:
-      type: string
-      description: "Source: V1_MODULE_ARCHITECTURE §17."
-      enum: [normal, urgent, critical]
-
-    DerivedStatus:
-      type: string
-      description: "Source: V1_MODULE_ARCHITECTURE §10.1."
-      enum: [design_in_progress, design_submitted, audit_pending_claim, audit_in_progress, audit_approved, warehouse_preparing, customization_in_progress, procurement_in_progress, closed]
-
     DenyCode:
       type: string
       description: "Minimum deny-code registry frozen in R1. Source: V1_MODULE_ARCHITECTURE §6.2 / R1 prompt §1.3."
       enum: [not_implemented, task_not_found, module_not_instantiated, module_out_of_scope, module_state_mismatch, module_action_role_denied, module_claim_conflict, module_blueprint_missing_team, task_already_claimed, asset_gone, draft_not_found, draft_quota_exceeded, org_move_requires_superadmin, ws_upgrade_failed]
-
     Actor:
       type: object
       description: "Source: V1_MODULE_ARCHITECTURE §5.2 / V1_INFORMATION_ARCHITECTURE §7.2."
@@ -6233,37 +5871,10 @@ components:
           type: array
           items:
             type: string
-
-    TaskModule:
-      type: object
-      description: "Source: V1_MODULE_ARCHITECTURE §3 / §9.2."
-      properties:
-        module_key:
-          type: string
-          enum: [basic_info, design, audit, warehouse, customization, procurement, retouch]
-        state:
-          $ref: '#/components/schemas/TaskModuleState'
-        pool_team_code:
-          type: string
-          nullable: true
-        claimed_by:
-          allOf:
-            - $ref: '#/components/schemas/Actor'
-          nullable: true
-        scope:
-          $ref: '#/components/schemas/TaskModuleScope'
-        allowed_actions:
-          type: array
-          items:
-            $ref: '#/components/schemas/TaskModuleAction'
-        projection:
-          $ref: '#/components/schemas/TaskModuleProjection'
-
     TaskDraftPayload:
       type: object
       description: "Draft payload mirrors `POST /v1/tasks`. Source: V1_INFORMATION_ARCHITECTURE §3.5.9."
       additionalProperties: true
-
     TaskDraft:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §3.5.9."
@@ -6285,7 +5896,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     BatchItem:
       type: object
       properties:
@@ -6319,7 +5929,6 @@ components:
           type: object
           nullable: true
           additionalProperties: true
-
     ParseViolation:
       type: object
       required: [row, code, message]
@@ -6332,31 +5941,6 @@ components:
           type: string
         message:
           type: string
-
-    BatchCreatePreviewItem:
-      type: object
-      properties:
-        row:
-          type: integer
-        sku_code:
-          type: string
-        category_code:
-          type: string
-        product_name:
-          type: string
-
-    BatchCreateViolation:
-      type: object
-      properties:
-        row:
-          type: integer
-        column:
-          type: string
-        code:
-          type: string
-        message:
-          type: string
-
     BatchCreateParseResult:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §3.5.4."
@@ -6372,12 +5956,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ParseViolation'
-
     AssetLifecycleState:
       type: string
       description: "Source: V1_ASSET_OWNERSHIP §7."
       enum: [active, closed_retained, archived, auto_cleaned, deleted]
-
     Asset:
       allOf:
         - $ref: '#/components/schemas/DesignAsset'
@@ -6387,7 +5969,6 @@ components:
               type: string
             lifecycle_state:
               $ref: '#/components/schemas/AssetLifecycleState'
-
     ERPProductSnapshot:
       type: object
       description: "Source: V1_CUSTOMIZATION_WORKFLOW §3.1.2."
@@ -6399,7 +5980,6 @@ components:
         snapshot:
           type: object
           additionalProperties: true
-
     DesignSourceEntry:
       type: object
       description: "Source: V1_CUSTOMIZATION_WORKFLOW §3.2.2."
@@ -6422,7 +6002,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     SearchResultGroup:
       type: object
       description: |
@@ -6505,12 +6084,10 @@ components:
               department_name:
                 type: string
                 nullable: true
-
     NotificationType:
       type: string
       description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1)."
       enum: [task_assigned_to_me, task_rejected, claim_conflict, pool_reassigned, task_cancelled]
-
     Notification:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §8."
@@ -6531,12 +6108,10 @@ components:
         created_at:
           type: string
           format: date-time
-
     OrgMoveRequestState:
       type: string
       description: "Source: V1_INFORMATION_ARCHITECTURE §5.2."
       enum: [pending_super_admin_confirm, approved, rejected]
-
     OrgMoveRequest:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §5.2."
@@ -6555,8 +6130,7 @@ components:
         requested_by:
           $ref: '#/components/schemas/Actor'
         decided_by:
-          allOf:
-            - $ref: '#/components/schemas/Actor'
+          allOf: [{ $ref: '#/components/schemas/Actor' }]
           nullable: true
         reason:
           type: string
@@ -6567,7 +6141,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
     MyOrgProfile:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (我的组织 · 只读). R4-SA-B."
@@ -6592,7 +6165,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/V7Role'
-
     UpdateMyProfileRequest:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑). R4-SA-B. All fields optional; server applies PATCH semantics."
@@ -6609,7 +6181,6 @@ components:
           nullable: true
           description: |
             R1.7-B placeholder. The server accepts but currently ignores this field (no `users.avatar_url` column in v1 DDL). Full persistence is scheduled for R5+.
-
     ChangePasswordRequest:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (安全 · 改密). R4-SA-B."
@@ -6625,7 +6196,6 @@ components:
           type: string
           minLength: 1
           description: Must equal `new_password`; server enforces equality.
-
     CreateOrgMoveRequestPayload:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §5.2 (DeptAdmin 发起跨部门移出). R4-SA-B."
@@ -6641,7 +6211,6 @@ components:
         reason:
           type: string
           minLength: 1
-
     RejectReasonRequest:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §5.2 (SuperAdmin 驳回 org-move-request). R4-SA-B."
@@ -6650,7 +6219,6 @@ components:
         reason:
           type: string
           minLength: 1
-
     L1Card:
       type: object
       description: |
@@ -6672,7 +6240,6 @@ components:
           type: number
           nullable: true
           description: Change vs previous period; null when no baseline available.
-
     AssetReasonRequest:
       type: object
       description: "Source: V1_ASSET_OWNERSHIP §5.4 (delete) / §7.3 (archive). R4-SA-A."
@@ -6681,7 +6248,6 @@ components:
         reason:
           type: string
           minLength: 1
-
     AssetVersion:
       type: object
       description: "Single asset version entry. Source: V1_ASSET_OWNERSHIP §4 / §5.2."
@@ -6706,7 +6272,6 @@ components:
           format: date-time
         created_by:
           $ref: '#/components/schemas/Actor'
-
     AssetDetail:
       allOf:
         - $ref: '#/components/schemas/Asset'
@@ -6722,8 +6287,7 @@ components:
               format: date-time
               nullable: true
             archived_by:
-              allOf:
-                - $ref: '#/components/schemas/Actor'
+              allOf: [{ $ref: '#/components/schemas/Actor' }]
               nullable: true
             cleaned_at:
               type: string
@@ -6733,7 +6297,6 @@ components:
               type: string
               format: date-time
               nullable: true
-
 paths:
   /v1/auth/register:
     post:
@@ -6788,7 +6351,6 @@ paths:
                     $ref: '#/components/schemas/AuthResult'
         '400':
           description: Invalid registration payload, invalid department/team/mobile/email, or duplicate account/mobile
-
   /v1/auth/register-options:
     get:
       summary: Get registration department/team options
@@ -6807,7 +6369,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/RegistrationOptions'
-
   /v1/org/options:
     get:
       summary: Get organization options
@@ -6847,7 +6408,6 @@ paths:
                     $ref: '#/components/schemas/OrgOptions'
         '403':
           description: Permission denied
-
   /v1/org/departments:
     post:
       summary: Create organization department
@@ -6877,7 +6437,6 @@ paths:
           description: Invalid request payload or department already exists
         '403':
           description: Permission denied
-
   /v1/org/departments/{id}:
     put:
       summary: Update organization department
@@ -6914,7 +6473,6 @@ paths:
           description: Permission denied
         '404':
           description: Department not found
-
   /v1/org/teams:
     post:
       summary: Create organization team
@@ -6944,7 +6502,6 @@ paths:
           description: Invalid request payload, team already exists, or department is invalid
         '403':
           description: Permission denied
-
   /v1/org/teams/{id}:
     put:
       summary: Update organization team
@@ -6981,7 +6538,6 @@ paths:
           description: Permission denied
         '404':
           description: Team not found
-
   /v1/auth/login:
     post:
       summary: Login workflow user
@@ -7020,7 +6576,6 @@ paths:
                     $ref: '#/components/schemas/AuthResult'
         '401':
           description: Invalid account or password
-
   /v1/auth/me:
     get:
       summary: Get current authenticated user
@@ -7045,7 +6600,6 @@ paths:
                     $ref: '#/components/schemas/WorkflowUser'
         '401':
           description: Authentication required
-
   /v1/auth/password:
     put:
       summary: Change current user password
@@ -7082,7 +6636,6 @@ paths:
           description: Invalid new password
         '401':
           description: Authentication required or old password incorrect
-
   /v1/roles:
     get:
       summary: List role catalog
@@ -7106,7 +6659,6 @@ paths:
                       $ref: '#/components/schemas/RoleCatalogEntry'
         '403':
           description: Permission denied
-
   /v1/access-rules:
     get:
       summary: List protected route access rules
@@ -7129,7 +6681,6 @@ paths:
                       $ref: '#/components/schemas/RouteAccessRule'
         '403':
           description: Permission denied
-
   /v1/users:
     get:
       summary: List workflow users
@@ -7213,7 +6764,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/WorkflowUser'
-
   /v1/users/designers:
     get:
       summary: List designers
@@ -7258,7 +6808,6 @@ paths:
                       page: { type: integer, example: 1 }
                       page_size: { type: integer }
                       total: { type: integer }
-
   /v1/users/{id}:
     get:
       summary: Get workflow user
@@ -7292,7 +6841,6 @@ paths:
       summary: Update workflow user
       description: |
         Partial update for user profile and org affiliation.
-
         Org-field contract:
         - `department` + `team` are the canonical write fields.
         - `group` is a compatibility alias of `team` (when both are provided they must be equal).
@@ -7408,7 +6956,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/users/{id}/password:
     put:
       summary: Reset workflow user password
@@ -7442,7 +6989,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/WorkflowUser'
-
   /v1/users/{id}/roles:
     post:
       summary: Add workflow user roles
@@ -7510,7 +7056,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/WorkflowUser'
-
   /v1/users/{id}/roles/{role}:
     delete:
       summary: Remove one workflow user role
@@ -7539,7 +7084,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/WorkflowUser'
-
   /v1/permission-logs:
     get:
       summary: List permission access logs
@@ -7596,7 +7140,6 @@ paths:
                       $ref: '#/components/schemas/PermissionLog'
                   pagination:
                     $ref: '#/components/schemas/PaginationMeta'
-
   /v1/operation-logs:
     get:
       summary: List aggregated operation logs
@@ -7637,7 +7180,6 @@ paths:
                       $ref: '#/components/schemas/OperationLogEntry'
                   pagination:
                     $ref: '#/components/schemas/PaginationMeta'
-
   /v1/audit-logs:
     get:
       summary: List audit records (cross-task)
@@ -7700,7 +7242,6 @@ paths:
                         auditor_name: { type: string }
                         comment: { type: string }
                         created_at: { type: string, format: date-time }
-
   /v1/server-logs:
     get:
       summary: List server logs
@@ -7742,7 +7283,6 @@ paths:
                       $ref: '#/components/schemas/ServerLog'
                   pagination:
                     $ref: '#/components/schemas/PaginationMeta'
-
   /v1/server-logs/clean:
     post:
       summary: Clean old server logs
@@ -7766,15 +7306,12 @@ paths:
                 type: object
                 properties:
                   deleted: { type: integer }
-
   /v1/erp/products:
     get:
       summary: Search ERP Bridge products
       description: |
         Frontend-ready MAIN facade over Bridge(8081). **Primary chain**: Bridge `remote`/`hybrid` calls Jushuitan OpenWeb POST `ERP_REMOTE_SKU_QUERY_PATH` (live ERP). Local `products` is **not** the search source of truth; hybrid may fall back to local `products` only on transient upstream failure (5xx/timeout), never on OpenWeb business errors or auth misconfiguration. Server logs: `erp_bridge_product_search` (`remote_ok` vs `fallback_local_products`).
-
         **8080 `products` table**: sync replica / mapping cache / business read-model (ERP_SYNC_SOURCE_MODE=jst via OpenWeb provider), not the picker primary index.
-
         Current search boundary:
         - keyword / q: supported; implemented as the current bridge's contains-match style lookup rather than semantic/global search
         - sku_code: supported as an exact filter after MAIN normalization
@@ -7783,7 +7320,6 @@ paths:
         - sorting: not supported
         - search suggestion / association: not supported
         - global search: not supported
-
         Contract guarantees for result-page integration:
         - product_id is the stable lookup key emitted by this list and accepted by /v1/erp/products/{id}
         - sku_code, category_name, category_code, product_short_name, image_url may be empty strings when upstream data is absent
@@ -7845,13 +7381,11 @@ paths:
           description: ERP Bridge upstream product path not found
         '500':
           description: ERP Bridge unavailable or upstream returned a non-200 response. Error details may now include timeout/retry-hint diagnostics for internal observability.
-
   /v1/erp/products/{id}:
     get:
       summary: Get ERP Bridge product detail
       description: |
         Returns one normalized ERP product detail through the MAIN facade.
-
         Detail lookup behavior:
         - accepts the product_id emitted by GET /v1/erp/products
         - first tries direct bridge detail lookup
@@ -7880,7 +7414,6 @@ paths:
           description: ERP Bridge product not found
         '500':
           description: ERP Bridge unavailable or upstream returned a non-200 response
-
   /v1/erp/categories:
     get:
       summary: List ERP Bridge categories
@@ -7905,7 +7438,6 @@ paths:
                       $ref: '#/components/schemas/ERPBridgeCategory'
         '500':
           description: ERP Bridge unavailable or upstream returned a non-200 response
-
   /v1/erp/warehouses:
     get:
       summary: List ERP warehouses (wms_co_id)
@@ -7928,7 +7460,6 @@ paths:
                       $ref: '#/components/schemas/ERPWarehouse'
         '500':
           description: ERP Bridge unavailable
-
   /v1/erp/users:
     get:
       summary: List JST company users (Bridge-side, pre-wiring)
@@ -7958,7 +7489,6 @@ paths:
           description: JST user list
         '500':
           description: Bridge or upstream unavailable
-
   /v1/admin/jst-users:
     get:
       summary: List JST users (Admin, via Bridge)
@@ -8012,7 +7542,6 @@ paths:
       responses:
         '200':
           description: Import result
-
   /v1/erp/products/upsert:
     post:
       summary: Upsert ERP Bridge product (Bridge-side write endpoint)
@@ -8022,13 +7551,11 @@ paths:
         on an existing-product task. In the current v0.4 architecture, Bridge uses a
         `localERPBridgeClient` that persists directly to the shared MySQL database
         rather than calling an external ERP API.
-
         As of 2026-03-17, Bridge also supports a config-driven remote mode:
         `ERP_REMOTE_MODE=local|remote|hybrid`.
         - `local`: keep local DB writeback
         - `remote`: upsert is sent to configured external ERP API
         - `hybrid`: remote first, optional local fallback by env switch
-
         OpenWeb official mapping used by Bridge remote mode:
         - `POST /v1/erp/products/upsert` -> `/open/webapi/itemapi/itemsku/itemskubatchupload`
         - `POST /v1/erp/products/style/update` -> `/open/webapi/itemapi/itemskuim/itemupload`
@@ -8036,17 +7563,14 @@ paths:
           `app_key`, `access_token`, `timestamp`, `charset`, `version`, `biz`
           (`sign` excluded from signing), sorted by key and signed as:
           `md5(app_secret + key1value1key2value2...)` (lowercase hex)
-
         Combined-SKU upload endpoint `/open/item/combinesku/upload` is intentionally
         not auto-selected in current Bridge contract because this payload currently has
         no explicit "combined SKU" discriminator; Bridge keeps ordinary-SKU mapping
         deterministic to avoid accidental wrong-endpoint writes.
         Current live production mode is `hybrid`; do not assume every write endpoint has
         remote success without upstream response evidence for that endpoint.
-
         This route was added in ITERATION_070 to fix a 404 gap that prevented all
         MAIN -> Bridge filing calls from succeeding.
-
         Requires session authentication (Bearer token forwarded from MAIN).
       tags: [ERPBridge, InternalBridge]
       x-api-readiness: ready_for_frontend
@@ -8074,7 +7598,6 @@ paths:
           description: Authentication required
         '500':
           description: Internal error during upsert
-
   /v1/erp/products/style/update:
     post:
       summary: Update ERP item style (Bridge-side write endpoint)
@@ -8109,7 +7632,6 @@ paths:
           description: Authentication required
         '500':
           description: Internal error during style update
-
   /v1/erp/sync-logs:
     get:
       summary: List ERP Bridge sync logs
@@ -8161,7 +7683,6 @@ paths:
                     $ref: '#/components/schemas/PaginationMeta'
         '500':
           description: Internal error while reading sync logs
-
   /v1/erp/sync-logs/{id}:
     get:
       summary: Get ERP Bridge sync log detail
@@ -8186,7 +7707,6 @@ paths:
                     $ref: '#/components/schemas/ERPSyncLog'
         '404':
           description: Sync log not found
-
   /v1/erp/products/shelve/batch:
     post:
       summary: Shelve products in batch through Bridge
@@ -8219,7 +7739,6 @@ paths:
                     $ref: '#/components/schemas/ERPProductBatchMutationResult'
         '400':
           description: Invalid batch payload
-
   /v1/erp/products/unshelve/batch:
     post:
       summary: Unshelve products in batch through Bridge
@@ -8252,7 +7771,6 @@ paths:
                     $ref: '#/components/schemas/ERPProductBatchMutationResult'
         '400':
           description: Invalid batch payload
-
   /v1/erp/inventory/virtual-qty:
     post:
       summary: Update virtual inventory qty through Bridge
@@ -8286,7 +7804,6 @@ paths:
                     $ref: '#/components/schemas/ERPVirtualInventoryUpdateResult'
         '400':
           description: Invalid payload
-
   /internal/jst/ping:
     get:
       summary: JST sync service ping (8082)
@@ -8304,7 +7821,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JSTSyncPingResponse'
-
   /jst/sync/inc:
     post:
       summary: Trigger JST incremental sync (8082)
@@ -8320,7 +7836,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JSTIncrementalSyncResponse'
-
   /v1/products/search:
     get:
       summary: Search local cached ERP products
@@ -8328,6 +7843,7 @@ paths:
         Compatibility-only local-cache product search.
         New integrations must use `GET /v1/erp/products`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/erp/products
       x-workflow-new-usage-allowed: false
@@ -8394,7 +7910,6 @@ paths:
                 $ref: '#/components/schemas/ProductListResponse'
         '400':
           description: Invalid mapped-search query
-
   /v1/products/sync/status:
     get:
       summary: Get ERP sync placeholder status
@@ -8411,7 +7926,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ERPSyncStatusResponse'
-
   /v1/products/sync/run:
     post:
       summary: Run ERP sync placeholder manually
@@ -8428,12 +7942,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ERPSyncRunResponse'
-
   /v1/products/{id}:
     get:
       summary: Get product by ID
       description: Compatibility-only local-cache product detail. New integrations must use `GET /v1/erp/products/{id}`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/erp/products/{id}
       x-workflow-new-usage-allowed: false
@@ -8460,7 +7974,6 @@ paths:
                     $ref: '#/components/schemas/Product'
         '404':
           description: Product not found
-
   /v1/categories:
     get:
       summary: List categories
@@ -8536,7 +8049,6 @@ paths:
                     $ref: '#/components/schemas/Category'
         '400':
           description: Invalid category payload
-
   /v1/categories/search:
     get:
       summary: Search categories
@@ -8572,7 +8084,6 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Category'
-
   /v1/categories/{id}:
     get:
       summary: Get category by ID
@@ -8631,7 +8142,6 @@ paths:
           description: Invalid category payload
         '404':
           description: Category not found
-
   /v1/category-mappings:
     get:
       summary: List category-to-ERP mappings
@@ -8713,7 +8223,6 @@ paths:
                     $ref: '#/components/schemas/CategoryERPMapping'
         '400':
           description: Invalid category mapping payload
-
   /v1/category-mappings/search:
     get:
       summary: Search category-to-ERP mappings
@@ -8755,7 +8264,6 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CategoryERPMapping'
-
   /v1/category-mappings/{id}:
     get:
       summary: Get category-to-ERP mapping by ID
@@ -8814,7 +8322,6 @@ paths:
           description: Invalid category mapping payload
         '404':
           description: Category-to-ERP mapping not found
-
   /v1/cost-rules:
     get:
       summary: List cost rules
@@ -8887,7 +8394,6 @@ paths:
                     $ref: '#/components/schemas/CostRule'
         '400':
           description: Invalid cost rule payload
-
   /v1/cost-rules/{id}:
     get:
       summary: Get cost rule by ID
@@ -8947,7 +8453,6 @@ paths:
           description: Invalid cost rule payload
         '404':
           description: Cost rule not found
-
   /v1/cost-rules/{id}/history:
     get:
       summary: Get cost rule lineage history
@@ -8974,7 +8479,6 @@ paths:
                     $ref: '#/components/schemas/CostRuleHistoryReadModel'
         '404':
           description: Cost rule not found
-
   /v1/cost-rules/preview:
     post:
       summary: Preview cost rule estimate
@@ -9002,7 +8506,6 @@ paths:
                     $ref: '#/components/schemas/CostRulePreviewResponse'
         '400':
           description: Invalid preview request
-
   /v1/task-create/asset-center/upload-sessions:
     post:
       summary: Create task-create reference upload session
@@ -9010,6 +8513,7 @@ paths:
         Compatibility-only pre-task reference upload flow retained for rollback-safe migration.
         Obsolete for frontend rollout. New frontend integration must use `POST /v1/tasks/reference-upload`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/reference-upload
       x-workflow-new-usage-allowed: false
@@ -9037,12 +8541,12 @@ paths:
                     $ref: '#/components/schemas/CreateTaskReferenceUploadSessionResponseData'
         '400':
           description: Invalid request payload
-
   /v1/task-create/asset-center/upload-sessions/{session_id}:
     get:
       summary: Get task-create reference upload session
       description: Compatibility-only status read for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/reference-upload
       x-workflow-new-usage-allowed: false
@@ -9069,7 +8573,6 @@ paths:
                     $ref: '#/components/schemas/UploadSession'
         '404':
           description: Upload session not found
-
   /v1/task-create/asset-center/upload-sessions/{session_id}/complete:
     post:
       summary: Complete task-create reference upload session
@@ -9078,6 +8581,7 @@ paths:
         Obsolete for frontend rollout. Finalizes one old pre-task reference upload session and returns both the legacy
         `reference_file_ref` id and the normalized `ref_object` that can be passed into `POST /v1/tasks`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/reference-upload
       x-workflow-new-usage-allowed: false
@@ -9114,12 +8618,12 @@ paths:
           description: Upload session not found
         '409':
           description: Upload session already terminal
-
   /v1/task-create/asset-center/upload-sessions/{session_id}/abort:
     post:
       summary: Abort task-create reference upload session
       description: Compatibility-only abort for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/reference-upload
       x-workflow-new-usage-allowed: false
@@ -9156,7 +8660,6 @@ paths:
           description: Upload session not found
         '409':
           description: Completed upload session cannot be aborted
-
   /v1/tasks/reference-upload:
     post:
       summary: Upload task-create reference file
@@ -9203,7 +8706,6 @@ paths:
           description: Invalid upload request
         '401':
           description: Authentication required
-
   /v1/assets:
     get:
       summary: List assets
@@ -9254,7 +8756,6 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/DesignAsset'
-
   /v1/assets/{id}:
     get:
       summary: Get asset
@@ -9315,7 +8816,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/assets/{id}/download:
     get:
       summary: Get asset download info
@@ -9344,7 +8844,6 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Asset not found
-
   /v1/assets/{id}/preview:
     get:
       summary: Get asset preview info
@@ -9389,7 +8888,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/assets/upload-sessions:
     post:
       summary: Create asset upload session
@@ -9419,7 +8917,6 @@ paths:
           description: Invalid request payload
         '403':
           description: Permission denied
-
   /v1/assets/upload-sessions/{session_id}:
     get:
       summary: Get asset upload session
@@ -9447,7 +8944,6 @@ paths:
                     $ref: '#/components/schemas/UploadSession'
         '404':
           description: Upload session not found
-
   /v1/assets/upload-sessions/{session_id}/complete:
     post:
       summary: Complete asset upload session
@@ -9485,7 +8981,6 @@ paths:
           description: Upload session not found
         '409':
           description: Upload session already terminal or asset type mismatch
-
   /v1/assets/upload-sessions/{session_id}/cancel:
     post:
       summary: Cancel asset upload session
@@ -9523,7 +9018,6 @@ paths:
           description: Upload session not found
         '409':
           description: Completed upload session cannot be cancelled
-
   /v1/tasks/prepare-product-codes:
     post:
       summary: Prepare task product codes
@@ -9555,7 +9049,6 @@ paths:
                     $ref: '#/components/schemas/PrepareTaskProductCodesResponse'
         '400':
           description: Invalid task type/category/count payload
-
   /v1/tasks:
     post:
       summary: Create task
@@ -9752,7 +9245,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListResponse'
-
   /v1/tasks/{id}:
     get:
       summary: Get task read model
@@ -9781,7 +9273,6 @@ paths:
           description: "`PERMISSION_DENIED` with `deny_code` such as `task_out_of_department_scope` or `task_out_of_team_scope`."
         '404':
           description: Task not found
-
   /v1/tasks/{id}/product-info:
     get:
       summary: Get per-task product information
@@ -9874,7 +9365,6 @@ paths:
                     $ref: '#/components/schemas/TaskDetail'
         '403':
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
-
   /v1/tasks/{id}/cost-info:
     get:
       summary: Get per-task cost information
@@ -9953,7 +9443,6 @@ paths:
                     $ref: '#/components/schemas/TaskDetail'
         '403':
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
-
   /v1/tasks/{id}/cost-quote/preview:
     post:
       summary: Preview cost quote for one task
@@ -9994,7 +9483,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/CostRulePreviewResponse'
-
   /v1/tasks/{id}/business-info:
     patch:
       summary: Update task business-info and generic cost fields
@@ -10053,7 +9541,6 @@ paths:
           description: Internal error
         '404':
           description: Task not found
-
   /v1/tasks/{id}/filing-status:
     get:
       summary: Get task filing status view
@@ -10080,7 +9567,6 @@ paths:
                     $ref: '#/components/schemas/TaskFilingStatusView'
         '404':
           description: Task not found
-
   /v1/tasks/{id}/filing/retry:
     post:
       summary: Retry task filing
@@ -10115,7 +9601,6 @@ paths:
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
         '404':
           description: Task not found
-
   /v1/tasks/{id}/procurement:
     patch:
       summary: Update purchase-task procurement draft data
@@ -10152,7 +9637,6 @@ paths:
           description: Task not found
         '409':
           description: Task is not a purchase task
-
   /v1/tasks/{id}/procurement/advance:
     post:
       summary: Advance purchase-task procurement lifecycle
@@ -10195,14 +9679,21 @@ paths:
           description: Task not found
         '409':
           description: Task is not a purchase task or the transition is invalid
-
   /v1/tasks/{id}/detail:
     get:
-      summary: Get task aggregate detail
-      description: Returns the frontend aggregate detail. `/v1/tasks/{id}` exposes the lighter read model with workflow, `procurement_summary`, top-level `product_selection`, and canonical task org ownership. This detail route adds aggregate sections including governance summaries, design-asset detail, and supporting read models for the full page. `task_event_logs` remain the general task event stream; the override audit layer is governance-specific and read-only; the boundary layer is a placeholder governance summary rather than an approval or finance system. For `purchase_task`, `procurement_summary` remains the procurement-to-warehouse coordination summary and carries lightweight `product_selection`, while top-level and nested task-detail `product_selection` keep the full provenance contract.
+      summary: Get task aggregate detail (V1.1-A1 fast-path 5-section)
+      description: |
+        Returns the 5-section task aggregate produced by `task_aggregator.DetailService` fast path.
+        Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]`
+        (service caps recent events at 50), and `reference_file_refs[]`. Rich snapshot sections
+        such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`,
+        `design_assets`, `asset_versions`, `sku_items`, and `governance_audit_summary` are not
+        returned by this endpoint in v1.21; use dedicated routes such as
+        `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and
+        `/v1/tasks/{id}/cost-overrides` for those read models.
       tags: [TaskDetail, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-owner-round: R3
+      x-owner-round: V1.1-A1
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
         required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
@@ -10213,17 +9704,16 @@ paths:
           schema: { type: integer }
       responses:
         '200':
-          description: Aggregate detail for detail page
+          description: 5-section aggregate detail
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   data:
-                    $ref: '#/components/schemas/TaskDetail'
+                    $ref: '#/components/schemas/TaskAggregateDetailV2'
         '404':
           description: Task not found
-
   /v1/tasks/{id}/cost-overrides:
     get:
       summary: Get task cost-override governance audit timeline
@@ -10250,7 +9740,6 @@ paths:
                     $ref: '#/components/schemas/TaskCostOverrideAuditTimeline'
         '404':
           description: Task not found
-
   /v1/tasks/{id}/cost-overrides/{event_id}/review:
     post:
       summary: Upsert cost-override review placeholder boundary
@@ -10287,7 +9776,6 @@ paths:
                     $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary'
         '404':
           description: Task or override event not found
-
   /v1/tasks/{id}/cost-overrides/{event_id}/finance-mark:
     post:
       summary: Upsert cost-override finance placeholder boundary
@@ -10324,7 +9812,6 @@ paths:
                     $ref: '#/components/schemas/TaskCostOverrideGovernanceBoundary'
         '404':
           description: Task or override event not found
-
   /v1/tasks/{id}/assign:
     post:
       summary: Assign task to designer
@@ -10366,7 +9853,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task state such as attempting designer assignment on `purchase_task`
-
   /v1/tasks/batch/assign:
     post:
       summary: Batch assign tasks to designer
@@ -10407,7 +9893,6 @@ paths:
           description: "`PERMISSION_DENIED` when one or more tasks fall outside the actor org scope."
         '409':
           description: One or more tasks in invalid state
-
   /v1/tasks/batch/remind:
     post:
       summary: Batch remind task handlers
@@ -10445,7 +9930,6 @@ paths:
           description: Invalid request payload
         '409':
           description: One or more tasks in invalid state
-
   /v1/tasks/{id}/submit-design:
       post:
         summary: Submit task design asset
@@ -10454,12 +9938,10 @@ paths:
           1) Compatibility single-asset submit (`asset_type` + `file_name`) which creates one `task_assets` record.
           2) Batch submit (`assets[]`) which completes multiple upload sessions in a single action and persists canonical
              `design_assets`/`asset_versions` with SKU scope.
-
           Re-entry is allowed from `RejectedByAuditA` and `RejectedByAuditB`. Delivery upload-session completion advances
           task status to `PendingAuditA` when current status is one of `PendingAssign`, `Assigned`, `InProgress`,
           `RejectedByAuditA`, or `RejectedByAuditB`, and for multi-SKU batch tasks the gate waits until required SKU-scoped
           delivery assets are complete.
-
           `purchase_task` cannot submit design. This action uses minimum role plus org or handler gating.
       tags: [TaskAssets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
@@ -10497,7 +9979,6 @@ paths:
           description: Task not found
         '409':
           description: Missing designer assignment or invalid task state
-
   /v1/tasks/{id}/assets:
     get:
       summary: List task-linked design assets
@@ -10531,12 +10012,12 @@ paths:
                       $ref: '#/components/schemas/DesignAsset'
         '404':
           description: Task not found
-
   /v1/tasks/{id}/assets/timeline:
     get:
       summary: List legacy task asset timeline
       description: Returns the append-only task-asset timeline ordered by `version_no ASC`. This is a compatibility-only standalone refresh view, obsolete for frontend rollout, and not the primary design-asset aggregation surface for new frontend upload integration.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/assets
       x-workflow-new-usage-allowed: false
@@ -10565,12 +10046,12 @@ paths:
                       $ref: '#/components/schemas/TaskAsset'
         '404':
           description: Task not found
-
   /v1/tasks/{id}/assets/{asset_id}/versions:
     get:
       summary: List versions under one design asset
       description: Compatibility-only alias for `GET /v1/tasks/{id}/asset-center/assets/{asset_id}/versions`. Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/asset-center/assets/{asset_id}/versions
       x-workflow-new-usage-allowed: false
@@ -10603,12 +10084,12 @@ paths:
                       $ref: '#/components/schemas/DesignAssetVersion'
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/assets/{asset_id}/download:
     get:
       summary: Get latest version download info for one design asset
       description: Compatibility-only alias for `GET /v1/tasks/{id}/asset-center/assets/{asset_id}/download`. Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/asset-center/assets/{asset_id}/download
       x-workflow-new-usage-allowed: false
@@ -10667,12 +10148,12 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/assets/{asset_id}/versions/{version_id}/download:
     get:
       summary: Get specific version download info for one design asset
       description: Compatibility-only alias for `GET /v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download`. Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download
       x-workflow-new-usage-allowed: false
@@ -10735,7 +10216,6 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Task, asset, or version not found
-
   /v1/tasks/{id}/assets/upload-sessions:
     post:
       summary: Create upload session
@@ -10743,6 +10223,7 @@ paths:
         Compatibility-only alias for `POST /v1/assets/upload-sessions`.
         Obsolete for frontend rollout; new integration must use the top-level asset session contract.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions
       x-workflow-new-usage-allowed: false
@@ -10779,7 +10260,6 @@ paths:
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/assets/upload-sessions/{session_id}:
     get:
       summary: Get upload session status
@@ -10787,6 +10267,7 @@ paths:
         Compatibility-only alias for `GET /v1/assets/upload-sessions/{session_id}`.
         Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions/{session_id}
       x-workflow-new-usage-allowed: false
@@ -10817,7 +10298,6 @@ paths:
                     $ref: '#/components/schemas/UploadSession'
         '404':
           description: Task or upload session not found
-
   /v1/tasks/{id}/assets/upload-sessions/{session_id}/complete:
     post:
       summary: Complete upload session and record asset version
@@ -10825,6 +10305,7 @@ paths:
         Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/complete`.
         Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions/{session_id}/complete
       x-workflow-new-usage-allowed: false
@@ -10867,7 +10348,6 @@ paths:
           description: Task or upload session not found
         '409':
           description: Upload session already terminal or asset type mismatch
-
   /v1/tasks/{id}/assets/upload-sessions/{session_id}/abort:
     post:
       summary: Abort upload session
@@ -10875,6 +10355,7 @@ paths:
         Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/cancel`.
         Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions/{session_id}/cancel
       x-workflow-new-usage-allowed: false
@@ -10917,22 +10398,19 @@ paths:
           description: Task or upload session not found
         '409':
           description: Completed upload session cannot be aborted
-
   /v1/tasks/{id}/assets/upload:
     post:
       summary: Create small-file direct upload handoff (legacy path)
       description: |
         **Deprecated browser contract:** `multipart/form-data` uploads (`file` + `file_role`)
         are **not supported** on this path and return **410** with `UPLOAD_ENDPOINT_DEPRECATED`.
-
         **Supported:** `application/json` body identical to
         `POST /v1/assets/upload-sessions` (backend-selected upload strategy).
-
         **Design drafts (source / delivery / preview):** use the unified asset upload-session contract,
         upload bytes using the returned remote plan, then call `.../complete`.
-
         Preferred entrypoint for new code: `/v1/assets/upload-sessions` instead of this legacy URL.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: deprecated
       x-workflow-successor-path: /v1/assets/upload-sessions
       x-workflow-new-usage-allowed: false
@@ -10972,7 +10450,6 @@ paths:
             `UPLOAD_ENDPOINT_DEPRECATED` when `Content-Type` is `multipart/form-data` or
             `application/x-www-form-urlencoded`. Use asset-center upload session JSON handoff + OSS
             upload + complete (see response `details`).
-
   /v1/tasks/{id}/asset-center/assets:
     get:
       summary: List design assets in task asset center
@@ -10981,6 +10458,7 @@ paths:
         Keep for migration safety only; new frontend integration must use the canonical
         task-linked lookup path `GET /v1/tasks/{id}/assets`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/assets
       x-workflow-new-usage-allowed: false
@@ -11009,12 +10487,12 @@ paths:
                       $ref: '#/components/schemas/DesignAsset'
         '404':
           description: Task not found
-
   /v1/tasks/{id}/asset-center/assets/{asset_id}/versions:
     get:
       summary: List versions under one design asset
       description: Compatibility-only alias for `GET /v1/tasks/{id}/assets/{asset_id}/versions`. Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/assets/{asset_id}/versions
       x-workflow-new-usage-allowed: false
@@ -11047,12 +10525,12 @@ paths:
                       $ref: '#/components/schemas/DesignAssetVersion'
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/asset-center/assets/{asset_id}/download:
     get:
       summary: Get latest version download info for one design asset
       description: Compatibility-only alias for `GET /v1/tasks/{id}/assets/{asset_id}/download`. Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/assets/{asset_id}/download
       x-workflow-new-usage-allowed: false
@@ -11083,12 +10561,12 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download:
     get:
       summary: Get specific version download info for one design asset
       description: Compatibility-only alias for `GET /v1/tasks/{id}/assets/{asset_id}/versions/{version_id}/download`. Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks/{id}/assets/{asset_id}/versions/{version_id}/download
       x-workflow-new-usage-allowed: false
@@ -11123,12 +10601,12 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Task, asset, or version not found
-
   /v1/tasks/{id}/asset-center/upload-sessions:
     post:
       summary: Create upload session
       description: Compatibility-only alias for `POST /v1/assets/upload-sessions`. Use the top-level asset session route for new frontend work.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions
       x-workflow-new-usage-allowed: false
@@ -11165,12 +10643,12 @@ paths:
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/asset-center/upload-sessions/small:
     post:
       summary: Create small-file upload session
       description: Compatibility-only alias for `POST /v1/assets/upload-sessions`. Use the top-level asset session route for new frontend work.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions
       x-workflow-new-usage-allowed: false
@@ -11207,12 +10685,12 @@ paths:
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/asset-center/upload-sessions/multipart:
     post:
       summary: Create multipart upload session
       description: Compatibility-only alias for `POST /v1/assets/upload-sessions`. Use the top-level asset session route for new frontend work.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions
       x-workflow-new-usage-allowed: false
@@ -11249,12 +10727,12 @@ paths:
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
         '404':
           description: Task or asset not found
-
   /v1/tasks/{id}/asset-center/upload-sessions/{session_id}:
     get:
       summary: Get upload session status
       description: Compatibility-only alias for `GET /v1/assets/upload-sessions/{session_id}`. Returns the MAIN-side upload-session business view.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions/{session_id}
       x-workflow-new-usage-allowed: false
@@ -11285,7 +10763,6 @@ paths:
                     $ref: '#/components/schemas/UploadSession'
         '404':
           description: Task or upload session not found
-
   /v1/tasks/{id}/asset-center/upload-sessions/{session_id}/complete:
     post:
       summary: Complete upload session and record asset version
@@ -11294,6 +10771,7 @@ paths:
         For multi-SKU batch delivery submissions, whole-task status does not advance on the first successful bucket.
         `PendingAuditA` is entered only after all SKU items required by the batch have a completed delivery asset.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions/{session_id}/complete
       x-workflow-new-usage-allowed: false
@@ -11336,12 +10814,12 @@ paths:
           description: Task or upload session not found
         '409':
           description: Upload session already terminal or asset type mismatch
-
   /v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel:
     post:
       summary: Cancel upload session
       description: Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/cancel`. Cancels the MAIN business session and aborts the remote OSS upload session when needed.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions/{session_id}/cancel
       x-workflow-new-usage-allowed: false
@@ -11384,12 +10862,12 @@ paths:
           description: Task or upload session not found
         '409':
           description: Completed upload session cannot be cancelled
-
   /v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort:
     post:
       summary: Abort upload session
       description: Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/cancel`. Obsolete for frontend rollout.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/assets/upload-sessions/{session_id}/cancel
       x-workflow-new-usage-allowed: false
@@ -11432,7 +10910,6 @@ paths:
           description: Task or upload session not found
         '409':
           description: Completed upload session cannot be aborted
-
   /v1/tasks/{id}/warehouse/prepare:
     post:
       summary: Prepare task for warehouse handoff
@@ -11469,7 +10946,6 @@ paths:
           description: Task not found
         '409':
           description: Warehouse blocking reasons prevent handoff
-
   /v1/tasks/{id}/assets/mock-upload:
     post:
       summary: Mock upload task asset
@@ -11504,7 +10980,6 @@ paths:
           description: Invalid request
         '404':
           description: Task not found
-
   /v1/assets/files/{path}:
     get:
       summary: Proxy OSS-backed business file
@@ -11525,7 +11000,6 @@ paths:
           description: File not found
         '502':
           description: Upstream file request failed
-
   /v1/assets/upload-requests:
     get:
       summary: List asset upload requests
@@ -11618,7 +11092,6 @@ paths:
           description: Invalid request payload or unsupported owner boundary
         '404':
           description: Owner not found
-
   /v1/assets/upload-requests/{id}:
     get:
       summary: Get asset upload request
@@ -11645,7 +11118,6 @@ paths:
                     $ref: '#/components/schemas/UploadRequest'
         '404':
           description: Upload request not found
-
   /v1/assets/upload-requests/{id}/advance:
     post:
       summary: Advance asset upload request
@@ -11683,7 +11155,6 @@ paths:
           description: Invalid request payload or invalid upload-request lifecycle transition
         '404':
           description: Upload request not found
-
   /v1/tasks/{id}/close:
     post:
       summary: Close task explicitly
@@ -11729,7 +11200,6 @@ paths:
           description: Task not found
         '409':
           description: Task is not ready to close; see `error.details.workflow` and `error.details.cannot_close_reasons`
-
   /v1/tasks/{id}/audit/claim:
     post:
       summary: Claim task for audit
@@ -11767,7 +11237,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task state
-
   /v1/tasks/{id}/audit/approve:
       post:
         summary: Approve audit and move task to next status
@@ -11814,7 +11283,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task state or transition
-
   /v1/tasks/{id}/audit/reject:
       post:
         summary: Reject audit
@@ -11859,7 +11327,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task state
-
   /v1/tasks/{id}/audit/transfer:
     post:
       summary: Transfer audit responsibility
@@ -11899,7 +11366,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task state
-
   /v1/tasks/{id}/audit/handover:
       post:
         summary: Create audit handover
@@ -11945,7 +11411,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task state
-
   /v1/tasks/{id}/audit/handovers:
     get:
       summary: List audit handovers for task
@@ -11974,7 +11439,6 @@ paths:
                       $ref: '#/components/schemas/AuditHandover'
         '404':
           description: Task not found
-
   /v1/tasks/{id}/audit/takeover:
       post:
         summary: Take over pending handover
@@ -12010,12 +11474,12 @@ paths:
           description: Task or handover not found
         '409':
           description: Invalid handover or task state
-
   /v1/tasks/{id}/outsource:
     post:
       summary: Create outsource order for task
       description: Compatibility-only legacy late-branch entry retained for historical tasks. New integrations must create customization-lane tasks with `customization_required=true` instead of using this route.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/tasks
       x-workflow-new-usage-allowed: false
@@ -12056,12 +11520,12 @@ paths:
           description: Task not found
         '409':
           description: Task not in PendingOutsource
-
   /v1/outsource-orders:
     get:
       summary: List outsource orders
       description: Compatibility-only legacy list for historical late-branch outsource records. New integrations should use `/v1/customization-jobs` for the unified customization lane. `vendor` is matched with fuzzy `LIKE` against `vendor_name`.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: compatibility
       x-workflow-successor-path: /v1/customization-jobs
       x-workflow-new-usage-allowed: false
@@ -12093,7 +11557,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OutsourceOrderListResponse'
-
   /v1/warehouse/receipts:
     get:
       summary: List warehouse receipts
@@ -12133,7 +11596,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WarehouseReceiptListResponse'
-
   /v1/task-board/summary:
     get:
       summary: Get task-board queue summary
@@ -12255,7 +11717,6 @@ paths:
                 $ref: '#/components/schemas/TaskBoardSummaryResponse'
         '400':
           description: Invalid board query
-
   /v1/task-board/queues:
     get:
       summary: Get task-board queue tasks
@@ -12379,7 +11840,6 @@ paths:
                 $ref: '#/components/schemas/TaskBoardQueuesAPIResponse'
         '400':
           description: Invalid board query
-
   /v1/workbench/preferences:
     get:
       summary: Get saved workbench preferences
@@ -12398,7 +11858,6 @@ paths:
                 $ref: '#/components/schemas/WorkbenchPreferencesResponse'
         '401':
           description: Session-backed user required
-
     patch:
       summary: Save workbench preferences
       description: Saves lightweight workbench preferences for the current session-backed user. This persists queue/default-filter/page-size/sort hints only and does not introduce full inbox ownership persistence.
@@ -12424,7 +11883,6 @@ paths:
           description: Invalid preference payload
         '401':
           description: Session-backed user required
-
   /v1/export-templates:
     get:
       summary: List export templates
@@ -12441,7 +11899,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExportTemplateListResponse'
-
   /v1/integration/connectors:
     get:
       summary: List integration connectors
@@ -12458,7 +11915,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrationConnectorListResponse'
-
   /v1/integration/call-logs:
     post:
       summary: Create integration call log
@@ -12483,7 +11939,6 @@ paths:
                 $ref: '#/components/schemas/IntegrationCallLogResponse'
         '400':
           description: Invalid integration call log payload
-
     get:
       summary: List integration call logs
       description: Returns internal integration call logs plus latest execution summaries for troubleshooting. The payload exposes `retry_count`, `replay_count`, latest retry or replay action summaries, and separate retryability or replayability reasons so retry and replay remain distinguishable on the same execution boundary. This route also serves narrow ERP filing traces; admins can filter task filing traces with `connector_key=erp_bridge_product_upsert` and `resource_type=task_erp_filing`.
@@ -12524,7 +11979,6 @@ paths:
                 $ref: '#/components/schemas/IntegrationCallLogListResponse'
         '400':
           description: Invalid integration call log query
-
   /v1/integration/call-logs/{id}:
     get:
       summary: Get integration call log
@@ -12548,7 +12002,6 @@ paths:
                 $ref: '#/components/schemas/IntegrationCallLogResponse'
         '404':
           description: Integration call log not found
-
   /v1/integration/call-logs/{id}/executions:
     get:
       summary: List integration executions
@@ -12572,7 +12025,6 @@ paths:
                 $ref: '#/components/schemas/IntegrationExecutionListResponse'
         '404':
           description: Integration call log not found
-
     post:
       summary: Create integration execution
       description: Internal/admin placeholder execution-start boundary beneath one call log. This formalizes a manual execution attempt without introducing a real ERP/HTTP/SDK executor, callback processor, or async platform.
@@ -12603,7 +12055,6 @@ paths:
           description: Invalid integration execution payload or invalid call-log state
         '404':
           description: Integration call log not found
-
   /v1/integration/call-logs/{id}/retry:
     post:
       summary: Retry integration call log
@@ -12635,7 +12086,6 @@ paths:
           description: Invalid integration retry payload or invalid call-log state
         '404':
           description: Integration call log not found
-
   /v1/integration/call-logs/{id}/replay:
     post:
       summary: Replay integration call log
@@ -12667,7 +12117,6 @@ paths:
           description: Invalid integration replay payload or invalid call-log state
         '404':
           description: Integration call log not found
-
   /v1/integration/call-logs/{id}/executions/{execution_id}/advance:
     post:
       summary: Advance integration execution
@@ -12703,7 +12152,6 @@ paths:
           description: Invalid integration execution payload or transition
         '404':
           description: Integration execution not found
-
   /v1/integration/call-logs/{id}/advance:
     post:
       summary: Advance integration call log
@@ -12735,7 +12183,6 @@ paths:
           description: Invalid integration call log payload or transition
         '404':
           description: Integration call log not found
-
   /v1/export-jobs:
     post:
       summary: Create export job
@@ -12760,7 +12207,6 @@ paths:
                 $ref: '#/components/schemas/ExportJobResponse'
         '400':
           description: Invalid export job payload
-
     get:
       summary: List export jobs
       description: Returns persisted export jobs for the current export-center skeleton. List items expose lifecycle read fields such as `progress_hint`, `latest_status_at`, `download_ready`, `can_start`, `can_attempt`, `can_retry`, `can_dispatch`, `can_redispatch`, admission reason fields (`can_*_reason`, `dispatchability_reason`, `attemptability_reason`, `latest_admission_decision`), `start_mode`, `execution_mode`, `adapter_mode`, `dispatch_mode`, `storage_mode`, `delivery_mode`, `execution_boundary`, `storage_boundary`, `delivery_boundary`, `is_expired`, and `can_refresh`, plus shared `adapter_ref_summary`, `resource_ref_summary`, and `handoff_ref_summary`, placeholder dispatch visibility through `dispatch_count` and `latest_dispatch`, placeholder execution-attempt visibility through `attempt_count` and `latest_attempt`, and lightweight audit summaries through `event_count`, `latest_event`, `latest_dispatch_event`, and `latest_runner_event`. `result_ref` remains placeholder handoff metadata only.
@@ -12797,7 +12243,6 @@ paths:
                 $ref: '#/components/schemas/ExportJobListResponse'
         '400':
           description: Invalid export job query
-
   /v1/export-jobs/{id}:
     get:
       summary: Get export job
@@ -12821,7 +12266,6 @@ paths:
                 $ref: '#/components/schemas/ExportJobResponse'
         '404':
           description: Export job not found
-
   /v1/export-jobs/{id}/dispatches:
     get:
       summary: List export job dispatches
@@ -12850,7 +12294,6 @@ paths:
                 $ref: '#/components/schemas/ExportJobDispatchListResponse'
         '404':
           description: Export job not found
-
     post:
       summary: Submit export job dispatch
       description: |
@@ -12892,7 +12335,6 @@ paths:
           description: Export job not found
         '409':
           description: Export job is not in a dispatchable queued state
-
   /v1/export-jobs/{id}/dispatches/{dispatch_id}/advance:
     post:
       summary: Advance export job dispatch
@@ -12937,7 +12379,6 @@ paths:
           description: Export job or dispatch not found
         '409':
           description: Export job dispatch is not in an advanceable placeholder state
-
   /v1/export-jobs/{id}/attempts:
     get:
       summary: List export job attempts
@@ -12966,7 +12407,6 @@ paths:
                 $ref: '#/components/schemas/ExportJobAttemptListResponse'
         '404':
           description: Export job not found
-
   /v1/export-jobs/{id}/events:
     get:
       summary: List export job events
@@ -12990,7 +12430,6 @@ paths:
                 $ref: '#/components/schemas/ExportJobEventListResponse'
         '404':
           description: Export job not found
-
   /v1/export-jobs/{id}/claim-download:
     post:
       summary: Claim export job download handoff
@@ -13021,7 +12460,6 @@ paths:
           description: Export job not found
         '409':
           description: Export job is not in a claimable placeholder-download state, including expired ready handoff
-
   /v1/export-jobs/{id}/download:
     get:
       summary: Read export job download handoff
@@ -13052,7 +12490,6 @@ paths:
           description: Export job not found
         '409':
           description: Export job is not in a readable placeholder-download state, including expired ready handoff
-
   /v1/export-jobs/{id}/refresh-download:
     post:
       summary: Refresh export job download handoff
@@ -13083,7 +12520,6 @@ paths:
           description: Export job not found
         '409':
           description: Export job is not in a refreshable placeholder-download state
-
   /v1/export-jobs/{id}/start:
     post:
       summary: Start export job placeholder runner
@@ -13119,7 +12555,6 @@ paths:
           description: Export job not found
         '409':
           description: Export job is not in a startable queued state
-
   /v1/export-jobs/{id}/advance:
     post:
       summary: Advance export job lifecycle
@@ -13151,7 +12586,6 @@ paths:
           description: Invalid advance payload or lifecycle transition
         '404':
           description: Export job not found
-
   /v1/tasks/{id}/warehouse/receive:
       post:
         summary: Mark warehouse receipt as received
@@ -13193,7 +12627,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task or warehouse state
-
   /v1/tasks/{id}/warehouse/reject:
       post:
         summary: Reject warehouse receipt and return task to a truthful rework state
@@ -13239,7 +12672,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task or warehouse state
-
   /v1/tasks/{id}/warehouse/complete:
     post:
       summary: Complete warehouse flow and move task to pending close
@@ -13283,7 +12715,6 @@ paths:
           description: Task not found
         '409':
           description: Invalid task or warehouse state
-
   /v1/tasks/{id}/customization/review:
     post:
       summary: Submit customization review for task
@@ -13338,8 +12769,7 @@ paths:
                 type: object
                 properties:
                   data:
-                    allOf:
-                      - $ref: '#/components/schemas/CustomizationJob'
+                    allOf: [{ $ref: '#/components/schemas/CustomizationJob' }]
                     nullable: true
         '400':
           description: Invalid decision or missing required review fields
@@ -13349,7 +12779,6 @@ paths:
           description: Permission denied
         '404':
           description: Task not found
-
   /v1/customization-jobs:
     get:
       summary: List customization jobs
@@ -13389,7 +12818,6 @@ paths:
                       $ref: '#/components/schemas/CustomizationJob'
                   pagination:
                     $ref: '#/components/schemas/PaginationMeta'
-
   /v1/customization-jobs/{id}:
     get:
       summary: Get customization job detail
@@ -13415,7 +12843,6 @@ paths:
                     $ref: '#/components/schemas/CustomizationJob'
         '404':
           description: Customization job not found
-
   /v1/customization-jobs/{id}/effect-preview:
     post:
       summary: Submit customization effect preview
@@ -13458,7 +12885,6 @@ paths:
           description: Missing or invalid pricing rule snapshot input
         '409':
           description: Invalid workflow state transition
-
   /v1/customization-jobs/{id}/effect-review:
     post:
       summary: Review customization effect
@@ -13502,7 +12928,6 @@ paths:
                     $ref: '#/components/schemas/CustomizationJob'
         '409':
           description: Invalid workflow state transition
-
   /v1/customization-jobs/{id}/production-transfer:
     post:
       summary: Transfer customization production to warehouse QC
@@ -13541,7 +12966,6 @@ paths:
                     $ref: '#/components/schemas/CustomizationJob'
         '409':
           description: Invalid workflow state transition
-
   /v1/tasks/{id}/events:
       get:
         summary: List task events
@@ -13570,7 +12994,6 @@ paths:
                       $ref: '#/components/schemas/TaskEvent'
         '404':
           description: Task not found
-
   /v1/code-rules:
     get:
       summary: List code rules
@@ -13591,7 +13014,6 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CodeRule'
-
   /v1/code-rules/{id}/preview:
     get:
       summary: Preview generated code
@@ -13617,7 +13039,6 @@ paths:
                     $ref: '#/components/schemas/CodePreview'
         '404':
           description: Rule not found
-
   /v1/code-rules/generate-sku:
     post:
       summary: Generate SKU code
@@ -13638,21 +13059,18 @@ paths:
       responses:
         '200':
           description: SKU generated
-
   /v1/sku/list:
     get:
       summary: "[V6] List SKUs"
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/sku:
     post:
       summary: "[V6] Create SKU"
       tags: [V6-Legacy]
       responses:
         '201': { description: ok }
-
   /v1/sku/{id}:
     get:
       summary: "[V6] Get SKU by ID"
@@ -13664,7 +13082,6 @@ paths:
           schema: { type: integer }
       responses:
         '200': { description: ok }
-
   /v1/sku/{id}/sync_status:
     get:
       summary: "[V6] Frontend sequence-gap recovery"
@@ -13679,12 +13096,12 @@ paths:
           schema: { type: integer }
       responses:
         '200': { description: ok }
-
   /v1/audit:
     post:
       summary: "[V6] Submit audit decision"
       description: Legacy audit route retained for compatibility only. Canonical MAIN audit behavior lives under task-centric `/v1/tasks/{id}/audit/*` routes.
       deprecated: true
+      x-removed-at: v1.3
       x-workflow-api-status: deprecated
       x-workflow-successor-path: /v1/tasks/{id}/audit/*
       x-workflow-new-usage-allowed: false
@@ -13692,49 +13109,42 @@ paths:
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/agent/sync:
     post:
       summary: "[V6] NAS agent sync"
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/agent/pull_job:
     post:
       summary: "[V6] Agent pull job"
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/agent/heartbeat:
     post:
       summary: "[V6] Agent heartbeat"
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/agent/ack_job:
     post:
       summary: "[V6] Agent ack job"
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/incidents:
     get:
       summary: "[V6] List incidents"
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/policies:
     get:
       summary: "[V6] List policies"
       tags: [V6-Legacy]
       responses:
         '200': { description: ok }
-
   /v1/tasks/pool:
     get:
       summary: List task pool entries
@@ -13769,7 +13179,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '501':
           description: Reserved for R3
-
   /v1/tasks/{id}/modules/{module_key}/claim:
     post:
       summary: Claim a task module
@@ -13794,7 +13203,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R3 }
-
   /v1/tasks/{id}/modules/{module_key}/actions/{action}:
     post:
       summary: Trigger a task module action
@@ -13824,7 +13232,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R3 }
-
   /v1/tasks/{id}/modules/{module_key}/reassign:
     post:
       summary: Reassign a task module within team scope
@@ -13849,7 +13256,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R3 }
-
   /v1/tasks/{id}/modules/{module_key}/pool-reassign:
     post:
       summary: Reassign a task module between pools
@@ -13874,7 +13280,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R3 }
-
   /v1/tasks/{id}/cancel:
     post:
       summary: Cancel or close a task
@@ -13908,7 +13313,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R3 }
-
   /v1/task-drafts:
     post:
       summary: Create or update a task draft
@@ -13950,7 +13354,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/me/task-drafts:
     get:
       summary: List my task drafts
@@ -13995,7 +13398,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/task-drafts/{draft_id}:
     get:
       summary: Get a task draft
@@ -14074,7 +13476,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/tasks/batch-create/template.xlsx:
     get:
       summary: Download batch create Excel template
@@ -14114,7 +13515,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/tasks/batch-create/parse-excel:
     post:
       summary: Parse a batch create Excel file
@@ -14169,7 +13569,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/assets/search:
     get:
       summary: Search assets across tasks
@@ -14238,7 +13637,6 @@ paths:
                     type: integer
                   size:
                     type: integer
-
   /v1/assets/{asset_id}/versions/{version_id}/download:
     get:
       summary: Download a specific asset version
@@ -14277,7 +13675,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/assets/{asset_id}/archive:
     post:
       summary: Archive an asset
@@ -14310,7 +13707,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/assets/{asset_id}/restore:
     post:
       summary: Restore an archived asset
@@ -14337,7 +13733,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/erp/products/by-code:
     get:
       summary: Lookup ERP product by code
@@ -14384,7 +13779,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/design-sources/search:
     get:
       summary: Search design source entries
@@ -14429,7 +13823,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/search:
     get:
       summary: Perform a global search
@@ -14482,7 +13875,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R4-SA-D }
-
   /v1/me/notifications:
     get:
       summary: List my notifications
@@ -14528,7 +13920,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/me/notifications/{id}/read:
     post:
       summary: Mark one notification as read
@@ -14565,7 +13956,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/me/notifications/read-all:
     post:
       summary: Mark all notifications as read
@@ -14585,7 +13975,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/me/notifications/unread-count:
     get:
       summary: Get unread notification count
@@ -14616,7 +14005,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/me:
     get:
       summary: Get my profile
@@ -14668,7 +14056,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/me/change-password:
     post:
       summary: Change my password
@@ -14693,7 +14080,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/me/org:
     get:
       summary: Get my org profile
@@ -14714,7 +14100,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/MyOrgProfile'
-
   /v1/users/{id}/activate:
     post:
       summary: Activate a workflow user
@@ -14746,7 +14131,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/users/{id}/deactivate:
     post:
       summary: Deactivate a workflow user
@@ -14777,7 +14161,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/departments/{id}/org-move-requests:
     post:
       summary: Create an org move request
@@ -14829,7 +14212,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/org-move-requests:
     get:
       summary: List org move requests
@@ -14876,7 +14258,6 @@ paths:
                       $ref: '#/components/schemas/OrgMoveRequest'
                   pagination:
                     $ref: '#/components/schemas/PaginationMeta'
-
   /v1/org-move-requests/{id}/approve:
     post:
       summary: Approve an org move request
@@ -14913,7 +14294,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/org-move-requests/{id}/reject:
     post:
       summary: Reject an org move request
@@ -14962,7 +14342,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /v1/reports/l1/cards:
     get:
       summary: Get L1 report cards
@@ -15002,7 +14381,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R4-SA-D }
-
   /v1/reports/l1/throughput:
     get:
       summary: Get L1 throughput report
@@ -15074,7 +14452,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R4-SA-D }
-
   /v1/reports/l1/module-dwell:
     get:
       summary: Get L1 module dwell report
@@ -15144,7 +14521,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '501': { description: Reserved for R4-SA-D }
-
   /ws/v1:
     get:
       summary: Open v1 websocket channel
