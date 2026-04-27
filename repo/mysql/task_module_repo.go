@@ -23,6 +23,16 @@ func (r *taskModuleRepo) GetByTaskAndKey(ctx context.Context, taskID int64, modu
 	return m, err
 }
 
+func (r *taskModuleRepo) getByTaskAndKeyTx(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (*domain.TaskModule, error) {
+	sqlTx := Unwrap(tx)
+	row := sqlTx.QueryRowContext(ctx, taskModuleSelectSQL()+` WHERE task_id = ? AND module_key = ?`, taskID, moduleKey)
+	m, err := scanTaskModule(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return m, err
+}
+
 func (r *taskModuleRepo) ListByTask(ctx context.Context, taskID int64) ([]*domain.TaskModule, error) {
 	rows, err := r.db.db.QueryContext(ctx, taskModuleSelectSQL()+`
 		WHERE task_id = ?
@@ -78,11 +88,15 @@ func (r *taskModuleRepo) Enter(ctx context.Context, tx repo.Tx, taskID int64, mo
 	if err != nil {
 		return nil, fmt.Errorf("enter task_module: %w", err)
 	}
-	id, _ := res.LastInsertId()
-	if id == 0 {
-		return r.GetByTaskAndKey(ctx, taskID, moduleKey)
+	_, _ = res.LastInsertId()
+	m, err := r.getByTaskAndKeyTx(ctx, tx, taskID, moduleKey)
+	if err != nil {
+		return nil, err
 	}
-	return r.GetByTaskAndKey(ctx, taskID, moduleKey)
+	if m == nil {
+		return nil, fmt.Errorf("enter task_module: inserted module not readable in tx task_id=%d module_key=%s", taskID, moduleKey)
+	}
+	return m, nil
 }
 
 func (r *taskModuleRepo) UpdateState(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string, state domain.ModuleState, terminal bool, data json.RawMessage) error {
