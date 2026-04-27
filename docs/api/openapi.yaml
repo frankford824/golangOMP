@@ -1680,7 +1680,7 @@ components:
           enum: [Draft, PendingAssign, Assigned, InProgress, PendingAuditA, RejectedByAuditA, PendingAuditB, RejectedByAuditB, PendingOutsource, Outsourcing, PendingOutsourceReview, PendingCustomizationReview, PendingCustomizationProduction, PendingEffectReview, PendingEffectRevision, PendingProductionTransfer, PendingWarehouseQC, RejectedByWarehouse, PendingWarehouseReceive, PendingClose, Completed, Archived, Blocked, Cancelled]
         priority:
           type: string
-          enum: [low, normal, high, urgent]
+          enum: [low, normal, high, critical]
         deadline_at:
           type: string
           format: date-time
@@ -3912,7 +3912,7 @@ components:
           nullable: true
         priority:
           type: string
-          enum: [low, normal, high, urgent, critical]
+          enum: [low, normal, high, critical]
         is_outsource:
           type: boolean
           description: Compatibility-only legacy create flag. When true, backend normalizes the request into `customization_required=true`.
@@ -6291,7 +6291,7 @@ components:
               priority:
                 type: string
                 nullable: true
-                description: One of `normal` / `urgent` / `critical`.
+                description: One of `low` / `normal` / `high` / `critical`.
               highlight:
                 type: string
                 nullable: true
