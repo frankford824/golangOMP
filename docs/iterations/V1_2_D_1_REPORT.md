@@ -177,4 +177,40 @@ index 0122b27..27c91ba 100644
  }
 ```
 
-terminator: `V1_2_D_1_FALLBACK_REMOVED`
+codex terminator: `V1_2_D_1_FALLBACK_REMOVED`
+
+## §10 Architect Independent Verify (2026-04-27)
+
+独立 verify 全部通过,签 PASS · 无 ABORT。
+
+| # | check | result |
+|---|---|---|
+| 1 | commit `c3603db` 存在,只动 3 个业务 Go 文件 (task_detail / cmd-server / cmd-api) | PASS |
+| 2 | baseline 锚 7 文件 SHA 不漂移 (openapi / http / aggregate / detail_aggregator / identity / domain.task / contract_audit) | PASS |
+| 3 | `transport/handler/task_detail.go` 重写后只剩 fast-path,无 `service.TaskDetailAggregateService` 引用 | PASS |
+| 4 | 重跑 contract_audit (architect 独立运行) 数字与 codex 自报一致 | PASS |
+| 5 | `total_paths=242 / clean=85 / drift=71 / unmapped=66 / known_gap=20` | PASS |
+| 6 | `GET /v1/tasks/:id/detail` verdict=`clean`,response_type=`Detail` | PASS |
+| 7 | code_fields == openapi_fields == `[events, modules, reference_file_refs, task, task_detail]` | PASS |
+| 8 | only_in_code=0, only_in_openapi=0 | PASS |
+| 9 | 工作树仅 3 个 prompt 文件 untracked,无业务文件遗留 | PASS |
+| 10 | `cmd/server/main.go` diff 仅构造期注入 | PASS |
+| 11 | `cmd/api/main.go` diff 含 scope-creep:`NewTaskHandler(taskSvc, nil, nil)` → `NewTaskHandler(taskSvc, costRuleSvc, taskDetailSvc)` | NOTE |
+| 12 | summary.drift 单步下降 1 (72→71),summary.clean 上升 1 (84→85) 完全符合 §4 期望 | PASS |
+| 13 | OpenAPI / frontend TASKS / transport/http / domain aggregate / task_aggregator SHA 不漂移 | PASS |
+
+§10.1 关于 cmd/api scope-creep 的判断
+- codex 在 prompt §3 P2.2 范围之外顺手修了 `cmd/api/main.go:275` 的 `NewTaskHandler(taskSvc, nil, nil)` 占位,改为传入真实 svc。
+- 该改动消除潜在 nil-pointer 隐患,无回归风险,无新 drift。
+- 裁决:**NET-POSITIVE creep · 接受不回滚**,登记在案。下一轮 prompt 范围控制需明确。
+
+§10.2 关于 task_detail.go L39 `var detail *task_aggregator.Detail = aggregate`
+- 表面冗余,实为 codex 给 contract_audit 工具留的 type-hint。
+- 工具的 inferExprType 通过显式声明立即定位到 `Detail` 类型,audit 报告显示 `response_type: Detail` 验证生效。
+- 裁决:**接受 hint**,功能等价,无副作用。
+
+§10.3 V1.2-D-1 verdict
+- **PASS · CRITICAL drift 已修**
+- `summary.drift` 单步下降 1 (72→71),`summary.clean` 上升 1 (84→85),完全符合 prompt §4 期望。
+- 终止符:`V1_2_D_1_FALLBACK_REMOVED`(codex)
+- 架构师终止符:`V1_2_D_1_ARCHITECT_VERIFIED`
