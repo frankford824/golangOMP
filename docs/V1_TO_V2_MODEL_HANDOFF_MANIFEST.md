@@ -1,7 +1,7 @@
 # V1 → V2 Backend Model Handoff Manifest
 
 > 用途:为接管 V1 后端的下一代模型、前端工程师、V2 重构架构师提供权威指引。
-> 范围:V1.0 backend closed state through R6.A.4, V1.1-A1 detail P99 remediation, and Release v1.21 production evidence dated 2026-04-25.
+> 范围:V1.0 backend closed state through R6.A.4, V1.1-A1 detail P99 remediation, Release v1.21 production evidence, and V1.1-A2 contract drift purge dated 2026-04-27.
 > 风格:对齐 `docs/V0_9_MODEL_HANDOFF_MANIFEST.md`: authority / current state / reading order / non-authoritative / working rule.
 
 ## §1 Authority Order
@@ -10,7 +10,7 @@
 2. `docs/V1_INFORMATION_ARCHITECTURE.md`.
 3. `docs/V1_CUSTOMIZATION_WORKFLOW.md`.
 4. `docs/V1_ASSET_OWNERSHIP.md`.
-5. `docs/api/openapi.yaml` with sha `b3d7c3651ea2496a6e4ea1a948772c6a395d6b387bf6c4509e5c26477c75dd0f`.
+5. `docs/api/openapi.yaml` with post V1.2 path-closure GC sha `80730ec3d272e4124ab95244feb0c1daf499d4c0a032f47b70179cdd4189488f`.
 6. `transport/http.go`, the actual mounted route source.
 
 Conflict rule:
@@ -22,11 +22,11 @@ Conflict rule:
 
 ## §2 Current Repo Baseline
 
-- Main backend line is Release v1.21 on production `jst_erp`.
+- Current state: `V1_2_AUTHORITY_PURGED_AND_GUARD_LIVE · 待架构师 verify`. Main backend line remains Release v1.21 on production `jst_erp`.
 - R1~R6.A.4 are architect-cleared.
 - V1.1-A1 remediated `/v1/tasks/{id}/detail` P99 and is architect-verified.
 - Release v1.21 deployed V1 backend to `jst_ecs:/root/ecommerce_ai/releases/v1.21`.
-- OpenAPI path grep count in this round: 203 `/v1` entries.
+- OpenAPI path grep count after V1.1-A2: 203 `/v1` entries; contract schemas are post drift-purge and aligned to current git HEAD implementation.
 - Service directory count in this round: 21 directories.
 - `transport/http.go` route/group grep count in this round: 140 route-related lines.
 
@@ -169,10 +169,15 @@ V1.1 completed:
 - View/materialization was evaluated and rejected for V1.1-A1 to avoid write amplification.
 - Re-run P99 after optimization: cold p99 47.525ms, warm p99 47.513ms.
 
+V1.1 contract debt:
+
+- V1.1-A2 已收口 OpenAPI/frontend contract drift;详见 `docs/iterations/V1_1_A2_RETRO_REPORT.md`.
+
 V1.1 remaining mandatory:
 
 - CI script / workflow guard that always uses `-p 1` for shared-DB integration packages.
 - Test stability sweep for timeout buffer and `t.Cleanup` DB close order.
+- V1.2 rebuild/deploy v1.22 to align production binary with git HEAD after the documented `identity_service.go` micro-drift baseline decision.
 
 V1.1 optional:
 
@@ -199,6 +204,15 @@ V2 candidates:
 - U5 cancellation expansion.
 - U6 SLA automation.
 - A12 durable consumer outlet.
+
+## §6.2 V1.1-A2 Contract Drift Purge · 2026-04-27
+
+- Status: `V1_1_A2_CONTRACT_DRIFT_PURGED · 待架构师 verify`.
+- OpenAPI sha after purge: `0ff87aa90a53963a64350f92bf8bdce821dad3c24538bf70d61283b8dd97e5c3`.
+- Inventory coverage: 203/203 `/v1` paths.
+- P0/P1 fixed: 6 path-level schema drift items.
+- `GET /v1/tasks/{id}/detail` now documents V1.1-A1 5-section fast path: `task`, `task_detail`, `modules`, `events`, `reference_file_refs`.
+- Frontend docs under `docs/frontend/` were updated with V1.1-A2 revision marker; `V1_API_TASKS.md` contains the canonical detail handoff section.
 
 ## §7 Data Isolation Rule
 
@@ -269,3 +283,11 @@ Do not use default package parallelism for shared test DB integration.
 Do not use `defer db.Close()` when prompt requires cleanup assertions in `t.Cleanup`; close DB at the callback end.
 
 Do not regress detail P99; frontend rollout may use `/v1/tasks/{id}/detail` as the single task-detail screen fetch after V1.1-A1.
+
+
+## §V1.2 Authority Purge
+
+- Current status: `V1_2_AUTHORITY_PURGED_AND_GUARD_LIVE · 待架构师 verify`.
+- V1 SoT: `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`.
+- OpenAPI unreachable schema closure: 0. Deprecated paths: 29 decided with `x-removed-at: v1.3`.
+- Contract guard: `tools/contract_audit/` + `scripts/contract-guard.*` + `.cursor/hooks/contract-guard.json`.

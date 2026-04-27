@@ -2,19 +2,19 @@
 
 > Last updated: 2026-04-25
 > 性质:**接手 prompt 起步包**(给下一个接手 V1 后端的 Codex / Claude / GPT 模型用)
-> 当前状态:**Release v1.21 production deployed · test DB dropped · frontend docs ready · 2026-04-25**
-> 终止符:`V1_RELEASE_v1_21_DONE_FRONTEND_DOCS_READY`
+> 当前状态:**V1.2 authority purged + contract guard live · Release v1.21 production deployed · frontend docs refreshed · 2026-04-27 · 待架构师 verify**
+> 终止符:`V1_2_AUTHORITY_PURGED_AND_GUARD_LIVE`
 > 本文件不是 API 契约 · 不覆盖权威文档 · 仅作下一轮起步入口。
 
 ---
 
 ## §0 你是谁 · 你接的是什么
 
-你接手的是一个 **backend-only Go 工程**(模块名 `workflow` · 仓位 `c:\Users\wsfwk\Downloads\yongboWorkflow\go`),已完成 V0.9 → V1.0 主链路重构、V1.1-A1 detail P99 收口与 Release v1.21 生产部署,目前处于前端联调起步状态:
+你接手的是一个 **backend-only Go 工程**(模块名 `workflow` · 仓位 `c:\Users\wsfwk\Downloads\yongboWorkflow\go`),已完成 V0.9 → V1.0 主链路重构、V1.1-A1 detail P99 收口、Release v1.21 生产部署与 V1.1-A2 契约漂移清算,目前处于 post V1.1-A2 前端联调起步状态:
 
 - **闭环签字**:R1 → R6.A.4 + V1.1-A1 + Release v1.21 全部签字(详见 `docs/iterations/V1_RELEASE_v1_21_REPORT.md`)
 - **P99 状态**:`/v1/tasks/{id}/detail` R6.A.4 `p99=334.721ms` RED 已由 V1.1-A1 收口;生产 v1.21 复测 warm `32.933ms` / cold `32.995ms`
-- **前端文档**:`docs/frontend/INDEX.md` + 15 份 companion docs 已落盘,覆盖 203 个 `/v1` path
+- **前端文档**:`docs/frontend/INDEX.md` + 15 份 companion docs 已按 V1.1-A2 刷新,覆盖 203 个 `/v1` path;`GET /v1/tasks/{id}/detail` 为 5 段精简 schema
 - **接手任务候选**:见 §6 候选下一轮(用户/起草模型选其一开工)
 
 接手前你**必须**完整读完本文件 + 下面的"必读五件套"。**不要跳读**。
@@ -25,7 +25,8 @@
 
 | 序 | 文件 | 性质 | 你需要从中拿走什么 |
 |---|---|---|---|
-| 1 | `docs/V0_9_MODEL_HANDOFF_MANIFEST.md` | V0.9 时代入口(历史背景) | 知道 V0.9 baseline 与兼容性 surface 怎么来 |
+| 1 | `docs/V1_BACKEND_SOURCE_OF_TRUTH.md` | V1 当前 SoT 入口 | 当前 authority / family / milestone 指针 |
+| 2 | `docs/V0_9_MODEL_HANDOFF_MANIFEST.md` | V0.9 时代入口(历史背景) | 知道 V0.9 baseline 与兼容性 surface 怎么来 |
 | 2 | `docs/V1_TO_V2_MODEL_HANDOFF_MANIFEST.md` | **V1 当前权威 handoff**(2026-04-25 Release v1.21 更新) | Authority order / Stable surface / Cron gates / Verification baseline / Known debt / 段映射 / sha 锚 |
 | 3 | `docs/iterations/V1_RETRO_REPORT.md`(§14 架构师裁决节)| V1 整体 retro + 架构师独立 verify 证据 | A1~A12 验收实证 / 全栈 verify 矩阵 / P99 RED 详情 / 已知债务 / V1.1+V2 路线建议 |
 | 4 | `docs/iterations/V1_1_A1_DETAIL_P99_REPORT.md` | V1.1-A1 性能收口报告 | detail P99 实测 / 实现决策 / 验证矩阵 / 架构师裁决 |
@@ -48,7 +49,7 @@
 冲突时:
 
 1. `transport/http.go` 决定**实际挂载了什么**。
-2. `docs/api/openapi.yaml` 决定**当前 HTTP 契约**(sha `b3d7c365…dd0f`)。
+2. `docs/api/openapi.yaml` 决定**当前 HTTP 契约**(post V1.1-A2 sha `0ff87aa90a53…`)。
 3. 4 份权威文档决定**架构语义**:
    - `docs/V1_MODULE_ARCHITECTURE.md` v1.3
    - `docs/V1_INFORMATION_ARCHITECTURE.md`
@@ -75,6 +76,10 @@ f9d09d1fbc55734b00ff1f6c35cc1bccbf9db05298283eff6f255971262638c2  repo/mysql/tas
 
 如果你是 V1.2 / 后续性能或联调修补轮:任何业务文件 sha 变化都必须在 prompt §3 明示新 baseline,并在 retro 里更新锚。
 如果你是 V1.1-A2 CI 守卫 / V1.1-A3 测试稳定性轮 / §9.3 路由下线轮:这 7 文件 sha 应**完全不动**(测试稳定性轮只动 `_test.go`,§9.3 下线轮只动 `transport/http.go` + openapi.yaml)。
+
+### §3.4 契约真实性(V1.1-A2)
+
+OpenAPI 是 v1.21 + V1.1-A2 后的状态,按当前 git HEAD 实现校准。`GET /v1/tasks/{id}/detail` 只返回 `data.{task, task_detail, modules, events, reference_file_refs}` 5 段;如第三方文档仍声明旧富 schema,以 `docs/api/openapi.yaml` 和 `docs/frontend/V1_API_TASKS.md` 为准。
 
 ### §3.2 段隔离 Map(历史测试库 `jst_erp_r3_test`)
 
@@ -197,7 +202,7 @@ curl -sS http://127.0.0.1:18086/healthz   # 应 200
 
 ## §6 候选下一轮(请挑选其一开工 · prompt 起草指引)
 
-> ✅ 已完成:Release v1.21(2026-04-25)+ 前端 API 文档(`docs/frontend/`)。前端联调首轮门已开。下一轮候选见下表。
+> ✅ 已完成:Release v1.21(2026-04-25)+ V1.1-A2 contract drift purge(2026-04-27)+ 前端 API 文档(`docs/frontend/`)刷新。前端联调以 post V1.1-A2 文档为准。下一轮候选见下表。
 
 ### §6.A V1.1-A1 · `/v1/tasks/{id}/detail` P99 改造(**已完成 · architect-verified**)
 
