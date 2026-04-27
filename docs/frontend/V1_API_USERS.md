@@ -1,3 +1,7 @@
+> Revision: V1.2-D drift triage P3 (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D P3)
+> `WorkflowUser` response fields follow `domain.User`: includes `jst_u_id`, `managed_departments`, `managed_teams`; response no longer documents `avatar`.
+
 > Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
 > Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
 > V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
@@ -188,6 +192,8 @@ curl -X GET https://api.example.com/v1/access-rules \
 | `data` | array<WorkflowUser> | 否 | - |
 | `pagination` | PaginationMeta | 否 | - |
 
+`WorkflowUser` list items follow the backend `domain.User` response: `jst_u_id`, `managed_departments`, and `managed_teams` may be present; `avatar` is not returned by this response schema.
+
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
@@ -246,6 +252,8 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `data` | WorkflowUser | 否 | - |
+
+`WorkflowUser` follows the backend `domain.User` response: `jst_u_id`, `managed_departments`, and `managed_teams` may be present; `avatar` is not returned by this response schema.
 
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -1324,4 +1332,3 @@ curl -X POST https://api.example.com/v1/users/<id>/deactivate \
 - 角色与访问规则主要供后台管理页使用。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-

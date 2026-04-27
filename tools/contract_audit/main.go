@@ -76,9 +76,11 @@ type Operation struct {
 }
 
 type HandlerIndex struct {
-	Funcs        map[string]*ast.FuncDecl
-	FileByMethod map[string]string
-	ReturnTypes  map[string]string
+	Funcs           map[string]*ast.FuncDecl
+	FileByMethod    map[string]string
+	ReturnTypes     map[string]string
+	ReturnTypeLists map[string][]string
+	FieldTypes      map[string]string
 }
 
 type StructIndex struct {
@@ -149,12 +151,22 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 	if err != nil {
 		return Report{}, err
 	}
-	returnTypes, err := BuildReturnTypeIndex([]string{handlers, domain, "service"})
+	returnTypes, returnTypeLists, err := BuildReturnTypeIndex([]string{handlers, domain, "service"})
 	if err != nil {
 		return Report{}, err
 	}
 	for name, typ := range returnTypes {
 		handlerIndex.ReturnTypes[name] = typ
+	}
+	for name, types := range returnTypeLists {
+		handlerIndex.ReturnTypeLists[name] = types
+	}
+	fieldTypes, err := BuildStructFieldTypeIndex([]string{handlers, domain, "service"})
+	if err != nil {
+		return Report{}, err
+	}
+	for name, typ := range fieldTypes {
+		handlerIndex.FieldTypes[name] = typ
 	}
 	structIndex, err := BuildStructIndex([]string{domain, "service", handlers})
 	if err != nil {
@@ -373,7 +385,13 @@ func ParseTransportRoutes(transportPath string) ([]Route, error) {
 }
 
 func BuildHandlerIndex(dir string) (HandlerIndex, error) {
-	idx := HandlerIndex{Funcs: map[string]*ast.FuncDecl{}, FileByMethod: map[string]string{}, ReturnTypes: map[string]string{}}
+	idx := HandlerIndex{
+		Funcs:           map[string]*ast.FuncDecl{},
+		FileByMethod:    map[string]string{},
+		ReturnTypes:     map[string]string{},
+		ReturnTypeLists: map[string][]string{},
+		FieldTypes:      map[string]string{},
+	}
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
@@ -438,7 +456,83 @@ func BuildStructIndex(roots []string) (StructIndex, error) {
 	return idx, nil
 }
 
-func BuildReturnTypeIndex(roots []string) (map[string]string, error) {
+func BuildReturnTypeIndex(roots []string) (map[string]string, map[string][]string, error) {
+	out := map[string]string{}
+	lists := map[string][]string{}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return out, lists, err
+		}
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				return err
+			}
+			for _, decl := range f.Decls {
+				switch x := decl.(type) {
+				case *ast.FuncDecl:
+					if x.Type.Results == nil || len(x.Type.Results.List) == 0 {
+						continue
+					}
+					results := resultTypes(x.Type.Results.List)
+					keys := []string{x.Name.Name}
+					if x.Recv != nil && len(x.Recv.List) > 0 {
+						keys = append(keys, baseTypeName(exprString(x.Recv.List[0].Type))+"."+x.Name.Name)
+					}
+					for _, key := range keys {
+						if len(results) > 0 {
+							out[key] = results[0]
+							lists[key] = results
+						}
+					}
+				case *ast.GenDecl:
+					for _, spec := range x.Specs {
+						ts, ok := spec.(*ast.TypeSpec)
+						if !ok {
+							continue
+						}
+						it, ok := ts.Type.(*ast.InterfaceType)
+						if !ok {
+							continue
+						}
+						for _, method := range it.Methods.List {
+							if len(method.Names) == 0 {
+								continue
+							}
+							ft, ok := method.Type.(*ast.FuncType)
+							if !ok || ft.Results == nil || len(ft.Results.List) == 0 {
+								continue
+							}
+							results := resultTypes(ft.Results.List)
+							key := ts.Name.Name + "." + method.Names[0].Name
+							if len(results) > 0 {
+								out[key] = results[0]
+								lists[key] = results
+							}
+						}
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return out, lists, err
+		}
+	}
+	return out, lists, nil
+}
+
+func BuildStructFieldTypeIndex(roots []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, root := range roots {
 		if root == "" {
@@ -460,11 +554,26 @@ func BuildReturnTypeIndex(roots []string) (map[string]string, error) {
 				return err
 			}
 			for _, decl := range f.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Type.Results == nil || len(fn.Type.Results.List) == 0 {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok {
 					continue
 				}
-				out[fn.Name.Name] = resultType(fn.Type.Results.List[0].Type)
+				for _, spec := range gen.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					st, ok := ts.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					for _, field := range st.Fields.List {
+						typ := resultType(field.Type)
+						for _, name := range field.Names {
+							out[ts.Name.Name+"."+name.Name] = typ
+						}
+					}
+				}
 			}
 			return nil
 		})
@@ -495,9 +604,9 @@ func ResolveHandlerResponseShapes(idx HandlerIndex, route Route) (shapes []Respo
 	if len(responses) == 0 {
 		return nil, "unmapped_handler", "no respondOK/respondCreated/respondOKWithPagination call"
 	}
-	local := localTypes(fn, idx.ReturnTypes)
+	local := localTypes(fn, idx)
 	for _, resp := range responses {
-		typ := inferExprType(resp.Expr, local, idx.ReturnTypes)
+		typ := inferExprType(resp.Expr, local, idx)
 		if typ == "map" || typ == "gin.H" {
 			return nil, "unmapped_handler_dynamic_payload", "dynamic payload"
 		}
@@ -734,8 +843,14 @@ func respondExprs(fn *ast.FuncDecl) []respondExpr {
 	return found
 }
 
-func localTypes(fn *ast.FuncDecl, returns map[string]string) map[string]string {
+func localTypes(fn *ast.FuncDecl, idx HandlerIndex) map[string]string {
 	local := map[string]string{}
+	if fn.Recv != nil && len(fn.Recv.List) > 0 {
+		typ := baseTypeName(exprString(fn.Recv.List[0].Type))
+		for _, name := range fn.Recv.List[0].Names {
+			local[name.Name] = typ
+		}
+	}
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.DeclStmt:
@@ -756,18 +871,22 @@ func localTypes(fn *ast.FuncDecl, returns map[string]string) map[string]string {
 				}
 			}
 		case *ast.AssignStmt:
+			var rhsTypes [][]string
+			for _, rhs := range x.Rhs {
+				rhsTypes = append(rhsTypes, inferExprReturnTypes(rhs, local, idx))
+			}
 			for i, lhs := range x.Lhs {
 				id, ok := lhs.(*ast.Ident)
 				if !ok || id.Name == "_" {
 					continue
 				}
 				if i < len(x.Rhs) {
-					if typ := inferExprType(x.Rhs[i], local, returns); typ != "" {
-						local[id.Name] = typ
+					if len(rhsTypes[i]) > 0 && rhsTypes[i][0] != "" {
+						local[id.Name] = rhsTypes[i][0]
 					}
-				} else if len(x.Rhs) == 1 {
-					if typ := inferExprType(x.Rhs[0], local, returns); typ != "" {
-						local[id.Name] = typ
+				} else if len(rhsTypes) == 1 {
+					if i < len(rhsTypes[0]) && rhsTypes[0][i] != "" {
+						local[id.Name] = rhsTypes[0][i]
 					}
 				}
 			}
@@ -777,28 +896,66 @@ func localTypes(fn *ast.FuncDecl, returns map[string]string) map[string]string {
 	return local
 }
 
-func inferExprType(expr ast.Expr, local, returns map[string]string) string {
+func inferExprType(expr ast.Expr, local map[string]string, idx HandlerIndex) string {
+	types := inferExprReturnTypes(expr, local, idx)
+	if len(types) == 0 {
+		return ""
+	}
+	return types[0]
+}
+
+func inferExprReturnTypes(expr ast.Expr, local map[string]string, idx HandlerIndex) []string {
 	switch x := expr.(type) {
 	case *ast.UnaryExpr:
-		return inferExprType(x.X, local, returns)
+		return inferExprReturnTypes(x.X, local, idx)
 	case *ast.CompositeLit:
-		return resultType(x.Type)
+		return []string{resultType(x.Type)}
 	case *ast.Ident:
-		return local[x.Name]
+		if typ := local[x.Name]; typ != "" {
+			return []string{typ}
+		}
 	case *ast.CallExpr:
 		if fun, ok := x.Fun.(*ast.Ident); ok && fun.Name == "make" && len(x.Args) > 0 {
-			return resultType(x.Args[0])
+			return []string{resultType(x.Args[0])}
 		}
-		if name := methodName(x.Fun); name != "" {
-			if typ := returns[name]; typ != "" {
-				return typ
+		keys := returnLookupKeys(x.Fun, local, idx.FieldTypes)
+		for _, key := range keys {
+			if types := idx.ReturnTypeLists[key]; len(types) > 0 {
+				return types
 			}
 		}
-		if id, ok := x.Fun.(*ast.Ident); ok {
-			return returns[id.Name]
+	}
+	return nil
+}
+
+func returnLookupKeys(expr ast.Expr, local map[string]string, fieldTypes map[string]string) []string {
+	name := methodName(expr)
+	if name == "" {
+		return nil
+	}
+	var keys []string
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		if recv := receiverType(sel.X, local, fieldTypes); recv != "" {
+			keys = append(keys, recv+"."+sel.Sel.Name)
 		}
 	}
-	return ""
+	keys = append(keys, name)
+	return keys
+}
+
+func receiverType(expr ast.Expr, local map[string]string, fieldTypes map[string]string) string {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return baseTypeName(local[x.Name])
+	case *ast.SelectorExpr:
+		parent := receiverType(x.X, local, fieldTypes)
+		if parent == "" {
+			return ""
+		}
+		return baseTypeName(fieldTypes[parent+"."+x.Sel.Name])
+	default:
+		return ""
+	}
 }
 
 func transportHandlerTypes(f *ast.File) map[string]string {
@@ -1040,6 +1197,24 @@ func resultType(expr ast.Expr) string {
 	default:
 		return exprString(expr)
 	}
+}
+
+func resultTypes(fields []*ast.Field) []string {
+	var out []string
+	for _, field := range fields {
+		typ := resultType(field.Type)
+		if typ == "" {
+			continue
+		}
+		repeats := len(field.Names)
+		if repeats == 0 {
+			repeats = 1
+		}
+		for i := 0; i < repeats; i++ {
+			out = append(out, typ)
+		}
+	}
+	return out
 }
 
 func exprString(expr ast.Expr) string {

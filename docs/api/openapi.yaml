@@ -103,11 +103,14 @@ components:
         mobile: { type: string }
         phone: { type: string }
         email: { type: string, nullable: true }
-        avatar:
-          type: string
-          nullable: true
-          description: |
-            R1.7-B placeholder. Source: V1_INFORMATION_ARCHITECTURE §7.2. The `users` DDL has no `avatar_url` column in v1; the server currently ignores writes to this field on `PATCH /v1/me` / `PATCH /v1/users/{id}` and always returns `null`. Full persistence is scheduled for R5+ in a dedicated user-profile migration round.
+        managed_departments:
+          type: array
+          items:
+            type: string
+        managed_teams:
+          type: array
+          items:
+            type: string
         status:
           $ref: '#/components/schemas/UserStatus'
         employment_type:
@@ -119,6 +122,9 @@ components:
         last_login_at:
           type: string
           format: date-time
+          nullable: true
+        jst_u_id:
+          type: integer
           nullable: true
         created_at:
           type: string
