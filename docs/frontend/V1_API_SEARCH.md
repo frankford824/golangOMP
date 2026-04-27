@@ -1,13 +1,7 @@
-> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
-> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
-
 # 搜索
 
-> Revision: V1.1-A2 contract drift purge (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.1-A2)
-> 与 v1.21 生产实际响应对齐
-
+> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -211,7 +205,6 @@ curl -X GET https://api.example.com/v1/design-sources/search \
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
-| 501 | 见 `error.code` | 见 `deny_code` | Reserved for R4-SA-D |
 
 ### curl 示例
 ```bash

@@ -1,17 +1,7 @@
-> Revision: V1.2-D drift triage P3 (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2-D P3)
-> `WorkflowUser` response fields follow `domain.User`: includes `jst_u_id`, `managed_departments`, `managed_teams`; response no longer documents `avatar`.
-
-> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
-> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
-
 # 认证与登录
 
-> Revision: V1.1-A2 contract drift purge (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.1-A2)
-> 与 v1.21 生产实际响应对齐
-
+> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -267,8 +257,6 @@ curl -X POST https://api.example.com/v1/auth/login \
 |---|---|---|---|
 | `data` | WorkflowUser | 否 | - |
 
-`WorkflowUser` follows the backend `domain.User` response: `jst_u_id`, `managed_departments`, and `managed_teams` may be present; `avatar` is not returned by this response schema.
-
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
@@ -344,3 +332,4 @@ curl -X PUT https://api.example.com/v1/auth/password \
 - 登录成功后，前端统一使用 `Authorization: Bearer <token>`。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+

@@ -1,4 +1,4 @@
-﻿openapi: 3.0.3
+openapi: 3.0.3
 info:
   title: Design Flow V7 API
   version: 0.90.0
@@ -82,6 +82,125 @@ components:
           type: boolean
         debug_compatible:
           type: boolean
+    RuleTemplate:
+      type: object
+      properties:
+        id: { type: integer }
+        template_type: { type: string, enum: [cost-pricing, product-code, short-name] }
+        config_json: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Incident:
+      type: object
+      properties:
+        id: { type: integer }
+        sku_id: { type: integer }
+        job_id: { type: integer, nullable: true }
+        status: { type: string }
+        reason: { type: string }
+        assignee_id: { type: integer, nullable: true }
+        resolved_by: { type: integer, nullable: true }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        closed_by: { type: integer, nullable: true }
+        closed_at: { type: string, format: date-time, nullable: true }
+        close_reason: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SystemPolicy:
+      type: object
+      properties:
+        id: { type: integer }
+        key: { type: string }
+        value: { type: string }
+        version: { type: integer }
+        updated_by: { type: integer }
+        updated_at: { type: string, format: date-time }
+    SKU:
+      type: object
+      properties:
+        id: { type: integer }
+        sku_code: { type: string }
+        name: { type: string }
+        workflow_status: { type: string }
+        current_ver_id: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SKUSyncStatusResult:
+      type: object
+      properties:
+        sku:
+          $ref: '#/components/schemas/SKU'
+        latest_sequence: { type: integer }
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    JSTUserImportResult:
+      type: object
+      properties:
+        fetched_count: { type: integer }
+        created_count: { type: integer }
+        updated_count: { type: integer }
+        disabled_count: { type: integer }
+        mapping_failed_count: { type: integer }
+        trace_updated_count: { type: integer }
+        roles_written: { type: integer }
+        errors:
+          type: array
+          items: { type: string }
+    JSTUserImportPreviewResult:
+      type: object
+      properties:
+        fetched_count: { type: integer }
+        matched_count: { type: integer }
+        to_create_count: { type: integer }
+        to_update_count: { type: integer }
+        org_mapping_missed:
+          type: array
+          items: { type: object, additionalProperties: true }
+        role_mapping_missed:
+          type: array
+          items: { type: object, additionalProperties: true }
+        risks:
+          type: array
+          items: { type: object, additionalProperties: true }
+        preview_items:
+          type: array
+          items: { type: object, additionalProperties: true }
+    AgentSyncResult:
+      type: object
+      properties:
+        asset_version_id: { type: integer, nullable: true }
+    PullJobResult:
+      type: object
+      properties:
+        attempt_id: { type: integer, nullable: true }
+        job:
+          type: object
+          additionalProperties: true
+        lease_expires_at: { type: string, format: date-time, nullable: true }
+    HeartbeatResult:
+      type: object
+      properties:
+        lease_expires_at: { type: string, format: date-time, nullable: true }
+    AuditSubmitResult:
+      type: object
+      properties:
+        action: { type: string }
+        jobs:
+          type: array
+          items: { type: object, additionalProperties: true }
+    BatchTaskActionResult:
+      type: object
+      properties:
+        batch_request_id: { type: string }
+        total: { type: integer }
+        succeeded: { type: integer }
+        failed: { type: integer }
+        items:
+          type: array
+          items: { type: object, additionalProperties: true }
     UserStatus:
       type: string
       enum: [active, disabled]
@@ -2595,6 +2714,34 @@ components:
           format: date-time
           nullable: true
         remark: { type: string }
+        remote_file_id:
+          type: string
+          nullable: true
+        scope_sku_code:
+          type: string
+          nullable: true
+        source_module_key:
+          type: string
+          nullable: true
+        source_task_module_id:
+          type: integer
+          nullable: true
+        is_archived: { type: boolean }
+        archived_by:
+          type: integer
+          nullable: true
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+        cleaned_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -3027,6 +3174,9 @@ components:
           type: integer
         task_id:
           type: integer
+        target_sku_code:
+          type: string
+          nullable: true
         asset_id:
           type: integer
           nullable: true
@@ -3368,10 +3518,6 @@ components:
         status:
           type: string
           enum: [uploaded]
-        owner_module_key:
-          type: string
-          nullable: true
-          description: "V1 asset ownership extension. Source: V1_ASSET_OWNERSHIP §3."
     AdvanceUploadRequestRequest:
       type: object
       required: [action]
@@ -3493,6 +3639,60 @@ components:
         platform_entry_boundary:
           allOf: [{ $ref: '#/components/schemas/PlatformEntryBoundary' }]
           nullable: true
+        category: { type: string, nullable: true }
+        category_code: { type: string, nullable: true }
+        category_name: { type: string, nullable: true }
+        priority: { type: string, nullable: true }
+        material: { type: string, nullable: true }
+        size_text: { type: string, nullable: true }
+        spec_text: { type: string, nullable: true }
+        craft_text: { type: string, nullable: true }
+        expected_delivery_at: { type: string, format: date-time, nullable: true }
+        cost_price: { type: number, nullable: true }
+        estimated_cost: { type: number, nullable: true }
+        cost_rule_id: { type: integer, nullable: true }
+        cost_rule_name: { type: string, nullable: true }
+        cost_rule_source: { type: string, nullable: true }
+        matched_rule_version: { type: integer, nullable: true }
+        source_product_id: { type: integer, nullable: true }
+        source_product_name: { type: string, nullable: true }
+        source_search_entry_code: { type: string, nullable: true }
+        source_match_type: { type: string, nullable: true }
+        source_match_rule: { type: string, nullable: true }
+        matched_category_code: { type: string, nullable: true }
+        matched_search_entry_code: { type: string, nullable: true }
+        product_selection_snapshot_json:
+          type: object
+          nullable: true
+          additionalProperties: true
+        procurement_status: { type: string, nullable: true }
+        procurement_quantity: { type: integer, nullable: true }
+        procurement_price: { type: number, nullable: true }
+        supplier_name: { type: string, nullable: true }
+        is_outsource: { type: boolean }
+        erp_sync_required: { type: boolean }
+        erp_sync_version: { type: integer, nullable: true }
+        filing_status: { type: string, nullable: true }
+        filing_error_message: { type: string, nullable: true }
+        filing_trigger_source: { type: string, nullable: true }
+        prefill_source: { type: string, nullable: true }
+        requires_manual_review: { type: boolean }
+        manual_cost_override: { type: boolean }
+        manual_cost_override_reason: { type: string, nullable: true }
+        override_actor: { type: string, nullable: true }
+        prefill_at: { type: string, format: date-time, nullable: true }
+        override_at: { type: string, format: date-time, nullable: true }
+        last_filing_attempt_at: { type: string, format: date-time, nullable: true }
+        last_filed_at: { type: string, format: date-time, nullable: true }
+        filed_at: { type: string, format: date-time, nullable: true }
+        missing_fields:
+          type: array
+          nullable: true
+          items: { type: string }
+        missing_fields_summary_cn: { type: string, nullable: true }
+        created_at:
+          type: string
+          format: date-time
     TaskReadModel:
       allOf:
         - $ref: '#/components/schemas/Task'
@@ -6187,12 +6387,10 @@ components:
           nullable: true
         state:
           $ref: '#/components/schemas/OrgMoveRequestState'
-        requested_by:
-          $ref: '#/components/schemas/Actor'
-        decided_by:
-          allOf: [{ $ref: '#/components/schemas/Actor' }]
-          nullable: true
         reason:
+          type: string
+          nullable: true
+        reject_reason:
           type: string
           nullable: true
         created_at:
@@ -7628,40 +7826,33 @@ paths:
   /v1/admin/jst-users/import-preview:
     post:
       summary: Preview JST user import (Admin)
-      description: Pre-wiring. Preview import result without executing. Admin only.
       tags: [Admin, InternalPlaceholder]
       x-api-readiness: internal_placeholder
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                current_page: { type: integer }
-                page_size: { type: integer }
-                write_roles: { type: boolean }
       responses:
         '200':
-          description: Import preview
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JSTUserImportPreviewResult'
   /v1/admin/jst-users/import:
     post:
-      summary: Execute JST user import (Admin)
-      description: Pre-wiring. Import JST users. dry_run=true for preview. Admin only.
+      summary: Import JST users (Admin)
       tags: [Admin, InternalPlaceholder]
       x-api-readiness: internal_placeholder
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                current_page: { type: integer }
-                page_size: { type: integer }
-                write_roles: { type: boolean }
-                dry_run: { type: boolean }
       responses:
         '200':
-          description: Import result
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JSTUserImportResult'
   /v1/erp/products/upsert:
     post:
       summary: Upsert ERP Bridge product (Bridge-side write endpoint)
@@ -9976,80 +10167,33 @@ paths:
   /v1/tasks/batch/assign:
     post:
       summary: Batch assign tasks to designer
-      description: Assigns multiple tasks in one request and returns assignment results.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-rbac-placeholder:
-        auth_mode: session_token_role_enforced
-        required_roles: [Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [task_ids, designer_id]
-              properties:
-                task_ids:
-                  type: array
-                  minItems: 1
-                  items: { type: integer }
-                designer_id: { type: integer }
-                reason: { type: string }
       responses:
         '200':
-          description: Batch assignment result
+          description: ok
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   data:
-                    type: object
-                    additionalProperties: true
-        '400':
-          description: Invalid request payload
-        '403':
-          description: "`PERMISSION_DENIED` when one or more tasks fall outside the actor org scope."
-        '409':
-          description: One or more tasks in invalid state
+                    $ref: '#/components/schemas/BatchTaskActionResult'
   /v1/tasks/batch/remind:
     post:
       summary: Batch remind task handlers
-      description: Sends reminders for multiple tasks and emits reminder events with traceable batch request id.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-rbac-placeholder:
-        auth_mode: session_token_role_enforced
-        required_roles: [Ops, Audit_A, Audit_B, Warehouse, Admin]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [task_ids]
-              properties:
-                task_ids:
-                  type: array
-                  minItems: 1
-                  items: { type: integer }
-                reason: { type: string }
       responses:
         '200':
-          description: Batch remind result
+          description: ok
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   data:
-                    type: object
-                    additionalProperties: true
-        '400':
-          description: Invalid request payload
-        '409':
-          description: One or more tasks in invalid state
+                    $ref: '#/components/schemas/BatchTaskActionResult'
   /v1/tasks/{id}/submit-design:
       post:
         summary: Submit task design asset
@@ -11487,37 +11631,18 @@ paths:
         '409':
           description: Invalid task state
   /v1/tasks/{id}/audit/handover:
-      post:
-        summary: Create audit handover
-        description: "`from_auditor_id` is optional and defaults to the current authenticated actor. Handover creation clears the current handler; further audit actions must wait for `takeover`. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only hand over stage A, `Audit_B` can only hand over stage B, and non-management actors must currently own the handler slot."
+    post:
+      summary: Create audit handover
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-rbac-placeholder:
-        auth_mode: session_token_role_enforced
-        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: integer }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [to_auditor_id, reason]
-              properties:
-                from_auditor_id:
-                  type: integer
-                  description: Optional override for compatibility. Defaults to the current authenticated actor.
-                to_auditor_id: { type: integer }
-                reason: { type: string }
-                current_judgement: { type: string }
-                risk_remark: { type: string }
       responses:
-        '201':
-          description: Handover created
+        '200':
+          description: Audit handover
           content:
             application/json:
               schema:
@@ -11525,12 +11650,6 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/AuditHandover'
-        '403':
-          description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
-        '404':
-          description: Task not found
-        '409':
-          description: Invalid task state
   /v1/tasks/{id}/audit/handovers:
     get:
       summary: List audit handovers for task
@@ -12707,33 +12826,18 @@ paths:
         '404':
           description: Export job not found
   /v1/tasks/{id}/warehouse/receive:
-      post:
-        summary: Mark warehouse receipt as received
-        description: "Task must be in `PendingWarehouseReceive`. `receiver_id` is optional and defaults to the current authenticated actor. A previously rejected receipt may be received again after re-prepare, and the current handler is set to the receiver. This action uses minimum role plus org or handler gating over canonical task ownership. If a current handler already exists, non-management actors must match that handler instead of taking over the task."
+    post:
+      summary: Mark warehouse receipt as received
       tags: [Warehouse, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-rbac-placeholder:
-        auth_mode: session_token_role_enforced
-        required_roles: [Warehouse, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: integer }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                receiver_id:
-                  type: integer
-                  description: Optional override for compatibility. Defaults to the current authenticated actor.
-                remark: { type: string }
       responses:
-        '201':
-          description: Warehouse receipt created as received
+        '200':
+          description: Warehouse receipt
           content:
             application/json:
               schema:
@@ -12741,57 +12845,26 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/WarehouseReceipt'
-        '403':
-          description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
-        '404':
-          description: Task not found
-        '409':
-          description: Invalid task or warehouse state
   /v1/tasks/{id}/warehouse/reject:
-      post:
-        summary: Reject warehouse receipt and return task to a truthful rework state
-        description: "Requires `reject_reason` or `remark`. Task must be in `PendingWarehouseReceive`. `receiver_id` is optional and defaults to the current authenticated actor. Purchase tasks return to `PendingAssign`, design or audit tasks return to designer rework, and customization-lane tasks return to `last_customization_operator_id` instead of restarting the whole lane. `reject_category` is the bounded statistics field for warehouse/QC error classification. This action uses minimum role plus org or handler gating over canonical task ownership. Non-management actors must be the current warehouse handler."
+    post:
+      summary: Reject warehouse receipt
       tags: [Warehouse, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-rbac-placeholder:
-        auth_mode: session_token_role_enforced
-        required_roles: [Warehouse, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: integer }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                receiver_id:
-                  type: integer
-                  description: Optional override for compatibility. Defaults to the current authenticated actor.
-                reject_reason: { type: string }
-                reject_category: { type: string }
-                remark: { type: string }
-        responses:
-          '200':
-            description: Rejected and task moved to the next truthful rework state
-            content:
-              application/json:
-                schema:
-                  type: object
-                  properties:
-                    data:
-                      $ref: '#/components/schemas/WarehouseReceipt'
-        '400':
-          description: reject_reason or remark missing
-        '403':
-          description: "`PERMISSION_DENIED` with `deny_code` such as `task_out_of_department_scope`, `task_out_of_team_scope`, or `task_not_assigned_to_actor`."
-        '404':
-          description: Task not found
-        '409':
-          description: Invalid task or warehouse state
+      responses:
+        '200':
+          description: Warehouse rejection receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WarehouseReceipt'
   /v1/tasks/{id}/warehouse/complete:
     post:
       summary: Complete warehouse flow and move task to pending close
@@ -13087,14 +13160,10 @@ paths:
         '409':
           description: Invalid workflow state transition
   /v1/tasks/{id}/events:
-      get:
-        summary: List task events
-        description: Ordered by `sequence ASC`. This is a narrow business trace stream and key create, assign, submit-design, audit, procurement, warehouse, and close events may include before/after state plus handler or result context. Customization replacement-related events additionally carry trace fields such as `previous_asset_id`, `current_asset_id`, `replacement_actor_id`, `workflow_lane`, and `source_department`.
+    get:
+      summary: List task events
       tags: [TaskEvents, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-rbac-placeholder:
-        auth_mode: session_token_role_enforced
-        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
@@ -13179,18 +13248,42 @@ paths:
       responses:
         '200':
           description: SKU generated
+  /v1/sku/preview_code:
+    post:
+      summary: "[V6] Preview SKU code"
+      tags: [V6-Legacy]
+      responses:
+        '200': { description: ok }
   /v1/sku/list:
     get:
       summary: "[V6] List SKUs"
       tags: [V6-Legacy]
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SKU'
   /v1/sku:
     post:
       summary: "[V6] Create SKU"
       tags: [V6-Legacy]
       responses:
-        '201': { description: ok }
+        '201':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SKU'
   /v1/sku/{id}:
     get:
       summary: "[V6] Get SKU by ID"
@@ -13201,7 +13294,15 @@ paths:
           required: true
           schema: { type: integer }
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SKU'
   /v1/sku/{id}/sync_status:
     get:
       summary: "[V6] Frontend sequence-gap recovery"
@@ -13215,11 +13316,18 @@ paths:
           name: since_sequence
           schema: { type: integer }
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SKUSyncStatusResult'
   /v1/audit:
     post:
       summary: "[V6] Submit audit decision"
-      description: Legacy audit route retained for compatibility only. Canonical MAIN audit behavior lives under task-centric `/v1/tasks/{id}/audit/*` routes.
       deprecated: true
       x-removed-at: v1.3
       x-workflow-api-status: deprecated
@@ -13228,25 +13336,57 @@ paths:
       x-workflow-target-removal-phase: candidate_for_v1_0_removal
       tags: [V6-Legacy]
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AuditSubmitResult'
   /v1/agent/sync:
     post:
       summary: "[V6] NAS agent sync"
       tags: [V6-Legacy]
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AgentSyncResult'
   /v1/agent/pull_job:
     post:
       summary: "[V6] Agent pull job"
       tags: [V6-Legacy]
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PullJobResult'
   /v1/agent/heartbeat:
     post:
       summary: "[V6] Agent heartbeat"
       tags: [V6-Legacy]
       responses:
-        '200': { description: ok }
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HeartbeatResult'
   /v1/agent/ack_job:
     post:
       summary: "[V6] Agent ack job"
@@ -13258,29 +13398,8 @@ paths:
       summary: "[V6] List incidents"
       tags: [V6-Legacy]
       responses:
-        '200': { description: ok }
-  /v1/policies:
-    get:
-      summary: "[V6] List policies"
-      tags: [V6-Legacy]
-      responses:
-        '200': { description: ok }
-  /v1/tasks/pool:
-    get:
-      summary: List task pool entries
-      tags: [Tasks, ReadyForFrontend]
-      x-api-readiness: ready_for_frontend
-      x-owner-round: R3
-      parameters:
-        - in: query
-          name: module_key
-          schema: { type: string }
-        - in: query
-          name: pool_team_code
-          schema: { type: string }
-      responses:
         '200':
-          description: Task pool entries
+          description: ok
           content:
             application/json:
               schema:
@@ -13289,16 +13408,161 @@ paths:
                   data:
                     type: array
                     items:
-                      type: object
-                      additionalProperties: true
-        '401':
-          description: Unauthorized
+                      $ref: '#/components/schemas/Incident'
+  /v1/incidents/{id}/assign:
+    post:
+      summary: "[V6] Assign incident"
+      tags: [V6-Legacy]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignee_id, reason]
+              properties:
+                assignee_id: { type: integer }
+                reason: { type: string }
+      responses:
+        '200': { description: ok }
+  /v1/incidents/{id}/resolve:
+    post:
+      summary: "[V6] Resolve incident"
+      tags: [V6-Legacy]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: ok }
+  /v1/policies:
+    get:
+      summary: "[V6] List policies"
+      tags: [V6-Legacy]
+      responses:
+        '200':
+          description: ok
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '501':
-          description: Reserved for R3
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SystemPolicy'
+  /v1/policies/{id}:
+    put:
+      summary: "[V6] Update policy"
+      tags: [V6-Legacy]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value, reason]
+              properties:
+                value: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { description: ok }
+  /v1/rule-templates:
+    get:
+      summary: "[V6] List rule templates"
+      tags: [V6-Legacy]
+      responses:
+        '200':
+          description: Rule templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RuleTemplate'
+  /v1/rule-templates/{type}:
+    get:
+      summary: "[V6] Get rule template by type"
+      tags: [V6-Legacy]
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Rule template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RuleTemplate'
+    put:
+      summary: "[V6] Upsert rule template by type"
+      tags: [V6-Legacy]
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Rule template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RuleTemplate'
+  /v1/tasks/pool:
+    get:
+      summary: List task pool entries
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WarehouseReceipt'
   /v1/tasks/{id}/modules/{module_key}/claim:
     post:
       summary: Claim a task module
@@ -13322,7 +13586,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R3 }
   /v1/tasks/{id}/modules/{module_key}/actions/{action}:
     post:
       summary: Trigger a task module action
@@ -13351,7 +13614,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R3 }
   /v1/tasks/{id}/modules/{module_key}/reassign:
     post:
       summary: Reassign a task module within team scope
@@ -13375,7 +13637,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R3 }
   /v1/tasks/{id}/modules/{module_key}/pool-reassign:
     post:
       summary: Reassign a task module between pools
@@ -13399,7 +13660,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R3 }
   /v1/tasks/{id}/cancel:
     post:
       summary: Cancel or close a task
@@ -13432,7 +13692,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R3 }
   /v1/task-drafts:
     post:
       summary: Create or update a task draft
@@ -13994,7 +14253,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R4-SA-D }
   /v1/me/notifications:
     get:
       summary: List my notifications
@@ -14500,7 +14758,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R4-SA-D }
   /v1/reports/l1/throughput:
     get:
       summary: Get L1 throughput report
@@ -14571,7 +14828,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R4-SA-D }
   /v1/reports/l1/module-dwell:
     get:
       summary: Get L1 module dwell report
@@ -14640,7 +14896,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '501': { description: Reserved for R4-SA-D }
   /ws/v1:
     get:
       summary: Open v1 websocket channel

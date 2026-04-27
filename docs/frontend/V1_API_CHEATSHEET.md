@@ -1,17 +1,10 @@
-> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
-> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
+# V1 API 速查表(209 path · 一行一条)
 
-# V1 API 速查表(203 path · 一行一条)
-
-> Revision: V1.1-A2 contract drift purge (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.1-A2)
-> 与 v1.21 生产实际响应对齐
-
+> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> 重要: V1.1-A2 已校准,如有第三方文档与此处不一致,以本表为准。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 203 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 209 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -40,7 +33,7 @@
 | POST | `/v1/server-logs/clean` | Clean old server logs | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET | `/v1/admin/jst-users` | List JST users (Admin, via Bridge) | GET:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST | `/v1/admin/jst-users/import-preview` | Preview JST user import (Admin) | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
-| POST | `/v1/admin/jst-users/import` | Execute JST user import (Admin) | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
+| POST | `/v1/admin/jst-users/import` | Import JST users (Admin) | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST | `/v1/users/{id}/activate` | Activate a workflow user | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST | `/v1/users/{id}/deactivate` | Deactivate a workflow user | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET | `/v1/org/options` | Get organization options | GET:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
@@ -118,7 +111,7 @@
 | POST | `/v1/export-jobs/{id}/start` | Start export job placeholder runner | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/export-jobs/{id}/advance` | Advance export job lifecycle | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/warehouse/receive` | Mark warehouse receipt as received | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/warehouse/reject` | Reject warehouse receipt and return task to a truthful rework state | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/warehouse/reject` | Reject warehouse receipt | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/warehouse/complete` | Complete warehouse flow and move task to pending close | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/customization/review` | Submit customization review for task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/customization-jobs` | List customization jobs | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -130,6 +123,7 @@
 | GET | `/v1/code-rules` | List code rules | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/code-rules/{id}/preview` | Preview generated code | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/code-rules/generate-sku` | Generate SKU code | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/sku/preview_code` | [V6] Preview SKU code | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/sku/list` | [V6] List SKUs | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/sku` | [V6] Create SKU | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/sku/{id}` | [V6] Get SKU by ID | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -140,7 +134,12 @@
 | POST | `/v1/agent/heartbeat` | [V6] Agent heartbeat | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/agent/ack_job` | [V6] Agent ack job | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/incidents` | [V6] List incidents | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/incidents/{id}/assign` | [V6] Assign incident | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/incidents/{id}/resolve` | [V6] Resolve incident | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/policies` | [V6] List policies | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PUT | `/v1/policies/{id}` | [V6] Update policy | PUT:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/rule-templates` | [V6] List rule templates | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, PUT | `/v1/rule-templates/{type}` | [V6] Get rule template by type；[V6] Upsert rule template by type | GET:已登录 / scope-aware; PUT:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/pool` | List task pool entries | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/modules/{module_key}/claim` | Claim a task module | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/modules/{module_key}/actions/{action}` | Trigger a task module action | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -164,9 +163,9 @@
 | POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel` | Cancel upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort` | Abort upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/assets` | List assets | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| GET, DELETE | `/v1/assets/{id}` | Get asset；Delete asset | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| GET | `/v1/assets/{id}/download` | Get asset download info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| GET | `/v1/assets/{id}/preview` | Get asset preview info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/{asset_id}/download` | Get asset download info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/{asset_id}/preview` | Get asset preview info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-sessions` | Create asset upload session | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/upload-sessions/{session_id}` | Get asset upload session | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-sessions/{session_id}/complete` | Complete asset upload session | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |

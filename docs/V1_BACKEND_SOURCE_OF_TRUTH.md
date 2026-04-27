@@ -16,8 +16,8 @@
 - production: v1.21
 - artifact sha256: `977da0e4561a6baf841f89fca1c2cd0cb1c14b93bb97d981ee72632488a513bc`
 - detail P99: warm 32.933ms / cold 32.995ms
-- contract state: V1.2 + V1.2-C CLOSED(2026-04-27);post-V1.2 OpenAPI sha `80730ec3d272e4124ab95244feb0c1daf499d4c0a032f47b70179cdd4189488f`(14552 行 · 298 schemas · 206 paths / 203 `/v1` paths)
-- contract audit: V1.2-C `tools/contract_audit/` 真三向 diff 工具已上线 · 真实仓 audit `clean=84 / drift=72 / unmapped=66 / known_gap=20`(`docs/iterations/V1_2_CONTRACT_AUDIT_v2.json`)· CI 守门 `[contract-skip-justified]` 与 `--fail-on-drift` 双轨生效
+- contract state: V1.2-D-2 CLOSED(2026-04-26 PT);post-D-2 OpenAPI sha `94f1ff0d4a2bdf766506153f263c00c7fa7a5fcab02bd2110ca310fd726e25ba`(14936 行 · 209 `/v1` paths)
+- contract audit: V1.2-D-2 `tools/contract_audit/` 真三向 diff 工具已上线并收口残留漂移 · final audit `clean=179 / drift=0 / unmapped=0 / known_gap=54`(`docs/iterations/V1_2_D_2_FINAL_AUDIT.json`)· CI 守门 `[contract-skip-justified]` 与 `--fail-on-drift` 双轨生效
 
 ## §2 路由家族总览(只列 family · 字段查 OpenAPI)
 
@@ -46,19 +46,15 @@
 ## §4 已知遗留(指针)
 
 - V1.2-B-1 · v1.22 rebuild for local git HEAD / production binary alignment;详见 `docs/iterations/V1_2_RETRO_REPORT.md`。
-- V1.2-B-2 · 20 条 route known-gap(`docs/iterations/V1_2_CONTRACT_AUDIT_v2.json` known_gap[])review。
+- V1.2-B-2 · 54 条 classified known-gap(`docs/iterations/V1_2_D_2_FINAL_AUDIT.json` known_gap[])review。
 - V1.2-B-4 · 29 D1 deprecated mounted paths 在或之前于 v1.3 做去留决断。
-- **V1.2-D**(由 V1.2-C audit 工具暴露的真实 drift 处理 · 详见 `docs/iterations/V1_RETRO_REPORT.md` §18):
-  - CRITICAL · `task_detail.go` GetByTaskID fallback 出口残留(36 字段老 schema vs OpenAPI 5 段)
-  - HIGH · `TaskReadModel` 字段空 · GET `/v1/tasks/:id` / POST `/v1/tasks/:id/close` only_in_openapi 32
-  - MED · 类目家族 31 both_diff
-  - MED · pagination wrap 字段统一(7 list 接口 only_in_code)
-  - LOW · 35 unmapped_handler 真实改造
+- **V1.2-D** · CLOSED by V1.2-D-1 + V1.2-D-2. See `docs/iterations/V1_2_D_1_REPORT.md` and `docs/iterations/V1_2_D_2_RETRO_REPORT.md`.
 
 ## §4.1 已关闭遗留
 
 - ✅ V1.1-A2 Q-1 · CLOSED 2026-04-27(经 V1.2-C 工具回炉关闭)
 - ✅ V1.2-C-1 · CLOSED 2026-04-27(`tools/contract_audit/` 真三向 diff 引擎落地)
+- ✅ V1.2-D · CLOSED 2026-04-26 PT(`drift=0`, `unmapped=0`, final audit landed)
 
 ## §5 反向规则(必读)
 

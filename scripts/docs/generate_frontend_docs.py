@@ -10,6 +10,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "docs/api/openapi.yaml"
 OUT = ROOT / "docs/frontend"
+V1_PATH_COUNT = 209
 
 METHODS = ("get", "post", "put", "patch", "delete")
 METHOD_LABEL = {
@@ -430,6 +431,8 @@ def render_path_section(spec, path, path_item, family_key):
 def render_family(spec, key, entries):
     filename, title, intro = FAMILIES[key]
     out = [f"# {title}\n\n"]
+    out.append("> Revision: V1.2-D-2 residual drift triage (2026-04-26)\n")
+    out.append("> Source: docs/api/openapi.yaml (post V1.2-D-2)\n\n")
     out.append("> 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。\n\n")
     out.append(f"{intro}\n\n")
     out.append("## Family 约定\n\n")
@@ -443,7 +446,7 @@ def render_family(spec, key, entries):
         if ws_item:
             out.append("## GET /ws/v1\n\n")
             out.append("### 简介\n")
-            out.append("当前 OpenAPI 实际挂载的 WebSocket path 是 `/ws/v1`，不是 `/v1/ws/v1`。本文按 OpenAPI 真实路径记录；`/v1` path 统计仍保持 203。\n\n")
+            out.append(f"当前 OpenAPI 实际挂载的 WebSocket path 是 `/ws/v1`，不是 `/v1/ws/v1`。本文按 OpenAPI 真实路径记录；`/v1` path 统计为 {V1_PATH_COUNT}。\n\n")
             out.append("### 鉴权与 RBAC\n")
             out.append("- 需要 Bearer token，推荐通过协议约定或查询参数传递，具体以 transport 实现和前端联调环境为准。\n- 允许角色: 已登录用户。\n- 字段级授权: 无。\n\n")
             out.append("### 请求体 schema\n无 HTTP JSON 请求体；WebSocket 握手后收发消息。\n\n")
@@ -456,6 +459,9 @@ def render_family(spec, key, entries):
 
 def render_index(family_entries):
     out = ["# V1 前端联调接口文档索引\n\n"]
+    out.append("> Revision: V1.2-D-2 residual drift triage (2026-04-26)\n")
+    out.append("> Source: docs/api/openapi.yaml (post V1.2-D-2)\n\n")
+    out.append("当前真相入口: [V1_BACKEND_SOURCE_OF_TRUTH.md](../V1_BACKEND_SOURCE_OF_TRUTH.md)\n\n")
     out.append("> Release: v1.21 · Backend: V1.0 + V1.1-A1 · Production detail P99 warm 32.933ms / cold 32.995ms。\n\n")
     out.append("## §0 Base URL 与鉴权\n\n")
     out.append("- 生产: `https://<prod-host>` 或联调反代地址。\n- 本地/隧道: `http://127.0.0.1:18080`。\n- 鉴权: `Authorization: Bearer <token>`。\n- 成功响应常见包装: `{\"data\": ...}`；以各接口 OpenAPI response schema 为准。\n\n")
@@ -495,7 +501,7 @@ def render_index(family_entries):
         if key == "WS":
             count = "0 个 `/v1` path + `/ws/v1`"
         out.append(f"| {title} | [{filename}]({filename}) | {count} |\n")
-    out.append("| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 203 |\n\n")
+    out.append(f"| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | {V1_PATH_COUNT} |\n\n")
     out.append("## §6 联调硬门\n\n")
     out.append("- 所有请求必须走 Bearer token，公开登录/注册除外。\n- 首屏详情优先使用 `GET /v1/tasks/{id}/detail`，不要并发拼旧 detail 子接口。\n- 前端必须展示后端 `error.code` 或 `deny_code`。\n- 新页面只接 canonical 路径。\n- WebSocket 只做实时提示，最终一致状态回读 HTTP。\n- Excel 批量创建以 parse preview 的 `violations` 为准，不在前端复制完整业务校验。\n\n")
     out.append("## §7 Deprecated / Compatibility 清单\n\n")
@@ -504,9 +510,11 @@ def render_index(family_entries):
 
 
 def render_cheatsheet(spec, family_entries):
-    rows = ["# V1 API 速查表(203 path · 一行一条)\n\n"]
+    rows = [f"# V1 API 速查表({V1_PATH_COUNT} path · 一行一条)\n\n"]
+    rows.append("> Revision: V1.2-D-2 residual drift triage (2026-04-26)\n")
+    rows.append("> Source: docs/api/openapi.yaml (post V1.2-D-2)\n\n")
     rows.append("> 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。\n")
-    rows.append("> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 203 个 `/v1` path。\n")
+    rows.append(f"> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 {V1_PATH_COUNT} 个 `/v1` path。\n")
     rows.append("> 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。\n\n")
     rows.append("| Methods | Path | Summary | RBAC | family doc |\n|---|---|---|---|---|\n")
     for key, entries in family_entries.items():
@@ -524,13 +532,13 @@ def main():
     spec = load_spec()
     OUT.mkdir(parents=True, exist_ok=True)
     paths = [(p, item) for p, item in spec["paths"].items() if p.startswith("/v1")]
-    if len(paths) != 203:
-        raise SystemExit(f"expected 203 /v1 paths, got {len(paths)}")
+    if len(paths) != V1_PATH_COUNT:
+        raise SystemExit(f"expected {V1_PATH_COUNT} /v1 paths, got {len(paths)}")
     family_entries = OrderedDict((key, []) for key in FAMILIES)
     for path, item in paths:
         family_entries[family_for(path)].append((path, item))
     covered = sum(len(v) for v in family_entries.values())
-    if covered != 203:
+    if covered != V1_PATH_COUNT:
         raise SystemExit(f"coverage mismatch: {covered}")
     for key, entries in family_entries.items():
         filename, text = render_family(spec, key, entries)

@@ -1,17 +1,7 @@
-> Revision: V1.2-D drift triage P4 (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2-D P4)
-> `/v1/erp/users` uses the JST ERP-style payload under `data.{datas,count,current_page,page_size,pages}`.
-
-> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
-> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
-
 # ERP 与业务字典
 
-> Revision: V1.1-A2 contract drift purge (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.1-A2)
-> 与 v1.21 生产实际响应对齐
-
+> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -301,23 +291,17 @@ curl -X GET https://api.example.com/v1/erp/warehouses \
 ```json
 {
   "data": {
-    "current_page": "1",
-    "page_size": "50",
-    "count": "123",
-    "pages": "3",
-    "datas": [
-      {
-        "u_id": 123,
-        "name": "string"
-      }
-    ]
+    "current_page": "string",
+    "page_size": "string",
+    "count": "string",
+    "pages": "string"
   }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | JSTUserListResponse | 否 | ERP-style JST getcompanyusers response |
+| `data` | JSTUserListResponse | 否 | ERP-style JST getcompanyusers response. Source: domain.JSTUserListResponse. |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -2182,3 +2166,4 @@ curl -X GET https://api.example.com/v1/erp/products/by-code \
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+

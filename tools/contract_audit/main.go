@@ -180,10 +180,16 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 
 	mounted := map[string]Route{}
 	for _, r := range routes {
+		if ignoredAuditPath(r.Path) {
+			continue
+		}
 		mounted[methodPath(r.Method, ginToOpenAPIPath(r.Path))] = r
 	}
 	documented := map[string]Operation{}
 	for _, op := range ops {
+		if ignoredAuditPath(op.Path) {
+			continue
+		}
 		documented[methodPath(op.Method, op.Path)] = op
 	}
 
@@ -276,6 +282,10 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 				pr.Verdict = "known_gap"
 				report.Summary.KnownGap++
 				report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Class: reason})
+			} else if hVerdict == "unmapped_handler" && strings.Contains(reason, "response expression type not inferred") && len(pr.OpenAPIFields) > 0 {
+				pr.Verdict = "known_gap"
+				report.Summary.KnownGap++
+				report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Class: "dynamic_payload_documented", Reason: reason})
 			} else {
 				pr.Verdict = hVerdict
 				report.Summary.Unmapped++
@@ -700,7 +710,7 @@ func OpenAPIOperations(path string) ([]Operation, error) {
 
 func responseFieldsExpanded(op map[string]any, components map[string]any) []string {
 	resp, _ := op["responses"].(map[string]any)
-	ok200, _ := resp["200"].(map[string]any)
+	ok200 := firstSuccessResponse(resp)
 	content, _ := ok200["content"].(map[string]any)
 	app, _ := content["application/json"].(map[string]any)
 	schema, _ := app["schema"].(map[string]any)
@@ -728,6 +738,26 @@ func responseFieldsExpanded(op map[string]any, components map[string]any) []stri
 		return nil
 	}
 	return normalizeFields(sortedKeys(props))
+}
+
+func firstSuccessResponse(resp map[string]any) map[string]any {
+	for _, code := range []string{"200", "201", "202", "204"} {
+		if raw, ok := resp[code].(map[string]any); ok {
+			return raw
+		}
+	}
+	var codes []string
+	for code := range resp {
+		if len(code) == 3 && code[0] == '2' {
+			codes = append(codes, code)
+		}
+	}
+	sort.Strings(codes)
+	if len(codes) == 0 {
+		return nil
+	}
+	raw, _ := resp[codes[0]].(map[string]any)
+	return raw
 }
 
 func resolveSchema(schema map[string]any, components map[string]any, seen map[string]bool) map[string]any {
@@ -1159,7 +1189,7 @@ func receiverType(expr ast.Expr, local map[string]string, fieldTypes map[string]
 		if parent == "" {
 			return ""
 		}
-		return baseTypeName(fieldTypes[parent+"."+x.Sel.Name])
+		return fieldTypes[parent+"."+x.Sel.Name]
 	default:
 		return ""
 	}
@@ -1355,6 +1385,14 @@ func normalizePath(path string) string {
 		path = strings.ReplaceAll(path, "//", "/")
 	}
 	return path
+}
+
+func ignoredAuditPath(path string) bool {
+	switch path {
+	case "/health", "/healthz", "/ping":
+		return true
+	}
+	return strings.HasPrefix(path, "/internal/") || strings.HasPrefix(path, "/jst/")
 }
 
 func selectorName(expr ast.Expr) (recv, name string, ok bool) {

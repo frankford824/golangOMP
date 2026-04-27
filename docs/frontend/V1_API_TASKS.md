@@ -1,13 +1,7 @@
-> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
-> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
-
 # 任务主流程
 
-> Revision: V1.1-A2 contract drift purge (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.1-A2)
-> 与 v1.21 生产实际响应对齐
-
+> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -17,7 +11,7 @@
 
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `95` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `101` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## POST /v1/tasks/prepare-product-codes
 
@@ -402,15 +396,15 @@ Content-Type: `application/json`
   "data": {
     "id": 123,
     "task_id": 123,
-    "task_no": "string",
-    "task_type": "original_product_development"
+    "demand_text": "string",
+    "copy_text": "string"
   }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | TaskDetail | 否 | - |
+| `data` | TaskDetail | 否 | Task supplemental demand information. Field names follow `domain.TaskDetail` json tags in `domain/task.go`. |
 
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -519,15 +513,15 @@ Content-Type: `application/json`
   "data": {
     "id": 123,
     "task_id": 123,
-    "task_no": "string",
-    "task_type": "original_product_development"
+    "demand_text": "string",
+    "copy_text": "string"
   }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | TaskDetail | 否 | - |
+| `data` | TaskDetail | 否 | Task supplemental demand information. Field names follow `domain.TaskDetail` json tags in `domain/task.go`. |
 
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -679,15 +673,15 @@ Content-Type: `application/json`
   "data": {
     "id": 123,
     "task_id": 123,
-    "task_no": "string",
-    "task_type": "original_product_development"
+    "demand_text": "string",
+    "copy_text": "string"
   }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | TaskDetail | 否 | - |
+| `data` | TaskDetail | 否 | Task supplemental demand information. Field names follow `domain.TaskDetail` json tags in `domain/task.go`. |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -974,11 +968,10 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 ### 简介
 支持方法: GET。
 
-- `GET`: V1.1-A1 fast-path 首屏聚合接口。成功响应固定为 `data.{task, task_detail, modules, events, reference_file_refs}` 5 段。
-- 不再返回旧富详情字段集: `procurement_summary`、完整顶层 `product_selection`、`matched_rule_governance`、`governance_audit_summary`、`design_assets`、`asset_versions`、`sku_items`、`cost_override_summary`、`boundary_summary` 等。
+- `GET`: Returns the 5-section task aggregate produced by `task_aggregator.DetailService` fast path. Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]` (service caps recent events at 50), and `reference_file_refs[]`. Rich snapshot sections such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`, `design_assets`, `asset_versions`, `sku_items`, and `governance_audit_summary` are not returned by this endpoint in v1.21; use dedicated routes such as `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and `/v1/tasks/{id}/cost-overrides` for those read models.
 
 ### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)。
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
 - `GET` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
@@ -987,97 +980,36 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `id` | path | integer | 是 | task id |
+| `id` | path | integer | 是 | - |
 
 请求体: 无请求体。
 
 ### 响应体 schema
 成功响应: `200 application/json`
 
-顶层 5 段:
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data.task` | `Task` | 是 | 主任务行,字段按 `domain.Task` json tag。 |
-| `data.task_detail` | `TaskDetail/null` | 否 | 详情行,字段按 `domain.TaskDetail` json tag;不存在时可为 `null` 或省略。 |
-| `data.modules` | `TaskAggregateModule[]` | 是 | 每个模块使用 `TaskAggregateModule` 字段集,包含 `visibility`, `allowed_actions`, `projection`。 |
-| `data.events` | module event array | 是 | 最近模块事件,服务端上限 50。 |
-| `data.reference_file_refs` | `ReferenceFileRefFlat[]` | 是 | 任务级参考文件关联。 |
-
-`task_detail` 中常见 nullable/omitempty 字段包括 `category_id`, `width`, `height`, `area`, `quantity`, `cost_price`, `estimated_cost`, `cost_rule_id`, `matched_rule_version`, `prefill_at`, `override_at`, `last_filing_attempt_at`, `last_filed_at`, `filed_at`, `missing_fields`, `missing_fields_summary_cn`, `base_sale_price`, `product_selection`。以 OpenAPI `TaskDetail` component 为准。
-
 ```json
 {
   "data": {
     "task": {
-      "id": 123,
-      "task_no": "T202604250001",
-      "task_type": "new_product_development",
-      "task_status": "InProgress",
-      "sku_code": "NSKT000001",
-      "owner_department": "Design",
-      "owner_org_team": "design-team-1",
-      "is_outsource": false,
-      "customization_required": false,
-      "created_at": "2026-04-25T10:28:52Z",
-      "updated_at": "2026-04-25T10:28:52Z"
+      "id": "...",
+      "task_no": "...",
+      "source_mode": "...",
+      "product_id": "..."
     },
-    "task_detail": {
-      "id": 456,
-      "task_id": 123,
-      "demand_text": "poster resize",
-      "category_code": "KT_STANDARD",
-      "width": 10.0,
-      "height": 20.0,
-      "filing_status": "not_filed",
-      "created_at": "2026-04-25T10:28:52Z",
-      "updated_at": "2026-04-25T10:28:52Z"
-    },
+    "task_detail": {},
     "modules": [
-      {
-        "id": 1,
-        "task_id": 123,
-        "module_key": "design",
-        "state": "claimed",
-        "visibility": "visible",
-        "allowed_actions": ["submit"],
-        "projection": {}
-      }
+      "..."
     ],
     "events": [
-      {
-        "id": 99,
-        "task_id": 123,
-        "task_module_id": 1,
-        "module_key": "design",
-        "event_type": "module.claimed",
-        "payload": {},
-        "created_at": "2026-04-25T10:28:52Z"
-      }
-    ],
-    "reference_file_refs": [
-      {
-        "id": 7,
-        "task_id": 123,
-        "ref_id": "ref_abc",
-        "owner_module_key": "basic_info",
-        "attached_at": "2026-04-25T10:28:52Z"
-      }
+      "..."
     ]
   }
 }
 ```
 
-### 富字段替代接口
-
-| 旧富字段/视图 | 请改用 |
-|---|---|
-| `procurement_summary` / procurement lifecycle | `PATCH /v1/tasks/{id}/procurement`, `POST /v1/tasks/{id}/procurement/advance`, 或任务 read model `/v1/tasks/{id}` |
-| 完整顶层 `product_selection` provenance | `/v1/tasks/{id}` 或 `GET/PATCH /v1/tasks/{id}/product-info` |
-| `matched_rule_governance` / cost governance | `/v1/tasks/{id}/cost-overrides` |
-| `design_assets` / `asset_versions` | `/v1/tasks/{id}/asset-center/*` 或 `/v1/assets/*` |
-| `sku_items` | `/v1/tasks` / `/v1/tasks/{id}` read model 中的批量 SKU 视图 |
-| `governance_audit_summary` / boundary summary | `/v1/tasks/{id}/cost-overrides` |
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | TaskAggregateDetailV2 | 否 | V1.1-A1 fast-path 5-section task aggregate detail. |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -1086,15 +1018,15 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 
 ### curl 示例
 ```bash
-curl -sS https://api.example.com/v1/tasks/123/detail \
+curl -X GET https://api.example.com/v1/tasks/<id>/detail \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践
-- 首屏只消费 5 段结构,不要按旧富 schema 读取不存在字段。
-- 模块按钮状态以 `modules[].allowed_actions` 和后端动作接口返回为准。
-- 需要富详情时按上表调用专用接口,不要假设 detail 聚合会补齐所有读模型。
-- 失败时必须展示 `error.code` 或 `deny_code`,不要只显示 HTTP 状态码。
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/tasks/{id}/cost-overrides
 
@@ -1359,7 +1291,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assign \
 ### 简介
 支持方法: POST。
 
-- `POST`: Assigns multiple tasks in one request and returns assignment results.
+- `POST`: Batch assign tasks to designer
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1371,40 +1303,39 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assign \
 
 无 path/query/header 参数。
 
-Content-Type: `application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `task_ids` | array<integer> | 是 | - |
-| `designer_id` | integer | 是 | - |
-| `reason` | string | 否 | - |
+请求体: 无请求体。
 
 ### 响应体 schema
 成功响应: `200 application/json`
 
 ```json
 {
-  "data": {}
+  "data": {
+    "batch_request_id": "string",
+    "total": 123,
+    "succeeded": 123,
+    "failed": 123
+  }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | object | 否 | - |
+| `data` | BatchTaskActionResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
-| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` when one or more tasks fall outside the actor org scope. |
-| 409 | 见 `error.code` | 见 `deny_code` | One or more tasks in invalid state |
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
 
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/tasks/batch/assign \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践
@@ -1418,7 +1349,7 @@ curl -X POST https://api.example.com/v1/tasks/batch/assign \
 ### 简介
 支持方法: POST。
 
-- `POST`: Sends reminders for multiple tasks and emits reminder events with traceable batch request id.
+- `POST`: Batch remind task handlers
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1430,38 +1361,39 @@ curl -X POST https://api.example.com/v1/tasks/batch/assign \
 
 无 path/query/header 参数。
 
-Content-Type: `application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `task_ids` | array<integer> | 是 | - |
-| `reason` | string | 否 | - |
+请求体: 无请求体。
 
 ### 响应体 schema
 成功响应: `200 application/json`
 
 ```json
 {
-  "data": {}
+  "data": {
+    "batch_request_id": "string",
+    "total": 123,
+    "succeeded": 123,
+    "failed": 123
+  }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | object | 否 | - |
+| `data` | BatchTaskActionResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
-| 409 | 见 `error.code` | 见 `deny_code` | One or more tasks in invalid state |
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
 
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/tasks/batch/remind \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践
@@ -2605,7 +2537,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/transfer \
 ### 简介
 支持方法: POST。
 
-- `POST`: `from_auditor_id` is optional and defaults to the current authenticated actor. Handover creation clears the current handler; further audit actions must wait for `takeover`. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only hand over stage A, `Audit_B` can only hand over stage B, and non-management actors must currently own the handler slot.
+- `POST`: Create audit handover
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -2622,9 +2554,22 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/transfer \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `见 OpenAPI responses`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "id": 123,
+    "handover_no": "string",
+    "task_id": 123,
+    "from_auditor_id": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AuditHandover | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -4697,7 +4642,7 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/advance \
 ### 简介
 支持方法: POST。
 
-- `POST`: Task must be in `PendingWarehouseReceive`. `receiver_id` is optional and defaults to the current authenticated actor. A previously rejected receipt may be received again after re-prepare, and the current handler is set to the receiver. This action uses minimum role plus org or handler gating over canonical task ownership. If a current handler already exists, non-management actors must match that handler instead of taking over the task.
+- `POST`: Mark warehouse receipt as received
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -4714,9 +4659,22 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/advance \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `见 OpenAPI responses`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "id": 123,
+    "task_id": 123,
+    "receipt_no": "string",
+    "workflow_lane": "normal"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | WarehouseReceipt | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -4744,7 +4702,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/receive \
 ### 简介
 支持方法: POST。
 
-- `POST`: Requires `reject_reason` or `remark`. Task must be in `PendingWarehouseReceive`. `receiver_id` is optional and defaults to the current authenticated actor. Purchase tasks return to `PendingAssign`, design or audit tasks return to designer rework, and customization-lane tasks return to `last_customization_operator_id` instead of restarting the whole lane. `reject_category` is the bounded statistics field for warehouse/QC error classification. This action uses minimum role plus org or handler gating over canonical task ownership. Non-management actors must be the current warehouse handler.
+- `POST`: Reject warehouse receipt
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -4761,9 +4719,22 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/receive \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `见 OpenAPI responses`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "id": 123,
+    "task_id": 123,
+    "receipt_no": "string",
+    "workflow_lane": "normal"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | WarehouseReceipt | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5254,7 +5225,7 @@ curl -X POST https://api.example.com/v1/customization-jobs/<id>/production-trans
 ### 简介
 支持方法: GET。
 
-- `GET`: Ordered by `sequence ASC`. This is a narrow business trace stream and key create, assign, submit-design, audit, procurement, warehouse, and close events may include before/after state plus handler or result context. Customization replacement-related events additionally carry trace fields such as `previous_asset_id`, `current_asset_id`, `replacement_actor_id`, `workflow_lane`, and `source_department`.
+- `GET`: List task events
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5271,18 +5242,29 @@ curl -X POST https://api.example.com/v1/customization-jobs/<id>/production-trans
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `见 OpenAPI responses`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "task_id": "...",
+      "sequence": "...",
+      "event_type": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<TaskEvent> | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+| 404 | 见 `error.code` | 见 `deny_code` | Task not found |
 
 ### curl 示例
 ```bash
@@ -5462,6 +5444,51 @@ curl -X POST https://api.example.com/v1/code-rules/generate-sku \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## POST /v1/sku/preview_code
+
+### 简介
+支持方法: POST。
+
+- `POST`: [V6] Preview SKU code
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200`
+
+无 JSON 响应体或响应体由文件流承载。
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/sku/preview_code \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## GET /v1/sku/list
 
 ### 简介
@@ -5482,9 +5509,24 @@ curl -X POST https://api.example.com/v1/code-rules/generate-sku \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "sku_code": "...",
+      "name": "...",
+      "workflow_status": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<SKU> | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5527,9 +5569,22 @@ curl -X GET https://api.example.com/v1/sku/list \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `201`
+成功响应: `201 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "id": 123,
+    "sku_code": "string",
+    "name": "string",
+    "workflow_status": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | SKU | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5574,9 +5629,22 @@ curl -X POST https://api.example.com/v1/sku \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "id": 123,
+    "sku_code": "string",
+    "name": "string",
+    "workflow_status": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | SKU | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5622,9 +5690,28 @@ curl -X GET https://api.example.com/v1/sku/<id> \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "sku": {
+      "id": "...",
+      "sku_code": "...",
+      "name": "...",
+      "workflow_status": "..."
+    },
+    "latest_sequence": 123,
+    "events": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | SKUSyncStatusResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5652,7 +5739,7 @@ curl -X GET https://api.example.com/v1/sku/<id>/sync_status \
 ### 简介
 支持方法: POST。
 
-- `POST`: Legacy audit route retained for compatibility only. Canonical MAIN audit behavior lives under task-centric `/v1/tasks/{id}/audit/*` routes.
+- `POST`: [V6] Submit audit decision
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5667,9 +5754,22 @@ curl -X GET https://api.example.com/v1/sku/<id>/sync_status \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "action": "string",
+    "jobs": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AuditSubmitResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5712,9 +5812,19 @@ curl -X POST https://api.example.com/v1/audit \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "asset_version_id": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AgentSyncResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5757,9 +5867,21 @@ curl -X POST https://api.example.com/v1/agent/sync \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "attempt_id": 123,
+    "job": {},
+    "lease_expires_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | PullJobResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5802,9 +5924,19 @@ curl -X POST https://api.example.com/v1/agent/pull_job \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "lease_expires_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | HeartbeatResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5892,6 +6024,73 @@ curl -X POST https://api.example.com/v1/agent/ack_job \
 请求体: 无请求体。
 
 ### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "sku_id": "...",
+      "job_id": "...",
+      "status": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<Incident> | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/incidents \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/incidents/{id}/assign
+
+### 简介
+支持方法: POST。
+
+- `POST`: [V6] Assign incident
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `assignee_id` | integer | 是 | - |
+| `reason` | string | 是 | - |
+
+### 响应体 schema
 成功响应: `200`
 
 无 JSON 响应体或响应体由文件流承载。
@@ -5907,8 +6106,63 @@ curl -X POST https://api.example.com/v1/agent/ack_job \
 
 ### curl 示例
 ```bash
-curl -X GET https://api.example.com/v1/incidents \
-  -H "Authorization: Bearer $TOKEN"
+curl -X POST https://api.example.com/v1/incidents/<id>/assign \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/incidents/{id}/resolve
+
+### 简介
+支持方法: POST。
+
+- `POST`: [V6] Resolve incident
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `reason` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `200`
+
+无 JSON 响应体或响应体由文件流承载。
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/incidents/<id>/resolve \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
 ```
 
 ### 前端最佳实践
@@ -5937,6 +6191,73 @@ curl -X GET https://api.example.com/v1/incidents \
 请求体: 无请求体。
 
 ### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "key": "...",
+      "value": "...",
+      "version": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<SystemPolicy> | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/policies \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## PUT /v1/policies/{id}
+
+### 简介
+支持方法: PUT。
+
+- `PUT`: [V6] Update policy
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `PUT` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `value` | string | 是 | - |
+| `reason` | string | 是 | - |
+
+### 响应体 schema
 成功响应: `200`
 
 无 JSON 响应体或响应体由文件流承载。
@@ -5952,8 +6273,184 @@ curl -X GET https://api.example.com/v1/incidents \
 
 ### curl 示例
 ```bash
-curl -X GET https://api.example.com/v1/policies \
+curl -X PUT https://api.example.com/v1/policies/<id> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/rule-templates
+
+### 简介
+支持方法: GET。
+
+- `GET`: [V6] List rule templates
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "template_type": "...",
+      "config_json": "...",
+      "created_at": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<RuleTemplate> | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/rule-templates \
   -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/rule-templates/{type}
+
+### 简介
+支持方法: GET, PUT。
+
+- `GET`: [V6] Get rule template by type
+- `PUT`: [V6] Upsert rule template by type
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- `PUT` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### GET 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `type` | path | string | 是 | - |
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "template_type": "cost-pricing",
+    "config_json": "string",
+    "created_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | RuleTemplate | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+##### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/rule-templates/<type> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### PUT 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `type` | path | string | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | string | 视接口 | OpenAPI 声明的整体对象。 |
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "template_type": "cost-pricing",
+    "config_json": "string",
+    "created_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | RuleTemplate | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+##### curl 示例
+```bash
+curl -X PUT https://api.example.com/v1/rule-templates/<type> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
 ```
 
 ### 前端最佳实践
@@ -5977,10 +6474,7 @@ curl -X GET https://api.example.com/v1/policies \
 ### 请求体 schema
 参数:
 
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `module_key` | query | string | 否 | - |
-| `pool_team_code` | query | string | 否 | - |
+无 path/query/header 参数。
 
 请求体: 无请求体。
 
@@ -5990,20 +6484,28 @@ curl -X GET https://api.example.com/v1/policies \
 ```json
 {
   "data": [
-    {}
+    {
+      "id": "...",
+      "task_id": "...",
+      "receipt_no": "...",
+      "workflow_lane": "..."
+    }
   ]
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | array<object> | 否 | - |
+| `data` | array<WarehouseReceipt> | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 401 | 见 `error.code` | 见 `deny_code` | Unauthorized |
-| 501 | 见 `error.code` | 见 `deny_code` | Reserved for R3 |
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
 
 ### curl 示例
 ```bash
@@ -6048,7 +6550,6 @@ curl -X GET https://api.example.com/v1/tasks/pool \
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 4XX | 见 `error.code` | 见 `deny_code` | Module action denied |
-| 501 | 见 `error.code` | 见 `deny_code` | Reserved for R3 |
 
 ### curl 示例
 ```bash
@@ -6094,7 +6595,6 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/claim \
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 4XX | 见 `error.code` | 见 `deny_code` | Module action denied |
-| 501 | 见 `error.code` | 见 `deny_code` | Reserved for R3 |
 
 ### curl 示例
 ```bash
@@ -6139,7 +6639,6 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/actions/
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 4XX | 见 `error.code` | 见 `deny_code` | Reassign denied |
-| 501 | 见 `error.code` | 见 `deny_code` | Reserved for R3 |
 
 ### curl 示例
 ```bash
@@ -6184,7 +6683,6 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/reassign
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 4XX | 见 `error.code` | 见 `deny_code` | Pool reassign denied |
-| 501 | 见 `error.code` | 见 `deny_code` | Reserved for R3 |
 
 ### curl 示例
 ```bash
@@ -6233,7 +6731,6 @@ Content-Type: `application/json`
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 4XX | 见 `error.code` | 见 `deny_code` | Cancel denied |
-| 501 | 见 `error.code` | 见 `deny_code` | Reserved for R3 |
 
 ### curl 示例
 ```bash

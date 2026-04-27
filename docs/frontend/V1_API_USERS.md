@@ -1,18 +1,7 @@
-> Revision: V1.2-D drift triage P4 (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2-D P4)
-> `WorkflowUser` response fields follow `domain.User`: includes `jst_u_id`, `managed_departments`, `managed_teams`; response no longer documents `avatar`.
-> `/v1/admin/jst-users` uses the JST ERP-style payload under `data.{datas,count,current_page,page_size,pages}`.
-
-> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
-> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
-
 # 用户与管理审计
 
-> Revision: V1.1-A2 contract drift purge (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.1-A2)
-> 与 v1.21 生产实际响应对齐
-
+> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -193,8 +182,6 @@ curl -X GET https://api.example.com/v1/access-rules \
 | `data` | array<WorkflowUser> | 否 | - |
 | `pagination` | PaginationMeta | 否 | - |
 
-`WorkflowUser` list items follow the backend `domain.User` response: `jst_u_id`, `managed_departments`, and `managed_teams` may be present; `avatar` is not returned by this response schema.
-
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
@@ -253,8 +240,6 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `data` | WorkflowUser | 否 | - |
-
-`WorkflowUser` follows the backend `domain.User` response: `jst_u_id`, `managed_departments`, and `managed_teams` may be present; `avatar` is not returned by this response schema.
 
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -1119,23 +1104,17 @@ curl -X POST https://api.example.com/v1/server-logs/clean \
 ```json
 {
   "data": {
-    "current_page": "1",
-    "page_size": "50",
-    "count": "123",
-    "pages": "3",
-    "datas": [
-      {
-        "u_id": 123,
-        "name": "string"
-      }
-    ]
+    "current_page": "string",
+    "page_size": "string",
+    "count": "string",
+    "pages": "string"
   }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | JSTUserListResponse | 否 | ERP-style JST getcompanyusers response |
+| `data` | JSTUserListResponse | 否 | ERP-style JST getcompanyusers response. Source: domain.JSTUserListResponse. |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -1163,7 +1142,7 @@ curl -X GET https://api.example.com/v1/admin/jst-users \
 ### 简介
 支持方法: POST。
 
-- `POST`: Pre-wiring. Preview import result without executing. Admin only.
+- `POST`: Preview JST user import (Admin)
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1175,18 +1154,25 @@ curl -X GET https://api.example.com/v1/admin/jst-users \
 
 无 path/query/header 参数。
 
-Content-Type: `application/json`
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "fetched_count": 123,
+    "matched_count": 123,
+    "to_create_count": 123,
+    "to_update_count": 123
+  }
+}
+```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `current_page` | integer | 否 | - |
-| `page_size` | integer | 否 | - |
-| `write_roles` | boolean | 否 | - |
-
-### 响应体 schema
-成功响应: `200`
-
-无 JSON 响应体或响应体由文件流承载。
+| `data` | JSTUserImportPreviewResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -1200,9 +1186,7 @@ Content-Type: `application/json`
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/admin/jst-users/import-preview \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践
@@ -1216,7 +1200,7 @@ curl -X POST https://api.example.com/v1/admin/jst-users/import-preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Pre-wiring. Import JST users. dry_run=true for preview. Admin only.
+- `POST`: Import JST users (Admin)
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1228,19 +1212,25 @@ curl -X POST https://api.example.com/v1/admin/jst-users/import-preview \
 
 无 path/query/header 参数。
 
-Content-Type: `application/json`
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "fetched_count": 123,
+    "created_count": 123,
+    "updated_count": 123,
+    "disabled_count": 123
+  }
+}
+```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `current_page` | integer | 否 | - |
-| `page_size` | integer | 否 | - |
-| `write_roles` | boolean | 否 | - |
-| `dry_run` | boolean | 否 | - |
-
-### 响应体 schema
-成功响应: `200`
-
-无 JSON 响应体或响应体由文件流承载。
+| `data` | JSTUserImportResult | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -1254,9 +1244,7 @@ Content-Type: `application/json`
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/admin/jst-users/import \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践
@@ -1352,3 +1340,4 @@ curl -X POST https://api.example.com/v1/users/<id>/deactivate \
 - 角色与访问规则主要供后台管理页使用。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+

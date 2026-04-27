@@ -1,13 +1,7 @@
-> Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
-> V1 SoT: docs/V1_BACKEND_SOURCE_OF_TRUTH.md
-
 # 资产资源库
 
-> Revision: V1.1-A2 contract drift purge (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.1-A2)
-> 与 v1.21 生产实际响应对齐
-
+> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -86,7 +80,7 @@ curl -X GET https://api.example.com/v1/assets \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
-## GET /v1/assets/{id}
+## GET /v1/assets/{asset_id}
 
 ### 简介
 支持方法: GET, DELETE。
@@ -107,7 +101,7 @@ curl -X GET https://api.example.com/v1/assets \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `id` | path | integer | 是 | - |
+| `asset_id` | path | integer | 是 | - |
 
 请求体: 无请求体。
 
@@ -116,13 +110,18 @@ curl -X GET https://api.example.com/v1/assets \
 
 ```json
 {
-  "data": {}
+  "data": {
+    "id": 123,
+    "task_id": 123,
+    "asset_no": "string",
+    "scope_sku_code": "string"
+  }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | AssetDetail | 否 | - |
+| `data` | AssetDetail | 否 | Source: service/asset_center.AssetDetail — detail endpoint returns asset + version list. |
 
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -131,7 +130,7 @@ curl -X GET https://api.example.com/v1/assets \
 
 ##### curl 示例
 ```bash
-curl -X GET https://api.example.com/v1/assets/<id> \
+curl -X GET https://api.example.com/v1/assets/<asset_id> \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -142,7 +141,7 @@ curl -X GET https://api.example.com/v1/assets/<id> \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `id` | path | integer | 是 | - |
+| `asset_id` | path | integer | 是 | - |
 
 Content-Type: `application/json`
 
@@ -163,7 +162,7 @@ Content-Type: `application/json`
 
 ##### curl 示例
 ```bash
-curl -X DELETE https://api.example.com/v1/assets/<id> \
+curl -X DELETE https://api.example.com/v1/assets/<asset_id> \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -173,7 +172,7 @@ curl -X DELETE https://api.example.com/v1/assets/<id> \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
-## GET /v1/assets/{id}/download
+## GET /v1/assets/{asset_id}/download
 
 ### 简介
 支持方法: GET。
@@ -190,7 +189,7 @@ curl -X DELETE https://api.example.com/v1/assets/<id> \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `id` | path | integer | 是 | - |
+| `asset_id` | path | integer | 是 | - |
 
 请求体: 无请求体。
 
@@ -219,7 +218,7 @@ curl -X DELETE https://api.example.com/v1/assets/<id> \
 
 ### curl 示例
 ```bash
-curl -X GET https://api.example.com/v1/assets/<id>/download \
+curl -X GET https://api.example.com/v1/assets/<asset_id>/download \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -229,7 +228,7 @@ curl -X GET https://api.example.com/v1/assets/<id>/download \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
-## GET /v1/assets/{id}/preview
+## GET /v1/assets/{asset_id}/preview
 
 ### 简介
 支持方法: GET。
@@ -246,7 +245,7 @@ curl -X GET https://api.example.com/v1/assets/<id>/download \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `id` | path | integer | 是 | - |
+| `asset_id` | path | integer | 是 | - |
 
 请求体: 无请求体。
 
@@ -276,7 +275,7 @@ curl -X GET https://api.example.com/v1/assets/<id>/download \
 
 ### curl 示例
 ```bash
-curl -X GET https://api.example.com/v1/assets/<id>/preview \
+curl -X GET https://api.example.com/v1/assets/<asset_id>/preview \
   -H "Authorization: Bearer $TOKEN"
 ```
 
