@@ -564,6 +564,24 @@ func validateCreateTaskProductSelectionWhitelist(taskType string, hasEffectivePr
 	}
 }
 
+func validateCreateTaskPriority(priority string) (string, *domain.AppError) {
+	normalized := strings.TrimSpace(priority)
+	if normalized == "" {
+		return string(domain.TaskPriorityNormal), nil
+	}
+	switch domain.TaskPriority(normalized) {
+	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
+		return normalized, nil
+	default:
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "task_priority_invalid", map[string]interface{}{
+			"field":        "priority",
+			"deny_code":    "task_priority_invalid",
+			"allowed":      []string{"low", "normal", "high", "critical"},
+			"actual_value": normalized,
+		})
+	}
+}
+
 // Create handles POST /v1/tasks
 func (h *TaskHandler) Create(c *gin.Context) {
 	var req createTaskReq
@@ -621,6 +639,12 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	parsedSelectionNilOrEmpty := req.ProductSelection == nil || isTaskProductSelectionReqEmpty(req.ProductSelection)
 	hasEffectiveProductSelection := req.hasEffectiveProductSelection()
 	selectionValidationBranch := "not_checked"
+
+	priority, appErr := validateCreateTaskPriority(req.Priority)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
 
 	log.Printf(
 		"create_task_entry trace_id=%s task_type=%s source_mode=%s product_id=%v sku_code=%s raw_has_product_selection=%v parsed_selection_nil_or_empty=%v",
@@ -756,7 +780,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		OwnerDepartment:         req.OwnerDepartment,
 		OwnerOrgTeam:            req.OwnerOrgTeam,
 		DesignerID:              designerID,
-		Priority:                domain.TaskPriority(req.Priority),
+		Priority:                domain.TaskPriority(priority),
 		DeadlineAt:              deadlineAt,
 		IsOutsource:             isOutsource,
 		CustomizationRequired:   req.CustomizationRequired != nil && *req.CustomizationRequired,

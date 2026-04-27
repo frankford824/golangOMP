@@ -806,11 +806,16 @@ func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, 
 
 func (s *taskService) mapTaskCreateTxError(p CreateTaskParams, txErr error) *domain.AppError {
 	var mysqlErr *mysql.MySQLError
-	if errors.As(txErr, &mysqlErr) && mysqlErr.Number == 1062 {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "duplicate sku_code or batch item detected", map[string]interface{}{
-			"task_type":   p.TaskType,
-			"source_mode": p.SourceMode,
-		})
+	if errors.As(txErr, &mysqlErr) {
+		switch mysqlErr.Number {
+		case 1062:
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "duplicate sku_code or batch item detected", map[string]interface{}{
+				"task_type":   p.TaskType,
+				"source_mode": p.SourceMode,
+			})
+		case 3819:
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "task field violates DB constraint: "+mysqlErr.Message, nil)
+		}
 	}
 	return infraError("create task tx", txErr)
 }
