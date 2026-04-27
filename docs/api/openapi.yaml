@@ -6333,30 +6333,76 @@ components:
         created_by:
           $ref: '#/components/schemas/Actor'
     AssetDetail:
-      allOf:
-        - $ref: '#/components/schemas/Asset'
-        - type: object
-          description: "Source: V1_ASSET_OWNERSHIP §5.2 — detail endpoint returns asset + version list."
-          properties:
-            versions:
-              type: array
-              items:
-                $ref: '#/components/schemas/AssetVersion'
-            archived_at:
-              type: string
-              format: date-time
-              nullable: true
-            archived_by:
-              allOf: [{ $ref: '#/components/schemas/Actor' }]
-              nullable: true
-            cleaned_at:
-              type: string
-              format: date-time
-              nullable: true
-            deleted_at:
-              type: string
-              format: date-time
-              nullable: true
+      type: object
+      description: "Source: service/asset_center.AssetDetail — detail endpoint returns asset + version list."
+      properties:
+        id:
+          type: integer
+        task_id:
+          type: integer
+        asset_no:
+          type: string
+        scope_sku_code:
+          type: string
+        asset_type:
+          type: string
+        current_version_id:
+          type: integer
+          nullable: true
+        source_module_key:
+          type: string
+        lifecycle_state:
+          $ref: '#/components/schemas/AssetLifecycleState'
+        archive_status:
+          type: string
+        upload_status:
+          $ref: '#/components/schemas/DesignAssetUploadStatus'
+        storage_key:
+          type: string
+          nullable: true
+        file_name:
+          type: string
+        original_filename:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+          nullable: true
+        mime_type:
+          type: string
+        task_no:
+          type: string
+        task_status:
+          type: string
+        owner_team_code:
+          type: string
+        created_by:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetVersion'
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+        archived_by:
+          allOf: [{ $ref: '#/components/schemas/Actor' }]
+          nullable: true
+        cleaned_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
 paths:
   /v1/auth/register:
     post:
@@ -8830,7 +8876,7 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/DesignAsset'
-  /v1/assets/{id}:
+  /v1/assets/{asset_id}:
     get:
       summary: Get asset
       description: Returns one asset resource by id including full version list. Source V1_ASSET_OWNERSHIP §5.2.
@@ -8842,7 +8888,7 @@ paths:
         required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
       parameters:
         - in: path
-          name: id
+          name: asset_id
           required: true
           schema:
             type: integer
@@ -8866,7 +8912,7 @@ paths:
       x-owner-round: R4-SA-A
       parameters:
         - in: path
-          name: id
+          name: asset_id
           required: true
           schema:
             type: integer
@@ -8890,7 +8936,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /v1/assets/{id}/download:
+  /v1/assets/{asset_id}/download:
     get:
       summary: Get asset download info
       description: Returns backend-authorized download metadata for one asset resource. Canonical runtime prefers browser-direct byte access.
@@ -8902,7 +8948,7 @@ paths:
         required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
       parameters:
         - in: path
-          name: id
+          name: asset_id
           required: true
           schema:
             type: integer
@@ -8918,7 +8964,7 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Asset not found
-  /v1/assets/{id}/preview:
+  /v1/assets/{asset_id}/preview:
     get:
       summary: Get asset preview info
       description: |
@@ -8936,7 +8982,7 @@ paths:
         required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
       parameters:
         - in: path
-          name: id
+          name: asset_id
           required: true
           schema:
             type: integer
