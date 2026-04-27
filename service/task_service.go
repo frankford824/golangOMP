@@ -2027,10 +2027,48 @@ func (s *taskService) resolveTaskCategory(ctx context.Context, categoryID *int64
 	if err != nil {
 		return nil, infraError("get category by code for task business info", err)
 	}
+	if category != nil {
+		return category, nil
+	}
+	category, err = s.resolveTaskCategoryByDisplayValue(ctx, categoryCode)
+	if err != nil {
+		return nil, infraError("search category by display value for task business info", err)
+	}
 	if category == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "category_code does not exist", nil)
 	}
 	return category, nil
+}
+
+func (s *taskService) resolveTaskCategoryByDisplayValue(ctx context.Context, value string) (*domain.Category, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || s.categoryRepo == nil {
+		return nil, nil
+	}
+	active := true
+	items, err := s.categoryRepo.Search(ctx, repo.CategorySearchFilter{
+		Keyword:  value,
+		IsActive: &active,
+		Limit:    20,
+	})
+	if err != nil {
+		return nil, err
+	}
+	upper := strings.ToUpper(value)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(item.CategoryCode), value) ||
+			strings.EqualFold(strings.TrimSpace(item.SearchEntryCode), value) ||
+			strings.TrimSpace(item.CategoryName) == value ||
+			strings.TrimSpace(item.DisplayName) == value ||
+			strings.ToUpper(strings.TrimSpace(item.CategoryCode)) == upper ||
+			strings.ToUpper(strings.TrimSpace(item.SearchEntryCode)) == upper {
+			return item, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *taskService) resolveTaskCostRule(ctx context.Context, costRuleID *int64) (*domain.CostRule, *domain.AppError) {
