@@ -216,6 +216,7 @@ Lessons:
 | View/materialization | detail aggregate too heavy for R6 gate | V1.1 |
 | Index review | likely task/detail/module/event joins need composite review | V1.1 |
 | Compatibility routes | §9.3 old routes still mounted | R7+ |
+| MED · OPEN V1.3-T1 onboarding sha 锚组过期 | `prompts/V1_NEXT_MODEL_ONBOARDING.md` §3.1 锚组停留在 V1.0/V1.1-A1 期间,V1.1-A2 / V1.2 / V1.2-C / V1.2-D-1 / V1.2-D-2 后未回写,导致每次新 codex 接手都触发 §9 漂移裁决。同时 CLAUDE.md L7 "Start model handoff with docs/V0_9_MODEL_HANDOFF_MANIFEST.md" 指向已归档文件 `docs/archive/legacy_handoffs/`。修复方式:V1.3 单独发起 onboarding/CLAUDE.md 回写轮,把锚组、authority 列表、handoff manifest 路径全部锁到 V1.2-D-2 head | `prompts/V1_NEXT_MODEL_ONBOARDING.md`, `CLAUDE.md`, `docs/V1_BACKEND_SOURCE_OF_TRUTH.md` |
 | U1 | timeout escalation | V2 |
 | U2 | L2/L3 reports | V2 |
 | U3 | blueprint externalization | V2 |
