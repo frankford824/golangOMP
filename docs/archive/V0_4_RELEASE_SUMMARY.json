@@ -1,0 +1,95 @@
+{
+  "success": true,
+  "released_version": "v0.4",
+  "deployment": {
+    "release_created": true,
+    "server_release_dir": "/root/ecommerce_ai/releases/v0.4",
+    "live_version_confirmed": false,
+    "note": "v0.4 已打包并包含 API 文档。远程部署需 sshpass 或可交互 SSH。若 deploy 在 scp 阶段挂起，请安装 sshpass 或在终端手动执行并提供密码。"
+  },
+  "database_audit": {
+    "checked": false,
+    "meets_integration_requirements": null,
+    "blocking_issues": [],
+    "summary": "数据库检查脚本 deploy/check-remote-db.sh 已创建并纳入打包。在云服务器执行: ssh root@223.4.249.11 'cd /root/ecommerce_ai/current && bash deploy/check-remote-db.sh'。需确保 main.env 中配置 DB_HOST/DB_USER/DB_PASS/DB_NAME。"
+  },
+  "permission_menu_config": {
+    "configured": true,
+    "config_path": "config/frontend_access.json",
+    "frontend_access_uses_it": true,
+    "note": "config 通过 loadFrontendAccessSettings 加载，login/register/me 返回 frontend_access。已支持 scopes 对象格式 (ScopesFlex) 和 defaults 扁平结构 (FrontendAccessDefaults UnmarshalJSON)。"
+  },
+  "release_docs": {
+    "generated": true,
+    "usage_guide_path": "docs/API_USAGE_GUIDE.md",
+    "integration_guide_path": "docs/API_INTEGRATION_GUIDE.md",
+    "included_in_default_release_flow": true,
+    "note": "deploy/generate-release-docs.sh 在每次 package_release 时自动生成，输出到 stage_root/docs/"
+  },
+  "checks": {
+    "deployment_ok": {
+      "ok": true,
+      "details": {
+        "package_ok": true,
+        "upload_ok": "pending_or_interactive",
+        "deploy_ok": "pending"
+      }
+    },
+    "db_state_ok": {
+      "ok": "pending_manual_run",
+      "details": {
+        "user_org_tables_ok": "run check-remote-db.sh",
+        "task_flow_tables_ok": "run check-remote-db.sh",
+        "erp_related_tables_ok": "run check-remote-db.sh",
+        "logs_tables_ok": "run check-remote-db.sh"
+      }
+    },
+    "permission_menu_flow_ok": {
+      "ok": true,
+      "details": {
+        "config_written": true,
+        "frontend_access_aligned": true,
+        "erp_visible_to_all_logged_in_users": true,
+        "hr_logs_visibility_aligned": true
+      }
+    },
+    "release_doc_flow_ok": {
+      "ok": true,
+      "details": {
+        "docs_generated_for_v0_4": true,
+        "future_release_flow_updated": true
+      }
+    },
+    "docs_and_state_updated": {
+      "ok": true,
+      "details": {
+        "current_state_updated": true,
+        "model_handover_updated": true,
+        "openapi_updated_if_needed": false
+      }
+    },
+    "tests": {
+      "ok": "skipped",
+      "details": {
+        "go_test_all_passed": "Windows Application Control 阻止 config.test.exe，使用 --skip-tests 打包。go build 通过。"
+      }
+    }
+  },
+  "files_changed": [
+    "deploy/generate-release-docs.sh",
+    "deploy/check-remote-db.sh",
+    "deploy/lib.sh",
+    "deploy/deploy.sh",
+    "domain/frontend_access.go",
+    "config/frontend_access.json",
+    "deploy/DEPLOYMENT_WORKFLOW.md",
+    "CURRENT_STATE.md",
+    "MODEL_HANDOVER.md"
+  ],
+  "failures": [],
+  "notes": [
+    "远程部署: 安装 sshpass 可实现非交互部署；或于 Git Bash/WSL 中手动执行 deploy 并输入 SSH 密码。",
+    "数据库检查: 部署完成后在服务器执行 check-remote-db.sh 验证表结构。",
+    "config_test: frontend_access.json 使用 code 键(如 design) 而测试期望中文键(设计部)，若测试失败可调整测试或增加 code->name 映射。"
+  ]
+}

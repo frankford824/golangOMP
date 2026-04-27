@@ -1,0 +1,773 @@
+# V7 Model Handover Appendix
+
+## Current repository truth
+- Current phase: Step 52 complete
+- Latest iteration: `docs/iterations/ITERATION_052.md`
+- OpenAPI source of truth: `docs/api/openapi.yaml` (`v0.48.0`)
+- Current ready/internal/mock split is summarized in `docs/V7_API_READY.md`
+
+## Step 52 state
+- Minimal real identity/auth support is now available through:
+  - `POST /v1/auth/register`
+  - `POST /v1/auth/login`
+  - `GET /v1/auth/me`
+- Minimal user / role / permission administration is now available through:
+  - `GET /v1/roles`
+  - `GET /v1/users`
+  - `GET /v1/users/{id}`
+  - `PATCH /v1/users/{id}`
+  - `PUT /v1/users/{id}/roles`
+  - `GET /v1/permission-logs`
+- Current persisted auth boundary is:
+  - `users`
+  - `user_roles`
+  - `user_sessions`
+  - `permission_logs`
+- Current route actor resolution now prefers bearer session tokens and still keeps debug-header compatibility.
+- Key task-flow write routes now default actor ids from the authenticated request actor when legacy explicit ids are omitted.
+- This step is still intentionally limited:
+  - not SSO
+  - not org sync
+  - not deep RBAC / ABAC
+  - not an external identity-provider rollout
+
+## Step 49 state
+- Unified auth/org/visibility policy scaffolding is now available as one cross-center additive language, without introducing real identity/org systems.
+- Reusable policy summary structures are now explicit:
+  - `policy_scope_summary`
+  - `resource_access_policy`
+  - `action_policy_summary`
+- Cross-center read models now additively expose:
+  - `policy_mode`
+  - `visible_to_roles`
+  - `action_roles`
+  - `policy_scope_summary`
+- Current minimum coverage includes:
+  - task center:
+    - task list/read/detail
+    - task-board summary/queues
+    - procurement summary
+  - export center:
+    - export job
+  - integration center:
+    - call log
+    - execution
+  - cost governance:
+    - task override governance boundary
+  - upload/storage boundary:
+    - upload request
+- Action summaries now also label API exposure intent:
+  - `frontend_ready`
+  - `internal`
+  - `admin`
+  - `mock_placeholder`
+- Existing route-level placeholder auth contract remains stable:
+  - request headers:
+    - `X-Debug-Actor-Id`
+    - `X-Debug-Actor-Roles`
+  - route metadata/enforcement:
+    - `withAccessMeta(...)`
+- This step is scaffolding only:
+  - not real login/session/SSO
+  - not real org sync/hierarchy policies
+  - not final fine-grained RBAC/ABAC
+  - not a full approval permission system redesign
+
+## Step 50 state
+- Unified KPI/finance/report platform entry-boundary scaffolding is now available as one cross-center additive language.
+- Reusable platform entry structures are now explicit:
+  - `platform_entry_boundary`
+  - `kpi_entry_summary`
+  - `finance_entry_summary`
+  - `report_entry_summary`
+- Current minimum coverage includes:
+  - task center:
+    - `task_list_item`
+    - `task_read_model`
+    - `task_detail_aggregate`
+  - procurement center:
+    - `procurement_summary`
+  - cost governance:
+    - `override_governance_boundary`
+  - export center:
+    - `export_job`
+- Entry summaries now explicitly expose:
+  - source read-model fields reused by future platform docking
+  - placeholder-only future fields
+  - current `eligible_now` boundary hints
+- This step is entry-boundary scaffolding only:
+  - not real KPI/BI computation
+  - not real finance/accounting/reconciliation/settlement/invoice workflows
+  - not a real report-generation engine
+  - not a real data warehouse or analytics engine
+
+## Step 20 state
+- Added dedicated category-center skeleton APIs:
+  - `GET /v1/categories`
+  - `GET /v1/categories/search`
+  - `GET /v1/categories/{id}`
+  - `POST /v1/categories`
+  - `PATCH /v1/categories/{id}`
+- Added dedicated cost-rule-center skeleton APIs:
+  - `GET /v1/cost-rules`
+  - `GET /v1/cost-rules/{id}`
+  - `POST /v1/cost-rules`
+  - `PATCH /v1/cost-rules/{id}`
+  - `POST /v1/cost-rules/preview`
+- Coded-style values such as `HBJ/HBZ/HCP/HLZ/HPJ/HQT/HSC/HZS` are valid first-level category entries.
+- Task business info can persist structured category linkage and internal cost-rule provenance.
+
+## Step 21 state
+- `PATCH /v1/tasks/{id}/business-info` now accepts minimal cost-prefill inputs:
+  - `width`
+  - `height`
+  - `area`
+  - `quantity`
+  - `process`
+- Task business info now persists:
+  - `estimated_cost`
+  - `requires_manual_review`
+  - `manual_cost_override`
+  - `manual_cost_override_reason`
+- When skeleton preview can estimate, business info now prefills internal `cost_price`.
+- `purchase_task` summaries now expose category / internal-cost / rule-provenance signals without moving procurement ownership back into task details.
+
+## Step 22 state
+- Category center now explicitly models first-level ERP search-entry semantics:
+  - `search_entry_code`
+  - `is_search_entry`
+- Current first-level entry contract is:
+  - top-level category code is the first-level ERP search entry
+  - top-level categories must keep `search_entry_code == category_code`
+  - top-level categories must keep `is_search_entry=true`
+  - child categories inherit the same `search_entry_code`
+- Added independent category-to-ERP positioning skeleton APIs:
+  - `GET /v1/category-mappings`
+  - `GET /v1/category-mappings/search`
+  - `GET /v1/category-mappings/{id}`
+  - `POST /v1/category-mappings`
+  - `PATCH /v1/category-mappings/{id}`
+- Reserved later refinement fields are now explicit:
+  - `secondary_condition_key`
+  - `secondary_condition_value`
+  - `tertiary_condition_key`
+  - `tertiary_condition_value`
+- Real ERP lookup execution is still deferred.
+
+## Step 23 state
+- `GET /v1/products/search` now executes mapped local ERP positioning through:
+  - `category_id`
+  - `category_code`
+  - `search_entry_code`
+  - `mapping_match`
+  - lightweight reserved `secondary_*` / `tertiary_*` query pairs
+- Current mapped-search execution is:
+  - selected category -> `search_entry_code`
+  - active local `category_erp_mappings`
+  - local synced `products`
+- Search results now expose:
+  - `matched_category_code`
+  - `matched_search_entry_code`
+  - `matched_mapping_rule`
+- Real ERP lookup execution is still deferred; this remains a non-real-time local ERP positioning layer only.
+
+## Step 24 state
+- Original-product task entry now accepts additive `product_selection` on:
+  - `POST /v1/tasks`
+  - `PATCH /v1/tasks/{id}/business-info`
+- `product_selection` is the formal handoff object from mapped product search into task-side persistence:
+  - selected product identity
+  - selected SKU snapshot
+  - `matched_category_code`
+  - `matched_search_entry_code`
+  - `matched_mapping_rule`
+  - `source_match_type`
+  - `source_match_rule`
+  - `source_search_entry_code`
+- Task read/detail contracts now expose top-level:
+  - `product_selection`
+- Existing-product legacy rows still fall back to a minimal trace object instead of returning no selection context at all.
+
+## Step 25 state
+- `product_selection` is now a first-class read-model contract rather than a detail-only add-on.
+- `GET /v1/tasks` task items now expose lightweight:
+  - `product_selection`
+- `GET /v1/task-board/summary` and `GET /v1/task-board/queues` now surface the same task-item `product_selection` summary contract through sample tasks / queue tasks.
+- `procurement_summary` now also exposes lightweight:
+  - `product_selection`
+- Current layering is explicit:
+  - list / board / procurement summary use lightweight `product_selection` summary
+  - task read / task detail keep full `product_selection` provenance including `matched_mapping_rule`
+- Frontend should consume these read models directly and must not reconstruct original-product provenance by reassembling scattered `matched_*` / `source_*` fields client-side.
+
+## Step 26 state
+- Export center skeleton is now available through:
+  - `GET /v1/export-templates`
+  - `POST /v1/export-jobs`
+  - `GET /v1/export-jobs`
+  - `GET /v1/export-jobs/{id}`
+- Current export sources are intentionally limited to existing stable read-model state:
+  - task-list query state
+  - task-board queue handoff state
+  - procurement-summary task query state
+  - warehouse receipt list filters
+- Export jobs now persist:
+  - `template_key`
+  - `export_type`
+  - `source_query_type`
+  - `source_filters`
+  - `query_template`
+  - `normalized_filters`
+  - `requested_by`
+  - `status`
+  - placeholder `result_ref`
+- Current template catalog is static and code-defined only.
+- `result_ref` is placeholder metadata only and does not imply:
+  - real file generation
+  - NAS/object-storage integration
+  - signed download delivery
+
+## Step 27 state
+- Export jobs now expose a minimal lifecycle skeleton:
+  - `queued`
+  - `running`
+  - `ready`
+  - `failed`
+  - optional `cancelled`
+- Internal/admin lifecycle advancement is now available through:
+  - `POST /v1/export-jobs/{id}/advance`
+- Export-job list/detail contracts now expose stable lifecycle read fields:
+  - `progress_hint`
+  - `latest_status_at`
+  - `download_ready`
+- `result_ref` is now the structured placeholder download-handoff contract:
+  - `ref_type`
+  - `ref_key`
+  - `file_name`
+  - `mime_type`
+  - `expires_at`
+  - `is_placeholder`
+  - `note`
+- `ready` means placeholder handoff metadata is present; it does not mean a real file service, NAS path, object-storage URL, or signed download exists.
+
+## Step 28 state
+- Export-job lifecycle audit trace is now available through:
+  - `GET /v1/export-jobs/{id}/events`
+- Export-job list/detail now expose lightweight audit summaries:
+  - `event_count`
+  - `latest_event`
+- Current export-job event coverage includes:
+  - `export_job.created`
+  - `export_job.advanced_to_running`
+  - `export_job.advanced_to_ready`
+  - `export_job.advanced_to_failed`
+  - `export_job.advanced_to_cancelled`
+  - `export_job.advanced_to_queued`
+  - `export_job.result_ref_updated`
+- Event payload is audit context only:
+  - not a runner log stream
+  - not a storage-delivery log
+  - not proof that real file generation or download APIs exist
+
+## Step 29 state
+- Placeholder download handoff boundary is now available through:
+  - `POST /v1/export-jobs/{id}/claim-download`
+  - `GET /v1/export-jobs/{id}/download`
+- Current claim/read contract is valid only for ready export jobs.
+- Current handoff response returns structured placeholder metadata including:
+  - `export_job_id`
+  - `result_ref`
+  - `file_name`
+  - `mime_type`
+  - `is_placeholder`
+  - `expires_at`
+  - `download_ready`
+  - `note`
+- Current handoff response may also surface latest placeholder access audit context such as:
+  - `claimed_at`
+  - `claimed_by_actor_id`
+  - `claimed_by_actor_type`
+  - `last_read_at`
+  - `last_read_by_actor_id`
+  - `last_read_by_actor_type`
+- Claim/read activity now reuses the existing export-job event chain through:
+  - `export_job.download_claimed`
+  - `export_job.download_read`
+- These endpoints are still placeholder handoff boundaries only:
+  - not file-byte download
+  - not signed URL delivery
+  - not NAS or object-storage integration
+
+## Step 30 state
+- Placeholder download handoff expiry/refresh is now available through:
+  - `POST /v1/export-jobs/{id}/refresh-download`
+- Current handoff semantics are explicit:
+  - ready + not expired => claim/read allowed
+  - ready + expired => claim/read rejected until refresh
+  - refresh is allowed only for expired ready handoff
+- Export-job list/detail now expose:
+  - `is_expired`
+  - `can_refresh`
+- Handoff responses now also expose:
+  - `is_expired`
+  - `can_refresh`
+- Refresh updates placeholder handoff metadata by:
+  - rotating `result_ref.ref_key`
+  - updating `expires_at`
+- Expiry/refresh activity now reuses the existing export-job event chain through:
+  - `export_job.download_expired`
+  - `export_job.download_refreshed`
+  - `export_job.result_ref_updated`
+- These semantics are still placeholder-only:
+  - not signed URL renewal
+  - not NAS/object-storage reissue
+  - not runner re-execution
+
+## Step 31 state
+- Explicit placeholder runner-initiation is now available through:
+  - `POST /v1/export-jobs/{id}/start`
+- Current start semantics are:
+  - only `queued` export jobs can start
+  - start formalizes the `queued -> running` boundary
+  - `running|ready|failed|cancelled` cannot be started again
+  - `POST /v1/export-jobs/{id}/advance` `action=start` remains backward compatible but reuses the same start helper
+- Export-job list/detail now also expose:
+  - `can_start`
+  - `start_mode`
+  - `execution_mode`
+  - `latest_runner_event`
+- Current explicit runner-boundary events include:
+  - `export_job.runner_initiated`
+  - `export_job.started`
+- These semantics are still placeholder-only:
+  - not a real async runner platform
+  - not a worker-lease API
+  - not a scheduler callback
+  - not proof that real file generation or delivery exists
+
+## Step 32 state
+- Placeholder execution-attempt visibility is now available through:
+  - `GET /v1/export-jobs/{id}/attempts`
+- Export-job list/detail now also expose:
+  - `attempt_count`
+  - `latest_attempt`
+  - `can_retry`
+- Current attempt records now expose:
+  - `attempt_id`
+  - `attempt_no`
+  - `trigger_source`
+  - `execution_mode`
+  - `adapter_key`
+  - `status`
+  - `started_at`
+  - `finished_at`
+  - `error_message`
+  - `adapter_note`
+- Current attempt-result events now include:
+  - `export_job.attempt_succeeded`
+  - `export_job.attempt_failed`
+  - `export_job.attempt_cancelled`
+- These semantics are still placeholder-only:
+  - not a real scheduler queue
+  - not a worker-lease / heartbeat contract
+  - not a distributed runner log stream
+  - not proof that real file generation or delivery exists
+
+## Step 33 state
+- Placeholder adapter-dispatch visibility is now available through:
+  - `GET /v1/export-jobs/{id}/dispatches`
+  - `POST /v1/export-jobs/{id}/dispatches`
+  - `POST /v1/export-jobs/{id}/dispatches/{dispatch_id}/advance`
+- Current dispatch records now expose:
+  - `dispatch_id`
+  - `dispatch_no`
+  - `trigger_source`
+  - `execution_mode`
+  - `adapter_key`
+  - `status`
+  - `submitted_at`
+  - `received_at`
+  - `finished_at`
+  - `expires_at`
+  - `status_reason`
+  - `adapter_note`
+- Current dispatch state contract is:
+  - `submitted`
+  - `received`
+  - `rejected`
+  - `expired`
+  - `not_executed`
+- Start now consumes a received dispatch or auto-creates one placeholder submitted/received handoff for backward-compatible start flows.
+- Dispatch semantics are still placeholder-only:
+  - not a real scheduler queue
+  - not a worker claim / lease / heartbeat contract
+  - not proof that real background execution exists
+
+## Step 34 state
+- Export-job list/detail now also expose dispatch-side read-model summaries:
+  - `dispatch_count`
+  - `latest_dispatch`
+  - `can_dispatch`
+  - `can_redispatch`
+  - `latest_dispatch_event`
+- `can_start` is now dispatch-aware:
+  - latest `submitted` dispatch keeps `can_start=false`
+- Export-job read models now explicitly separate:
+  - lifecycle state
+  - dispatch handoff state
+  - attempt state
+- These read-model summaries are still placeholder-only:
+  - not a real scheduler or worker platform
+  - not proof that dispatch handoff is asynchronously executed
+
+## Step 35 state
+- Integration center / API call log skeleton is now available through:
+  - `GET /v1/integration/connectors`
+  - `POST /v1/integration/call-logs`
+  - `GET /v1/integration/call-logs`
+  - `GET /v1/integration/call-logs/{id}`
+  - `POST /v1/integration/call-logs/{id}/advance`
+- Current static connector catalog includes:
+  - `erp_product_stub`
+  - `export_adapter_bridge`
+- Current integration call-log records now expose:
+  - `connector_key`
+  - `operation_key`
+  - `direction`
+  - `resource_type`
+  - `resource_id`
+  - `status`
+  - `progress_hint`
+  - `request_payload`
+  - `response_payload`
+  - `error_message`
+  - `latest_status_at`
+  - `started_at`
+  - `finished_at`
+  - `can_replay`
+- These integration-center semantics are still placeholder-only:
+  - not a real ERP/external API executor
+  - not a callback processor
+  - not a retry scheduler
+  - not proof that a real external request occurred
+
+## Step 37 state
+- Task-asset storage/upload adapter boundary is now available through:
+  - `POST /v1/assets/upload-requests`
+  - `GET /v1/assets/upload-requests/{id}`
+- Task assets now expose additive boundary fields:
+  - `upload_request_id`
+  - `storage_ref_id`
+  - `mime_type`
+  - `file_size`
+  - nested `storage_ref`
+- Task-asset writes now auto-create placeholder `asset_storage_refs`, and may optionally bind a prior upload request.
+- These semantics are still placeholder-only:
+  - not a real upload session
+  - not real NAS/object storage
+  - not signed URL issuance
+  - not proof that file bytes exist
+
+## Step 38 state
+- Integration execution boundary is now available through:
+  - `GET /v1/integration/call-logs/{id}/executions`
+  - `POST /v1/integration/call-logs/{id}/executions`
+  - `POST /v1/integration/call-logs/{id}/retry`
+  - `POST /v1/integration/call-logs/{id}/replay`
+  - `POST /v1/integration/call-logs/{id}/executions/{execution_id}/advance`
+- Integration call-log read models now additionally expose:
+  - `execution_count`
+  - `latest_execution`
+  - `can_retry`
+  - backward-compatible `can_replay`
+  - `retry_count`
+  - `replay_count`
+  - `latest_retry_action`
+  - `latest_replay_action`
+  - `retryability_reason`
+  - `replayability_reason`
+- Current execution records now expose:
+  - `execution_id`
+  - `execution_no`
+  - `connector_key`
+  - `execution_mode`
+  - `action_type`
+  - `trigger_source`
+  - `status`
+  - `latest_status_at`
+  - `started_at`
+  - `finished_at`
+  - `error_message`
+  - `adapter_note`
+  - `retryable`
+- Current execution state contract is:
+  - `prepared`
+  - `dispatched`
+  - `received`
+  - `completed`
+  - `failed`
+  - `cancelled`
+- `POST /v1/integration/call-logs/{id}/advance` remains backward-compatible:
+  - `queued` still requeues the parent call log
+  - `sent|succeeded|failed|cancelled` now reuse execution semantics so call-log lifecycle and execution lifecycle stay layered
+- Retry/replay semantics now remain explicit on that same execution boundary:
+  - `retry` creates a new execution only for retryable failed outcomes
+  - `replay` creates a new execution that re-drives the recorded call-log envelope, including succeeded/cancelled outcomes
+  - retry/replay history currently reuses `integration_call_executions`; no separate action-event stream exists yet
+- These integration-center semantics are still placeholder-only:
+  - not a real ERP / HTTP / SDK executor
+  - not a callback processor
+  - not a retry scheduler
+  - not a message queue or async platform
+
+## Step 39 state
+- Export runner / storage / delivery planning boundary hardening is now visible directly on export-job list/detail responses.
+- Export-job read models now additionally expose:
+  - `adapter_mode`
+  - `storage_mode`
+  - `delivery_mode`
+  - `execution_boundary`
+  - `storage_boundary`
+  - `delivery_boundary`
+- Current layered responsibility is now explicit:
+  - start execution -> `POST /v1/export-jobs/{id}/start`
+  - adapter handoff -> `export_job_dispatches`
+  - one concrete execution try -> `export_job_attempts`
+  - placeholder result generation -> export-job lifecycle advance
+  - placeholder storage representation -> `result_ref`
+  - placeholder delivery handoff -> `claim-download` / `download` / `refresh-download`
+- These boundary fields are still planning-only:
+  - not a real runner platform
+  - not real file generation
+  - not real NAS/object storage
+  - not a real byte-stream download service
+
+## Step 48 state
+- Export dispatch / attempt admission hardening is now visible directly on export-job list/detail responses.
+- Export-job read models now additionally expose:
+  - `can_start_reason`
+  - `can_attempt`
+  - `can_attempt_reason`
+  - `can_dispatch_reason`
+  - `can_redispatch_reason`
+  - `dispatchability_reason`
+  - `attemptability_reason`
+  - `latest_admission_decision`
+- Dispatch records now additionally expose:
+  - `start_admissible`
+  - `start_admission_reason`
+- Attempt records now additionally expose:
+  - `blocks_new_attempt`
+  - `next_attempt_admission_reason`
+- Current admission semantics are now explicit:
+  - dispatch submit is queued-only and blocks while latest dispatch is unresolved `submitted|received`
+  - start/attempt admission now reports whether the job can create a new attempt at this boundary
+  - latest `received` dispatch can be consumed directly by start
+  - when no startable dispatch exists, `/start` may still auto-create one submitted+received placeholder dispatch for backward-compatible initiation
+- These semantics are still admission/read-model hardening only:
+  - not a real scheduler or async runner
+  - not a real queue/lease/heartbeat protocol
+  - not proof of real file generation/storage/download infrastructure
+
+## Step 47 state
+- Integration execution replay / retry hardening is now visible on the existing call-log + execution boundary.
+- Internal placeholder action APIs now exist:
+  - `POST /v1/integration/call-logs/{id}/retry`
+  - `POST /v1/integration/call-logs/{id}/replay`
+- Integration executions now additionally expose:
+  - `action_type`
+- Integration call-log read models now additionally expose:
+  - `retry_count`
+  - `replay_count`
+  - `latest_retry_action`
+  - `latest_replay_action`
+  - `retryability_reason`
+  - `replayability_reason`
+- Current semantics remain explicit:
+  - `retry` = new execution for retryable failed outcomes
+  - `replay` = new execution that re-drives recorded envelope, including succeeded/cancelled outcomes
+  - history relation remains execution-centric; no second retry/replay event stream
+
+## Step 46 state
+- Upload-request placeholder lifecycle hardening is now available through:
+  - `POST /v1/assets/upload-requests/{id}/advance`
+- Upload requests now additionally expose:
+  - `can_bind`
+  - `can_cancel`
+  - `can_expire`
+- Explicit placeholder lifecycle actions now include:
+  - `cancel`
+  - `expire`
+- Current upload semantics remain explicit:
+  - `bound` still comes from task-asset binding paths only
+  - lifecycle control remains placeholder-only; no real byte upload/NAS/object-storage/signed-URL flow
+
+## Step 45 state
+- Cross-center adapter-boundary terminology is now consolidated across export, integration, and storage/upload placeholder layers.
+- Shared terminology is now explicit:
+  - `adapter_mode`
+  - `execution_mode`
+  - `dispatch_mode`
+  - `storage_mode`
+  - `delivery_mode`
+- Shared minimal summaries now exist:
+  - `adapter_ref_summary`
+  - `resource_ref_summary`
+  - `handoff_ref_summary`
+- Current reuse relationship is now explicit:
+  - export jobs keep lifecycle / dispatch / attempt / result / delivery semantics, and now also expose unified `dispatch_mode` plus shared adapter/resource/handoff summaries
+  - integration call logs / executions keep connector + execution semantics, and now also expose unified `adapter_mode` / `dispatch_mode` plus shared adapter/handoff summaries
+  - upload requests and `asset_storage_refs` keep storage-center semantics, and now also expose unified `adapter_mode` / `dispatch_mode` / `storage_mode` plus shared adapter/resource/handoff summaries
+- These semantics are still consolidation-only:
+  - not a real runner or scheduler platform
+  - not real upload/storage infrastructure
+  - not real external execution
+  - not a cross-center table merge
+
+## Step 44 state
+- Cost-governance placeholder boundaries are now consolidated into one stable read-model contract above the Step 43 write boundary.
+- `override_governance_boundary` remains the shared boundary object across:
+  - `GET /v1/tasks/{id}`
+  - `GET /v1/tasks/{id}/detail`
+  - purchase-task `procurement_summary`
+  - `GET /v1/tasks/{id}/cost-overrides`
+- The boundary now additionally exposes:
+  - `governance_boundary_summary`
+  - `approval_placeholder_summary`
+  - `finance_placeholder_summary`
+  - `latest_review_action`
+  - `latest_finance_action`
+  - `latest_boundary_actor`
+  - `latest_boundary_at`
+- Current interpretation rules are now explicit:
+  - rule history = governed rule lineage layer
+  - matched snapshot / prefill trace = task-side historical rule-hit layer
+  - override audit = `cost_override_events`
+  - approval placeholder = `cost_override_reviews`
+  - finance placeholder = `cost_override_finance_flags`
+  - boundary summary = stable read-model aggregation over approval / finance placeholders
+- These semantics are still skeleton-only:
+  - not a real approval workflow
+  - not a real finance / accounting / settlement / invoice system
+  - not a real ERP cost writeback layer
+
+## Step 43 state
+- Task-side override governance now also has explicit approval / finance placeholder boundaries above the dedicated audit layer.
+- Dedicated placeholder persistence now exists through:
+  - `cost_override_reviews`
+  - `cost_override_finance_flags`
+- Task read/detail and `procurement_summary` now additionally expose:
+  - `override_governance_boundary`
+- `GET /v1/tasks/{id}/cost-overrides` now additionally exposes:
+  - event-level `override_governance_boundary`
+  - top-level latest/current `override_governance_boundary`
+- Internal placeholder write actions now exist through:
+  - `POST /v1/tasks/{id}/cost-overrides/{event_id}/review`
+  - `POST /v1/tasks/{id}/cost-overrides/{event_id}/finance-mark`
+- Current interpretation rules are now explicit:
+  - rule history = cost-rule governance / lineage layer
+  - override audit = dedicated `cost_override_events` layer
+  - approval placeholder = `cost_override_reviews`
+  - finance placeholder = `cost_override_finance_flags`
+- These semantics are still skeleton-only:
+  - not a real approval workflow
+  - not a real finance / accounting / reconciliation / settlement / invoice system
+  - not a real ERP cost writeback layer
+
+## Step 42 state
+- Task-side override governance now has a dedicated audit skeleton beneath the existing read-model summary layer.
+- Dedicated persistence now exists through:
+  - `cost_override_events`
+  - `cost_override_event_sequences`
+- `PATCH /v1/tasks/{id}/business-info` now keeps both layers visible:
+  - `task_event_logs` = general task event stream
+  - `cost_override_events` = governance-specific override audit stream
+- New read-only task audit timeline endpoint:
+  - `GET /v1/tasks/{id}/cost-overrides`
+- Task read/detail and `procurement_summary` now additionally expose:
+  - `governance_audit_summary`
+- Current interpretation rules are now explicit:
+  - `override_summary` = stable lightweight consumer summary
+  - `governance_audit_summary` = additive audit-layer metadata
+  - `/v1/tasks/{id}/cost-overrides` = dedicated override apply/update/release timeline
+- These semantics are still skeleton-only:
+  - not a real approval workflow
+  - not a finance ledger
+  - not a real ERP cost writeback layer
+  - not a historical backfill of old task events into dedicated override audit rows
+
+## Step 41 state
+- Cost-governance audit/history read-model hardening is now visible directly on cost-rule, task read/detail, and procurement-summary contracts.
+- Cost-rule list/detail now additionally expose:
+  - `version_chain_summary`
+  - `previous_version`
+  - `next_version`
+  - `supersession_depth`
+- New read-only cost-rule lineage endpoint:
+  - `GET /v1/cost-rules/{id}/history`
+- Task read/detail and `procurement_summary` now additionally expose:
+  - `matched_rule_governance`
+  - `override_summary`
+- Current interpretation rules are now explicit:
+  - `matched_rule_governance.matched_rule` = historical matched snapshot
+  - `matched_rule_governance.current_rule` = latest reachable rule in the same lineage at read time
+  - `override_summary` = lightweight summary derived from task business-info events
+- These semantics are still read-model hardening only:
+  - not a full approval workflow
+  - not a finance system
+  - not a real ERP cost writeback layer
+  - not automatic recomputation of historical tasks
+
+## Step 40 state
+- Cost-rule governance / versioning / override hardening is now visible directly on cost-rule, preview, task-detail, and procurement-summary contracts.
+- Cost-rule list/detail now additionally expose:
+  - `rule_version`
+  - `supersedes_rule_id`
+  - `superseded_by_rule_id`
+  - `governance_note`
+  - `governance_status`
+- Cost preview now additionally exposes:
+  - `matched_rule_id`
+  - `matched_rule_version`
+  - `governance_status`
+- Task business info now additionally persists:
+  - `matched_rule_version`
+  - `prefill_source`
+  - `prefill_at`
+  - `override_actor`
+  - `override_at`
+- Current history policy is explicit:
+  - later rule changes affect future preview / future prefill only
+  - already-persisted task-side cost results are not auto-recomputed
+- These semantics are still skeleton-hardening only:
+  - not a full formula DSL
+  - not a real approval workflow
+  - not a finance system
+  - not a real ERP cost writeback layer
+
+## Contract interpretation rules
+- `ready_for_frontend` means the route is part of the intended V7 frontend/admin integration set now.
+- `internal_placeholder` means implemented but not for frontend integration.
+- `mock_placeholder_only` means temporary prototype route and not stable production contract.
+- Route role metadata is currently enforced at the V7 route boundary through debug actor headers, but this is still not a full auth/org/visibility platform.
+
+## Non-goals still in effect
+- No external authentication provider or SSO integration
+- No real auth/org/data-scope platform beyond current minimal session-token login plus route-level role enforcement
+- No real KPI/BI computation engine
+- No real finance/accounting/reconciliation/settlement/invoice platform
+- No real report-generation platform or analytics engine
+- No real ERP integration beyond stub source
+- No real file upload / NAS integration beyond the current placeholder upload/storage boundary
+- No full second/third-level category tree implementation
+- No full search engine or formula engine
+- Persisted `task_status` is still the legacy operational state carrier; read contracts remain the stable PRD-facing layer
+
+## Recommended next-step direction
+- Keep export real runner / scheduler / storage / delivery infrastructure deferred.
+- Keep Step 49 policy scaffolding additive and stable before introducing any runtime policy engine changes.
+- Keep Step 50 platform-entry scaffolding additive and stable before introducing any real KPI/finance/report systems.
+- Recommended next bounded priorities are:
+  - export runner/scheduler replacement planning (boundary-safe, still no real infra)
+  - integration executor replacement planning (boundary-safe, still no real infra)
+  - policy-runtime integration planning (boundary-safe, still no real auth/org platform)

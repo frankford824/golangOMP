@@ -1,0 +1,219 @@
+{
+  "version": "v1.0-convergence",
+  "defaults": {
+    "menus": ["dashboard"],
+    "pages": ["dashboard_home", "profile_me"],
+    "actions": ["auth.me.read", "profile.view"],
+    "scopes": ["frontend_ready", "self_only"]
+  },
+  "departments": {
+    "人事部": {
+      "code": "hr",
+      "scopes": ["department_hr"]
+    },
+    "设计研发部": {
+      "code": "design_rd",
+      "scopes": ["department_design_rd"]
+    },
+    "定制美工部": {
+      "code": "customization_art",
+      "scopes": ["department_customization_art"],
+      "frontend_access": {
+        "menus": ["customization_management"],
+        "pages": ["customization_jobs", "customization_job_detail"]
+      }
+    },
+    "审核部": {
+      "code": "audit",
+      "scopes": ["department_audit"]
+    },
+    "运营部": {
+      "code": "operations",
+      "scopes": ["department_operations"]
+    },
+    "云仓部": {
+      "code": "cloud_warehouse",
+      "scopes": ["department_cloud_warehouse"]
+    },
+    "未分配": {
+      "code": "unassigned",
+      "scopes": ["department_unassigned"]
+    },
+    "设计部": {
+      "code": "design",
+      "scopes": ["department_design"]
+    },
+    "采购部": {
+      "code": "procurement",
+      "scopes": ["department_procurement"]
+    },
+    "仓储部": {
+      "code": "warehouse",
+      "scopes": ["department_warehouse"]
+    },
+    "烘焙仓储部": {
+      "code": "bakery_warehouse",
+      "scopes": ["department_bakery_warehouse"]
+    }
+  },
+  "roles": {
+    "SuperAdmin": {
+      "menus": ["user_admin", "org_admin", "role_admin", "logs_center"],
+      "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"],
+      "actions": ["user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"],
+      "scopes": ["view_all", "identity_admin", "organization_admin"]
+    },
+    "HRAdmin": {
+      "menus": ["user_admin", "org_admin", "role_admin", "logs_center"],
+      "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"],
+      "actions": ["user.manage", "org.assign", "org.manage", "role.assign", "role.read", "permission_logs.read", "operation_logs.read"],
+      "scopes": ["view_all", "hr_admin"]
+    },
+    "OrgAdmin": {
+      "menus": ["user_admin"],
+      "pages": ["admin_users"],
+      "actions": ["org.manage", "user.org.assign"],
+      "scopes": ["org_admin"]
+    },
+    "RoleAdmin": {
+      "menus": ["user_admin"],
+      "pages": ["admin_users"],
+      "actions": ["role.assign", "role.remove", "role.read"],
+      "scopes": ["role_admin"]
+    },
+    "DepartmentAdmin": {
+      "menus": ["user_admin", "task_center", "task_list"],
+      "pages": ["department_users", "team_users", "task_list", "my_tasks"],
+      "actions": ["department.manage", "department.users.read", "department.users.create", "department.users.move_team", "department.users.disable", "department.users.reset_password", "department.users.assign_from_unassigned", "task.assign.department", "task.reassign.department", "task.view.department", "task.list"],
+      "scopes": ["department_scope"]
+    },
+    "TeamLead": {
+      "menus": [],
+      "pages": ["team_users"],
+      "actions": ["team.users.read"],
+      "scopes": ["team_scope"]
+    },
+    "DesignDirector": {
+      "menus": ["design_workspace", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin"],
+      "pages": ["design_workspace", "department_users", "task_assets", "asset_detail", "assets_index", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"],
+      "actions": ["design.review.read", "department.users.read", "task.list"],
+      "scopes": ["design_department_scope"]
+    },
+    "DesignReviewer": {
+      "menus": ["design_workspace"],
+      "pages": ["design_workspace", "audit_workspace"],
+      "actions": ["design.review", "task.audit.review"],
+      "scopes": ["design_review_scope"]
+    },
+    "Member": {
+      "menus": ["dashboard"],
+      "pages": ["dashboard"],
+      "actions": ["profile.view"],
+      "scopes": ["self_only"]
+    },
+    "Admin": {
+      "menus": ["user_admin", "logs_center"],
+      "pages": ["admin_users", "admin_permission_logs", "admin_operation_logs"],
+      "actions": ["user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"],
+      "scopes": ["view_all", "identity_admin"]
+    },
+    "Ops": {
+      "menus": ["task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "resource_management", "customization_management"],
+      "pages": ["task_board", "task_list", "task_create", "assets_index", "task_assets", "asset_detail", "customization_jobs", "customization_job_detail"],
+      "actions": ["task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"],
+      "scopes": ["workflow_ops"]
+    },
+    "Designer": {
+      "menus": ["design_workspace", "resource_management"],
+      "pages": ["design_workspace", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail"],
+      "actions": ["task.design_submit", "task.asset_upload", "task.list"],
+      "scopes": ["design_workspace"]
+    },
+    "CustomizationOperator": {
+      "menus": ["design_workspace", "resource_management"],
+      "pages": ["design_workspace", "my_tasks", "task_assets", "asset_detail", "assets_index"],
+      "actions": ["task.customization.submit", "task.customization.transfer", "task.asset_upload", "task.list", "warehouse_lane_filter"],
+      "scopes": ["customization_workspace"]
+    },
+    "Audit_A": {
+      "menus": ["audit_queue", "task_board", "task_list", "resource_management"],
+      "pages": ["task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"],
+      "actions": ["task.audit.claim", "task.audit.review", "task.list"],
+      "scopes": ["audit_workspace"]
+    },
+    "Audit_B": {
+      "menus": ["audit_queue", "task_board", "task_list", "resource_management"],
+      "pages": ["task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"],
+      "actions": ["task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"],
+      "scopes": ["audit_workspace"]
+    },
+    "Warehouse": {
+      "menus": ["warehouse_receive", "warehouse_processing", "resource_management", "export_center"],
+      "pages": ["warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail"],
+      "actions": ["warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"],
+      "scopes": ["warehouse_workspace"]
+    },
+    "Outsource": {
+      "menus": ["task_list"],
+      "pages": ["outsource_orders", "task_list"],
+      "actions": ["outsource.manage", "task.list"],
+      "scopes": ["outsource_workspace"]
+    },
+    "CustomizationReviewer": {
+      "menus": ["customization_management", "audit_queue", "resource_management"],
+      "pages": ["customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "audit_workspace"],
+      "actions": ["task.customization.review", "task.customization.effect_review", "task.list", "warehouse_lane_filter"],
+      "scopes": ["customization_review_scope"]
+    },
+    "ERP": {
+      "menus": ["integration_center"],
+      "pages": ["erp_sync_console"],
+      "actions": ["erp.sync"],
+      "scopes": ["erp_internal"]
+    }
+  },
+  "identities": {
+    "super_admin": {
+      "menus": ["user_admin", "org_admin", "role_admin", "logs_center"],
+      "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"],
+      "actions": ["user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"],
+      "scopes": ["view_all", "identity_admin", "organization_admin"]
+    },
+    "hr_admin": {
+      "menus": ["user_admin", "org_admin", "role_admin", "logs_center"],
+      "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"],
+      "actions": ["user.manage", "org.assign", "org.manage", "role.assign", "role.read", "permission_logs.read", "operation_logs.read"],
+      "scopes": ["view_all", "hr_admin"]
+    },
+    "department_admin": {
+      "menus": ["user_admin", "task_center", "task_list"],
+      "pages": ["department_users", "team_users", "task_list", "my_tasks"],
+      "actions": ["department.manage", "department.users.read", "department.users.create", "department.users.move_team", "department.users.disable", "department.users.reset_password", "department.users.assign_from_unassigned", "task.assign.department", "task.reassign.department", "task.view.department", "task.list"],
+      "scopes": ["department_scope"]
+    },
+    "member": {
+      "actions": ["profile.view"],
+      "scopes": ["self_only"]
+    }
+  },
+  "menu_catalog": {
+    "dashboard": { "label": "主页", "icon": "home", "sort_order": 10 },
+    "erp_query": { "label": "ERP查询", "icon": "database", "sort_order": 20 },
+    "user_admin": { "label": "用户管理", "icon": "users", "sort_order": 30 },
+    "org_admin": { "label": "组织配置", "icon": "building", "sort_order": 40 },
+    "role_admin": { "label": "角色管理", "icon": "shield", "sort_order": 50 },
+    "logs_center": { "label": "权限日志", "icon": "history", "sort_order": 60 },
+    "design_workspace": { "label": "设计工作台", "icon": "palette", "sort_order": 70 },
+    "task_list": { "label": "任务列表", "icon": "list", "sort_order": 80 },
+    "task_board": { "label": "任务看板", "icon": "kanban", "sort_order": 90 },
+    "task_create": { "label": "创建任务", "icon": "plus-square", "sort_order": 100 },
+    "business_info": { "label": "业务信息", "icon": "file-text", "sort_order": 110 },
+    "warehouse_receive": { "label": "仓库接收", "icon": "package", "sort_order": 120 },
+    "warehouse_processing": { "label": "仓库处理", "icon": "archive", "sort_order": 130 },
+    "export_center": { "label": "导出中心", "icon": "download", "sort_order": 140 },
+    "integration_center": { "label": "集成中心", "icon": "plug", "sort_order": 150 },
+    "audit_queue": { "label": "审核队列", "icon": "check-square", "sort_order": 160 },
+    "resource_management": { "label": "资源管理", "icon": "folder", "sort_order": 170 },
+    "customization_management": { "label": "定制管理", "icon": "sliders", "sort_order": 180 }
+  }
+}

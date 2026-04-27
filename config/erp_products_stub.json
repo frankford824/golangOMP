@@ -1,0 +1,26 @@
+[
+  {
+    "erp_product_id": "ERP-10001",
+    "sku_code": "SKU-ERP-10001",
+    "product_name": "ERP Stub Product A",
+    "category": "poster",
+    "spec_json": {
+      "material": "paper",
+      "size": "A3"
+    },
+    "status": "active",
+    "source_updated_at": "2026-03-09T00:00:00Z"
+  },
+  {
+    "erp_product_id": "ERP-10002",
+    "sku_code": "SKU-ERP-10002",
+    "product_name": "ERP Stub Product B",
+    "category": "sticker",
+    "spec_json": {
+      "material": "vinyl",
+      "shape": "round"
+    },
+    "status": "active",
+    "source_updated_at": "2026-03-09T00:05:00Z"
+  }
+]

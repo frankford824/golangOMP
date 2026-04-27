@@ -1,0 +1,34 @@
+[
+  {
+    "category_code": "KT_STANDARD",
+    "search_entry_code": "KT_STANDARD",
+    "erp_match_type": "product_family",
+    "erp_match_value": "board",
+    "is_primary": true,
+    "priority": 100,
+    "source": "phase_022_sample",
+    "remark": "一级搜索入口示例：先按总分类编码收敛，再预留后续二级/三级条件。"
+  },
+  {
+    "category_code": "A4_PRINT",
+    "search_entry_code": "A4_PRINT",
+    "erp_match_type": "keyword",
+    "erp_match_value": "A4",
+    "secondary_condition_key": "print_side",
+    "secondary_condition_value": "single|double",
+    "is_primary": true,
+    "priority": 100,
+    "source": "phase_022_sample",
+    "remark": "预留二级搜索条件示例。"
+  },
+  {
+    "category_code": "HBJ",
+    "search_entry_code": "HBJ",
+    "erp_match_type": "external_id",
+    "erp_match_value": "HBJ",
+    "is_primary": true,
+    "priority": 100,
+    "source": "phase_022_sample",
+    "remark": "coded-style 总分类编码直接作为一级 ERP 搜索入口。"
+  }
+]

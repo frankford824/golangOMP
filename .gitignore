@@ -1,0 +1,82 @@
+# Local secrets and environment files
+*.env
+*.local.env
+.env
+.env.*
+!.env.example
+!.env.*.example
+.vscode/deploy.local.env
+.deploy/
+config/auth_identity.json
+config/*.local.json
+
+# Editor and assistant local state
+.claude/settings.local.json
+.cursor/
+
+# Build outputs and binaries
+dist/
+bin/
+*.exe
+*.test
+*.test.exe
+*.out
+*.pyc
+__pycache__/
+/api
+/api.exe
+/ecommerce-api
+/ecommerce-api.exe
+/erp_bridge
+/erp_bridge.exe
+/erp_bridge_sync
+/erp_bridge_sync.exe
+/run-cleanup
+/run-cleanup.exe
+/server
+/server.exe
+/mysql.test.exe
+/handler*.test.exe
+/service*.test.exe
+
+# Go and Codex caches
+.codex-gocache/
+.codex-gotmp/
+.gomodcache/
+.tmp/
+.tmp-*/
+.tmp_*/
+
+# Runtime, verification, and scratch artifacts
+tmp/
+*.log
+*.pid
+*.token
+*token*.txt
+service-test.out
+
+# Dumps, archives, and generated packages
+*.sql.gz
+*.tar.gz
+*.zip
+*.bak
+
+# Local scratch files accidentally created during SSH/heredoc experiments
+/hello-ssh-stdin
+/{s}*
+/"
+/p1hRH.png
+
+# One-off live probing scripts with historical credentials.
+/blackbox_test.py
+/blackbox_test2.py
+/check_prod.py
+/verify_bridge.py
+/verify_bridge2.py
+/deploy_bridge_fix.py
+/step87_migration_compat.sh
+/step87_verify.sql
+/scripts/iteration105_live_verify.py
+/scripts/iteration106_org_patch_verify.py
+/scripts/smoke/roundj_iter2.py
+/scripts/__pycache__/
