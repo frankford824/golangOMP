@@ -1,6 +1,7 @@
-> Revision: V1.2-D drift triage P3 (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2-D P3)
+> Revision: V1.2-D drift triage P4 (2026-04-26)
+> Source: docs/api/openapi.yaml (post V1.2-D P4)
 > `WorkflowUser` response fields follow `domain.User`: includes `jst_u_id`, `managed_departments`, `managed_teams`; response no longer documents `avatar`.
+> `/v1/admin/jst-users` uses the JST ERP-style payload under `data.{datas,count,current_page,page_size,pages}`.
 
 > Revision: V1.2 authority purge + OpenAPI GC (2026-04-26)
 > Source: docs/api/openapi.yaml (post V1.2 path-closure GC)
@@ -1113,9 +1114,28 @@ curl -X POST https://api.example.com/v1/server-logs/clean \
 请求体: 无请求体。
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `200 application/json`
 
-无 JSON 响应体或响应体由文件流承载。
+```json
+{
+  "data": {
+    "current_page": "1",
+    "page_size": "50",
+    "count": "123",
+    "pages": "3",
+    "datas": [
+      {
+        "u_id": 123,
+        "name": "string"
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | JSTUserListResponse | 否 | ERP-style JST getcompanyusers response |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |

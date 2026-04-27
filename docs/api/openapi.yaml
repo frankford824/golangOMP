@@ -88,6 +88,60 @@ components:
     EmploymentType:
       type: string
       enum: [full_time, part_time]
+    JSTUser:
+      type: object
+      description: "JST getcompanyusers item. Source: domain.JSTUser."
+      properties:
+        u_id:
+          type: integer
+        name:
+          type: string
+        loginId:
+          type: string
+        enabled:
+          type: boolean
+        created:
+          type: string
+        modified:
+          type: string
+        last_login_time:
+          type: string
+        pwd_modified:
+          type: string
+        remark:
+          type: string
+        role_ids:
+          type: string
+        roles:
+          type: string
+        ug_ids:
+          type: string
+        ug_names:
+          type: array
+          items:
+            type: string
+        creator:
+          type: string
+        modifier:
+          type: string
+        empId:
+          type: string
+    JSTUserListResponse:
+      type: object
+      description: "ERP-style JST getcompanyusers response. Source: domain.JSTUserListResponse."
+      properties:
+        current_page:
+          type: string
+        page_size:
+          type: string
+        count:
+          type: string
+        pages:
+          type: string
+        datas:
+          type: array
+          items:
+            $ref: '#/components/schemas/JSTUser'
     WorkflowUser:
       type: object
       properties:
@@ -7493,6 +7547,13 @@ paths:
       responses:
         '200':
           description: JST user list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JSTUserListResponse'
         '500':
           description: Bridge or upstream unavailable
   /v1/admin/jst-users:
@@ -7511,6 +7572,13 @@ paths:
       responses:
         '200':
           description: JST user list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JSTUserListResponse'
   /v1/admin/jst-users/import-preview:
     post:
       summary: Preview JST user import (Admin)
