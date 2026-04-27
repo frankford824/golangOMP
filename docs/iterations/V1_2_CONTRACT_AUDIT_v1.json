@@ -1,0 +1,3355 @@
+{
+  "version": "v1.2",
+  "generated_at": "2026-04-27T04:56:49Z",
+  "openapi_sha256": "80730ec3d272e4124ab95244feb0c1daf499d4c0a032f47b70179cdd4189488f",
+  "transport_sha256": "9a6d194b54aa8d49dbff3d10f6d91283e07d68f21e117d2ffb9c2f99a72eb396",
+  "summary": {
+    "total_paths": 228,
+    "clean": 228,
+    "drift": 0,
+    "missing_in_openapi": 0,
+    "missing_in_code": 0
+  },
+  "paths": [
+    {
+      "method": "GET",
+      "path": "/internal/jst/ping",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/jst/sync/inc",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/access-rules",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/jst-users",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/jst-users/import",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/jst-users/import-preview",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/agent/ack_job",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/agent/heartbeat",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/agent/pull_job",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/agent/sync",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/files/{path}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/search",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "page",
+        "size",
+        "total"
+      ],
+      "openapi_fields": [
+        "data",
+        "page",
+        "size",
+        "total"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/upload-requests",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets/upload-requests",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/upload-requests/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets/upload-requests/{id}/advance",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets/upload-sessions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/upload-sessions/{session_id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets/upload-sessions/{session_id}/cancel",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets/upload-sessions/{session_id}/complete",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets/{asset_id}/archive",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assets/{asset_id}/restore",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/{asset_id}/versions/{version_id}/download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/assets/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/{id}/download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assets/{id}/preview",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/audit",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/audit-logs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/me",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/auth/password",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "message"
+      ],
+      "openapi_fields": [
+        "message"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/register",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/register-options",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/categories",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/categories",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/categories/search",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/categories/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/categories/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/category-mappings",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/category-mappings",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/category-mappings/search",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/category-mappings/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/category-mappings/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/code-rules",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/code-rules/generate-sku",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/code-rules/{id}/preview",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cost-rules",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cost-rules",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cost-rules/preview",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cost-rules/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/cost-rules/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cost-rules/{id}/history",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/customization-jobs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/customization-jobs/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/customization-jobs/{id}/effect-preview",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/customization-jobs/{id}/effect-review",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/customization-jobs/{id}/production-transfer",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/departments/{id}/org-move-requests",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/design-sources/search",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "page",
+        "size",
+        "total"
+      ],
+      "openapi_fields": [
+        "data",
+        "page",
+        "size",
+        "total"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/categories",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/erp/inventory/virtual-qty",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/products",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "normalized_filters",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "normalized_filters",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/products/by-code",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/erp/products/shelve/batch",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/erp/products/style/update",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/erp/products/unshelve/batch",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/erp/products/upsert",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/products/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/sync-logs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/sync-logs/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/users",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/erp/warehouses",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export-jobs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export-jobs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export-jobs/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export-jobs/{id}/advance",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export-jobs/{id}/attempts",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export-jobs/{id}/claim-download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export-jobs/{id}/dispatches",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export-jobs/{id}/dispatches",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export-jobs/{id}/dispatches/{dispatch_id}/advance",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export-jobs/{id}/download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export-jobs/{id}/events",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export-jobs/{id}/refresh-download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export-jobs/{id}/start",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export-templates",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/incidents",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/integration/call-logs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/integration/call-logs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/integration/call-logs/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/integration/call-logs/{id}/advance",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/integration/call-logs/{id}/executions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/integration/call-logs/{id}/executions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/integration/call-logs/{id}/executions/{execution_id}/advance",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/integration/call-logs/{id}/replay",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/integration/call-logs/{id}/retry",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/integration/connectors",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/change-password",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/notifications",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "next_cursor"
+      ],
+      "openapi_fields": [
+        "data",
+        "next_cursor"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/notifications/read-all",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/notifications/unread-count",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "unread_count"
+      ],
+      "openapi_fields": [
+        "unread_count"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/notifications/{id}/read",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/org",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/task-drafts",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "next_cursor"
+      ],
+      "openapi_fields": [
+        "data",
+        "next_cursor"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/operation-logs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/org-move-requests",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/org-move-requests/{id}/approve",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/org-move-requests/{id}/reject",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/org/departments",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/org/departments/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/org/options",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/org/teams",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/org/teams/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/outsource-orders",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/permission-logs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/policies",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/products/search",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/products/sync/run",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/products/sync/status",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/products/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/l1/cards",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/l1/module-dwell",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/l1/throughput",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/roles",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/search",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "query",
+        "results"
+      ],
+      "openapi_fields": [
+        "query",
+        "results"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/server-logs",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/server-logs/clean",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "deleted"
+      ],
+      "openapi_fields": [
+        "deleted"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sku",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sku/list",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sku/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sku/{id}/sync_status",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/task-board/queues",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/task-board/summary",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/task-create/asset-center/upload-sessions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/task-create/asset-center/upload-sessions/{session_id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/task-create/asset-center/upload-sessions/{session_id}/abort",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/task-create/asset-center/upload-sessions/{session_id}/complete",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/task-drafts",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/task-drafts/{draft_id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/task-drafts/{draft_id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/batch-create/parse-excel",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/batch-create/template.xlsx",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/batch/assign",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/batch/remind",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/pool",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/prepare-product-codes",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/reference-upload",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/asset-center/assets",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/asset-center/assets/{asset_id}/download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/asset-center/assets/{asset_id}/versions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/asset-center/upload-sessions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/asset-center/upload-sessions/multipart",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/asset-center/upload-sessions/small",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/complete",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/assets",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/assets/mock-upload",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/assets/timeline",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/assets/upload",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/assets/upload-sessions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/assets/upload-sessions/{session_id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/assets/upload-sessions/{session_id}/abort",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/assets/upload-sessions/{session_id}/complete",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/assets/{asset_id}/download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/assets/{asset_id}/versions",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/assets/{asset_id}/versions/{version_id}/download",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/assign",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/audit/approve",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/audit/claim",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/audit/handover",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/audit/handovers",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/audit/reject",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/audit/takeover",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/audit/transfer",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/tasks/{id}/business-info",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/cancel",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/close",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/cost-info",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "cost_price",
+        "cost_rule_id",
+        "cost_rule_name",
+        "cost_rule_source",
+        "estimated_cost",
+        "manual_cost_override",
+        "manual_cost_override_reason",
+        "matched_rule_version",
+        "override_actor",
+        "override_at",
+        "prefill_at",
+        "prefill_source",
+        "requires_manual_review"
+      ],
+      "openapi_fields": [
+        "cost_price",
+        "cost_rule_id",
+        "cost_rule_name",
+        "cost_rule_source",
+        "estimated_cost",
+        "manual_cost_override",
+        "manual_cost_override_reason",
+        "matched_rule_version",
+        "override_actor",
+        "override_at",
+        "prefill_at",
+        "prefill_source",
+        "requires_manual_review"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/tasks/{id}/cost-info",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/cost-overrides",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/cost-overrides/{event_id}/finance-mark",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/cost-overrides/{event_id}/review",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/cost-quote/preview",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/customization/review",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/detail",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/events",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/filing-status",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/filing/retry",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/modules/{module_key}/actions/{action}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/modules/{module_key}/claim",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/modules/{module_key}/pool-reassign",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/modules/{module_key}/reassign",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/outsource",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/tasks/{id}/procurement",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/procurement/advance",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks/{id}/product-info",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "category",
+        "category_code",
+        "category_id",
+        "category_name",
+        "material",
+        "note",
+        "product_id",
+        "product_name_snapshot",
+        "product_selection",
+        "reference_file_refs",
+        "reference_link",
+        "size_text",
+        "sku_code",
+        "spec_text"
+      ],
+      "openapi_fields": [
+        "category",
+        "category_code",
+        "category_id",
+        "category_name",
+        "material",
+        "note",
+        "product_id",
+        "product_name_snapshot",
+        "product_selection",
+        "reference_file_refs",
+        "reference_link",
+        "size_text",
+        "sku_code",
+        "spec_text"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/tasks/{id}/product-info",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/submit-design",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/warehouse/complete",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/warehouse/prepare",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/warehouse/receive",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{id}/warehouse/reject",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/users",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/users",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/users/designers",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data",
+        "pagination"
+      ],
+      "openapi_fields": [
+        "data",
+        "pagination"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/users/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/users/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/users/{id}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/users/{id}/activate",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/users/{id}/deactivate",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/users/{id}/password",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/users/{id}/roles",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/users/{id}/roles",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/users/{id}/roles/{role}",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": [
+        "data"
+      ],
+      "openapi_fields": [
+        "data"
+      ],
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/warehouse/receipts",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workbench/preferences",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/workbench/preferences",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    },
+    {
+      "method": "GET",
+      "path": "/ws/v1",
+      "handler": "transport/http.go",
+      "response_type": "openapi.response.200",
+      "code_fields": null,
+      "openapi_fields": null,
+      "only_in_code": null,
+      "only_in_openapi": null,
+      "type_mismatch": null,
+      "verdict": "clean"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+openapi: 3.0.3
+paths:
+  /v1/tasks/{id}:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+components:
+  schemas: {}

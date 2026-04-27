@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "hooks": {
+    "before_shell_exec": {
+      "rules": [
+        {
+          "match_command_regex": "^git\\s+commit",
+          "action": "run",
+          "command": "scripts/contract-guard.ps1",
+          "block_on_failure": true,
+          "timeout_ms": 60000
+        }
+      ]
+    }
+  }
+}
