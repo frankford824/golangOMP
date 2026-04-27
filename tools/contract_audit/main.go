@@ -97,6 +97,9 @@ type OpenAPIDoc struct {
 type ResponseShape struct {
 	Type        string
 	ExtraFields []string
+	Fields      []string
+	Direct      bool
+	KnownGap    string
 }
 
 func main() {
@@ -218,17 +221,28 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 				var missing []string
 				var fieldSets [][]string
 				for _, shape := range shapes {
-					fields := append([]string{}, structIndex.Fields(shape.Type)...)
+					if shape.KnownGap != "" {
+						hVerdict, reason = "known_gap", shape.KnownGap
+						break
+					}
+					var fields []string
+					if shape.Direct {
+						fields = append(fields, shape.Fields...)
+					} else {
+						fields = append(fields, structIndex.Fields(shape.Type)...)
+					}
 					fields = append(fields, shape.ExtraFields...)
 					fields = normalizeFields(fields)
-					if len(fields) == 0 {
+					if len(fields) == 0 && !shape.Direct {
 						missing = append(missing, shape.Type)
 						continue
 					}
 					fieldSets = append(fieldSets, fields)
 					codeFields = append(codeFields, fields...)
 				}
-				if len(fieldSets) == 0 {
+				if hVerdict != "" {
+					// shape-level known gaps are handled by the outer verdict switch.
+				} else if len(fieldSets) == 0 {
 					if len(missing) == 0 {
 						missing = append(missing, pr.ResponseType)
 					}
@@ -256,9 +270,15 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 			report.Summary.MissingInOpenAPI++
 			report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Class: "mounted_not_documented"})
 		case hVerdict != "":
-			pr.Verdict = hVerdict
-			report.Summary.Unmapped++
-			report.Unmapped = append(report.Unmapped, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Reason: reason})
+			if hVerdict == "known_gap" {
+				pr.Verdict = "known_gap"
+				report.Summary.KnownGap++
+				report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Class: reason})
+			} else {
+				pr.Verdict = hVerdict
+				report.Summary.Unmapped++
+				report.Unmapped = append(report.Unmapped, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Reason: reason})
+			}
 		default:
 			pr.OnlyInCode, pr.OnlyInOpenAPI = DiffFields(pr.CodeFields, pr.OpenAPIFields)
 			pr.Verdict = decideVerdict(pr.CodeFields, pr.OpenAPIFields, pr.OnlyInCode, pr.OnlyInOpenAPI)
@@ -586,10 +606,10 @@ func BuildStructFieldTypeIndex(roots []string) (map[string]string, error) {
 
 func ResolveHandlerResponseShapes(idx HandlerIndex, route Route) (shapes []ResponseShape, verdict, reason string) {
 	if route.HandlerExpr == "" {
-		return nil, "unmapped_handler_dynamic_payload", "route handler is inline or middleware slice"
+		return nil, "known_gap", "inline_or_middleware_route"
 	}
 	if route.HandlerExpr == "v1R1ReservedHandler" {
-		return nil, "unmapped_handler_dynamic_payload", "reserved route handler"
+		return nil, "known_gap", "reserved_route"
 	}
 	parts := strings.Split(route.HandlerExpr, ".")
 	if len(parts) != 2 || route.HandlerType == "" {
@@ -602,10 +622,20 @@ func ResolveHandlerResponseShapes(idx HandlerIndex, route Route) (shapes []Respo
 	}
 	responses := respondExprs(fn)
 	if len(responses) == 0 {
+		if hasStreamResponse(fn) {
+			return nil, "known_gap", "stream_response"
+		}
+		if hasDelegatedResponse(fn) {
+			return nil, "known_gap", "delegated_handler_response"
+		}
 		return nil, "unmapped_handler", "no respondOK/respondCreated/respondOKWithPagination call"
 	}
 	local := localTypes(fn, idx)
 	for _, resp := range responses {
+		if resp.Direct {
+			shapes = append(shapes, ResponseShape{Fields: resp.Fields, ExtraFields: resp.ExtraFields, Direct: true, KnownGap: resp.KnownGap})
+			continue
+		}
 		typ := inferExprType(resp.Expr, local, idx)
 		if typ == "map" || typ == "gin.H" {
 			return nil, "unmapped_handler_dynamic_payload", "dynamic payload"
@@ -667,8 +697,10 @@ func responseFieldsExpanded(op map[string]any, components map[string]any) []stri
 		if dp, ok := data["properties"].(map[string]any); ok {
 			fields = append(fields, sortedKeys(dp)...)
 		}
-		if _, ok := props["pagination"]; ok {
-			fields = append(fields, "pagination")
+		for key := range props {
+			if key != "data" {
+				fields = append(fields, key)
+			}
 		}
 		if len(fields) > 0 {
 			return normalizeFields(fields)
@@ -817,30 +849,148 @@ func indexFunctions(idx HandlerIndex, f *ast.File, path string) {
 }
 
 type respondExpr struct {
-	Expr       ast.Expr
-	Pagination bool
+	Expr        ast.Expr
+	Pagination  bool
+	Fields      []string
+	ExtraFields []string
+	Direct      bool
+	KnownGap    string
 }
 
 func respondExprs(fn *ast.FuncDecl) []respondExpr {
 	var found []respondExpr
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) < 2 {
-			return true
-		}
-		id, ok := call.Fun.(*ast.Ident)
 		if !ok {
 			return true
 		}
-		switch id.Name {
-		case "respondOK", "respondCreated":
-			found = append(found, respondExpr{Expr: call.Args[1]})
-		case "respondOKWithPagination":
-			found = append(found, respondExpr{Expr: call.Args[1], Pagination: true})
+		if id, ok := call.Fun.(*ast.Ident); ok && len(call.Args) >= 2 {
+			switch id.Name {
+			case "respondOK", "respondCreated":
+				found = append(found, responseFromPayload(call.Args[1]))
+			case "respondOKWithPagination":
+				resp := responseFromPayload(call.Args[1])
+				resp.Pagination = true
+				found = append(found, resp)
+			}
+			return true
+		}
+		if recv, name, ok := selectorName(call.Fun); ok && recv == "c" {
+			switch name {
+			case "JSON":
+				if len(call.Args) >= 2 {
+					found = append(found, responseFromJSONPayload(call.Args[1]))
+				}
+			case "Status":
+				found = append(found, respondExpr{Direct: true})
+			}
 		}
 		return true
 	})
 	return found
+}
+
+func responseFromPayload(expr ast.Expr) respondExpr {
+	if fields, ok := ginHFields(expr); ok {
+		return respondExpr{Fields: fields, Direct: true, KnownGap: "dynamic_payload_documented"}
+	}
+	return respondExpr{Expr: expr}
+}
+
+func hasStreamResponse(fn *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		recv, name, ok := selectorName(call.Fun)
+		if ok && recv == "c" {
+			switch name {
+			case "File", "FileAttachment", "Data", "DataFromReader", "Stream":
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func hasDelegatedResponse(fn *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name := methodName(call.Fun)
+		switch name {
+		case "createUploadSession", "createUploadSessionWithRequest", "CancelUploadSession", "moduleAdminAction":
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func responseFromJSONPayload(expr ast.Expr) respondExpr {
+	fields, ok := ginHKeyValues(expr)
+	if !ok {
+		return responseFromPayload(expr)
+	}
+	var resp respondExpr
+	for key, value := range fields {
+		if key == "data" {
+			resp = responseFromPayload(value)
+			continue
+		}
+		resp.ExtraFields = append(resp.ExtraFields, key)
+	}
+	if resp.Expr == nil && !resp.Direct {
+		resp.Fields = sortedExprKeys(fields)
+		resp.Direct = true
+		resp.KnownGap = "dynamic_payload_documented"
+	}
+	return resp
+}
+
+func ginHFields(expr ast.Expr) ([]string, bool) {
+	values, ok := ginHKeyValues(expr)
+	if !ok {
+		return nil, false
+	}
+	return sortedExprKeys(values), true
+}
+
+func ginHKeyValues(expr ast.Expr) (map[string]ast.Expr, bool) {
+	cl, ok := expr.(*ast.CompositeLit)
+	if !ok || baseTypeName(resultType(cl.Type)) != "H" && resultType(cl.Type) != "map" {
+		return nil, false
+	}
+	out := map[string]ast.Expr{}
+	for _, elt := range cl.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := stringLiteral(kv.Key)
+		if !ok {
+			continue
+		}
+		out[key] = kv.Value
+	}
+	return out, true
+}
+
+func sortedExprKeys(m map[string]ast.Expr) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func localTypes(fn *ast.FuncDecl, idx HandlerIndex) map[string]string {
@@ -971,6 +1121,28 @@ func transportHandlerTypes(f *ast.File) map[string]string {
 				out[name.Name] = typ
 			}
 		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+			for i, rhs := range as.Rhs {
+				call, ok := rhs.(*ast.CallExpr)
+				if !ok {
+					continue
+				}
+				method := methodName(call.Fun)
+				if !strings.HasPrefix(method, "New") || !strings.HasSuffix(method, "Handler") {
+					continue
+				}
+				if i < len(as.Lhs) {
+					if id, ok := as.Lhs[i].(*ast.Ident); ok {
+						out[id.Name] = strings.TrimPrefix(method, "New")
+					}
+				}
+			}
+			return true
+		})
 	}
 	return out
 }
