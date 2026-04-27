@@ -1,0 +1,24 @@
+openapi: 3.0.3
+paths:
+  /v1/items:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Item"
+                  pagination:
+                    type: object
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        id:
+          type: integer

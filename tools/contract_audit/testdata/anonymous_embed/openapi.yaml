@@ -1,0 +1,26 @@
+openapi: 3.0.3
+paths:
+  /v1/tasks/{id}:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/TaskReadModel"
+components:
+  schemas:
+    TaskReadModel:
+      type: object
+      properties:
+        id:
+          type: integer
+        reference_file_refs:
+          type: array
+          items:
+            type: object
+        status:
+          type: string

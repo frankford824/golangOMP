@@ -84,11 +84,17 @@ type HandlerIndex struct {
 type StructIndex struct {
 	FieldsByType map[string][]string
 	FileByType   map[string]string
+	RawByType    map[string]*ast.StructType
 }
 
 type OpenAPIDoc struct {
 	Components map[string]any
 	Operations []Operation
+}
+
+type ResponseShape struct {
+	Type        string
+	ExtraFields []string
 }
 
 func main() {
@@ -189,18 +195,34 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 		op, hasOp := documented[key]
 		pr := PathReport{Method: method, Path: openapiToGinPath(openapiPathKey), OpenAPIPath: openapiPathKey}
 		var codeFields, openapiFields []string
-		var responseType, hVerdict, reason string
+		var hVerdict, reason string
 		if hasRoute {
 			pr.Path = route.Path
 			pr.Handler = route.Mount + " " + displayHandler(route)
-			responseType, hVerdict, reason = ResolveHandlerResponseType(handlerIndex, route)
-			pr.ResponseType = responseType
+			shapes, hv, hr := ResolveHandlerResponseShapes(handlerIndex, route)
+			hVerdict, reason = hv, hr
+			pr.ResponseType = displayResponseShapes(shapes)
 			if hVerdict == "" {
-				fields := structIndex.Fields(responseType)
-				if len(fields) == 0 {
-					hVerdict, reason = "unmapped_handler", "response struct not found: "+responseType
-				} else {
-					codeFields = fields
+				var missing []string
+				var fieldSets [][]string
+				for _, shape := range shapes {
+					fields := append([]string{}, structIndex.Fields(shape.Type)...)
+					fields = append(fields, shape.ExtraFields...)
+					fields = normalizeFields(fields)
+					if len(fields) == 0 {
+						missing = append(missing, shape.Type)
+						continue
+					}
+					fieldSets = append(fieldSets, fields)
+					codeFields = append(codeFields, fields...)
+				}
+				if len(fieldSets) == 0 {
+					if len(missing) == 0 {
+						missing = append(missing, pr.ResponseType)
+					}
+					hVerdict, reason = "unmapped_handler", "response struct not found: "+strings.Join(missing, ",")
+				} else if inconsistentFieldSets(fieldSets) {
+					hVerdict, reason = "multi_exit_inconsistent", "multiple response exits expose different fields: "+pr.ResponseType
 				}
 			}
 		}
@@ -368,7 +390,7 @@ func BuildHandlerIndex(dir string) (HandlerIndex, error) {
 }
 
 func BuildStructIndex(roots []string) (StructIndex, error) {
-	idx := StructIndex{FieldsByType: map[string][]string{}, FileByType: map[string]string{}}
+	idx := StructIndex{FieldsByType: map[string][]string{}, FileByType: map[string]string{}, RawByType: map[string]*ast.StructType{}}
 	for _, root := range roots {
 		if root == "" {
 			continue
@@ -399,8 +421,7 @@ func BuildStructIndex(roots []string) (StructIndex, error) {
 						continue
 					}
 					if st, ok := ts.Type.(*ast.StructType); ok {
-						fields := structFields(st)
-						idx.FieldsByType[ts.Name.Name] = fields
+						idx.RawByType[ts.Name.Name] = st
 						idx.FileByType[ts.Name.Name] = path
 					}
 				}
@@ -410,6 +431,9 @@ func BuildStructIndex(roots []string) (StructIndex, error) {
 		if err != nil {
 			return idx, err
 		}
+	}
+	for name, st := range idx.RawByType {
+		idx.FieldsByType[name] = idx.structFields(st, map[string]bool{name: true})
 	}
 	return idx, nil
 }
@@ -451,35 +475,42 @@ func BuildReturnTypeIndex(roots []string) (map[string]string, error) {
 	return out, nil
 }
 
-func ResolveHandlerResponseType(idx HandlerIndex, route Route) (typeName, verdict, reason string) {
+func ResolveHandlerResponseShapes(idx HandlerIndex, route Route) (shapes []ResponseShape, verdict, reason string) {
 	if route.HandlerExpr == "" {
-		return "", "unmapped_handler_dynamic_payload", "route handler is inline or middleware slice"
+		return nil, "unmapped_handler_dynamic_payload", "route handler is inline or middleware slice"
 	}
 	if route.HandlerExpr == "v1R1ReservedHandler" {
-		return "", "unmapped_handler_dynamic_payload", "reserved route handler"
+		return nil, "unmapped_handler_dynamic_payload", "reserved route handler"
 	}
 	parts := strings.Split(route.HandlerExpr, ".")
 	if len(parts) != 2 || route.HandlerType == "" {
-		return "", "unmapped_handler", "handler receiver type not resolved"
+		return nil, "unmapped_handler", "handler receiver type not resolved"
 	}
 	key := route.HandlerType + "." + parts[1]
 	fn := idx.Funcs[key]
 	if fn == nil {
-		return "", "unmapped_handler", "handler method not found: " + key
+		return nil, "unmapped_handler", "handler method not found: " + key
 	}
-	resp := lastRespondExpr(fn)
-	if resp == nil {
-		return "", "unmapped_handler", "no respondOK/respondCreated/respondOKWithPagination call"
+	responses := respondExprs(fn)
+	if len(responses) == 0 {
+		return nil, "unmapped_handler", "no respondOK/respondCreated/respondOKWithPagination call"
 	}
 	local := localTypes(fn, idx.ReturnTypes)
-	typ := inferExprType(resp, local, idx.ReturnTypes)
-	if typ == "map" || typ == "gin.H" {
-		return "", "unmapped_handler_dynamic_payload", "dynamic payload"
+	for _, resp := range responses {
+		typ := inferExprType(resp.Expr, local, idx.ReturnTypes)
+		if typ == "map" || typ == "gin.H" {
+			return nil, "unmapped_handler_dynamic_payload", "dynamic payload"
+		}
+		if typ == "" {
+			return nil, "unmapped_handler", "response expression type not inferred"
+		}
+		shape := ResponseShape{Type: baseTypeName(typ)}
+		if resp.Pagination {
+			shape.ExtraFields = append(shape.ExtraFields, "pagination")
+		}
+		shapes = append(shapes, shape)
 	}
-	if typ == "" {
-		return "", "unmapped_handler", "response expression type not inferred"
-	}
-	return baseTypeName(typ), "", ""
+	return uniqueResponseShapes(shapes), "", ""
 }
 
 func OpenAPIOperations(path string) ([]Operation, error) {
@@ -517,6 +548,7 @@ func responseFieldsExpanded(op map[string]any, components map[string]any) []stri
 	root := resolveSchema(schema, components, map[string]bool{})
 	props, _ := root["properties"].(map[string]any)
 	if data, ok := props["data"].(map[string]any); ok {
+		var fields []string
 		data = resolveSchema(data, components, map[string]bool{})
 		if data["type"] == "array" {
 			if items, ok := data["items"].(map[string]any); ok {
@@ -524,7 +556,13 @@ func responseFieldsExpanded(op map[string]any, components map[string]any) []stri
 			}
 		}
 		if dp, ok := data["properties"].(map[string]any); ok {
-			return normalizeFields(sortedKeys(dp))
+			fields = append(fields, sortedKeys(dp)...)
+		}
+		if _, ok := props["pagination"]; ok {
+			fields = append(fields, "pagination")
+		}
+		if len(fields) > 0 {
+			return normalizeFields(fields)
 		}
 		return nil
 	}
@@ -622,6 +660,36 @@ func (idx StructIndex) Fields(typeName string) []string {
 	return append([]string(nil), idx.FieldsByType[typeName]...)
 }
 
+func (idx StructIndex) structFields(st *ast.StructType, seen map[string]bool) []string {
+	var fields []string
+	for _, field := range st.Fields.List {
+		name := ""
+		if field.Tag != nil {
+			name = jsonTagName(strings.Trim(field.Tag.Value, "`"))
+		}
+		if name != "" {
+			if name != "-" {
+				fields = append(fields, name)
+			}
+			continue
+		}
+		if len(field.Names) == 0 {
+			embedded := baseTypeName(resultType(field.Type))
+			if embedded == "" || seen[embedded] {
+				continue
+			}
+			child := idx.RawByType[embedded]
+			if child == nil {
+				continue
+			}
+			seen[embedded] = true
+			fields = append(fields, idx.structFields(child, seen)...)
+			delete(seen, embedded)
+		}
+	}
+	return normalizeFields(fields)
+}
+
 func indexFunctions(idx HandlerIndex, f *ast.File, path string) {
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -639,8 +707,13 @@ func indexFunctions(idx HandlerIndex, f *ast.File, path string) {
 	}
 }
 
-func lastRespondExpr(fn *ast.FuncDecl) ast.Expr {
-	var found ast.Expr
+type respondExpr struct {
+	Expr       ast.Expr
+	Pagination bool
+}
+
+func respondExprs(fn *ast.FuncDecl) []respondExpr {
+	var found []respondExpr
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) < 2 {
@@ -651,8 +724,10 @@ func lastRespondExpr(fn *ast.FuncDecl) ast.Expr {
 			return true
 		}
 		switch id.Name {
-		case "respondOK", "respondCreated", "respondOKWithPagination":
-			found = call.Args[1]
+		case "respondOK", "respondCreated":
+			found = append(found, respondExpr{Expr: call.Args[1]})
+		case "respondOKWithPagination":
+			found = append(found, respondExpr{Expr: call.Args[1], Pagination: true})
 		}
 		return true
 	})
@@ -777,6 +852,49 @@ func structFields(st *ast.StructType) []string {
 		}
 	}
 	return normalizeFields(fields)
+}
+
+func uniqueResponseShapes(in []ResponseShape) []ResponseShape {
+	seen := map[string]bool{}
+	var out []ResponseShape
+	for _, shape := range in {
+		key := shape.Type + "|" + strings.Join(normalizeFields(shape.ExtraFields), ",")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		shape.ExtraFields = normalizeFields(shape.ExtraFields)
+		out = append(out, shape)
+	}
+	return out
+}
+
+func displayResponseShapes(shapes []ResponseShape) string {
+	if len(shapes) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(shapes))
+	for _, shape := range shapes {
+		part := shape.Type
+		if len(shape.ExtraFields) > 0 {
+			part += "+" + strings.Join(shape.ExtraFields, "+")
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func inconsistentFieldSets(sets [][]string) bool {
+	if len(sets) < 2 {
+		return false
+	}
+	first := strings.Join(normalizeFields(sets[0]), "\x00")
+	for _, set := range sets[1:] {
+		if strings.Join(normalizeFields(set), "\x00") != first {
+			return true
+		}
+	}
+	return false
 }
 
 func decideVerdict(code, openapi, onlyCode, onlyOpenAPI []string) string {

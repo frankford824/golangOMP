@@ -47,6 +47,27 @@ func TestMainFlow_BothDiff(t *testing.T) {
 	}
 }
 
+func TestMainFlow_AnonymousEmbedClean(t *testing.T) {
+	report := buildFixtureReport(t, "anonymous_embed")
+	if got := firstVerdict(report); got != "clean" {
+		t.Fatalf("expected anonymous embed fixture clean, got %s: %#v", got, report.Paths)
+	}
+}
+
+func TestMainFlow_PaginationWrapClean(t *testing.T) {
+	report := buildFixtureReport(t, "pagination_wrap")
+	if got := firstVerdict(report); got != "clean" {
+		t.Fatalf("expected pagination wrap fixture clean, got %s: %#v", got, report.Paths)
+	}
+}
+
+func TestMainFlow_MultiExitInconsistent(t *testing.T) {
+	report := buildFixtureReport(t, "multi_exit")
+	if got := firstVerdict(report); got != "multi_exit_inconsistent" {
+		t.Fatalf("expected multi_exit_inconsistent verdict, got %s: %#v", got, report.Paths)
+	}
+}
+
 func TestParseTransportRoutes_RealRepo(t *testing.T) {
 	routes, err := ParseTransportRoutes("../../transport/http.go")
 	if err != nil {
