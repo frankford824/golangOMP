@@ -181,7 +181,7 @@ Content-Type: `application/json`
 | `creator_id` | integer | 否 | - |
 | `operator_group_id` | integer | 否 | - |
 | `designer_id` | integer | 否 | - |
-| `priority` | enum(low/normal/high/urgent/critical) | 否 | - |
+| `priority` | enum(low/normal/high/critical) | 否 | - |
 | `is_outsource` | boolean | 否 | Compatibility-only legacy create flag. When true, backend normalizes the request into `customization_required=true`. |
 | `customization_required` | boolean | 否 | Canonical creation-time customization lane selector. When true, task enters customization review directly, bypasses the normal design workbench, and immediately gets one primary `customization_job`. |
 | `customization_source_type` | enum(new_product/existing_product) | 否 | Business source classification inside the customization lane; it does not select the lane by itself. |
