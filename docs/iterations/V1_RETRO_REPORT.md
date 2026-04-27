@@ -217,6 +217,8 @@ Lessons:
 | Index review | likely task/detail/module/event joins need composite review | V1.1 |
 | Compatibility routes | §9.3 old routes still mounted | R7+ |
 | MED · OPEN V1.3-T1 onboarding sha 锚组过期 | `prompts/V1_NEXT_MODEL_ONBOARDING.md` §3.1 锚组停留在 V1.0/V1.1-A1 期间,V1.1-A2 / V1.2 / V1.2-C / V1.2-D-1 / V1.2-D-2 后未回写,导致每次新 codex 接手都触发 §9 漂移裁决。同时 CLAUDE.md L7 "Start model handoff with docs/V0_9_MODEL_HANDOFF_MANIFEST.md" 指向已归档文件 `docs/archive/legacy_handoffs/`。修复方式:V1.3 单独发起 onboarding/CLAUDE.md 回写轮,把锚组、authority 列表、handoff manifest 路径全部锁到 V1.2-D-2 head | `prompts/V1_NEXT_MODEL_ONBOARDING.md`, `CLAUDE.md`, `docs/V1_BACKEND_SOURCE_OF_TRUTH.md` |
+| HIGH · CLOSED-A1.1-PENDING-ARCHITECT-VERIFY | V1.3-A1 Issue 3 `POST /v1/tasks` 500 已从 PARTIALLY-CLOSED-PENDING-A1.1-VERIFY 升级:trace `83ba7d26-385b-4bea-99b7-db0925be2975` 锁定 `tasks.priority` 五方契约漂移,生产 DB CHECK `chk_tasks_priority_v1` 4 值拒绝 `urgent`;V1.3-A1.1 采纳方案 B,Go/OpenAPI/frontend docs 删除 `urgent`,service/handler 4 值校验,MySQL 3819 映射 400。待架构师独立 verify,未自签 PASS。 | `docs/iterations/V1_3_A1_1_PRIORITY_DRIFT_FIX_REPORT.md` |
+| MED · OPEN Q-V1.3-T4 audit 工具不识别 enum value drift | 现状:`tools/contract_audit/main.go` 只比 struct field 名,不比 enum value;影响:本次 priority 漂移五方源都对得上 field 名(`priority`),但值集不同,历史 audit 可给出 `verdict=clean` 假阴性。V1.3 工具升级:对 OpenAPI `enum: [...]` 与 Go `const` block 做交叉对账,加 `verdict=enum_value_drift`,同时把 DB CHECK 解析进 audit 三方变四方。 | `tools/contract_audit/main.go`, `docs/api/openapi.yaml`, `domain/enums_v7.go`, `db/migrations/067_v1_0_tasks_priority_constraint.sql` |
 | U1 | timeout escalation | V2 |
 | U2 | L2/L3 reports | V2 |
 | U3 | blueprint externalization | V2 |
