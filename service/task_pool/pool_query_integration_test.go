@@ -28,9 +28,12 @@ func TestPoolQueryFiltersBackfillPlaceholderIntegration(t *testing.T) {
 	defer r35.CleanupTaskIDs(t, db, visibleTaskID, placeholderTaskID)
 
 	svc := NewPoolQueryService(mysqlrepo.New(db))
-	rows, err := svc.List(context.Background(), domain.RequestActor{ID: 1, Team: domain.TeamDesignStandard, Roles: []domain.Role{domain.RoleMember}}, domain.ModuleKeyDesign, domain.TeamDesignStandard, 100, 0)
+	rows, total, err := svc.List(context.Background(), domain.RequestActor{ID: 1, Team: domain.TeamDesignStandard, Roles: []domain.Role{domain.RoleMember}}, domain.ModuleKeyDesign, domain.TeamDesignStandard, 100, 0, "")
 	if err != nil {
 		t.Fatalf("pool list: %v", err)
+	}
+	if total < 1 {
+		t.Fatalf("pool total = %d, want at least 1", total)
 	}
 	foundVisible := false
 	for _, row := range rows {

@@ -13662,8 +13662,39 @@ paths:
   /v1/tasks/pool:
     get:
       summary: List task pool entries
+      description: |
+        Lists R3 module-pool entries generated from `task_modules` rows in `pending_claim` state.
+        This is a module claim pool, not the generic assignment/unassigned task list; use
+        `GET /v1/tasks` filters for `PendingAssign` / unassigned-pool task assignment views.
+        Response `data` is always an array; empty pools return `[]`.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
+      parameters:
+        - in: query
+          name: module_key
+          schema: { type: string }
+        - in: query
+          name: pool_team_code
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: limit
+          description: Compatibility offset-pagination size. Prefer `page_size`.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: offset
+          description: Compatibility offset. Prefer `page`.
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [created_at, -created_at, updated_at, -updated_at]
       responses:
         '200':
           description: ok
@@ -13671,11 +13702,26 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [data, pagination]
                 properties:
                   data:
                     type: array
                     items:
-                      $ref: '#/components/schemas/WarehouseReceipt'
+                      type: object
+                      required: [task_id, module_key, pool_team_code, priority, created_at, updated_at, task_type, task_no, title, product_code]
+                      properties:
+                        task_id: { type: integer, format: int64 }
+                        module_key: { type: string }
+                        pool_team_code: { type: string }
+                        priority: { type: string }
+                        created_at: { type: string, format: date-time }
+                        updated_at: { type: string, format: date-time }
+                        task_type: { type: string }
+                        task_no: { type: string }
+                        title: { type: string }
+                        product_code: { type: string }
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
   /v1/tasks/{id}/modules/{module_key}/claim:
     post:
       summary: Claim a task module

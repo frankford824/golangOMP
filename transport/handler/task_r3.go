@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,13 +36,27 @@ func (h *TaskHandler) Pool(c *gin.Context) {
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "0"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "0"))
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if pageSize > 0 {
+		limit = pageSize
+		if page < 1 {
+			page = 1
+		}
+		offset = (page - 1) * pageSize
+	} else if page < 1 {
+		page = offset/limit + 1
+	}
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	items, err := h.poolQuerySvc.List(c.Request.Context(), actor, c.Query("module_key"), c.Query("pool_team_code"), limit, offset)
+	items, total, err := h.poolQuerySvc.List(c.Request.Context(), actor, c.Query("module_key"), c.Query("pool_team_code"), limit, offset, strings.TrimSpace(c.Query("sort")))
 	if err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil))
 		return
 	}
-	respondOK(c, items)
+	respondOKWithPagination(c, items, domain.PaginationMeta{Page: page, PageSize: limit, Total: total})
 }
 
 func (h *TaskHandler) ModuleClaim(c *gin.Context) {
