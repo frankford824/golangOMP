@@ -368,6 +368,9 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 		if err := s.taskRepo.CreateSKUItems(ctx, tx, persistedItems); err != nil {
 			return fmt.Errorf("create task sku items: %w", err)
 		}
+		if err := s.insertTaskReferenceFileRefFlatRows(ctx, tx, newID, p.ReferenceFileRefs); err != nil {
+			return err
+		}
 
 		var procurementRecord *domain.ProcurementRecord
 		if p.TaskType == domain.TaskTypePurchaseTask {
@@ -460,6 +463,28 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 		return 0, txErr
 	}
 	return newID, nil
+}
+
+func (s *taskService) insertTaskReferenceFileRefFlatRows(ctx context.Context, tx repo.Tx, taskID int64, refs []domain.ReferenceFileRef) error {
+	if s.referenceFileRefFlatRepo == nil || len(refs) == 0 {
+		return nil
+	}
+	normalized := domain.NormalizeReferenceFileRefs(refs)
+	for _, ref := range normalized {
+		refID := ref.CanonicalID()
+		if refID == "" {
+			continue
+		}
+		if _, err := s.referenceFileRefFlatRepo.InsertFlat(ctx, tx, &domain.ReferenceFileRefFlat{
+			TaskID:         taskID,
+			RefID:          refID,
+			OwnerModuleKey: string(domain.ModuleKeyBasicInfo),
+			Context:        stringPtr("task_create_reference"),
+		}); err != nil {
+			return fmt.Errorf("insert task reference_file_ref flat row: %w", err)
+		}
+	}
+	return nil
 }
 
 func zeroInt64ToNil(value int64) interface{} {

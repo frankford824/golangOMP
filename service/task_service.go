@@ -266,6 +266,7 @@ type taskService struct {
 	integrationCallLogRepo       repo.IntegrationCallLogRepo
 	uploadRequestRepo            repo.UploadRequestRepo
 	assetStorageRefRepo          repo.AssetStorageRefRepo
+	referenceFileRefFlatRepo     repo.ReferenceFileRefFlatRepo
 	productCodeSeqRepo           repo.ProductCodeSequenceRepo
 	erpBridgeSvc                 ERPBridgeService
 	codeRuleSvc                  CodeRuleService
@@ -311,6 +312,12 @@ func WithTaskReferenceFileRefValidation(uploadRequestRepo repo.UploadRequestRepo
 	return func(s *taskService) {
 		s.uploadRequestRepo = uploadRequestRepo
 		s.assetStorageRefRepo = assetStorageRefRepo
+	}
+}
+
+func WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo repo.ReferenceFileRefFlatRepo) TaskServiceOption {
+	return func(s *taskService) {
+		s.referenceFileRefFlatRepo = referenceFileRefFlatRepo
 	}
 }
 

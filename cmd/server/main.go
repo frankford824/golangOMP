@@ -245,6 +245,7 @@ func main() {
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
 		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
 		service.WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
+		service.WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
 		service.WithTaskReferenceFileRefsOSSDirectService(ossDirectSvc),
 		service.WithTaskDesignAssetReadModel(designAssetRepo),
 		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
@@ -319,7 +320,8 @@ func main() {
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
 	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen))
 	r3CancelSvc := task_cancel.NewService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb)
-	r3DetailSvc := task_aggregator.NewDetailService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo)
+	r3DetailSvc := task_aggregator.NewDetailService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo,
+		task_aggregator.WithReferenceFileRefEnricher(service.NewReferenceFileRefsEnricher(ossDirectSvc, nil)))
 
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)

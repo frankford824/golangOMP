@@ -1961,7 +1961,7 @@ components:
         reference_file_refs:
           type: array
           items:
-            $ref: '#/components/schemas/ReferenceFileRefFlat'
+            $ref: '#/components/schemas/ReferenceFileRef'
     ProcurementStatus:
       type: string
       enum: [draft, prepared, in_progress, completed]
