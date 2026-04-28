@@ -6316,6 +6316,51 @@ components:
                 type: string
                 nullable: true
                 description: One of `low` / `normal` / `high` / `critical`.
+              task_type:
+                type: string
+                nullable: true
+                description: Task business type, such as `new_product_development`.
+              sku_code:
+                type: string
+                nullable: true
+              primary_sku_code:
+                type: string
+                nullable: true
+              i_id:
+                type: string
+                nullable: true
+                description: JST product style/family i_id resolved from task detail or ERP filing snapshot.
+              owner_department:
+                type: string
+                nullable: true
+              owner_team:
+                type: string
+                nullable: true
+              owner_org_team:
+                type: string
+                nullable: true
+              creator_id:
+                type: integer
+                format: int64
+                nullable: true
+              creator_name:
+                type: string
+                nullable: true
+              designer_id:
+                type: integer
+                format: int64
+                nullable: true
+              designer_name:
+                type: string
+                nullable: true
+              created_at:
+                type: string
+                format: date-time
+                nullable: true
+              deadline_at:
+                type: string
+                format: date-time
+                nullable: true
               highlight:
                 type: string
                 nullable: true
@@ -6349,6 +6394,9 @@ components:
                 type: string
               product_name:
                 type: string
+              i_id:
+                type: string
+                nullable: true
               category:
                 type: string
                 nullable: true
