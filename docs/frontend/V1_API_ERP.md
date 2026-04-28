@@ -1,17 +1,86 @@
 # ERP 与业务字典
 
-> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Revision: V1.3-A2 i_id-first task/ERP integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
-ERP 商品、分类、仓库、同步、类目、成本规则与兼容商品目录。
+ERP 商品、i_id 选择、分类、仓库、同步、类目、成本规则与兼容商品目录。
 
 ## Family 约定
 
-- 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- 新联调优先使用 `/v1/erp/iids`、`/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- 新品开发/采购任务的前端选项以聚水潭 `i_id` 为主；`category_code` 是后端内部兼容字段，不再作为前端主选择项。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
-- 本文件覆盖 `27` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `28` 个 `/v1` path；同一路径多 method 合并在同一节。
+
+## i_id-first 联调方式
+
+前端创建新品开发或采购任务时，先调用 `GET /v1/erp/iids` 让用户选择聚水潭商品款式/品类语义的 `i_id`。创建任务时传 `i_id` 或兼容别名 `product_i_id`，不要再让用户选择或填写后端内部 `category_code`。
+
+推荐流程：
+
+1. `GET /v1/erp/iids?q=常规kt板&page=1&page_size=50`
+2. 用户选择返回项里的 `i_id`
+3. `POST /v1/tasks` 传 `product_name`、`i_id`、任务基础字段
+4. 如需创建后立即写聚水潭，传 `sync_erp_on_create: true`
+
+`category_code` 仍可能在任务详情、成本规则、历史数据里出现，这是后端内部兼容和 SKU 前缀/成本规则用字段。新前端不要把它作为业务主选择项。
+
+## GET /v1/erp/iids
+
+### 简介
+支持方法: GET。
+
+- `GET`: 返回聚水潭商品快照中去重后的 `i_id` 列表，供新品开发/采购任务创建页选择。数据来自本地 ERP 同步副本，包含每个 `i_id` 的商品数量和可辅助展示的 category/category_name。
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)。
+- 允许角色: 已登录 / scope-aware。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `q` | query | string | 否 | 按 `i_id`、category、category_name、product_name、sku_code 模糊搜索。 |
+| `keyword` | query | string | 否 | `q` 的兼容别名。 |
+| `page` | query | integer | 否 | 默认 1。 |
+| `page_size` | query | integer | 否 | 默认 50，最大 200。 |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "i_id": "常规kt板",
+      "label": "常规kt板",
+      "category": "常规kt板",
+      "category_name": "常规KT板",
+      "product_count": 1920
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 50,
+    "total": 1474
+  },
+  "normalized_filters": {
+    "q": "常规kt板",
+    "page": 1,
+    "page_size": 50
+  }
+}
+```
+
+### 前端最佳实践
+- 下拉展示建议用 `label`，保存/提交用 `i_id`。
+- `category`、`category_name` 只做辅助展示，不要回填为 `category_code`。
+- 若搜索不到用户要的 `i_id`，不要自行构造，提示运营先确认 ERP 商品同步或聚水潭基础资料。
 
 ## GET /v1/erp/products
 
@@ -2166,4 +2235,3 @@ curl -X GET https://api.example.com/v1/erp/products/by-code \
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-

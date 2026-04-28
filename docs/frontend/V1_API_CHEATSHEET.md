@@ -1,10 +1,10 @@
-# V1 API 速查表(209 path · 一行一条)
+# V1 API 速查表(210 path · 一行一条)
 
-> Revision: V1.2-D-2 residual drift triage (2026-04-26)
+> Revision: V1.3-A2 i_id-first task/ERP integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.2-D-2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 209 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 210 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -185,6 +185,7 @@
 | GET | `/v1/me/notifications/unread-count` | Get unread notification count | GET:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
 | GET | `/v1/tasks/batch-create/template.xlsx` | Download batch create Excel template | GET:已登录 / scope-aware | [V1_API_BATCH.md](V1_API_BATCH.md) |
 | POST | `/v1/tasks/batch-create/parse-excel` | Parse a batch create Excel file | POST:已登录 / scope-aware | [V1_API_BATCH.md](V1_API_BATCH.md) |
+| GET | `/v1/erp/iids` | List ERP product i_id options | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |
 | GET | `/v1/erp/products` | Search ERP Bridge products | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |
 | GET | `/v1/erp/products/{id}` | Get ERP Bridge product detail | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |
 | GET | `/v1/erp/categories` | List ERP Bridge categories | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |
