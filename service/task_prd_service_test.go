@@ -2132,6 +2132,47 @@ func TestTaskServiceUpdateBusinessInfoSeparatesManualOverrideFromEstimatedCost(t
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoAcceptsExternalCategoryDisplayValue(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			606: {ID: 606, TaskType: domain.TaskTypeNewProductDevelopment, SKUCode: "SKU-606", ProductNameSnapshot: "Product 606"},
+		},
+		details: map[int64]*domain.TaskDetail{
+			606: {TaskID: 606},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:       606,
+		OperatorID:   1,
+		CategoryCode: "激光打印",
+		SpecText:     "20*20",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.Category != "激光打印" || detail.CategoryName != "激光打印" || detail.CategoryCode != "" {
+		t.Fatalf("category fields = category:%q category_name:%q category_code:%q", detail.Category, detail.CategoryName, detail.CategoryCode)
+	}
+	if detail.SpecText != "20*20" {
+		t.Fatalf("spec_text = %q, want 20*20", detail.SpecText)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoMarksManualReviewForManualQuote(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

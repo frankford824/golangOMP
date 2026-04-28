@@ -1615,16 +1615,21 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		if appErr != nil {
 			return nil, appErr
 		}
+		categoryDisplayValue := firstNonEmptyString(strings.TrimSpace(p.Category), strings.TrimSpace(p.CategoryCode))
 		if category != nil {
 			detail.Category = categoryDisplayName(category)
 			detail.CategoryID = &category.CategoryID
 			detail.CategoryCode = category.CategoryCode
 			detail.CategoryName = category.CategoryName
 		} else {
-			detail.Category = strings.TrimSpace(p.Category)
+			detail.Category = categoryDisplayValue
 			detail.CategoryID = nil
-			detail.CategoryCode = strings.ToUpper(strings.TrimSpace(p.CategoryCode))
-			detail.CategoryName = strings.TrimSpace(p.Category)
+			detail.CategoryName = categoryDisplayValue
+			if isLikelyInternalCategoryCode(p.CategoryCode) {
+				detail.CategoryCode = strings.ToUpper(strings.TrimSpace(p.CategoryCode))
+			} else {
+				detail.CategoryCode = ""
+			}
 		}
 	}
 	if strings.TrimSpace(p.SpecText) != "" {
@@ -2114,6 +2119,9 @@ func (s *taskService) resolveTaskCategory(ctx context.Context, categoryID *int64
 		return nil, infraError("search category by display value for task business info", err)
 	}
 	if category == nil {
+		if !isLikelyInternalCategoryCode(categoryCode) {
+			return nil, nil
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "category_code does not exist", nil)
 	}
 	return category, nil
@@ -2179,6 +2187,24 @@ func categoryDisplayName(category *domain.Category) string {
 	default:
 		return category.CategoryCode
 	}
+}
+
+func isLikelyInternalCategoryCode(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (s *taskService) resolveERPBridgeSelectionBinding(ctx context.Context, tx repo.Tx, selection *domain.TaskProductSelectionContext) (*domain.Product, *domain.AppError) {
