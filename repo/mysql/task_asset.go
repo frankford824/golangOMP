@@ -52,7 +52,14 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 	if err != nil {
 		return 0, fmt.Errorf("insert task_asset: %w", err)
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, asset.TaskID); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 func (r *taskAssetRepo) GetByID(ctx context.Context, id int64) (*domain.TaskAsset, error) {

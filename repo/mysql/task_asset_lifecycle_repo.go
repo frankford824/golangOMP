@@ -18,7 +18,12 @@ func NewTaskAssetLifecycleRepo(db *DB) repo.TaskAssetLifecycleRepo {
 }
 
 func (r *taskAssetLifecycleRepo) Archive(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {
-	res, err := Unwrap(tx).ExecContext(ctx, `
+	sqlTx := Unwrap(tx)
+	taskIDs, err := taskIDsByAssetID(ctx, sqlTx, update.AssetID)
+	if err != nil {
+		return err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets
 		   SET is_archived = 1, archived_at = ?, archived_by = ?
 		 WHERE asset_id = ? AND deleted_at IS NULL AND cleaned_at IS NULL`,
@@ -26,11 +31,19 @@ func (r *taskAssetLifecycleRepo) Archive(ctx context.Context, tx repo.Tx, update
 	if err != nil {
 		return fmt.Errorf("archive task asset: %w", err)
 	}
-	return requireAffected(res, "archive task asset")
+	if err := requireAffected(res, "archive task asset"); err != nil {
+		return err
+	}
+	return reindexTaskSearchDocuments(ctx, sqlTx, taskIDs)
 }
 
 func (r *taskAssetLifecycleRepo) Restore(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {
-	res, err := Unwrap(tx).ExecContext(ctx, `
+	sqlTx := Unwrap(tx)
+	taskIDs, err := taskIDsByAssetID(ctx, sqlTx, update.AssetID)
+	if err != nil {
+		return err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets
 		   SET is_archived = 0, archived_at = NULL, archived_by = NULL
 		 WHERE asset_id = ? AND deleted_at IS NULL AND cleaned_at IS NULL`,
@@ -38,11 +51,19 @@ func (r *taskAssetLifecycleRepo) Restore(ctx context.Context, tx repo.Tx, update
 	if err != nil {
 		return fmt.Errorf("restore task asset: %w", err)
 	}
-	return requireAffected(res, "restore task asset")
+	if err := requireAffected(res, "restore task asset"); err != nil {
+		return err
+	}
+	return reindexTaskSearchDocuments(ctx, sqlTx, taskIDs)
 }
 
 func (r *taskAssetLifecycleRepo) SoftDelete(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {
-	res, err := Unwrap(tx).ExecContext(ctx, `
+	sqlTx := Unwrap(tx)
+	taskIDs, err := taskIDsByAssetID(ctx, sqlTx, update.AssetID)
+	if err != nil {
+		return err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets
 		   SET deleted_at = ?, storage_key = NULL
 		 WHERE asset_id = ? AND deleted_at IS NULL`,
@@ -50,11 +71,19 @@ func (r *taskAssetLifecycleRepo) SoftDelete(ctx context.Context, tx repo.Tx, upd
 	if err != nil {
 		return fmt.Errorf("soft delete task asset: %w", err)
 	}
-	return requireAffected(res, "soft delete task asset")
+	if err := requireAffected(res, "soft delete task asset"); err != nil {
+		return err
+	}
+	return reindexTaskSearchDocuments(ctx, sqlTx, taskIDs)
 }
 
 func (r *taskAssetLifecycleRepo) MarkAutoCleaned(ctx context.Context, tx repo.Tx, versionID int64, cleanedAt time.Time) error {
-	res, err := Unwrap(tx).ExecContext(ctx, `
+	sqlTx := Unwrap(tx)
+	taskID, err := taskIDByAssetVersionID(ctx, sqlTx, versionID)
+	if err != nil {
+		return err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets
 		   SET is_archived = 1, cleaned_at = ?, storage_key = NULL
 		 WHERE id = ? AND cleaned_at IS NULL AND deleted_at IS NULL`,
@@ -62,8 +91,13 @@ func (r *taskAssetLifecycleRepo) MarkAutoCleaned(ctx context.Context, tx repo.Tx
 	if err != nil {
 		return fmt.Errorf("mark task asset auto cleaned: %w", err)
 	}
-	_, err = res.RowsAffected()
-	return err
+	if _, err = res.RowsAffected(); err != nil {
+		return err
+	}
+	if taskID > 0 {
+		return reindexTaskSearchDocument(ctx, sqlTx, taskID)
+	}
+	return nil
 }
 
 func (r *taskAssetLifecycleRepo) ListEligibleForCleanup(ctx context.Context, cutoff time.Time, limit int) ([]*repo.TaskAssetCleanupCandidate, error) {

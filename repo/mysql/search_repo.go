@@ -16,6 +16,32 @@ type searchRepo struct{ db *DB }
 func NewSearchRepo(db *DB) repo.SearchRepo { return &searchRepo{db: db} }
 
 func (r *searchRepo) SearchTasks(ctx context.Context, q string, limit int) ([]domain.SearchTask, error) {
+	if r.tableExists(ctx, "task_search_documents") {
+		return r.searchTasksFromDocuments(ctx, q, limit)
+	}
+	return r.searchTasksLegacy(ctx, q, limit)
+}
+
+func (r *searchRepo) searchTasksFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchTask, error) {
+	limit = normalizeSearchLimit(limit)
+	like := "%" + strings.TrimSpace(q) + "%"
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT task_id, task_no, product_name_snapshot, task_status, priority,
+		       task_type, sku_code, primary_sku_code, product_i_id,
+		       owner_department, owner_team, owner_org_team,
+		       creator_id, creator_name, designer_id, designer_name,
+		       created_at, deadline_at
+		  FROM task_search_documents
+		 WHERE search_text LIKE ?
+		 ORDER BY updated_at DESC, task_id DESC
+		 LIMIT ?`, like, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search task documents: %w", err)
+	}
+	return scanSearchTasks(rows)
+}
+
+func (r *searchRepo) searchTasksLegacy(ctx context.Context, q string, limit int) ([]domain.SearchTask, error) {
 	limit = normalizeSearchLimit(limit)
 	like := "%" + strings.TrimSpace(q) + "%"
 	rows, err := r.db.db.QueryContext(ctx, `
@@ -86,6 +112,10 @@ func (r *searchRepo) SearchTasks(ctx context.Context, q string, limit int) ([]do
 	if err != nil {
 		return nil, fmt.Errorf("search tasks: %w", err)
 	}
+	return scanSearchTasks(rows)
+}
+
+func scanSearchTasks(rows *sql.Rows) ([]domain.SearchTask, error) {
 	defer rows.Close()
 
 	var out []domain.SearchTask

@@ -148,6 +148,9 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 	if err != nil {
 		return 0, fmt.Errorf("insert task_detail: %w", err)
 	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, taskID); err != nil {
+		return 0, err
+	}
 	return taskID, nil
 }
 
@@ -474,6 +477,9 @@ func (r *taskRepo) UpdateStatus(ctx context.Context, tx repo.Tx, id int64, statu
 	if err != nil {
 		return fmt.Errorf("update task status: %w", err)
 	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -594,6 +600,9 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 	if err != nil {
 		return fmt.Errorf("update task detail business info: %w", err)
 	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, detail.TaskID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -609,6 +618,9 @@ func (r *taskRepo) UpdateProductBinding(ctx context.Context, tx repo.Tx, task *d
 	if err != nil {
 		return fmt.Errorf("update task product binding: %w", err)
 	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, task.ID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -620,6 +632,9 @@ func (r *taskRepo) UpdateDesigner(ctx context.Context, tx repo.Tx, id int64, des
 	)
 	if err != nil {
 		return fmt.Errorf("update task designer: %w", err)
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
 	}
 	return nil
 }
@@ -648,6 +663,11 @@ func (r *taskRepo) ClaimPendingAssignment(ctx context.Context, tx repo.Tx, id in
 	if err != nil {
 		return false, fmt.Errorf("claim pending task assignment rows affected: %w", err)
 	}
+	if affected == 1 {
+		if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+			return false, err
+		}
+	}
 	return affected == 1, nil
 }
 
@@ -659,6 +679,9 @@ func (r *taskRepo) UpdateHandler(ctx context.Context, tx repo.Tx, id int64, hand
 	)
 	if err != nil {
 		return fmt.Errorf("update task handler: %w", err)
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
 	}
 	return nil
 }
@@ -690,6 +713,9 @@ func (r *taskRepo) UpdateCustomizationState(ctx context.Context, tx repo.Tx, id 
 	)
 	if err != nil {
 		return fmt.Errorf("update task customization state: %w", err)
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
 	}
 	return nil
 }
