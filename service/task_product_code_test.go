@@ -99,6 +99,43 @@ func TestTaskServiceCreatePurchaseTaskUsesDefaultProductCodeRule(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateRetouchTaskDoesNotAllocateSKU(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeRetouchTask,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           9,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		ProductNameSnapshot: "Retouch only",
+		DesignRequirement:   "retouch image",
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.SKUCode != "" {
+		t.Fatalf("Create() sku_code=%q, want empty for retouch_task", task.SKUCode)
+	}
+	if task.PrimarySKUCode != "" {
+		t.Fatalf("Create() primary_sku_code=%q, want empty for retouch_task", task.PrimarySKUCode)
+	}
+	if task.SKUGenerationStatus != domain.TaskSKUGenerationStatusNotApplicable {
+		t.Fatalf("Create() sku_generation_status=%s, want not_applicable", task.SKUGenerationStatus)
+	}
+}
+
 func TestTaskServicePrepareProductCodesBatchAndConcurrentUnique(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},

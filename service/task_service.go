@@ -1298,6 +1298,10 @@ func (s *taskService) resolveCreateTaskSKU(ctx context.Context, p *CreateTaskPar
 	if p == nil {
 		return domain.NewAppError(domain.ErrCodeInternalError, "task create parameters are missing", nil)
 	}
+	if taskTypeDoesNotUseSKU(p.TaskType) {
+		p.SKUCode = ""
+		return nil
+	}
 	if strings.TrimSpace(p.SKUCode) != "" {
 		p.SKUCode = strings.TrimSpace(p.SKUCode)
 		if p.TaskType == domain.TaskTypeNewProductDevelopment || p.TaskType == domain.TaskTypePurchaseTask {
@@ -1339,6 +1343,10 @@ func (s *taskService) resolveCreateTaskSKU(ctx context.Context, p *CreateTaskPar
 		return domain.NewAppError(domain.ErrCodeInternalError, "generated sku_code is empty", nil)
 	}
 	return nil
+}
+
+func taskTypeDoesNotUseSKU(taskType domain.TaskType) bool {
+	return taskType == domain.TaskTypeRetouchTask
 }
 
 func validTaskSourceMode(mode domain.TaskSourceMode) bool {
