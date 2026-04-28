@@ -26,6 +26,9 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 	if taskID <= 0 || !taskSearchDocumentsTableExists(ctx, q) {
 		return nil
 	}
+	if _, err := q.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
+		return fmt.Errorf("set task search group_concat_max_len: %w", err)
+	}
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO task_search_documents (
 		  task_id, task_no, product_name_snapshot, sku_code, primary_sku_code, product_i_id,
