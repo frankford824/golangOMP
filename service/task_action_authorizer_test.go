@@ -745,7 +745,7 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 				ID:                    472,
 				OwnerDepartment:       string(domain.DepartmentOperations),
 				OwnerOrgTeam:          "淘系一组",
-				TaskStatus:            domain.TaskStatusPendingAssign,
+				TaskStatus:            domain.TaskStatusPendingClose,
 				CustomizationRequired: true,
 			},
 			wantAllowed:    false,
@@ -827,6 +827,25 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 			},
 			wantAllowed:     true,
 			wantScopeSource: string(TaskActionScopeStage),
+		},
+		{
+			name:   "case_b_f2_9_ops_owner_pending_assign_can_upload_reference",
+			action: TaskActionAssetUploadSessionCreate,
+			actor: domain.RequestActor{
+				ID:         192,
+				Roles:      []domain.Role{domain.RoleOps},
+				Department: string(domain.DepartmentOperations),
+				Team:       "淘系一组",
+			},
+			task: &domain.Task{
+				ID:              477,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "淘系一组",
+				TaskStatus:      domain.TaskStatusPendingAssign,
+			},
+			wantAllowed:        true,
+			wantScopeSourceAny: []string{string(TaskActionScopeDepartment), string(TaskActionScopeTeam)},
+			wantScopeSourceNot: string(TaskActionScopeStage),
 		},
 	}
 

@@ -148,6 +148,7 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 			Action:        action,
 			RequiredRoles: append([]domain.Role{domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps}, managerRoles...),
 			AllowedStatuses: []domain.TaskStatus{
+				domain.TaskStatusPendingAssign,
 				domain.TaskStatusInProgress,
 				domain.TaskStatusRejectedByAuditA,
 				domain.TaskStatusRejectedByAuditB,

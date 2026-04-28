@@ -103,6 +103,8 @@ type CreateTaskParams struct {
 type UpdateTaskBusinessInfoParams struct {
 	TaskID                   int64
 	OperatorID               int64
+	ProductName              string
+	ProductIID               string
 	Category                 string
 	CategoryID               *int64
 	CategoryCode             string
@@ -1616,8 +1618,19 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	} else {
 		attachTaskProductSelection(detail, task)
 	}
+	if productName := strings.TrimSpace(p.ProductName); productName != "" && strings.TrimSpace(task.ProductNameSnapshot) != productName {
+		task.ProductNameSnapshot = productName
+		bindingChanged = true
+	}
 
-	if p.CategoryID != nil || strings.TrimSpace(p.CategoryCode) != "" || strings.TrimSpace(p.Category) != "" {
+	if productIID := strings.TrimSpace(p.ProductIID); productIID != "" {
+		detail.Category = productIID
+		detail.CategoryName = productIID
+		detail.CategoryID = nil
+		if strings.TrimSpace(p.CategoryCode) != "" {
+			detail.CategoryCode = strings.ToUpper(strings.TrimSpace(p.CategoryCode))
+		}
+	} else if p.CategoryID != nil || strings.TrimSpace(p.CategoryCode) != "" || strings.TrimSpace(p.Category) != "" {
 		category, appErr := s.resolveTaskCategory(ctx, p.CategoryID, p.CategoryCode)
 		if appErr != nil {
 			return nil, appErr
@@ -1819,6 +1832,10 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				"category_id":                 detail.CategoryID,
 				"category_code":               detail.CategoryCode,
 				"category_name":               detail.CategoryName,
+				"i_id":                        strings.TrimSpace(p.ProductIID),
+				"product_i_id":                strings.TrimSpace(p.ProductIID),
+				"product_name":                task.ProductNameSnapshot,
+				"product_name_snapshot":       task.ProductNameSnapshot,
 				"spec_text":                   p.SpecText,
 				"material":                    p.Material,
 				"size_text":                   p.SizeText,

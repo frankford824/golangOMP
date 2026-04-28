@@ -4213,6 +4213,18 @@ components:
         operator_id:
           type: integer
           description: Optional override for compatibility. Defaults to the current authenticated actor.
+        product_name:
+          type: string
+          description: Clean product-name edit field. For new-product tasks this updates `tasks.product_name_snapshot` and is included in the next ERP filing payload.
+        product_name_snapshot:
+          type: string
+          description: Compatibility alias for `product_name`.
+        i_id:
+          type: string
+          description: Canonical Jushuitan product style/family i_id used by ERP filing. Prefer this over legacy category fields.
+        product_i_id:
+          type: string
+          description: Compatibility alias for `i_id`.
         category: { type: string }
         category_id:
           type: integer
@@ -9325,7 +9337,12 @@ paths:
   /v1/assets/upload-sessions:
     post:
       summary: Create asset upload session
-      description: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints.
+      description: |
+        Canonical frontend entry for asset upload session creation. Backend decides whether
+        to use single-part or multipart upload and returns the upload strategy plus
+        completion/cancel endpoints. Reference uploads are allowed while a task is still
+        `PendingAssign`, so operations users can fill in reference material before a
+        designer self-claims or is assigned.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -9736,7 +9753,14 @@ paths:
                     properties:
                       product_id: { type: integer, nullable: true }
                       sku_code: { type: string }
+                      product_name: { type: string }
                       product_name_snapshot: { type: string }
+                      i_id:
+                        type: string
+                        description: Canonical JST product style/family i_id resolved from task product info.
+                      product_i_id:
+                        type: string
+                        description: Compatibility alias for `i_id`.
                       product_selection:
                         $ref: '#/components/schemas/TaskProductSelectionContext'
                       category: { type: string }
@@ -9773,6 +9797,22 @@ paths:
               type: object
               properties:
                 operator_id: { type: integer, nullable: true }
+                product_name:
+                  type: string
+                  nullable: true
+                  description: Clean product-name edit field. Updates task product snapshot and participates in ERP filing.
+                product_name_snapshot:
+                  type: string
+                  nullable: true
+                  description: Compatibility alias for `product_name`.
+                i_id:
+                  type: string
+                  nullable: true
+                  description: Canonical Jushuitan product style/family i_id. Prefer this over legacy category/category_code fields.
+                product_i_id:
+                  type: string
+                  nullable: true
+                  description: Compatibility alias for `i_id`.
                 product_selection:
                   $ref: '#/components/schemas/TaskProductSelectionContext'
                 category: { type: string, nullable: true }
@@ -9788,6 +9828,10 @@ paths:
                   items:
                     $ref: '#/components/schemas/ReferenceFileRef'
                 note: { type: string, nullable: true }
+                trigger_filing:
+                  type: boolean
+                  nullable: true
+                  description: Optional active sync switch. When true, backend forces ERP filing evaluation immediately; otherwise new-product tasks auto-file on product-info/business-info patch per backend policy.
                 remark: { type: string, nullable: true }
       responses:
         '200':

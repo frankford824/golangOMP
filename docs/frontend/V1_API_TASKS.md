@@ -343,13 +343,8 @@ curl -X GET https://api.example.com/v1/tasks/<id> \
   "data": {
     "product_id": 123,
     "sku_code": "string",
-    "product_name_snapshot": "string",
-    "product_selection": {
-      "selected_product_id": "...",
-      "selected_product_name": "...",
-      "selected_product_sku_code": "...",
-      "matched_category_code": "..."
-    }
+    "product_name": "string",
+    "product_name_snapshot": "string"
   }
 }
 ```
@@ -387,6 +382,10 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `operator_id` | integer | 否 | - |
+| `product_name` | string | 否 | Clean product-name edit field. Updates task product snapshot and participates in ERP filing. |
+| `product_name_snapshot` | string | 否 | Compatibility alias for `product_name`. |
+| `i_id` | string | 否 | Canonical Jushuitan product style/family i_id. Prefer this over legacy category/category_code fields. |
+| `product_i_id` | string | 否 | Compatibility alias for `i_id`. |
 | `product_selection` | TaskProductSelectionContext | 否 | Full original-product provenance contract for task read and detail views. It extends the lightweight summary with the local matched mapping snapshot and an additive ERP Bridge product snapshot. |
 | `category` | string | 否 | - |
 | `category_id` | integer | 否 | - |
@@ -397,6 +396,7 @@ Content-Type: `application/json`
 | `reference_link` | string | 否 | - |
 | `reference_file_refs` | array<ReferenceFileRef> | 否 | - |
 | `note` | string | 否 | - |
+| `trigger_filing` | boolean | 否 | Optional active sync switch. When true, backend forces ERP filing evaluation immediately; otherwise new-product tasks auto-file on product-info/business-info patch per backend policy. |
 | `remark` | string | 否 | - |
 
 ##### 响应体 schema
@@ -659,6 +659,10 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `operator_id` | integer | 否 | Optional override for compatibility. Defaults to the current authenticated actor. |
+| `product_name` | string | 否 | Clean product-name edit field. For new-product tasks this updates `tasks.product_name_snapshot` and is included in the next ERP filing payload. |
+| `product_name_snapshot` | string | 否 | Compatibility alias for `product_name`. |
+| `i_id` | string | 否 | Canonical Jushuitan product style/family i_id used by ERP filing. Prefer this over legacy category fields. |
+| `product_i_id` | string | 否 | Compatibility alias for `i_id`. |
 | `category` | string | 否 | - |
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |

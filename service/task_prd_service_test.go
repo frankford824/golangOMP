@@ -2173,6 +2173,52 @@ func TestTaskServiceUpdateBusinessInfoAcceptsExternalCategoryDisplayValue(t *tes
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoPatchesProductNameAndIID(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			607: {
+				ID:                  607,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "SKU-607",
+				ProductNameSnapshot: "Old Product",
+				TaskStatus:          domain.TaskStatusPendingAssign,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			607: {TaskID: 607, Category: "OLD-IID", CategoryName: "OLD-IID"},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:      607,
+		OperatorID:  1,
+		ProductName: "New Product",
+		ProductIID:  "NEW-IID",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.tasks[607].ProductNameSnapshot != "New Product" {
+		t.Fatalf("product_name_snapshot = %q, want New Product", taskRepo.tasks[607].ProductNameSnapshot)
+	}
+	if detail.Category != "NEW-IID" || detail.CategoryName != "NEW-IID" || detail.CategoryID != nil {
+		t.Fatalf("i_id fields = category:%q category_name:%q category_id:%+v", detail.Category, detail.CategoryName, detail.CategoryID)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoMarksManualReviewForManualQuote(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

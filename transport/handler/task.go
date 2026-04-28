@@ -173,6 +173,10 @@ func (r createTaskReq) hasRawReferenceImagesField() bool {
 
 type updateTaskBusinessInfoReq struct {
 	OperatorID               *int64                   `json:"operator_id"`
+	ProductName              string                   `json:"product_name"`
+	ProductNameSnapshot      string                   `json:"product_name_snapshot"`
+	IID                      string                   `json:"i_id"`
+	ProductIID               string                   `json:"product_i_id"`
 	Category                 string                   `json:"category"`
 	CategoryID               *int64                   `json:"category_id"`
 	CategoryCode             string                   `json:"category_code"`
@@ -205,7 +209,10 @@ type retryTaskFilingReq struct {
 type getTaskProductInfoResp struct {
 	ProductID           *int64                              `json:"product_id,omitempty"`
 	SKUCode             string                              `json:"sku_code"`
+	ProductName         string                              `json:"product_name"`
 	ProductNameSnapshot string                              `json:"product_name_snapshot"`
+	IID                 string                              `json:"i_id"`
+	ProductIID          string                              `json:"product_i_id"`
 	ProductSelection    *domain.TaskProductSelectionContext `json:"product_selection,omitempty"`
 	Category            string                              `json:"category"`
 	CategoryID          *int64                              `json:"category_id,omitempty"`
@@ -220,18 +227,23 @@ type getTaskProductInfoResp struct {
 }
 
 type patchTaskProductInfoReq struct {
-	OperatorID        *int64                     `json:"operator_id"`
-	ProductSelection  *taskProductSelectionReq   `json:"product_selection"`
-	Category          *string                    `json:"category"`
-	CategoryID        *int64                     `json:"category_id"`
-	CategoryCode      *string                    `json:"category_code"`
-	SpecText          *string                    `json:"spec_text"`
-	Material          *string                    `json:"material"`
-	SizeText          *string                    `json:"size_text"`
-	ReferenceLink     *string                    `json:"reference_link"`
-	ReferenceFileRefs *[]domain.ReferenceFileRef `json:"reference_file_refs"`
-	Note              *string                    `json:"note"`
-	Remark            *string                    `json:"remark"`
+	OperatorID          *int64                     `json:"operator_id"`
+	ProductName         *string                    `json:"product_name"`
+	ProductNameSnapshot *string                    `json:"product_name_snapshot"`
+	IID                 *string                    `json:"i_id"`
+	ProductIID          *string                    `json:"product_i_id"`
+	ProductSelection    *taskProductSelectionReq   `json:"product_selection"`
+	Category            *string                    `json:"category"`
+	CategoryID          *int64                     `json:"category_id"`
+	CategoryCode        *string                    `json:"category_code"`
+	SpecText            *string                    `json:"spec_text"`
+	Material            *string                    `json:"material"`
+	SizeText            *string                    `json:"size_text"`
+	ReferenceLink       *string                    `json:"reference_link"`
+	ReferenceFileRefs   *[]domain.ReferenceFileRef `json:"reference_file_refs"`
+	Note                *string                    `json:"note"`
+	TriggerFiling       *bool                      `json:"trigger_filing"`
+	Remark              *string                    `json:"remark"`
 }
 
 type getTaskCostInfoResp struct {
@@ -961,6 +973,8 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 	detail, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), service.UpdateTaskBusinessInfoParams{
 		TaskID:                   taskID,
 		OperatorID:               operatorID,
+		ProductName:              firstNonEmptyTrimmed(req.ProductName, req.ProductNameSnapshot),
+		ProductIID:               firstNonEmptyTrimmed(req.IID, req.ProductIID),
 		Category:                 req.Category,
 		CategoryID:               req.CategoryID,
 		CategoryCode:             req.CategoryCode,
@@ -1388,7 +1402,10 @@ func (h *TaskHandler) GetProductInfo(c *gin.Context) {
 	resp := &getTaskProductInfoResp{
 		ProductID:           task.ProductID,
 		SKUCode:             task.SKUCode,
+		ProductName:         task.ProductNameSnapshot,
 		ProductNameSnapshot: task.ProductNameSnapshot,
+		IID:                 firstNonEmptyTrimmed(detail.Category, detail.CategoryName),
+		ProductIID:          firstNonEmptyTrimmed(detail.Category, detail.CategoryName),
 		ProductSelection:    detail.ProductSelection,
 		Category:            detail.Category,
 		CategoryID:          detail.CategoryID,
@@ -1433,6 +1450,12 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 		return
 	}
 	params := buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
+	if req.ProductName != nil || req.ProductNameSnapshot != nil {
+		params.ProductName = firstNonEmptyTrimmed(valueFromStringPtr(req.ProductName), valueFromStringPtr(req.ProductNameSnapshot))
+	}
+	if req.IID != nil || req.ProductIID != nil {
+		params.ProductIID = firstNonEmptyTrimmed(valueFromStringPtr(req.IID), valueFromStringPtr(req.ProductIID))
+	}
 	if req.ProductSelection != nil {
 		params.ProductSelection = req.ProductSelection.toDomain()
 	}
@@ -1462,6 +1485,9 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 	}
 	if req.Note != nil {
 		params.Note = strings.TrimSpace(*req.Note)
+	}
+	if req.TriggerFiling != nil {
+		params.TriggerFiling = *req.TriggerFiling
 	}
 	if req.Remark != nil {
 		params.Remark = strings.TrimSpace(*req.Remark)
@@ -1674,4 +1700,11 @@ func firstFloat64(primary, fallback *float64) *float64 {
 		return primary
 	}
 	return fallback
+}
+
+func valueFromStringPtr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
