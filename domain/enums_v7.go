@@ -190,7 +190,7 @@ const (
 
 func (t TaskType) RequiresDesign() bool {
 	switch t {
-	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment:
+	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment, TaskTypeRetouchTask:
 		return true
 	default:
 		return false
@@ -198,7 +198,12 @@ func (t TaskType) RequiresDesign() bool {
 }
 
 func (t TaskType) RequiresAudit() bool {
-	return t.RequiresDesign()
+	switch t {
+	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment:
+		return true
+	default:
+		return false
+	}
 }
 
 func (t TaskType) Valid() bool {
