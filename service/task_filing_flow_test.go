@@ -334,8 +334,6 @@ func TestNewAndPurchaseTaskPendingThenAutoFilingOnPatch(t *testing.T) {
 		OwnerTeam:           domain.AllValidTeams()[0],
 		DeadlineAt:          timePtr(),
 		SKUCode:             "NEW-PENDING-001",
-		MaterialMode:        string(domain.MaterialModePreset),
-		Material:            "PVC",
 		ProductNameSnapshot: "New Product A",
 		ProductShortName:    "NPA",
 		DesignRequirement:   "new product",

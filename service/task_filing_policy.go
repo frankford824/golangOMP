@@ -58,15 +58,7 @@ func ComputeFilingMissingFields(task *domain.Task, detail *domain.TaskDetail) ([
 	case domain.TaskTypeNewProductDevelopment:
 		add("sku_code", "SKU", strings.TrimSpace(task.SKUCode) == "")
 		add("product_name", "产品名称", strings.TrimSpace(task.ProductNameSnapshot) == "")
-		add("product_short_name", "产品简称", strings.TrimSpace(detail.ProductShortName) == "")
-		add("category_code", "品类编码", strings.TrimSpace(detail.CategoryCode) == "")
-		add("material_mode", "材质模式", strings.TrimSpace(detail.MaterialMode) == "")
-		switch strings.TrimSpace(detail.MaterialMode) {
-		case string(domain.MaterialModePreset):
-			add("material", "材质", strings.TrimSpace(detail.Material) == "")
-		case string(domain.MaterialModeOther):
-			add("material_other", "自定义材质", strings.TrimSpace(detail.MaterialOther) == "")
-		}
+		add("i_id", "产品i_id", strings.TrimSpace(detail.Category) == "" && strings.TrimSpace(detail.CategoryName) == "")
 		if strings.TrimSpace(detail.CostPriceMode) == string(domain.CostPriceModeManual) {
 			add("cost_price", "成本价", detail.CostPrice == nil)
 		}

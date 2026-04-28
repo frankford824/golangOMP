@@ -1020,8 +1020,8 @@ func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T)
 	if detail == nil {
 		t.Fatal("task detail not found")
 	}
-	if detail.FilingStatus != domain.FilingStatusFiled && detail.FilingStatus != domain.FilingStatusFilingFailed {
-		t.Fatalf("filing_status = %s, want filed or filing_failed", detail.FilingStatus)
+	if detail.FilingStatus != domain.FilingStatusPending {
+		t.Fatalf("filing_status = %s, want pending_filing until i_id is supplied", detail.FilingStatus)
 	}
 }
 
