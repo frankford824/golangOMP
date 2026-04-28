@@ -10,6 +10,9 @@
 ## Family 约定
 
 - 批量创建只做模板下载和解析预览，不直接写任务表。
+- 用户可以把参考图直接贴到 Excel 的数据行；`parse-excel` 会按图片锚点行号提取、服务端上传，并在该行 preview 返回 `reference_file_refs`。
+- 前端只负责展示解析预览并在确认创建时把每行 `reference_file_refs` 原样放回 `batch_items[]`。
+- 用户填写的 `产品i_id` 会在 `parse-excel` 阶段由后端按 ERP i_id 选项做精确校验，非法值返回行级 `invalid_i_id`。
 - Excel 字段与枚举以模板中的 Schema/EnumDict sheet 和接口 violations 为准。
 - 本文件覆盖 `2` 个 `/v1` path；同一路径多 method 合并在同一节。
 
@@ -18,7 +21,7 @@
 ### 简介
 支持方法: GET。
 
-- `GET`: Downloads the batch-create workbook. For `new_product_development`, the Items sheet intentionally contains only `产品名称` and `设计要求`; category/product-code details are resolved by the backend during task creation. For `purchase_task`, the purchase-specific template remains unchanged.
+- `GET`: Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `产品i_id` and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For `purchase_task`, purchase-specific fields remain, and `产品i_id`/`参考图` are also supported as optional row-scoped fields.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -60,6 +63,9 @@ curl -X GET https://api.example.com/v1/tasks/batch-create/template.xlsx \
 
 ### 前端最佳实践
 - 批量创建只做模板下载和解析预览，不直接写任务表。
+- 用户可以把参考图直接贴到 Excel 的数据行；`parse-excel` 会按图片锚点行号提取、服务端上传，并在该行 preview 返回 `reference_file_refs`。
+- 前端只负责展示解析预览并在确认创建时把每行 `reference_file_refs` 原样放回 `batch_items[]`。
+- 用户填写的 `产品i_id` 会在 `parse-excel` 阶段由后端按 ERP i_id 选项做精确校验，非法值返回行级 `invalid_i_id`。
 - Excel 字段与枚举以模板中的 Schema/EnumDict sheet 和接口 violations 为准。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -69,7 +75,7 @@ curl -X GET https://api.example.com/v1/tasks/batch-create/template.xlsx \
 ### 简介
 支持方法: POST。
 
-- `POST`: Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required and returned by the template parser.
+- `POST`: Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required. If `产品i_id` is filled, the backend validates exact membership against ERP i_id options. If users pasted images into workbook rows, the backend extracts the row-anchored pictures, uploads them through the task reference upload flow, and returns row-level `reference_file_refs`; frontend should only preview/confirm and submit the returned refs unchanged.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -126,6 +132,9 @@ curl -X POST https://api.example.com/v1/tasks/batch-create/parse-excel \
 
 ### 前端最佳实践
 - 批量创建只做模板下载和解析预览，不直接写任务表。
+- 用户可以把参考图直接贴到 Excel 的数据行；`parse-excel` 会按图片锚点行号提取、服务端上传，并在该行 preview 返回 `reference_file_refs`。
+- 前端只负责展示解析预览并在确认创建时把每行 `reference_file_refs` 原样放回 `batch_items[]`。
+- 用户填写的 `产品i_id` 会在 `parse-excel` 阶段由后端按 ERP i_id 选项做精确校验，非法值返回行级 `invalid_i_id`。
 - Excel 字段与枚举以模板中的 Schema/EnumDict sheet 和接口 violations 为准。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。

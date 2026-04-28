@@ -85,6 +85,12 @@ var npdFields = []FieldSpec{
 			Invalid: "invalid_i_id",
 		},
 	},
+	{
+		Column:   "参考图",
+		Key:      "reference_image",
+		Format:   FieldFormatString,
+		HelpText: "可选；将图片贴到本行任意单元格，解析时后端会提取并上传为本 SKU 的 reference_file_refs",
+	},
 }
 
 var ptFields = []FieldSpec{
@@ -106,6 +112,15 @@ var ptFields = []FieldSpec{
 		HelpText: "ERP/业务类目编码",
 		ViolationCodes: ViolationCodeSet{
 			Missing: "missing_required_field",
+		},
+	},
+	{
+		Column:   "产品i_id",
+		Key:      "product_i_id",
+		Format:   FieldFormatString,
+		HelpText: "可选；如需创建后同步 ERP，每行必须选择一个来自 /v1/erp/iids 的 i_id",
+		ViolationCodes: ViolationCodeSet{
+			Invalid: "invalid_i_id",
 		},
 	},
 	{
@@ -158,5 +173,11 @@ var ptFields = []FieldSpec{
 		ViolationCodes: ViolationCodeSet{
 			Invalid: "duplicate_batch_sku",
 		},
+	},
+	{
+		Column:   "参考图",
+		Key:      "reference_image",
+		Format:   FieldFormatString,
+		HelpText: "可选；将图片贴到本行任意单元格，解析时后端会提取并上传为本 SKU 的 reference_file_refs",
 	},
 }

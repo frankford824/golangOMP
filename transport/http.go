@@ -11,7 +11,6 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/domain"
-	taskbatchexcel "workflow/service/task_batch_excel"
 	"workflow/transport/handler"
 	transportws "workflow/transport/ws"
 )
@@ -44,6 +43,7 @@ func NewRouter(
 	taskDetailH *handler.TaskDetailHandler,
 	taskCostOverrideH *handler.TaskCostOverrideHandler,
 	taskBoardH *handler.TaskBoardHandler,
+	taskBatchExcelH *handler.TaskBatchExcelHandler,
 	workbenchH *handler.WorkbenchHandler,
 	exportCenterH *handler.ExportCenterHandler,
 	integrationCenterH *handler.IntegrationCenterHandler,
@@ -87,8 +87,6 @@ func NewRouter(
 		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(method, joinRoutePath(group.BasePath(), path), readiness, roles...))
 		return withAccessMetaAndLogger(permissionLogger, readiness, roles...)
 	}
-	taskBatchTemplateSvc, taskBatchParseSvc := taskbatchexcel.New()
-	taskBatchExcelH := handler.NewTaskBatchExcelHandler(taskBatchTemplateSvc, taskBatchParseSvc)
 	legacyRoleConvergedAccess := func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, roles ...domain.Role) []gin.HandlerFunc {
 		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(method, joinRoutePath(group.BasePath(), path), readiness, roles...))
 		return []gin.HandlerFunc{

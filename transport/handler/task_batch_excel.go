@@ -54,7 +54,8 @@ func (h *TaskBatchExcelHandler) ParseUpload(c *gin.Context) {
 		return
 	}
 	defer src.Close()
-	result, appErr := h.parseSvc.Parse(c.Request.Context(), taskType, src)
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	result, appErr := h.parseSvc.Parse(c.Request.Context(), taskType, src, taskbatchexcel.WithActorID(actor.ID))
 	if appErr != nil {
 		respondError(c, appErr)
 		return

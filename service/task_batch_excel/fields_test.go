@@ -2,6 +2,10 @@ package task_batch_excel
 
 import (
 	"bytes"
+	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +13,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"workflow/domain"
+	"workflow/service"
 )
 
 func TestFieldsForNPDUseMinimalBatchTemplate(t *testing.T) {
@@ -20,7 +25,7 @@ func TestFieldsForNPDUseMinimalBatchTemplate(t *testing.T) {
 	for _, field := range fields {
 		got = append(got, field.Key)
 	}
-	want := []string{"product_name", "design_requirement", "product_i_id"}
+	want := []string{"product_name", "design_requirement", "product_i_id", "reference_image"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("NPD field keys = %v, want %v", got, want)
 	}
@@ -88,6 +93,50 @@ func TestParseValidExcel(t *testing.T) {
 	}
 	if len(result.Preview) != 2 || len(result.Violations) != 0 {
 		t.Fatalf("Parse result = %+v, want 2 preview rows and no violations", result)
+	}
+}
+
+func TestParseExcelUploadsEmbeddedReferenceImagesAndValidatesIID(t *testing.T) {
+	content := testWorkbookWithImage(t, "IID-OK")
+	uploader := &parseReferenceUploaderStub{}
+	lookup := &parseIIDLookupStub{valid: map[string]bool{"IID-OK": true}}
+	result, appErr := NewParseServiceWithDependencies(uploader, lookup).Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content), WithActorID(42))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v, want none", result.Violations)
+	}
+	if len(result.Preview) != 2 {
+		t.Fatalf("preview len = %d, want 2", len(result.Preview))
+	}
+	if len(result.Preview[0].ReferenceFileRefs) != 1 {
+		t.Fatalf("row 2 reference_file_refs = %+v, want 1", result.Preview[0].ReferenceFileRefs)
+	}
+	if uploader.calls != 1 {
+		t.Fatalf("upload calls = %d, want 1", uploader.calls)
+	}
+	if uploader.createdBy != 42 {
+		t.Fatalf("created_by = %d, want 42", uploader.createdBy)
+	}
+	if lookup.queries["IID-OK"] != 1 {
+		t.Fatalf("iid queries = %+v, want IID-OK once", lookup.queries)
+	}
+}
+
+func TestParseExcelRejectsInvalidIIDBeforeUploadingImages(t *testing.T) {
+	content := testWorkbookWithImage(t, "BAD-IID")
+	uploader := &parseReferenceUploaderStub{}
+	lookup := &parseIIDLookupStub{valid: map[string]bool{"IID-OK": true}}
+	result, appErr := NewParseServiceWithDependencies(uploader, lookup).Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content), WithActorID(42))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolation(result.Violations, "product_i_id", "invalid_i_id") {
+		t.Fatalf("violations = %+v, want invalid_i_id", result.Violations)
+	}
+	if uploader.calls != 0 {
+		t.Fatalf("upload calls = %d, want 0 when iid invalid", uploader.calls)
 	}
 }
 
@@ -165,6 +214,39 @@ func testWorkbook(t *testing.T, taskType domain.TaskType, mutate func(map[string
 	return buf.Bytes()
 }
 
+func testWorkbookWithImage(t *testing.T, iid string) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+	for i, field := range fields {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(itemsSheet, cell, field.Column)
+	}
+	for row := 2; row <= 3; row++ {
+		values := validRowValues(domain.TaskTypeNewProductDevelopment, row-1)
+		if row == 2 {
+			values["product_i_id"] = iid
+		}
+		for i, field := range fields {
+			cell, _ := excelize.CoordinatesToCellName(i+1, row)
+			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
+		}
+	}
+	if err := f.AddPictureFromBytes(itemsSheet, "D2", &excelize.Picture{
+		Extension: ".png",
+		File:      tinyPNG(),
+	}); err != nil {
+		t.Fatalf("AddPictureFromBytes: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
 func validRowValues(taskType domain.TaskType, idx int) map[string]string {
 	values := map[string]string{
 		"product_name":       "产品" + strconv.Itoa(idx),
@@ -208,4 +290,49 @@ func appErrorHasCode(appErr *domain.AppError, code string) bool {
 		}
 	}
 	return false
+}
+
+type parseReferenceUploaderStub struct {
+	calls     int
+	createdBy int64
+}
+
+func (s *parseReferenceUploaderStub) UploadFile(_ context.Context, params service.UploadTaskReferenceFileParams) (*domain.ReferenceFileRef, *domain.AppError) {
+	s.calls++
+	s.createdBy = params.CreatedBy
+	ref := domain.ReferenceFileRef{
+		AssetID:         "asset-from-excel",
+		RefID:           "asset-from-excel",
+		UploadRequestID: "upload-from-excel",
+		Filename:        params.Filename,
+		MimeType:        params.MimeType,
+		Status:          "uploaded",
+		Source:          domain.ReferenceFileRefSourceTaskReferenceUpload,
+	}
+	ref.Normalize()
+	return &ref, nil
+}
+
+type parseIIDLookupStub struct {
+	valid   map[string]bool
+	queries map[string]int
+}
+
+func (s *parseIIDLookupStub) ListIIDs(_ context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+	if s.queries == nil {
+		s.queries = map[string]int{}
+	}
+	s.queries[filter.Q]++
+	if s.valid[filter.Q] {
+		return &domain.ERPIIDListResponse{Items: []*domain.ERPIIDOption{{IID: filter.Q, Label: filter.Q}}}, nil
+	}
+	return &domain.ERPIIDListResponse{Items: []*domain.ERPIIDOption{}}, nil
+}
+
+func tinyPNG() []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.NRGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	return buf.Bytes()
 }

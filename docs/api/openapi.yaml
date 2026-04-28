@@ -6213,6 +6213,7 @@ components:
           format: date-time
     BatchItem:
       type: object
+      description: Batch Excel preview row. When the uploaded workbook contains pictures anchored to the row, the server uploads them through the task reference-file flow and returns the resulting `reference_file_refs`; frontend should preview and submit those refs unchanged in `POST /v1/tasks.batch_items[]`.
       properties:
         product_name:
           type: string
@@ -6220,6 +6221,9 @@ components:
           type: string
         category_code:
           type: string
+        product_i_id:
+          type: string
+          description: Per-row ERP product i_id. If present, parse-excel validates exact membership through `GET /v1/erp/iids` semantics before returning a clean preview.
         material_mode:
           type: string
           enum: [preset, other]
@@ -6244,6 +6248,11 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+        reference_file_refs:
+          type: array
+          description: Reference file refs uploaded by the server from images pasted into this Excel row. Submit unchanged in the matching `batch_items[]` row during task creation.
+          items:
+            $ref: '#/components/schemas/ReferenceFileRef'
     ParseViolation:
       type: object
       required: [row, code, message]
@@ -14107,7 +14116,7 @@ paths:
     get:
       summary: Download batch create Excel template
       description: |
-        Downloads the batch-create workbook. For `new_product_development`, the Items sheet intentionally contains only `产品名称` and `设计要求`; category/product-code details are resolved by the backend during task creation. For `purchase_task`, the purchase-specific template remains unchanged.
+        Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `产品i_id` and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For `purchase_task`, purchase-specific fields remain, and `产品i_id`/`参考图` are also supported as optional row-scoped fields.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5
@@ -14148,7 +14157,7 @@ paths:
     post:
       summary: Parse a batch create Excel file
       description: |
-        Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required and returned by the template parser.
+        Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required. If `产品i_id` is filled, the backend validates exact membership against ERP i_id options. If users pasted images into workbook rows, the backend extracts the row-anchored pictures, uploads them through the task reference upload flow, and returns row-level `reference_file_refs`; frontend should only preview/confirm and submit the returned refs unchanged.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5

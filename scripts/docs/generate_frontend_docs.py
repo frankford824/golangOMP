@@ -91,6 +91,9 @@ FAMILY_NOTES = {
     ],
     "BATCH": [
         "批量创建只做模板下载和解析预览，不直接写任务表。",
+        "用户可以把参考图直接贴到 Excel 的数据行；`parse-excel` 会按图片锚点行号提取、服务端上传，并在该行 preview 返回 `reference_file_refs`。",
+        "前端只负责展示解析预览并在确认创建时把每行 `reference_file_refs` 原样放回 `batch_items[]`。",
+        "用户填写的 `产品i_id` 会在 `parse-excel` 阶段由后端按 ERP i_id 选项做精确校验，非法值返回行级 `invalid_i_id`。",
         "Excel 字段与枚举以模板中的 Schema/EnumDict sheet 和接口 violations 为准。",
     ],
     "ERP": [
