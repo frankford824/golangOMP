@@ -2,7 +2,6 @@ package task_batch_excel
 
 import (
 	"bytes"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -10,31 +9,20 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"workflow/domain"
-	"workflow/service"
 )
 
-func TestFieldsAlignWithCreateTaskBatchSKUItemParams(t *testing.T) {
-	got := map[string]bool{}
-	for _, taskType := range []domain.TaskType{domain.TaskTypeNewProductDevelopment, domain.TaskTypePurchaseTask} {
-		fields, ok := FieldsForTaskType(taskType)
-		if !ok {
-			t.Fatalf("FieldsForTaskType(%s) missing", taskType)
-		}
-		for _, field := range fields {
-			got[field.Key] = true
-		}
+func TestFieldsForNPDUseMinimalBatchTemplate(t *testing.T) {
+	fields, ok := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
+	if !ok {
+		t.Fatal("FieldsForTaskType(new_product_development) missing")
 	}
-	want := map[string]bool{}
-	rt := reflect.TypeOf(service.CreateTaskBatchSKUItemParams{})
-	for i := 0; i < rt.NumField(); i++ {
-		key := lowerSnake(rt.Field(i).Name)
-		if key == "reference_file_refs" {
-			continue
-		}
-		want[key] = true
+	got := make([]string, 0, len(fields))
+	for _, field := range fields {
+		got = append(got, field.Key)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("field keys = %#v, want %#v", got, want)
+	want := []string{"product_name", "design_requirement"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("NPD field keys = %v, want %v", got, want)
 	}
 }
 
@@ -44,9 +32,6 @@ func TestFieldsAlignWithValidateBatchTaskCreateRequest(t *testing.T) {
 		fieldKey string
 	}{
 		{domain.TaskTypeNewProductDevelopment, "product_name"},
-		{domain.TaskTypeNewProductDevelopment, "product_short_name"},
-		{domain.TaskTypeNewProductDevelopment, "category_code"},
-		{domain.TaskTypeNewProductDevelopment, "material_mode"},
 		{domain.TaskTypeNewProductDevelopment, "design_requirement"},
 		{domain.TaskTypePurchaseTask, "product_name"},
 		{domain.TaskTypePurchaseTask, "category_code"},
@@ -119,32 +104,6 @@ func TestParseMissingRequired(t *testing.T) {
 	}
 }
 
-func TestParseInvalidEnum(t *testing.T) {
-	content := testWorkbook(t, domain.TaskTypeNewProductDevelopment, func(row map[string]string) {
-		row["material_mode"] = "foo"
-	})
-	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
-	if appErr != nil {
-		t.Fatalf("Parse appErr = %v", appErr)
-	}
-	if !hasViolation(result.Violations, "material_mode", "invalid_material_mode") {
-		t.Fatalf("violations = %#v, want material_mode invalid", result.Violations)
-	}
-}
-
-func TestParseDuplicateBatchSKU(t *testing.T) {
-	content := testWorkbook(t, domain.TaskTypeNewProductDevelopment, func(row map[string]string) {
-		row["new_sku"] = "DUP-SKU"
-	})
-	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
-	if appErr != nil {
-		t.Fatalf("Parse appErr = %v", appErr)
-	}
-	if !hasViolation(result.Violations, "new_sku", "duplicate_batch_sku") {
-		t.Fatalf("violations = %#v, want duplicate_batch_sku", result.Violations)
-	}
-}
-
 func TestParseTaskTypeNotSupported(t *testing.T) {
 	content := testWorkbook(t, domain.TaskTypeNewProductDevelopment, nil)
 	_, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeOriginalProductDevelopment, bytes.NewReader(content))
@@ -208,13 +167,8 @@ func testWorkbook(t *testing.T, taskType domain.TaskType, mutate func(map[string
 
 func validRowValues(taskType domain.TaskType, idx int) map[string]string {
 	values := map[string]string{
-		"product_name":       "产品",
-		"product_short_name": "简称",
-		"category_code":      "CAT",
-		"material_mode":      string(domain.MaterialModeOther),
+		"product_name":       "产品" + strconv.Itoa(idx),
 		"design_requirement": "出单画图",
-		"new_sku":            "NPD-SKU-" + strconv.Itoa(idx),
-		"variant_json":       `{"idx":` + strconv.Itoa(idx) + `}`,
 	}
 	if taskType == domain.TaskTypePurchaseTask {
 		values = map[string]string{
@@ -254,23 +208,4 @@ func appErrorHasCode(appErr *domain.AppError, code string) bool {
 		}
 	}
 	return false
-}
-
-func lowerSnake(s string) string {
-	switch s {
-	case "NewSKU":
-		return "new_sku"
-	case "PurchaseSKU":
-		return "purchase_sku"
-	case "VariantJSON":
-		return "variant_json"
-	}
-	var b strings.Builder
-	for i, r := range s {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			b.WriteByte('_')
-		}
-		b.WriteRune(r)
-	}
-	return strings.ToLower(b.String())
 }

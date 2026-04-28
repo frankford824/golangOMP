@@ -18,7 +18,7 @@
 ### 简介
 支持方法: GET。
 
-- `GET`: Download batch create Excel template
+- `GET`: Downloads the batch-create workbook. For `new_product_development`, the Items sheet intentionally contains only `产品名称` and `设计要求`; category/product-code details are resolved by the backend during task creation. For `purchase_task`, the purchase-specific template remains unchanged.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -69,7 +69,7 @@ curl -X GET https://api.example.com/v1/tasks/batch-create/template.xlsx \
 ### 简介
 支持方法: POST。
 
-- `POST`: Parse a batch create Excel file
+- `POST`: Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required and returned by the template parser.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

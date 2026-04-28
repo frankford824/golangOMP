@@ -12,15 +12,20 @@ import (
 
 type RuleEngine struct {
 	registry *Registry
+	tasks    repo.TaskRepo
 	modules  repo.TaskModuleRepo
 	events   repo.TaskModuleEventRepo
 }
 
-func NewRuleEngine(registry *Registry, modules repo.TaskModuleRepo, events repo.TaskModuleEventRepo) *RuleEngine {
+func NewRuleEngine(registry *Registry, modules repo.TaskModuleRepo, events repo.TaskModuleEventRepo, taskRepos ...repo.TaskRepo) *RuleEngine {
 	if registry == nil {
 		registry = NewRegistry()
 	}
-	return &RuleEngine{registry: registry, modules: modules, events: events}
+	var tasks repo.TaskRepo
+	if len(taskRepos) > 0 {
+		tasks = taskRepos[0]
+	}
+	return &RuleEngine{registry: registry, tasks: tasks, modules: modules, events: events}
 }
 
 func (e *RuleEngine) InitTask(ctx context.Context, tx repo.Tx, task *domain.Task) error {
@@ -70,7 +75,7 @@ func (e *RuleEngine) ApplyAfterAction(ctx context.Context, tx repo.Tx, task *dom
 	case domain.ModuleKeyDesign + "." + domain.ModuleActionSubmit:
 		return e.enterModule(ctx, tx, task, domain.ModuleKeyAudit, actorID, actionEventID)
 	case domain.ModuleKeyRetouch + "." + domain.ModuleActionSubmit:
-		return e.enterModule(ctx, tx, task, domain.ModuleKeyWarehouse, actorID, actionEventID)
+		return e.completeRetouchTask(ctx, tx, task, actorID, actionEventID)
 	case domain.ModuleKeyCustomization + "." + domain.ModuleActionSubmit:
 		return e.enterModule(ctx, tx, task, domain.ModuleKeyAudit, actorID, actionEventID)
 	case domain.ModuleKeyAudit + "." + domain.ModuleActionApprove:
@@ -90,6 +95,22 @@ func (e *RuleEngine) ApplyAfterAction(ctx context.Context, tx repo.Tx, task *dom
 		return e.reopenModule(ctx, tx, task.ID, target, actorID, actionEventID)
 	}
 	return nil
+}
+
+func (e *RuleEngine) completeRetouchTask(ctx context.Context, tx repo.Tx, task *domain.Task, actorID *int64, actionEventID int64) error {
+	if task == nil {
+		return nil
+	}
+	if err := e.closeModule(ctx, tx, task.ID, domain.ModuleKeyRetouch, actorID, actionEventID); err != nil {
+		return err
+	}
+	if e.tasks == nil {
+		return nil
+	}
+	if err := e.tasks.UpdateStatus(ctx, tx, task.ID, domain.TaskStatusCompleted); err != nil {
+		return err
+	}
+	return e.tasks.UpdateHandler(ctx, tx, task.ID, nil)
 }
 
 func (e *RuleEngine) enterModule(ctx context.Context, tx repo.Tx, task *domain.Task, moduleKey string, actorID *int64, triggerEventID int64) error {

@@ -147,15 +147,7 @@ func ValidateBatchTaskCreateRequest(p CreateTaskParams) *domain.AppError {
 			if item.ProductName == "" {
 				addViolation(prefix+".product_name", "missing_required_field", "batch_items[].product_name is required")
 			}
-			if item.ProductShortName == "" {
-				addViolation(prefix+".product_short_name", "missing_required_field", "batch_items[].product_short_name is required")
-			}
-			if item.CategoryCode == "" {
-				addViolation(prefix+".category_code", "missing_required_field", "batch_items[].category_code is required")
-			}
-			if item.MaterialMode == "" {
-				addViolation(prefix+".material_mode", "missing_required_field", "batch_items[].material_mode is required")
-			} else if !domain.MaterialMode(item.MaterialMode).Valid() {
+			if item.MaterialMode != "" && !domain.MaterialMode(item.MaterialMode).Valid() {
 				addViolation(prefix+".material_mode", "invalid_material_mode", "batch_items[].material_mode must be preset or other")
 			}
 			if item.DesignRequirement == "" {
@@ -241,6 +233,10 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 	items := make([]*taskBatchItemBuild, 0, len(p.BatchItems))
 	seenSKU := map[string]int{}
 	for idx, rawItem := range p.BatchItems {
+		if p.TaskType == domain.TaskTypeNewProductDevelopment {
+			rawItem.ProductShortName = defaultBatchItemProductShortName(rawItem)
+			rawItem.CategoryCode = defaultBatchItemCategoryCode(p, rawItem)
+		}
 		dedupeKey, appErr := computeTaskBatchItemDedupeKey(p.TaskType, rawItem)
 		if appErr != nil {
 			return nil, taskCreateValidationError(
@@ -276,8 +272,8 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 			SKUCode:             skuCode,
 			SKUStatus:           domain.TaskSKUStatusGenerated,
 			ProductNameSnapshot: rawItem.ProductName,
-			ProductShortName:    rawItem.ProductShortName,
-			CategoryCode:        rawItem.CategoryCode,
+			ProductShortName:    defaultBatchItemProductShortName(rawItem),
+			CategoryCode:        defaultBatchItemCategoryCode(p, rawItem),
 			MaterialMode:        rawItem.MaterialMode,
 			CostPriceMode:       rawItem.CostPriceMode,
 			Quantity:            cloneInt64Ptr(rawItem.Quantity),
@@ -344,6 +340,22 @@ func (s *taskService) generateOrReserveSkuForBatchItem(ctx context.Context, task
 		fmt.Sprintf("failed to generate unique sku for %s", taskType),
 		map[string]interface{}{"task_type": taskType},
 	)
+}
+
+func defaultBatchItemProductShortName(item CreateTaskBatchSKUItemParams) string {
+	if value := strings.TrimSpace(item.ProductShortName); value != "" {
+		return value
+	}
+	return strings.TrimSpace(item.ProductName)
+}
+
+func defaultBatchItemCategoryCode(p CreateTaskParams, item CreateTaskBatchSKUItemParams) string {
+	for _, value := range []string{item.CategoryCode, p.CategoryCode, p.ProductIID, "GENERAL"} {
+		if normalized := strings.TrimSpace(value); normalized != "" {
+			return normalized
+		}
+	}
+	return "GENERAL"
 }
 
 func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p CreateTaskParams, task *domain.Task, detail *domain.TaskDetail, items []*taskBatchItemBuild) (int64, error) {

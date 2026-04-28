@@ -9499,6 +9499,7 @@ paths:
         - frontend should not send `source_mode`; backend infers it from `task_type`.
         - `new_product_development` infers `source_mode=new_product` and auto-generates `sku_code` when omitted.
         - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately.
+        - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, and ends after the retouch/design worker submits the retouched image.
         - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime.
         - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationReview` immediately and does not pass through the normal design workbench first.
         - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors.
@@ -9508,6 +9509,7 @@ paths:
         - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> KT`), otherwise first two alphabet letters from `category_code` (uppercased), then deterministic fallback to two letters.
         - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique.
         - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`.
+        - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned.
         - batch mode writes one mother task plus multiple `task_sku_items` in one transaction and keeps `sku_code` / `primary_sku_code` aligned to the first child SKU for compatibility.
         - create now also appends `task.created`, and multi-SKU creates additionally append `task.batch_items_created`.
         - `reference_images` is no longer accepted. If present, backend returns `400 INVALID_REQUEST` and requires the reference-upload flow.
@@ -14027,6 +14029,8 @@ paths:
   /v1/tasks/batch-create/template.xlsx:
     get:
       summary: Download batch create Excel template
+      description: |
+        Downloads the batch-create workbook. For `new_product_development`, the Items sheet intentionally contains only `产品名称` and `设计要求`; category/product-code details are resolved by the backend during task creation. For `purchase_task`, the purchase-specific template remains unchanged.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5
@@ -14066,6 +14070,8 @@ paths:
   /v1/tasks/batch-create/parse-excel:
     post:
       summary: Parse a batch create Excel file
+      description: |
+        Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required and returned by the template parser.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5

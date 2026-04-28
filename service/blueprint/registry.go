@@ -41,7 +41,6 @@ func NewRegistry() *Registry {
 			Modules: []ModuleSpec{
 				basicInfo(),
 				{Key: domain.ModuleKeyRetouch, InitialState: domain.ModuleStatePendingClaim, PoolTeamCode: strPtr(domain.TeamDesignRetouch)},
-				{Key: domain.ModuleKeyWarehouse, InitialState: domain.ModuleStatePending},
 			},
 		},
 		domain.TaskTypeCustomerCustomization: customizationBlueprint(domain.TaskTypeCustomerCustomization),

@@ -140,7 +140,7 @@ func main() {
 
 	codeRuleSvc := service.NewCodeRuleService(codeRuleRepo, mdb)
 	blueprintRegistry := blueprint.NewRegistry()
-	blueprintRules := blueprint.NewRuleEngine(blueprintRegistry, taskModuleRepo, taskModuleEventRepo)
+	blueprintRules := blueprint.NewRuleEngine(blueprintRegistry, taskModuleRepo, taskModuleEventRepo, taskRepo)
 	categorySvc := service.NewCategoryService(categoryRepo, mdb)
 	categoryMappingSvc := service.NewCategoryERPMappingService(categoryERPMappingRepo, categoryRepo, mdb)
 	costRuleSvc := service.NewCostRuleService(costRuleRepo, categoryRepo, mdb)
