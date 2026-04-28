@@ -838,6 +838,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 				ProductName:       item.ProductName,
 				ProductShortName:  item.ProductShortName,
 				CategoryCode:      item.CategoryCode,
+				ProductIID:        firstNonEmptyTrimmed(item.IID, item.ProductIID),
 				MaterialMode:      item.MaterialMode,
 				DesignRequirement: item.DesignRequirement,
 				NewSKU:            item.NewSKU,

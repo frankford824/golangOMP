@@ -76,6 +76,15 @@ var npdFields = []FieldSpec{
 			Missing: "missing_required_field",
 		},
 	},
+	{
+		Column:   "产品i_id",
+		Key:      "product_i_id",
+		Format:   FieldFormatString,
+		HelpText: "可选；如需创建后立即同步 ERP，每行必须选择一个来自 /v1/erp/iids 的 i_id",
+		ViolationCodes: ViolationCodeSet{
+			Invalid: "invalid_i_id",
+		},
+	},
 }
 
 var ptFields = []FieldSpec{

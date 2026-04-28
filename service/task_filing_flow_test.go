@@ -391,3 +391,56 @@ func TestNewAndPurchaseTaskPendingThenAutoFilingOnPatch(t *testing.T) {
 		t.Fatalf("purchase task filing_status after update = %s, want filed", taskRepo.details[purchaseTask.ID].FilingStatus)
 	}
 }
+
+func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions: []*domain.ERPIIDOption{
+			{IID: "I-1001", Label: "I-1001"},
+			{IID: "I-1002", Label: "I-1002"},
+		},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "ok"},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:        domain.TaskTypeNewProductDevelopment,
+		SourceMode:      domain.TaskSourceModeNewProduct,
+		CreatorID:       11,
+		OwnerTeam:       domain.AllValidTeams()[0],
+		DeadlineAt:      timePtr(),
+		BatchSKUMode:    "multiple",
+		SyncERPOnCreate: true,
+		BatchItems: []CreateTaskBatchSKUItemParams{
+			{ProductName: "Batch A", DesignRequirement: "draw A", ProductIID: "I-1001"},
+			{ProductName: "Batch B", DesignRequirement: "draw B", ProductIID: "I-1002"},
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	}
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
+	}
+	if bridgeStub.upsertPayloads[0].IID != "I-1001" || bridgeStub.upsertPayloads[1].IID != "I-1002" {
+		t.Fatalf("upsert iids = %s/%s, want I-1001/I-1002", bridgeStub.upsertPayloads[0].IID, bridgeStub.upsertPayloads[1].IID)
+	}
+	items := taskRepo.skuItems[task.ID]
+	if len(items) != 2 || items[0].ProductIID != "I-1001" || items[1].ProductIID != "I-1002" {
+		t.Fatalf("sku item product_i_id = %+v", items)
+	}
+}

@@ -20,6 +20,7 @@ type CreateTaskBatchSKUItemParams struct {
 	ProductName       string
 	ProductShortName  string
 	CategoryCode      string
+	ProductIID        string
 	MaterialMode      string
 	DesignRequirement string
 	NewSKU            string
@@ -709,6 +710,9 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 }
 
 func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (*domain.Task, *domain.AppError) {
+	if appErr := s.validateBatchItemProductIIDs(ctx, p); appErr != nil {
+		return nil, appErr
+	}
 	items, appErr := s.buildBatchTaskSkuItems(ctx, p)
 	if appErr != nil {
 		return nil, appErr
@@ -804,6 +808,48 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		return nil, s.mapTaskCreateTxError(p, txErr)
 	}
 	return s.finishTaskCreate(ctx, p, newID)
+}
+
+func (s *taskService) validateBatchItemProductIIDs(ctx context.Context, p CreateTaskParams) *domain.AppError {
+	if p.TaskType != domain.TaskTypeNewProductDevelopment && p.TaskType != domain.TaskTypePurchaseTask {
+		return nil
+	}
+	seen := map[string]bool{}
+	var violations []map[string]interface{}
+	for idx, item := range p.BatchItems {
+		iid := strings.TrimSpace(item.ProductIID)
+		if iid == "" || seen[iid] {
+			continue
+		}
+		seen[iid] = true
+		if s.erpBridgeSvc == nil {
+			return domain.NewAppError(domain.ErrCodeInternalError, "erp bridge service is unavailable", nil)
+		}
+		resp, appErr := s.erpBridgeSvc.ListIIDs(ctx, domain.ERPIIDListFilter{Q: iid, Page: 1, PageSize: 50})
+		if appErr != nil {
+			return appErr
+		}
+		found := false
+		if resp != nil {
+			for _, option := range resp.Items {
+				if option != nil && strings.EqualFold(strings.TrimSpace(option.IID), iid) {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			violations = append(violations, taskCreateViolation(
+				fmt.Sprintf("batch_items[%d].product_i_id", idx),
+				"invalid_i_id",
+				"batch_items[].product_i_id must be selected from ERP product i_id options",
+			))
+		}
+	}
+	if len(violations) > 0 {
+		return taskCreateValidationError("batch task i_id validation failed", p, violations...)
+	}
+	return nil
 }
 
 func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, newID int64) (*domain.Task, *domain.AppError) {

@@ -68,6 +68,7 @@ type TaskSKUItem struct {
 	ERPProductID        *string            `db:"erp_product_id"        json:"erp_product_id,omitempty"`
 	ProductNameSnapshot string             `db:"product_name_snapshot" json:"product_name_snapshot"`
 	ProductShortName    string             `db:"product_short_name"    json:"product_short_name,omitempty"`
+	ProductIID          string             `db:"-"                     json:"product_i_id,omitempty"`
 	CategoryCode        string             `db:"category_code"         json:"category_code,omitempty"`
 	MaterialMode        string             `db:"material_mode"         json:"material_mode,omitempty"`
 	CostPriceMode       string             `db:"cost_price_mode"       json:"cost_price_mode,omitempty"`

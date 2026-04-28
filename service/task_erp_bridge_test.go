@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,19 +354,30 @@ func TestTaskServiceCreateRejectsMismatchedSelectedProductIDForERPSelection(t *t
 }
 
 type erpBridgeSelectionBinderStub struct {
-	product       *domain.Product
-	upsertPayload *domain.ERPProductUpsertPayload
-	upsertResult  *domain.ERPProductUpsertResult
-	upsertAppErr  *domain.AppError
-	upsertCalls   int
+	product        *domain.Product
+	iidOptions     []*domain.ERPIIDOption
+	upsertPayload  *domain.ERPProductUpsertPayload
+	upsertPayloads []domain.ERPProductUpsertPayload
+	upsertResult   *domain.ERPProductUpsertResult
+	upsertAppErr   *domain.AppError
+	upsertCalls    int
 }
 
 func (s *erpBridgeSelectionBinderStub) SearchProducts(context.Context, domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError) {
 	return nil, nil
 }
 
-func (s *erpBridgeSelectionBinderStub) ListIIDs(context.Context, domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
-	return &domain.ERPIIDListResponse{Items: []*domain.ERPIIDOption{}}, nil
+func (s *erpBridgeSelectionBinderStub) ListIIDs(_ context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+	items := []*domain.ERPIIDOption{}
+	for _, item := range s.iidOptions {
+		if item == nil {
+			continue
+		}
+		if strings.TrimSpace(filter.Q) == "" || strings.EqualFold(strings.TrimSpace(item.IID), strings.TrimSpace(filter.Q)) {
+			items = append(items, item)
+		}
+	}
+	return &domain.ERPIIDListResponse{Items: items}, nil
 }
 
 func (s *erpBridgeSelectionBinderStub) GetProductByID(context.Context, string) (*domain.ERPProduct, *domain.AppError) {
@@ -396,6 +408,7 @@ func (s *erpBridgeSelectionBinderStub) UpsertProduct(_ context.Context, payload 
 	s.upsertCalls++
 	copyPayload := payload
 	s.upsertPayload = &copyPayload
+	s.upsertPayloads = append(s.upsertPayloads, copyPayload)
 	return s.upsertResult, s.upsertAppErr
 }
 

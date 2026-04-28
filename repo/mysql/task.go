@@ -1104,6 +1104,7 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	item.BaseSalePrice = fromNullFloat64(baseSalePrice)
 	if len(variantJSON) > 0 {
 		item.VariantJSON = append(item.VariantJSON[:0], variantJSON...)
+		item.ProductIID = productIIDFromVariantJSON(variantJSON)
 	}
 	if referenceFileRefsJSON.Valid {
 		item.ReferenceFileRefs = domain.ParseReferenceFileRefsJSON(referenceFileRefsJSON.String)
@@ -1112,6 +1113,24 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 		item.ReferenceFileRefs = []domain.ReferenceFileRef{}
 	}
 	return &item, nil
+}
+
+func productIIDFromVariantJSON(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ""
+	}
+	for _, key := range []string{"product_i_id", "i_id"} {
+		if value, ok := obj[key]; ok {
+			if text, ok := value.(string); ok {
+				return strings.TrimSpace(text)
+			}
+		}
+	}
+	return ""
 }
 
 func marshalReferenceFileRefs(refs []domain.ReferenceFileRef) string {

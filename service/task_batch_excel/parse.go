@@ -123,6 +123,8 @@ func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) 
 			item.ProductShortName = value
 		case "category_code":
 			item.CategoryCode = value
+		case "product_i_id":
+			item.ProductIID = value
 		case "material_mode":
 			item.MaterialMode = value
 		case "design_requirement":
@@ -241,6 +243,7 @@ func batchItemFromService(item service.CreateTaskBatchSKUItemParams) BatchItem {
 		ProductName:       item.ProductName,
 		ProductShortName:  item.ProductShortName,
 		CategoryCode:      item.CategoryCode,
+		ProductIID:        item.ProductIID,
 		MaterialMode:      item.MaterialMode,
 		DesignRequirement: item.DesignRequirement,
 		NewSKU:            item.NewSKU,

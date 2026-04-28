@@ -20,6 +20,7 @@ type BatchItem struct {
 	ProductName       string          `json:"product_name"`
 	ProductShortName  string          `json:"product_short_name,omitempty"`
 	CategoryCode      string          `json:"category_code"`
+	ProductIID        string          `json:"product_i_id,omitempty"`
 	MaterialMode      string          `json:"material_mode,omitempty"`
 	DesignRequirement string          `json:"design_requirement,omitempty"`
 	NewSKU            string          `json:"new_sku,omitempty"`

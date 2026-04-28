@@ -20,7 +20,7 @@ func TestFieldsForNPDUseMinimalBatchTemplate(t *testing.T) {
 	for _, field := range fields {
 		got = append(got, field.Key)
 	}
-	want := []string{"product_name", "design_requirement"}
+	want := []string{"product_name", "design_requirement", "product_i_id"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("NPD field keys = %v, want %v", got, want)
 	}

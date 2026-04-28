@@ -3834,6 +3834,9 @@ components:
           nullable: true
         product_name_snapshot: { type: string }
         product_short_name: { type: string }
+        product_i_id:
+          type: string
+          description: Per-SKU ERP product i_id. For batch new-product tasks this is row-scoped and may differ across `sku_items`.
         category_code: { type: string }
         material_mode: { type: string }
         cost_price_mode: { type: string }
@@ -4044,6 +4047,12 @@ components:
           type: string
         category_code:
           type: string
+        i_id:
+          type: string
+          description: Per-row ERP product i_id selected from `GET /v1/erp/iids`. For batch new-product ERP filing, each row must carry its own i_id.
+        product_i_id:
+          type: string
+          description: Compatibility alias for `i_id`.
         material_mode:
           type: string
           enum: [preset, other]
