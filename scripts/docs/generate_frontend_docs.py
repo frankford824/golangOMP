@@ -80,6 +80,13 @@ FAMILY_NOTES = {
     ],
     "NOTIFICATIONS": [
         "V1 冻结 5 类通知类型：task_assigned_to_me、task_rejected、claim_conflict、pool_reassigned、task_cancelled。",
+        "`payload` 按 `notification_type` 分型。前端应穷举 5 类 type；未知 type 使用兜底文案。",
+        "`task_assigned_to_me` payload：必有 `task_id`；可能有 `task_no`、`task_type`、`module_key`、`action`、`assigned_by`、`assigned_by_name`、`designer_id`、`previous_designer_id`、`previous_handler_id`、`reason`、`remark`、`batch_request_id`。",
+        "`task_rejected` payload：必有 `task_id`、`reject_reason`；可能有 `task_no`、`module_key`、`rejected_by`、`rejected_by_name`。",
+        "`claim_conflict` payload：必有 `task_id`、`module_key`；可能有 `task_no`、`winner_user_id`、`winner_user_name`。",
+        "`pool_reassigned` payload：必有 `task_id`、`module_key`；可能有 `task_no`、`team_code`、`team_name`、`reassigned_by`、`reassigned_by_name`。",
+        "`task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。",
+        "payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。",
         "未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。",
     ],
     "BATCH": [

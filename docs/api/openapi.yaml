@@ -6449,11 +6449,31 @@ components:
                 nullable: true
     NotificationType:
       type: string
-      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1)."
+      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). V1 freezes 5 values: `task_assigned_to_me`, `task_rejected`, `claim_conflict`, `pool_reassigned`, and `task_cancelled`."
       enum: [task_assigned_to_me, task_rejected, claim_conflict, pool_reassigned, task_cancelled]
     Notification:
       type: object
-      description: "Source: V1_INFORMATION_ARCHITECTURE §8."
+      description: |
+        Source: V1_INFORMATION_ARCHITECTURE §8.
+
+        `payload` is a notification-type-specific JSON object. Stable routing fields are ids/codes;
+        display-name fields may be included as denormalized snapshots for frontend rendering, but
+        frontend must tolerate them being absent and fall back to id/code based labels.
+
+        Current payload contract:
+
+        - `task_assigned_to_me`: `task_id`; optional `task_no`, `task_type`, `module_key`,
+          `action`, `assigned_by`, `assigned_by_name`, `designer_id`,
+          `previous_designer_id`, `previous_handler_id`, `reason`, `remark`,
+          `batch_request_id`.
+        - `task_rejected`: `task_id`, `reject_reason`; optional `task_no`, `module_key`,
+          `rejected_by`, `rejected_by_name`.
+        - `claim_conflict`: `task_id`, `module_key`; optional `task_no`, `winner_user_id`,
+          `winner_user_name`.
+        - `pool_reassigned`: `task_id`, `module_key`; optional `task_no`, `team_code`,
+          `team_name`, `reassigned_by`, `reassigned_by_name`.
+        - `task_cancelled`: `task_id`, `cancel_reason`, `cancelled_by`; optional `task_no`,
+          `cancelled_by_name`, `module_key`.
       properties:
         id:
           type: integer
@@ -6461,6 +6481,7 @@ components:
           $ref: '#/components/schemas/NotificationType'
         payload:
           type: object
+          description: Notification-type-specific payload. See `Notification` schema description for the per-type field list.
           additionalProperties: true
         is_read:
           type: boolean
