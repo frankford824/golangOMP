@@ -198,8 +198,11 @@ func TestBuildFrontendAccessCustomizationOperatorRoleUsesDesignWorkspaceBaseMenu
 	if !containsStringValue(view.Menus, "design_workspace") || !containsStringValue(view.Menus, "resource_management") {
 		t.Fatalf("menus missing customization operator base workspace: %+v", view.Menus)
 	}
-	if containsStringValue(view.Menus, "customization_management") || containsStringValue(view.Menus, "task_list") {
+	if containsStringValue(view.Menus, "customization_management") {
 		t.Fatalf("customization operator member should not receive dept-admin customization menus: %+v", view.Menus)
+	}
+	if !containsStringValue(view.Menus, "task_list") {
+		t.Fatalf("customization operator member should receive task_list for globally readable main task flow: %+v", view.Menus)
 	}
 	if !containsStringValue(view.Actions, "task.customization.submit") || !containsStringValue(view.Actions, "task.customization.transfer") {
 		t.Fatalf("actions missing customization operator abilities: %+v", view.Actions)

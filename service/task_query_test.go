@@ -72,7 +72,7 @@ func TestTaskQueryStageVisibilityUATMatrix(t *testing.T) {
 			wantCount: 9,
 		},
 		{
-			name: "audit department admin gets both audit stages and customization review stages",
+			name: "audit department admin sees full main task flow",
 			actor: domain.RequestActor{
 				ID:         1003,
 				Department: string(domain.DepartmentAudit),
@@ -83,52 +83,52 @@ func TestTaskQueryStageVisibilityUATMatrix(t *testing.T) {
 					domain.RoleCustomizationReviewer,
 				},
 			},
-			wantCount: 4,
+			wantCount: 9,
 		},
 		{
-			name: "normal audit group gets audit a and b only",
+			name: "normal audit group sees full main task flow",
 			actor: domain.RequestActor{
 				ID:         1004,
 				Department: string(domain.DepartmentAudit),
 				Roles:      []domain.Role{domain.RoleAuditA, domain.RoleAuditB},
 			},
-			wantCount: 2,
+			wantCount: 9,
 		},
 		{
-			name: "customization reviewer gets customization review stages only",
+			name: "customization reviewer sees full main task flow",
 			actor: domain.RequestActor{
 				ID:         1005,
 				Department: string(domain.DepartmentAudit),
 				Roles:      []domain.Role{domain.RoleCustomizationReviewer},
 			},
-			wantCount: 2,
+			wantCount: 9,
 		},
 		{
-			name: "cloud warehouse dept admin plus warehouse sees both warehouse lanes",
+			name: "cloud warehouse dept admin plus warehouse sees full main task flow",
 			actor: domain.RequestActor{
 				ID:         1006,
 				Department: string(domain.DepartmentCloudWarehouse),
 				Roles:      []domain.Role{domain.RoleDeptAdmin, domain.RoleWarehouse},
 			},
-			wantCount: 2,
+			wantCount: 9,
 		},
 		{
-			name: "customization art dept admin plus operator sees customization review and production stages",
+			name: "customization art dept admin plus operator sees full main task flow",
 			actor: domain.RequestActor{
 				ID:         1007,
 				Department: string(domain.DepartmentCustomizationArt),
 				Roles:      []domain.Role{domain.RoleDeptAdmin, domain.RoleCustomizationOperator},
 			},
-			wantCount: 4,
+			wantCount: 9,
 		},
 		{
-			name: "customization operator sees customization production and in progress customization only",
+			name: "customization operator sees full main task flow",
 			actor: domain.RequestActor{
 				ID:         1008,
 				Department: string(domain.DepartmentCustomizationArt),
 				Roles:      []domain.Role{domain.RoleCustomizationOperator},
 			},
-			wantCount: 2,
+			wantCount: 9,
 		},
 	}
 

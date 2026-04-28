@@ -94,8 +94,8 @@
       "scopes": ["team_scope"]
     },
     "DesignDirector": {
-      "menus": ["design_workspace", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin"],
-      "pages": ["design_workspace", "department_users", "task_assets", "asset_detail", "assets_index", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"],
+      "menus": ["design_workspace", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin"],
+      "pages": ["design_workspace", "task_list", "department_users", "task_assets", "asset_detail", "assets_index", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"],
       "actions": ["design.review.read", "department.users.read", "task.list"],
       "scopes": ["design_department_scope"]
     },
@@ -124,14 +124,14 @@
       "scopes": ["workflow_ops"]
     },
     "Designer": {
-      "menus": ["design_workspace", "resource_management"],
-      "pages": ["design_workspace", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail"],
+      "menus": ["design_workspace", "task_list", "resource_management"],
+      "pages": ["design_workspace", "task_list", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail"],
       "actions": ["task.design_submit", "task.asset_upload", "task.list"],
       "scopes": ["design_workspace"]
     },
     "CustomizationOperator": {
-      "menus": ["design_workspace", "resource_management"],
-      "pages": ["design_workspace", "my_tasks", "task_assets", "asset_detail", "assets_index"],
+      "menus": ["design_workspace", "task_list", "resource_management"],
+      "pages": ["design_workspace", "task_list", "my_tasks", "task_assets", "asset_detail", "assets_index"],
       "actions": ["task.customization.submit", "task.customization.transfer", "task.asset_upload", "task.list", "warehouse_lane_filter"],
       "scopes": ["customization_workspace"]
     },

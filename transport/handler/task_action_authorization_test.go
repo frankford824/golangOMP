@@ -60,7 +60,9 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		router.Use(routeActor(domain.RequestActor{ID: 102, Roles: []domain.Role{domain.RoleDeptAdmin}, Department: "design"}))
 		router.GET("/v1/tasks/:id", h.GetByID)
 		rec = performJSON(router, http.MethodGet, "/v1/tasks/1", "")
-		assertTaskPermissionDenied(t, rec, "task_out_of_department_scope")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("main flow read should allow cross-department GET /v1/tasks/1 code=%d body=%s", rec.Code, rec.Body.String())
+		}
 	})
 
 	t.Run("assign_allow_and_deny", func(t *testing.T) {

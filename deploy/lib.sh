@@ -411,6 +411,17 @@ go_build_linux_amd64() {
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "$go_tool" build -o "$output_path" "$entrypoint"
 }
 
+wait_for_file() {
+  local path="$1"
+  local label="$2"
+  local attempt
+  for attempt in $(seq 1 20); do
+    [ -f "$path" ] && return 0
+    sleep 0.25
+  done
+  fail "Linux build output missing: $path ($label)"
+}
+
 package_release() {
   local root="$1"
   local version="$2"
@@ -450,8 +461,8 @@ package_release() {
     go_build_linux_amd64 "$root" "$go_tool" "$bridge_output" "$entrypoint"
   )
 
-  [ -f "$stage_root/ecommerce-api" ] || fail "Linux build output missing: $stage_root/ecommerce-api"
-  [ -f "$stage_root/erp_bridge" ] || fail "Linux build output missing: $stage_root/erp_bridge"
+  wait_for_file "$stage_root/ecommerce-api" "main"
+  wait_for_file "$stage_root/erp_bridge" "bridge"
 
   cp "$root"/config/*.json "$stage_root/config/"
   cp -R "$root/db/migrations" "$stage_root/db/"

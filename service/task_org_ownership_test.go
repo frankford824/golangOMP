@@ -359,8 +359,8 @@ func TestTaskServiceListAppliesCanonicalOrgVisibilityScope(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("department List() unexpected error: %+v", appErr)
 	}
-	if len(departmentItems) != 2 {
-		t.Fatalf("department List() len = %d, want 2", len(departmentItems))
+	if len(departmentItems) != 3 {
+		t.Fatalf("department List() len = %d, want 3 (main task flow is globally readable)", len(departmentItems))
 	}
 
 	teamCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
@@ -373,9 +373,8 @@ func TestTaskServiceListAppliesCanonicalOrgVisibilityScope(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("team List() unexpected error: %+v", appErr)
 	}
-	// TeamLead sees all tasks in own department (P0-03: department-wide read visibility).
-	if len(teamItems) != 2 {
-		t.Fatalf("team List() len = %d, want 2 (department-wide read for TeamLead)", len(teamItems))
+	if len(teamItems) != 3 {
+		t.Fatalf("team List() len = %d, want 3 (main task flow is globally readable)", len(teamItems))
 	}
 }
 

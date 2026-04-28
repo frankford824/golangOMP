@@ -402,8 +402,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"design_director"},
 			Scopes:  []string{"design_department_scope"},
-			Menus:   []string{"design_workspace", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin"},
-			Pages:   []string{"design_workspace", "department_users", "task_assets", "asset_detail", "assets_index", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"},
+			Menus:   []string{"design_workspace", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin"},
+			Pages:   []string{"design_workspace", "task_list", "department_users", "task_assets", "asset_detail", "assets_index", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"},
 			Actions: []string{"design.review.read", "department.users.read", "task.list"},
 		}
 	case RoleDesignReviewer:
@@ -426,8 +426,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"customization_operator"},
 			Scopes:  []string{"customization_workspace", "department:定制美工部"},
-			Menus:   []string{"design_workspace", "resource_management"},
-			Pages:   []string{"design_workspace", "my_tasks", "task_assets", "asset_detail", "assets_index"},
+			Menus:   []string{"design_workspace", "task_list", "resource_management"},
+			Pages:   []string{"design_workspace", "task_list", "my_tasks", "task_assets", "asset_detail", "assets_index"},
 			Actions: []string{"task.customization.submit", "task.customization.transfer", "task.asset_upload", "task.list", "warehouse_lane_filter"},
 		}
 	case RoleMember:
@@ -466,8 +466,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"designer"},
 			Scopes:  []string{"design_workspace"},
-			Menus:   []string{"design_workspace", "resource_management"},
-			Pages:   []string{"design_workspace", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail"},
+			Menus:   []string{"design_workspace", "task_list", "resource_management"},
+			Pages:   []string{"design_workspace", "task_list", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail"},
 			Actions: []string{"task.design_submit", "task.asset_upload", "task.list"},
 		}
 	case RoleAuditA:

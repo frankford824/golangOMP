@@ -13,12 +13,8 @@ func (s *taskService) listTasks(ctx context.Context, filter TaskFilter) ([]*doma
 	if appErr != nil {
 		return nil, domain.PaginationMeta{}, appErr
 	}
-	scope, appErr := s.resolveDataScope(ctx)
-	if appErr != nil {
-		return nil, domain.PaginationMeta{}, appErr
-	}
 
-	repoFilter := taskFilterToRepoTaskListFilter(normalized, normalized.Page, normalized.PageSize, scope)
+	repoFilter := taskFilterToRepoTaskListFilter(normalized, normalized.Page, normalized.PageSize, mainTaskReadScope())
 	items, total, err := s.taskRepo.List(ctx, repoFilter)
 	if err != nil {
 		return nil, domain.PaginationMeta{}, infraError("list tasks", err)
@@ -36,19 +32,19 @@ func (s *taskService) listBoardCandidates(ctx context.Context, filter TaskFilter
 	if appErr != nil {
 		return nil, appErr
 	}
-	scope, appErr := s.resolveDataScope(ctx)
-	if appErr != nil {
-		return nil, appErr
-	}
 
 	items, err := s.taskRepo.ListBoardCandidates(ctx, repo.TaskBoardCandidateFilter{
-		TaskListFilter:   taskFilterToRepoTaskListFilter(normalized, 0, 0, scope),
+		TaskListFilter:   taskFilterToRepoTaskListFilter(normalized, 0, 0, mainTaskReadScope()),
 		CandidateFilters: append([]domain.TaskQueryFilterDefinition(nil), presets...),
 	})
 	if err != nil {
 		return nil, infraError("list board candidates", err)
 	}
 	return hydrateTaskListItems(items), nil
+}
+
+func mainTaskReadScope() *DataScope {
+	return &DataScope{ViewAll: true}
 }
 
 func normalizeTaskFilter(filter TaskFilter) (TaskFilter, *domain.AppError) {

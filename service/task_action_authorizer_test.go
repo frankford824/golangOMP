@@ -391,11 +391,11 @@ func TestTaskActionAuthorizerReadVisibilityHydratesScopedUser(t *testing.T) {
 	}
 
 	decision := newTaskActionAuthorizer(NewRoleBasedDataScopeResolver(), userRepo).EvaluateTaskActionPolicy(ctx, TaskActionReadDetail, task, "", "")
-	if decision.Allowed {
-		t.Fatalf("EvaluateTaskActionPolicy() allowed = true, want false, decision=%+v", decision)
+	if !decision.Allowed {
+		t.Fatalf("EvaluateTaskActionPolicy() allowed = false, want true for globally readable task detail, decision=%+v", decision)
 	}
-	if decision.DenyCode != "task_out_of_scope" {
-		t.Fatalf("EvaluateTaskActionPolicy() deny_code = %q, want task_out_of_scope", decision.DenyCode)
+	if decision.ScopeSource != string(TaskActionScopeMainFlowRead) {
+		t.Fatalf("ScopeSource = %q, want %q", decision.ScopeSource, TaskActionScopeMainFlowRead)
 	}
 }
 
@@ -464,11 +464,11 @@ func TestTaskActionAuthorizerReadDetailUsesStageVisibilityForMidLaneRoles(t *tes
 		}
 
 		decision := authz.EvaluateTaskActionPolicy(ctx, TaskActionReadDetail, task, "", "")
-		if decision.Allowed {
-			t.Fatalf("EvaluateTaskActionPolicy() allowed = true, want false, decision=%+v", decision)
+		if !decision.Allowed {
+			t.Fatalf("EvaluateTaskActionPolicy() allowed = false, want true for globally readable task detail, decision=%+v", decision)
 		}
-		if decision.DenyCode != "task_out_of_scope" && decision.DenyCode != "task_out_of_department_scope" {
-			t.Fatalf("DenyCode = %q, want scope-based deny", decision.DenyCode)
+		if decision.ScopeSource != string(TaskActionScopeMainFlowRead) {
+			t.Fatalf("ScopeSource = %q, want %q", decision.ScopeSource, TaskActionScopeMainFlowRead)
 		}
 	})
 }
@@ -527,11 +527,14 @@ func TestTeamLeadReadsDepartmentWritesTeamOnly(t *testing.T) {
 		}
 	})
 
-	t.Run("TeamLead cannot read other-department task", func(t *testing.T) {
+	t.Run("TeamLead can read other-department task through main flow read", func(t *testing.T) {
 		ctx := domain.WithRequestActor(context.Background(), actor)
 		decision := authz.EvaluateTaskActionPolicy(ctx, TaskActionReadDetail, otherDeptTask, "", "")
-		if decision.Allowed {
-			t.Fatalf("expected allowed=false for other-department read, got decision=%+v", decision)
+		if !decision.Allowed {
+			t.Fatalf("expected allowed=true for globally readable main task flow, got decision=%+v", decision)
+		}
+		if decision.ScopeSource != string(TaskActionScopeMainFlowRead) {
+			t.Fatalf("ScopeSource = %q, want %q", decision.ScopeSource, TaskActionScopeMainFlowRead)
 		}
 	})
 
@@ -940,11 +943,11 @@ func TestTaskActionAuthorizer_ReadDetail_TeamLead_PlainScope_Unchanged(t *testin
 	}
 
 	decision := authz.EvaluateTaskActionPolicy(ctx, TaskActionReadDetail, task, "", "")
-	if decision.Allowed {
-		t.Fatalf("EvaluateTaskActionPolicy() allowed = true, want false, decision=%+v", decision)
+	if !decision.Allowed {
+		t.Fatalf("EvaluateTaskActionPolicy() allowed = false, want true for globally readable task detail, decision=%+v", decision)
 	}
-	if decision.DenyCode != "task_out_of_team_scope" {
-		t.Fatalf("DenyCode = %q, want %q", decision.DenyCode, "task_out_of_team_scope")
+	if decision.ScopeSource != string(TaskActionScopeMainFlowRead) {
+		t.Fatalf("ScopeSource = %q, want %q", decision.ScopeSource, TaskActionScopeMainFlowRead)
 	}
 }
 

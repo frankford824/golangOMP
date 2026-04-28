@@ -59,7 +59,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "研发默认组",
 				Roles:      []Role{RoleMember, RoleDesigner},
 			},
-			expectMenus: []string{"dashboard", "design_workspace", "resource_management"},
+			expectMenus: []string{"dashboard", "design_workspace", "resource_management", "task_list"},
 		},
 		{
 			name: "Row05_AuditAMember",
@@ -125,7 +125,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "定制默认组",
 				Roles:      []Role{RoleMember, RoleCustomizationOperator},
 			},
-			expectMenus: []string{"dashboard", "design_workspace", "resource_management"},
+			expectMenus: []string{"dashboard", "design_workspace", "resource_management", "task_list"},
 		},
 		{
 			name: "Row10_WarehouseDeptAdmin",
@@ -240,7 +240,7 @@ func TestCustomizationOperatorMemberHidesCustomizationManagement(t *testing.T) {
 		Roles:      []Role{RoleMember, RoleCustomizationOperator},
 	}, settings)
 
-	assertStringSetEqual(t, view.Menus, []string{"dashboard", "design_workspace", "resource_management"}, "menus")
+	assertStringSetEqual(t, view.Menus, []string{"dashboard", "design_workspace", "resource_management", "task_list"}, "menus")
 	assertNotContainsAny(t, view.Menus, []string{"customization_management"}, "menus")
 }
 

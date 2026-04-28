@@ -21,6 +21,7 @@ const (
 	TaskActionScopeCreator           TaskActionScopeSource = "creator_match"
 	TaskActionScopeRequester         TaskActionScopeSource = "requester_match"
 	TaskActionScopeStage             TaskActionScopeSource = "stage_scope"
+	TaskActionScopeMainFlowRead      TaskActionScopeSource = "main_flow_read"
 )
 
 type taskActionActor struct {

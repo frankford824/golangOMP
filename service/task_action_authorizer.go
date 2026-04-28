@@ -156,7 +156,6 @@ func (a *taskActionAuthorizer) EvaluateTaskActionPolicyWithAttributes(
 		decision.StatusReason = decision.DenyReason
 		return decision
 	}
-
 	if rule.UseReadVisibility && task != nil {
 		scope, appErr := resolveDataScopeForActor(ctx, a.dataScopeResolver, a.scopeUserRepo)
 		if appErr != nil {
@@ -197,6 +196,11 @@ func (a *taskActionAuthorizer) EvaluateTaskActionPolicyWithAttributes(
 				decision.ScopeSource = inferReadScopeSource(task, scope, actorOrg)
 				return decision
 			}
+		}
+		if resolvedAction == TaskActionReadDetail {
+			decision.Allowed = true
+			decision.ScopeSource = string(TaskActionScopeMainFlowRead)
+			return decision
 		}
 		decision.DenyCode = inferReadScopeDenyCode(actor, task)
 		decision.DenyReason = authFirstNonEmpty(rule.ScopeGateMessage, "task detail is outside the current data scope")
