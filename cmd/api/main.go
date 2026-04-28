@@ -236,7 +236,8 @@ func main() {
 		service.WithAuditV7ScopeUserRepo(userRepo),
 		service.WithAuditV7FilingTrigger(taskSvc))
 	outsourceSvc := service.NewOutsourceService(outsourceRepo, taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb)
-	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo)
+	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
+		service.WithTaskEventUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
 	warehouseSvc := service.NewWarehouseService(taskRepo, taskAssetRepo, warehouseRepo, taskEventRepo, mdb,
 		service.WithWarehouseDataScopeResolver(taskDataScopeResolver),
 		service.WithWarehouseScopeUserRepo(userRepo),

@@ -1,7 +1,7 @@
 # Excel 批量创建
 
-> Revision: V1.2-D-2 residual drift triage (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2-D-2)
+> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
+> Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 

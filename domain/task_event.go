@@ -17,11 +17,14 @@ import (
 //   - If a unified log is needed in the future, a DB view or a fan-out worker can
 //     merge both tables without changing either table's schema.
 type TaskEvent struct {
-	ID         string          `db:"id"          json:"id"` // UUID (event_id)
-	TaskID     int64           `db:"task_id"     json:"task_id"`
-	Sequence   int64           `db:"sequence"    json:"sequence"` // monotonically increasing per task
-	EventType  string          `db:"event_type"  json:"event_type"`
-	OperatorID *int64          `db:"operator_id" json:"operator_id,omitempty"`
-	Payload    json.RawMessage `db:"payload"     json:"payload"` // raw JSON payload
-	CreatedAt  time.Time       `db:"created_at"  json:"created_at"`
+	ID           string          `db:"id"          json:"id"` // UUID (event_id)
+	TaskID       int64           `db:"task_id"     json:"task_id"`
+	Sequence     int64           `db:"sequence"    json:"sequence"` // monotonically increasing per task
+	EventType    string          `db:"event_type"  json:"event_type"`
+	OperatorID   *int64          `db:"operator_id" json:"operator_id,omitempty"`
+	OperatorName string          `json:"operator_name,omitempty"`
+	CreatorID    *int64          `json:"creator_id,omitempty"`
+	CreatorName  string          `json:"creator_name,omitempty"`
+	Payload      json.RawMessage `db:"payload"     json:"payload"` // raw JSON payload
+	CreatedAt    time.Time       `db:"created_at"  json:"created_at"`
 }

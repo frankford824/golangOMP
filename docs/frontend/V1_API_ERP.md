@@ -1,86 +1,18 @@
 # ERP 与业务字典
 
-> Revision: V1.3-A2 i_id-first task/ERP integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.2-D-2)
+> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
+> Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
-ERP 商品、i_id 选择、分类、仓库、同步、类目、成本规则与兼容商品目录。
+ERP 商品、分类、仓库、同步、类目、成本规则与兼容商品目录。
 
 ## Family 约定
 
-- 新联调优先使用 `/v1/erp/iids`、`/v1/erp/products*` 与 `/v1/erp/products/by-code`。
-- 新品开发/采购任务的前端选项以聚水潭 `i_id` 为主；`category_code` 是后端内部兼容字段，不再作为前端主选择项。
+- 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 本文件覆盖 `28` 个 `/v1` path；同一路径多 method 合并在同一节。
-
-## i_id-first 联调方式
-
-前端创建新品开发或采购任务时，先调用 `GET /v1/erp/iids` 让用户选择聚水潭商品款式/品类语义的 `i_id`。创建任务时传 `i_id` 或兼容别名 `product_i_id`，不要再让用户选择或填写后端内部 `category_code`。
-
-推荐流程：
-
-1. `GET /v1/erp/iids?q=常规kt板&page=1&page_size=50`
-2. 用户选择返回项里的 `i_id`
-3. `POST /v1/tasks` 传 `product_name`、`i_id`、任务基础字段
-4. 如需创建后立即写聚水潭，传 `sync_erp_on_create: true`
-
-`category_code` 仍可能在任务详情、成本规则、历史数据里出现，这是后端内部兼容和 SKU 前缀/成本规则用字段。新前端不要把它作为业务主选择项。
-
-## GET /v1/erp/iids
-
-### 简介
-支持方法: GET。
-
-- `GET`: 返回聚水潭商品快照中去重后的 `i_id` 列表，供新品开发/采购任务创建页选择。数据来自本地 ERP 同步副本，包含每个 `i_id` 的商品数量和可辅助展示的 category/category_name。
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)。
-- 允许角色: 已登录 / scope-aware。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `q` | query | string | 否 | 按 `i_id`、category、category_name、product_name、sku_code 模糊搜索。 |
-| `keyword` | query | string | 否 | `q` 的兼容别名。 |
-| `page` | query | integer | 否 | 默认 1。 |
-| `page_size` | query | integer | 否 | 默认 50，最大 200。 |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {
-      "i_id": "常规kt板",
-      "label": "常规kt板",
-      "category": "常规kt板",
-      "category_name": "常规KT板",
-      "product_count": 1920
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "page_size": 50,
-    "total": 1474
-  },
-  "normalized_filters": {
-    "q": "常规kt板",
-    "page": 1,
-    "page_size": 50
-  }
-}
-```
-
-### 前端最佳实践
-- 下拉展示建议用 `label`，保存/提交用 `i_id`。
-- `category`、`category_name` 只做辅助展示，不要回填为 `category_code`。
-- 若搜索不到用户要的 `i_id`，不要自行构造，提示运营先确认 ERP 商品同步或聚水潭基础资料。
 
 ## GET /v1/erp/products
 
@@ -157,6 +89,85 @@ curl -X GET https://api.example.com/v1/erp/products \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
+- `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/erp/iids
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns distinct Jushuitan product style/family `i_id` values from the local ERP sync replica for frontend selection. New task creation should use this endpoint to select `i_id`; `category_code` is backend-owned compatibility metadata and should not be a required frontend input.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `q` | query | string | 否 | Optional fuzzy search against i_id, category, category_name, product_name, or sku_code. |
+| `keyword` | query | string | 否 | Compatibility alias for `q`. |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "i_id": "...",
+      "label": "...",
+      "category": "...",
+      "category_name": "..."
+    }
+  ],
+  "pagination": {
+    "page": 123,
+    "page_size": 123,
+    "total": 123
+  },
+  "normalized_filters": {
+    "q": "string",
+    "page": 123,
+    "page_size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<ERPIIDOption> | 否 | - |
+| `pagination` | PaginationMeta | 否 | - |
+| `normalized_filters` | ERPIIDListFilter | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/erp/iids \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -214,6 +225,7 @@ curl -X GET https://api.example.com/v1/erp/products/<id> \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -270,6 +282,7 @@ curl -X GET https://api.example.com/v1/erp/categories \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -325,6 +338,7 @@ curl -X GET https://api.example.com/v1/erp/warehouses \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -385,6 +399,7 @@ curl -X GET https://api.example.com/v1/erp/users \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -499,6 +514,7 @@ curl -X POST https://api.example.com/v1/erp/products/upsert \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -578,6 +594,7 @@ curl -X POST https://api.example.com/v1/erp/products/style/update \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -647,6 +664,7 @@ curl -X GET https://api.example.com/v1/erp/sync-logs \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -703,6 +721,7 @@ curl -X GET https://api.example.com/v1/erp/sync-logs/<id> \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -765,6 +784,7 @@ curl -X POST https://api.example.com/v1/erp/products/shelve/batch \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -827,6 +847,7 @@ curl -X POST https://api.example.com/v1/erp/products/unshelve/batch \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -889,6 +910,7 @@ curl -X POST https://api.example.com/v1/erp/inventory/virtual-qty \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -959,6 +981,7 @@ curl -X GET https://api.example.com/v1/products/search \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1017,6 +1040,7 @@ curl -X GET https://api.example.com/v1/products/sync/status \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1075,6 +1099,7 @@ curl -X POST https://api.example.com/v1/products/sync/run \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1131,6 +1156,7 @@ curl -X GET https://api.example.com/v1/products/<id> \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1265,6 +1291,7 @@ curl -X POST https://api.example.com/v1/categories \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1330,6 +1357,7 @@ curl -X GET https://api.example.com/v1/categories/search \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1448,6 +1476,7 @@ curl -X PATCH https://api.example.com/v1/categories/<id> \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1586,6 +1615,7 @@ curl -X POST https://api.example.com/v1/category-mappings \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1653,6 +1683,7 @@ curl -X GET https://api.example.com/v1/category-mappings/search \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1773,6 +1804,7 @@ curl -X PATCH https://api.example.com/v1/category-mappings/<id> \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1916,6 +1948,7 @@ curl -X POST https://api.example.com/v1/cost-rules \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -2044,6 +2077,7 @@ curl -X PATCH https://api.example.com/v1/cost-rules/<id> \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -2106,6 +2140,7 @@ curl -X GET https://api.example.com/v1/cost-rules/<id>/history \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -2175,6 +2210,7 @@ curl -X POST https://api.example.com/v1/cost-rules/preview \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -2232,6 +2268,7 @@ curl -X GET https://api.example.com/v1/erp/products/by-code \
 
 ### 前端最佳实践
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。

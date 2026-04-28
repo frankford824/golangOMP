@@ -1,7 +1,7 @@
 # V1 前端联调接口文档索引
 
-> Revision: V1.3-A2 i_id-first task/ERP integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.2-D-2)
+> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
+> Source: docs/api/openapi.yaml (post V1.3-A2)
 
 当前真相入口: [V1_BACKEND_SOURCE_OF_TRUTH.md](../V1_BACKEND_SOURCE_OF_TRUTH.md)
 
@@ -14,15 +14,14 @@
 - 鉴权: `Authorization: Bearer <token>`。
 - 成功响应常见包装: `{"data": ...}`；以各接口 OpenAPI response schema 为准。
 
-## §1 联调起步 7 步
+## §1 联调起步 6 步
 
 1. `POST /v1/auth/login` 获取 token。
 2. `GET /v1/me` 校验当前用户。
 3. `GET /v1/tasks` 拉任务列表。
 4. `GET /v1/tasks/{id}/detail` 拉首屏聚合详情。
-5. `GET /v1/erp/iids` 拉聚水潭 `i_id` 选项；新品/采购任务创建传 `i_id`，不要让用户填 `category_code`。
-6. 使用 `/v1/tasks/{id}/asset-center/*` 联调任务资产。
-7. 使用 `/v1/tasks/batch-create/template.xlsx` 与 `/parse-excel` 联调 Excel 批量预览。
+5. 使用 `/v1/tasks/{id}/asset-center/*` 联调任务资产。
+6. 使用 `/v1/tasks/batch-create/template.xlsx` 与 `/parse-excel` 联调 Excel 批量预览。
 
 ## §2 错误码总表
 
@@ -74,7 +73,7 @@
 
 ## §4 路由分类
 
-- Canonical: `/v1/auth/*`, `/v1/me*`, `/v1/users*`, `/v1/erp/iids`, `/v1/erp/products*`, `/v1/tasks*`, `/v1/tasks/{id}/asset-center/*`, `/v1/task-drafts*`, `/v1/me/notifications*`, `/v1/reports/l1/*`, `/ws/v1`。
+- Canonical: `/v1/auth/*`, `/v1/me*`, `/v1/users*`, `/v1/erp/products*`, `/v1/tasks*`, `/v1/tasks/{id}/asset-center/*`, `/v1/task-drafts*`, `/v1/me/notifications*`, `/v1/reports/l1/*`, `/ws/v1`。
 - Compatibility: `/v1/products*`, `/v1/task-create/asset-center/*`, 以及 transport 中 `withCompatibilityRoute` 标记的旧入口。
 - Deprecated: transport 中 `withDeprecatedRoute` 标记的旧入口；新前端不要接。
 
@@ -102,7 +101,6 @@
 
 - 所有请求必须走 Bearer token，公开登录/注册除外。
 - 首屏详情优先使用 `GET /v1/tasks/{id}/detail`，不要并发拼旧 detail 子接口。
-- 新品/采购任务创建页必须使用 `GET /v1/erp/iids` 选择 `i_id`；`category_code` 只作为后端兼容字段。
 - 前端必须展示后端 `error.code` 或 `deny_code`。
 - 新页面只接 canonical 路径。
 - WebSocket 只做实时提示，最终一致状态回读 HTTP。
@@ -111,6 +109,6 @@
 ## §7 Deprecated / Compatibility 清单
 
 - `/v1/task-create/asset-center/*`: 创建前资产上传兼容入口。
-- `/v1/products*`: 老本地缓存商品入口，新联调用 `/v1/erp/iids` 与 `/v1/erp/products*`。
+- `/v1/products*`: 老本地缓存商品入口，新联调用 `/v1/erp/products*`。
 - `/v1/tasks/{id}/audit_a_claim`、`/v1/tasks/{id}/audit_b_claim`: 老审核领取别名。
 - 所有 `withCompatibilityRoute` / `withDeprecatedRoute` 标记路径不得作为新前端主入口。

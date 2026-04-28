@@ -1,7 +1,7 @@
 # WebSocket
 
-> Revision: V1.2-D-2 residual drift triage (2026-04-26)
-> Source: docs/api/openapi.yaml (post V1.2-D-2)
+> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
+> Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -16,7 +16,7 @@
 ## GET /ws/v1
 
 ### 简介
-当前 OpenAPI 实际挂载的 WebSocket path 是 `/ws/v1`，不是 `/v1/ws/v1`。本文按 OpenAPI 真实路径记录；`/v1` path 统计为 209。
+当前 OpenAPI 实际挂载的 WebSocket path 是 `/ws/v1`，不是 `/v1/ws/v1`。本文按 OpenAPI 真实路径记录；`/v1` path 统计为 210。
 
 ### 鉴权与 RBAC
 - 需要 Bearer token，推荐通过协议约定或查询参数传递，具体以 transport 实现和前端联调环境为准。

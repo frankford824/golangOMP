@@ -2655,6 +2655,16 @@ components:
         operator_id:
           type: integer
           nullable: true
+        operator_name:
+          type: string
+          description: Display name resolved from `operator_id` for timeline rendering.
+        creator_id:
+          type: integer
+          nullable: true
+          description: Task creator id, repeated on each event for frontend timeline context.
+        creator_name:
+          type: string
+          description: Task creator display name, repeated on each event for frontend timeline context.
         payload:
           type: object
           additionalProperties: true
