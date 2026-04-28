@@ -76,6 +76,9 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		detail.ProductSelection = selection
 	}
 	missingFields, missingSummary := ComputeFilingMissingFields(task, detail)
+	if p.Source == TaskFilingTriggerSourceCreate && p.Force && task.TaskType != domain.TaskTypeOriginalProductDevelopment {
+		missingFields, missingSummary = computeMinimalCreateFilingMissingFields(task, detail)
+	}
 	if len(missingFields) > 0 {
 		detail.FilingTriggerSource = string(p.Source)
 		if task.TaskType == domain.TaskTypeOriginalProductDevelopment && p.Source == TaskFilingTriggerSourceCreate && !p.Force {
@@ -262,7 +265,7 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        productID,
 		SKUID:            skuID,
-		IID:              strings.TrimSpace(firstNonEmptyString(snapshotIID(snapshot), skuID)),
+		IID:              strings.TrimSpace(firstNonEmptyString(snapshotIID(snapshot), detail.Category, detail.CategoryName, skuID)),
 		SKUCode:          skuCode,
 		Name:             name,
 		ProductName:      firstNonEmptyString(name, skuCode),

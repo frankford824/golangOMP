@@ -126,6 +126,7 @@ type ProductRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.Product, error)
 	GetByERPProductID(ctx context.Context, erpProductID string) (*domain.Product, error)
 	Search(ctx context.Context, filter ProductSearchFilter) ([]*domain.Product, int64, error)
+	ListIIDs(ctx context.Context, filter ProductIIDListFilter) ([]*domain.ERPIIDOption, int64, error)
 	UpsertBatch(ctx context.Context, tx Tx, products []*domain.Product) (int64, error)
 }
 
@@ -231,6 +232,12 @@ type ProductSearchFilter struct {
 	MappingRules []*domain.CategoryERPMapping
 	Page         int
 	PageSize     int
+}
+
+type ProductIIDListFilter struct {
+	Q        string
+	Page     int
+	PageSize int
 }
 
 type CategoryListFilter struct {

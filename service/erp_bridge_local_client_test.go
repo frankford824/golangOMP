@@ -81,6 +81,10 @@ func (s *localERPBridgeProductRepoStub) Search(context.Context, repo.ProductSear
 	return items, s.searchTotal, nil
 }
 
+func (s *localERPBridgeProductRepoStub) ListIIDs(context.Context, repo.ProductIIDListFilter) ([]*domain.ERPIIDOption, int64, error) {
+	return []*domain.ERPIIDOption{}, 0, nil
+}
+
 func (s *localERPBridgeProductRepoStub) UpsertBatch(context.Context, repo.Tx, []*domain.Product) (int64, error) {
 	return 0, nil
 }

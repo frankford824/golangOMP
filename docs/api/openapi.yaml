@@ -1164,6 +1164,21 @@ components:
         query_mode:
           type: string
           description: Current normalized search mode such as `keyword`, `sku_code`, `category_auxiliary`, or `browse`.
+    ERPIIDOption:
+      type: object
+      description: Frontend selection option for Jushuitan product style code `i_id`. This is the canonical business selector for new-product and purchase-task creation; `category_code` remains backend-owned compatibility metadata.
+      properties:
+        i_id: { type: string }
+        label: { type: string }
+        category: { type: string }
+        category_name: { type: string }
+        product_count: { type: integer, format: int64 }
+    ERPIIDListFilter:
+      type: object
+      properties:
+        q: { type: string }
+        page: { type: integer }
+        page_size: { type: integer }
     ERPBridgeCategory:
       type: object
       description: Normalized ERP category contract used by MAIN to validate exact category_id / category_name filters.
@@ -3959,7 +3974,13 @@ components:
           type: string
         category_code:
           type: string
-          description: Required for `batch_sku_mode=multiple` on both `new_product_development` and `purchase_task`.
+          description: Backend-owned compatibility category/cost/SKU-prefix field. New frontend creation should prefer `i_id`; backend may resolve an internal `category_code` from `i_id` when possible.
+        i_id:
+          type: string
+          description: Canonical frontend selector for product family/style. For new-product and purchase-task creation, pass a value selected from `GET /v1/erp/iids`.
+        product_i_id:
+          type: string
+          description: Compatibility alias for `i_id`.
         material_mode:
           type: string
           enum: [preset, other]
@@ -3991,6 +4012,9 @@ components:
           nullable: true
         reference_link:
           type: string
+        sync_erp_on_create:
+          type: boolean
+          description: When true, backend triggers the ERP product upsert immediately after task creation using the minimal create-time payload (`product_name`, generated/provided sku, and `i_id`). Later edits can enrich ERP data.
         purchase_sku:
           type: string
         product_channel:
@@ -7685,6 +7709,47 @@ paths:
           description: ERP Bridge upstream product path not found
         '500':
           description: ERP Bridge unavailable or upstream returned a non-200 response. Error details may now include timeout/retry-hint diagnostics for internal observability.
+  /v1/erp/iids:
+    get:
+      summary: List ERP product i_id options
+      description: |
+        Returns distinct Jushuitan product style/family `i_id` values from the local ERP sync replica for frontend selection.
+        New task creation should use this endpoint to select `i_id`; `category_code` is backend-owned compatibility metadata and should not be a required frontend input.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Optional fuzzy search against i_id, category, category_name, product_name, or sku_code.
+        - in: query
+          name: keyword
+          schema: { type: string }
+          description: Compatibility alias for `q`.
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        '200':
+          description: Distinct ERP i_id option list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ERPIIDOption'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+                  normalized_filters:
+                    $ref: '#/components/schemas/ERPIIDListFilter'
   /v1/erp/products/{id}:
     get:
       summary: Get ERP Bridge product detail

@@ -113,6 +113,7 @@ func TestERPBridgeHandlerGetProductByIDAcceptsSlashContainingID(t *testing.T) {
 
 type erpBridgeServiceStub struct {
 	searchResponse *domain.ERPProductListResponse
+	iidResponse    *domain.ERPIIDListResponse
 	product        *domain.ERPProduct
 	categories     []*domain.ERPCategory
 	appErr         *domain.AppError
@@ -120,6 +121,13 @@ type erpBridgeServiceStub struct {
 
 func (s *erpBridgeServiceStub) SearchProducts(context.Context, domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError) {
 	return s.searchResponse, s.appErr
+}
+
+func (s *erpBridgeServiceStub) ListIIDs(context.Context, domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+	if s.iidResponse != nil {
+		return s.iidResponse, s.appErr
+	}
+	return &domain.ERPIIDListResponse{Items: []*domain.ERPIIDOption{}}, s.appErr
 }
 
 func (s *erpBridgeServiceStub) GetProductByID(context.Context, string) (*domain.ERPProduct, *domain.AppError) {

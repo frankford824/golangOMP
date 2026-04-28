@@ -73,6 +73,8 @@ type createTaskReq struct {
 
 	// New product development fields
 	CategoryCode      string   `json:"category_code"`
+	IID               string   `json:"i_id"`
+	ProductIID        string   `json:"product_i_id"`
 	MaterialMode      string   `json:"material_mode"`
 	Material          string   `json:"material"`
 	MaterialOther     string   `json:"material_other"`
@@ -85,6 +87,7 @@ type createTaskReq struct {
 	Quantity          *int64   `json:"quantity"`
 	BaseSalePrice     *float64 `json:"base_sale_price"`
 	ReferenceLink     string   `json:"reference_link"`
+	SyncERPOnCreate   bool     `json:"sync_erp_on_create"`
 
 	// Purchase task fields
 	PurchaseSKU    string `json:"purchase_sku"`
@@ -105,6 +108,8 @@ type createTaskBatchItemReq struct {
 	ProductName       string                    `json:"product_name"`
 	ProductShortName  string                    `json:"product_short_name"`
 	CategoryCode      string                    `json:"category_code"`
+	IID               string                    `json:"i_id"`
+	ProductIID        string                    `json:"product_i_id"`
 	MaterialMode      string                    `json:"material_mode"`
 	DesignRequirement string                    `json:"design_requirement"`
 	NewSKU            string                    `json:"new_sku"`
@@ -797,6 +802,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		ChangeRequest:       req.ChangeRequest,
 		DesignRequirement:   req.DesignRequirement,
 		CategoryCode:        req.CategoryCode,
+		ProductIID:          firstNonEmptyTrimmed(req.IID, req.ProductIID),
 		MaterialMode:        req.MaterialMode,
 		Material:            req.Material,
 		MaterialOther:       req.MaterialOther,
@@ -811,6 +817,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		BatchSKUMode:        req.BatchSKUMode,
 		TopLevelNewSKU:      req.NewSKU,
 		TopLevelPurchaseSKU: req.PurchaseSKU,
+		SyncERPOnCreate:     req.SyncERPOnCreate,
 	}
 	if len(req.BatchItems) > 0 {
 		params.BatchItems = make([]service.CreateTaskBatchSKUItemParams, 0, len(req.BatchItems))

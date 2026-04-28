@@ -364,6 +364,10 @@ func (s *erpBridgeSelectionBinderStub) SearchProducts(context.Context, domain.ER
 	return nil, nil
 }
 
+func (s *erpBridgeSelectionBinderStub) ListIIDs(context.Context, domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+	return &domain.ERPIIDListResponse{Items: []*domain.ERPIIDOption{}}, nil
+}
+
 func (s *erpBridgeSelectionBinderStub) GetProductByID(context.Context, string) (*domain.ERPProduct, *domain.AppError) {
 	return nil, nil
 }

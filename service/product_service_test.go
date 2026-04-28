@@ -223,6 +223,10 @@ func (r *productSearchProductRepoStub) Search(_ context.Context, filter repo.Pro
 	return items, int64(len(items)), nil
 }
 
+func (r *productSearchProductRepoStub) ListIIDs(context.Context, repo.ProductIIDListFilter) ([]*domain.ERPIIDOption, int64, error) {
+	return []*domain.ERPIIDOption{}, 0, nil
+}
+
 func (r *productSearchProductRepoStub) UpsertBatch(_ context.Context, _ repo.Tx, products []*domain.Product) (int64, error) {
 	r.products = append(r.products, products...)
 	return int64(len(products)), nil

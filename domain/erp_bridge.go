@@ -47,6 +47,26 @@ type ERPProductListResponse struct {
 	NormalizedFilters *ERPProductSearchFilter `json:"normalized_filters,omitempty"`
 }
 
+type ERPIIDListFilter struct {
+	Q        string `json:"q,omitempty"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+}
+
+type ERPIIDOption struct {
+	IID          string `json:"i_id"`
+	Label        string `json:"label"`
+	Category     string `json:"category,omitempty"`
+	CategoryName string `json:"category_name,omitempty"`
+	ProductCount int64  `json:"product_count"`
+}
+
+type ERPIIDListResponse struct {
+	Items             []*ERPIIDOption  `json:"items"`
+	Pagination        PaginationMeta   `json:"pagination"`
+	NormalizedFilters ERPIIDListFilter `json:"normalized_filters"`
+}
+
 // ERPCategory is the normalized category contract consumed from ERP Bridge.
 type ERPCategory struct {
 	CategoryID   string `json:"category_id"`

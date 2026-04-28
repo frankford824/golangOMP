@@ -880,6 +880,36 @@ func (r *erpBridgeProductRepoStub) Search(_ context.Context, filter repo.Product
 	return matches[start:end], total, nil
 }
 
+func (r *erpBridgeProductRepoStub) ListIIDs(_ context.Context, filter repo.ProductIIDListFilter) ([]*domain.ERPIIDOption, int64, error) {
+	if r.products == nil {
+		return []*domain.ERPIIDOption{}, 0, nil
+	}
+	q := strings.ToLower(strings.TrimSpace(filter.Q))
+	counts := map[string]int64{}
+	for _, product := range r.products {
+		if product == nil {
+			continue
+		}
+		snapshot := erpProductSnapshotFromSpecJSON(product.SpecJSON)
+		iid := ""
+		if snapshot != nil {
+			iid = strings.TrimSpace(snapshot.IID)
+		}
+		if iid == "" {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(iid), q) && !strings.Contains(strings.ToLower(product.ProductName), q) {
+			continue
+		}
+		counts[iid]++
+	}
+	items := make([]*domain.ERPIIDOption, 0, len(counts))
+	for iid, count := range counts {
+		items = append(items, &domain.ERPIIDOption{IID: iid, Label: iid, ProductCount: count})
+	}
+	return items, int64(len(items)), nil
+}
+
 func (r *erpBridgeProductRepoStub) UpsertBatch(_ context.Context, _ repo.Tx, products []*domain.Product) (int64, error) {
 	for _, product := range products {
 		copied := *product

@@ -228,6 +228,7 @@ func NewRouter(
 	erpGroup := v1.Group("/erp")
 	{
 		erpGroup.GET("/products", access(erpGroup, http.MethodGet, "/products", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleERP, domain.RoleAdmin), erpBridgeH.SearchProducts)
+		erpGroup.GET("/iids", access(erpGroup, http.MethodGet, "/iids", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleERP, domain.RoleAdmin), erpBridgeH.ListIIDs)
 		erpGroup.GET("/products/*id", access(erpGroup, http.MethodGet, "/products/{id}", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleERP, domain.RoleAdmin), func(c *gin.Context) {
 			if erpProductH != nil && strings.Trim(strings.TrimSpace(c.Param("id")), "/") == "by-code" {
 				erpProductH.ByCode(c)

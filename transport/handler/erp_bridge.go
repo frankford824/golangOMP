@@ -36,6 +36,24 @@ func (h *ERPBridgeHandler) SearchProducts(c *gin.Context) {
 	})
 }
 
+func (h *ERPBridgeHandler) ListIIDs(c *gin.Context) {
+	filter, appErr := parseERPIIDListFilter(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.ListIIDs(c.Request.Context(), filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, gin.H{
+		"data":               result.Items,
+		"pagination":         result.Pagination,
+		"normalized_filters": result.NormalizedFilters,
+	})
+}
+
 func (h *ERPBridgeHandler) GetProductByID(c *gin.Context) {
 	id := strings.TrimSpace(strings.TrimPrefix(c.Param("id"), "/"))
 	if id == "" {
@@ -48,6 +66,32 @@ func (h *ERPBridgeHandler) GetProductByID(c *gin.Context) {
 		return
 	}
 	respondOK(c, product)
+}
+
+func parseERPIIDListFilter(c *gin.Context) (domain.ERPIIDListFilter, *domain.AppError) {
+	filter := domain.ERPIIDListFilter{
+		Q:        strings.TrimSpace(c.Query("q")),
+		Page:     1,
+		PageSize: 50,
+	}
+	if filter.Q == "" {
+		filter.Q = strings.TrimSpace(c.Query("keyword"))
+	}
+	if raw := strings.TrimSpace(c.Query("page")); raw != "" {
+		n, err := parseInt(raw)
+		if err != nil {
+			return domain.ERPIIDListFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "page must be an integer", nil)
+		}
+		filter.Page = n
+	}
+	if raw := strings.TrimSpace(c.Query("page_size")); raw != "" {
+		n, err := parseInt(raw)
+		if err != nil {
+			return domain.ERPIIDListFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_size must be an integer", nil)
+		}
+		filter.PageSize = n
+	}
+	return filter, nil
 }
 
 func (h *ERPBridgeHandler) ListCategories(c *gin.Context) {

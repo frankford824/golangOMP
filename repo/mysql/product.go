@@ -83,6 +83,65 @@ func (r *productRepo) Search(ctx context.Context, filter repo.ProductSearchFilte
 	return products, total, nil
 }
 
+func (r *productRepo) ListIIDs(ctx context.Context, filter repo.ProductIIDListFilter) ([]*domain.ERPIIDOption, int64, error) {
+	iidExpr := `TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.i_id')), ''))`
+	categoryNameExpr := `TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.category_name')), ''))`
+	where := []string{fmt.Sprintf("%s <> ''", iidExpr)}
+	args := []interface{}{}
+	if q := strings.TrimSpace(filter.Q); q != "" {
+		like := "%" + q + "%"
+		where = append(where, fmt.Sprintf("(%s LIKE ? OR category LIKE ? OR %s LIKE ? OR product_name LIKE ? OR sku_code LIKE ?)", iidExpr, categoryNameExpr))
+		args = append(args, like, like, like, like, like)
+	}
+	whereSQL := strings.Join(where, " AND ")
+
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM (
+		SELECT %s AS i_id FROM products WHERE %s GROUP BY i_id
+	) t`, iidExpr, whereSQL)
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count product i_id options: %w", err)
+	}
+
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	offset := (page - 1) * pageSize
+	queryArgs := append([]interface{}{}, args...)
+	queryArgs = append(queryArgs, pageSize, offset)
+	query := fmt.Sprintf(`
+		SELECT
+			%s AS i_id,
+			MIN(NULLIF(TRIM(category), '')) AS category,
+			MIN(NULLIF(%s, '')) AS category_name,
+			COUNT(*) AS product_count
+		FROM products
+		WHERE %s
+		GROUP BY i_id
+		ORDER BY product_count DESC, i_id ASC
+		LIMIT ? OFFSET ?`, iidExpr, categoryNameExpr, whereSQL)
+	rows, err := r.db.db.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list product i_id options: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]*domain.ERPIIDOption, 0, pageSize)
+	for rows.Next() {
+		var item domain.ERPIIDOption
+		var category, categoryName sql.NullString
+		if err := rows.Scan(&item.IID, &category, &categoryName, &item.ProductCount); err != nil {
+			return nil, 0, fmt.Errorf("scan product i_id option: %w", err)
+		}
+		item.Category = strings.TrimSpace(category.String)
+		item.CategoryName = strings.TrimSpace(categoryName.String)
+		item.Label = item.IID
+		items = append(items, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 func appendProductMappingWhere(where *[]string, args *[]interface{}, mappings []*domain.CategoryERPMapping) {
 	if len(mappings) == 0 {
 		return

@@ -23,6 +23,7 @@ const (
 type ERPBridgeService interface {
 	// Query behavior stays Bridge-owned even when MAIN exposes a facade route.
 	SearchProducts(ctx context.Context, filter domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError)
+	ListIIDs(ctx context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError)
 	GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, *domain.AppError)
 	ListCategories(ctx context.Context) ([]*domain.ERPCategory, *domain.AppError)
 	ListWarehouses(ctx context.Context) ([]domain.ERPWarehouse, *domain.AppError)
@@ -103,6 +104,36 @@ func (s *erpBridgeService) SearchProducts(ctx context.Context, filter domain.ERP
 	}
 	stabilizeERPProductPagination(&items.Pagination, len(items.Items))
 	return items, nil
+}
+
+func (s *erpBridgeService) ListIIDs(ctx context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+	normalized := normalizeERPIIDListFilter(filter)
+	if s.productRepo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "product repo is unavailable", nil)
+	}
+	items, total, err := s.productRepo.ListIIDs(ctx, repo.ProductIIDListFilter{
+		Q:        normalized.Q,
+		Page:     normalized.Page,
+		PageSize: normalized.PageSize,
+	})
+	if err != nil {
+		return nil, infraError("list erp i_id options", err)
+	}
+	return &domain.ERPIIDListResponse{
+		Items:             items,
+		Pagination:        buildPaginationMeta(normalized.Page, normalized.PageSize, total),
+		NormalizedFilters: normalized,
+	}, nil
+}
+
+func normalizeERPIIDListFilter(filter domain.ERPIIDListFilter) domain.ERPIIDListFilter {
+	filter.Q = strings.TrimSpace(filter.Q)
+	filter.Page = normalizePositiveInt(filter.Page, 1)
+	filter.PageSize = normalizePositiveInt(filter.PageSize, 50)
+	if filter.PageSize > 200 {
+		filter.PageSize = 200
+	}
+	return filter
 }
 
 func (s *erpBridgeService) GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, *domain.AppError) {

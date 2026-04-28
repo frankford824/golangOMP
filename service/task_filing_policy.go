@@ -87,6 +87,27 @@ func ComputeFilingMissingFields(task *domain.Task, detail *domain.TaskDetail) ([
 	return fields, "缺少：" + strings.Join(labels, "、")
 }
 
+func computeMinimalCreateFilingMissingFields(task *domain.Task, detail *domain.TaskDetail) ([]string, string) {
+	if task == nil || detail == nil {
+		return []string{"task_detail"}, "缺少任务建档明细"
+	}
+	fields := make([]string, 0, 3)
+	labels := make([]string, 0, 3)
+	add := func(field, label string, missing bool) {
+		if missing {
+			fields = append(fields, field)
+			labels = append(labels, label)
+		}
+	}
+	add("sku_code", "SKU", strings.TrimSpace(task.SKUCode) == "")
+	add("product_name", "产品名称", strings.TrimSpace(task.ProductNameSnapshot) == "")
+	add("i_id", "产品i_id", strings.TrimSpace(detail.Category) == "" && strings.TrimSpace(detail.CategoryName) == "")
+	if len(labels) == 0 {
+		return fields, ""
+	}
+	return fields, "缺少：" + strings.Join(labels, "、")
+}
+
 func shouldAutoTriggerFiling(task *domain.Task, source TaskFilingTriggerSource) bool {
 	if task == nil {
 		return false

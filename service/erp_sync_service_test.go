@@ -231,6 +231,10 @@ func (r *erpSyncProductRepoStub) Search(_ context.Context, _ repo.ProductSearchF
 	return []*domain.Product{}, 0, nil
 }
 
+func (r *erpSyncProductRepoStub) ListIIDs(context.Context, repo.ProductIIDListFilter) ([]*domain.ERPIIDOption, int64, error) {
+	return []*domain.ERPIIDOption{}, 0, nil
+}
+
 func (r *erpSyncProductRepoStub) UpsertBatch(_ context.Context, _ repo.Tx, products []*domain.Product) (int64, error) {
 	for _, product := range products {
 		copied := *product

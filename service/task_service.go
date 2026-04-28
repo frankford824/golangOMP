@@ -68,6 +68,7 @@ type CreateTaskParams struct {
 	// New product development
 	DesignRequirement string
 	CategoryCode      string
+	ProductIID        string
 	MaterialMode      string
 	Material          string
 	MaterialOther     string
@@ -87,6 +88,7 @@ type CreateTaskParams struct {
 	BatchItems          []CreateTaskBatchSKUItemParams
 	TopLevelNewSKU      string
 	TopLevelPurchaseSKU string
+	SyncERPOnCreate     bool
 
 	// Debug-only raw values captured before alias normalization.
 	rawChangeRequest        string
@@ -511,6 +513,9 @@ func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (*domain.T
 }
 
 func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) (*domain.Task, *domain.AppError) {
+	if appErr := s.resolveCreateTaskProductIID(ctx, &p); appErr != nil {
+		return nil, appErr
+	}
 	resolvedProduct, appErr := s.resolveERPBridgeSelectionBinding(ctx, nil, p.ProductSelection)
 	if appErr != nil {
 		return nil, appErr
@@ -661,6 +666,8 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		ReferenceImagesJSON:   referenceImagesJSON,
 		ReferenceFileRefsJSON: referenceFileRefsJSON,
 		ReferenceLink:         strings.TrimSpace(p.ReferenceLink),
+		Category:              strings.TrimSpace(p.ProductIID),
+		CategoryName:          strings.TrimSpace(p.ProductIID),
 		CategoryCode:          strings.TrimSpace(p.CategoryCode),
 		FilingStatus:          domain.FilingStatusNotFiled,
 		FilingErrorMessage:    "",
@@ -800,8 +807,76 @@ func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, 
 		OperatorID: p.CreatorID,
 		Remark:     p.Remark,
 		Source:     TaskFilingTriggerSourceCreate,
+		Force:      p.SyncERPOnCreate,
 	}, "task_create_auto_policy")
 	return created, nil
+}
+
+func (s *taskService) resolveCreateTaskProductIID(ctx context.Context, p *CreateTaskParams) *domain.AppError {
+	if p == nil {
+		return nil
+	}
+	iid := strings.TrimSpace(p.ProductIID)
+	if iid == "" {
+		return nil
+	}
+	if p.TaskType != domain.TaskTypeNewProductDevelopment && p.TaskType != domain.TaskTypePurchaseTask {
+		return nil
+	}
+	if s.erpBridgeSvc == nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "erp bridge service is unavailable", nil)
+	}
+	resp, appErr := s.erpBridgeSvc.ListIIDs(ctx, domain.ERPIIDListFilter{Q: iid, Page: 1, PageSize: 50})
+	if appErr != nil {
+		return appErr
+	}
+	found := false
+	for _, item := range resp.Items {
+		if item != nil && strings.EqualFold(strings.TrimSpace(item.IID), iid) {
+			found = true
+			if p.CategoryCode == "" {
+				p.CategoryCode = s.resolveCategoryCodeForProductIID(ctx, iid)
+			}
+			if p.CategoryCode == "" {
+				p.CategoryCode = iid
+			}
+			break
+		}
+	}
+	if !found {
+		return taskCreateValidationError(
+			"i_id does not exist",
+			*p,
+			taskCreateViolation("i_id", "invalid_i_id", "i_id must be selected from ERP product i_id options"),
+		)
+	}
+	return nil
+}
+
+func (s *taskService) resolveCategoryCodeForProductIID(ctx context.Context, iid string) string {
+	value := strings.TrimSpace(iid)
+	if value == "" || s.categoryRepo == nil {
+		return ""
+	}
+	active := true
+	items, err := s.categoryRepo.Search(ctx, repo.CategorySearchFilter{Keyword: value, IsActive: &active, Limit: 50})
+	if err != nil {
+		return ""
+	}
+	upper := strings.ToUpper(value)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(item.CategoryCode), value) ||
+			strings.EqualFold(strings.TrimSpace(item.CategoryName), value) ||
+			strings.EqualFold(strings.TrimSpace(item.DisplayName), value) ||
+			strings.EqualFold(strings.TrimSpace(item.SearchEntryCode), value) ||
+			strings.ToUpper(strings.TrimSpace(item.CategoryCode)) == upper {
+			return strings.TrimSpace(item.CategoryCode)
+		}
+	}
+	return ""
 }
 
 func (s *taskService) mapTaskCreateTxError(p CreateTaskParams, txErr error) *domain.AppError {
@@ -844,6 +919,7 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 	p.ChangeRequest = strings.TrimSpace(p.ChangeRequest)
 	p.DesignRequirement = strings.TrimSpace(p.DesignRequirement)
 	p.CategoryCode = strings.TrimSpace(p.CategoryCode)
+	p.ProductIID = strings.TrimSpace(p.ProductIID)
 	p.MaterialMode = strings.TrimSpace(p.MaterialMode)
 	p.Material = strings.TrimSpace(p.Material)
 	p.MaterialOther = strings.TrimSpace(p.MaterialOther)
@@ -852,6 +928,9 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 	p.ReferenceLink = strings.TrimSpace(p.ReferenceLink)
 	p.PurchaseSKU = strings.TrimSpace(p.PurchaseSKU)
 	p.ProductChannel = strings.TrimSpace(p.ProductChannel)
+	for i := range p.BatchItems {
+		p.BatchItems[i].CategoryCode = strings.TrimSpace(p.BatchItems[i].CategoryCode)
+	}
 	p.ReferenceFileRefs = domain.NormalizeReferenceFileRefs(p.ReferenceFileRefs)
 	if p.IsOutsource {
 		p.CustomizationRequired = true
