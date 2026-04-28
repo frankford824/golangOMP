@@ -221,3 +221,4 @@ curl -X GET https://api.example.com/v1/search \
 - 高频输入框应做前端 debounce，避免无意义请求。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+

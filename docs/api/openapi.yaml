@@ -10251,7 +10251,7 @@ paths:
       summary: Assign task to designer
       description: |
         `POST /v1/tasks/{id}/assign` now carries two bounded semantics under the same route:
-        - `PendingAssign`: assign is allowed for the existing operation/management path within the allowed org scope. Success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`.
+        - `PendingAssign`: assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`.
         - `InProgress`: the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied.
         - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
         - `purchase_task` cannot be assigned or reassigned to a designer.
@@ -10259,7 +10259,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id

@@ -1260,7 +1260,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/fin
 ### 简介
 支持方法: POST。
 
-- `POST`: `POST /v1/tasks/{id}/assign` now carries two bounded semantics under the same route: - `PendingAssign`: assign is allowed for the existing operation/management path within the allowed org scope. Success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. - `InProgress`: the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`. - `purchase_task` cannot be assigned or reassigned to a designer.
+- `POST`: `POST /v1/tasks/{id}/assign` now carries two bounded semantics under the same route: - `PendingAssign`: assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. - `InProgress`: the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`. - `purchase_task` cannot be assigned or reassigned to a designer.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -6968,3 +6968,4 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+

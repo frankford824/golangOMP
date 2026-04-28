@@ -2272,3 +2272,4 @@ curl -X GET https://api.example.com/v1/erp/products/by-code \
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+

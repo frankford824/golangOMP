@@ -112,3 +112,4 @@
 - `/v1/products*`: 老本地缓存商品入口，新联调用 `/v1/erp/products*`。
 - `/v1/tasks/{id}/audit_a_claim`、`/v1/tasks/{id}/audit_b_claim`: 老审核领取别名。
 - 所有 `withCompatibilityRoute` / `withDeprecatedRoute` 标记路径不得作为新前端主入口。
+
