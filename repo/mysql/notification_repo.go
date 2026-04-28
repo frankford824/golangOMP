@@ -59,7 +59,7 @@ func (r *notificationRepo) List(ctx context.Context, filter repo.NotificationLis
 		return nil, fmt.Errorf("list notifications: %w", err)
 	}
 	defer rows.Close()
-	var out []domain.Notification
+	out := make([]domain.Notification, 0)
 	for rows.Next() {
 		n, err := scanNotification(rows)
 		if err != nil {

@@ -16,10 +16,13 @@ func TestTaskAssignmentServiceAssign(t *testing.T) {
 	ctx := context.Background()
 	taskRepo := newStep04TaskRepo(&domain.Task{
 		ID:         1,
+		TaskNo:     "T-0001",
 		TaskStatus: domain.TaskStatusPendingAssign,
+		TaskType:   domain.TaskTypeNewProductDevelopment,
 	})
 	eventRepo := &step04TaskEventRepo{}
-	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{})
+	notifications := &step04AssignmentNotificationService{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{}, WithTaskAssignmentNotificationService(notifications))
 
 	task, appErr := svc.Assign(ctx, AssignTaskParams{
 		TaskID:     1,
@@ -42,6 +45,19 @@ func TestTaskAssignmentServiceAssign(t *testing.T) {
 	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventAssigned {
 		t.Fatalf("Assign() expected one task.assigned event, got %+v", eventRepo.events)
 	}
+	if len(notifications.created) != 1 {
+		t.Fatalf("Assign() notifications = %+v, want one target notification", notifications.created)
+	}
+	if notifications.created[0].userID != 101 || notifications.created[0].ntype != domain.NotificationTypeTaskAssignedToMe {
+		t.Fatalf("Assign() notification = %+v, want task_assigned_to_me for user 101", notifications.created[0])
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(notifications.created[0].payload, &payload); err != nil {
+		t.Fatalf("Assign() notification payload unmarshal error: %v", err)
+	}
+	if payload["task_no"] != "T-0001" || payload["action"] != "assign" {
+		t.Fatalf("Assign() notification payload = %+v, want task_no/action", payload)
+	}
 }
 
 func TestTaskAssignmentServiceSelfClaimPendingAssign(t *testing.T) {
@@ -55,7 +71,8 @@ func TestTaskAssignmentServiceSelfClaimPendingAssign(t *testing.T) {
 		TaskStatus: domain.TaskStatusPendingAssign,
 	})
 	eventRepo := &step04TaskEventRepo{}
-	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{})
+	notifications := &step04AssignmentNotificationService{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{}, WithTaskAssignmentNotificationService(notifications))
 
 	task, appErr := svc.Assign(ctx, AssignTaskParams{
 		TaskID:     1010,
@@ -71,6 +88,9 @@ func TestTaskAssignmentServiceSelfClaimPendingAssign(t *testing.T) {
 	}
 	if task.DesignerID == nil || *task.DesignerID != 101 || task.CurrentHandlerID == nil || *task.CurrentHandlerID != 101 {
 		t.Fatalf("self claim assignment = designer:%+v handler:%+v, want 101", task.DesignerID, task.CurrentHandlerID)
+	}
+	if len(notifications.created) != 0 {
+		t.Fatalf("self claim notifications = %+v, want none for actor assigning self", notifications.created)
 	}
 }
 
@@ -761,6 +781,21 @@ func (r *step04TaskEventRepo) ListByTaskID(_ context.Context, _ int64) ([]*domai
 
 func (r *step04TaskEventRepo) ListRecent(_ context.Context, _ repo.TaskEventListFilter) ([]*domain.TaskEvent, int64, error) {
 	return r.events, int64(len(r.events)), nil
+}
+
+type step04AssignmentNotification struct {
+	userID  int64
+	ntype   domain.NotificationType
+	payload json.RawMessage
+}
+
+type step04AssignmentNotificationService struct {
+	created []step04AssignmentNotification
+}
+
+func (s *step04AssignmentNotificationService) CreateNotification(_ context.Context, _ repo.Tx, userID int64, ntype domain.NotificationType, payload json.RawMessage) (*domain.Notification, error) {
+	s.created = append(s.created, step04AssignmentNotification{userID: userID, ntype: ntype, payload: append(json.RawMessage(nil), payload...)})
+	return &domain.Notification{ID: int64(len(s.created)), UserID: userID, NotificationType: ntype, Payload: payload}, nil
 }
 
 func strPtr(s string) *string {

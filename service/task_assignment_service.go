@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"strings"
@@ -62,6 +63,7 @@ type taskAssignmentService struct {
 	txRunner          repo.TxRunner
 	dataScopeResolver DataScopeResolver
 	scopeUserRepo     repo.UserRepo
+	notifications     taskAssignmentNotificationService
 }
 
 type taskAssignmentOperation struct {
@@ -77,6 +79,10 @@ type pendingAssignmentCASUpdater interface {
 	ClaimPendingAssignment(ctx context.Context, tx repo.Tx, id int64, designerID int64, resultingStatus domain.TaskStatus) (bool, error)
 }
 
+type taskAssignmentNotificationService interface {
+	CreateNotification(ctx context.Context, tx repo.Tx, userID int64, ntype domain.NotificationType, payload json.RawMessage) (*domain.Notification, error)
+}
+
 type TaskAssignmentServiceOption func(*taskAssignmentService)
 
 func WithTaskAssignmentDataScopeResolver(resolver DataScopeResolver) TaskAssignmentServiceOption {
@@ -88,6 +94,12 @@ func WithTaskAssignmentDataScopeResolver(resolver DataScopeResolver) TaskAssignm
 func WithTaskAssignmentScopeUserRepo(userRepo repo.UserRepo) TaskAssignmentServiceOption {
 	return func(s *taskAssignmentService) {
 		s.scopeUserRepo = userRepo
+	}
+}
+
+func WithTaskAssignmentNotificationService(notifications taskAssignmentNotificationService) TaskAssignmentServiceOption {
+	return func(s *taskAssignmentService) {
+		s.notifications = notifications
 	}
 }
 
@@ -238,6 +250,7 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		if err != nil {
 			return err
 		}
+		s.createAssignmentNotification(ctx, tx, task, p, operation, actorID, previousDesignerID, previousHandlerID)
 		return nil
 	})
 	if txErr != nil {
@@ -260,6 +273,32 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	}
 	logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, true)
 	return updated, nil
+}
+
+func (s *taskAssignmentService) createAssignmentNotification(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, actorID int64, previousDesignerID, previousHandlerID *int64) {
+	if s.notifications == nil || p.DesignerID == nil || *p.DesignerID <= 0 || *p.DesignerID == actorID {
+		return
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"task_id":              p.TaskID,
+		"task_no":              task.TaskNo,
+		"task_type":            string(task.TaskType),
+		"module_key":           "task",
+		"action":               operation.LogAction,
+		"assigned_by":          actorID,
+		"designer_id":          *p.DesignerID,
+		"previous_designer_id": cloneInt64Ptr(previousDesignerID),
+		"previous_handler_id":  cloneInt64Ptr(previousHandlerID),
+		"remark":               strings.TrimSpace(p.Remark),
+		"batch_request_id":     strings.TrimSpace(p.BatchRequestID),
+	})
+	if err != nil {
+		log.Printf("task assignment notification marshal failed task_id=%d user_id=%d err=%v", p.TaskID, *p.DesignerID, err)
+		return
+	}
+	if _, err := s.notifications.CreateNotification(ctx, tx, *p.DesignerID, domain.NotificationTypeTaskAssignedToMe, payload); err != nil {
+		log.Printf("task assignment notification create failed task_id=%d user_id=%d err=%v", p.TaskID, *p.DesignerID, err)
+	}
 }
 
 func (s *taskAssignmentService) clearAssignment(ctx context.Context, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, decision TaskActionDecision) (*domain.Task, *domain.AppError) {

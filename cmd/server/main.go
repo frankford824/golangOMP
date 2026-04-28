@@ -259,9 +259,6 @@ func main() {
 	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
 	exportCenterSvc := service.NewExportCenterService(exportJobRepo, exportJobDispatchRepo, exportJobAttemptRepo, exportJobEventRepo, mdb)
 	integrationCenterSvc := service.NewIntegrationCenterService(integrationCallLogRepo, integrationExecutionRepo, mdb)
-	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,
-		service.WithTaskAssignmentDataScopeResolver(taskDataScopeResolver),
-		service.WithTaskAssignmentScopeUserRepo(userRepo))
 	taskAssetSvc := service.NewTaskAssetService(taskRepo, taskAssetRepo, taskEventRepo, uploadRequestRepo, assetStorageRefRepo, mdb,
 		service.WithTaskAssetDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetScopeUserRepo(userRepo),
@@ -311,6 +308,10 @@ func main() {
 	wsHub := wsservice.NewHub(logger.Named("websocket"))
 	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"))
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
+	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,
+		service.WithTaskAssignmentDataScopeResolver(taskDataScopeResolver),
+		service.WithTaskAssignmentScopeUserRepo(userRepo),
+		service.WithTaskAssignmentNotificationService(notificationSvc))
 	taskDraftSvc := taskdraftsvc.NewService(taskDraftRepo, permissionLogRepo, mdb)
 	erpProductSvc := erpproductsvc.NewService(erpBridgeSvc)
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
