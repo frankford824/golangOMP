@@ -423,8 +423,16 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 		BatchSKUMode:    "multiple",
 		SyncERPOnCreate: true,
 		BatchItems: []CreateTaskBatchSKUItemParams{
-			{ProductName: "Batch A", DesignRequirement: "draw A", ProductIID: "I-1001"},
-			{ProductName: "Batch B", DesignRequirement: "draw B", ProductIID: "I-1002"},
+			{
+				ProductName:       "Batch A",
+				DesignRequirement: "draw A",
+				ProductIID:        "I-1001",
+			},
+			{
+				ProductName:       "Batch B",
+				DesignRequirement: "draw B",
+				ProductIID:        "I-1002",
+			},
 		},
 	})
 	if appErr != nil {
@@ -442,5 +450,51 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 	items := taskRepo.skuItems[task.ID]
 	if len(items) != 2 || items[0].ProductIID != "I-1001" || items[1].ProductIID != "I-1002" {
 		t.Fatalf("sku item product_i_id = %+v", items)
+	}
+}
+
+func TestBatchNewProductFilingPayloadUsesPerSKUReferenceImage(t *testing.T) {
+	task := &domain.Task{
+		ID:                  77,
+		TaskNo:              "RW-BATCH-77",
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		SKUCode:             "SKU-A",
+		ProductNameSnapshot: "Batch A",
+		IsBatchTask:         true,
+	}
+	detail := &domain.TaskDetail{TaskID: 77}
+	payload, appErr := buildBatchSKUItemERPBridgeProductUpsertPayload(task, detail, &domain.TaskSKUItem{
+		TaskID:              77,
+		SequenceNo:          1,
+		SKUCode:             "SKU-A",
+		ProductNameSnapshot: "Batch A",
+		ProductIID:          "I-1001",
+		ReferenceFileRefs: []domain.ReferenceFileRef{
+			{AssetID: "ref-a", DownloadURL: strPtr("/v1/assets/files/ref-a.jpg")},
+		},
+	}, 11, "", string(TaskFilingTriggerSourceCreate))
+	if appErr != nil {
+		t.Fatalf("build payload unexpected error: %+v", appErr)
+	}
+	if payload.Pic != "/v1/assets/files/ref-a.jpg" || payload.PicBig != "/v1/assets/files/ref-a.jpg" || payload.SKUPic != "/v1/assets/files/ref-a.jpg" {
+		t.Fatalf("payload image fields = pic:%q pic_big:%q sku_pic:%q", payload.Pic, payload.PicBig, payload.SKUPic)
+	}
+
+	payload, appErr = buildBatchSKUItemERPBridgeProductUpsertPayload(task, detail, &domain.TaskSKUItem{
+		TaskID:              77,
+		SequenceNo:          2,
+		SKUCode:             "SKU-B",
+		ProductNameSnapshot: "Batch B",
+		ProductIID:          "I-1002",
+		ReferenceFileRefs: []domain.ReferenceFileRef{
+			{AssetID: "ref-b", StorageKey: "tasks/ref-b.jpg"},
+		},
+	}, 11, "", string(TaskFilingTriggerSourceCreate))
+	if appErr != nil {
+		t.Fatalf("build payload storage key unexpected error: %+v", appErr)
+	}
+	if payload.SKUPic != "/v1/assets/files/tasks/ref-b.jpg" {
+		t.Fatalf("payload sku_pic = %q, want storage key file route", payload.SKUPic)
 	}
 }

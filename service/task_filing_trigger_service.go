@@ -373,6 +373,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 	}
 	name := firstNonEmptyString(strings.TrimSpace(item.ProductNameSnapshot), strings.TrimSpace(task.ProductNameSnapshot), skuCode)
 	shortName := firstNonEmptyString(strings.TrimSpace(item.ProductShortName), name)
+	imageURL := firstReferenceImageURL(item.ReferenceFileRefs)
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        skuCode,
 		SKUID:            skuCode,
@@ -382,6 +383,9 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		ProductName:      name,
 		ShortName:        shortName,
 		ProductShortName: shortName,
+		Pic:              imageURL,
+		PicBig:           imageURL,
+		SKUPic:           imageURL,
 		CategoryCode:     strings.TrimSpace(item.CategoryCode),
 		CategoryName:     strings.TrimSpace(detail.CategoryName),
 		Remark:           strings.TrimSpace(remark),
@@ -413,6 +417,25 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		},
 	}
 	return normalizeERPProductUpsertPayload(payload), nil
+}
+
+func firstReferenceImageURL(refs []domain.ReferenceFileRef) string {
+	for _, ref := range domain.NormalizeReferenceFileRefs(refs) {
+		if ref.DownloadURL != nil {
+			if value := strings.TrimSpace(*ref.DownloadURL); value != "" {
+				return value
+			}
+		}
+		if ref.URL != nil {
+			if value := strings.TrimSpace(*ref.URL); value != "" {
+				return value
+			}
+		}
+		if value := strings.TrimSpace(ref.StorageKey); value != "" {
+			return "/v1/assets/files/" + strings.TrimLeft(value, "/")
+		}
+	}
+	return ""
 }
 
 func (s *taskService) loadTaskAndDetailForFiling(ctx context.Context, taskID int64) (*domain.Task, *domain.TaskDetail, *domain.AppError) {

@@ -4079,7 +4079,7 @@ components:
           additionalProperties: true
         reference_file_refs:
           type: array
-          description: Optional per-batch-line reference uploads using the same object contract as top-level `reference_file_refs`. When `batch_sku_mode=multiple`, the server validates and persists each line and also maintains a deduplicated task-level union summary.
+          description: Optional per-batch-line reference uploads using the same object contract as top-level `reference_file_refs`. When `batch_sku_mode=multiple`, the server validates and persists each line, returns it on `sku_items[].reference_file_refs`, maintains a deduplicated task-level union summary, and uses the first row-level reference as that SKU/product image during ERP filing.
           items:
             $ref: '#/components/schemas/ReferenceFileRef'
     PrepareTaskProductCodesRequest:
