@@ -52,8 +52,11 @@ func (s *PoolQueryService) List(ctx context.Context, actor domain.RequestActor, 
 	where := []string{
 		"tm.state = 'pending_claim'",
 		"tm.pool_team_code IN (" + placeholders + ")",
+		"(t.current_handler_id IS NULL OR t.current_handler_id = ?)",
+		"(t.designer_id IS NULL OR t.designer_id = ?)",
 		"COALESCE(JSON_EXTRACT(tm.data, '$.backfill_placeholder'), CAST('false' AS JSON)) != CAST('true' AS JSON)",
 	}
+	filterArgs = append(filterArgs, actor.ID, actor.ID)
 	if moduleKey != "" {
 		where = append(where, "tm.module_key = ?")
 		filterArgs = append(filterArgs, moduleKey)

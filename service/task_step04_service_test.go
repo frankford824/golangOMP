@@ -44,6 +44,67 @@ func TestTaskAssignmentServiceAssign(t *testing.T) {
 	}
 }
 
+func TestTaskAssignmentServiceSelfClaimPendingAssign(t *testing.T) {
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    101,
+		Roles: []domain.Role{domain.RoleDesigner},
+		Team:  domain.TeamDesignStandard,
+	})
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         1010,
+		TaskStatus: domain.TaskStatusPendingAssign,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{})
+
+	task, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1010,
+		DesignerID: authzInt64Ptr(101),
+		AssignedBy: 101,
+		Remark:     "self claim",
+	})
+	if appErr != nil {
+		t.Fatalf("Assign(self claim) unexpected error: %+v", appErr)
+	}
+	if task.TaskStatus != domain.TaskStatusInProgress {
+		t.Fatalf("self claim status = %s, want InProgress", task.TaskStatus)
+	}
+	if task.DesignerID == nil || *task.DesignerID != 101 || task.CurrentHandlerID == nil || *task.CurrentHandlerID != 101 {
+		t.Fatalf("self claim assignment = designer:%+v handler:%+v, want 101", task.DesignerID, task.CurrentHandlerID)
+	}
+}
+
+func TestTaskAssignmentServiceSelfClaimDeniedAfterReassignToOther(t *testing.T) {
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    101,
+		Roles: []domain.Role{domain.RoleDesigner},
+		Team:  domain.TeamDesignStandard,
+	})
+	assignedID := int64(202)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:               1011,
+		TaskStatus:       domain.TaskStatusInProgress,
+		DesignerID:       &assignedID,
+		CurrentHandlerID: &assignedID,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{})
+
+	_, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1011,
+		DesignerID: authzInt64Ptr(101),
+		AssignedBy: 101,
+		Remark:     "old assignee tries claim",
+	})
+	if appErr == nil {
+		t.Fatal("Assign(self claim after reassigned) expected error")
+	}
+	details, ok := appErr.Details.(map[string]interface{})
+	if !ok || details["deny_code"] != domain.DenyTaskAlreadyClaimed {
+		t.Fatalf("deny details = %+v, want task_already_claimed", appErr.Details)
+	}
+}
+
 func TestTaskAssignmentServiceReassign(t *testing.T) {
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:    8,

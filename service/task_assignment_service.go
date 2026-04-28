@@ -115,8 +115,25 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	}
 	operation := resolveTaskAssignmentOperation(task)
 	authz := s.taskActionAuthorizer()
+	selfClaim, actorID := isTaskAssignmentSelfClaim(ctx, task, p)
 	decision := authz.EvaluateTaskActionPolicy(ctx, operation.Action, task, "", "")
+	if selfClaim {
+		decision.Allowed = true
+		decision.DenyCode = ""
+		decision.DenyReason = ""
+		decision.ActorID = actorID
+		decision.MatchedRule = "pending_assign_self_claim"
+	}
 	authz.logDecision(operation.Action, decision)
+	if isActorTakingTaskAlreadyClaimedByOther(task, p, actorID) {
+		denied := decision
+		denied.Allowed = false
+		denied.DenyCode = domain.DenyTaskAlreadyClaimed
+		denied.DenyReason = "task is already assigned to another actor"
+		denied.ActorID = actorID
+		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, denied, false)
+		return nil, taskActionDecisionAppError(operation.Action, denied)
+	}
 	if !decision.Allowed {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
 		return nil, taskActionDecisionAppError(operation.Action, decision)
@@ -299,6 +316,54 @@ func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Cont
 		"actor_id":            actor.ID,
 		"managed_departments": managedDepartments,
 	})
+}
+
+func isTaskAssignmentSelfClaim(ctx context.Context, task *domain.Task, p AssignTaskParams) (bool, int64) {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	actorID := p.AssignedBy
+	if ok && actor.ID > 0 {
+		actorID = actor.ID
+	}
+	if task == nil || task.TaskStatus != domain.TaskStatusPendingAssign || p.DesignerID == nil || *p.DesignerID <= 0 || actorID <= 0 || *p.DesignerID != actorID {
+		return false, actorID
+	}
+	if task.DesignerID != nil || task.CurrentHandlerID != nil {
+		return false, actorID
+	}
+	if !ok {
+		return true, actorID
+	}
+	return hasAnyRoleValue(actor.Roles,
+		domain.RoleDesigner,
+		domain.RoleOps,
+		domain.RoleCustomizationOperator,
+		domain.RoleOutsource,
+		domain.RoleTeamLead,
+		domain.RoleDeptAdmin,
+		domain.RoleDesignDirector,
+		domain.RoleAdmin,
+		domain.RoleSuperAdmin,
+	), actorID
+}
+
+func taskAlreadyClaimedByOther(task *domain.Task, actorID int64) bool {
+	if task == nil || actorID <= 0 {
+		return false
+	}
+	if task.CurrentHandlerID != nil && *task.CurrentHandlerID > 0 && *task.CurrentHandlerID != actorID {
+		return true
+	}
+	if task.DesignerID != nil && *task.DesignerID > 0 && *task.DesignerID != actorID {
+		return true
+	}
+	return false
+}
+
+func isActorTakingTaskAlreadyClaimedByOther(task *domain.Task, p AssignTaskParams, actorID int64) bool {
+	if p.DesignerID == nil || actorID <= 0 || *p.DesignerID != actorID {
+		return false
+	}
+	return taskAlreadyClaimedByOther(task, actorID)
 }
 
 func (s *taskAssignmentService) BatchAssign(ctx context.Context, p BatchAssignTasksParams) (*BatchTaskActionResult, *domain.AppError) {

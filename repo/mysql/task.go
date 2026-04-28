@@ -378,7 +378,7 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 		%s
 		%s
 		WHERE %s
-		ORDER BY FIELD(t.priority, 'critical', 'high', 'normal', 'low') ASC, t.created_at ASC, t.id DESC
+		ORDER BY t.updated_at DESC, t.id DESC
 		LIMIT ? OFFSET ?`, spec.latestAssetExpr, spec.fromSQL, taskActorNameJoins(), spec.whereSQL)
 	pageArgs := append(append([]interface{}{}, spec.args...), pageSize, offset)
 

@@ -25,6 +25,12 @@ type taskGetter interface {
 	GetByID(ctx context.Context, id int64) (*domain.Task, error)
 }
 
+type taskClaimUpdater interface {
+	UpdateDesigner(ctx context.Context, tx repo.Tx, id int64, designerID *int64) error
+	UpdateHandler(ctx context.Context, tx repo.Tx, id int64, handlerID *int64) error
+	UpdateStatus(ctx context.Context, tx repo.Tx, id int64, status domain.TaskStatus) error
+}
+
 type claimNotificationGenerator interface {
 	GenerateForEvent(ctx context.Context, tx repo.Tx, evt domain.TaskModuleEvent) error
 }
@@ -59,6 +65,9 @@ func (s *ClaimService) Claim(ctx context.Context, actor domain.RequestActor, tas
 	if task == nil {
 		return permission.Deny("task_not_found", "task not found")
 	}
+	if taskClaimedByOther(task, actor.ID) {
+		return permission.Deny(domain.DenyTaskAlreadyClaimed, "task is already assigned to another actor")
+	}
 	tm, err := s.modules.GetByTaskAndKey(ctx, taskID, moduleKey)
 	if err != nil {
 		return permission.Deny(domain.ErrCodeInternalError, err.Error())
@@ -81,6 +90,9 @@ func (s *ClaimService) Claim(ctx context.Context, actor domain.RequestActor, tas
 		}
 		if !ok {
 			return claimConflictError{}
+		}
+		if err := s.claimTaskIfUnassigned(ctx, tx, task, actor.ID, moduleKey); err != nil {
+			return err
 		}
 		from := domain.ModuleStatePendingClaim
 		to := domain.ModuleStateInProgress
@@ -106,6 +118,9 @@ func (s *ClaimService) Claim(ctx context.Context, actor domain.RequestActor, tas
 		return nil
 	})
 	if err != nil {
+		if _, ok := err.(taskAlreadyClaimedError); ok {
+			return permission.Deny(domain.DenyTaskAlreadyClaimed, "task is already assigned to another actor")
+		}
 		if _, ok := err.(claimConflictError); ok {
 			return permission.Deny(domain.DenyModuleClaimConflict, "module claim conflict")
 		}
@@ -117,9 +132,55 @@ func (s *ClaimService) Claim(ctx context.Context, actor domain.RequestActor, tas
 	return permission.Allow()
 }
 
+func (s *ClaimService) claimTaskIfUnassigned(ctx context.Context, tx repo.Tx, task *domain.Task, actorID int64, moduleKey string) error {
+	if task == nil || actorID <= 0 {
+		return nil
+	}
+	updater, ok := s.tasks.(taskClaimUpdater)
+	if !ok {
+		return nil
+	}
+	if taskClaimedByOther(task, actorID) {
+		return taskAlreadyClaimedError{}
+	}
+	if task.CurrentHandlerID == nil {
+		if err := updater.UpdateHandler(ctx, tx, task.ID, &actorID); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(moduleKey) == domain.ModuleKeyDesign && task.DesignerID == nil {
+		if err := updater.UpdateDesigner(ctx, tx, task.ID, &actorID); err != nil {
+			return err
+		}
+	}
+	if task.TaskStatus == domain.TaskStatusPendingAssign {
+		if err := updater.UpdateStatus(ctx, tx, task.ID, domain.TaskStatusInProgress); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type claimConflictError struct{}
 
 func (claimConflictError) Error() string { return "module claim conflict" }
+
+type taskAlreadyClaimedError struct{}
+
+func (taskAlreadyClaimedError) Error() string { return "task already claimed" }
+
+func taskClaimedByOther(task *domain.Task, actorID int64) bool {
+	if task == nil || actorID <= 0 {
+		return false
+	}
+	if task.CurrentHandlerID != nil && *task.CurrentHandlerID > 0 && *task.CurrentHandlerID != actorID {
+		return true
+	}
+	if task.DesignerID != nil && *task.DesignerID > 0 && *task.DesignerID != actorID {
+		return true
+	}
+	return false
+}
 
 func matchedTeam(actor domain.RequestActor, pool string) string {
 	pool = strings.TrimSpace(pool)

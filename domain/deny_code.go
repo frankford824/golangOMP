@@ -7,4 +7,5 @@ const (
 	DenyModuleActionRoleDenied     = "module_action_role_denied"
 	DenyModuleClaimConflict        = "module_claim_conflict"
 	DenyModuleBlueprintMissingTeam = "module_blueprint_missing_team"
+	DenyTaskAlreadyClaimed         = "task_already_claimed"
 )
