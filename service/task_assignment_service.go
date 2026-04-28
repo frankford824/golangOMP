@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -68,6 +69,12 @@ type taskAssignmentOperation struct {
 	EventType       string
 	LogAction       string
 	ResultingStatus domain.TaskStatus
+}
+
+var errPendingAssignmentClaimConflict = errors.New("pending assignment claim conflict")
+
+type pendingAssignmentCASUpdater interface {
+	ClaimPendingAssignment(ctx context.Context, tx repo.Tx, id int64, designerID int64, resultingStatus domain.TaskStatus) (bool, error)
 }
 
 type TaskAssignmentServiceOption func(*taskAssignmentService)
@@ -180,15 +187,39 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	previousHandlerID := cloneInt64Ptr(task.CurrentHandlerID)
 	previousStatus := task.TaskStatus
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.taskRepo.UpdateDesigner(ctx, tx, p.TaskID, p.DesignerID); err != nil {
-			return err
-		}
-		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, p.DesignerID); err != nil {
-			return err
-		}
-		if operation.ResultingStatus != task.TaskStatus {
-			if err := s.taskRepo.UpdateStatus(ctx, tx, p.TaskID, operation.ResultingStatus); err != nil {
+		if task.TaskStatus == domain.TaskStatusPendingAssign && task.DesignerID == nil && task.CurrentHandlerID == nil {
+			if updater, ok := s.taskRepo.(pendingAssignmentCASUpdater); ok {
+				claimed, err := updater.ClaimPendingAssignment(ctx, tx, p.TaskID, *p.DesignerID, operation.ResultingStatus)
+				if err != nil {
+					return err
+				}
+				if !claimed {
+					return errPendingAssignmentClaimConflict
+				}
+			} else {
+				if err := s.taskRepo.UpdateDesigner(ctx, tx, p.TaskID, p.DesignerID); err != nil {
+					return err
+				}
+				if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, p.DesignerID); err != nil {
+					return err
+				}
+				if operation.ResultingStatus != task.TaskStatus {
+					if err := s.taskRepo.UpdateStatus(ctx, tx, p.TaskID, operation.ResultingStatus); err != nil {
+						return err
+					}
+				}
+			}
+		} else {
+			if err := s.taskRepo.UpdateDesigner(ctx, tx, p.TaskID, p.DesignerID); err != nil {
 				return err
+			}
+			if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, p.DesignerID); err != nil {
+				return err
+			}
+			if operation.ResultingStatus != task.TaskStatus {
+				if err := s.taskRepo.UpdateStatus(ctx, tx, p.TaskID, operation.ResultingStatus); err != nil {
+					return err
+				}
 			}
 		}
 		payload := taskTransitionEventPayload(task, previousStatus, operation.ResultingStatus, previousHandlerID, p.DesignerID, map[string]interface{}{
@@ -210,6 +241,15 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		return nil
 	})
 	if txErr != nil {
+		if errors.Is(txErr, errPendingAssignmentClaimConflict) {
+			denied := decision
+			denied.Allowed = false
+			denied.DenyCode = domain.DenyTaskAlreadyClaimed
+			denied.DenyReason = "task is already assigned to another actor"
+			denied.ActorID = actorID
+			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, denied, false)
+			return nil, taskActionDecisionAppError(operation.Action, denied)
+		}
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
 		return nil, infraError("assign task tx", txErr)
 	}

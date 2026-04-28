@@ -624,6 +624,33 @@ func (r *taskRepo) UpdateDesigner(ctx context.Context, tx repo.Tx, id int64, des
 	return nil
 }
 
+func (r *taskRepo) ClaimPendingAssignment(ctx context.Context, tx repo.Tx, id int64, designerID int64, resultingStatus domain.TaskStatus) (bool, error) {
+	sqlTx := Unwrap(tx)
+	res, err := sqlTx.ExecContext(ctx, `
+		UPDATE tasks
+		   SET designer_id = ?,
+		       current_handler_id = ?,
+		       task_status = ?
+		 WHERE id = ?
+		   AND task_status = ?
+		   AND designer_id IS NULL
+		   AND current_handler_id IS NULL`,
+		designerID,
+		designerID,
+		string(resultingStatus),
+		id,
+		string(domain.TaskStatusPendingAssign),
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim pending task assignment: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim pending task assignment rows affected: %w", err)
+	}
+	return affected == 1, nil
+}
+
 func (r *taskRepo) UpdateHandler(ctx context.Context, tx repo.Tx, id int64, handlerID *int64) error {
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx,
