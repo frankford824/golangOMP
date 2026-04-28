@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -522,7 +523,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		if request.AssetID != nil {
 			existingAsset, err := s.designAssetRepo.GetByID(ctx, *request.AssetID)
 			if err != nil {
-				return err
+				return fmt.Errorf("get existing design asset: %w", err)
 			}
 			if existingAsset == nil || existingAsset.TaskID != params.TaskID {
 				return domain.ErrNotFound
@@ -543,7 +544,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		} else {
 			assetNo, err := s.designAssetRepo.NextAssetNo(ctx, tx, params.TaskID)
 			if err != nil {
-				return err
+				return fmt.Errorf("next design asset no: %w", err)
 			}
 			asset = &domain.DesignAsset{
 				TaskID:        params.TaskID,
@@ -555,7 +556,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			}
 			id, err := s.designAssetRepo.Create(ctx, tx, asset)
 			if err != nil {
-				return err
+				return fmt.Errorf("create design asset: %w", err)
 			}
 			asset.ID = id
 			assetID = id
@@ -563,12 +564,12 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 
 		timelineVersionNo, err := s.taskAssetRepo.NextVersionNo(ctx, tx, params.TaskID)
 		if err != nil {
-			return err
+			return fmt.Errorf("next task asset timeline version: %w", err)
 		}
 		attemptedTimelineVersionNo = timelineVersionNo
 		assetVersionNo, err := s.taskAssetRepo.NextAssetVersionNo(ctx, tx, assetID)
 		if err != nil {
-			return err
+			return fmt.Errorf("next design asset version: %w", err)
 		}
 
 		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
@@ -598,7 +599,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}
 		id, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
 		if err != nil {
-			return err
+			return fmt.Errorf("create task asset version: %w", err)
 		}
 		versionID = id
 
@@ -619,13 +620,13 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			Status:          domain.AssetStorageRefStatusRecorded,
 		}
 		if _, err := s.assetStorageRefRepo.Create(ctx, tx, ref); err != nil {
-			return err
+			return fmt.Errorf("create asset storage ref: %w", err)
 		}
 		if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
-			return err
+			return fmt.Errorf("update design asset current version: %w", err)
 		}
 		if err := s.uploadRequestRepo.UpdateBinding(ctx, tx, request.RequestID, &versionID, storageRefID, domain.UploadRequestStatusBound, taskAsset.Remark); err != nil {
-			return err
+			return fmt.Errorf("update upload request binding: %w", err)
 		}
 		if err := s.uploadRequestRepo.UpdateSession(ctx, tx, repo.UploadRequestSessionUpdate{
 			RequestID:      request.RequestID,
@@ -636,28 +637,28 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			LastSyncedAt:   &lastSyncedAt,
 			Remark:         taskAsset.Remark,
 		}); err != nil {
-			return err
+			return fmt.Errorf("update upload request session: %w", err)
 		}
 		if requestAssetType.IsDelivery() {
 			switch task.TaskStatus {
 			case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB:
 				advance, gateErr := s.shouldAdvanceTaskToPendingAuditA(ctx, task, scopeSKUCode)
 				if gateErr != nil {
-					return gateErr
+					return fmt.Errorf("check design submit gate: %w", gateErr)
 				}
 				if advance {
 					if err := s.taskRepo.UpdateStatus(ctx, tx, params.TaskID, domain.TaskStatusPendingAuditA); err != nil {
-						return err
+						return fmt.Errorf("advance task status after delivery upload: %w", err)
 					}
 					if err := s.taskRepo.UpdateHandler(ctx, tx, params.TaskID, nil); err != nil {
-						return err
+						return fmt.Errorf("clear current handler after delivery upload: %w", err)
 					}
 					_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventDesignSubmitted, &params.CompletedBy, map[string]interface{}{
 						"asset_type": string(requestAssetType), "asset_id": assetID, "designer_id": task.DesignerID,
 						"upload_session_id": request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
 					})
 					if err != nil {
-						return err
+						return fmt.Errorf("append design submitted event: %w", err)
 					}
 				}
 			}
@@ -675,7 +676,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			"remark":            taskAsset.Remark,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("append asset version created event: %w", err)
 		}
 		_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCompleted, &params.CompletedBy, map[string]interface{}{
 			"asset_id":          assetID,
@@ -693,9 +694,14 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			"file_hash":         meta.FileHash,
 			"remark":            taskAsset.Remark,
 		})
-		return err
+		if err != nil {
+			return fmt.Errorf("append upload session completed event: %w", err)
+		}
+		return nil
 	})
 	if txErr != nil {
+		log.Printf("complete_upload_session_tx_failed trace_id=%s task_id=%d session_id=%s asset_id=%v err=%v",
+			domain.TraceIDFromContext(ctx), params.TaskID, request.RequestID, request.AssetID, txErr)
 		if appErr, ok := txErr.(*domain.AppError); ok {
 			return nil, appErr
 		}
