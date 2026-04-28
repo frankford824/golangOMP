@@ -10,6 +10,7 @@
 ## Family 约定
 
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -73,6 +74,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -84,12 +86,12 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 ### 简介
 支持方法: GET, POST。
 
-- `GET`: Returns the frontend-oriented task list with projected `workflow`, aggregated `warehouse_status`, stable `product_selection` summary, `procurement_summary`, canonical actor/source fields `requester_id/requester_name`, `creator_id/creator_name`, `designer_id/designer_name`, `current_handler_id/current_handler_name`, and task org ownership fields `owner_team`, `owner_department`, and `owner_org_team`. Default ordering is latest updated first (`updated_at DESC, id DESC`). For `purchase_task`, `procurement_summary` carries procurement-to-warehouse coordination state plus lightweight product-selection provenance. Board queue `query_template` payloads are designed to be consumed directly by this endpoint. `workflow_lane` is the canonical list/workbench split selector for distinguishing the normal lane from the customization lane. List reads apply the current canonical-org visibility rules plus stage-based visibility for mid-lane roles (`Audit_A`, `Audit_B`, `Warehouse`, `Outsource`, `CustomizationOperator`, `CustomizationReviewer`) where the backend-authorized status set and lane match. This is not a full ABAC engine.
+- `GET`: Returns the frontend-oriented task list with projected `workflow`, aggregated `warehouse_status`, stable `product_selection` summary, `procurement_summary`, canonical actor/source fields `requester_id/requester_name`, `creator_id/creator_name`, `designer_id/designer_name`, `current_handler_id/current_handler_name`, and task org ownership fields `owner_team`, `owner_department`, and `owner_org_team`. Default ordering is latest updated first (`updated_at DESC, id DESC`). For `purchase_task`, `procurement_summary` carries procurement-to-warehouse coordination state plus lightweight product-selection provenance. Board queue `query_template` payloads are designed to be consumed directly by this endpoint. `workflow_lane` is the canonical list/workbench split selector for distinguishing the normal lane from the customization lane. Main task-flow list reads are globally visible to task-facing authenticated roles; use query filters for workbench/pool/tab slicing. Mutating actions such as assign/reassign, upload, submit, audit, filing, procurement, warehouse, close, and cancel remain action-gated by role, status, handler/assignee, and organization scope.
 - `POST`: Creates one task. For `original_product_development`, narrow by category or `search_entry_code`, call `GET /v1/erp/products`, choose one product, and submit that result through `product_selection`. Legacy `product_id`, `sku_code`, and `product_name_snapshot` fields remain accepted for compatibility. Current create rules: - `original_product_development` is existing-product only. - when `product_id` is null, backend resolves ERP/local binding before create-tx using this priority: `product_id` -> `product_selection.erp_product.product_id` -> `product_selection.erp_product.sku_code` -> top-level `sku_code`. - ERP-side codes are treated as bridge binding keys and are normalized to a local `products.id`; they are not used as local primary keys directly. - frontend should not send `source_mode`; backend infers it from `task_type`. - `new_product_development` infers `source_mode=new_product` and auto-generates `sku_code` when omitted. - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately. - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, and ends after the retouch/design worker submits the retouched image. - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime. - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationReview` immediately and does not pass through the normal design workbench first. - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors. - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval. - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels. - default task product-code rule is backend-only and fixed to `NS + category_short_code(2 uppercase letters) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation. - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> KT`), otherwise first two alphabet letters from `category_code` (uppercased), then deterministic fallback to two letters. - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique. - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`. - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned. - batch mode writes one mother task plus multiple `task_sku_items` in one transaction and keeps `sku_code` / `primary_sku_code` aligned to the first child SKU for compatibility. - create now also appends `task.created`, and multi-SKU creates additionally append `task.batch_items_created`. - `reference_images` is no longer accepted. If present, backend returns `400 INVALID_REQUEST` and requires the reference-upload flow. - `reference_file_refs` must be objects returned by `POST /v1/tasks/reference-upload` or the compatibility task-create asset-center flow; forged, missing, incomplete, or unauthorized refs return `400 INVALID_REQUEST` with `invalid_reference_file_refs`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: 已登录 / 主流程读全量可见。
 - `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
@@ -250,6 +252,7 @@ curl -X POST https://api.example.com/v1/tasks \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -261,11 +264,11 @@ curl -X POST https://api.example.com/v1/tasks \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns the root task record plus the current workflow snapshot, nullable `procurement`, frontend-friendly `procurement_summary`, full `product_selection` provenance, canonical actor/source fields `requester_id/requester_name`, `creator_id/creator_name`, `designer_id/designer_name`, `current_handler_id/current_handler_name`, compatibility alias `assignee_id/assignee_name`, task org ownership fields `owner_team`, `owner_department`, and `owner_org_team`, and cost-governance read models. `reference_file_refs` is the task-level reference-image summary field; for batch tasks, SKU-specific refs are returned on `sku_items[].reference_file_refs`. `design_assets` and `asset_versions` are the formal design-asset detail fields, and batch-task SKU scope is expressed by `scope_sku_code`. `matched_rule_governance` exposes matched-rule lineage context, `override_summary` is the lightweight current summary, `governance_audit_summary` points to the read-only override timeline, and `override_governance_boundary` exposes the current governance-boundary summary fields. `task_event_logs` remain the general task event layer. Use `/v1/tasks/{id}/detail` for the full aggregate page and `/v1/tasks/{id}/cost-overrides` for the read-only governance audit timeline. For `purchase_task`, `procurement_summary` carries arrival and warehouse handoff state plus lightweight product-selection provenance. This read path applies the current minimum task-action org gating. This is not a full ABAC engine.
+- `GET`: Returns the root task record plus the current workflow snapshot, nullable `procurement`, frontend-friendly `procurement_summary`, full `product_selection` provenance, canonical actor/source fields `requester_id/requester_name`, `creator_id/creator_name`, `designer_id/designer_name`, `current_handler_id/current_handler_name`, compatibility alias `assignee_id/assignee_name`, task org ownership fields `owner_team`, `owner_department`, and `owner_org_team`, and cost-governance read models. `reference_file_refs` is the task-level reference-image summary field; for batch tasks, SKU-specific refs are returned on `sku_items[].reference_file_refs`. `design_assets` and `asset_versions` are the formal design-asset detail fields, and batch-task SKU scope is expressed by `scope_sku_code`. `matched_rule_governance` exposes matched-rule lineage context, `override_summary` is the lightweight current summary, `governance_audit_summary` points to the read-only override timeline, and `override_governance_boundary` exposes the current governance-boundary summary fields. `task_event_logs` remain the general task event layer. Use `/v1/tasks/{id}/detail` for the full aggregate page and `/v1/tasks/{id}/cost-overrides` for the read-only governance audit timeline. For `purchase_task`, `procurement_summary` carries arrival and warehouse handoff state plus lightweight product-selection provenance. Main task-flow read detail is globally visible to task-facing authenticated roles; mutating actions remain separately action-gated by role, status, handler/assignee, and organization scope.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: 已登录 / 主流程读全量可见。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -304,6 +307,7 @@ curl -X GET https://api.example.com/v1/tasks/<id> \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -432,6 +436,7 @@ curl -X PATCH https://api.example.com/v1/tasks/<id>/product-info \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -551,6 +556,7 @@ curl -X PATCH https://api.example.com/v1/tasks/<id>/cost-info \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -629,6 +635,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-quote/preview \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -722,6 +729,7 @@ curl -X PATCH https://api.example.com/v1/tasks/<id>/business-info \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -780,6 +788,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/filing-status \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -846,6 +855,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/filing/retry \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -919,6 +929,7 @@ curl -X PATCH https://api.example.com/v1/tasks/<id>/procurement \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -988,6 +999,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -999,11 +1011,11 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns the 5-section task aggregate produced by `task_aggregator.DetailService` fast path. Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]` (service caps recent events at 50), and `reference_file_refs[]`. Rich snapshot sections such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`, `design_assets`, `asset_versions`, `sku_items`, and `governance_audit_summary` are not returned by this endpoint in v1.21; use dedicated routes such as `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and `/v1/tasks/{id}/cost-overrides` for those read models.
+- `GET`: Returns the 5-section task aggregate produced by `task_aggregator.DetailService` fast path. Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]` (service caps recent events at 50), and `reference_file_refs[]`. Rich snapshot sections such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`, `design_assets`, `asset_versions`, `sku_items`, and `governance_audit_summary` are not returned by this endpoint in v1.21; use dedicated routes such as `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and `/v1/tasks/{id}/cost-overrides` for those read models. Main task-flow aggregate detail is globally visible to task-facing authenticated roles; all mutating actions remain separately action-gated by role, status, handler/assignee, and organization scope.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: 已登录 / 主流程读全量可见。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1055,6 +1067,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/detail \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1115,6 +1128,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/cost-overrides \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1184,6 +1198,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/rev
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1253,6 +1268,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/fin
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1321,6 +1337,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assign \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1381,6 +1398,7 @@ curl -X POST https://api.example.com/v1/tasks/batch/assign \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1441,6 +1459,7 @@ curl -X POST https://api.example.com/v1/tasks/batch/remind \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1490,6 +1509,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/submit-design \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1550,6 +1570,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/assets \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1610,6 +1631,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/assets/timeline \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1671,6 +1693,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/assets/<asset_id>/versions \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1737,6 +1760,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/assets/<asset_id>/download \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1804,6 +1828,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/assets/<asset_id>/versions/<ve
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1894,6 +1919,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assets/upload-sessions \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -1953,6 +1979,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/assets/upload-sessions/<sessio
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2038,6 +2065,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assets/upload-sessions/<sessi
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2107,6 +2135,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assets/upload-sessions/<sessi
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2197,6 +2226,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assets/upload \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2264,6 +2294,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/prepare \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2337,6 +2368,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/assets/mock-upload \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2399,6 +2431,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/close \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2453,6 +2486,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/claim \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2502,6 +2536,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/approve \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2551,6 +2586,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/reject \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2607,6 +2643,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/transfer \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2669,6 +2706,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/handover \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2729,6 +2767,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/audit/handovers \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2778,6 +2817,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/takeover \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2847,6 +2887,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/outsource \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2921,6 +2962,7 @@ curl -X GET https://api.example.com/v1/outsource-orders \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -2996,6 +3038,7 @@ curl -X GET https://api.example.com/v1/warehouse/receipts \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3076,6 +3119,7 @@ curl -X GET https://api.example.com/v1/task-board/summary \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3157,6 +3201,7 @@ curl -X GET https://api.example.com/v1/task-board/queues \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3294,6 +3339,7 @@ curl -X PATCH https://api.example.com/v1/workbench/preferences \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3356,6 +3402,7 @@ curl -X GET https://api.example.com/v1/export-templates \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3418,6 +3465,7 @@ curl -X GET https://api.example.com/v1/integration/connectors \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3543,6 +3591,7 @@ curl -X POST https://api.example.com/v1/integration/call-logs \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3601,6 +3650,7 @@ curl -X GET https://api.example.com/v1/integration/call-logs/<id> \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3714,6 +3764,7 @@ curl -X POST https://api.example.com/v1/integration/call-logs/<id>/executions \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3780,6 +3831,7 @@ curl -X POST https://api.example.com/v1/integration/call-logs/<id>/retry \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3846,6 +3898,7 @@ curl -X POST https://api.example.com/v1/integration/call-logs/<id>/replay \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3916,6 +3969,7 @@ curl -X POST https://api.example.com/v1/integration/call-logs/<id>/executions/<e
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -3984,6 +4038,7 @@ curl -X POST https://api.example.com/v1/integration/call-logs/<id>/advance \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4108,6 +4163,7 @@ curl -X POST https://api.example.com/v1/export-jobs \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4166,6 +4222,7 @@ curl -X GET https://api.example.com/v1/export-jobs/<id> \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4280,6 +4337,7 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/dispatches \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4349,6 +4407,7 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/dispatches/<dispatch_id
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4409,6 +4468,7 @@ curl -X GET https://api.example.com/v1/export-jobs/<id>/attempts \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4464,6 +4524,7 @@ curl -X GET https://api.example.com/v1/export-jobs/<id>/events \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4523,6 +4584,7 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/claim-download \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4582,6 +4644,7 @@ curl -X GET https://api.example.com/v1/export-jobs/<id>/download \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4641,6 +4704,7 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/refresh-download \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4700,6 +4764,7 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/start \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4770,6 +4835,7 @@ curl -X POST https://api.example.com/v1/export-jobs/<id>/advance \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4832,6 +4898,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/receive \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4894,6 +4961,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/reject \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -4962,6 +5030,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/complete \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5031,6 +5100,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/customization/review \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5105,6 +5175,7 @@ curl -X GET https://api.example.com/v1/customization-jobs \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5163,6 +5234,7 @@ curl -X GET https://api.example.com/v1/customization-jobs/<id> \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5232,6 +5304,7 @@ curl -X POST https://api.example.com/v1/customization-jobs/<id>/effect-preview \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5303,6 +5376,7 @@ curl -X POST https://api.example.com/v1/customization-jobs/<id>/effect-review \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5371,6 +5445,7 @@ curl -X POST https://api.example.com/v1/customization-jobs/<id>/production-trans
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5431,6 +5506,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/events \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5493,6 +5569,7 @@ curl -X GET https://api.example.com/v1/code-rules \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5550,6 +5627,7 @@ curl -X GET https://api.example.com/v1/code-rules/<id>/preview \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5603,6 +5681,7 @@ curl -X POST https://api.example.com/v1/code-rules/generate-sku \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5650,6 +5729,7 @@ curl -X POST https://api.example.com/v1/sku/preview_code \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5712,6 +5792,7 @@ curl -X GET https://api.example.com/v1/sku/list \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5772,6 +5853,7 @@ curl -X POST https://api.example.com/v1/sku \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5834,6 +5916,7 @@ curl -X GET https://api.example.com/v1/sku/<id> \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5903,6 +5986,7 @@ curl -X GET https://api.example.com/v1/sku/<id>/sync_status \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -5963,6 +6047,7 @@ curl -X POST https://api.example.com/v1/audit \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6020,6 +6105,7 @@ curl -X POST https://api.example.com/v1/agent/sync \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6079,6 +6165,7 @@ curl -X POST https://api.example.com/v1/agent/pull_job \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6136,6 +6223,7 @@ curl -X POST https://api.example.com/v1/agent/heartbeat \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6183,6 +6271,7 @@ curl -X POST https://api.example.com/v1/agent/ack_job \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6245,6 +6334,7 @@ curl -X GET https://api.example.com/v1/incidents \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6301,6 +6391,7 @@ curl -X POST https://api.example.com/v1/incidents/<id>/assign \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6356,6 +6447,7 @@ curl -X POST https://api.example.com/v1/incidents/<id>/resolve \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6418,6 +6510,7 @@ curl -X GET https://api.example.com/v1/policies \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6474,6 +6567,7 @@ curl -X PUT https://api.example.com/v1/policies/<id> \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6536,6 +6630,7 @@ curl -X GET https://api.example.com/v1/rule-templates \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6652,6 +6747,7 @@ curl -X PUT https://api.example.com/v1/rule-templates/<type> \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6730,6 +6826,7 @@ curl -X GET https://api.example.com/v1/tasks/pool \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6776,6 +6873,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/claim \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6823,6 +6921,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/actions/
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6869,6 +6968,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/reassign
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6915,6 +7015,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/pool-rea
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
@@ -6967,6 +7068,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 
 ### 前端最佳实践
 - `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。

@@ -61,6 +61,7 @@ FAMILY_NOTES = {
     ],
     "TASKS": [
         "`GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。",
+        "任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。",
         "创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。",
         "`sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。",
         "模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。",
@@ -311,6 +312,12 @@ def collect_roles(op):
     return "已登录 / scope-aware"
 
 
+def access_label(path, method, op):
+    if method == "get" and path in {"/v1/tasks", "/v1/tasks/{id}", "/v1/tasks/{id}/detail"}:
+        return "已登录 / 主流程读全量可见"
+    return collect_roles(op)
+
+
 def error_rows(op):
     rows = ["| HTTP | code | deny_code | 说明 |", "|---|---|---|---|"]
     responses = op.get("responses") or {}
@@ -395,7 +402,7 @@ def render_path_section(spec, path, path_item, family_key):
     out.append(f"支持方法: {methods}。\n\n" + "\n".join(desc) + "\n\n")
     out.append("### 鉴权与 RBAC\n")
     out.append("- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。\n")
-    role_lines = [f"- `{METHOD_LABEL[m]}` 允许角色: {collect_roles(op)}。" for m, op in ops]
+    role_lines = [f"- `{METHOD_LABEL[m]}` 允许角色: {access_label(path, m, op)}。" for m, op in ops]
     out.append("\n".join(role_lines) + "\n")
     out.append("- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。\n\n")
 
@@ -530,7 +537,7 @@ def render_cheatsheet(spec, family_entries, v1_path_count):
             ops = [(m, item[m]) for m in METHODS if isinstance(item.get(m), dict)]
             methods = ", ".join(METHOD_LABEL[m] for m, _ in ops)
             summary = path_summary(item).replace("|", "\\|")
-            roles = "; ".join(f"{METHOD_LABEL[m]}:{collect_roles(op)}" for m, op in ops).replace("|", "\\|")
+            roles = "; ".join(f"{METHOD_LABEL[m]}:{access_label(path, m, op)}" for m, op in ops).replace("|", "\\|")
             rows.append(f"| {methods} | `{path}` | {summary} | {roles} | [{filename}]({filename}) |\n")
     return "".join(rows)
 

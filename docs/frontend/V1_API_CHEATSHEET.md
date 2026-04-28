@@ -46,8 +46,8 @@
 | POST | `/v1/org-move-requests/{id}/approve` | Approve an org move request | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org-move-requests/{id}/reject` | Reject an org move request | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET, POST | `/v1/tasks` | List tasks；Create task | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}` | Get task read model | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/tasks` | List tasks；Create task | GET:已登录 / 主流程读全量可见; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}` | Get task read model | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/product-info` | Get per-task product information；Patch per-task product information | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/cost-info` | Get per-task cost information；Patch per-task cost information | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-quote/preview` | Preview cost quote for one task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -56,7 +56,7 @@
 | POST | `/v1/tasks/{id}/filing/retry` | Retry task filing | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/tasks/{id}/procurement` | Update purchase-task procurement draft data | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/procurement/advance` | Advance purchase-task procurement lifecycle | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}/detail` | Get task aggregate detail (V1.1-A1 fast-path 5-section) | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/detail` | Get task aggregate detail (V1.1-A1 fast-path 5-section) | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/cost-overrides` | Get task cost-override governance audit timeline | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-overrides/{event_id}/review` | Upsert cost-override review placeholder boundary | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-overrides/{event_id}/finance-mark` | Upsert cost-override finance placeholder boundary | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
