@@ -476,7 +476,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"audit_workspace"},
 			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management"},
 			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"},
-			Actions: []string{"task.audit.claim", "task.audit.review", "task.list"},
+			Actions: []string{"task.audit.claim", "task.audit.review", "task.asset_upload", "task.list"},
 		}
 	case RoleAuditB:
 		return FrontendAccessSpec{
@@ -484,7 +484,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"audit_workspace"},
 			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management"},
 			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"},
-			Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"},
+			Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.asset_upload", "task.list"},
 		}
 	case RoleWarehouse:
 		return FrontendAccessSpec{

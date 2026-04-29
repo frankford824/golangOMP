@@ -939,6 +939,9 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if !decision.Allowed {
 		return nil, taskActionDecisionAppError(TaskActionAssetUploadSessionCreate, decision)
 	}
+	if appErr := validateAuditStageUploadAssetType(task, params.AssetType); appErr != nil {
+		return nil, appErr
+	}
 	taskRef := strings.TrimSpace(task.TaskNo)
 	identity, appErr := s.freezeUploadAssetIdentity(ctx, params.TaskID, params.AssetID, params.SourceAssetID, params.TargetSKUCode, params.AssetType, params.CreatedBy)
 	if appErr != nil {
@@ -1419,6 +1422,34 @@ func inferTaskAssetUploadMode(assetType domain.TaskAssetType) (domain.DesignAsse
 		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_type is required", nil)
 	}
 	return domain.DesignAssetUploadModeMultipart, nil
+}
+
+func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType) *domain.AppError {
+	if task == nil || !isAuditStageTaskStatus(task.TaskStatus) {
+		return nil
+	}
+	normalized := domain.NormalizeTaskAssetType(assetType)
+	if normalized == domain.TaskAssetTypeSource || normalized == domain.TaskAssetTypeDelivery {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit-stage uploads only support source or delivery assets", map[string]interface{}{
+		"deny_code":   "audit_stage_asset_type_not_allowed",
+		"task_status": string(task.TaskStatus),
+		"asset_type":  string(assetType),
+		"allowed_asset_types": []string{
+			string(domain.TaskAssetTypeSource),
+			string(domain.TaskAssetTypeDelivery),
+		},
+	})
+}
+
+func isAuditStageTaskStatus(status domain.TaskStatus) bool {
+	switch status {
+	case domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB, domain.TaskStatusPendingOutsourceReview:
+		return true
+	default:
+		return false
+	}
 }
 
 func matchesAssetResourceFilters(asset *domain.DesignAsset, params ListAssetResourcesParams) bool {

@@ -1495,15 +1495,17 @@ func taskLatestAssetTypeExpr() string {
 
 func taskLatestAssetJoinSQL() string {
 	return `LEFT JOIN (
-			SELECT ta.task_id, ta.asset_type
-			FROM task_assets ta
-			INNER JOIN (
-				SELECT task_id, MAX(version_no) AS max_version_no
-				FROM task_assets
-				GROUP BY task_id
-			) latest_task_asset
-				ON latest_task_asset.task_id = ta.task_id
-				AND latest_task_asset.max_version_no = ta.version_no
+			SELECT task_id,
+			       CASE
+			         WHEN SUM(CASE WHEN asset_type IN ('delivery', 'draft', 'revised', 'final', 'outsource_return') THEN 1 ELSE 0 END) > 0 THEN 'delivery'
+			         WHEN SUM(CASE WHEN asset_type IN ('source', 'original') THEN 1 ELSE 0 END) > 0 THEN 'source'
+			         WHEN SUM(CASE WHEN asset_type = 'preview' THEN 1 ELSE 0 END) > 0 THEN 'preview'
+			         WHEN SUM(CASE WHEN asset_type = 'design_thumb' THEN 1 ELSE 0 END) > 0 THEN 'design_thumb'
+			         WHEN SUM(CASE WHEN asset_type = 'reference' THEN 1 ELSE 0 END) > 0 THEN 'reference'
+			         ELSE MAX(asset_type)
+			       END AS asset_type
+			FROM task_assets
+			GROUP BY task_id
 		) la ON la.task_id = t.id`
 }
 

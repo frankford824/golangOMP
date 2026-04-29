@@ -25,8 +25,8 @@ func TestBuildTaskListQuerySpecUsesJoinedLatestAssetProjection(t *testing.T) {
 	if !strings.Contains(spec.fromSQL, "LEFT JOIN (") {
 		t.Fatalf("fromSQL missing latest asset join: %s", spec.fromSQL)
 	}
-	if !strings.Contains(spec.fromSQL, "MAX(version_no) AS max_version_no") {
-		t.Fatalf("fromSQL missing latest asset max-version projection: %s", spec.fromSQL)
+	if !strings.Contains(spec.fromSQL, "WHEN SUM(CASE WHEN asset_type IN ('delivery'") {
+		t.Fatalf("fromSQL missing delivery-priority asset projection: %s", spec.fromSQL)
 	}
 	if !strings.Contains(spec.fromSQL, "la ON la.task_id = t.id") {
 		t.Fatalf("fromSQL missing latest asset alias join: %s", spec.fromSQL)

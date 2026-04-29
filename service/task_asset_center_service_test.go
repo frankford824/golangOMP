@@ -926,7 +926,7 @@ func TestTaskAssetCenterServiceCompletePrecreatedSessionAllowedInPendingAuditAWi
 	}
 }
 
-func TestTaskAssetCenterServiceCreateLateSessionStillRejectedInPendingAuditA(t *testing.T) {
+func TestTaskAssetCenterServiceAuditStageAllowsSourceAndDeliveryButRejectsReference(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2092, TaskStatus: domain.TaskStatusPendingAuditA})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
@@ -937,22 +937,42 @@ func TestTaskAssetCenterServiceCreateLateSessionStillRejectedInPendingAuditA(t *
 	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:    934,
-		Roles: []domain.Role{domain.RoleAdmin},
+		Roles: []domain.Role{domain.RoleAuditA},
 	})
 
-	_, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+	if _, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       2092,
+		CreatedBy:    934,
+		AssetType:    domain.TaskAssetTypeSource,
+		Filename:     "audit-source.psd",
+		ExpectedSize: uploadRequestInt64Ptr(1024),
+		MimeType:     "image/vnd.adobe.photoshop",
+	}); appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession(audit source) unexpected error: %+v", appErr)
+	}
+	if _, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
 		TaskID:       2092,
 		CreatedBy:    934,
 		AssetType:    domain.TaskAssetTypeDelivery,
-		Filename:     "late-session.zip",
+		Filename:     "audit-delivery.jpg",
 		ExpectedSize: uploadRequestInt64Ptr(1024),
-		MimeType:     "application/zip",
+		MimeType:     "image/jpeg",
+	}); appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession(audit delivery) unexpected error: %+v", appErr)
+	}
+	_, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       2092,
+		CreatedBy:    934,
+		AssetType:    domain.TaskAssetTypeReference,
+		Filename:     "audit-reference.jpg",
+		ExpectedSize: uploadRequestInt64Ptr(1024),
+		MimeType:     "image/jpeg",
 	})
 	if appErr == nil {
-		t.Fatal("CreateMultipartUploadSession() appErr = nil, want permission denied")
+		t.Fatal("CreateMultipartUploadSession(audit reference) appErr = nil, want invalid request")
 	}
-	if appErr.Code != domain.ErrCodePermissionDenied {
-		t.Fatalf("CreateMultipartUploadSession() code = %s, want PERMISSION_DENIED", appErr.Code)
+	if appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("CreateMultipartUploadSession(audit reference) code = %s, want INVALID_REQUEST", appErr.Code)
 	}
 }
 

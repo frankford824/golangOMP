@@ -138,13 +138,13 @@
     "Audit_A": {
       "menus": ["audit_queue", "task_board", "task_list", "resource_management"],
       "pages": ["task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"],
-      "actions": ["task.audit.claim", "task.audit.review", "task.list"],
+      "actions": ["task.audit.claim", "task.audit.review", "task.asset_upload", "task.list"],
       "scopes": ["audit_workspace"]
     },
     "Audit_B": {
       "menus": ["audit_queue", "task_board", "task_list", "resource_management"],
       "pages": ["task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"],
-      "actions": ["task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"],
+      "actions": ["task.audit.claim", "task.audit.review", "task.audit.takeover", "task.asset_upload", "task.list"],
       "scopes": ["audit_workspace"]
     },
     "Warehouse": {

@@ -733,7 +733,39 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 			},
 			wantAllowed:    false,
 			wantDenyCode:   "missing_required_role",
-			wantDenyReason: "asset upload requires a design, customization, operation, or management role",
+			wantDenyReason: "asset upload requires a design, audit, customization, operation, or management role",
+		},
+		{
+			name:   "audit_a_can_upload_in_pending_audit_a_via_stage",
+			action: TaskActionAssetUploadSessionCreate,
+			actor: domain.RequestActor{
+				ID:    301,
+				Roles: []domain.Role{domain.RoleAuditA, domain.RoleMember},
+			},
+			task: &domain.Task{
+				ID:              478,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "淘系一组",
+				TaskStatus:      domain.TaskStatusPendingAuditA,
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeStage),
+		},
+		{
+			name:   "audit_b_can_upload_in_pending_audit_b_via_stage",
+			action: TaskActionAssetUploadSessionCreate,
+			actor: domain.RequestActor{
+				ID:    302,
+				Roles: []domain.Role{domain.RoleAuditB, domain.RoleMember},
+			},
+			task: &domain.Task{
+				ID:              479,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "淘系一组",
+				TaskStatus:      domain.TaskStatusPendingAuditB,
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeStage),
 		},
 		{
 			name:   "case_b_f2_4_negative_wrong_status",

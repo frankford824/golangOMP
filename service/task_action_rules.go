@@ -146,12 +146,15 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 	case TaskActionAssetUploadSessionCreate, TaskActionAssetUploadSessionComplete, TaskActionAssetUploadSessionCancel:
 		return taskActionRule{
 			Action:        action,
-			RequiredRoles: append([]domain.Role{domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps}, managerRoles...),
+			RequiredRoles: append([]domain.Role{domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses: []domain.TaskStatus{
 				domain.TaskStatusPendingAssign,
 				domain.TaskStatusInProgress,
+				domain.TaskStatusPendingAuditA,
 				domain.TaskStatusRejectedByAuditA,
+				domain.TaskStatusPendingAuditB,
 				domain.TaskStatusRejectedByAuditB,
+				domain.TaskStatusPendingOutsourceReview,
 				domain.TaskStatusPendingCustomizationReview,
 				domain.TaskStatusPendingCustomizationProduction,
 				domain.TaskStatusPendingEffectReview,
@@ -161,7 +164,7 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 			},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler, TaskActionScopeDesigner, TaskActionScopeStage},
 			PreferHandlerDeny: true,
-			RoleGateMessage:   "asset upload requires a design, customization, operation, or management role",
+			RoleGateMessage:   "asset upload requires a design, audit, customization, operation, or management role",
 			ScopeGateMessage:  "task asset upload is outside the actor organization scope",
 			MatchedRule:       "role_plus_asset_upload_scope_or_handler",
 		}
