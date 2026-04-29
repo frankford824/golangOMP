@@ -4242,6 +4242,12 @@ components:
         spec_text: { type: string }
         material: { type: string }
         size_text: { type: string }
+        design_requirement:
+          type: string
+          description: Editable demand text. For `original_product_development`, this is accepted as a compatibility alias and persisted to `change_request`; for `new_product_development` and `retouch_task`, it persists to `design_requirement`.
+        change_request:
+          type: string
+          description: Editable original-product change request. For `new_product_development` and `retouch_task`, this is accepted as a compatibility alias of `design_requirement`.
         craft_text: { type: string }
         width:
           type: number
@@ -9809,6 +9815,12 @@ paths:
                       material: { type: string }
                       size_text: { type: string }
                       spec_text: { type: string }
+                      design_requirement:
+                        type: string
+                        description: Editable demand text. For original-product tasks this is a compatibility alias of `change_request`.
+                      change_request:
+                        type: string
+                        description: Editable original-product change request. For new-product and retouch tasks prefer `design_requirement`.
                       reference_link: { type: string }
                       reference_file_refs:
                         type: array
@@ -9858,6 +9870,14 @@ paths:
                 category_id: { type: integer, nullable: true }
                 category_code: { type: string, nullable: true }
                 spec_text: { type: string, nullable: true }
+                design_requirement:
+                  type: string
+                  nullable: true
+                  description: Editable demand text. For original-product tasks backend maps this as an alias to `change_request`; for new-product and retouch tasks it writes `design_requirement`.
+                change_request:
+                  type: string
+                  nullable: true
+                  description: Editable original-product change request. For new-product and retouch tasks backend accepts it as a compatibility alias of `design_requirement`.
                 material: { type: string, nullable: true }
                 size_text: { type: string, nullable: true }
                 reference_link: { type: string, nullable: true }

@@ -2219,6 +2219,61 @@ func TestTaskServiceUpdateBusinessInfoPatchesProductNameAndIID(t *testing.T) {
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoPatchesDemandTextByTaskType(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			608: {
+				ID:       608,
+				TaskType: domain.TaskTypeNewProductDevelopment,
+			},
+			609: {
+				ID:       609,
+				TaskType: domain.TaskTypeOriginalProductDevelopment,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			608: {TaskID: 608, DesignRequirement: "old new-product demand"},
+			609: {TaskID: 609, ChangeRequest: "old original-product change"},
+		},
+	}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	newDetail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:            608,
+		OperatorID:        1,
+		DesignRequirement: "updated new-product demand",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo(new product demand) unexpected error: %+v", appErr)
+	}
+	if newDetail.DesignRequirement != "updated new-product demand" || newDetail.ChangeRequest != "" {
+		t.Fatalf("new product demand fields = design_requirement:%q change_request:%q", newDetail.DesignRequirement, newDetail.ChangeRequest)
+	}
+
+	originalDetail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:            609,
+		OperatorID:        1,
+		DesignRequirement: "updated original-product change via alias",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo(original demand) unexpected error: %+v", appErr)
+	}
+	if originalDetail.ChangeRequest != "updated original-product change via alias" || originalDetail.DesignRequirement != "updated original-product change via alias" {
+		t.Fatalf("original product demand fields = change_request:%q design_requirement:%q", originalDetail.ChangeRequest, originalDetail.DesignRequirement)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoMarksManualReviewForManualQuote(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

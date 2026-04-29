@@ -395,6 +395,8 @@ Content-Type: `application/json`
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |
 | `spec_text` | string | 否 | - |
+| `design_requirement` | string | 否 | Editable demand text. For original-product tasks backend maps this as an alias to `change_request`; for new-product and retouch tasks it writes `design_requirement`. |
+| `change_request` | string | 否 | Editable original-product change request. For new-product and retouch tasks backend accepts it as a compatibility alias of `design_requirement`. |
 | `material` | string | 否 | - |
 | `size_text` | string | 否 | - |
 | `reference_link` | string | 否 | - |
@@ -676,6 +678,8 @@ Content-Type: `application/json`
 | `spec_text` | string | 否 | - |
 | `material` | string | 否 | - |
 | `size_text` | string | 否 | - |
+| `design_requirement` | string | 否 | Editable demand text. For `original_product_development`, this is accepted as a compatibility alias and persisted to `change_request`; for `new_product_development` and `retouch_task`, it persists to `design_requirement`. |
+| `change_request` | string | 否 | Editable original-product change request. For `new_product_development` and `retouch_task`, this is accepted as a compatibility alias of `design_requirement`. |
 | `craft_text` | string | 否 | - |
 | `width` | number | 否 | - |
 | `height` | number | 否 | - |

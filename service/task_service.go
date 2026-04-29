@@ -119,6 +119,8 @@ type UpdateTaskBusinessInfoParams struct {
 	Process                  string
 	ProductSelection         *domain.TaskProductSelectionContext
 	Note                     string
+	ChangeRequest            string
+	DesignRequirement        string
 	ReferenceFileRefs        []domain.ReferenceFileRef
 	ReferenceLink            string
 	CraftText                string
@@ -1718,6 +1720,9 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	if strings.TrimSpace(p.Note) != "" {
 		detail.Note = strings.TrimSpace(p.Note)
 	}
+	if strings.TrimSpace(p.ChangeRequest) != "" || strings.TrimSpace(p.DesignRequirement) != "" {
+		applyTaskDetailDemandTextEdit(task, detail, p.ChangeRequest, p.DesignRequirement)
+	}
 	if strings.TrimSpace(p.ReferenceLink) != "" {
 		detail.ReferenceLink = strings.TrimSpace(p.ReferenceLink)
 	}
@@ -1893,6 +1898,8 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				"spec_text":                   p.SpecText,
 				"material":                    p.Material,
 				"size_text":                   p.SizeText,
+				"change_request":              detail.ChangeRequest,
+				"design_requirement":          detail.DesignRequirement,
 				"note":                        detail.Note,
 				"reference_file_refs":         p.ReferenceFileRefs,
 				"reference_link":              detail.ReferenceLink,
@@ -1957,7 +1964,31 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	}
 	attachTaskProductSelection(updated, task)
 	hydrateTaskDetailFilingProjection(task, updated)
+	if task.TaskType == domain.TaskTypeOriginalProductDevelopment && strings.TrimSpace(updated.DesignRequirement) == "" {
+		updated.DesignRequirement = strings.TrimSpace(updated.ChangeRequest)
+	}
 	return updated, nil
+}
+
+func applyTaskDetailDemandTextEdit(task *domain.Task, detail *domain.TaskDetail, changeRequest, designRequirement string) {
+	if detail == nil {
+		return
+	}
+	changeRequest = strings.TrimSpace(changeRequest)
+	designRequirement = strings.TrimSpace(designRequirement)
+	if task != nil && task.TaskType == domain.TaskTypeOriginalProductDevelopment {
+		value := firstNonEmptyString(changeRequest, designRequirement)
+		if value != "" {
+			detail.ChangeRequest = value
+			detail.DesignRequirement = ""
+		}
+		return
+	}
+	value := firstNonEmptyString(designRequirement, changeRequest)
+	if value != "" {
+		detail.DesignRequirement = value
+		detail.ChangeRequest = ""
+	}
 }
 
 func (s *taskService) previewTaskCost(ctx context.Context, detail *domain.TaskDetail) (costPreviewComputation, *domain.AppError) {

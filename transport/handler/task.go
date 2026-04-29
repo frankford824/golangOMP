@@ -183,6 +183,8 @@ type updateTaskBusinessInfoReq struct {
 	SpecText                 string                   `json:"spec_text"`
 	Material                 string                   `json:"material"`
 	SizeText                 string                   `json:"size_text"`
+	DesignRequirement        string                   `json:"design_requirement"`
+	ChangeRequest            string                   `json:"change_request"`
 	CraftText                string                   `json:"craft_text"`
 	Width                    *float64                 `json:"width"`
 	Height                   *float64                 `json:"height"`
@@ -223,6 +225,8 @@ type getTaskProductInfoResp struct {
 	SpecText            string                              `json:"spec_text"`
 	ReferenceLink       string                              `json:"reference_link"`
 	ReferenceFileRefs   []domain.ReferenceFileRef           `json:"reference_file_refs,omitempty"`
+	DesignRequirement   string                              `json:"design_requirement,omitempty"`
+	ChangeRequest       string                              `json:"change_request,omitempty"`
 	Note                string                              `json:"note,omitempty"`
 }
 
@@ -241,6 +245,8 @@ type patchTaskProductInfoReq struct {
 	SizeText            *string                    `json:"size_text"`
 	ReferenceLink       *string                    `json:"reference_link"`
 	ReferenceFileRefs   *[]domain.ReferenceFileRef `json:"reference_file_refs"`
+	DesignRequirement   *string                    `json:"design_requirement"`
+	ChangeRequest       *string                    `json:"change_request"`
 	Note                *string                    `json:"note"`
 	TriggerFiling       *bool                      `json:"trigger_filing"`
 	Remark              *string                    `json:"remark"`
@@ -990,6 +996,8 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		Process:                  req.Process,
 		ProductSelection:         req.ProductSelection.toDomain(),
 		Note:                     base.Note,
+		ChangeRequest:            req.ChangeRequest,
+		DesignRequirement:        req.DesignRequirement,
 		ReferenceFileRefs:        base.ReferenceFileRefs,
 		ReferenceLink:            base.ReferenceLink,
 		CostPrice:                req.CostPrice,
@@ -1400,6 +1408,11 @@ func (h *TaskHandler) GetProductInfo(c *gin.Context) {
 	}
 	task := aggregate.Task
 	detail := aggregate.TaskDetail
+	designRequirement := detail.DesignRequirement
+	changeRequest := detail.ChangeRequest
+	if task.TaskType == domain.TaskTypeOriginalProductDevelopment && strings.TrimSpace(designRequirement) == "" {
+		designRequirement = changeRequest
+	}
 	resp := &getTaskProductInfoResp{
 		ProductID:           task.ProductID,
 		SKUCode:             task.SKUCode,
@@ -1416,6 +1429,8 @@ func (h *TaskHandler) GetProductInfo(c *gin.Context) {
 		SizeText:            detail.SizeText,
 		SpecText:            detail.SpecText,
 		ReferenceLink:       detail.ReferenceLink,
+		DesignRequirement:   designRequirement,
+		ChangeRequest:       changeRequest,
 		Note:                detail.Note,
 	}
 	if resp.Note == "" {
@@ -1483,6 +1498,12 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 	}
 	if req.ReferenceFileRefs != nil {
 		params.ReferenceFileRefs = *req.ReferenceFileRefs
+	}
+	if req.DesignRequirement != nil {
+		params.DesignRequirement = strings.TrimSpace(*req.DesignRequirement)
+	}
+	if req.ChangeRequest != nil {
+		params.ChangeRequest = strings.TrimSpace(*req.ChangeRequest)
 	}
 	if req.Note != nil {
 		params.Note = strings.TrimSpace(*req.Note)
@@ -1669,6 +1690,8 @@ func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggreg
 		Material:                 detail.Material,
 		SizeText:                 detail.SizeText,
 		Note:                     detail.Note,
+		ChangeRequest:            detail.ChangeRequest,
+		DesignRequirement:        detail.DesignRequirement,
 		ReferenceFileRefs:        domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON),
 		ReferenceLink:            detail.ReferenceLink,
 		CraftText:                detail.CraftText,
