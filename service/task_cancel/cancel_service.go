@@ -58,7 +58,6 @@ func (s *Service) Cancel(ctx context.Context, req Request) permission.Decision {
 	targetModuleState := domain.ModuleStateForciblyClosed
 	eventType := domain.ModuleEventTaskCancelled
 	if req.Force {
-		targetTaskStatus = domain.TaskStatusCompleted
 		targetModuleState = domain.ModuleStateClosedByAdmin
 		eventType = domain.ModuleEventForciblyClosed
 	}
