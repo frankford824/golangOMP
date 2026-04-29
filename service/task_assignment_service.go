@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -58,12 +59,14 @@ type BatchTaskActionResult struct {
 }
 
 type taskAssignmentService struct {
-	taskRepo          repo.TaskRepo
-	taskEventRepo     repo.TaskEventRepo
-	txRunner          repo.TxRunner
-	dataScopeResolver DataScopeResolver
-	scopeUserRepo     repo.UserRepo
-	notifications     taskAssignmentNotificationService
+	taskRepo            repo.TaskRepo
+	taskEventRepo       repo.TaskEventRepo
+	taskModuleRepo      repo.TaskModuleRepo
+	taskModuleEventRepo repo.TaskModuleEventRepo
+	txRunner            repo.TxRunner
+	dataScopeResolver   DataScopeResolver
+	scopeUserRepo       repo.UserRepo
+	notifications       taskAssignmentNotificationService
 }
 
 type taskAssignmentOperation struct {
@@ -100,6 +103,13 @@ func WithTaskAssignmentScopeUserRepo(userRepo repo.UserRepo) TaskAssignmentServi
 func WithTaskAssignmentNotificationService(notifications taskAssignmentNotificationService) TaskAssignmentServiceOption {
 	return func(s *taskAssignmentService) {
 		s.notifications = notifications
+	}
+}
+
+func WithTaskAssignmentModuleSync(moduleRepo repo.TaskModuleRepo, moduleEventRepo repo.TaskModuleEventRepo) TaskAssignmentServiceOption {
+	return func(s *taskAssignmentService) {
+		s.taskModuleRepo = moduleRepo
+		s.taskModuleEventRepo = moduleEventRepo
 	}
 }
 
@@ -250,6 +260,9 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		if err != nil {
 			return err
 		}
+		if err := s.syncDesignModuleAssignment(ctx, tx, task, p, previousDesignerID); err != nil {
+			return err
+		}
 		s.createAssignmentNotification(ctx, tx, task, p, operation, actorID, previousDesignerID, previousHandlerID)
 		return nil
 	})
@@ -301,6 +314,132 @@ func (s *taskAssignmentService) createAssignmentNotification(ctx context.Context
 	}
 }
 
+func (s *taskAssignmentService) syncDesignModuleAssignment(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, previousDesignerID *int64) error {
+	if s.taskModuleRepo == nil || p.DesignerID == nil || *p.DesignerID <= 0 || task == nil || !task.TaskType.RequiresDesign() {
+		return nil
+	}
+	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, domain.ModuleKeyDesign)
+	if err != nil {
+		return fmt.Errorf("load design module for task assignment sync: %w", err)
+	}
+	if module == nil || module.State.Terminal() {
+		return nil
+	}
+	claimedTeam := s.resolveAssignedDesignerTeam(ctx, *p.DesignerID, module)
+	if err := s.taskModuleRepo.Reassign(ctx, tx, p.TaskID, domain.ModuleKeyDesign, *p.DesignerID, claimedTeam, assignmentActorSnapshot(p.AssignedBy)); err != nil {
+		return err
+	}
+	if s.taskModuleEventRepo != nil {
+		fromState := module.State
+		toState := domain.ModuleStateInProgress
+		_, err := s.taskModuleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
+			TaskModuleID:  module.ID,
+			EventType:     assignmentModuleEventType(previousDesignerID),
+			FromState:     &fromState,
+			ToState:       &toState,
+			ActorID:       &p.AssignedBy,
+			ActorSnapshot: assignmentActorSnapshot(p.AssignedBy),
+			Payload: mustJSON(map[string]interface{}{
+				"designer_id":          *p.DesignerID,
+				"previous_designer_id": cloneInt64Ptr(previousDesignerID),
+				"assigned_by":          p.AssignedBy,
+				"source":               "task_assign",
+				"remark":               strings.TrimSpace(p.Remark),
+			}),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *taskAssignmentService) syncDesignModuleUnassignment(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, previousDesignerID *int64) error {
+	if s.taskModuleRepo == nil || task == nil || !task.TaskType.RequiresDesign() {
+		return nil
+	}
+	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, domain.ModuleKeyDesign)
+	if err != nil {
+		return fmt.Errorf("load design module for task unassignment sync: %w", err)
+	}
+	if module == nil || module.State.Terminal() {
+		return nil
+	}
+	poolTeam := strings.TrimSpace(valueFromStringPtr(module.PoolTeamCode))
+	if poolTeam == "" {
+		poolTeam = domain.TeamDesignStandard
+	}
+	if err := s.taskModuleRepo.PoolReassign(ctx, tx, p.TaskID, domain.ModuleKeyDesign, poolTeam); err != nil {
+		return err
+	}
+	if s.taskModuleEventRepo != nil {
+		fromState := module.State
+		toState := domain.ModuleStatePendingClaim
+		_, err := s.taskModuleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
+			TaskModuleID:  module.ID,
+			EventType:     domain.ModuleEventPoolReassignedByAdmin,
+			FromState:     &fromState,
+			ToState:       &toState,
+			ActorID:       &p.AssignedBy,
+			ActorSnapshot: assignmentActorSnapshot(p.AssignedBy),
+			Payload: mustJSON(map[string]interface{}{
+				"previous_designer_id": cloneInt64Ptr(previousDesignerID),
+				"assigned_by":          p.AssignedBy,
+				"source":               "task_unassign",
+				"pool_team_code":       poolTeam,
+				"remark":               strings.TrimSpace(p.Remark),
+			}),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *taskAssignmentService) resolveAssignedDesignerTeam(ctx context.Context, designerID int64, module *domain.TaskModule) string {
+	if s.scopeUserRepo != nil && designerID > 0 {
+		if user, err := s.scopeUserRepo.GetByID(ctx, designerID); err == nil && user != nil && strings.TrimSpace(string(user.Team)) != "" {
+			return strings.TrimSpace(string(user.Team))
+		}
+	}
+	if module != nil {
+		if module.ClaimedTeamCode != nil && strings.TrimSpace(*module.ClaimedTeamCode) != "" {
+			return strings.TrimSpace(*module.ClaimedTeamCode)
+		}
+		if module.PoolTeamCode != nil && strings.TrimSpace(*module.PoolTeamCode) != "" {
+			return strings.TrimSpace(*module.PoolTeamCode)
+		}
+	}
+	return domain.TeamDesignStandard
+}
+
+func assignmentModuleEventType(previousDesignerID *int64) domain.ModuleEventType {
+	if previousDesignerID != nil && *previousDesignerID > 0 {
+		return domain.ModuleEventReassigned
+	}
+	return domain.ModuleEventClaimed
+}
+
+func assignmentActorSnapshot(actorID int64) json.RawMessage {
+	return mustJSON(map[string]interface{}{"actor_id": actorID})
+}
+
+func mustJSON(v interface{}) json.RawMessage {
+	raw, _ := json.Marshal(v)
+	if len(raw) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return raw
+}
+
+func valueFromStringPtr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func (s *taskAssignmentService) clearAssignment(ctx context.Context, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, decision TaskActionDecision) (*domain.Task, *domain.AppError) {
 	if task.TaskStatus == domain.TaskStatusPendingAssign && task.DesignerID == nil && task.CurrentHandlerID == nil {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, nil, task.TaskStatus, decision, true)
@@ -338,7 +477,10 @@ func (s *taskAssignmentService) clearAssignment(ctx context.Context, task *domai
 			payload["reassigned_by"] = p.AssignedBy
 		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, operation.EventType, &p.AssignedBy, payload)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.syncDesignModuleUnassignment(ctx, tx, task, p, previousDesignerID)
 	})
 	if txErr != nil {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, nil, resultingStatus, decision, false)

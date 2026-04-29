@@ -60,6 +60,49 @@ func TestTaskAssignmentServiceAssign(t *testing.T) {
 	}
 }
 
+func TestTaskAssignmentServiceAssignSyncsDesignModule(t *testing.T) {
+	ctx := context.Background()
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         1012,
+		TaskNo:     "T-1012",
+		TaskStatus: domain.TaskStatusPendingAssign,
+		TaskType:   domain.TaskTypeNewProductDevelopment,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{
+		ID:           55,
+		TaskID:       1012,
+		ModuleKey:    domain.ModuleKeyDesign,
+		State:        domain.ModuleStatePendingClaim,
+		PoolTeamCode: strPtr(domain.TeamDesignStandard),
+	})
+	moduleEventRepo := &step04TaskModuleEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{},
+		WithTaskAssignmentModuleSync(moduleRepo, moduleEventRepo))
+
+	task, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1012,
+		DesignerID: authzInt64Ptr(203),
+		AssignedBy: 1,
+	})
+	if appErr != nil {
+		t.Fatalf("Assign() unexpected error: %+v", appErr)
+	}
+	if task.TaskStatus != domain.TaskStatusInProgress {
+		t.Fatalf("Assign() task status = %s, want InProgress", task.TaskStatus)
+	}
+	module := moduleRepo.modules["design"]
+	if module.State != domain.ModuleStateInProgress {
+		t.Fatalf("design module state = %s, want in_progress", module.State)
+	}
+	if module.ClaimedBy == nil || *module.ClaimedBy != 203 {
+		t.Fatalf("design module claimed_by = %+v, want 203", module.ClaimedBy)
+	}
+	if len(moduleEventRepo.events) != 1 || moduleEventRepo.events[0].EventType != domain.ModuleEventClaimed {
+		t.Fatalf("module events = %+v, want claimed", moduleEventRepo.events)
+	}
+}
+
 func TestTaskAssignmentServiceSelfClaimPendingAssign(t *testing.T) {
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:    101,
@@ -163,6 +206,52 @@ func TestTaskAssignmentServiceReassign(t *testing.T) {
 	}
 	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventReassigned {
 		t.Fatalf("Assign(reassign) expected one task.reassigned event, got %+v", eventRepo.events)
+	}
+}
+
+func TestTaskAssignmentServiceReassignSyncsDesignModule(t *testing.T) {
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    8,
+		Roles: []domain.Role{domain.RoleTeamLead},
+		Team:  "ops-team-1",
+	})
+	currentDesignerID := int64(101)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:               1013,
+		TaskStatus:       domain.TaskStatusInProgress,
+		TaskType:         domain.TaskTypeNewProductDevelopment,
+		OwnerDepartment:  "ops",
+		OwnerOrgTeam:     "ops-team-1",
+		DesignerID:       &currentDesignerID,
+		CurrentHandlerID: &currentDesignerID,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{
+		ID:              56,
+		TaskID:          1013,
+		ModuleKey:       domain.ModuleKeyDesign,
+		State:           domain.ModuleStateInProgress,
+		ClaimedBy:       &currentDesignerID,
+		ClaimedTeamCode: strPtr(domain.TeamDesignStandard),
+	})
+	moduleEventRepo := &step04TaskModuleEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{},
+		WithTaskAssignmentModuleSync(moduleRepo, moduleEventRepo))
+
+	_, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1013,
+		DesignerID: authzInt64Ptr(202),
+		AssignedBy: 8,
+	})
+	if appErr != nil {
+		t.Fatalf("Assign(reassign) unexpected error: %+v", appErr)
+	}
+	module := moduleRepo.modules["design"]
+	if module.ClaimedBy == nil || *module.ClaimedBy != 202 {
+		t.Fatalf("design module claimed_by = %+v, want 202", module.ClaimedBy)
+	}
+	if len(moduleEventRepo.events) != 1 || moduleEventRepo.events[0].EventType != domain.ModuleEventReassigned {
+		t.Fatalf("module events = %+v, want reassigned", moduleEventRepo.events)
 	}
 }
 
@@ -781,6 +870,102 @@ func (r *step04TaskEventRepo) ListByTaskID(_ context.Context, _ int64) ([]*domai
 
 func (r *step04TaskEventRepo) ListRecent(_ context.Context, _ repo.TaskEventListFilter) ([]*domain.TaskEvent, int64, error) {
 	return r.events, int64(len(r.events)), nil
+}
+
+type step04TaskModuleRepo struct {
+	modules map[string]*domain.TaskModule
+}
+
+func newStep04TaskModuleRepo(modules ...*domain.TaskModule) *step04TaskModuleRepo {
+	r := &step04TaskModuleRepo{modules: map[string]*domain.TaskModule{}}
+	for _, module := range modules {
+		if module != nil {
+			r.modules[module.ModuleKey] = module
+		}
+	}
+	return r
+}
+
+func (r *step04TaskModuleRepo) GetByTaskAndKey(_ context.Context, _ int64, moduleKey string) (*domain.TaskModule, error) {
+	return r.modules[moduleKey], nil
+}
+
+func (r *step04TaskModuleRepo) ListByTask(context.Context, int64) ([]*domain.TaskModule, error) {
+	out := make([]*domain.TaskModule, 0, len(r.modules))
+	for _, module := range r.modules {
+		out = append(out, module)
+	}
+	return out, nil
+}
+
+func (r *step04TaskModuleRepo) ClaimCAS(context.Context, repo.Tx, int64, string, string, int64, string, json.RawMessage) (bool, error) {
+	return false, nil
+}
+
+func (r *step04TaskModuleRepo) Enter(_ context.Context, _ repo.Tx, taskID int64, moduleKey string, state domain.ModuleState, poolTeamCode *string, data json.RawMessage) (*domain.TaskModule, error) {
+	module := &domain.TaskModule{ID: int64(len(r.modules) + 1), TaskID: taskID, ModuleKey: moduleKey, State: state, PoolTeamCode: poolTeamCode, Data: data}
+	r.modules[moduleKey] = module
+	return module, nil
+}
+
+func (r *step04TaskModuleRepo) UpdateState(_ context.Context, _ repo.Tx, _ int64, moduleKey string, state domain.ModuleState, _ bool, data json.RawMessage) error {
+	if module := r.modules[moduleKey]; module != nil {
+		module.State = state
+		if data != nil {
+			module.Data = data
+		}
+	}
+	return nil
+}
+
+func (r *step04TaskModuleRepo) Reassign(_ context.Context, _ repo.Tx, _ int64, moduleKey string, actorID int64, claimedTeamCode string, actorSnapshot json.RawMessage) error {
+	if module := r.modules[moduleKey]; module != nil {
+		module.State = domain.ModuleStateInProgress
+		module.ClaimedBy = &actorID
+		module.ClaimedTeamCode = &claimedTeamCode
+		module.ActorOrgSnapshot = actorSnapshot
+		now := time.Now()
+		module.ClaimedAt = &now
+	}
+	return nil
+}
+
+func (r *step04TaskModuleRepo) PoolReassign(_ context.Context, _ repo.Tx, _ int64, moduleKey, poolTeamCode string) error {
+	if module := r.modules[moduleKey]; module != nil {
+		module.State = domain.ModuleStatePendingClaim
+		module.PoolTeamCode = &poolTeamCode
+		module.ClaimedBy = nil
+		module.ClaimedTeamCode = nil
+		module.ClaimedAt = nil
+		module.ActorOrgSnapshot = nil
+	}
+	return nil
+}
+
+func (r *step04TaskModuleRepo) CloseOpenModules(context.Context, repo.Tx, int64, domain.ModuleState) ([]*domain.TaskModule, error) {
+	return nil, nil
+}
+
+func (r *step04TaskModuleRepo) InsertPlaceholder(context.Context, repo.Tx, int64, string) (*domain.TaskModule, error) {
+	return nil, nil
+}
+
+type step04TaskModuleEventRepo struct {
+	events []*domain.TaskModuleEvent
+}
+
+func (r *step04TaskModuleEventRepo) Insert(_ context.Context, _ repo.Tx, event *domain.TaskModuleEvent) (int64, error) {
+	event.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, event)
+	return event.ID, nil
+}
+
+func (r *step04TaskModuleEventRepo) ListByTaskModule(context.Context, int64, int) ([]*domain.TaskModuleEvent, error) {
+	return r.events, nil
+}
+
+func (r *step04TaskModuleEventRepo) ListRecentByTask(context.Context, int64, int) ([]*domain.TaskModuleEvent, error) {
+	return r.events, nil
 }
 
 type step04AssignmentNotification struct {
