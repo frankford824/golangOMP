@@ -474,7 +474,7 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 			Action:            action,
 			RequiredRoles:     append([]domain.Role{domain.RoleOps, domain.RoleWarehouse}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingClose},
-			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam},
+			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeStage},
 			StatusDenyCode:    "task_not_closable",
 			StatusGateMessage: "task close requires PendingClose",
 			RoleGateMessage:   "task maintenance requires an operation, warehouse, or management role",

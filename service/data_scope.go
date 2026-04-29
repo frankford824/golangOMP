@@ -149,6 +149,7 @@ func buildRoleBasedStageVisibilities(roles []domain.Role, department string) []S
 			domain.TaskStatusPendingWarehouseReceive,
 			domain.TaskStatusRejectedByWarehouse,
 			domain.TaskStatusPendingProductionTransfer,
+			domain.TaskStatusPendingClose,
 		)
 	}
 	if hasRoleValue(roles, domain.RoleOutsource) {
@@ -193,6 +194,7 @@ func buildRoleBasedStageVisibilities(roles []domain.Role, department string) []S
 				domain.TaskStatusPendingWarehouseReceive,
 				domain.TaskStatusRejectedByWarehouse,
 				domain.TaskStatusPendingProductionTransfer,
+				domain.TaskStatusPendingClose,
 			)
 		case domain.DepartmentCustomizationArt:
 			stageBuilder.Grant(domain.WorkflowLaneCustomization,

@@ -456,6 +456,7 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 				users: map[int64]*domain.User{
 					601: {ID: 601, Department: domain.Department("ops"), Roles: []domain.Role{domain.RoleDeptAdmin}},
 					602: {ID: 602, Department: domain.Department("design"), Roles: []domain.Role{domain.RoleDeptAdmin}},
+					603: {ID: 603, Department: domain.DepartmentCloudWarehouse, Roles: []domain.Role{domain.RoleDeptAdmin, domain.RoleWarehouse}},
 				},
 			}))
 		h := NewTaskHandler(taskSvc, nil, nil)
@@ -485,7 +486,28 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		router.Use(routeActor(domain.RequestActor{ID: 602, Roles: []domain.Role{domain.RoleDeptAdmin}, Department: "design"}))
 		router.POST("/v1/tasks/:id/close", h.Close)
 		rec = performJSON(router, http.MethodPost, "/v1/tasks/6/close", `{"operator_id":602}`)
-		assertTaskPermissionDenied(t, rec, "task_out_of_department_scope")
+		assertTaskPermissionDenied(t, rec, "task_out_of_stage_scope")
+
+		taskRepo.tasks[6] = &domain.Task{
+			ID:              6,
+			TaskNo:          "T-006",
+			SKUCode:         "SKU-006",
+			TaskType:        domain.TaskTypeNewProductDevelopment,
+			SourceMode:      domain.TaskSourceModeNewProduct,
+			TaskStatus:      domain.TaskStatusPendingClose,
+			OwnerDepartment: "ops",
+			OwnerOrgTeam:    "ops-team-1",
+			CreatorID:       600,
+			CreatedAt:       time.Now().UTC(),
+			UpdatedAt:       time.Now().UTC(),
+		}
+		router = gin.New()
+		router.Use(routeActor(domain.RequestActor{ID: 603, Roles: []domain.Role{domain.RoleDeptAdmin, domain.RoleWarehouse}, Department: string(domain.DepartmentCloudWarehouse)}))
+		router.POST("/v1/tasks/:id/close", h.Close)
+		rec = performJSON(router, http.MethodPost, "/v1/tasks/6/close", `{"operator_id":603}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("warehouse stage-scope close code=%d body=%s", rec.Code, rec.Body.String())
+		}
 	})
 
 	t.Run("close_status_and_role_guardrails", func(t *testing.T) {

@@ -593,6 +593,23 @@ func TestTaskActionAuthorizerStageScopeWriteMatrix(t *testing.T) {
 			wantScopeSource: string(TaskActionScopeStage),
 		},
 		{
+			name:   "warehouse_role_can_close_foreign_pending_close_via_stage_scope",
+			action: TaskActionClose,
+			actor: domain.RequestActor{
+				ID:         620,
+				Roles:      []domain.Role{domain.RoleDeptAdmin, domain.RoleWarehouse, domain.RoleMember},
+				Department: string(domain.DepartmentCloudWarehouse),
+			},
+			task: &domain.Task{
+				ID:              629,
+				TaskStatus:      domain.TaskStatusPendingClose,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "淘系一组",
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeStage),
+		},
+		{
 			name:   "audit_dept_admin_cannot_reassign_foreign_task",
 			action: TaskActionReassign,
 			actor: domain.RequestActor{
