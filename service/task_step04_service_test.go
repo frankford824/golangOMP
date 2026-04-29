@@ -301,6 +301,9 @@ func TestTaskAssignmentServiceDeptAdminAssignAndReassignRoundV(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	userRepo.users[202] = &domain.User{ID: 202, Department: domain.DepartmentOperations}
 	userRepo.users[303] = &domain.User{ID: 303, Department: domain.DepartmentDesignRD}
+	userRepo.users[404] = &domain.User{ID: 404, Department: domain.DepartmentDesignRD, Team: "默认组"}
+	userRepo.users[505] = &domain.User{ID: 505, Department: domain.DepartmentDesignRD, Team: "默认组"}
+	userRepo.users[606] = &domain.User{ID: 606, Department: domain.DepartmentDesignRD, Team: "其他组"}
 
 	t.Run("assign pending in managed department", func(t *testing.T) {
 		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
@@ -372,6 +375,108 @@ func TestTaskAssignmentServiceDeptAdminAssignAndReassignRoundV(t *testing.T) {
 		details, _ := appErr.Details.(map[string]interface{})
 		if got, _ := details["deny_code"].(string); got != "reassign_target_out_of_managed_department" {
 			t.Fatalf("deny_code = %v, want reassign_target_out_of_managed_department", details["deny_code"])
+		}
+	})
+
+	t.Run("design dept admin can assign ops-owned pending task to managed designer", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:                 198,
+			Roles:              []domain.Role{domain.RoleDeptAdmin, domain.RoleDesigner, domain.RoleMember, domain.RoleTeamLead},
+			Department:         string(domain.DepartmentDesignRD),
+			Team:               "默认组",
+			ManagedDepartments: []string{string(domain.DepartmentDesignRD)},
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:              24,
+			TaskStatus:      domain.TaskStatusPendingAssign,
+			OwnerDepartment: string(domain.DepartmentOperations),
+			OwnerOrgTeam:    "淘系一组",
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		task, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 24, DesignerID: authzInt64Ptr(404), AssignedBy: 198})
+		if appErr != nil {
+			t.Fatalf("Assign(design manager target scope) unexpected error: %+v", appErr)
+		}
+		if task.TaskStatus != domain.TaskStatusInProgress || task.DesignerID == nil || *task.DesignerID != 404 {
+			t.Fatalf("Assign(design manager target scope) task = %+v, want InProgress assigned to 404", task)
+		}
+	})
+
+	t.Run("design dept admin can reassign ops-owned in-progress task to managed designer", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:                 198,
+			Roles:              []domain.Role{domain.RoleDeptAdmin, domain.RoleDesigner, domain.RoleMember, domain.RoleTeamLead},
+			Department:         string(domain.DepartmentDesignRD),
+			Team:               "默认组",
+			ManagedDepartments: []string{string(domain.DepartmentDesignRD)},
+		})
+		currentDesignerID := int64(202)
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:               25,
+			TaskStatus:       domain.TaskStatusInProgress,
+			OwnerDepartment:  string(domain.DepartmentOperations),
+			OwnerOrgTeam:     "淘系一组",
+			DesignerID:       &currentDesignerID,
+			CurrentHandlerID: &currentDesignerID,
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		task, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 25, DesignerID: authzInt64Ptr(404), AssignedBy: 198})
+		if appErr != nil {
+			t.Fatalf("Assign(design manager reassign target scope) unexpected error: %+v", appErr)
+		}
+		if task.TaskStatus != domain.TaskStatusInProgress || task.DesignerID == nil || *task.DesignerID != 404 {
+			t.Fatalf("Assign(design manager reassign target scope) task = %+v, want InProgress assigned to 404", task)
+		}
+	})
+
+	t.Run("design team lead can assign unassigned pool task to same-team designer", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:         198,
+			Roles:      []domain.Role{domain.RoleTeamLead, domain.RoleDesigner, domain.RoleMember},
+			Department: string(domain.DepartmentDesignRD),
+			Team:       "默认组",
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:              26,
+			TaskStatus:      domain.TaskStatusPendingAssign,
+			OwnerDepartment: "未分配",
+			OwnerOrgTeam:    "未分配池",
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		task, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 26, DesignerID: authzInt64Ptr(505), AssignedBy: 198})
+		if appErr != nil {
+			t.Fatalf("Assign(team lead target scope) unexpected error: %+v", appErr)
+		}
+		if task.TaskStatus != domain.TaskStatusInProgress || task.DesignerID == nil || *task.DesignerID != 505 {
+			t.Fatalf("Assign(team lead target scope) task = %+v, want InProgress assigned to 505", task)
+		}
+	})
+
+	t.Run("design team lead rejects target outside same team", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:         198,
+			Roles:      []domain.Role{domain.RoleTeamLead, domain.RoleDesigner, domain.RoleMember},
+			Department: string(domain.DepartmentDesignRD),
+			Team:       "默认组",
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:              27,
+			TaskStatus:      domain.TaskStatusPendingAssign,
+			OwnerDepartment: "未分配",
+			OwnerOrgTeam:    "未分配池",
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		_, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 27, DesignerID: authzInt64Ptr(606), AssignedBy: 198})
+		if appErr == nil {
+			t.Fatal("Assign(team lead out-of-team target) expected permission error")
+		}
+		details, _ := appErr.Details.(map[string]interface{})
+		if got, _ := details["deny_code"].(string); got != "reassign_target_out_of_managed_team" {
+			t.Fatalf("deny_code = %v, want reassign_target_out_of_managed_team", details["deny_code"])
 		}
 	})
 }

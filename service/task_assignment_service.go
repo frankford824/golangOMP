@@ -164,8 +164,16 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		return nil, taskActionDecisionAppError(operation.Action, denied)
 	}
 	if !decision.Allowed {
-		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
-		return nil, taskActionDecisionAppError(operation.Action, decision)
+		overrideDecision, overridden, appErr := s.allowDesignManagerAssignmentByTargetScope(ctx, task, p, operation, decision)
+		if appErr != nil {
+			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
+			return nil, appErr
+		}
+		if !overridden {
+			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
+			return nil, taskActionDecisionAppError(operation.Action, decision)
+		}
+		decision = overrideDecision
 	}
 	if task.TaskStatus != domain.TaskStatusPendingAssign && !taskActionDecisionHasElevatedScope(decision) {
 		denied := decision
@@ -537,6 +545,159 @@ func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Cont
 		"actor_id":            actor.ID,
 		"managed_departments": managedDepartments,
 	})
+}
+
+func (s *taskAssignmentService) allowDesignManagerAssignmentByTargetScope(ctx context.Context, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, decision TaskActionDecision) (TaskActionDecision, bool, *domain.AppError) {
+	if task == nil || p.DesignerID == nil {
+		return decision, false, nil
+	}
+	if operation.Action != TaskActionAssign && operation.Action != TaskActionReassign {
+		return decision, false, nil
+	}
+	if operation.Action == TaskActionAssign && task.TaskStatus != domain.TaskStatusPendingAssign {
+		return decision, false, nil
+	}
+	if operation.Action == TaskActionReassign && task.TaskStatus != domain.TaskStatusInProgress {
+		return decision, false, nil
+	}
+	if !taskAssignmentScopeDenyCanUseTargetOverride(decision.DenyCode) {
+		return decision, false, nil
+	}
+	if s.scopeUserRepo == nil {
+		return decision, false, nil
+	}
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || !hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector, domain.RoleTeamLead) {
+		return decision, false, nil
+	}
+	scopeSource, appErr := s.validateDesignManagerTargetScope(ctx, actor, p.DesignerID)
+	if appErr != nil {
+		return decision, false, appErr
+	}
+	decision.Allowed = true
+	decision.DenyCode = ""
+	decision.DenyReason = ""
+	decision.StatusReason = ""
+	decision.ScopeSource = string(scopeSource)
+	decision.MatchedRule = "design_manager_target_scope"
+	return decision, true, nil
+}
+
+func taskAssignmentScopeDenyCanUseTargetOverride(denyCode string) bool {
+	switch strings.TrimSpace(denyCode) {
+	case "task_out_of_department_scope", "task_out_of_team_scope", "task_out_of_scope", "task_not_assigned_to_actor":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *taskAssignmentService) validateDesignManagerTargetScope(ctx context.Context, actor domain.RequestActor, designerID *int64) (TaskActionScopeSource, *domain.AppError) {
+	if designerID == nil {
+		return "", nil
+	}
+	if hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector) {
+		managedDepartments := normalizeTaskDepartmentCodes(actor.ManagedDepartments)
+		if len(managedDepartments) == 0 {
+			managedDepartments = normalizeTaskDepartmentCodes(actor.FrontendAccess.ManagedDepartments)
+		}
+		if len(managedDepartments) == 0 {
+			return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed departments", map[string]interface{}{
+				"deny_code":           "reassign_target_out_of_managed_department",
+				"target_user_id":      *designerID,
+				"actor_id":            actor.ID,
+				"managed_departments": managedDepartments,
+			})
+		}
+		target, appErr := s.loadTaskAssignmentTarget(ctx, designerID)
+		if appErr != nil {
+			return "", appErr
+		}
+		targetDepartment := normalizeTaskDepartmentCode(string(target.Department))
+		for _, department := range managedDepartments {
+			if strings.EqualFold(department, targetDepartment) {
+				return TaskActionScopeManagedDepartment, nil
+			}
+		}
+		return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed departments", map[string]interface{}{
+			"deny_code":           "reassign_target_out_of_managed_department",
+			"target_user_id":      *designerID,
+			"target_department":   targetDepartment,
+			"actor_id":            actor.ID,
+			"managed_departments": managedDepartments,
+		})
+	}
+	if hasRoleValue(actor.Roles, domain.RoleTeamLead) {
+		managedTeams := normalizeTaskAssignmentTeamCodes(actor.ManagedTeams)
+		if len(managedTeams) == 0 {
+			managedTeams = normalizeTaskAssignmentTeamCodes(actor.FrontendAccess.ManagedTeams)
+		}
+		if len(managedTeams) == 0 {
+			managedTeams = normalizeTaskAssignmentTeamCodes([]string{actor.Team, actor.FrontendAccess.Team})
+		}
+		if len(managedTeams) == 0 {
+			return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed teams", map[string]interface{}{
+				"deny_code":      "reassign_target_out_of_managed_team",
+				"target_user_id": *designerID,
+				"actor_id":       actor.ID,
+				"managed_teams":  managedTeams,
+			})
+		}
+		target, appErr := s.loadTaskAssignmentTarget(ctx, designerID)
+		if appErr != nil {
+			return "", appErr
+		}
+		targetTeam := strings.TrimSpace(target.Team)
+		for _, team := range managedTeams {
+			if strings.EqualFold(team, targetTeam) {
+				return TaskActionScopeManagedTeam, nil
+			}
+		}
+		return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed teams", map[string]interface{}{
+			"deny_code":      "reassign_target_out_of_managed_team",
+			"target_user_id": *designerID,
+			"target_team":    targetTeam,
+			"actor_id":       actor.ID,
+			"managed_teams":  managedTeams,
+		})
+	}
+	return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed scope", map[string]interface{}{
+		"deny_code":      "reassign_target_out_of_managed_scope",
+		"target_user_id": *designerID,
+		"actor_id":       actor.ID,
+	})
+}
+
+func (s *taskAssignmentService) loadTaskAssignmentTarget(ctx context.Context, designerID *int64) (*domain.User, *domain.AppError) {
+	if s.scopeUserRepo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "target assignee validation is not configured", nil)
+	}
+	target, err := s.scopeUserRepo.GetByID(ctx, *designerID)
+	if err != nil {
+		return nil, infraError("load target assignee", err)
+	}
+	if target == nil {
+		return nil, domain.ErrNotFound
+	}
+	return target, nil
+}
+
+func normalizeTaskAssignmentTeamCodes(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func isTaskAssignmentSelfClaim(ctx context.Context, task *domain.Task, p AssignTaskParams) (bool, int64) {
