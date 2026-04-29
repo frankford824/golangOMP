@@ -1015,7 +1015,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns the 5-section task aggregate produced by `task_aggregator.DetailService` fast path. Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]` (service caps recent events at 50), and `reference_file_refs[]`. Rich snapshot sections such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`, `design_assets`, `asset_versions`, `sku_items`, and `governance_audit_summary` are not returned by this endpoint in v1.21; use dedicated routes such as `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and `/v1/tasks/{id}/cost-overrides` for those read models. Main task-flow aggregate detail is globally visible to task-facing authenticated roles; all mutating actions remain separately action-gated by role, status, handler/assignee, and organization scope.
+- `GET`: Returns the task aggregate produced by `task_aggregator.DetailService` fast path. Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]` (service caps recent events at 50), `reference_file_refs[]`, `sku_items[]`, and `asset_versions[]`. For batch tasks, `sku_items[]` is present on this detail endpoint so frontend can render per-SKU tabs without a second read. Design upload versions preserve batch scope through `asset_versions[].scope_sku_code`, copied from upload-session `target_sku_code`. Rich snapshot sections such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`, `design_assets`, and `governance_audit_summary` are not returned by this endpoint in v1.21; use dedicated routes such as `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and `/v1/tasks/{id}/cost-overrides` for those read models. Main task-flow aggregate detail is globally visible to task-facing authenticated roles; all mutating actions remain separately action-gated by role, status, handler/assignee, and organization scope.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1056,7 +1056,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/procurement/advance \
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data` | TaskAggregateDetailV2 | 否 | V1.1-A1 fast-path 5-section task aggregate detail. |
+| `data` | TaskAggregateDetailV2 | 否 | V1.1-A1 fast-path task aggregate detail. Batch tasks include `sku_items`; design uploads include `asset_versions` with `scope_sku_code` for per-SKU grouping. |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |

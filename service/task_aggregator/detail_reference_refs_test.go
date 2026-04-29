@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"workflow/domain"
+	"workflow/repo"
 )
 
 func TestBuildDetailReferenceFileRefsPrefersTaskDetailJSON(t *testing.T) {
@@ -62,10 +63,119 @@ func TestBuildDetailEnrichesActorNamesAndDesignWorkflow(t *testing.T) {
 	}
 }
 
+func TestDetailServiceReturnsSKUItemsAndScopedAssetVersions(t *testing.T) {
+	taskID := int64(617)
+	assetID := int64(9001)
+	assetVersionNo := 1
+	uploadMode := string(domain.DesignAssetUploadModeMultipart)
+	uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
+	previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
+	storageKey := "tasks/RW-617/assets/AST-0001/v1/delivery/file.jpg"
+
+	svc := NewDetailService(
+		detailTaskRepoStub{
+			task: &domain.Task{
+				ID:          taskID,
+				TaskNo:      "RW-617",
+				TaskType:    domain.TaskTypeNewProductDevelopment,
+				IsBatchTask: true,
+				BatchMode:   domain.TaskBatchModeMultiSKU,
+			},
+			detail: &domain.TaskDetail{TaskID: taskID},
+			skuItems: []*domain.TaskSKUItem{
+				{TaskID: taskID, SequenceNo: 1, SKUCode: "NSGE000004", ProductNameSnapshot: "新品样品1"},
+				{TaskID: taskID, SequenceNo: 2, SKUCode: "NSGE000005", ProductNameSnapshot: "新品样品2"},
+			},
+		},
+		detailModuleRepoStub{},
+		detailModuleEventRepoStub{},
+		detailReferenceRepoStub{},
+		WithTaskAssetRepo(detailTaskAssetRepoStub{assets: []*domain.TaskAsset{{
+			ID:             7001,
+			TaskID:         taskID,
+			AssetID:        &assetID,
+			ScopeSKUCode:   strPtr("NSGE000005"),
+			AssetType:      domain.TaskAssetTypeDelivery,
+			VersionNo:      1,
+			AssetVersionNo: &assetVersionNo,
+			UploadMode:     &uploadMode,
+			FileName:       "delivery.jpg",
+			StorageKey:     &storageKey,
+			UploadStatus:   &uploadStatus,
+			PreviewStatus:  &previewStatus,
+			UploadedBy:     1,
+		}}}),
+	)
+
+	detail, err := svc.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if len(detail.SKUItems) != 2 {
+		t.Fatalf("sku_items len = %d, want 2", len(detail.SKUItems))
+	}
+	if len(detail.AssetVersions) != 1 {
+		t.Fatalf("asset_versions len = %d, want 1", len(detail.AssetVersions))
+	}
+	if detail.AssetVersions[0].ScopeSKUCode != "NSGE000005" {
+		t.Fatalf("asset_versions[0].scope_sku_code = %q, want NSGE000005", detail.AssetVersions[0].ScopeSKUCode)
+	}
+}
+
 type detailNameResolverStub struct {
 	names map[int64]string
 }
 
 func (r detailNameResolverStub) GetDisplayName(_ context.Context, id int64) string {
 	return r.names[id]
+}
+
+type detailTaskRepoStub struct {
+	repo.TaskRepo
+	task     *domain.Task
+	detail   *domain.TaskDetail
+	skuItems []*domain.TaskSKUItem
+}
+
+func (r detailTaskRepoStub) GetByID(context.Context, int64) (*domain.Task, error) {
+	return r.task, nil
+}
+
+func (r detailTaskRepoStub) GetDetailByTaskID(context.Context, int64) (*domain.TaskDetail, error) {
+	return r.detail, nil
+}
+
+func (r detailTaskRepoStub) ListSKUItemsByTaskID(context.Context, int64) ([]*domain.TaskSKUItem, error) {
+	return r.skuItems, nil
+}
+
+type detailModuleRepoStub struct{ repo.TaskModuleRepo }
+
+func (detailModuleRepoStub) ListByTask(context.Context, int64) ([]*domain.TaskModule, error) {
+	return []*domain.TaskModule{}, nil
+}
+
+type detailModuleEventRepoStub struct{ repo.TaskModuleEventRepo }
+
+func (detailModuleEventRepoStub) ListRecentByTask(context.Context, int64, int) ([]*domain.TaskModuleEvent, error) {
+	return []*domain.TaskModuleEvent{}, nil
+}
+
+type detailReferenceRepoStub struct{ repo.ReferenceFileRefFlatRepo }
+
+func (detailReferenceRepoStub) ListByTask(context.Context, int64) ([]*domain.ReferenceFileRefFlat, error) {
+	return []*domain.ReferenceFileRefFlat{}, nil
+}
+
+type detailTaskAssetRepoStub struct {
+	repo.TaskAssetRepo
+	assets []*domain.TaskAsset
+}
+
+func (r detailTaskAssetRepoStub) ListByTaskID(context.Context, int64) ([]*domain.TaskAsset, error) {
+	return r.assets, nil
+}
+
+func strPtr(value string) *string {
+	return &value
 }

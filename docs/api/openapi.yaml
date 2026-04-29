@@ -1943,7 +1943,7 @@ components:
         attached_at: { type: string, format: date-time }
     TaskAggregateDetailV2:
       type: object
-      description: V1.1-A1 fast-path 5-section task aggregate detail.
+      description: V1.1-A1 fast-path task aggregate detail. Batch tasks include `sku_items`; design uploads include `asset_versions` with `scope_sku_code` for per-SKU grouping.
       properties:
         task:
           $ref: '#/components/schemas/Task'
@@ -1962,6 +1962,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReferenceFileRef'
+        sku_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSKUItem'
+        asset_versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DesignAssetVersion'
     ProcurementStatus:
       type: string
       enum: [draft, prepared, in_progress, completed]
@@ -10220,14 +10228,18 @@ paths:
           description: Task is not a purchase task or the transition is invalid
   /v1/tasks/{id}/detail:
     get:
-      summary: Get task aggregate detail (V1.1-A1 fast-path 5-section)
+      summary: Get task aggregate detail (V1.1-A1 fast-path)
       description: |
-        Returns the 5-section task aggregate produced by `task_aggregator.DetailService` fast path.
+        Returns the task aggregate produced by `task_aggregator.DetailService` fast path.
         Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]`
-        (service caps recent events at 50), and `reference_file_refs[]`. Rich snapshot sections
+        (service caps recent events at 50), `reference_file_refs[]`, `sku_items[]`, and
+        `asset_versions[]`. For batch tasks, `sku_items[]` is present on this detail endpoint so
+        frontend can render per-SKU tabs without a second read. Design upload versions preserve
+        batch scope through `asset_versions[].scope_sku_code`, copied from upload-session
+        `target_sku_code`. Rich snapshot sections
         such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`,
-        `design_assets`, `asset_versions`, `sku_items`, and `governance_audit_summary` are not
-        returned by this endpoint in v1.21; use dedicated routes such as
+        `design_assets`, and `governance_audit_summary` are not returned by this endpoint in
+        v1.21; use dedicated routes such as
         `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and
         `/v1/tasks/{id}/cost-overrides` for those read models.
         Main task-flow aggregate detail is globally visible to task-facing authenticated roles;
@@ -10246,7 +10258,7 @@ paths:
           schema: { type: integer }
       responses:
         '200':
-          description: 5-section aggregate detail
+          description: Aggregate detail
           content:
             application/json:
               schema:

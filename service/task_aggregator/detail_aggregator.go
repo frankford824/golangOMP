@@ -10,6 +10,7 @@ import (
 
 type DetailService struct {
 	tasks        repo.TaskRepo
+	taskAssets   repo.TaskAssetRepo
 	modules      repo.TaskModuleRepo
 	events       repo.TaskModuleEventRepo
 	refs         repo.ReferenceFileRefFlatRepo
@@ -19,23 +20,25 @@ type DetailService struct {
 }
 
 type Detail struct {
-	Task               *domain.Task                `json:"task"`
-	TaskDetail         *domain.TaskDetail          `json:"task_detail,omitempty"`
-	Modules            []ModuleDetail              `json:"modules"`
-	Events             []*domain.TaskModuleEvent   `json:"events"`
-	References         []domain.ReferenceFileRef   `json:"reference_file_refs"`
-	Workflow           domain.TaskWorkflowSnapshot `json:"workflow"`
-	DesignSubStatus    string                      `json:"design_sub_status,omitempty"`
-	CreatorID          *int64                      `json:"creator_id,omitempty"`
-	RequesterID        *int64                      `json:"requester_id,omitempty"`
-	DesignerID         *int64                      `json:"designer_id,omitempty"`
-	AssigneeID         *int64                      `json:"assignee_id,omitempty"`
-	CurrentHandlerID   *int64                      `json:"current_handler_id,omitempty"`
-	CreatorName        string                      `json:"creator_name,omitempty"`
-	RequesterName      string                      `json:"requester_name,omitempty"`
-	DesignerName       string                      `json:"designer_name,omitempty"`
-	AssigneeName       string                      `json:"assignee_name,omitempty"`
-	CurrentHandlerName string                      `json:"current_handler_name,omitempty"`
+	Task               *domain.Task                 `json:"task"`
+	TaskDetail         *domain.TaskDetail           `json:"task_detail,omitempty"`
+	Modules            []ModuleDetail               `json:"modules"`
+	Events             []*domain.TaskModuleEvent    `json:"events"`
+	References         []domain.ReferenceFileRef    `json:"reference_file_refs"`
+	SKUItems           []*domain.TaskSKUItem        `json:"sku_items"`
+	AssetVersions      []*domain.DesignAssetVersion `json:"asset_versions"`
+	Workflow           domain.TaskWorkflowSnapshot  `json:"workflow"`
+	DesignSubStatus    string                       `json:"design_sub_status,omitempty"`
+	CreatorID          *int64                       `json:"creator_id,omitempty"`
+	RequesterID        *int64                       `json:"requester_id,omitempty"`
+	DesignerID         *int64                       `json:"designer_id,omitempty"`
+	AssigneeID         *int64                       `json:"assignee_id,omitempty"`
+	CurrentHandlerID   *int64                       `json:"current_handler_id,omitempty"`
+	CreatorName        string                       `json:"creator_name,omitempty"`
+	RequesterName      string                       `json:"requester_name,omitempty"`
+	DesignerName       string                       `json:"designer_name,omitempty"`
+	AssigneeName       string                       `json:"assignee_name,omitempty"`
+	CurrentHandlerName string                       `json:"current_handler_name,omitempty"`
 }
 
 type ModuleDetail struct {
@@ -71,6 +74,12 @@ func WithUserDisplayNameResolver(resolver userDisplayNameResolver) DetailService
 	}
 }
 
+func WithTaskAssetRepo(taskAssets repo.TaskAssetRepo) DetailServiceOption {
+	return func(s *DetailService) {
+		s.taskAssets = taskAssets
+	}
+}
+
 func NewDetailService(tasks repo.TaskRepo, modules repo.TaskModuleRepo, events repo.TaskModuleEventRepo, refs repo.ReferenceFileRefFlatRepo, opts ...DetailServiceOption) *DetailService {
 	svc := &DetailService{tasks: tasks, modules: modules, events: events, refs: refs, statusAgg: NewStatusAggregator(modules)}
 	for _, opt := range opts {
@@ -88,7 +97,11 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 			if task == nil {
 				return nil, nil
 			}
-			return s.buildDetail(ctx, task, detail, modules, events, refs), nil
+			out := s.buildDetail(ctx, task, detail, modules, events, refs)
+			if err := s.hydrateBatchAndAssetFields(ctx, out, task); err != nil {
+				return nil, err
+			}
+			return out, nil
 		}
 	}
 	task, err := s.tasks.GetByID(ctx, taskID)
@@ -111,7 +124,11 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 	if err != nil {
 		return nil, err
 	}
-	return s.buildDetail(ctx, task, detail, modules, events, refs), nil
+	out := s.buildDetail(ctx, task, detail, modules, events, refs)
+	if err := s.hydrateBatchAndAssetFields(ctx, out, task); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule, events []*domain.TaskModuleEvent, refs []*domain.ReferenceFileRefFlat) *Detail {
@@ -143,6 +160,65 @@ func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, deta
 	}
 	hydrateDetailActorFields(ctx, s.nameResolver, out, task)
 	return out
+}
+
+func (s *DetailService) hydrateBatchAndAssetFields(ctx context.Context, out *Detail, task *domain.Task) error {
+	if out == nil || task == nil {
+		return nil
+	}
+	skuItems, err := s.loadSKUItems(ctx, task)
+	if err != nil {
+		return err
+	}
+	assetVersions, err := s.loadAssetVersions(ctx, task)
+	if err != nil {
+		return err
+	}
+	out.SKUItems = skuItems
+	out.AssetVersions = assetVersions
+	return nil
+}
+
+func (s *DetailService) loadSKUItems(ctx context.Context, task *domain.Task) ([]*domain.TaskSKUItem, error) {
+	if s == nil || s.tasks == nil || task == nil {
+		return []*domain.TaskSKUItem{}, nil
+	}
+	items, err := s.tasks.ListSKUItemsByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		return []*domain.TaskSKUItem{}, nil
+	}
+	return items, nil
+}
+
+func (s *DetailService) loadAssetVersions(ctx context.Context, task *domain.Task) ([]*domain.DesignAssetVersion, error) {
+	if s == nil || s.taskAssets == nil || task == nil {
+		return []*domain.DesignAssetVersion{}, nil
+	}
+	records, err := s.taskAssets.ListByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]*domain.DesignAssetVersion, 0, len(records))
+	for _, record := range records {
+		version := domain.BuildDesignAssetVersion(record)
+		if version == nil {
+			continue
+		}
+		version.TaskNo = task.TaskNo
+		version.AssetType = domain.NormalizeTaskAssetType(version.AssetType)
+		version.IsSourceFile = version.AssetType.IsSource()
+		version.IsDeliveryFile = version.AssetType.IsDelivery()
+		version.IsPreviewFile = version.AssetType.IsPreview()
+		version.IsDesignThumb = version.AssetType.IsDesignThumb()
+		versions = append(versions, version)
+	}
+	if versions == nil {
+		return []*domain.DesignAssetVersion{}, nil
+	}
+	return versions, nil
 }
 
 func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResolver, out *Detail, task *domain.Task) {
