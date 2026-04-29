@@ -120,6 +120,15 @@ func TestDetailServiceReturnsSKUItemsAndScopedAssetVersions(t *testing.T) {
 	if detail.AssetVersions[0].ScopeSKUCode != "NSGE000005" {
 		t.Fatalf("asset_versions[0].scope_sku_code = %q, want NSGE000005", detail.AssetVersions[0].ScopeSKUCode)
 	}
+	if detail.AssetVersions[0].DownloadURL == nil || *detail.AssetVersions[0].DownloadURL != "/v1/assets/files/tasks/RW-617/assets/AST-0001/v1/delivery/file.jpg" {
+		t.Fatalf("asset_versions[0].download_url = %+v", detail.AssetVersions[0].DownloadURL)
+	}
+	if !detail.AssetVersions[0].PreviewAvailable {
+		t.Fatalf("asset_versions[0].preview_available = false, want true")
+	}
+	if !detail.AssetVersions[0].PublicDownloadAllowed || !detail.AssetVersions[0].PreviewPublicAllowed {
+		t.Fatalf("asset_versions[0] access flags = %+v", detail.AssetVersions[0])
+	}
 }
 
 type detailNameResolverStub struct {

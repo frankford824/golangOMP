@@ -3,6 +3,7 @@ package task_aggregator
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -214,12 +215,65 @@ func (s *DetailService) loadAssetVersions(ctx context.Context, task *domain.Task
 		version.IsDeliveryFile = version.AssetType.IsDelivery()
 		version.IsPreviewFile = version.AssetType.IsPreview()
 		version.IsDesignThumb = version.AssetType.IsDesignThumb()
+		version.PreviewAvailable = detailAssetVersionPreviewAvailable(version)
+		version.SourceAccessMode = domain.DesignAssetSourceAccessModeStandard
+		version.AccessPolicy = detailAssetVersionAccessPolicy(version)
+		version.PreviewPublicAllowed = version.PreviewAvailable
+		if strings.TrimSpace(version.StorageKey) != "" {
+			downloadURL := domain.BuildRelativeEscapedURLPath("/v1/assets/files", version.StorageKey)
+			version.DownloadURL = &downloadURL
+			version.PublicDownloadAllowed = true
+		}
+		version.AccessHint = detailAssetVersionAccessHint(version)
 		versions = append(versions, version)
 	}
 	if versions == nil {
 		return []*domain.DesignAssetVersion{}, nil
 	}
 	return versions, nil
+}
+
+func detailAssetVersionPreviewAvailable(version *domain.DesignAssetVersion) bool {
+	if version == nil || strings.TrimSpace(version.StorageKey) == "" {
+		return false
+	}
+	if version.UploadStatus != "" && version.UploadStatus != domain.DesignAssetUploadStatusUploaded {
+		return false
+	}
+	if version.IsPreviewFile || version.IsDesignThumb || version.IsDeliveryFile || version.IsSourceFile {
+		return true
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(version.MimeType))
+	return strings.HasPrefix(mimeType, "image/")
+}
+
+func detailAssetVersionAccessPolicy(version *domain.DesignAssetVersion) domain.DesignAssetAccessPolicy {
+	if version == nil {
+		return domain.DesignAssetAccessPolicyReferenceDirect
+	}
+	switch {
+	case version.IsSourceFile:
+		return domain.DesignAssetAccessPolicySourceControlled
+	case version.IsDeliveryFile:
+		return domain.DesignAssetAccessPolicyDeliveryFlow
+	case version.IsPreviewFile, version.IsDesignThumb:
+		return domain.DesignAssetAccessPolicyPreviewAssist
+	default:
+		return domain.DesignAssetAccessPolicyReferenceDirect
+	}
+}
+
+func detailAssetVersionAccessHint(version *domain.DesignAssetVersion) string {
+	if version == nil {
+		return ""
+	}
+	if version.IsSourceFile {
+		return "Source file is available through download_url; preview uses the same task asset access path when supported by the browser."
+	}
+	if version.IsDeliveryFile {
+		return "Delivery asset is available through download_url and can be used as the batch item preview."
+	}
+	return "Task asset is available through download_url."
 }
 
 func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResolver, out *Detail, task *domain.Task) {
