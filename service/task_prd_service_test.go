@@ -1721,6 +1721,60 @@ func TestTaskServiceUpdateProcurementPersistsRecord(t *testing.T) {
 	}
 }
 
+func TestTaskServiceUpdateProcurementStatusOnlyPreservesProcurementValues(t *testing.T) {
+	procurementRepo := &prdProcurementRepo{
+		records: map[int64]*domain.ProcurementRecord{
+			61: {
+				TaskID:           61,
+				Status:           domain.ProcurementStatusDraft,
+				ProcurementPrice: float64Ptr(222),
+				Quantity:         int64Ptr(22),
+				SupplierName:     "Vendor A",
+			},
+		},
+	}
+	eventRepo := &prdTaskEventRepo{}
+	svc := NewTaskService(
+		&prdTaskRepo{
+			tasks: map[int64]*domain.Task{
+				61: {
+					ID:       61,
+					TaskType: domain.TaskTypePurchaseTask,
+				},
+			},
+		},
+		procurementRepo,
+		&prdTaskAssetRepo{},
+		eventRepo,
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	record, appErr := svc.UpdateProcurement(context.Background(), UpdateTaskProcurementParams{
+		TaskID:         61,
+		OperatorID:     12,
+		Status:         domain.ProcurementStatusCompleted,
+		PurchaseRemark: "arrived",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateProcurement() unexpected error: %+v", appErr)
+	}
+	if record.ProcurementPrice == nil || *record.ProcurementPrice != 222 {
+		t.Fatalf("UpdateProcurement() procurement_price = %+v, want 222", record.ProcurementPrice)
+	}
+	if record.Quantity == nil || *record.Quantity != 22 {
+		t.Fatalf("UpdateProcurement() quantity = %+v, want 22", record.Quantity)
+	}
+	if record.Status != domain.ProcurementStatusCompleted {
+		t.Fatalf("UpdateProcurement() status = %s, want %s", record.Status, domain.ProcurementStatusCompleted)
+	}
+	if len(eventRepo.events) != 1 {
+		t.Fatalf("UpdateProcurement() events = %+v", eventRepo.events)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoAutoPrefillsCost(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

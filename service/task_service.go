@@ -2598,11 +2598,20 @@ func (s *taskService) UpdateProcurement(ctx context.Context, p UpdateTaskProcure
 		return nil, infraError("get task detail before procurement update", err)
 	}
 
+	procurementPrice := cloneFloat64Ptr(p.ProcurementPrice)
+	if procurementPrice == nil && previousRecord != nil {
+		procurementPrice = cloneFloat64Ptr(previousRecord.ProcurementPrice)
+	}
+	quantity := cloneInt64Ptr(p.Quantity)
+	if quantity == nil && previousRecord != nil {
+		quantity = cloneInt64Ptr(previousRecord.Quantity)
+	}
+
 	record := &domain.ProcurementRecord{
 		TaskID:             p.TaskID,
 		Status:             p.Status,
-		ProcurementPrice:   p.ProcurementPrice,
-		Quantity:           p.Quantity,
+		ProcurementPrice:   procurementPrice,
+		Quantity:           quantity,
 		SupplierName:       p.SupplierName,
 		PurchaseRemark:     p.PurchaseRemark,
 		ExpectedDeliveryAt: p.ExpectedDeliveryAt,
@@ -2627,8 +2636,8 @@ func (s *taskService) UpdateProcurement(ctx context.Context, p UpdateTaskProcure
 			mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
 				"previous_status":      procurementStatusValue(previousRecord),
 				"status":               p.Status,
-				"procurement_price":    p.ProcurementPrice,
-				"quantity":             p.Quantity,
+				"procurement_price":    record.ProcurementPrice,
+				"quantity":             record.Quantity,
 				"supplier_name":        p.SupplierName,
 				"purchase_remark":      p.PurchaseRemark,
 				"expected_delivery_at": p.ExpectedDeliveryAt,
