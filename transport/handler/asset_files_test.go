@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"workflow/domain"
+	"workflow/service"
 )
 
 func TestAssetFilesHandlerServeFileProxiesHeadersAndStatus(t *testing.T) {
@@ -90,6 +91,46 @@ func TestAssetFilesHandlerServeFilePassesThroughUpstream404(t *testing.T) {
 	if rec.Body.String() != "not found in oss" {
 		t.Fatalf("body = %q", rec.Body.String())
 	}
+}
+
+func TestAssetFilesHandlerServeFileRedirectsToOSSDirectOnUpstream404(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "not found in upload service")
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	h := NewAssetFilesHandler(upstream.URL, "oss-token", "oss", zap.NewNop(), assetFilesPresignerStub{
+		urls: map[string]string{
+			"tasks/task-create-reference/assets/PRECREATE-REFERENCE/v1/derived/ref.jpeg": "https://oss.example/ref.jpeg?sig=1",
+		},
+	})
+	router.GET("/v1/assets/files/*path", h.ServeFile)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/files/tasks/task-create-reference/assets/PRECREATE-REFERENCE/v1/derived/ref.jpeg", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "https://oss.example/ref.jpeg?sig=1" {
+		t.Fatalf("Location = %q", got)
+	}
+}
+
+type assetFilesPresignerStub struct {
+	urls map[string]string
+}
+
+func (s assetFilesPresignerStub) PresignPreviewURL(objectKey string) *service.OSSDirectDownloadInfo {
+	if url := s.urls[objectKey]; url != "" {
+		return &service.OSSDirectDownloadInfo{DownloadURL: url}
+	}
+	return nil
 }
 
 func TestAssetFilesHandlerServeFileEscapesStorageKeyPath(t *testing.T) {

@@ -353,7 +353,7 @@ func main() {
 	taskAssetCenterH.SetGlobalAssetServices(globalAssetCenterSvc, globalAssetLifecycleSvc)
 	taskCreateReferenceUploadH := handler.NewTaskCreateReferenceUploadHandler(taskCreateReferenceUploadSvc)
 	assetUploadH := handler.NewAssetUploadHandler(assetUploadSvc)
-	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger)
+	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
 	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
 	taskCostOverrideH := handler.NewTaskCostOverrideHandler(taskCostOverrideSvc)

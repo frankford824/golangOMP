@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/domain"
+	"workflow/service"
 )
 
 // AssetFilesHandler proxies GET /v1/assets/files/* to the OSS-backed upload service.
@@ -19,12 +20,17 @@ type AssetFilesHandler struct {
 	uploadServiceBaseURL string
 	internalToken        string
 	storageProvider      string
+	ossPresigner         assetFilesOSSPresigner
 	httpClient           *http.Client
 	logger               *zap.Logger
 }
 
+type assetFilesOSSPresigner interface {
+	PresignPreviewURL(objectKey string) *service.OSSDirectDownloadInfo
+}
+
 // NewAssetFilesHandler creates a handler that proxies file requests to the OSS-backed upload service.
-func NewAssetFilesHandler(uploadServiceBaseURL, internalToken, storageProvider string, logger *zap.Logger) *AssetFilesHandler {
+func NewAssetFilesHandler(uploadServiceBaseURL, internalToken, storageProvider string, logger *zap.Logger, ossPresigner ...assetFilesOSSPresigner) *AssetFilesHandler {
 	base := strings.TrimSuffix(strings.TrimSpace(uploadServiceBaseURL), "/")
 	if base == "" {
 		base = "http://127.0.0.1:8092"
@@ -36,6 +42,7 @@ func NewAssetFilesHandler(uploadServiceBaseURL, internalToken, storageProvider s
 		uploadServiceBaseURL: base,
 		internalToken:        strings.TrimSpace(internalToken),
 		storageProvider:      strings.TrimSpace(storageProvider),
+		ossPresigner:         firstAssetFilesOSSPresigner(ossPresigner),
 		httpClient:           &http.Client{},
 		logger:               logger.Named("asset_files_proxy"),
 	}
@@ -123,6 +130,11 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 		zap.Int("probe_len", len(probe)),
 		zap.String("probe_prefix_b64", encodeProbe(probe)),
 	)
+	if resp.StatusCode == http.StatusNotFound {
+		if h.redirectToOSSDirect(c, storageKey, traceID) {
+			return
+		}
+	}
 
 	copyHeaders(c.Writer.Header(), resp.Header)
 	if c.Request.Method != http.MethodHead && len(probe) > 0 && resp.ContentLength == 0 {
@@ -150,6 +162,31 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 		zap.Int("final_status_code", c.Writer.Status()),
 		zap.Error(copyErr),
 	)
+}
+
+func (h *AssetFilesHandler) redirectToOSSDirect(c *gin.Context, storageKey, traceID string) bool {
+	if h == nil || h.ossPresigner == nil {
+		return false
+	}
+	info := h.ossPresigner.PresignPreviewURL(storageKey)
+	if info == nil || strings.TrimSpace(info.DownloadURL) == "" {
+		return false
+	}
+	h.logger.Info("asset_files_proxy_oss_direct_fallback",
+		zap.String("trace_id", traceID),
+		zap.String("storage_key", storageKey),
+	)
+	c.Redirect(http.StatusFound, strings.TrimSpace(info.DownloadURL))
+	return true
+}
+
+func firstAssetFilesOSSPresigner(values []assetFilesOSSPresigner) assetFilesOSSPresigner {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func copyHeaders(dst, src http.Header) {
