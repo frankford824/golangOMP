@@ -646,6 +646,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}); err != nil {
 			return fmt.Errorf("update upload request session: %w", err)
 		}
+		shouldAppendDesignSubmitted := false
 		if requestAssetType.IsDelivery() {
 			switch task.TaskStatus {
 			case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB:
@@ -663,13 +664,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					if err := s.markDesignModuleSubmitted(ctx, tx, params.TaskID); err != nil {
 						return fmt.Errorf("mark design module submitted after delivery upload: %w", err)
 					}
-					_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventDesignSubmitted, &params.CompletedBy, map[string]interface{}{
-						"asset_type": string(requestAssetType), "asset_id": assetID, "designer_id": task.DesignerID,
-						"upload_session_id": request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
-					})
-					if err != nil {
-						return fmt.Errorf("append design submitted event: %w", err)
-					}
+					shouldAppendDesignSubmitted = true
 				}
 			}
 		}
@@ -706,6 +701,15 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		})
 		if err != nil {
 			return fmt.Errorf("append upload session completed event: %w", err)
+		}
+		if shouldAppendDesignSubmitted {
+			_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventDesignSubmitted, &params.CompletedBy, map[string]interface{}{
+				"asset_type": string(requestAssetType), "asset_id": assetID, "designer_id": task.DesignerID,
+				"upload_session_id": request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
+			})
+			if err != nil {
+				return fmt.Errorf("append design submitted event: %w", err)
+			}
 		}
 		return nil
 	})

@@ -1881,14 +1881,15 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			}
 		}
 		productSelectionPayload := buildTaskProductSelectionContext(task, detail)
+		productIID := taskBusinessInfoEventProductIID(detail, p.ProductIID)
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventBusinessInfoUpdated, &p.OperatorID,
 			map[string]interface{}{
 				"category":                    detail.Category,
 				"category_id":                 detail.CategoryID,
 				"category_code":               detail.CategoryCode,
 				"category_name":               detail.CategoryName,
-				"i_id":                        strings.TrimSpace(p.ProductIID),
-				"product_i_id":                strings.TrimSpace(p.ProductIID),
+				"i_id":                        productIID,
+				"product_i_id":                productIID,
 				"product_name":                task.ProductNameSnapshot,
 				"product_name_snapshot":       task.ProductNameSnapshot,
 				"spec_text":                   p.SpecText,
@@ -1964,6 +1965,16 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		updated.DesignRequirement = strings.TrimSpace(updated.ChangeRequest)
 	}
 	return updated, nil
+}
+
+func taskBusinessInfoEventProductIID(detail *domain.TaskDetail, requested string) string {
+	if value := strings.TrimSpace(requested); value != "" {
+		return value
+	}
+	if detail == nil {
+		return ""
+	}
+	return firstNonEmptyString(strings.TrimSpace(detail.Category), strings.TrimSpace(detail.CategoryName))
 }
 
 func applyTaskDetailDemandTextEdit(task *domain.Task, detail *domain.TaskDetail, changeRequest, designRequirement string) {

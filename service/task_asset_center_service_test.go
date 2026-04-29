@@ -151,6 +151,15 @@ func TestTaskAssetCenterServiceCompleteMultipartSkipsSecondRemoteCompleteAfterBr
 	if uploadClient.getFileMetaCalls == 0 {
 		t.Fatalf("CompleteUploadSession() get file meta calls = %d, want > 0", uploadClient.getFileMetaCalls)
 	}
+	if len(taskEventRepo.events) != 4 {
+		t.Fatalf("task events = %+v, want create/version/completed/design_submitted", taskEventRepo.events)
+	}
+	if taskEventRepo.events[1].EventType != domain.TaskEventAssetVersionCreated ||
+		taskEventRepo.events[2].EventType != domain.TaskEventAssetUploadSessionCompleted ||
+		taskEventRepo.events[3].EventType != domain.TaskEventDesignSubmitted {
+		t.Fatalf("event order = %s/%s/%s, want asset.version.created/upload_session.completed/design.submitted",
+			taskEventRepo.events[1].EventType, taskEventRepo.events[2].EventType, taskEventRepo.events[3].EventType)
+	}
 
 	reloadedSession, appErr := svc.GetUploadSession(context.Background(), 2011, createResult.Session.ID)
 	if appErr != nil {
@@ -796,6 +805,9 @@ func TestTaskAssetCenterServiceBatchDeliveryAdvancesOnlyAfterAllSKUCompleted(t *
 	}
 	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventDesignSubmitted) != 1 {
 		t.Fatalf("design submitted events = %+v, want exactly one", taskEventRepo.events)
+	}
+	if last := taskEventRepo.events[len(taskEventRepo.events)-1]; last.EventType != domain.TaskEventDesignSubmitted {
+		t.Fatalf("last event = %s, want design submitted after asset version and upload completion", last.EventType)
 	}
 }
 

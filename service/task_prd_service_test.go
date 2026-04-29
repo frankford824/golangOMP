@@ -2273,6 +2273,61 @@ func TestTaskServiceUpdateBusinessInfoPatchesProductNameAndIID(t *testing.T) {
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoEventKeepsExistingProductIID(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			629: {
+				ID:                  629,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "NSPP000001",
+				ProductNameSnapshot: "29测试",
+				TaskStatus:          domain.TaskStatusPendingAssign,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			629: {TaskID: 629, Category: "常规PP背胶", CategoryName: "常规PP背胶"},
+		},
+	}
+	eventRepo := &prdTaskEventRepo{}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		eventRepo,
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	if _, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     629,
+		OperatorID: 197,
+		SpecText:   "20*20",
+	}); appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	var businessEvent *domain.TaskEvent
+	for _, event := range eventRepo.events {
+		if event.EventType == domain.TaskEventBusinessInfoUpdated {
+			businessEvent = event
+			break
+		}
+	}
+	if businessEvent == nil {
+		t.Fatalf("events = %+v, want business info event", eventRepo.events)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(businessEvent.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["i_id"] != "常规PP背胶" || payload["product_i_id"] != "常规PP背胶" {
+		t.Fatalf("event i_id/product_i_id = %#v/%#v, want existing detail i_id", payload["i_id"], payload["product_i_id"])
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoPatchesDemandTextByTaskType(t *testing.T) {
 	taskRepo := &prdTaskRepo{
 		tasks: map[int64]*domain.Task{
