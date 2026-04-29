@@ -453,6 +453,125 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 	}
 }
 
+func TestPurchaseFilingDoesNotRegressToPendingWhenBaseSalePriceMissingAfterCreateSync(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypePurchaseTask,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		PurchaseSKU:         "NSCK000000",
+		ProductNameSnapshot: "上线前采购单SKU任务",
+		ProductIID:          "定制海报",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		CostPrice:           float64Ptr(22),
+		Quantity:            int64Ptr(22),
+		SyncERPOnCreate:     true,
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after create = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	}
+
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             task.ID,
+		OperatorID:         11,
+		ProductName:        "上线前采购单SKU任务",
+		ProductIID:         "定制海报",
+		Category:           "定制海报",
+		SpecText:           "20*20",
+		CostPrice:          float64Ptr(22),
+		ManualCostOverride: true,
+		Quantity:           int64Ptr(22),
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after business-info patch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	}
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
+	}
+}
+
+func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreateSync(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		ProductNameSnapshot: "上线前新款单SKU任务",
+		ProductIID:          "KT_STANDARD",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		DesignRequirement:   "设计要求",
+		SyncERPOnCreate:     true,
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after create = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	}
+
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:      task.ID,
+		OperatorID:  11,
+		ProductName: "上线前新款单SKU任务3",
+		ProductIID:  "KT_STANDARD",
+		Category:    "KT_STANDARD",
+		SpecText:    "20*20",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after business-info patch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	}
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
+	}
+}
+
 func TestBatchNewProductFilingPayloadUsesPerSKUReferenceImage(t *testing.T) {
 	task := &domain.Task{
 		ID:                  77,

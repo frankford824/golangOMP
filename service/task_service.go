@@ -1310,8 +1310,6 @@ func validateNewProductDevelopment(p CreateTaskParams) *domain.AppError {
 	if strings.TrimSpace(p.CostPriceMode) != "" {
 		if !domain.CostPriceMode(p.CostPriceMode).Valid() {
 			violations = append(violations, taskCreateViolation("cost_price_mode", "invalid_cost_price_mode", "cost_price_mode must be manual or template"))
-		} else if domain.CostPriceMode(p.CostPriceMode) == domain.CostPriceModeManual && p.CostPrice == nil {
-			violations = append(violations, taskCreateViolation("cost_price", "missing_cost_price", "cost_price is required when cost_price_mode=manual"))
 		}
 	}
 
@@ -1332,8 +1330,6 @@ func validatePurchaseTask(p CreateTaskParams) *domain.AppError {
 		// allowed: missing cost_price_mode can enter pending_filing.
 	} else if !domain.CostPriceMode(p.CostPriceMode).Valid() {
 		violations = append(violations, taskCreateViolation("cost_price_mode", "invalid_cost_price_mode", "cost_price_mode must be manual or template"))
-	} else if domain.CostPriceMode(p.CostPriceMode) == domain.CostPriceModeManual && p.CostPrice == nil {
-		violations = append(violations, taskCreateViolation("cost_price", "missing_cost_price", "cost_price is required when cost_price_mode=manual"))
 	}
 
 	if len(violations) > 0 {
