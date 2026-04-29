@@ -300,6 +300,7 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 func (r *taskRepo) GetSKUItemBySKUCode(ctx context.Context, skuCode string) (*domain.TaskSKUItem, error) {
 	row := r.db.db.QueryRowContext(ctx, `
 		SELECT id, task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
+		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version, last_filed_at, COALESCE(filing_error_message, ''),
 		       product_name_snapshot, product_short_name, category_code, material_mode,
 		       cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
 		       dedupe_key, created_at, updated_at
@@ -318,6 +319,7 @@ func (r *taskRepo) GetSKUItemBySKUCode(ctx context.Context, skuCode string) (*do
 func (r *taskRepo) ListSKUItemsByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskSKUItem, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT id, task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
+		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version, last_filed_at, COALESCE(filing_error_message, ''),
 		       product_name_snapshot, product_short_name, category_code, material_mode,
 		       cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
 		       dedupe_key, created_at, updated_at
@@ -341,6 +343,41 @@ func (r *taskRepo) ListSKUItemsByTaskID(ctx context.Context, taskID int64) ([]*d
 		return nil, fmt.Errorf("iterate task_sku_items: %w", err)
 	}
 	return items, nil
+}
+
+func (r *taskRepo) UpdateSKUItemsFilingProjection(ctx context.Context, tx repo.Tx, taskID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error {
+	sqlTx := Unwrap(tx)
+	skuStatus := domain.TaskSKUStatusGenerated
+	switch filingStatus {
+	case domain.FilingStatusFiled:
+		skuStatus = domain.TaskSKUStatusFiled
+	case domain.FilingStatusFilingFailed:
+		skuStatus = domain.TaskSKUStatusFilingFailed
+	}
+	_, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_sku_items
+		SET sku_status = ?,
+		    filing_status = ?,
+		    erp_sync_status = ?,
+		    erp_sync_required = ?,
+		    erp_sync_version = ?,
+		    last_filed_at = ?,
+		    filing_error_message = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE task_id = ?`,
+		string(skuStatus),
+		string(filingStatus),
+		string(filingStatus),
+		syncRequired,
+		syncVersion,
+		toNullTime(lastFiledAt),
+		errorMessage,
+		taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task_sku_items filing projection: %w", err)
+	}
+	return nil
 }
 
 func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
@@ -1071,6 +1108,9 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	var item domain.TaskSKUItem
 	var productID sql.NullInt64
 	var erpProductID sql.NullString
+	var filingStatus string
+	var erpSyncStatus string
+	var lastFiledAt sql.NullTime
 	var quantity sql.NullInt64
 	var baseSalePrice sql.NullFloat64
 	var variantJSON []byte
@@ -1083,6 +1123,12 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 		&item.SKUStatus,
 		&productID,
 		&erpProductID,
+		&filingStatus,
+		&erpSyncStatus,
+		&item.ERPSyncRequired,
+		&item.ERPSyncVersion,
+		&lastFiledAt,
+		&item.FilingErrorMessage,
 		&item.ProductNameSnapshot,
 		&item.ProductShortName,
 		&item.CategoryCode,
@@ -1104,6 +1150,15 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	}
 	item.ProductID = fromNullInt64(productID)
 	item.ERPProductID = fromNullString(erpProductID)
+	item.FilingStatus = domain.FilingStatus(filingStatus)
+	if !item.FilingStatus.Valid() {
+		item.FilingStatus = domain.FilingStatusPending
+	}
+	item.ERPSyncStatus = domain.FilingStatus(erpSyncStatus)
+	if !item.ERPSyncStatus.Valid() {
+		item.ERPSyncStatus = item.FilingStatus
+	}
+	item.LastFiledAt = fromNullTime(lastFiledAt)
 	item.Quantity = fromNullInt64(quantity)
 	item.BaseSalePrice = fromNullFloat64(baseSalePrice)
 	if len(variantJSON) > 0 {

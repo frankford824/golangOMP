@@ -28,6 +28,10 @@ type RetryTaskFilingParams struct {
 	Remark     string
 }
 
+type taskSKUItemFilingProjectionUpdater interface {
+	UpdateSKUItemsFilingProjection(ctx context.Context, tx repo.Tx, taskID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error
+}
+
 func (s *taskService) GetFilingStatus(ctx context.Context, taskID int64) (*domain.TaskFilingStatusView, *domain.AppError) {
 	task, detail, appErr := s.loadTaskAndDetailForFiling(ctx, taskID)
 	if appErr != nil {
@@ -472,6 +476,13 @@ func (s *taskService) persistTaskFilingState(
 	return s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
 			return err
+		}
+		if isBatchNewProductTask(task) {
+			if updater, ok := s.taskRepo.(taskSKUItemFilingProjectionUpdater); ok {
+				if err := updater.UpdateSKUItemsFilingProjection(ctx, tx, task.ID, detail.FilingStatus, detail.ERPSyncRequired, detail.ERPSyncVersion, detail.LastFiledAt, detail.FilingErrorMessage); err != nil {
+					return err
+				}
+			}
 		}
 		if s.taskEventRepo == nil {
 			return nil

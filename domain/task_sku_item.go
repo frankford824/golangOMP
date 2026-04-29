@@ -66,6 +66,12 @@ type TaskSKUItem struct {
 	SKUStatus           TaskSKUStatus      `db:"sku_status"            json:"sku_status"`
 	ProductID           *int64             `db:"product_id"            json:"product_id,omitempty"`
 	ERPProductID        *string            `db:"erp_product_id"        json:"erp_product_id,omitempty"`
+	FilingStatus        FilingStatus       `db:"filing_status"         json:"filing_status,omitempty"`
+	ERPSyncStatus       FilingStatus       `db:"erp_sync_status"       json:"erp_sync_status,omitempty"`
+	ERPSyncRequired     bool               `db:"erp_sync_required"     json:"erp_sync_required"`
+	ERPSyncVersion      int64              `db:"erp_sync_version"      json:"erp_sync_version"`
+	LastFiledAt         *time.Time         `db:"last_filed_at"         json:"last_filed_at,omitempty"`
+	FilingErrorMessage  string             `db:"filing_error_message"  json:"filing_error_message,omitempty"`
 	ProductNameSnapshot string             `db:"product_name_snapshot" json:"product_name_snapshot"`
 	ProductShortName    string             `db:"product_short_name"    json:"product_short_name,omitempty"`
 	ProductIID          string             `db:"-"                     json:"product_i_id,omitempty"`

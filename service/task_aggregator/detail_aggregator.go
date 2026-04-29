@@ -176,6 +176,7 @@ func (s *DetailService) hydrateBatchAndAssetFields(ctx context.Context, out *Det
 	}
 	out.SKUItems = skuItems
 	out.AssetVersions = assetVersions
+	out.Workflow = normalizeDetailTerminalWorkflow(task, out.Workflow)
 	return nil
 }
 
@@ -257,6 +258,25 @@ func buildDetailWorkflow(task *domain.Task, modules []*domain.TaskModule) (domai
 		WarehouseBlockingReasons: []domain.WorkflowReason{},
 		CannotCloseReasons:       []domain.WorkflowReason{},
 	}, string(design.Code)
+}
+
+func normalizeDetailTerminalWorkflow(task *domain.Task, workflow domain.TaskWorkflowSnapshot) domain.TaskWorkflowSnapshot {
+	if task == nil {
+		return workflow
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingClose:
+		workflow.MainStatus = domain.TaskMainStatusPendingClose
+		workflow.CanClose = true
+		workflow.Closable = true
+		workflow.CannotCloseReasons = []domain.WorkflowReason{}
+	case domain.TaskStatusCompleted:
+		workflow.MainStatus = domain.TaskMainStatusClosed
+		workflow.CanClose = false
+		workflow.Closable = false
+		workflow.CannotCloseReasons = []domain.WorkflowReason{{Code: domain.WorkflowReasonTaskAlreadyClosed, Message: "Task is already closed."}}
+	}
+	return workflow
 }
 
 func detailDesignSubStatus(task *domain.Task, modules []*domain.TaskModule) domain.TaskSubStatusItem {

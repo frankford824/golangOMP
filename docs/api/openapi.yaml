@@ -3840,6 +3840,23 @@ components:
         erp_product_id:
           type: string
           nullable: true
+        filing_status:
+          type: string
+          enum: [not_filed, pending_filing, filing, filed, filing_failed]
+          description: Per-SKU ERP filing status for batch tasks.
+        erp_sync_status:
+          type: string
+          enum: [not_filed, pending_filing, filing, filed, filing_failed]
+          description: Per-SKU ERP sync projection, currently mirrors filing_status.
+        erp_sync_required: { type: boolean }
+        erp_sync_version:
+          type: integer
+          format: int64
+        last_filed_at:
+          type: string
+          format: date-time
+          nullable: true
+        filing_error_message: { type: string }
         product_name_snapshot: { type: string }
         product_short_name: { type: string }
         product_i_id:
