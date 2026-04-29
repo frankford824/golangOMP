@@ -77,7 +77,7 @@ var npdFields = []FieldSpec{
 		},
 	},
 	{
-		Column:   "产品i_id",
+		Column:   "商品编码",
 		Key:      "product_i_id",
 		Format:   FieldFormatString,
 		HelpText: "可选；如需创建后立即同步 ERP，每行必须选择一个来自 /v1/erp/iids 的 i_id",
@@ -115,7 +115,7 @@ var ptFields = []FieldSpec{
 		},
 	},
 	{
-		Column:   "产品i_id",
+		Column:   "商品编码",
 		Key:      "product_i_id",
 		Format:   FieldFormatString,
 		HelpText: "可选；如需创建后同步 ERP，每行必须选择一个来自 /v1/erp/iids 的 i_id",

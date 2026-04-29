@@ -21,7 +21,7 @@
 ### 简介
 支持方法: GET。
 
-- `GET`: Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `产品i_id` and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For `purchase_task`, purchase-specific fields remain, and `产品i_id`/`参考图` are also supported as optional row-scoped fields.
+- `GET`: Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `商品编码` (mapped to `batch_items[].product_i_id`) and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For `purchase_task`, purchase-specific fields remain, and `商品编码`/`参考图` are also supported as optional row-scoped fields.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -75,7 +75,7 @@ curl -X GET https://api.example.com/v1/tasks/batch-create/template.xlsx \
 ### 简介
 支持方法: POST。
 
-- `POST`: Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required. If `产品i_id` is filled, the backend validates exact membership against ERP i_id options. If users pasted images into workbook rows, the backend extracts the row-anchored pictures, uploads them through the task reference upload flow, and returns row-level `reference_file_refs`; frontend should only preview/confirm and submit the returned refs unchanged.
+- `POST`: Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required. If `商品编码` is filled, the backend maps it to `batch_items[].product_i_id` and validates exact membership against ERP i_id options. If users pasted images into workbook rows, the backend extracts the row-anchored pictures, uploads them through the task reference upload flow, and returns row-level `reference_file_refs`; frontend should only preview/confirm and submit the returned refs unchanged.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

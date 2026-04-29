@@ -303,7 +303,7 @@ func (s *parseService) validateProductIIDs(ctx context.Context, items []service.
 			}
 			violations = append(violations, ParseViolation{
 				Row:     row,
-				Column:  "产品i_id",
+				Column:  "商品编码",
 				Code:    "invalid_i_id",
 				Message: "batch_items[].product_i_id must be selected from ERP product i_id options",
 			})
