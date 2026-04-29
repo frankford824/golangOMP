@@ -96,6 +96,7 @@ type taskAssetCenterService struct {
 	uploadRequestRepo         repo.UploadRequestRepo
 	assetStorageRefRepo       repo.AssetStorageRefRepo
 	taskEventRepo             repo.TaskEventRepo
+	taskModuleRepo            repo.TaskModuleRepo
 	txRunner                  repo.TxRunner
 	uploadClient              UploadServiceClient
 	ossDirectService          *OSSDirectService
@@ -149,6 +150,12 @@ func NewTaskAssetCenterService(
 func WithOSSDirectService(ossDirect *OSSDirectService) func(*taskAssetCenterService) {
 	return func(s *taskAssetCenterService) {
 		s.ossDirectService = ossDirect
+	}
+}
+
+func WithTaskAssetCenterModuleRepo(moduleRepo repo.TaskModuleRepo) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.taskModuleRepo = moduleRepo
 	}
 }
 
@@ -653,6 +660,9 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					if err := s.taskRepo.UpdateHandler(ctx, tx, params.TaskID, nil); err != nil {
 						return fmt.Errorf("clear current handler after delivery upload: %w", err)
 					}
+					if err := s.markDesignModuleSubmitted(ctx, tx, params.TaskID); err != nil {
+						return fmt.Errorf("mark design module submitted after delivery upload: %w", err)
+					}
 					_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventDesignSubmitted, &params.CompletedBy, map[string]interface{}{
 						"asset_type": string(requestAssetType), "asset_id": assetID, "designer_id": task.DesignerID,
 						"upload_session_id": request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
@@ -724,6 +734,13 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		s.scheduleDerivedPreviewGeneration(params.TaskID, assetID, params.CompletedBy, result.Version)
 	}
 	return result, nil
+}
+
+func (s *taskAssetCenterService) markDesignModuleSubmitted(ctx context.Context, tx repo.Tx, taskID int64) error {
+	if s.taskModuleRepo == nil {
+		return nil
+	}
+	return s.taskModuleRepo.UpdateState(ctx, tx, taskID, domain.ModuleKeyDesign, domain.ModuleStateSubmitted, false, nil)
 }
 
 func (s *taskAssetCenterService) resolveCompletedUploadMeta(

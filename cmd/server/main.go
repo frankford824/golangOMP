@@ -262,6 +262,7 @@ func main() {
 	exportCenterSvc := service.NewExportCenterService(exportJobRepo, exportJobDispatchRepo, exportJobAttemptRepo, exportJobEventRepo, mdb)
 	integrationCenterSvc := service.NewIntegrationCenterService(integrationCallLogRepo, integrationExecutionRepo, mdb)
 	taskAssetSvc := service.NewTaskAssetService(taskRepo, taskAssetRepo, taskEventRepo, uploadRequestRepo, assetStorageRefRepo, mdb,
+		service.WithTaskAssetModuleRepo(taskModuleRepo),
 		service.WithTaskAssetDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetScopeUserRepo(userRepo),
 		service.WithTaskAssetUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
@@ -285,6 +286,7 @@ func main() {
 	taskBatchParseSvc := taskbatchexcel.NewParseServiceWithDependencies(taskCreateReferenceUploadSvc, erpBridgeSvc)
 	taskAssetCenterSvc := service.NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, assetStorageRefRepo, taskEventRepo, mdb, uploadClient,
 		service.WithOSSDirectService(ossDirectSvc),
+		service.WithTaskAssetCenterModuleRepo(taskModuleRepo),
 		service.WithTaskAssetCenterDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetCenterScopeUserRepo(userRepo),
 		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))

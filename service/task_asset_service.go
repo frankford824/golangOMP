@@ -48,6 +48,7 @@ type taskAssetService struct {
 	taskRepo                repo.TaskRepo
 	taskAssetRepo           repo.TaskAssetRepo
 	taskEventRepo           repo.TaskEventRepo
+	taskModuleRepo          repo.TaskModuleRepo
 	uploadRequestRepo       repo.UploadRequestRepo
 	assetStorageRefRepo     repo.AssetStorageRefRepo
 	txRunner                repo.TxRunner
@@ -73,6 +74,12 @@ func WithTaskAssetScopeUserRepo(userRepo repo.UserRepo) TaskAssetServiceOption {
 func WithTaskAssetUserDisplayNameResolver(resolver UserDisplayNameResolver) TaskAssetServiceOption {
 	return func(s *taskAssetService) {
 		s.userDisplayNameResolver = resolver
+	}
+}
+
+func WithTaskAssetModuleRepo(moduleRepo repo.TaskModuleRepo) TaskAssetServiceOption {
+	return func(s *taskAssetService) {
+		s.taskModuleRepo = moduleRepo
 	}
 }
 
@@ -327,6 +334,9 @@ func (s *taskAssetService) createAsset(
 			if err := s.taskRepo.UpdateHandler(ctx, tx, taskID, nil); err != nil {
 				return err
 			}
+			if err := s.markDesignModuleSubmitted(ctx, tx, taskID); err != nil {
+				return err
+			}
 			eventType = domain.TaskEventDesignSubmitted
 			payload = taskTransitionEventPayload(task, fromStatus, domain.TaskStatusPendingAuditA, task.CurrentHandlerID, nil, payload)
 			payload["designer_id"] = cloneInt64Ptr(task.DesignerID)
@@ -356,6 +366,13 @@ func (s *taskAssetService) createAsset(
 	}
 	enrichTaskAssetUploaderNames(ctx, s.userDisplayNameResolver, []*domain.TaskAsset{asset})
 	return asset, nil
+}
+
+func (s *taskAssetService) markDesignModuleSubmitted(ctx context.Context, tx repo.Tx, taskID int64) error {
+	if s.taskModuleRepo == nil {
+		return nil
+	}
+	return s.taskModuleRepo.UpdateState(ctx, tx, taskID, domain.ModuleKeyDesign, domain.ModuleStateSubmitted, false, nil)
 }
 
 func (s *taskAssetService) resolveUploadRequest(ctx context.Context, requestID string, taskID int64, assetType domain.TaskAssetType) (*domain.UploadRequest, *domain.AppError) {
