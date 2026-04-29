@@ -572,6 +572,28 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	}
 }
 
+func TestRetouchTaskFilingProjectionDoesNotRequireERPSync(t *testing.T) {
+	task := &domain.Task{
+		ID:       612,
+		TaskType: domain.TaskTypeRetouchTask,
+	}
+	detail := &domain.TaskDetail{
+		TaskID:              612,
+		FilingStatus:        domain.FilingStatusNotFiled,
+		ERPSyncRequired:     true,
+		FilingTriggerSource: string(TaskFilingTriggerSourceCreate),
+	}
+
+	hydrateTaskDetailFilingProjection(task, detail)
+
+	if detail.FilingStatus != domain.FilingStatusNotFiled {
+		t.Fatalf("filing_status = %s, want not_filed", detail.FilingStatus)
+	}
+	if detail.ERPSyncRequired {
+		t.Fatal("retouch_task should not require ERP sync")
+	}
+}
+
 func TestBatchNewProductFilingPayloadUsesPerSKUReferenceImage(t *testing.T) {
 	task := &domain.Task{
 		ID:                  77,

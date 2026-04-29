@@ -504,6 +504,11 @@ func hydrateTaskDetailFilingProjection(task *domain.Task, detail *domain.TaskDet
 	missing, summary := ComputeFilingMissingFields(task, detail)
 	detail.MissingFields = missing
 	detail.MissingFieldsSummaryCN = summary
+	if task.TaskType == domain.TaskTypeRetouchTask {
+		detail.FilingStatus = domain.FilingStatusNotFiled
+		detail.ERPSyncRequired = false
+		return
+	}
 	if detail.FilingStatus == domain.FilingStatusFiled && strings.TrimSpace(detail.LastFilingPayloadHash) != "" {
 		detail.ERPSyncRequired = false
 		return
