@@ -149,7 +149,7 @@ func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, deta
 			detail.ReferenceFileRefsJSON = string(raw)
 		}
 	}
-	workflow, designSubStatus := buildDetailWorkflow(task, modules)
+	workflow, designSubStatus := buildDetailWorkflow(task, detail, modules)
 	out := &Detail{
 		Task:            task,
 		TaskDetail:      detail,
@@ -303,15 +303,49 @@ func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResol
 	}
 }
 
-func buildDetailWorkflow(task *domain.Task, modules []*domain.TaskModule) (domain.TaskWorkflowSnapshot, string) {
+func buildDetailWorkflow(task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule) (domain.TaskWorkflowSnapshot, string) {
 	design := detailDesignSubStatus(task, modules)
+	customization := detailOutsourceSubStatus(task)
 	return domain.TaskWorkflowSnapshot{
+		MainStatus: detailMainStatus(task, detail),
 		SubStatus: domain.TaskSubStatusSnapshot{
-			Design: design,
+			Design:        design,
+			Audit:         detailAuditSubStatus(task),
+			Procurement:   detailProcurementSubStatus(task),
+			Warehouse:     detailWarehouseSubStatus(task),
+			Customization: customization,
+			Outsource:     customization,
+			Production:    detailStatusItem(domain.TaskSubStatusReserved, "Reserved", domain.TaskSubStatusSourceReserved),
 		},
 		WarehouseBlockingReasons: []domain.WorkflowReason{},
 		CannotCloseReasons:       []domain.WorkflowReason{},
 	}, string(design.Code)
+}
+
+func detailMainStatus(task *domain.Task, detail *domain.TaskDetail) domain.TaskMainStatus {
+	if task == nil {
+		return domain.TaskMainStatusDraft
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusCompleted:
+		return domain.TaskMainStatusClosed
+	case domain.TaskStatusPendingClose:
+		return domain.TaskMainStatusPendingClose
+	case domain.TaskStatusPendingWarehouseReceive:
+		return domain.TaskMainStatusPendingWarehouseReceive
+	case domain.TaskStatusPendingCustomizationReview,
+		domain.TaskStatusPendingCustomizationProduction,
+		domain.TaskStatusPendingEffectReview,
+		domain.TaskStatusPendingEffectRevision,
+		domain.TaskStatusPendingProductionTransfer,
+		domain.TaskStatusPendingWarehouseQC,
+		domain.TaskStatusRejectedByWarehouse:
+		return domain.TaskMainStatusCreated
+	}
+	if detail != nil && (detail.FilingStatus == domain.FilingStatusFiled || detail.FiledAt != nil) {
+		return domain.TaskMainStatusFiled
+	}
+	return domain.TaskMainStatusCreated
 }
 
 func normalizeDetailTerminalWorkflow(task *domain.Task, workflow domain.TaskWorkflowSnapshot) domain.TaskWorkflowSnapshot {
@@ -335,7 +369,25 @@ func normalizeDetailTerminalWorkflow(task *domain.Task, workflow domain.TaskWork
 
 func detailDesignSubStatus(task *domain.Task, modules []*domain.TaskModule) domain.TaskSubStatusItem {
 	if task == nil || !task.TaskType.RequiresDesign() {
-		return domain.TaskSubStatusItem{Code: domain.TaskSubStatusNotRequired, Label: "Not required", Source: domain.TaskSubStatusSourceTaskType}
+		return detailStatusItem(domain.TaskSubStatusNotRequired, "Not required", domain.TaskSubStatusSourceTaskType)
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingCustomizationReview,
+		domain.TaskStatusPendingCustomizationProduction,
+		domain.TaskStatusPendingEffectReview,
+		domain.TaskStatusPendingEffectRevision,
+		domain.TaskStatusPendingProductionTransfer,
+		domain.TaskStatusPendingWarehouseQC,
+		domain.TaskStatusRejectedByWarehouse:
+		return detailStatusItem(domain.TaskSubStatusNotRequired, "Not required", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingAssign:
+		return detailStatusItem(domain.TaskSubStatusPendingDesign, "Pending design", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB, domain.TaskStatusPendingOutsourceReview:
+		return detailStatusItem(domain.TaskSubStatusPendingAudit, "Pending audit", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusBlocked:
+		return detailStatusItem(domain.TaskSubStatusReworkRequired, "Rework required", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
+		return detailStatusItem(domain.TaskSubStatusFinalReady, "Final ready", domain.TaskSubStatusSourceTaskStatus)
 	}
 	for _, m := range modules {
 		if m == nil || m.ModuleKey != domain.ModuleKeyDesign {
@@ -343,19 +395,102 @@ func detailDesignSubStatus(task *domain.Task, modules []*domain.TaskModule) doma
 		}
 		switch m.State {
 		case domain.ModuleStatePendingClaim:
-			return domain.TaskSubStatusItem{Code: domain.TaskSubStatusPendingDesign, Label: "Pending design", Source: domain.TaskSubStatusSourceTaskStatus}
+			return detailStatusItem(domain.TaskSubStatusPendingDesign, "Pending design", domain.TaskSubStatusSourceTaskStatus)
 		case domain.ModuleStateInProgress:
-			return domain.TaskSubStatusItem{Code: domain.TaskSubStatusInProgress, Label: "In progress", Source: domain.TaskSubStatusSourceTaskStatus}
+			return detailStatusItem(domain.TaskSubStatusInProgress, "In progress", domain.TaskSubStatusSourceTaskStatus)
 		case domain.ModuleStateSubmitted:
-			return domain.TaskSubStatusItem{Code: domain.TaskSubStatusPendingAudit, Label: "Pending audit", Source: domain.TaskSubStatusSourceTaskStatus}
+			return detailStatusItem(domain.TaskSubStatusPendingAudit, "Pending audit", domain.TaskSubStatusSourceTaskStatus)
 		case domain.ModuleStateClosed, domain.ModuleStateCompleted:
-			return domain.TaskSubStatusItem{Code: domain.TaskSubStatusCompleted, Label: "Completed", Source: domain.TaskSubStatusSourceTaskStatus}
+			return detailStatusItem(domain.TaskSubStatusCompleted, "Completed", domain.TaskSubStatusSourceTaskStatus)
 		}
 	}
 	if task.TaskStatus == domain.TaskStatusInProgress {
-		return domain.TaskSubStatusItem{Code: domain.TaskSubStatusInProgress, Label: "In progress", Source: domain.TaskSubStatusSourceTaskStatus}
+		return detailStatusItem(domain.TaskSubStatusInProgress, "In progress", domain.TaskSubStatusSourceTaskStatus)
 	}
-	return domain.TaskSubStatusItem{Code: domain.TaskSubStatusPendingDesign, Label: "Pending design", Source: domain.TaskSubStatusSourceTaskStatus}
+	return detailStatusItem(domain.TaskSubStatusPendingDesign, "Pending design", domain.TaskSubStatusSourceTaskStatus)
+}
+
+func detailAuditSubStatus(task *domain.Task) domain.TaskSubStatusItem {
+	if task == nil || !task.TaskType.RequiresAudit() {
+		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB, domain.TaskStatusPendingOutsourceReview:
+		return detailStatusItem(domain.TaskSubStatusInReview, "In review", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusBlocked:
+		return detailStatusItem(domain.TaskSubStatusRejected, "Rejected", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingOutsource, domain.TaskStatusOutsourcing:
+		return detailStatusItem(domain.TaskSubStatusOutsourced, "Outsourced", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
+		return detailStatusItem(domain.TaskSubStatusApproved, "Approved", domain.TaskSubStatusSourceTaskStatus)
+	default:
+		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskStatus)
+	}
+}
+
+func detailProcurementSubStatus(task *domain.Task) domain.TaskSubStatusItem {
+	if task == nil || task.TaskType != domain.TaskTypePurchaseTask {
+		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
+		return detailStatusItem(domain.TaskSubStatusCompleted, "Completed", domain.TaskSubStatusSourceTaskStatus)
+	default:
+		return detailStatusItem(domain.TaskSubStatusNotStarted, "Not started", domain.TaskSubStatusSourceTaskType)
+	}
+}
+
+func detailWarehouseSubStatus(task *domain.Task) domain.TaskSubStatusItem {
+	if task == nil {
+		return domain.TaskSubStatusItem{}
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingWarehouseReceive:
+		return detailStatusItem(domain.TaskSubStatusPendingReceive, "Pending receive", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
+		return detailStatusItem(domain.TaskSubStatusCompleted, "Completed", domain.TaskSubStatusSourceTaskStatus)
+	default:
+		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskStatus)
+	}
+}
+
+func detailOutsourceSubStatus(task *domain.Task) domain.TaskSubStatusItem {
+	if task == nil {
+		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
+	}
+	if !task.CustomizationRequired &&
+		!task.NeedOutsource &&
+		task.TaskStatus != domain.TaskStatusPendingOutsource &&
+		task.TaskStatus != domain.TaskStatusOutsourcing &&
+		task.TaskStatus != domain.TaskStatusPendingOutsourceReview {
+		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingCustomizationReview:
+		return detailStatusItem(domain.TaskSubStatusPendingReview, "Pending review", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingCustomizationProduction, domain.TaskStatusPendingEffectRevision:
+		return detailStatusItem(domain.TaskSubStatusInProgress, "In progress", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingEffectReview:
+		return detailStatusItem(domain.TaskSubStatusPendingReview, "Pending review", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingProductionTransfer:
+		return detailStatusItem(domain.TaskSubStatusReady, "Ready", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingWarehouseQC:
+		return detailStatusItem(domain.TaskSubStatusPendingReceive, "Pending warehouse QC", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusRejectedByWarehouse:
+		return detailStatusItem(domain.TaskSubStatusRejected, "Rejected", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingOutsource, domain.TaskStatusOutsourcing:
+		return detailStatusItem(domain.TaskSubStatusInProgress, "In progress", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingOutsourceReview:
+		return detailStatusItem(domain.TaskSubStatusPendingReview, "Pending review", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
+		return detailStatusItem(domain.TaskSubStatusCompleted, "Completed", domain.TaskSubStatusSourceTaskStatus)
+	default:
+		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskStatus)
+	}
+}
+
+func detailStatusItem(code domain.TaskSubStatusCode, label string, source domain.TaskSubStatusSource) domain.TaskSubStatusItem {
+	return domain.TaskSubStatusItem{Code: code, Label: label, Source: source}
 }
 
 func cloneInt64Ptr(value *int64) *int64 {
