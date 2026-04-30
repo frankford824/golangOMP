@@ -113,7 +113,12 @@ Always finish with these five sections, in order:
 ## Hard Boundaries
 
 - Do not edit `db/migrations/**` without explicit user instruction.
-- Do not edit `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`, `docs/V1_MODULE_ARCHITECTURE.md`, `docs/V1_INFORMATION_ARCHITECTURE.md`, `docs/V1_ASSET_GOVERNANCE.md`, or `docs/V1_CUSTOMIZATION_WORKFLOW.md` without explicit user instruction.
+- Do not edit the current V1 SoT set without explicit user instruction:
+  `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`,
+  `docs/V1_MODULE_ARCHITECTURE.md`,
+  `docs/V1_INFORMATION_ARCHITECTURE.md`,
+  `docs/V1_ASSET_OWNERSHIP.md`, or
+  `docs/V1_CUSTOMIZATION_WORKFLOW.md`.
 - Do not delete `docs/iterations/**`, `prompts/**`, or archived evidence.
 - Do not bulk rewrite files you have not read in this session.
 - Production deploy, remote SSH, and DB writes are operational actions; perform them only when the user requests or the active task clearly requires deployment/verification.

@@ -20,6 +20,13 @@ If this index conflicts with `transport/http.go` or
 
 ## V1 Authority Files
 
+All current `docs/V1_*.md` files are classified here so agents do not infer
+authority from filename alone.
+
+`docs/V1_BACKEND_SOURCE_OF_TRUTH.md` is this index. It owns the authority map,
+the reading rule, and the classification of V1 documents. It does not own
+business behavior or field substance.
+
 `docs/V1_MODULE_ARCHITECTURE.md` owns the V1 task/module architecture:
 Task as container, Module as work unit, workflow blueprints, module states,
 task type to module composition, pool/team routing, permission layers,
@@ -45,6 +52,11 @@ state machine, customization pool/team mapping, creation metadata, ERP product
 code lookup, design source lookup, audit rejection return path, and legacy
 customization migration mapping. Use it when deciding any customization-only
 workflow rule.
+
+`docs/V1_TO_V2_MODEL_HANDOFF_MANIFEST.md` is handoff evidence for future V2
+planning. It is not current V1 contract authority; if it disagrees with this
+index, `transport/http.go`, `docs/api/openapi.yaml`, or the four V1 substance
+authority files above, ignore the manifest and update it only as evidence.
 
 ## Contract Files
 
