@@ -180,8 +180,8 @@ func main() {
 	flag.StringVar(&handlers, "handlers", "transport/handler", "handler directory")
 	flag.StringVar(&domain, "domain", "domain", "domain directory")
 	flag.StringVar(&openapi, "openapi", "docs/api/openapi.yaml", "OpenAPI yaml path")
-	flag.StringVar(&output, "output", "docs/iterations/V1_2_CONTRACT_AUDIT_v2.json", "JSON output path")
-	flag.StringVar(&markdown, "markdown", "docs/iterations/V1_2_CONTRACT_AUDIT_v2.md", "Markdown output path")
+	flag.StringVar(&output, "output", "", "JSON output path")
+	flag.StringVar(&markdown, "markdown", "", "Markdown output path")
 	flag.BoolVar(&failOnDrift, "fail-on-drift", false, "exit non-zero when drift exists")
 	flag.Parse()
 

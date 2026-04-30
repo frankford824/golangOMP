@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -87,6 +88,24 @@ func TestFailOnDriftExitCode(t *testing.T) {
 	}
 }
 
+func TestDefaultRunDoesNotMutateDocsIterations(t *testing.T) {
+	docsIterations := filepath.Join("..", "..", "docs", "iterations")
+	before := snapshotDir(t, docsIterations)
+	cmd := exec.Command("go", "run", ".",
+		"--transport", "../../transport/http.go",
+		"--handlers", "../../transport/handler",
+		"--domain", "../../domain",
+		"--openapi", "../../docs/api/openapi.yaml",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("contract_audit default run failed: %v\n%s", err, out)
+	}
+	after := snapshotDir(t, docsIterations)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("default run mutated docs/iterations: before=%v after=%v", before, after)
+	}
+}
+
 func TestStructJSONFieldsDetectsOnlyInCode(t *testing.T) {
 	dir := t.TempDir()
 	goFile := filepath.Join(dir, "domain.go")
@@ -123,4 +142,30 @@ func firstVerdict(report Report) string {
 		}
 	}
 	return ""
+}
+
+func snapshotDir(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		out[rel] = info.ModTime().UTC().String() + "/" + info.Mode().String()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
