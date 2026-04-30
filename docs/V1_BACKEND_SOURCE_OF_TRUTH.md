@@ -69,5 +69,5 @@ authority files above, ignore the manifest and update it only as evidence.
 
 For current V1 behavior, start from this index and then read the specific
 authority file above for the affected module. Do not derive current contracts
-from `docs/V0_9_BACKEND_SOURCE_OF_TRUTH.md`, `docs/archive/**`,
-`docs/iterations/**`, or `prompts/**`.
+from `docs/archive/legacy_specs/V0_9_BACKEND_SOURCE_OF_TRUTH.md`,
+`docs/archive/**`, `docs/iterations/**`, or `prompts/**`.

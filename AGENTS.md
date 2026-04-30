@@ -5,7 +5,7 @@
 > 2. `docs/api/openapi.yaml`
 > 3. `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`
 >
-> Historical background only: `docs/V0_9_BACKEND_SOURCE_OF_TRUTH.md`.
+> Historical background only: `docs/archive/legacy_specs/V0_9_BACKEND_SOURCE_OF_TRUTH.md`.
 > Do not treat `CURRENT_STATE.md`, `MODEL_HANDOVER.md`, `docs/archive/*`,
 > `docs/iterations/*`, legacy specs, model-memory files, or prompts as current spec.
 
@@ -26,7 +26,7 @@ This file is an assistant guidance note. It is not the backend specification.
 2. `docs/api/openapi.yaml`
 3. `transport/http.go`
 4. `git log --oneline -20` for recent V1.21 task/asset/ERP/frontend-doc deltas
-5. `docs/V0_9_BACKEND_SOURCE_OF_TRUTH.md` for historical background only
+5. `docs/archive/legacy_specs/V0_9_BACKEND_SOURCE_OF_TRUTH.md` for historical background only
 
 ## Non-Authoritative Materials
 
