@@ -31,8 +31,13 @@ func (r *moduleNotificationRepo) GetTaskModuleByID(ctx context.Context, tx repo.
 }
 
 func (r *moduleNotificationRepo) ListActiveUserIDsByTeam(ctx context.Context, tx repo.Tx, teamCode string, excludeUserID *int64) ([]int64, error) {
-	query := `SELECT id FROM users WHERE team = ? AND status = 'active'`
+	query := `SELECT id FROM users WHERE status = 'active' AND (team = ?`
 	args := []interface{}{teamCode}
+	for _, target := range domain.PoolTeamTargets(teamCode) {
+		query += ` OR (department = ? AND team = ?)`
+		args = append(args, target.Department, target.Team)
+	}
+	query += `)`
 	if excludeUserID != nil {
 		query += ` AND id <> ?`
 		args = append(args, *excludeUserID)

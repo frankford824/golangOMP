@@ -11,10 +11,15 @@ import (
 )
 
 type RuleEngine struct {
-	registry *Registry
-	tasks    repo.TaskRepo
-	modules  repo.TaskModuleRepo
-	events   repo.TaskModuleEventRepo
+	registry        *Registry
+	tasks           repo.TaskRepo
+	modules         repo.TaskModuleRepo
+	events          repo.TaskModuleEventRepo
+	notificationGen notificationGenerator
+}
+
+type notificationGenerator interface {
+	GenerateForEvent(ctx context.Context, tx repo.Tx, evt domain.TaskModuleEvent) error
 }
 
 func NewRuleEngine(registry *Registry, modules repo.TaskModuleRepo, events repo.TaskModuleEventRepo, taskRepos ...repo.TaskRepo) *RuleEngine {
@@ -26,6 +31,12 @@ func NewRuleEngine(registry *Registry, modules repo.TaskModuleRepo, events repo.
 		tasks = taskRepos[0]
 	}
 	return &RuleEngine{registry: registry, tasks: tasks, modules: modules, events: events}
+}
+
+func (e *RuleEngine) SetNotificationGenerator(gen notificationGenerator) {
+	if e != nil {
+		e.notificationGen = gen
+	}
 }
 
 func (e *RuleEngine) InitTask(ctx context.Context, tx repo.Tx, task *domain.Task) error {
@@ -128,14 +139,22 @@ func (e *RuleEngine) enterModule(ctx context.Context, tx repo.Tx, task *domain.T
 		return err
 	}
 	to := state
-	_, err = e.events.Insert(ctx, tx, &domain.TaskModuleEvent{
+	event := domain.TaskModuleEvent{
 		TaskModuleID: m.ID,
 		EventType:    domain.ModuleEventEntered,
 		ToState:      &to,
 		ActorID:      actorID,
 		Payload:      payload(map[string]interface{}{"trigger_event_id": triggerEventID, "entered_at": time.Now().UTC(), "pool_team_code": poolValue(pool)}),
-	})
-	return err
+	}
+	eventID, err := e.events.Insert(ctx, tx, &event)
+	if err != nil {
+		return err
+	}
+	event.ID = eventID
+	if e.notificationGen != nil {
+		_ = e.notificationGen.GenerateForEvent(ctx, tx, event)
+	}
+	return nil
 }
 
 func (e *RuleEngine) closeModule(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string, actorID *int64, triggerEventID int64) error {

@@ -116,9 +116,13 @@ func (g *Generator) candidates(ctx context.Context, tx repo.Tx, evt domain.TaskM
 			return nil, err
 		}
 		out := make([]Candidate, 0, len(users))
+		ntype := domain.NotificationTypePoolReassigned
+		if evt.EventType == domain.ModuleEventEntered && evt.ModuleKey == domain.ModuleKeyAudit {
+			ntype = domain.NotificationTypeTaskPendingAudit
+		}
 		for _, userID := range users {
-			out = append(out, Candidate{UserID: userID, Type: domain.NotificationTypePoolReassigned, Payload: mustRaw(map[string]interface{}{
-				"task_id": evt.TaskID, "module_key": evt.ModuleKey,
+			out = append(out, Candidate{UserID: userID, Type: ntype, Payload: mustRaw(map[string]interface{}{
+				"task_id": evt.TaskID, "module_key": evt.ModuleKey, "pool_team_code": team,
 			})})
 		}
 		return out, nil

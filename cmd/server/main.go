@@ -313,6 +313,7 @@ func main() {
 	wsHub := wsservice.NewHub(logger.Named("websocket"))
 	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"))
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
+	blueprintRules.SetNotificationGenerator(notificationGen)
 	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,
 		service.WithTaskAssignmentDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssignmentScopeUserRepo(userRepo),

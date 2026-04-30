@@ -6489,8 +6489,8 @@ components:
                 nullable: true
     NotificationType:
       type: string
-      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). V1 freezes 5 values: `task_assigned_to_me`, `task_rejected`, `claim_conflict`, `pool_reassigned`, and `task_cancelled`."
-      enum: [task_assigned_to_me, task_rejected, claim_conflict, pool_reassigned, task_cancelled]
+      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). Current values: `task_assigned_to_me`, `task_rejected`, `task_pending_audit`, `claim_conflict`, `pool_reassigned`, and `task_cancelled`."
+      enum: [task_assigned_to_me, task_rejected, task_pending_audit, claim_conflict, pool_reassigned, task_cancelled]
     Notification:
       type: object
       description: |
@@ -6508,6 +6508,8 @@ components:
           `batch_request_id`.
         - `task_rejected`: `task_id`, `reject_reason`; optional `task_no`, `module_key`,
           `rejected_by`, `rejected_by_name`.
+        - `task_pending_audit`: `task_id`, `module_key`, `pool_team_code`; optional
+          `task_no`, `task_type`, `submitted_by`, `submitted_by_name`.
         - `claim_conflict`: `task_id`, `module_key`; optional `task_no`, `winner_user_id`,
           `winner_user_name`.
         - `pool_reassigned`: `task_id`, `module_key`; optional `task_no`, `team_code`,

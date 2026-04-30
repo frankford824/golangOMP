@@ -79,10 +79,11 @@ FAMILY_NOTES = {
         "草稿 payload 由后端持久化，前端不要假设旧草稿一定符合最新创建表单。",
     ],
     "NOTIFICATIONS": [
-        "V1 冻结 5 类通知类型：task_assigned_to_me、task_rejected、claim_conflict、pool_reassigned、task_cancelled。",
-        "`payload` 按 `notification_type` 分型。前端应穷举 5 类 type；未知 type 使用兜底文案。",
+        "当前通知类型：task_assigned_to_me、task_rejected、task_pending_audit、claim_conflict、pool_reassigned、task_cancelled。",
+        "`payload` 按 `notification_type` 分型。前端应穷举已知 type；未知 type 使用兜底文案。",
         "`task_assigned_to_me` payload：必有 `task_id`；可能有 `task_no`、`task_type`、`module_key`、`action`、`assigned_by`、`assigned_by_name`、`designer_id`、`previous_designer_id`、`previous_handler_id`、`reason`、`remark`、`batch_request_id`。",
         "`task_rejected` payload：必有 `task_id`、`reject_reason`；可能有 `task_no`、`module_key`、`rejected_by`、`rejected_by_name`。",
+        "`task_pending_audit` payload：必有 `task_id`、`module_key`、`pool_team_code`；可能有 `task_no`、`task_type`、`submitted_by`、`submitted_by_name`。",
         "`claim_conflict` payload：必有 `task_id`、`module_key`；可能有 `task_no`、`winner_user_id`、`winner_user_name`。",
         "`pool_reassigned` payload：必有 `task_id`、`module_key`；可能有 `task_no`、`team_code`、`team_name`、`reassigned_by`、`reassigned_by_name`。",
         "`task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。",
