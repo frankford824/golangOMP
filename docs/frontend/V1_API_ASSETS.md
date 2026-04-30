@@ -563,7 +563,7 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions/<session_id>/canc
 ### 简介
 支持方法: GET。
 
-- `GET`: Compatibility-only proxy byte-serving route for OSS-backed business files. Canonical browser download should use the URL returned by `/v1/assets/{id}/download` or `/v1/assets/{id}/preview`. Path is the storage_key (e.g. tasks/task-create-reference/assets/.../filename.png).
+- `GET`: Compatibility-only proxy byte-serving route for OSS-backed business files. Canonical browser download should use the URL returned by `/v1/assets/{asset_id}/download` or `/v1/assets/{asset_id}/preview`. Path is the storage_key (e.g. tasks/task-create-reference/assets/.../filename.png).
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

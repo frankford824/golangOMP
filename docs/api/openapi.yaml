@@ -11525,7 +11525,7 @@ paths:
     get:
       summary: Proxy OSS-backed business file
       description: |
-        Compatibility-only proxy byte-serving route for OSS-backed business files. Canonical browser download should use the URL returned by `/v1/assets/{id}/download` or `/v1/assets/{id}/preview`.
+        Compatibility-only proxy byte-serving route for OSS-backed business files. Canonical browser download should use the URL returned by `/v1/assets/{asset_id}/download` or `/v1/assets/{asset_id}/preview`.
         Path is the storage_key (e.g. tasks/task-create-reference/assets/.../filename.png).
       tags: [ReadyForFrontend]
       parameters:
