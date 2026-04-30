@@ -110,6 +110,12 @@ Always finish with these five sections, in order:
 4. **Test result** — pass/fail counts; note any skipped.
 5. **Risks / follow-ups** — anything not closed in this turn, including new governance debt.
 
+The Changed files section MUST be derived from
+`git status --short --untracked-files=all` and `git diff --stat HEAD`
+measured at end-of-turn. If the measured set is larger than what you
+intentionally changed, list the extras explicitly and label them
+`inherited dirty from session-start (not introduced this turn)`.
+
 ## Commit Style
 
 - One logical change per commit.

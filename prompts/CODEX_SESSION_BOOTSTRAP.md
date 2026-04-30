@@ -57,6 +57,12 @@ End the turn with the five sections from `AGENTS.md` §Response format:
 4. Test result (pass/fail counts; note skipped)
 5. Risks / follow-ups
 
+The Changed files section MUST be derived from
+`git status --short --untracked-files=all` and `git diff --stat HEAD`
+measured at end-of-turn. If the measured set is larger than what you
+intentionally changed, list the extras explicitly and label them
+`inherited dirty from session-start (not introduced this turn)`.
+
 Commit messages follow `AGENTS.md` §Commit Style. One logical change per
 commit. Use `git commit -F tmp/<msg>.txt` for multi-line messages on
 Windows PowerShell.
