@@ -34,9 +34,9 @@ func (s *PoolQueryService) List(ctx context.Context, actor domain.RequestActor, 
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	teams := actorTeams(actor)
+	teams := actorPoolCodes(actor)
 	if poolTeamCode != "" {
-		if !contains(teams, poolTeamCode) {
+		if !actorMatchesPool(actor, poolTeamCode) {
 			return []PoolEntry{}, 0, nil
 		}
 		teams = []string{poolTeamCode}
@@ -128,6 +128,56 @@ func actorTeams(actor domain.RequestActor) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+func actorPoolCodes(actor domain.RequestActor) []string {
+	teams := actorTeams(actor)
+	seen := map[string]struct{}{}
+	for _, team := range teams {
+		seen[team] = struct{}{}
+	}
+	for _, pool := range []string{
+		domain.TeamDesignStandard,
+		domain.TeamDesignRetouch,
+		domain.TeamAuditStandard,
+		domain.TeamAuditCustomization,
+		domain.TeamCustomizationArt,
+		domain.TeamWarehouseMain,
+		domain.TeamProcurementMain,
+	} {
+		if actorMatchesPool(actor, pool) {
+			seen[pool] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for v := range seen {
+		out = append(out, v)
+	}
+	return out
+}
+
+func actorMatchesPool(actor domain.RequestActor, pool string) bool {
+	if contains(actorTeams(actor), pool) {
+		return true
+	}
+	for _, target := range domain.PoolTeamTargets(pool) {
+		if actorDepartmentMatches(actor, target.Department) && contains(actorTeams(actor), target.Team) {
+			return true
+		}
+	}
+	return false
+}
+
+func actorDepartmentMatches(actor domain.RequestActor, department string) bool {
+	if department == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(actor.Department), department) {
+		return true
+	}
+	return contains(actor.ManagedDepartments, department) ||
+		contains(actor.FrontendAccess.ManagedDepartments, department) ||
+		contains(actor.FrontendAccess.DepartmentCodes, department)
 }
 
 func contains(values []string, target string) bool {

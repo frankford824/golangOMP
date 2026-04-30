@@ -60,7 +60,19 @@ func teamInActor(team string, actor domain.RequestActor) bool {
 	if strings.EqualFold(team, strings.TrimSpace(actor.Team)) {
 		return true
 	}
-	return stringIn(team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes)
+	if stringIn(team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes) {
+		return true
+	}
+	for _, target := range domain.PoolTeamTargets(team) {
+		if !actorDepartmentMatches(actor, target.Department) {
+			continue
+		}
+		if strings.EqualFold(target.Team, strings.TrimSpace(actor.Team)) ||
+			stringIn(target.Team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes) {
+			return true
+		}
+	}
+	return false
 }
 
 func teamManagedByActor(team string, actor domain.RequestActor) bool {
@@ -71,7 +83,21 @@ func teamManagedByActor(team string, actor domain.RequestActor) bool {
 	if strings.EqualFold(team, strings.TrimSpace(actor.Team)) {
 		return true
 	}
-	return stringIn(team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes)
+	if stringIn(team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes) {
+		return true
+	}
+	for _, target := range domain.PoolTeamTargets(team) {
+		if actorDepartmentMatches(actor, target.Department) &&
+			stringIn(target.Team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes) {
+			return true
+		}
+	}
+	return false
+}
+
+func actorDepartmentMatches(actor domain.RequestActor, department string) bool {
+	return strings.EqualFold(strings.TrimSpace(actor.Department), department) ||
+		stringIn(department, actor.ManagedDepartments, actor.FrontendAccess.ManagedDepartments, actor.FrontendAccess.DepartmentCodes)
 }
 
 func hasRole(actor domain.RequestActor, role domain.Role) bool {

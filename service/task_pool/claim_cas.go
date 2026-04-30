@@ -192,6 +192,16 @@ func matchedTeam(actor domain.RequestActor, pool string) string {
 			return team
 		}
 	}
+	for _, target := range domain.PoolTeamTargets(pool) {
+		if !actorDepartmentMatches(actor, target.Department) {
+			continue
+		}
+		for _, team := range actorTeams(actor) {
+			if strings.EqualFold(team, target.Team) {
+				return team
+			}
+		}
+	}
 	return ""
 }
 
