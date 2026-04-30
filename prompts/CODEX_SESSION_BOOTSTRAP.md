@@ -72,7 +72,7 @@ Windows PowerShell.
 - No edits to `db/migrations/**`.
 - No edits to `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`,
   `docs/V1_MODULE_ARCHITECTURE.md`, `docs/V1_INFORMATION_ARCHITECTURE.md`,
-  `docs/V1_ASSET_GOVERNANCE.md`, `docs/V1_CUSTOMIZATION_WORKFLOW.md`.
+  `docs/V1_ASSET_OWNERSHIP.md`, `docs/V1_CUSTOMIZATION_WORKFLOW.md`.
 - No `git tag`, no `git push`, no force, no deploy, no remote SSH, no DB
   writes outside fixtures — unless I explicitly request them.
 - No self-declared PASS when `agent-check` is red. Write an ABORT note
@@ -85,44 +85,40 @@ Windows PowerShell.
 > facts below drift more than ±5 commits or the audit summary changes.
 
 - Last release tag: `v1.21-prod` (commit `207f9a1`).
-- Current HEAD at handover: `b1e4551`
-  (`docs(governance): add V1.4 governance prompt - drift purge + sprawl cleanup roadmap`).
-- 59 commits exist between `v1.21-prod..HEAD` covering V1.0 / V1.1 /
+- Current HEAD at handover: `99d1bcd`
+  (`docs(governance): V1.4 governance phase 1 retro`).
+- 90 commits exist between `v1.21-prod..HEAD` covering V1.0 / V1.1 /
   V1.2 / V1.3 / V1.4-governance. The 32-commit V1.3 batch landed task
   main flow, search, notifications, assets, ERP, batch, retouch,
-  category, and frontend-doc work. The most recent 6 commits are
-  V1.4 governance (CLAUDE/AGENTS unification, root-md archival,
-  route-split refactor, contract drift closure, V1.4 governance
-  prompt).
+  category, and frontend-doc work. V1.4 governance phase 1 closed
+  known_gap reason annotations, SoT index cleanup, hard-boundary list
+  alignment, V0.9 SoT archival, ambiguous doc consolidation, measured
+  changed-file reporting, audit default output side effects, and the
+  phase retro report.
 - Working tree is clean.
-- Full audit gate is **green**: `drift=0 unmapped=0 known_gap=65 clean=169 total=234`.
+- Full audit gate is **green**: `drift=0 unmapped=0 known_gap=65 clean=169 total=234`;
+  all 65 known gaps have non-empty reasons.
   No baseline drift to inherit. Any new drift introduced in this session
   is yours to close before commit.
 
 ## Known unresolved (do not silently inherit; surface in your plan)
 
-1. **`known_gap=65` are all `<no-reason>`.** The audit's grey-zone
-   mechanism is unaudited — some of those 65 may be silenced drift.
-   The standing prompt to fix this is `prompts/V1_4_GOVERNANCE.md §A1`.
-   If your task is unrelated, leave them alone; if your task is
-   governance, start with §A1.
-
-2. **`AGENTS.md` §Reading Order #4** still says `git log --oneline -20`.
-   For long unreleased windows like the current 59-commit window,
+1. **`AGENTS.md` §Reading Order #4** still says `git log --oneline -20`.
+   For long unreleased windows like the current 90-commit window,
    `git log --oneline v1.21-prod..HEAD` is more accurate. Either is
    acceptable; if you change it, change it in one small
    `docs(governance)` commit and do not bundle with business work.
 
-3. **No new `_test.go` files were added across the 32 V1.3 commits.**
+2. **No new `_test.go` files were added across the 32 V1.3 commits.**
    This is V1.3-T5 governance debt (test coverage gap on V1.3 fixes).
    When you change behavior in `tasks/search/notifications/assets/erp/batch`
    in this session, prefer adding regression tests in the same commit.
    Tracked in `prompts/V1_4_GOVERNANCE.md §C`.
 
-4. **Four oversized service/repo files awaiting refactor split**:
-   `service/identity_service.go` (110 KB), `service/task_service.go`
-   (103 KB), `service/export_center_service.go` (82 KB),
-   `repo/mysql/task.go` (68 KB). Tracked in
+3. **Four oversized service/repo files awaiting refactor split**:
+   `service/identity_service.go` (109935 bytes), `service/task_service.go`
+   (103265 bytes), `service/export_center_service.go` (82942 bytes),
+   `repo/mysql/task.go` (68388 bytes). Tracked in
    `prompts/V1_4_GOVERNANCE.md §B`. Do not split them as a side effect
    of any other task.
 
