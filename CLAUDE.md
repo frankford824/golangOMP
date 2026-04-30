@@ -1,44 +1,45 @@
 # CLAUDE.md
 
-> AUTHORITY ONLY
-> 1. `transport/http.go`
-> 2. `docs/api/openapi.yaml`
-> 3. `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`
->
-> Historical background only: `docs/V0_9_BACKEND_SOURCE_OF_TRUTH.md`.
-> Do not treat `CURRENT_STATE.md`, `MODEL_HANDOVER.md`, `docs/archive/*`,
-> `docs/iterations/*`, legacy specs, model-memory files, or prompts as current spec.
+> **Single source of truth**: this repository's canonical agent contract is `AGENTS.md`.
+> Read `AGENTS.md` in full at the start of every Claude Code session.
+> If anything in this file disagrees with `AGENTS.md`, `AGENTS.md` wins.
 
-This file is an assistant guidance note. It is not the backend specification.
+## Why this stub exists
 
-## Current Repo Baseline
+Anthropic's Claude Code reads `CLAUDE.md` automatically. To avoid two drifting agent contracts, all repository rules live in `AGENTS.md`. This file only adds Claude-Code-specific behavior on top.
 
-- V1 current authority is centralized in `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`.
-- Route existence is decided by `transport/http.go`.
-- Request/response field contracts are decided by `docs/api/openapi.yaml`.
-- New frontend or new integrations must start from the V1 SoT route families and the generated frontend docs under `docs/frontend/`.
-- Compatibility and deprecated surfaces remain documented only for migration safety.
+## At session start (Claude Code)
 
-## Reading Order
+1. Read `AGENTS.md` end to end.
+2. Run `git status` and the two `git log` commands from `AGENTS.md` §Session Start.
+3. Read the three authority files in `AGENTS.md` §Reading Order for the route family being touched.
+4. Do not assume any previous chat context is preserved.
 
-1. `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`
-2. `docs/api/openapi.yaml`
-3. `transport/http.go`
-4. `docs/iterations/V1_2_RETRO_REPORT.md`
-5. `docs/V0_9_BACKEND_SOURCE_OF_TRUTH.md` for historical background only
+## Validation gate (Claude Code)
 
-## Non-Authoritative Materials
+Prefer the consolidated script over running commands by hand:
 
-- `CURRENT_STATE.md` and `MODEL_HANDOVER.md` are historical entry files.
-- `docs/archive/*` and `docs/iterations/*` are archive or evidence only unless restated in the V1 SoT.
-- `docs/archive/legacy_specs/*` and `docs/archive/model_memory/*` are never current API specs.
-- `prompts/*` are execution history, not current contract authority.
+```bash
+./scripts/agent-check.sh        # Linux / macOS / WSL
+```
 
-## Working Rule
+```powershell
+.\scripts\agent-check.ps1       # Windows PowerShell
+```
 
-When documents disagree:
+If the script fails, do not work around it — read its output, fix the cause, rerun.
+For narrow service-only changes, the narrow gate in `AGENTS.md` §After Editing still applies.
 
-1. `transport/http.go` decides what is mounted.
-2. `docs/api/openapi.yaml` decides the current request/response contract.
-3. `docs/V1_BACKEND_SOURCE_OF_TRUTH.md` decides route family, governance state, and milestone pointers.
-4. All other documents are evidence or history.
+## Response format at end of any non-trivial task
+
+Always finish with these five sections, in order:
+
+1. **Summary** — what changed and why.
+2. **Changed files** — full paths.
+3. **Commands run** — exact commands and their exit status.
+4. **Test result** — pass/fail counts; note any skipped.
+5. **Risks / follow-ups** — anything not closed in this turn, including new governance debt.
+
+## When something is genuinely unknown
+
+Write `Unknown` or `To be confirmed` in any document you produce. Do not invent rules, paths, or behaviors that the repository does not already prove.
