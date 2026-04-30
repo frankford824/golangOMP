@@ -308,105 +308,116 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 
 func ParseTransportRoutes(transportPath string) ([]Route, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, transportPath, nil, 0)
+	files, err := parseTransportPackageFiles(fset, transportPath)
 	if err != nil {
 		return nil, err
 	}
 	groups := map[string]string{"r": "", "v1": "/v1", "ws": "/ws"}
-	handlerTypes := transportHandlerTypes(f)
+	handlerTypes := map[string]string{}
+	for _, f := range files {
+		for name, typ := range transportHandlerTypes(f.file) {
+			handlerTypes[name] = typ
+		}
+	}
 	var routes []Route
 
-	ast.Inspect(f, func(n ast.Node) bool {
-		as, ok := n.(*ast.AssignStmt)
-		if !ok {
-			return true
-		}
-		for i, rhs := range as.Rhs {
-			call, ok := rhs.(*ast.CallExpr)
-			if !ok || len(call.Args) == 0 {
-				continue
-			}
-			recv, name, ok := selectorName(call.Fun)
-			if !ok || name != "Group" {
-				continue
-			}
-			rel, ok := stringLiteral(call.Args[0])
+	for _, tf := range files {
+		ast.Inspect(tf.file, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
 			if !ok {
-				continue
+				return true
 			}
-			if i < len(as.Lhs) {
-				if id, ok := as.Lhs[i].(*ast.Ident); ok {
-					groups[id.Name] = joinPath(groups[recv], rel)
+			for i, rhs := range as.Rhs {
+				call, ok := rhs.(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					continue
 				}
-			}
-		}
-		return true
-	})
-
-	ast.Inspect(f, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) == 0 {
-			return true
-		}
-		recv, method, ok := selectorName(call.Fun)
-		if !ok || !isHTTPMethod(method) {
-			return true
-		}
-		base, ok := groups[recv]
-		if !ok {
-			return true
-		}
-		rel, ok := stringLiteral(call.Args[0])
-		if !ok {
-			return true
-		}
-		handlerExpr, handlerType := lastHandlerSelector(call.Args, handlerTypes)
-		pos := fset.Position(call.Pos())
-		routes = append(routes, Route{Method: method, Path: joinPath(base, rel), HandlerExpr: handlerExpr, HandlerType: handlerType, Mount: fmt.Sprintf("%s:%d", transportPath, pos.Line)})
-		return true
-	})
-
-	// Dynamic reserved routes are real mounts, but their response is intentionally unmapped.
-	ast.Inspect(f, func(n ast.Node) bool {
-		cl, ok := n.(*ast.CompositeLit)
-		if !ok {
-			return true
-		}
-		for _, elt := range cl.Elts {
-			item, ok := elt.(*ast.CompositeLit)
-			if !ok {
-				continue
-			}
-			var groupBase, method, rel string
-			var overlaps bool
-			for _, e := range item.Elts {
-				kv, ok := e.(*ast.KeyValueExpr)
+				recv, name, ok := selectorName(call.Fun)
+				if !ok || name != "Group" {
+					continue
+				}
+				rel, ok := stringLiteral(call.Args[0])
 				if !ok {
 					continue
 				}
-				key, ok := kv.Key.(*ast.Ident)
-				if !ok {
-					continue
-				}
-				switch key.Name {
-				case "GroupBase":
-					groupBase, _ = stringLiteral(kv.Value)
-				case "Method":
-					method, _ = httpMethodExpr(kv.Value)
-				case "RelativePath":
-					rel, _ = stringLiteral(kv.Value)
-				case "OverlapsLiveRoute":
-					if id, ok := kv.Value.(*ast.Ident); ok && id.Name == "true" {
-						overlaps = true
+				if i < len(as.Lhs) {
+					if id, ok := as.Lhs[i].(*ast.Ident); ok {
+						groups[id.Name] = joinPath(groups[recv], rel)
 					}
 				}
 			}
-			if groupBase != "" && method != "" && rel != "" && !overlaps {
-				routes = append(routes, Route{Method: method, Path: joinPath(groupBase, rel), HandlerExpr: "v1R1ReservedHandler", HandlerType: "", Mount: transportPath})
+			return true
+		})
+	}
+
+	for _, tf := range files {
+		ast.Inspect(tf.file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
 			}
-		}
-		return true
-	})
+			recv, method, ok := selectorName(call.Fun)
+			if !ok || !isHTTPMethod(method) {
+				return true
+			}
+			base, ok := groups[recv]
+			if !ok {
+				return true
+			}
+			rel, ok := stringLiteral(call.Args[0])
+			if !ok {
+				return true
+			}
+			handlerExpr, handlerType := lastHandlerSelector(call.Args, handlerTypes)
+			pos := fset.Position(call.Pos())
+			routes = append(routes, Route{Method: method, Path: joinPath(base, rel), HandlerExpr: handlerExpr, HandlerType: handlerType, Mount: fmt.Sprintf("%s:%d", tf.path, pos.Line)})
+			return true
+		})
+	}
+
+	// Dynamic reserved routes are real mounts, but their response is intentionally unmapped.
+	for _, tf := range files {
+		ast.Inspect(tf.file, func(n ast.Node) bool {
+			cl, ok := n.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			for _, elt := range cl.Elts {
+				item, ok := elt.(*ast.CompositeLit)
+				if !ok {
+					continue
+				}
+				var groupBase, method, rel string
+				var overlaps bool
+				for _, e := range item.Elts {
+					kv, ok := e.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					key, ok := kv.Key.(*ast.Ident)
+					if !ok {
+						continue
+					}
+					switch key.Name {
+					case "GroupBase":
+						groupBase, _ = stringLiteral(kv.Value)
+					case "Method":
+						method, _ = httpMethodExpr(kv.Value)
+					case "RelativePath":
+						rel, _ = stringLiteral(kv.Value)
+					case "OverlapsLiveRoute":
+						if id, ok := kv.Value.(*ast.Ident); ok && id.Name == "true" {
+							overlaps = true
+						}
+					}
+				}
+				if groupBase != "" && method != "" && rel != "" && !overlaps {
+					routes = append(routes, Route{Method: method, Path: joinPath(groupBase, rel), HandlerExpr: "v1R1ReservedHandler", HandlerType: "", Mount: tf.path})
+				}
+			}
+			return true
+		})
+	}
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Path == routes[j].Path {
 			return routes[i].Method < routes[j].Method
@@ -414,6 +425,37 @@ func ParseTransportRoutes(transportPath string) ([]Route, error) {
 		return routes[i].Path < routes[j].Path
 	})
 	return routes, nil
+}
+
+type transportASTFile struct {
+	path string
+	file *ast.File
+}
+
+func parseTransportPackageFiles(fset *token.FileSet, transportPath string) ([]transportASTFile, error) {
+	dir := filepath.Dir(transportPath)
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+
+	files := make([]transportASTFile, 0, len(paths))
+	for _, path := range paths {
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, transportASTFile{path: path, file: f})
+	}
+	return files, nil
 }
 
 func BuildHandlerIndex(dir string) (HandlerIndex, error) {
