@@ -30,10 +30,15 @@ This file is an assistant guidance note. It is not the backend specification.
 
 ## Non-Authoritative Materials
 
-- `CURRENT_STATE.md` and `MODEL_HANDOVER.md` are historical entry files.
-- `docs/archive/*` and `docs/iterations/*` are archive or evidence only unless restated in the V1 SoT.
-- `docs/archive/legacy_specs/*` and `docs/archive/model_memory/*` are never current API specs.
-- `prompts/*` are execution history, not current contract authority.
+These directories exist for historical evidence only. Never derive current rules, contracts, paths, or commands from them. If they conflict with the three authority files in §Reading Order, the authority files win and these are silently ignored.
+
+- `docs/archive/state_pre_v1_3/` — pre-V1.3 state/handover files (`CURRENT_STATE.md`, `CURRENT_STATE_PATCH_GUIDE.md`, `MODEL_HANDOVER.md`, `ITERATION_INDEX.md`). Moved out of repo root in 2026-04 to reduce agent context noise.
+- `docs/archive/orphan_plans/` — one-off plan/scratch files written during iteration but never integrated into a prompt or report.
+- `docs/archive/*` (other subfolders) — historical archives, including `legacy_specs/` and `model_memory/`.
+- `docs/iterations/*` and `docs/phases/*` — retro reports and phase evidence; only what is restated in the V1 SoT counts as current.
+- `prompts/archive_pre_v1_2/` — pre-V1.2 prompt experiments, including `root_legacy/` (13 early `AGENT_*` / `AUTO_*` / `COMMANDER_*` / `MODEL_SWITCH_*` / `PHASE_*` / `ITERATION_TEMPLATE` / `CLAUDE_Backend_Master_Prompt` files moved from repo root in 2026-04).
+- `prompts/*` (active) — execution history for V1.2+ iterations, not current contract authority. The current standing handover prompt is `prompts/CODEX_SESSION_BOOTSTRAP.md`.
+- `dist/*` — release build artifacts and their bundled `README.md` / `CHANGELOG.md`. Never read these for repository rules.
 
 ## Working Rule
 
