@@ -51,6 +51,7 @@ type PathReport struct {
 	OnlyInOpenAPI []string `json:"only_in_openapi"`
 	TypeMismatch  []string `json:"type_mismatch,omitempty"`
 	Verdict       string   `json:"verdict"`
+	Reason        string   `json:"reason,omitempty"`
 }
 
 type GapReport struct {
@@ -102,6 +103,74 @@ type ResponseShape struct {
 	Fields      []string
 	Direct      bool
 	KnownGap    string
+}
+
+var knownGapReasons = map[string]string{
+	knownGapKey("DELETE", "/v1/task-drafts/:draft_id"):                                  "legitimate-reserved-placeholder-route",
+	knownGapKey("DELETE", "/v1/users/:id/roles/:role"):                                  "tool-deref-limit-inline-route",
+	knownGapKey("GET", "/v1/assets/files/*path"):                                        "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/assets/search"):                                             "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/assets/:asset_id"):                                          "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/assets/:asset_id/download"):                                 "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/assets/:asset_id/versions/:version_id/download"):            "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/audit-logs"):                                                "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/design-sources/search"):                                     "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/erp/iids"):                                                  "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/erp/products"):                                              "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/erp/products/by-code"):                                      "legitimate-reserved-placeholder-route",
+	knownGapKey("GET", "/v1/erp/products/*id"):                                          "tool-deref-limit-inline-route",
+	knownGapKey("GET", "/v1/erp/sync-logs"):                                             "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/me/notifications"):                                          "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/me/notifications/unread-count"):                             "legitimate-reserved-placeholder-route",
+	knownGapKey("GET", "/v1/me/org"):                                                    "legitimate-reserved-placeholder-route",
+	knownGapKey("GET", "/v1/me/task-drafts"):                                            "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/reports/l1/cards"):                                          "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/reports/l1/module-dwell"):                                   "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/reports/l1/throughput"):                                     "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/search"):                                                    "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/task-drafts/:draft_id"):                                     "legitimate-reserved-placeholder-route",
+	knownGapKey("GET", "/v1/tasks/batch-create/template.xlsx"):                          "legitimate-binary-stream-response",
+	knownGapKey("GET", "/v1/tasks/pool"):                                                "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/ws/v1"):                                                        "legitimate-reserved-placeholder-route",
+	knownGapKey("PATCH", "/v1/me"):                                                      "legitimate-reserved-placeholder-route",
+	knownGapKey("PATCH", "/v1/users/:id"):                                               "tool-deref-limit-inline-route",
+	knownGapKey("POST", "/v1/assets/upload-sessions"):                                   "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/assets/:asset_id/archive"):                                 "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/assets/:asset_id/restore"):                                 "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/code-rules/generate-sku"):                                  "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/departments/:id/org-move-requests"):                        "legitimate-reserved-placeholder-route",
+	knownGapKey("POST", "/v1/me/notifications/:id/read"):                                "legitimate-reserved-placeholder-route",
+	knownGapKey("POST", "/v1/org/departments"):                                          "tool-deref-limit-inline-route",
+	knownGapKey("POST", "/v1/org/teams"):                                                "tool-deref-limit-inline-route",
+	knownGapKey("POST", "/v1/server-logs/clean"):                                        "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/task-drafts"):                                              "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/prepare-product-codes"):                              "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/asset-center/upload-sessions"):                   "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/asset-center/upload-sessions/multipart"):         "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/asset-center/upload-sessions/small"):             "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/asset-center/upload-sessions/:session_id/abort"): "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/assets/upload"):                                  "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/assets/upload-sessions"):                         "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/assets/upload-sessions/:session_id/abort"):       "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/audit/approve"):                                  "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/audit/claim"):                                    "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/audit/reject"):                                   "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/audit/takeover"):                                 "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/audit/transfer"):                                 "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/cancel"):                                         "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/modules/:module_key/actions/:action"):            "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/modules/:module_key/claim"):                      "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/tasks/:id/modules/:module_key/pool-reassign"):              "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/modules/:module_key/reassign"):                   "tool-deref-limit-delegated-handler",
+	knownGapKey("POST", "/v1/tasks/:id/submit-design"):                                  "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/users"):                                                    "tool-deref-limit-inline-route",
+	knownGapKey("POST", "/v1/users/:id/activate"):                                       "legitimate-reserved-placeholder-route",
+	knownGapKey("POST", "/v1/users/:id/roles"):                                          "tool-deref-limit-inline-route",
+	knownGapKey("PUT", "/v1/auth/password"):                                             "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("PUT", "/v1/org/departments/:id"):                                       "tool-deref-limit-inline-route",
+	knownGapKey("PUT", "/v1/org/teams/:id"):                                             "tool-deref-limit-inline-route",
+	knownGapKey("PUT", "/v1/users/:id/password"):                                        "tool-deref-limit-inline-route",
+	knownGapKey("PUT", "/v1/users/:id/roles"):                                           "tool-deref-limit-inline-route",
 }
 
 func main() {
@@ -268,24 +337,16 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 
 		switch {
 		case !hasRoute:
-			pr.Verdict = "mounted_not_found"
-			report.Summary.KnownGap++
 			report.Summary.MissingInCode++
-			report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: openapiPathKey, Class: "documented_not_mounted"})
+			recordKnownGap(&report, &pr, method, openapiPathKey, "", "documented_not_mounted", "")
 		case !hasOp:
-			pr.Verdict = "documented_not_found"
-			report.Summary.KnownGap++
 			report.Summary.MissingInOpenAPI++
-			report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Class: "mounted_not_documented"})
+			recordKnownGap(&report, &pr, method, route.Path, displayHandler(route), "mounted_not_documented", "")
 		case hVerdict != "":
 			if hVerdict == "known_gap" {
-				pr.Verdict = "known_gap"
-				report.Summary.KnownGap++
-				report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Class: reason})
+				recordKnownGap(&report, &pr, method, route.Path, displayHandler(route), reason, "")
 			} else if hVerdict == "unmapped_handler" && strings.Contains(reason, "response expression type not inferred") && len(pr.OpenAPIFields) > 0 {
-				pr.Verdict = "known_gap"
-				report.Summary.KnownGap++
-				report.KnownGap = append(report.KnownGap, GapReport{Method: method, Path: route.Path, Handler: displayHandler(route), Class: "dynamic_payload_documented", Reason: reason})
+				recordKnownGap(&report, &pr, method, route.Path, displayHandler(route), "dynamic_payload_documented", reason)
 			} else {
 				pr.Verdict = hVerdict
 				report.Summary.Unmapped++
@@ -304,6 +365,46 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 	}
 	report.Summary.TotalPaths = len(report.Paths)
 	return report, nil
+}
+
+func recordKnownGap(report *Report, pr *PathReport, method, path, handler, class, detail string) {
+	reason, ok := knownGapReasons[knownGapKey(method, path)]
+	if !ok {
+		pr.Verdict = "unclassified_known_gap"
+		pr.Reason = "unclassified-known-gap-" + sanitizeReason(class)
+		report.Summary.Drift++
+		return
+	}
+	pr.Verdict = "known_gap"
+	pr.Reason = reason
+	report.Summary.KnownGap++
+	report.KnownGap = append(report.KnownGap, GapReport{
+		Method:  method,
+		Path:    path,
+		Handler: handler,
+		Class:   class,
+		Reason:  appendDetail(reason, detail),
+	})
+}
+
+func knownGapKey(method, path string) string {
+	return strings.ToUpper(method) + " " + path
+}
+
+func sanitizeReason(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "unknown"
+	}
+	return strings.NewReplacer(" ", "-", "_", "-").Replace(s)
+}
+
+func appendDetail(reason, detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return reason
+	}
+	return reason + " (" + detail + ")"
 }
 
 func ParseTransportRoutes(transportPath string) ([]Route, error) {
