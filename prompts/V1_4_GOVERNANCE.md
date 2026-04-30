@@ -98,9 +98,11 @@ breadcrumb is not necessary since AGENTS.md will point to the new path.
 
 Commit: `chore(governance): archive V0_9 SoT to docs/archive/legacy_specs/`
 
-### A5 — Resolve four ambiguous root/`docs/` files
+### A5 — Resolve three ambiguous root/`docs/` files
 
-Files: `API_DOC_SYNC_RULES.md` (root, 22 lines),
+Files (3 total — earlier draft of this prompt mistakenly said "four";
+the count is 3):
+`API_DOC_SYNC_RULES.md` (root, 22 lines),
 `docs/RELEASE_NOTES.md` (2 lines, empty shell),
 `docs/ENGINEERING_RULES.md` (43 lines).
 

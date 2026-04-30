@@ -75,47 +75,50 @@ Windows PowerShell.
 
 ## Repository baseline at handover
 
+> Refresh this section in one `docs(governance)` commit whenever the
+> facts below drift more than ±5 commits or the audit summary changes.
+
 - Last release tag: `v1.21-prod` (commit `207f9a1`).
-- Current HEAD at handover: `1a97e6f`
-  (`chore(agent-context): unify CLAUDE.md as AGENTS.md stub + add agent-check full-gate script`).
-- 53 commits exist between `v1.21-prod..HEAD` covering V1.0 / V1.1 /
-  V1.2 / V1.3. The most recent 32 are V1.3 work (tasks main flow, search,
-  notifications, assets, ERP, batch, retouch, category, frontend docs,
-  governance).
+- Current HEAD at handover: `b1e4551`
+  (`docs(governance): add V1.4 governance prompt - drift purge + sprawl cleanup roadmap`).
+- 59 commits exist between `v1.21-prod..HEAD` covering V1.0 / V1.1 /
+  V1.2 / V1.3 / V1.4-governance. The 32-commit V1.3 batch landed task
+  main flow, search, notifications, assets, ERP, batch, retouch,
+  category, and frontend-doc work. The most recent 6 commits are
+  V1.4 governance (CLAUDE/AGENTS unification, root-md archival,
+  route-split refactor, contract drift closure, V1.4 governance
+  prompt).
 - Working tree is clean.
-- The full gate currently fails at step 5 (contract_audit) because of one
-  known unresolved drift — see "Known unresolved" below. Treat this as
-  the baseline; you are not required to fix it unless the task explicitly
-  asks for it.
+- Full audit gate is **green**: `drift=0 unmapped=0 known_gap=65 clean=169 total=234`.
+  No baseline drift to inherit. Any new drift introduced in this session
+  is yours to close before commit.
 
 ## Known unresolved (do not silently inherit; surface in your plan)
 
-1. **`GET /v1/tasks/pool` both_diff**.
-   - `only_in_code`: `completed_at, id, receipt_no, received_at, receiver_id, reject_reason, remark, source_department, status, warehouse_ready_version, workflow_lane` (11 fields).
-   - `only_in_openapi`: `module_key, pool_team_code, priority, product_code, task_no, title` (6 fields).
-   - Introduced by `6872fa1 fix(tasks): stabilize pool response envelope`
-     during V1.3; OpenAPI was not synced. Any full-gate run will fail at
-     step 5 until this is closed via a C1/C2/C3/C4 decision matrix
-     (additive on OpenAPI vs removal vs known_gap vs Go-side regression).
-   - Until closed, full gate's `tmp/agent_check_audit.json` will report
-     `summary.drift == 1`.
+1. **`known_gap=65` are all `<no-reason>`.** The audit's grey-zone
+   mechanism is unaudited — some of those 65 may be silenced drift.
+   The standing prompt to fix this is `prompts/V1_4_GOVERNANCE.md §A1`.
+   If your task is unrelated, leave them alone; if your task is
+   governance, start with §A1.
 
-2. **`prompts/V1_3_0_LOCAL_FREEZE.md`** — superseded by this bootstrap and
-   by `AGENTS.md`. Treat it as deprecated. Do not execute it. If you
-   touch the `prompts/` tree, prepend a "DEPRECATED — superseded by
-   AGENTS.md + CODEX_SESSION_BOOTSTRAP.md" line at its top, but otherwise
-   do not act on its contents.
-
-3. **`AGENTS.md` §Reading Order #4** still says `git log --oneline -20`.
-   For long unreleased windows like the current 53-commit V1.3 period,
+2. **`AGENTS.md` §Reading Order #4** still says `git log --oneline -20`.
+   For long unreleased windows like the current 59-commit window,
    `git log --oneline v1.21-prod..HEAD` is more accurate. Either is
-   acceptable; if you change it, change it in one small `docs(governance)`
-   commit and do not bundle with business work.
+   acceptable; if you change it, change it in one small
+   `docs(governance)` commit and do not bundle with business work.
 
-4. **No new `_test.go` files were added across the 32 V1.3 commits.**
+3. **No new `_test.go` files were added across the 32 V1.3 commits.**
    This is V1.3-T5 governance debt (test coverage gap on V1.3 fixes).
    When you change behavior in `tasks/search/notifications/assets/erp/batch`
    in this session, prefer adding regression tests in the same commit.
+   Tracked in `prompts/V1_4_GOVERNANCE.md §C`.
+
+4. **Four oversized service/repo files awaiting refactor split**:
+   `service/identity_service.go` (110 KB), `service/task_service.go`
+   (103 KB), `service/export_center_service.go` (82 KB),
+   `repo/mysql/task.go` (68 KB). Tracked in
+   `prompts/V1_4_GOVERNANCE.md §B`. Do not split them as a side effect
+   of any other task.
 
 ## Task this turn
 
@@ -123,9 +126,9 @@ Windows PowerShell.
 >
 > Example:
 >
-> > Close the `/v1/tasks/pool` both_diff. Build the C1/C2/C3/C4 decision
-> > matrix for all 17 fields, propose changes to `docs/api/openapi.yaml`
-> > only (no Go edits), regenerate frontend docs, run the full gate, and
-> > commit with prefix `fix(openapi):`.
+> > Execute `prompts/V1_4_GOVERNANCE.md §A` (governance phase 1).
+> > Run A1 → A8 in order, each subsection its own commit, full
+> > agent-check gate green after every commit. Stop on ABORT-A1 if
+> > K3 count > 10.
 
 Begin with Step 1.
