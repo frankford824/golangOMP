@@ -24,8 +24,8 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 	sqlTx := Unwrap(tx)
 	res, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO task_assets
-		  (task_id, asset_id, scope_sku_code, asset_type, version_no, asset_version_no, upload_mode, upload_request_id, storage_ref_id, file_name, original_filename, remote_file_id, mime_type, file_size, file_path, storage_key, whole_hash, upload_status, preview_status, uploaded_by, uploaded_at, remark)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  (task_id, asset_id, scope_sku_code, asset_type, version_no, asset_version_no, upload_mode, upload_request_id, storage_ref_id, file_name, original_filename, remote_file_id, mime_type, file_size, file_path, storage_key, whole_hash, upload_status, preview_status, uploaded_by, uploaded_at, remark, source_module_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		asset.TaskID,
 		toNullInt64(asset.AssetID),
 		toNullString(asset.ScopeSKUCode),
@@ -48,6 +48,7 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 		asset.UploadedBy,
 		toNullTime(asset.UploadedAt),
 		asset.Remark,
+		taskAssetSourceModuleKey(asset),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert task_asset: %w", err)
@@ -60,6 +61,13 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 		return 0, err
 	}
 	return id, nil
+}
+
+func taskAssetSourceModuleKey(asset *domain.TaskAsset) string {
+	if asset == nil || asset.SourceModuleKey == "" {
+		return domain.ModuleKeyDesign
+	}
+	return asset.SourceModuleKey
 }
 
 func (r *taskAssetRepo) GetByID(ctx context.Context, id int64) (*domain.TaskAsset, error) {

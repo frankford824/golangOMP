@@ -9588,7 +9588,7 @@ paths:
         - frontend should not send `source_mode`; backend infers it from `task_type`.
         - `new_product_development` infers `source_mode=new_product` and auto-generates `sku_code` when omitted.
         - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately.
-        - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, and ends after the retouch/design worker submits the retouched image.
+        - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, does not enter audit, and is completed immediately after the retouch/design worker submits the retouched image.
         - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime.
         - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationReview` immediately and does not pass through the normal design workbench first.
         - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors.
@@ -10465,9 +10465,11 @@ paths:
           2) Batch submit (`assets[]`) which completes multiple upload sessions in a single action and persists canonical
              `design_assets`/`asset_versions` with SKU scope.
           Re-entry is allowed from `RejectedByAuditA` and `RejectedByAuditB`. Delivery upload-session completion advances
-          task status to `PendingAuditA` when current status is one of `PendingAssign`, `Assigned`, `InProgress`,
+          normal design task status to `PendingAuditA` when current status is one of `PendingAssign`, `Assigned`, `InProgress`,
           `RejectedByAuditA`, or `RejectedByAuditB`, and for multi-SKU batch tasks the gate waits until required SKU-scoped
           delivery assets are complete.
+          For `retouch_task`, delivery submission completes the task directly (`task_status=Completed`), clears `current_handler_id`,
+          marks the `retouch` module completed, and never triggers audit.
           `purchase_task` cannot submit design. This action uses minimum role plus org or handler gating.
       tags: [TaskAssets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend

@@ -103,6 +103,52 @@ func TestTaskAssignmentServiceAssignSyncsDesignModule(t *testing.T) {
 	}
 }
 
+func TestTaskAssignmentServiceAssignSyncsRetouchModule(t *testing.T) {
+	ctx := context.Background()
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         1014,
+		TaskNo:     "T-1014",
+		TaskStatus: domain.TaskStatusPendingAssign,
+		TaskType:   domain.TaskTypeRetouchTask,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{
+		ID:           57,
+		TaskID:       1014,
+		ModuleKey:    domain.ModuleKeyRetouch,
+		State:        domain.ModuleStatePendingClaim,
+		PoolTeamCode: strPtr(domain.TeamDesignRetouch),
+	})
+	moduleEventRepo := &step04TaskModuleEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{},
+		WithTaskAssignmentModuleSync(moduleRepo, moduleEventRepo))
+
+	task, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1014,
+		DesignerID: authzInt64Ptr(204),
+		AssignedBy: 1,
+	})
+	if appErr != nil {
+		t.Fatalf("Assign(retouch) unexpected error: %+v", appErr)
+	}
+	if task.TaskStatus != domain.TaskStatusInProgress {
+		t.Fatalf("Assign(retouch) task status = %s, want InProgress", task.TaskStatus)
+	}
+	if _, ok := moduleRepo.modules[domain.ModuleKeyDesign]; ok {
+		t.Fatalf("Assign(retouch) should not touch design module")
+	}
+	module := moduleRepo.modules[domain.ModuleKeyRetouch]
+	if module.State != domain.ModuleStateInProgress {
+		t.Fatalf("retouch module state = %s, want in_progress", module.State)
+	}
+	if module.ClaimedBy == nil || *module.ClaimedBy != 204 {
+		t.Fatalf("retouch module claimed_by = %+v, want 204", module.ClaimedBy)
+	}
+	if len(moduleEventRepo.events) != 1 || moduleEventRepo.events[0].EventType != domain.ModuleEventClaimed {
+		t.Fatalf("module events = %+v, want claimed", moduleEventRepo.events)
+	}
+}
+
 func TestTaskAssignmentServiceSelfClaimPendingAssign(t *testing.T) {
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:    101,
@@ -606,6 +652,70 @@ func TestTaskAssetServiceSubmitDesignFromInProgress(t *testing.T) {
 	}
 	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventDesignSubmitted {
 		t.Fatalf("SubmitDesign() expected one task.design.submitted event, got %+v", eventRepo.events)
+	}
+}
+
+func TestTaskAssetServiceSubmitDesignCompletesRetouchTask(t *testing.T) {
+	ctx := context.Background()
+	designerID := int64(104)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:               24,
+		TaskType:         domain.TaskTypeRetouchTask,
+		DesignerID:       &designerID,
+		CurrentHandlerID: &designerID,
+		TaskStatus:       domain.TaskStatusInProgress,
+	})
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{
+		TaskID:    24,
+		ModuleKey: domain.ModuleKeyRetouch,
+		State:     domain.ModuleStateInProgress,
+	})
+	assetRepo := newStep04TaskAssetRepo()
+	eventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssetService(
+		taskRepo,
+		assetRepo,
+		eventRepo,
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		step04TxRunner{},
+		WithTaskAssetModuleRepo(moduleRepo),
+	)
+
+	asset, appErr := svc.SubmitDesign(ctx, SubmitDesignParams{
+		TaskID:     24,
+		UploadedBy: designerID,
+		AssetType:  domain.TaskAssetTypeDelivery,
+		FileName:   "retouch-final.jpg",
+		FilePath:   strPtr("mock/path/retouch-final.jpg"),
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitDesign(retouch) unexpected error: %+v", appErr)
+	}
+	if asset.VersionNo != 1 {
+		t.Fatalf("SubmitDesign(retouch) version_no = %d, want 1", asset.VersionNo)
+	}
+	if taskRepo.tasks[24].TaskStatus != domain.TaskStatusCompleted {
+		t.Fatalf("SubmitDesign(retouch) task status = %s, want Completed", taskRepo.tasks[24].TaskStatus)
+	}
+	if taskRepo.tasks[24].CurrentHandlerID != nil {
+		t.Fatalf("SubmitDesign(retouch) current_handler_id = %+v, want nil", taskRepo.tasks[24].CurrentHandlerID)
+	}
+	if moduleRepo.modules[domain.ModuleKeyRetouch].State != domain.ModuleStateCompleted {
+		t.Fatalf("SubmitDesign(retouch) module state = %s, want completed", moduleRepo.modules[domain.ModuleKeyRetouch].State)
+	}
+	if _, ok := moduleRepo.modules[domain.ModuleKeyAudit]; ok {
+		t.Fatalf("SubmitDesign(retouch) should not create or update audit module")
+	}
+	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventDesignSubmitted {
+		t.Fatalf("SubmitDesign(retouch) expected one task.design.submitted event, got %+v", eventRepo.events)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(eventRepo.events[0].Payload, &payload); err != nil {
+		t.Fatalf("SubmitDesign(retouch) event payload json: %v", err)
+	}
+	if payload["to_task_status"] != string(domain.TaskStatusCompleted) {
+		t.Fatalf("SubmitDesign(retouch) to_task_status = %v, want Completed", payload["to_task_status"])
 	}
 }
 

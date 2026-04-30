@@ -326,7 +326,8 @@ func (s *taskAssignmentService) syncDesignModuleAssignment(ctx context.Context, 
 	if s.taskModuleRepo == nil || p.DesignerID == nil || *p.DesignerID <= 0 || task == nil || !task.TaskType.RequiresDesign() {
 		return nil
 	}
-	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, domain.ModuleKeyDesign)
+	moduleKey := assignmentDesignModuleKey(task)
+	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, moduleKey)
 	if err != nil {
 		return fmt.Errorf("load design module for task assignment sync: %w", err)
 	}
@@ -334,7 +335,7 @@ func (s *taskAssignmentService) syncDesignModuleAssignment(ctx context.Context, 
 		return nil
 	}
 	claimedTeam := s.resolveAssignedDesignerTeam(ctx, *p.DesignerID, module)
-	if err := s.taskModuleRepo.Reassign(ctx, tx, p.TaskID, domain.ModuleKeyDesign, *p.DesignerID, claimedTeam, assignmentActorSnapshot(p.AssignedBy)); err != nil {
+	if err := s.taskModuleRepo.Reassign(ctx, tx, p.TaskID, moduleKey, *p.DesignerID, claimedTeam, assignmentActorSnapshot(p.AssignedBy)); err != nil {
 		return err
 	}
 	if s.taskModuleEventRepo != nil {
@@ -366,7 +367,8 @@ func (s *taskAssignmentService) syncDesignModuleUnassignment(ctx context.Context
 	if s.taskModuleRepo == nil || task == nil || !task.TaskType.RequiresDesign() {
 		return nil
 	}
-	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, domain.ModuleKeyDesign)
+	moduleKey := assignmentDesignModuleKey(task)
+	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, moduleKey)
 	if err != nil {
 		return fmt.Errorf("load design module for task unassignment sync: %w", err)
 	}
@@ -375,9 +377,9 @@ func (s *taskAssignmentService) syncDesignModuleUnassignment(ctx context.Context
 	}
 	poolTeam := strings.TrimSpace(valueFromStringPtr(module.PoolTeamCode))
 	if poolTeam == "" {
-		poolTeam = domain.TeamDesignStandard
+		poolTeam = assignmentDefaultPoolTeam(task)
 	}
-	if err := s.taskModuleRepo.PoolReassign(ctx, tx, p.TaskID, domain.ModuleKeyDesign, poolTeam); err != nil {
+	if err := s.taskModuleRepo.PoolReassign(ctx, tx, p.TaskID, moduleKey, poolTeam); err != nil {
 		return err
 	}
 	if s.taskModuleEventRepo != nil {
@@ -403,6 +405,20 @@ func (s *taskAssignmentService) syncDesignModuleUnassignment(ctx context.Context
 		}
 	}
 	return nil
+}
+
+func assignmentDesignModuleKey(task *domain.Task) string {
+	if task != nil && task.TaskType == domain.TaskTypeRetouchTask {
+		return domain.ModuleKeyRetouch
+	}
+	return domain.ModuleKeyDesign
+}
+
+func assignmentDefaultPoolTeam(task *domain.Task) string {
+	if task != nil && task.TaskType == domain.TaskTypeRetouchTask {
+		return domain.TeamDesignRetouch
+	}
+	return domain.TeamDesignStandard
 }
 
 func (s *taskAssignmentService) resolveAssignedDesignerTeam(ctx context.Context, designerID int64, module *domain.TaskModule) string {

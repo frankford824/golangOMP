@@ -603,6 +603,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			UploadedBy:      params.CompletedBy,
 			UploadedAt:      &now,
 			Remark:          firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
+			SourceModuleKey: designAssetSourceModuleKeyForTask(task, requestAssetType),
 		}
 		id, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
 		if err != nil {
@@ -655,13 +656,14 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					return fmt.Errorf("check design submit gate: %w", gateErr)
 				}
 				if advance {
-					if err := s.taskRepo.UpdateStatus(ctx, tx, params.TaskID, domain.TaskStatusPendingAuditA); err != nil {
+					transition := designSubmissionTransitionForTask(task)
+					if err := s.taskRepo.UpdateStatus(ctx, tx, params.TaskID, transition.TaskStatus); err != nil {
 						return fmt.Errorf("advance task status after delivery upload: %w", err)
 					}
 					if err := s.taskRepo.UpdateHandler(ctx, tx, params.TaskID, nil); err != nil {
 						return fmt.Errorf("clear current handler after delivery upload: %w", err)
 					}
-					if err := s.markDesignModuleSubmitted(ctx, tx, params.TaskID); err != nil {
+					if err := s.markDesignSubmissionModuleState(ctx, tx, params.TaskID, transition); err != nil {
 						return fmt.Errorf("mark design module submitted after delivery upload: %w", err)
 					}
 					shouldAppendDesignSubmitted = true
@@ -741,10 +743,14 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 }
 
 func (s *taskAssetCenterService) markDesignModuleSubmitted(ctx context.Context, tx repo.Tx, taskID int64) error {
+	return s.markDesignSubmissionModuleState(ctx, tx, taskID, designSubmissionTransitionForTask(nil))
+}
+
+func (s *taskAssetCenterService) markDesignSubmissionModuleState(ctx context.Context, tx repo.Tx, taskID int64, transition designSubmissionTransition) error {
 	if s.taskModuleRepo == nil {
 		return nil
 	}
-	return s.taskModuleRepo.UpdateState(ctx, tx, taskID, domain.ModuleKeyDesign, domain.ModuleStateSubmitted, false, nil)
+	return s.taskModuleRepo.UpdateState(ctx, tx, taskID, transition.ModuleKey, transition.ModuleState, transition.ModuleTerminal, nil)
 }
 
 func (s *taskAssetCenterService) resolveCompletedUploadMeta(

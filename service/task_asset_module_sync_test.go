@@ -12,8 +12,10 @@ import (
 func TestTaskAssetServicesMarkDesignModuleSubmitted(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name string
-		run  func(*taskModuleStateRecorder) error
+		name          string
+		run           func(*taskModuleStateRecorder) error
+		wantModuleKey string
+		wantState     domain.ModuleState
 	}{
 		{
 			name: "asset center upload completion",
@@ -21,6 +23,8 @@ func TestTaskAssetServicesMarkDesignModuleSubmitted(t *testing.T) {
 				svc := &taskAssetCenterService{taskModuleRepo: modules}
 				return svc.markDesignModuleSubmitted(ctx, nil, 629)
 			},
+			wantModuleKey: domain.ModuleKeyDesign,
+			wantState:     domain.ModuleStateSubmitted,
 		},
 		{
 			name: "legacy submit design",
@@ -28,6 +32,17 @@ func TestTaskAssetServicesMarkDesignModuleSubmitted(t *testing.T) {
 				svc := &taskAssetService{taskModuleRepo: modules}
 				return svc.markDesignModuleSubmitted(ctx, nil, 629)
 			},
+			wantModuleKey: domain.ModuleKeyDesign,
+			wantState:     domain.ModuleStateSubmitted,
+		},
+		{
+			name: "asset center retouch completion",
+			run: func(modules *taskModuleStateRecorder) error {
+				svc := &taskAssetCenterService{taskModuleRepo: modules}
+				return svc.markDesignSubmissionModuleState(ctx, nil, 629, designSubmissionTransitionForTask(&domain.Task{TaskType: domain.TaskTypeRetouchTask}))
+			},
+			wantModuleKey: domain.ModuleKeyRetouch,
+			wantState:     domain.ModuleStateCompleted,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,7 +50,7 @@ func TestTaskAssetServicesMarkDesignModuleSubmitted(t *testing.T) {
 			if err := tc.run(modules); err != nil {
 				t.Fatalf("markDesignModuleSubmitted() error = %v", err)
 			}
-			if modules.taskID != 629 || modules.moduleKey != domain.ModuleKeyDesign || modules.state != domain.ModuleStateSubmitted {
+			if modules.taskID != 629 || modules.moduleKey != tc.wantModuleKey || modules.state != tc.wantState {
 				t.Fatalf("module update = task:%d key:%s state:%s", modules.taskID, modules.moduleKey, modules.state)
 			}
 		})

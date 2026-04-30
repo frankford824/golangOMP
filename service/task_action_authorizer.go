@@ -456,6 +456,9 @@ func resolveTaskAction(action TaskAction, task *domain.Task, attrs TaskActionAtt
 	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
 	switch action {
 	case TaskActionAuditClaim, TaskActionAuditApprove, TaskActionAuditReject, TaskActionAuditTransfer, TaskActionAuditHandover, TaskActionAuditTakeover:
+		if task.TaskType != "" && !task.TaskType.RequiresAudit() {
+			return action, "task_type_audit_not_supported", "task type does not support audit actions"
+		}
 		if !ok {
 			return action, "", ""
 		}

@@ -278,6 +278,7 @@ func (s *taskAssetService) createAsset(
 			UploadedBy:      uploadedBy,
 			UploadedAt:      &uploadedAt,
 			Remark:          remark,
+			SourceModuleKey: designAssetSourceModuleKeyForTask(task, assetType),
 		}
 		id, err := s.taskAssetRepo.Create(ctx, tx, asset)
 		if err != nil {
@@ -328,17 +329,18 @@ func (s *taskAssetService) createAsset(
 		}
 
 		if advanceStatus {
-			if err := s.taskRepo.UpdateStatus(ctx, tx, taskID, domain.TaskStatusPendingAuditA); err != nil {
+			transition := designSubmissionTransitionForTask(task)
+			if err := s.taskRepo.UpdateStatus(ctx, tx, taskID, transition.TaskStatus); err != nil {
 				return err
 			}
 			if err := s.taskRepo.UpdateHandler(ctx, tx, taskID, nil); err != nil {
 				return err
 			}
-			if err := s.markDesignModuleSubmitted(ctx, tx, taskID); err != nil {
+			if err := s.markDesignSubmissionModuleState(ctx, tx, taskID, transition); err != nil {
 				return err
 			}
 			eventType = domain.TaskEventDesignSubmitted
-			payload = taskTransitionEventPayload(task, fromStatus, domain.TaskStatusPendingAuditA, task.CurrentHandlerID, nil, payload)
+			payload = taskTransitionEventPayload(task, fromStatus, transition.TaskStatus, task.CurrentHandlerID, nil, payload)
 			payload["designer_id"] = cloneInt64Ptr(task.DesignerID)
 			payload["uploaded_by"] = uploadedBy
 		}
@@ -368,11 +370,15 @@ func (s *taskAssetService) createAsset(
 	return asset, nil
 }
 
-func (s *taskAssetService) markDesignModuleSubmitted(ctx context.Context, tx repo.Tx, taskID int64) error {
+func (s *taskAssetService) markDesignSubmissionModuleState(ctx context.Context, tx repo.Tx, taskID int64, transition designSubmissionTransition) error {
 	if s.taskModuleRepo == nil {
 		return nil
 	}
-	return s.taskModuleRepo.UpdateState(ctx, tx, taskID, domain.ModuleKeyDesign, domain.ModuleStateSubmitted, false, nil)
+	return s.taskModuleRepo.UpdateState(ctx, tx, taskID, transition.ModuleKey, transition.ModuleState, transition.ModuleTerminal, nil)
+}
+
+func (s *taskAssetService) markDesignModuleSubmitted(ctx context.Context, tx repo.Tx, taskID int64) error {
+	return s.markDesignSubmissionModuleState(ctx, tx, taskID, designSubmissionTransitionForTask(nil))
 }
 
 func (s *taskAssetService) resolveUploadRequest(ctx context.Context, requestID string, taskID int64, assetType domain.TaskAssetType) (*domain.UploadRequest, *domain.AppError) {

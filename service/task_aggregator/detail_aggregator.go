@@ -390,7 +390,7 @@ func detailDesignSubStatus(task *domain.Task, modules []*domain.TaskModule) doma
 		return detailStatusItem(domain.TaskSubStatusFinalReady, "Final ready", domain.TaskSubStatusSourceTaskStatus)
 	}
 	for _, m := range modules {
-		if m == nil || m.ModuleKey != domain.ModuleKeyDesign {
+		if m == nil || m.ModuleKey != detailDesignModuleKey(task) {
 			continue
 		}
 		switch m.State {
@@ -408,6 +408,13 @@ func detailDesignSubStatus(task *domain.Task, modules []*domain.TaskModule) doma
 		return detailStatusItem(domain.TaskSubStatusInProgress, "In progress", domain.TaskSubStatusSourceTaskStatus)
 	}
 	return detailStatusItem(domain.TaskSubStatusPendingDesign, "Pending design", domain.TaskSubStatusSourceTaskStatus)
+}
+
+func detailDesignModuleKey(task *domain.Task) string {
+	if task != nil && task.TaskType == domain.TaskTypeRetouchTask {
+		return domain.ModuleKeyRetouch
+	}
+	return domain.ModuleKeyDesign
 }
 
 func detailAuditSubStatus(task *domain.Task) domain.TaskSubStatusItem {
