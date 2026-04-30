@@ -1212,14 +1212,13 @@ func returnLookupKeys(expr ast.Expr, local map[string]string, fieldTypes map[str
 	if name == "" {
 		return nil
 	}
-	var keys []string
 	if sel, ok := expr.(*ast.SelectorExpr); ok {
 		if recv := receiverType(sel.X, local, fieldTypes); recv != "" {
-			keys = append(keys, recv+"."+sel.Sel.Name)
+			return []string{recv + "." + sel.Sel.Name}
 		}
+		return nil
 	}
-	keys = append(keys, name)
-	return keys
+	return []string{name}
 }
 
 func receiverType(expr ast.Expr, local map[string]string, fieldTypes map[string]string) string {

@@ -1970,6 +1970,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DesignAssetVersion'
+        workflow:
+          $ref: '#/components/schemas/TaskWorkflowSnapshot'
+        design_sub_status: { type: string }
+        creator_id: { type: integer, nullable: true }
+        requester_id: { type: integer, nullable: true }
+        designer_id: { type: integer, nullable: true }
+        assignee_id: { type: integer, nullable: true }
+        current_handler_id: { type: integer, nullable: true }
+        creator_name: { type: string }
+        requester_name: { type: string }
+        designer_name: { type: string }
+        assignee_name: { type: string }
+        current_handler_name: { type: string }
     ProcurementStatus:
       type: string
       enum: [draft, prepared, in_progress, completed]
