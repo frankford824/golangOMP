@@ -1,2 +1,0 @@
-v1.17 (Round S) - Asset upload authorization now honors stage visibility for customization operators and other stage-granted roles; no schema change; fixes task_out_of_department_scope on customization production step.
-v1.18 (Round T) - Reference file URLs are now presigned at read time against OSS. Fixes the 404 on pre-create reference images and aligns with the OSS-only asset storage policy. Frontend must refresh URLs on expiry; see docs/FRONTEND_REFERENCE_URL_REFRESH.md.

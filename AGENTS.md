@@ -60,9 +60,17 @@ When documents disagree:
 ## Before Editing
 
 - Locate the route in `transport/http.go` and the schema in `docs/api/openapi.yaml` first.
-- If a Go struct's JSON contract changes, update OpenAPI in the same logical change.
+- Treat path additions/removals, query parameters, request bodies, response bodies, schema fields, pagination envelopes, and readiness/deprecation markers as API contract changes.
+- If a Go struct's JSON contract changes, update OpenAPI in the same logical change; newly added OpenAPI schemas must be referenced by at least one operation or component chain.
 - If OpenAPI changes, regenerate frontend docs with `python scripts/docs/generate_frontend_docs.py`.
 - If `db/migrations/**` appears necessary, stop and surface the proposal unless the user explicitly authorized that migration work.
+
+## Engineering Hygiene
+
+- Prefer the smallest useful change and reuse existing package/service boundaries before adding new abstractions.
+- Do not build platform-style future capacity unless the current task proves it is needed.
+- Keep compatibility and deprecated surfaces shrinking; do not add new compatibility routes unless explicitly requested.
+- Do not prepare a release, deploy, push, SSH, or write production data unless explicitly requested.
 
 ## After Editing
 
