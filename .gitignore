@@ -5,6 +5,9 @@
 .env.*
 !.env.example
 !.env.*.example
+!/vue/.env.development
+!/vue/.env.production
+!/vue/.env.test
 .vscode/deploy.local.env
 .deploy/
 config/auth_identity.json
@@ -16,9 +19,13 @@ config/*.local.json
 
 # Build outputs and binaries
 dist/
+/vue/dist/
+/vue/node_modules/
+/vue/coverage/
 bin/
 *.exe
 *.test
+!/vue/.env.test
 *.test.exe
 *.out
 *.pyc

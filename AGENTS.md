@@ -13,12 +13,23 @@ This file is an assistant guidance note. It is not the backend specification.
 
 ## Current Repo Baseline
 
+- This is now a monorepo: Go backend code lives at the repository root, and Vue frontend code lives only under `vue/`.
+- Keep backend and frontend ownership explicit in every diagnosis, diff, test command, and final report. Do not treat root files and `vue/` files as the same application layer.
 - V1 current authority is centralized in `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`.
 - Route existence is decided by `transport/http.go`.
 - Request/response field contracts are decided by `docs/api/openapi.yaml`.
 - New frontend or new integrations must start from the V1 SoT route families and the generated frontend docs under `docs/frontend/`.
 - Compatibility and deprecated surfaces remain documented only for migration safety.
 - Recent V1.21 work materially changed task detail aggregation, batch SKU/i_id flows, ERP filing projection, asset upload/read-model fields, task visibility, permissions, and frontend docs; do not rely on v0.9 handoff or archived model memory for those areas.
+
+## Monorepo Layout
+
+- Backend scope: repository root Go modules, `cmd/`, `config/`, `db/`, `domain/`, `service/`, `transport/`, root `docs/`, root `scripts/`, and root tests.
+- Frontend scope: `vue/` and everything below it, including `vue/src/`, `vue/tests/`, `vue/docs/`, `vue/frontend/`, `vue/package.json`, and Vue/Vite config files.
+- Backend authority files are the root files listed in this document. Files under `vue/docs/` and `vue/frontend/` are frontend-side references or copied frontend history, not backend authority.
+- When a task crosses both layers, report ownership as `backend`, `frontend`, or `both`, and name the exact paths involved.
+- Before running commands, confirm the working directory: use the repository root for Go/backend commands, and `cd vue` for Node/Vue commands.
+- Do not move frontend files out of `vue/` or place new backend files under `vue/` unless the user explicitly requests a layout change.
 
 ## Reading Order
 

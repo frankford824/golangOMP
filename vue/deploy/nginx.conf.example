@@ -1,0 +1,86 @@
+# ============================================================
+# Nginx 配置示例 — 前端静态资源 + 后端 API 代理
+# ============================================================
+# 适用场景：前端 dist/ + 后端 8080 端口部署在同一台服务器
+#
+# 核心思路：
+# - 前端请求 /v1/... → nginx proxy_pass → 后端 127.0.0.1:8080
+# - 其余路径 → nginx 返回前端 index.html（SPA 路由）
+#
+# 此配置是唯一需要关注的部署文件，后续版本升级（v0.5、v0.6）
+# 只需改 proxy_pass 的端口/地址，前端代码无需任何修改。
+# ============================================================
+
+server {
+    listen 80;
+    server_name _;  # 替换为实际域名或 IP，如 www.example.com
+
+    # 前端静态文件目录（npm run build 输出的 dist/ 复制到此处）
+    root /var/www/dist;
+    index index.html;
+
+    # ── API 反向代理 ─────────────────────────────────────────
+    # 所有 /v1/ 请求转发到后端服务（MAIN 服务，端口 8080）
+    # 注意：末尾斜杠的处理 — proxy_pass 末尾不加 / 以保留完整路径
+    location /v1/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 超时配置（可根据接口响应时间调整）
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+
+    # ── SPA 路由支持 ─────────────────────────────────────────
+    # 所有非 API 路径回退到 index.html，支持 Vue Router history 模式
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # ── 静态资源缓存（可选）──────────────────────────────────
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+
+# ── HTTPS 配置（可选，推荐生产使用）────────────────────────────────────────────
+# 如需启用 HTTPS，取消注释以下配置并替换证书路径
+#
+# server {
+#     listen 443 ssl http2;
+#     server_name www.example.com;
+#
+#     ssl_certificate     /etc/nginx/ssl/fullchain.pem;
+#     ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+#     ssl_protocols       TLSv1.2 TLSv1.3;
+#     ssl_ciphers         HIGH:!aNULL:!MD5;
+#
+#     root /var/www/dist;
+#     index index.html;
+#
+#     location /v1/ {
+#         proxy_pass http://127.0.0.1:8080;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto https;
+#     }
+#
+#     location / {
+#         try_files $uri $uri/ /index.html;
+#     }
+# }
+#
+# HTTP → HTTPS 重定向
+# server {
+#     listen 80;
+#     server_name www.example.com;
+#     return 301 https://$host$request_uri;
+# }

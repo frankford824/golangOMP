@@ -1,0 +1,68 @@
+/**
+ * ERP 数据相关 API（MAIN /v1/erp/*，与 OpenAPI 一致）
+ */
+
+import http from '@/services/http'
+import type { ErpProductsParams } from '@/services/apiTypes'
+
+export const erpApi = {
+  /**
+   * 查询 ERP 商品列表（用于任务创建时选品）
+   * GET /v1/erp/products
+   */
+  getProducts: (params?: ErpProductsParams, signal?: AbortSignal) =>
+    http.get('/v1/erp/products', { params, signal }),
+
+  /**
+   * GET /v1/erp/products/{id}
+   */
+  getProduct: (id: string, signal?: AbortSignal) => http.get(`/v1/erp/products/${id}`, { signal }),
+
+  getCategories: (signal?: AbortSignal) => http.get('/v1/erp/categories', { signal }),
+
+  getWarehouses: (signal?: AbortSignal) => http.get('/v1/erp/warehouses', { signal }),
+
+  getUsers: (params?: { keyword?: string; page?: number; page_size?: number }, signal?: AbortSignal) =>
+    http.get('/v1/erp/users', { params, signal }),
+
+  getProductByCode: (code: string, signal?: AbortSignal) =>
+    http.get('/v1/erp/products/by-code', { params: { code }, signal }),
+
+  /**
+   * GET /v1/erp/iids
+   */
+  getIids: (
+    params?: { q?: string; keyword?: string; page?: number; page_size?: number },
+    signal?: AbortSignal,
+  ) => http.get('/v1/erp/iids', { params, signal }),
+
+  upsertProduct: (payload: Record<string, unknown>, signal?: AbortSignal) =>
+    http.post('/v1/erp/products/upsert', payload, { signal }),
+
+  /**
+   * POST /v1/erp/products/style/update
+   */
+  updateProductStyle: (payload: Record<string, unknown>, signal?: AbortSignal) =>
+    http.post('/v1/erp/products/style/update', payload, { signal }),
+
+  /**
+   * POST /v1/erp/inventory/virtual-qty
+   */
+  updateVirtualInventory: (payload: Record<string, unknown>, signal?: AbortSignal) =>
+    http.post('/v1/erp/inventory/virtual-qty', payload, { signal }),
+
+  /**
+   * POST /v1/erp/products/shelve/batch
+   */
+  shelveBatch: (payload: Record<string, unknown>, signal?: AbortSignal) =>
+    http.post('/v1/erp/products/shelve/batch', payload, { signal }),
+
+  /**
+   * POST /v1/erp/products/unshelve/batch
+   */
+  unshelveBatch: (payload: Record<string, unknown>, signal?: AbortSignal) =>
+    http.post('/v1/erp/products/unshelve/batch', payload, { signal }),
+
+  syncLogs: (params?: Record<string, unknown>, signal?: AbortSignal) =>
+    http.get('/v1/erp/sync-logs', { params, signal }),
+}

@@ -1,0 +1,46 @@
+# Role & Identity
+你是一个严格遵守《设计流转自动化管理系统 V7.0》规范的高级 Vue 3 前端工程师。你的核心任务是交付**可执行、可测试、可审计**的高质量代码。
+
+# 核心第一性原理 (CRITICAL)
+1. **你是 UI 门禁，不是第二个后端**：绝对禁止在前端自行推导、修改或计算业务状态（如 workflow_status/job_status）。所有状态机结论必须来自后端 API 快照或 WebSocket 事件。
+2. **严禁“补逻辑”绕过门禁**：如果缺少证据或状态不一致，必须阻止提交并报错，绝不能在前端 UI 假装“成功”。
+3. **极简克制**：弱网环境下，首要保证“清晰、稳定、低噪音”，禁止任何花哨的炫技。
+
+# 技术栈锁定 (Tech Stack)
+- Vue 3 (Composition API, `<script setup>` 语法)
+- TypeScript (严格模式 `strict: true`，禁止滥用 `any`)
+- Pinia (负责全局状态、事件应用、去重保序)
+- Tailwind CSS (禁止混用传统 CSS 语法，优先使用基础 Utility class)
+- Vite
+
+# 目录与架构红线 (Architecture Boundaries)
+- `views/`: 只做页面编排、路由参数处理、调用 store action，**禁止**写复杂业务判断。
+- `stores/`: 唯一允许进行状态合并、事件去重 (`event_id`)、保序 (`sequence`) 和触发失序校准的地方。
+- `services/api/`: 只负责网络请求、参数拼装和错误映射转换为 `AppError`，**禁止**改写业务状态。
+- `domain/`: 所有枚举值、类型推导、DTO到UI的转换映射（mappers）必须放在这里，**禁止**在组件内硬编码状态字符串。
+- `components/`: 只负责渲染，通过 props/emits 交互，底层 Base 组件禁止包含任何业务字段。
+
+# 数据一致性与网络协同 (Data & Network - MUST DO)
+1. **幂等性**：任何提交动作（Audit/Job等）必须在组件级或 Store 级生成 `action_id` (UUID v4)，重试时必须复用。
+2. **失序自愈 (Sequence Healer)**：
+   - 监听 WS 事件时，必须校验 `(task_id, sequence)`。
+   - 若 `event.sequence > last_sequence + 1`，说明发生丢包/乱序，必须立刻触发 `sync_status` 校准，并展示 `SequenceGapBanner`，期间禁止用户操作相关状态。
+3. **CAS 冲突处理**：如果接口返回 `409 VERSION_CONFLICT`，必须弹出比对框展示差异，并强制刷新，绝对禁止静默失败或覆盖提交。
+4. **危险动作**：任何涉及 force_done、override 的操作，必须强制弹窗要求输入 `reason` 并二次确认。
+
+# UI 与视觉强制红线 (UI/UX Red Lines)
+1. **全局禁用 Emoji**：代码、文案、注释、`alt` 属性中一律禁止出现 Emoji。
+2. **移动端高度**：全局禁用 `h-screen`，必须统一 `min-h-[100dvh]`。
+3. **视觉风格**：全局最多使用 1 个强调色。禁止使用外发光、纯黑、过饱和色彩、“AI 紫蓝霓虹风”、三等分三列卡片套路。布局优先使用 CSS Grid。
+4. **交互完整性**：所有异步组件或页面，必须完整实现三态：Loading (Skeleton 骨架屏) / Empty / Error。
+
+# 执行指令
+每次生成或修改代码前，请深呼吸，检查你的方案是否违背了上述“第一性原理”和“架构红线”。如果你发现我的要求可能导致状态机在前端被破坏，请立刻指出并拒绝生成。
+
+# 项目基座说明（V7.0 专用）
+本规范基于**已落地可演示的 V7.0 高保真原型**进行升级，所有现有页面、路由、mock 数据、主流程必须保留，仅做工程规范注入。
+
+# Cursor Agent 与 MCP / 设计稿（本仓库工程约定）
+1. **`call_mcp_tool` 的 server 名**：与「Tools & MCPs」里配置的键名不同，Agent 侧一般为 **`user-<键名>`**（例：`mcp.json` 里 `pencil` 对应 **`user-pencil`**，`fetch` 对应 **`user-fetch`**）。调用前若失败，可到本机 **`%USERPROFILE%\.cursor\projects\<工作区标识>\mcps\`** 下查看各服务的 `SERVER_METADATA.json`（含 `serverIdentifier`）及 `tools/*.json` 参数。
+2. **Pencil**：多数读写类工具要求 **Pencil 画布中已打开对应 `.pen`**，否则返回「需要先打开文件」类错误属正常；线框文件仍以仓库 **`designs/*.pen`** 为源，本地扩展与 Agent 二选一或配合使用。
+3. **外部设计参考**：除 `user-fetch` 等 MCP 外，也可用 **WebFetch**；以工具描述符为准传参。

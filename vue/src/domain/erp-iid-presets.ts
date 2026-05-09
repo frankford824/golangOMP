@@ -1,0 +1,73 @@
+export interface ErpIidOption {
+  i_id: string
+  label: string
+  category: string
+  category_name: string
+  product_count?: number
+}
+
+const IIDS = [
+  'A3纸打印',
+  'A4纸打印',
+  'HBJ',
+  'HBZ',
+  'HCP',
+  'HLZ',
+  'HPJ',
+  'HQT',
+  'HSC',
+  'HZS',
+  '白卡纸',
+  '材料包',
+  '常规kt板',
+  '常规kt板(覆膜)',
+  '常规PP背胶',
+  '常规pp无背胶',
+  '常规车缝',
+  '常规海报',
+  '常规喷绘布',
+  '常规旗帜布',
+  '常规无PP背胶',
+  '常规写真布',
+  '地垫',
+  '定制kt板',
+  '定制PP背胶',
+  '定制PP无背胶',
+  '定制PP纸',
+  '定制PVC',
+  '定制车缝',
+  '定制海报',
+  '定制锦旗',
+  '定制喷绘布',
+  '定制写真布',
+  '定制易拉宝',
+  '河南kt板',
+  '红色kt板',
+  '婚庆',
+  '婚庆礼炮',
+  '激光打印',
+  '金色kt板',
+  '锦旗',
+  '静电贴',
+  '刻字机',
+  '模切不干胶',
+  '模切拉旗',
+  '模切相纸',
+  '木刻画',
+  '南京小豚',
+  '水晶标',
+  '铜版纸',
+  '相框雕刻',
+  '相纸',
+  '雪纺纱',
+  '亚克力',
+  '叶雕',
+  '定制kt板(覆膜)',
+] as const
+
+export const ERP_IID_PRESETS: ErpIidOption[] = IIDS.map((i_id) => ({
+  i_id,
+  label: i_id,
+  category: i_id,
+  category_name: i_id,
+}))
