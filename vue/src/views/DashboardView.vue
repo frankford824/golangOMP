@@ -161,8 +161,8 @@
             >
               <RecentEventStream
                 :events="recentEvents"
-                :loading="loading"
-                :error="error"
+                :loading="auditsStore.loading"
+                :error="auditsStore.loadError"
                 hide-title
                 variant="dashboard"
               />
@@ -226,7 +226,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import type { Task } from '@/domain/types/task'
 import type { DashboardSummary, RecentEvent, RiskItem } from '@/types/dashboard'
@@ -234,8 +234,6 @@ import { useTasksStore } from '@/stores/tasks'
 import { useAuditsStore } from '@/stores/audits'
 import StatusSkeleton from '@/components/common/StatusSkeleton.vue'
 import DashboardKpiCard from '@/components/dashboard/DashboardKpiCard.vue'
-import DashboardTrendChart from '@/components/dashboard/DashboardTrendChart.vue'
-import DashboardStatusPie from '@/components/dashboard/DashboardStatusPie.vue'
 import DashboardTaskSnapshotTable from '@/components/dashboard/DashboardTaskSnapshotTable.vue'
 import RecentEventStream from '@/components/dashboard/RecentEventStream.vue'
 import RiskListCard from '@/components/dashboard/RiskListCard.vue'
@@ -259,6 +257,9 @@ import {
 } from '@/utils/date'
 import { getLastNBeijingDateKeys, beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
 
+const DashboardTrendChart = defineAsyncComponent(() => import('@/components/dashboard/DashboardTrendChart.vue'))
+const DashboardStatusPie = defineAsyncComponent(() => import('@/components/dashboard/DashboardStatusPie.vue'))
+
 const router = useRouter()
 const tasksStore = useTasksStore()
 const auditsStore = useAuditsStore()
@@ -277,6 +278,7 @@ const BUSINESS_ACTIONS = [
 
 const canListTasks = computed(() => can('task.list'))
 const hasBusinessAccess = computed(() => BUSINESS_ACTIONS.some((a) => can(a)))
+const canAccessAuditLogs = computed(() => can('audit.view'))
 
 function formatEventAt(iso: string): string {
   if (!iso) return ''
@@ -499,12 +501,24 @@ const kpiStats = computed(() => {
 async function load() {
   loading.value = true
   error.value = ''
+  auditsStore.loadError = ''
+
   try {
     if (canListTasks.value) {
       await tasksStore.loadTasks()
     }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '加载任务运营主页总览失败'
   } finally {
     loading.value = false
+  }
+
+  if (canAccessAuditLogs.value) {
+    try {
+      await auditsStore.loadAuditLogs()
+    } catch (e) {
+      auditsStore.loadError = e instanceof Error ? e.message : '加载审计日志失败'
+    }
   }
 }
 

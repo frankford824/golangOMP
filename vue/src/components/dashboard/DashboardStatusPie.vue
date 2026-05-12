@@ -16,7 +16,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
-import * as echarts from 'echarts'
+import { PieChart } from 'echarts/charts'
+import { LegendComponent, TitleComponent, TooltipComponent } from 'echarts/components'
+import { init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+
+use([PieChart, LegendComponent, TitleComponent, TooltipComponent, CanvasRenderer])
 
 const props = withDefaults(
   defineProps<{
@@ -27,9 +32,9 @@ const props = withDefaults(
 )
 
 const chartRef = ref<HTMLDivElement | null>(null)
-let chart: echarts.ECharts | null = null
+let chart: ECharts | null = null
 
-const option = computed(() => {
+const option = computed<EChartsCoreOption>(() => {
   const data = props.series.filter((d) => d.value > 0)
   if (!data.length) {
     return {
@@ -75,7 +80,7 @@ function resize() {
 function render() {
   if (!chartRef.value) return
   if (!chart) {
-    chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' })
+    chart = init(chartRef.value, undefined, { renderer: 'canvas' })
   }
   chart.setOption(option.value, { notMerge: true })
 }
