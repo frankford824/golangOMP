@@ -480,11 +480,19 @@
                         size="sm"
                       />
                     </article>
-                    <article class="detail-v3-info-card">
+                    <article class="detail-v3-info-card detail-v3-info-card--audit-comment">
                       <p class="detail-v3-card-kicker">审核意见</p>
+                      <BaseSelect
+                        v-model="auditRejectReasonCategory"
+                        label="驳回分类"
+                        placeholder="打回时请选择"
+                        :options="AUDIT_REJECT_REASON_OPTIONS"
+                        :disabled="!showAuditActionButtons || Boolean(actionLoading)"
+                        clearable
+                      />
                       <BaseTextarea
                         v-model="auditComment"
-                        placeholder="填写通过说明或打回原因..."
+                        :placeholder="auditRejectReasonCategory === AUDIT_REJECT_REASON_OTHER ? '填写其他具体理由...' : '填写通过说明或补充修改建议...'"
                         :rows="4"
                         :disabled="!showAuditActionButtons || Boolean(actionLoading)"
                         :error="auditCommentError"
@@ -786,6 +794,7 @@ import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES, designUploadTooLargeMessage } from '
 
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
+import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import SequenceGapBanner from '@/components/business/SequenceGapBanner.vue'
 import CASConflictModal from '@/components/business/CASConflictModal.vue'
@@ -1753,6 +1762,21 @@ async function refreshDetail() {
 
 const actionError = ref('')
 const actionSuccess = ref('')
+const AUDIT_REJECT_REASON_OTHER = '其他'
+const AUDIT_REJECT_REASON_OPTIONS = [
+  { value: '文案错误', label: '文案错误' },
+  { value: '图片错误', label: '图片错误' },
+  { value: '保存格式错误', label: '保存格式错误' },
+  { value: '尺寸错误', label: '尺寸错误' },
+  { value: '订单备注错误', label: '订单备注错误' },
+  { value: '无边框线', label: '无边框线' },
+  { value: '边框线没闭合', label: '边框线没闭合' },
+  { value: '排版错误', label: '排版错误' },
+  { value: '缺少素材', label: '缺少素材' },
+  { value: '素材模糊', label: '素材模糊' },
+  { value: AUDIT_REJECT_REASON_OTHER, label: '其他' },
+]
+const auditRejectReasonCategory = ref('')
 const auditComment = ref('')
 const auditCommentError = ref('')
 const actionLoading = ref<
@@ -1819,6 +1843,7 @@ async function loadSideEvents() {
 
 watch(taskId, () => {
   if (!taskId.value || isTempId.value) return
+  auditRejectReasonCategory.value = ''
   auditComment.value = ''
   auditCommentError.value = ''
   void loadSideEvents()
@@ -1929,6 +1954,7 @@ async function passAuditFromDetail(): Promise<void> {
       next_status: 'PendingWarehouseReceive',
       comment,
     })
+    auditRejectReasonCategory.value = ''
     auditComment.value = ''
     flashSuccess('已审核通过')
     void loadSideEvents()
@@ -1938,17 +1964,24 @@ async function passAuditFromDetail(): Promise<void> {
 async function rejectAuditFromDetail(): Promise<void> {
   if (!task.value) return
   if (!showAuditActionButtons.value) return
+  const category = auditRejectReasonCategory.value.trim()
   const comment = auditComment.value.trim()
-  if (!comment) {
-    auditCommentError.value = '请填写打回原因或修改建议'
+  if (!category) {
+    auditCommentError.value = '请选择驳回分类'
     return
   }
+  if (category === AUDIT_REJECT_REASON_OTHER && !comment) {
+    auditCommentError.value = '选择其他时请填写具体理由'
+    return
+  }
+  const rejectComment = comment ? `${category}：${comment}` : category
   auditCommentError.value = ''
   await runDetailAction('audit-reject', '审核打回失败', async () => {
     await tasksStore.rejectAudit(task.value!.id, {
       stage: auditStageForTask(),
-      comment,
+      comment: rejectComment,
     })
+    auditRejectReasonCategory.value = ''
     auditComment.value = ''
     flashSuccess('已打回设计')
     void loadSideEvents()
@@ -2768,6 +2801,11 @@ watch(taskId, (id) => {
 .detail-v3-info-card--audit,
 .detail-v3-info-card--warehouse {
   background: #f4f6fa;
+}
+.detail-v3-info-card--audit-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
 }
 .detail-v3-info-card--wide {
   grid-column: 1 / -1;
