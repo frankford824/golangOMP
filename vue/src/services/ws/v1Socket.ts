@@ -23,7 +23,7 @@ function resolveWsUrl(): string {
   const explicit = String(import.meta.env.VITE_WS_BASE_URL ?? '').trim()
   const base = explicit || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
   const url = new URL('/ws/v1', base)
-  if (token) url.searchParams.set('token', token)
+  if (token) url.searchParams.set('access_token', token)
   return url.toString()
 }
 

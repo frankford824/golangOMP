@@ -115,8 +115,11 @@ The script performs:
 6. `nginx -t`.
 7. `systemctl reload nginx`.
 8. HTTP probes for `/`, `/login`, `/health`, and `/v1/auth/login`.
+9. WebSocket handshake probe for `/ws/v1` when notification or realtime pages are affected.
 
 After publish, use a browser and a real account to smoke test the affected workflow.
+
+For realtime notification changes, verify that `/ws/v1` is proxied to the Go backend rather than served as the Vue fallback page. A failed WebSocket handshake should not return `text/html` or `index.html`.
 
 ## Backend Publish Reference
 
@@ -166,5 +169,6 @@ Backend rollback is not covered by this SOP. Use the backend release workflow an
 - Treating a backend contract change as frontend-only.
 - Publishing frontend before the backend API it depends on.
 - Leaving old hashed assets online by copying without `rsync --delete`.
+- Missing the `/ws/` Nginx reverse proxy and accidentally serving WebSocket paths through the SPA fallback.
 - Uploading static files into `/root/ecommerce_ai/releases`.
 - Merging `dev/external-developer` into `main` before the project owner approves.
