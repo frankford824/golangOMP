@@ -482,7 +482,13 @@
                     </article>
                     <article class="detail-v3-info-card">
                       <p class="detail-v3-card-kicker">审核意见</p>
-                      <div class="detail-v3-fake-textarea">填写通过说明或打回原因...</div>
+                      <BaseTextarea
+                        v-model="auditComment"
+                        placeholder="填写通过说明或打回原因..."
+                        :rows="4"
+                        :disabled="!showAuditActionButtons || Boolean(actionLoading)"
+                        :error="auditCommentError"
+                      />
                     </article>
                     <article class="detail-v3-info-card detail-v3-info-card--audit">
                       <p class="detail-v3-card-kicker">审核动作</p>
@@ -780,6 +786,7 @@ import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES, designUploadTooLargeMessage } from '
 
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
+import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import SequenceGapBanner from '@/components/business/SequenceGapBanner.vue'
 import CASConflictModal from '@/components/business/CASConflictModal.vue'
 import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
@@ -1746,6 +1753,8 @@ async function refreshDetail() {
 
 const actionError = ref('')
 const actionSuccess = ref('')
+const auditComment = ref('')
+const auditCommentError = ref('')
 const actionLoading = ref<
   | ''
   | 'claim-retouch'
@@ -1810,7 +1819,13 @@ async function loadSideEvents() {
 
 watch(taskId, () => {
   if (!taskId.value || isTempId.value) return
+  auditComment.value = ''
+  auditCommentError.value = ''
   void loadSideEvents()
+})
+
+watch(auditComment, () => {
+  if (auditCommentError.value) auditCommentError.value = ''
 })
 const {
   designers: designerOptions,
@@ -1906,12 +1921,15 @@ async function claimRetouchFromDetail(): Promise<void> {
 async function passAuditFromDetail(): Promise<void> {
   if (!task.value) return
   if (!showAuditActionButtons.value) return
+  auditCommentError.value = ''
+  const comment = auditComment.value.trim() || '审核通过'
   await runDetailAction('audit-pass', '审核通过失败', async () => {
     await tasksStore.passAudit(task.value!.id, {
       stage: auditStageForTask(),
       next_status: 'PendingWarehouseReceive',
-      comment: '审核通过',
+      comment,
     })
+    auditComment.value = ''
     flashSuccess('已审核通过')
     void loadSideEvents()
   })
@@ -1920,11 +1938,18 @@ async function passAuditFromDetail(): Promise<void> {
 async function rejectAuditFromDetail(): Promise<void> {
   if (!task.value) return
   if (!showAuditActionButtons.value) return
+  const comment = auditComment.value.trim()
+  if (!comment) {
+    auditCommentError.value = '请填写打回原因或修改建议'
+    return
+  }
+  auditCommentError.value = ''
   await runDetailAction('audit-reject', '审核打回失败', async () => {
     await tasksStore.rejectAudit(task.value!.id, {
       stage: auditStageForTask(),
-      comment: '审核打回',
+      comment,
     })
+    auditComment.value = ''
     flashSuccess('已打回设计')
     void loadSideEvents()
   })
