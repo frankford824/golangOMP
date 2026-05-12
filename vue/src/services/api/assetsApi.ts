@@ -221,6 +221,26 @@ export interface AssetListQuery {
   [key: string]: unknown
 }
 
+export interface AssetSearchQuery {
+  keyword?: string
+  page?: number
+  size?: number
+  module_key?: string
+  owner_team_code?: string
+  is_archived?: 'true' | 'false' | 'all'
+  task_status?: 'open' | 'closed' | 'archived' | 'all'
+  created_from?: string
+  created_to?: string
+  [key: string]: unknown
+}
+
+export interface AssetSearchResponse {
+  data: BackendAsset[]
+  total: number
+  page: number
+  size: number
+}
+
 export const assetsApi = {
   /**
    * 任务上下文资产列表
@@ -275,14 +295,9 @@ export const assetsApi = {
       signal,
     }),
 
-  searchAssets: (params?: AssetListQuery, signal?: AbortSignal) =>
-    http.get('/v1/assets/search', {
-      params: params
-        ? {
-            ...params,
-            ...(params.size == null && params.page_size != null ? { size: params.page_size } : {}),
-          }
-        : undefined,
+  searchAssets: (params?: AssetSearchQuery, signal?: AbortSignal) =>
+    http.get<AssetSearchResponse>('/v1/assets/search', {
+      params,
       signal,
     }),
 

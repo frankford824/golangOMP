@@ -71,7 +71,7 @@
       class="ac-status-bar"
       role="status"
     >
-      当前已加载 <b>{{ assets.length }}</b> 条，筛选后 <b>{{ filteredAssets.length }}</b> 条
+      当前共 <b>{{ listTotal }}</b> 条，当前页返回 <b>{{ assets.length }}</b> 条，展示 <b>{{ pagedAssets.length }}</b> 条
     </div>
 
     <main class="ac-grid">
@@ -80,7 +80,7 @@
         <p class="ac-loading-sub">请稍候…</p>
       </div>
       <div v-else-if="error" class="ac-loading-state ac-state-error">{{ error }}</div>
-      <div v-else-if="!filteredAssets.length" class="ac-grid-empty">
+      <div v-else-if="!pagedAssets.length" class="ac-grid-empty">
         <BaseEmptyState
           title="暂无资产"
           description="请输入关键词或调整筛选条件；若无匹配将显示此提示。"
@@ -141,7 +141,7 @@
       </template>
     </main>
 
-    <div v-if="!loading && !error && filteredAssets.length" class="ac-pagination">
+    <div v-if="!loading && !error && listTotal > 0" class="ac-pagination">
       <label class="ac-page-size">
         每页
         <select v-model.number="listPageSize" class="ac-page-size-select">
@@ -160,7 +160,7 @@
         上一页
       </button>
       <span class="ac-pg-meta">
-        第 {{ listPage }} / {{ listTotalPages }} 页（本页 {{ pagedAssets.length }} / 筛选 {{ filteredAssets.length }}）
+        第 {{ listPage }} / {{ listTotalPages }} 页（本页 {{ pagedAssets.length }} / 总计 {{ listTotal }}）
       </span>
       <label class="ac-page-jump">
         跳至
@@ -344,7 +344,6 @@ import {
   primeAssetDownloadMetaCache,
 } from '@/domain/asset-access'
 import { assetsApi } from '@/services/api/assetsApi'
-import { tasksApi } from '@/services/api/tasksApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 
@@ -366,7 +365,7 @@ const detailModalOpen = ref(false)
 const listPage = ref(1)
 const listJumpPage = ref(1)
 const listPageSize = ref(20)
-const keywordResolvedTaskIds = ref<string[]>([])
+const listTotal = ref(0)
 const AUTO_RELOAD_DELAY_MS = 400
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 const previewLightboxSrc = ref<string | null>(null)
@@ -407,34 +406,26 @@ const selectedAsset = computed(
 
 const selectedVersions = computed<BackendAssetVersion[]>(() => selectedAsset.value?.versions ?? [])
 
-const filteredAssets = computed(() => {
-  const keyword = filters.keyword.trim().toLowerCase()
-  const explicitTaskId = filters.taskId.trim()
-  const keywordAlreadyResolvedToTask =
-    !explicitTaskId && keyword.length > 0 && keywordResolvedTaskIds.value.length > 0
-  if (!keyword || keywordAlreadyResolvedToTask) return assets.value
-  return assets.value.filter((asset) => {
-    const record = asset as Record<string, unknown>
-    return [asset.id, asset.task_id, record.scope_sku_code, record.asset_kind, record.asset_type]
-      .some((value) => String(value ?? '').toLowerCase().includes(keyword))
-  })
-})
+const effectiveSearchKeyword = computed(
+  () => filters.keyword.trim() || filters.taskId.trim() || filters.scopeSkuCode.trim(),
+)
 
 const keywordAutoQueryHint = computed(() => {
-  const keyword = filters.keyword.trim()
-  if (!keyword) return ''
-  if (filters.taskId.trim()) return ''
-  if (!keywordResolvedTaskIds.value.length) return ''
-  return `关键词已解析为任务 ID：${keywordResolvedTaskIds.value.join(', ')}`
+  if (!filters.taskId.trim() && !filters.scopeSkuCode.trim()) return ''
+  return '任务 ID / SKU 作用域将作为 keyword 交给后端统一搜索'
 })
 
 const listTotalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredAssets.value.length / listPageSize.value)),
+  Math.max(1, Math.ceil(listTotal.value / listPageSize.value)),
 )
 
 const pagedAssets = computed(() => {
-  const start = (listPage.value - 1) * listPageSize.value
-  return filteredAssets.value.slice(start, start + listPageSize.value)
+  const selectedKind = filters.assetKind.trim()
+  if (!selectedKind) return assets.value
+  return assets.value.filter((asset) => {
+    const record = asset as Record<string, unknown>
+    return String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? '') === selectedKind
+  })
 })
 
 watch(listTotalPages, (tp) => {
@@ -451,10 +442,12 @@ watch(
 
 watch(listPageSize, () => {
   listPage.value = 1
+  scheduleReload()
 })
 
 watch(listPage, (p) => {
   listJumpPage.value = p
+  scheduleReload()
 })
 
 const previewStateLabel = computed(() => {
@@ -604,130 +597,6 @@ function scheduleReload() {
   }, AUTO_RELOAD_DELAY_MS)
 }
 
-function toTaskRowsFromListBody(body: unknown): Array<Record<string, unknown>> {
-  if (Array.isArray(body)) {
-    return body.filter((it) => it && typeof it === 'object') as Array<Record<string, unknown>>
-  }
-  if (!body || typeof body !== 'object') return []
-  const root = body as Record<string, unknown>
-  const data = root.data
-  if (Array.isArray(data)) return data.filter((it) => it && typeof it === 'object') as Array<Record<string, unknown>>
-  if (data && typeof data === 'object') {
-    const inner = data as Record<string, unknown>
-    if (Array.isArray(inner.items)) {
-      return inner.items.filter((it) => it && typeof it === 'object') as Array<Record<string, unknown>>
-    }
-    if (Array.isArray(inner.tasks)) {
-      return inner.tasks.filter((it) => it && typeof it === 'object') as Array<Record<string, unknown>>
-    }
-  }
-  if (Array.isArray(root.items)) {
-    return root.items.filter((it) => it && typeof it === 'object') as Array<Record<string, unknown>>
-  }
-  if (Array.isArray(root.list)) {
-    return root.list.filter((it) => it && typeof it === 'object') as Array<Record<string, unknown>>
-  }
-  return []
-}
-
-function collectSkuCodesFromTaskRow(row: Record<string, unknown>): string[] {
-  const out: string[] = []
-  const push = (v: unknown) => {
-    if (typeof v !== 'string') return
-    const t = v.trim()
-    if (!t) return
-    if (!out.includes(t)) out.push(t)
-  }
-  push(row.sku_code)
-  push(row.sku)
-  push(row.primary_sku_code)
-  const skuItems = row.sku_items
-  if (Array.isArray(skuItems)) {
-    for (const item of skuItems) {
-      if (!item || typeof item !== 'object') continue
-      const o = item as Record<string, unknown>
-      push(o.sku_code)
-      push(o.skuCode)
-    }
-  }
-  return out
-}
-
-function rowMatchesKeyword(row: Record<string, unknown>, keyword: string): boolean {
-  const kw = keyword.trim().toLowerCase()
-  if (!kw) return false
-  const taskNo = String(row.task_no ?? row.taskNo ?? '').toLowerCase()
-  if (taskNo.includes(kw)) return true
-  const productName = String(row.product_name ?? row.productName ?? row.product_name_snapshot ?? '').toLowerCase()
-  if (productName.includes(kw)) return true
-  const skuCodes = collectSkuCodesFromTaskRow(row)
-  if (skuCodes.some((code) => code.toLowerCase().includes(kw))) return true
-  return objectContainsKeyword(row, kw, 0)
-}
-
-function objectContainsKeyword(value: unknown, keywordLower: string, depth: number): boolean {
-  if (depth > 5) return false
-  if (value == null) return false
-  if (typeof value === 'string') return value.toLowerCase().includes(keywordLower)
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value).toLowerCase().includes(keywordLower)
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => objectContainsKeyword(item, keywordLower, depth + 1))
-  }
-  if (typeof value === 'object') {
-    for (const v of Object.values(value as Record<string, unknown>)) {
-      if (objectContainsKeyword(v, keywordLower, depth + 1)) return true
-    }
-  }
-  return false
-}
-
-function uniqueAssetRowsById(rows: BackendAsset[]): BackendAsset[] {
-  const seen = new Set<string>()
-  const out: BackendAsset[] = []
-  for (const row of rows) {
-    const id = String(row.id ?? '').trim()
-    if (!id || seen.has(id)) continue
-    seen.add(id)
-    out.push(row)
-  }
-  return out
-}
-
-async function resolveTaskIdsFromKeyword(keyword: string): Promise<string[]> {
-  const kw = keyword.trim()
-  if (!kw) return []
-  try {
-    const res = await tasksApi.list({ keyword: kw, page: 1, page_size: 100 })
-    const rows = toTaskRowsFromListBody(res.data)
-    const out: string[] = []
-    const seen = new Set<string>()
-    for (const row of rows) {
-      const id = String(row.id ?? '').trim()
-      if (!id || seen.has(id)) continue
-      seen.add(id)
-      out.push(id)
-    }
-    if (out.length > 0) return out
-
-    const fallbackRes = await tasksApi.list({ page: 1, page_size: 500 })
-    const fallbackRows = toTaskRowsFromListBody(fallbackRes.data)
-    const fallbackOut: string[] = []
-    const fallbackSeen = new Set<string>()
-    for (const row of fallbackRows) {
-      if (!rowMatchesKeyword(row, kw)) continue
-      const id = String(row.id ?? '').trim()
-      if (!id || fallbackSeen.has(id)) continue
-      fallbackSeen.add(id)
-      fallbackOut.push(id)
-    }
-    return fallbackOut
-  } catch {
-    return []
-  }
-}
-
 function syncQuerySelection() {
   const nextQuery: Record<string, string> = {}
   if (filters.taskId.trim()) nextQuery.task_id = filters.taskId.trim()
@@ -804,57 +673,25 @@ async function loadAssetDetail(assetId: string) {
 async function reload() {
   loading.value = true
   error.value = ''
-  listPage.value = 1
-  keywordResolvedTaskIds.value = []
   try {
-    const baseParams: Record<string, unknown> = {}
-    if (filters.assetKind) baseParams.asset_kind = filters.assetKind
-    if (filters.scopeSkuCode) baseParams.scope_sku_code = filters.scopeSkuCode
+    const res = await assetsApi.searchAssets({
+      keyword: effectiveSearchKeyword.value || undefined,
+      page: listPage.value,
+      size: listPageSize.value,
+    })
+    const body = res.data
+    const backendItems = Array.isArray(body?.data) ? body.data : []
+    const backendTotal = Number(body?.total)
+    const backendPage = Number(body?.page)
+    const backendSize = Number(body?.size)
 
-    const explicitTaskId = filters.taskId.trim()
-    if (explicitTaskId) {
-      const res = await assetsApi.listAssets({ ...baseParams, task_id: explicitTaskId })
-      const body = res.data as BackendAsset[] | { data?: BackendAsset[]; items?: BackendAsset[] } | undefined
-      const list = Array.isArray(body) ? body : (body?.data ?? body?.items ?? [])
-      assets.value = Array.isArray(list) ? list : []
-    } else {
-      const keyword = filters.keyword.trim()
-      const resolvedTaskIds = await resolveTaskIdsFromKeyword(keyword)
-      keywordResolvedTaskIds.value = resolvedTaskIds
-      if (resolvedTaskIds.length > 0) {
-        const settled = await Promise.allSettled(
-          resolvedTaskIds.map((taskId) => assetsApi.list(taskId)),
-        )
-        const merged: BackendAsset[] = []
-        for (const item of settled) {
-          if (item.status !== 'fulfilled') continue
-          const body = item.value.data as
-            | BackendAsset[]
-            | { data?: BackendAsset[]; items?: BackendAsset[] }
-            | undefined
-          const list = Array.isArray(body) ? body : (body?.data ?? body?.items ?? [])
-          if (Array.isArray(list)) merged.push(...list)
-        }
-        assets.value = uniqueAssetRowsById(merged)
-      } else {
-        const merged: BackendAsset[] = []
-        const res = await assetsApi.listAssets(baseParams)
-        const body = res.data as BackendAsset[] | { data?: BackendAsset[]; items?: BackendAsset[] } | undefined
-        const list = Array.isArray(body) ? body : (body?.data ?? body?.items ?? [])
-        if (Array.isArray(list)) merged.push(...list)
-        if (keyword) {
-          const scopeRes = await assetsApi.listAssets({ ...baseParams, scope_sku_code: keyword })
-          const scopeBody = scopeRes.data as
-            | BackendAsset[]
-            | { data?: BackendAsset[]; items?: BackendAsset[] }
-            | undefined
-          const scopeList = Array.isArray(scopeBody)
-            ? scopeBody
-            : (scopeBody?.data ?? scopeBody?.items ?? [])
-          if (Array.isArray(scopeList)) merged.push(...scopeList)
-        }
-        assets.value = uniqueAssetRowsById(merged)
-      }
+    assets.value = backendItems
+    listTotal.value = Number.isFinite(backendTotal) && backendTotal >= 0 ? backendTotal : backendItems.length
+    if (Number.isFinite(backendPage) && backendPage > 0) {
+      listPage.value = Math.trunc(backendPage)
+    }
+    if (Number.isFinite(backendSize) && backendSize > 0) {
+      listPageSize.value = Math.trunc(backendSize)
     }
     if (!assets.value.length) {
       selectedAssetId.value = ''
@@ -884,6 +721,7 @@ async function reload() {
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载资产列表失败'
     assets.value = []
+    listTotal.value = 0
     selectedAssetId.value = ''
     selectedAssetDetail.value = null
     detailModalOpen.value = false
