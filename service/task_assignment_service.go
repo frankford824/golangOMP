@@ -202,7 +202,11 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	if p.DesignerID == nil {
 		return s.clearAssignment(ctx, task, p, operation, decision)
 	}
-	if appErr := s.validateManagedDepartmentTarget(ctx, p.DesignerID); appErr != nil {
+	if appErr := s.validateAssignableDesignerTarget(ctx, p.DesignerID); appErr != nil {
+		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
+		return nil, appErr
+	}
+	if appErr := s.validateManagedDepartmentTarget(ctx, task, decision, p.DesignerID); appErr != nil {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
 		return nil, appErr
 	}
@@ -518,12 +522,48 @@ func (s *taskAssignmentService) clearAssignment(ctx context.Context, task *domai
 	return updated, nil
 }
 
-func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Context, designerID *int64) *domain.AppError {
+func (s *taskAssignmentService) validateAssignableDesignerTarget(ctx context.Context, designerID *int64) *domain.AppError {
+	if designerID == nil || s.scopeUserRepo == nil {
+		return nil
+	}
+	target, appErr := s.loadTaskAssignmentTarget(ctx, designerID)
+	if appErr != nil {
+		return appErr
+	}
+	if target.Status != domain.UserStatusActive {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee is not active", map[string]interface{}{
+			"deny_code":      "target_assignee_not_active",
+			"target_user_id": *designerID,
+			"target_status":  target.Status,
+		})
+	}
+	roles := append([]domain.Role(nil), target.Roles...)
+	if len(roles) == 0 {
+		loadedRoles, err := s.scopeUserRepo.ListRoles(ctx, *designerID)
+		if err != nil {
+			return infraError("load target assignee roles", err)
+		}
+		roles = loadedRoles
+	}
+	if !hasRoleValue(roles, domain.RoleDesigner) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee is not a designer", map[string]interface{}{
+			"deny_code":      "target_assignee_not_designer",
+			"target_user_id": *designerID,
+			"target_roles":   roles,
+		})
+	}
+	return nil
+}
+
+func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Context, task *domain.Task, decision TaskActionDecision, designerID *int64) *domain.AppError {
 	if designerID == nil {
 		return nil
 	}
 	actor, ok := domain.RequestActorFromContext(ctx)
 	if !ok || !hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector) {
+		return nil
+	}
+	if !taskAssignmentRequiresManagedTargetScope(actor, task, decision) {
 		return nil
 	}
 	managedDepartments := normalizeTaskDepartmentCodes(actor.ManagedDepartments)
@@ -561,6 +601,32 @@ func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Cont
 		"actor_id":            actor.ID,
 		"managed_departments": managedDepartments,
 	})
+}
+
+func taskAssignmentRequiresManagedTargetScope(actor domain.RequestActor, task *domain.Task, decision TaskActionDecision) bool {
+	if hasAnyRoleValue(actor.Roles, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleRoleAdmin, domain.RoleHRAdmin) {
+		return false
+	}
+	if task != nil && actor.ID > 0 {
+		if task.CreatorID == actor.ID {
+			return false
+		}
+		if task.RequesterID != nil && *task.RequesterID == actor.ID {
+			return false
+		}
+	}
+	switch TaskActionScopeSource(decision.ScopeSource) {
+	case TaskActionScopeCreator, TaskActionScopeRequester, TaskActionScopeViewAll:
+		return false
+	case TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam:
+		return true
+	case TaskActionScopeDepartment:
+		return hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector)
+	case TaskActionScopeTeam:
+		return hasRoleValue(actor.Roles, domain.RoleTeamLead)
+	default:
+		return strings.EqualFold(strings.TrimSpace(decision.MatchedRule), "design_manager_target_scope")
+	}
 }
 
 func (s *taskAssignmentService) allowDesignManagerAssignmentByTargetScope(ctx context.Context, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, decision TaskActionDecision) (TaskActionDecision, bool, *domain.AppError) {

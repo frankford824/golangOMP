@@ -343,13 +343,20 @@ func TestTaskAssignmentServiceReassignDeniedForOps(t *testing.T) {
 	}
 }
 
+func seedTaskAssignmentUser(repo *identityUserRepoStub, id int64, department domain.Department, team string, status domain.UserStatus, roles ...domain.Role) {
+	repo.users[id] = &domain.User{ID: id, Department: department, Team: team, Status: status}
+	repo.roles[id] = append([]domain.Role{}, domain.NormalizeRoleValues(roles)...)
+}
+
 func TestTaskAssignmentServiceDeptAdminAssignAndReassignRoundV(t *testing.T) {
 	userRepo := newIdentityUserRepo()
-	userRepo.users[202] = &domain.User{ID: 202, Department: domain.DepartmentOperations}
-	userRepo.users[303] = &domain.User{ID: 303, Department: domain.DepartmentDesignRD}
-	userRepo.users[404] = &domain.User{ID: 404, Department: domain.DepartmentDesignRD, Team: "默认组"}
-	userRepo.users[505] = &domain.User{ID: 505, Department: domain.DepartmentDesignRD, Team: "默认组"}
-	userRepo.users[606] = &domain.User{ID: 606, Department: domain.DepartmentDesignRD, Team: "其他组"}
+	seedTaskAssignmentUser(userRepo, 202, domain.DepartmentOperations, "", domain.UserStatusActive, domain.RoleDesigner)
+	seedTaskAssignmentUser(userRepo, 303, domain.DepartmentDesignRD, "", domain.UserStatusActive, domain.RoleDesigner)
+	seedTaskAssignmentUser(userRepo, 404, domain.DepartmentDesignRD, "默认组", domain.UserStatusActive, domain.RoleDesigner)
+	seedTaskAssignmentUser(userRepo, 505, domain.DepartmentDesignRD, "默认组", domain.UserStatusActive, domain.RoleDesigner)
+	seedTaskAssignmentUser(userRepo, 606, domain.DepartmentDesignRD, "其他组", domain.UserStatusActive, domain.RoleDesigner)
+	seedTaskAssignmentUser(userRepo, 707, domain.DepartmentDesignRD, "默认组", domain.UserStatusActive, domain.RoleMember)
+	seedTaskAssignmentUser(userRepo, 808, domain.DepartmentDesignRD, "默认组", domain.UserStatusDisabled, domain.RoleDesigner)
 
 	t.Run("assign pending in managed department", func(t *testing.T) {
 		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
@@ -421,6 +428,80 @@ func TestTaskAssignmentServiceDeptAdminAssignAndReassignRoundV(t *testing.T) {
 		details, _ := appErr.Details.(map[string]interface{})
 		if got, _ := details["deny_code"].(string); got != "reassign_target_out_of_managed_department" {
 			t.Fatalf("deny_code = %v, want reassign_target_out_of_managed_department", details["deny_code"])
+		}
+	})
+
+	t.Run("ops dept admin can assign pending task to design designer outside managed department", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:                 250,
+			Roles:              []domain.Role{domain.RoleOps, domain.RoleDeptAdmin, domain.RoleMember},
+			Department:         string(domain.DepartmentOperations),
+			ManagedDepartments: []string{string(domain.DepartmentOperations)},
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:              33,
+			TaskStatus:      domain.TaskStatusPendingAssign,
+			OwnerDepartment: string(domain.DepartmentOperations),
+			CreatorID:       250,
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		task, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 33, DesignerID: authzInt64Ptr(303), AssignedBy: 250})
+		if appErr != nil {
+			t.Fatalf("Assign(ops dept admin to design designer) unexpected error: %+v", appErr)
+		}
+		if task.TaskStatus != domain.TaskStatusInProgress || task.DesignerID == nil || *task.DesignerID != 303 {
+			t.Fatalf("Assign(ops dept admin to design designer) task = %+v, want InProgress assigned to 303", task)
+		}
+	})
+
+	t.Run("ops dept admin can reassign in-progress task to design designer outside managed department", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:                 250,
+			Roles:              []domain.Role{domain.RoleOps, domain.RoleDeptAdmin, domain.RoleMember},
+			Department:         string(domain.DepartmentOperations),
+			ManagedDepartments: []string{string(domain.DepartmentOperations)},
+		})
+		currentDesignerID := int64(202)
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:               34,
+			TaskStatus:       domain.TaskStatusInProgress,
+			OwnerDepartment:  string(domain.DepartmentOperations),
+			DesignerID:       &currentDesignerID,
+			CurrentHandlerID: &currentDesignerID,
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		task, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 34, DesignerID: authzInt64Ptr(303), AssignedBy: 250})
+		if appErr != nil {
+			t.Fatalf("Assign(ops dept admin reassign to design designer) unexpected error: %+v", appErr)
+		}
+		if task.TaskStatus != domain.TaskStatusInProgress || task.DesignerID == nil || *task.DesignerID != 303 {
+			t.Fatalf("Assign(ops dept admin reassign to design designer) task = %+v, want InProgress assigned to 303", task)
+		}
+	})
+
+	t.Run("task creator can assign design designer outside managed department", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:                 251,
+			Roles:              []domain.Role{domain.RoleDeptAdmin, domain.RoleMember},
+			Department:         string(domain.DepartmentOperations),
+			ManagedDepartments: []string{string(domain.DepartmentOperations)},
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:              35,
+			TaskStatus:      domain.TaskStatusPendingAssign,
+			OwnerDepartment: string(domain.DepartmentOperations),
+			CreatorID:       251,
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		task, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 35, DesignerID: authzInt64Ptr(303), AssignedBy: 251})
+		if appErr != nil {
+			t.Fatalf("Assign(creator to design designer) unexpected error: %+v", appErr)
+		}
+		if task.TaskStatus != domain.TaskStatusInProgress || task.DesignerID == nil || *task.DesignerID != 303 {
+			t.Fatalf("Assign(creator to design designer) task = %+v, want InProgress assigned to 303", task)
 		}
 	})
 
@@ -523,6 +604,68 @@ func TestTaskAssignmentServiceDeptAdminAssignAndReassignRoundV(t *testing.T) {
 		details, _ := appErr.Details.(map[string]interface{})
 		if got, _ := details["deny_code"].(string); got != "reassign_target_out_of_managed_team" {
 			t.Fatalf("deny_code = %v, want reassign_target_out_of_managed_team", details["deny_code"])
+		}
+	})
+
+	t.Run("rejects non-designer target", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:    250,
+			Roles: []domain.Role{domain.RoleOps},
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:         36,
+			TaskStatus: domain.TaskStatusPendingAssign,
+			CreatorID:  250,
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		_, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 36, DesignerID: authzInt64Ptr(707), AssignedBy: 250})
+		if appErr == nil {
+			t.Fatal("Assign(non-designer target) expected error")
+		}
+		details, _ := appErr.Details.(map[string]interface{})
+		if got, _ := details["deny_code"].(string); got != "target_assignee_not_designer" {
+			t.Fatalf("deny_code = %v, want target_assignee_not_designer", details["deny_code"])
+		}
+	})
+
+	t.Run("rejects disabled designer target", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:    250,
+			Roles: []domain.Role{domain.RoleOps},
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:         37,
+			TaskStatus: domain.TaskStatusPendingAssign,
+			CreatorID:  250,
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		_, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 37, DesignerID: authzInt64Ptr(808), AssignedBy: 250})
+		if appErr == nil {
+			t.Fatal("Assign(disabled target) expected error")
+		}
+		details, _ := appErr.Details.(map[string]interface{})
+		if got, _ := details["deny_code"].(string); got != "target_assignee_not_active" {
+			t.Fatalf("deny_code = %v, want target_assignee_not_active", details["deny_code"])
+		}
+	})
+
+	t.Run("rejects missing designer target", func(t *testing.T) {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+			ID:    250,
+			Roles: []domain.Role{domain.RoleOps},
+		})
+		taskRepo := newStep04TaskRepo(&domain.Task{
+			ID:         38,
+			TaskStatus: domain.TaskStatusPendingAssign,
+			CreatorID:  250,
+		})
+		svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+		_, appErr := svc.Assign(ctx, AssignTaskParams{TaskID: 38, DesignerID: authzInt64Ptr(909), AssignedBy: 250})
+		if appErr == nil || appErr.Code != domain.ErrCodeNotFound {
+			t.Fatalf("Assign(missing target) appErr = %+v, want not found", appErr)
 		}
 	})
 }
