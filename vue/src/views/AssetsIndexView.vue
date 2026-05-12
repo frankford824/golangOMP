@@ -1,5 +1,9 @@
 <template>
-  <div class="assets-index-view min-h-[100dvh] pb-16">
+  <div
+    class="assets-index-view min-h-[100dvh] pb-16"
+    :data-selected-count="selectedCount"
+    :data-selected-assets="selectedAssets.length"
+  >
     <header class="ac-header">
       <div class="ac-nav-box">
         <h1 class="ac-brand">资产管理</h1>
@@ -73,6 +77,22 @@
     >
       当前共 <b>{{ listTotal }}</b> 条，当前页返回 <b>{{ assets.length }}</b> 条，展示 <b>{{ pagedAssets.length }}</b> 条
     </div>
+    <div v-if="selectedCount > 0" class="ac-batch-bar">
+      <span class="ac-batch-count">已选 {{ selectedCount }} 项</span>
+      <button type="button" class="ac-batch-btn" @click="selectedModalOpen = true">查看已选</button>
+      <button type="button" class="ac-batch-btn ac-batch-btn--ghost" @click="clearSelectedAssets">
+        清空选择
+      </button>
+      <button
+        type="button"
+        class="ac-batch-btn ac-batch-btn--primary"
+        :disabled="!canBatchDownload"
+        @click="handleBatchDownload"
+      >
+        {{ batchDownloading ? '批量下载中...' : '批量下载' }}
+      </button>
+      <span v-if="batchDownloadError" class="ac-batch-error">{{ batchDownloadError }}</span>
+    </div>
 
     <main class="ac-grid">
       <div v-if="loading" class="ac-loading-state">
@@ -91,9 +111,20 @@
           v-for="asset in pagedAssets"
           :key="asset.id"
           class="ac-card"
-          :class="{ 'ac-card--active': selectedAsset?.id === asset.id }"
+          :class="{
+            'ac-card--active': selectedAsset?.id === asset.id,
+            'ac-card--selected': isAssetSelected(asset),
+          }"
           @click="selectAsset(asset)"
         >
+          <label class="ac-card-check" @click.stop>
+            <input
+              type="checkbox"
+              class="ac-card-checkbox"
+              :checked="isAssetSelected(asset)"
+              @change.stop="onAssetSelectionChange(asset, $event)"
+            />
+          </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
               :asset-id="String(asset.id)"
@@ -184,6 +215,39 @@
         下一页
       </button>
     </div>
+
+    <BaseModal
+      v-model="selectedModalOpen"
+      title="已选资产"
+      :show-confirm="false"
+      cancel-text="关闭"
+      panel-class="max-w-2xl"
+    >
+      <BaseEmptyState
+        v-if="selectedAssets.length === 0"
+        title="暂无已选资产"
+        description="请在列表中勾选资产。"
+      />
+      <div v-else class="ac-selected-list">
+        <article v-for="asset in selectedAssets" :key="asset.id" class="ac-selected-item">
+          <div class="ac-selected-main">
+            <h4 class="ac-selected-title" :title="asset.title">{{ asset.title }}</h4>
+            <p class="ac-selected-meta">
+              任务 ID：<span class="cell-mono">{{ asset.taskId }}</span>
+              <span class="ac-selected-divider">|</span>
+              类型：{{ asset.kind }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="ac-selected-remove"
+            @click="removeSelectedAsset(asset.id)"
+          >
+            取消选择
+          </button>
+        </article>
+      </div>
+    </BaseModal>
 
     <BaseModal
       v-model="detailModalOpen"
@@ -371,6 +435,9 @@ let reloadTimer: ReturnType<typeof setTimeout> | null = null
 const previewLightboxSrc = ref<string | null>(null)
 const filtersExpanded = ref(false)
 const copyHint = ref('')
+const selectedModalOpen = ref(false)
+const batchDownloading = ref(false)
+const batchDownloadError = ref('')
 
 const filters = reactive({
   keyword: '',
@@ -405,6 +472,18 @@ const selectedAsset = computed(
 )
 
 const selectedVersions = computed<BackendAssetVersion[]>(() => selectedAsset.value?.versions ?? [])
+
+interface SelectedAssetSummary {
+  id: string
+  taskId: string
+  title: string
+  kind: string
+}
+
+const selectedAssetMap = reactive(new Map<string, SelectedAssetSummary>())
+const selectedCount = computed(() => selectedAssetMap.size)
+const selectedAssets = computed(() => Array.from(selectedAssetMap.values()))
+const canBatchDownload = computed(() => selectedCount.value > 0 && !batchDownloading.value)
 
 const effectiveSearchKeyword = computed(
   () => filters.keyword.trim() || filters.taskId.trim() || filters.scopeSkuCode.trim(),
@@ -477,6 +556,116 @@ function cardTitle(asset: BackendAsset): string {
   const fn = r.file_name
   if (typeof fn === 'string' && fn.trim()) return fn.trim()
   return `${assetKind(asset)} #${asset.id}`
+}
+
+function toSelectedAssetSummary(asset: BackendAsset): SelectedAssetSummary {
+  return {
+    id: String(asset.id),
+    taskId: displayText(asset.task_id),
+    title: cardTitle(asset),
+    kind: assetKind(asset),
+  }
+}
+
+function isAssetSelected(asset: BackendAsset): boolean {
+  return selectedAssetMap.has(String(asset.id))
+}
+
+function toggleAssetSelection(asset: BackendAsset, checked?: boolean) {
+  const id = String(asset.id)
+  const nextChecked = typeof checked === 'boolean' ? checked : !selectedAssetMap.has(id)
+  if (!nextChecked) {
+    selectedAssetMap.delete(id)
+    return
+  }
+  selectedAssetMap.set(id, toSelectedAssetSummary(asset))
+}
+
+function clearSelectedAssets() {
+  selectedAssetMap.clear()
+}
+
+function removeSelectedAsset(assetId: string) {
+  selectedAssetMap.delete(assetId)
+}
+
+function onAssetSelectionChange(asset: BackendAsset, event: Event) {
+  const checked = (event.target as HTMLInputElement | null)?.checked
+  toggleAssetSelection(asset, checked)
+}
+
+function decodeDispositionFilename(value: string): string {
+  const trimmed = value.trim().replace(/^["']|["']$/g, '')
+  try {
+    return decodeURIComponent(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function resolveBatchDownloadFilename(contentDisposition: string | undefined): string {
+  const fallback = 'assets-batch-download.zip'
+  if (!contentDisposition) return fallback
+
+  const starMatch = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  if (starMatch?.[1]) {
+    const name = decodeDispositionFilename(starMatch[1])
+    if (name) return name
+  }
+
+  const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i)
+  if (quotedMatch?.[1]) {
+    const name = decodeDispositionFilename(quotedMatch[1])
+    if (name) return name
+  }
+
+  const plainMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i)
+  if (plainMatch?.[1]) {
+    const name = decodeDispositionFilename(plainMatch[1])
+    if (name) return name
+  }
+
+  return fallback
+}
+
+function normalizeSelectedAssetIDs(): number[] {
+  const ids = selectedAssets.value
+    .map((item) => Number(item.id))
+    .filter((id) => Number.isInteger(id) && id > 0)
+  return Array.from(new Set(ids))
+}
+
+async function handleBatchDownload() {
+  if (batchDownloading.value) return
+  batchDownloadError.value = ''
+
+  const assetIDs = normalizeSelectedAssetIDs()
+  if (!assetIDs.length) {
+    batchDownloadError.value = '未找到可下载的资产 ID，请重新勾选后重试'
+    return
+  }
+
+  batchDownloading.value = true
+  try {
+    const res = await assetsApi.batchDownload(assetIDs)
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data as BlobPart], { type: 'application/zip' })
+    const disposition = String(res.headers?.['content-disposition'] ?? '')
+    const filename = resolveBatchDownloadFilename(disposition)
+
+    const objectURL = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectURL
+    link.download = filename
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(objectURL)
+  } catch (err) {
+    batchDownloadError.value = err instanceof Error ? err.message : '批量下载失败，请稍后重试'
+  } finally {
+    batchDownloading.value = false
+  }
 }
 
 function firstDisplayImageUrl(asset: BackendAsset): string {
@@ -742,6 +931,7 @@ onBeforeUnmount(() => {
     clearTimeout(reloadTimer)
     reloadTimer = null
   }
+  clearSelectedAssets()
 })
 </script>
 
@@ -885,6 +1075,53 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.ac-batch-bar {
+  max-width: var(--ac-content-max);
+  margin: 10px auto 0;
+  padding: 0 clamp(30px, 3vw, 50px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ac-batch-count {
+  font-size: 13px;
+  color: var(--ac-text);
+  font-weight: 600;
+}
+
+.ac-batch-btn {
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+  color: var(--ac-accent);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ac-batch-btn--ghost {
+  color: #334155;
+}
+
+.ac-batch-btn--primary {
+  color: #fff;
+  background: var(--ac-accent);
+  border-color: var(--ac-accent);
+}
+
+.ac-batch-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ac-batch-error {
+  font-size: 12px;
+  color: #b91c1c;
+}
+
 .ac-grid {
   width: 100%;
   max-width: var(--ac-content-max);
@@ -936,6 +1173,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   cursor: pointer;
   border: 1px solid rgba(0, 0, 0, 0.04);
+  position: relative;
 }
 
 .ac-card:hover {
@@ -945,6 +1183,31 @@ onBeforeUnmount(() => {
 
 .ac-card--active {
   box-shadow: 0 0 0 2px var(--ac-accent);
+}
+
+.ac-card--selected {
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.28);
+}
+
+.ac-card-check {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.ac-card-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }
 
 .ac-card-img-box {
@@ -1290,6 +1553,54 @@ onBeforeUnmount(() => {
 
 .state-error {
   color: #b91c1c;
+}
+
+.ac-selected-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ac-selected-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.ac-selected-main {
+  min-width: 0;
+}
+
+.ac-selected-title {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
+  line-height: 1.4;
+}
+
+.ac-selected-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.ac-selected-divider {
+  margin: 0 6px;
+}
+
+.ac-selected-remove {
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
 
 .preview-lightbox {

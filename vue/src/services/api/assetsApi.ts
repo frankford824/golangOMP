@@ -241,6 +241,10 @@ export interface AssetSearchResponse {
   size: number
 }
 
+export interface AssetBatchDownloadPayload {
+  asset_ids: number[]
+}
+
 export const assetsApi = {
   /**
    * 任务上下文资产列表
@@ -300,6 +304,16 @@ export const assetsApi = {
       params,
       signal,
     }),
+
+  batchDownload: (assetIds: number[], signal?: AbortSignal) =>
+    http.post<Blob>(
+      '/v1/assets/batch-download',
+      { asset_ids: assetIds } as AssetBatchDownloadPayload,
+      {
+        signal,
+        responseType: 'blob',
+      },
+    ),
 
   /** GET /v1/assets/{id} */
   getAsset: (assetId: string, signal?: AbortSignal) =>
