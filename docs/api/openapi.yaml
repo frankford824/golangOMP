@@ -14285,7 +14285,7 @@ paths:
       parameters:
         - in: query
           name: keyword
-          description: Fuzzy match file_name / task_no / task title.
+          description: Fuzzy match asset_id / task_id / sku_code / primary_sku_code / scope_sku_code / file_name / original_filename / task_no / task title.
           schema: { type: string }
         - in: query
           name: module_key

@@ -90,8 +90,18 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 	var args []interface{}
 	if query.Keyword != "" {
 		like := "%" + strings.TrimSpace(query.Keyword) + "%"
-		clauses = append(clauses, `(ta.file_name LIKE ? OR t.task_no LIKE ? OR t.product_name_snapshot LIKE ?)`)
-		args = append(args, like, like, like)
+		clauses = append(clauses, `(
+			CAST(ta.asset_id AS CHAR) LIKE ?
+			OR CAST(ta.task_id AS CHAR) LIKE ?
+			OR t.sku_code LIKE ?
+			OR t.primary_sku_code LIKE ?
+			OR ta.scope_sku_code LIKE ?
+			OR ta.file_name LIKE ?
+			OR ta.original_filename LIKE ?
+			OR t.task_no LIKE ?
+			OR t.product_name_snapshot LIKE ?
+		)`)
+		args = append(args, like, like, like, like, like, like, like, like, like)
 	}
 	if query.ModuleKey != "" {
 		clauses = append(clauses, `ta.source_module_key = ?`)
