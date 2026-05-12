@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 涓€閿皢鏈湴 dist/front 鍙戝竷鍒拌繙绔?/var/www/yongbo.cloud锛堜笌 publish-front.ps1 鍚屼竴 SOP锛夈€?
-# 渚濊禆锛歴sh銆乻cp锛涜繙绔渶鏈?rsync銆乶ginx銆傚彲閫夋湰鏈?rsync 浠ュ姞閫熶笂浼犮€?
+# Publish local dist/front to jst_ecs:/var/www/yongbo.cloud.
+# Requires ssh and scp locally. Remote host must provide rsync and nginx.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,12 +35,12 @@ die() { echo "[publish-front] ERROR: $*" >&2; exit 1; }
 step() { echo "[publish-front] $*"; }
 
 if [[ "$SKIP_CHECKS" != "true" ]]; then
-  step "鏈湴妫€鏌?dist/front ..."
-  [[ -d "$FRONT" ]] || die "缂哄皯鐩綍: $FRONT"
-  [[ -f "$FRONT/index.html" ]] || die "缂哄皯: $FRONT/index.html"
-  [[ -d "$FRONT/assets" ]] || die "缂哄皯鐩綍: $FRONT/assets"
+  step "Local check: dist/front ..."
+  [[ -d "$FRONT" ]] || die "Missing directory: $FRONT"
+  [[ -f "$FRONT/index.html" ]] || die "Missing file: $FRONT/index.html"
+  [[ -d "$FRONT/assets" ]] || die "Missing directory: $FRONT/assets"
   if grep -qE 'localhost|127\.0\.0\.1' "$FRONT/index.html"; then
-    die "index.html 鍚?localhost / 127.0.0.1"
+    die "index.html contains localhost or 127.0.0.1"
   fi
   main_js=""
   main_js=$(grep -oE 'src="/assets/[^"]+\.js"' "$FRONT/index.html" | head -1 | sed 's/src="//;s/"$//' || true)
@@ -57,48 +57,48 @@ if [[ "$SKIP_CHECKS" != "true" ]]; then
     fi
   fi
   if ! grep -rEl 'beian\.miit\.gov\.cn|2026007026' "$FRONT" --include='*.html' --include='*.js' --include='*.css' -q 2>/dev/null; then
-    echo "[publish-front] WARN: 鏈娴嬪埌澶囨鍙锋垨 beian 閾炬帴锛岃纭椤甸潰宸插睍绀? >&2
+    echo "[publish-front] WARN: ICP footer or beian link not detected; confirm the page shows the required filing text." >&2
   fi
-  step "鏈湴妫€鏌ラ€氳繃"
+  step "Local checks passed"
 fi
 
-command -v ssh >/dev/null || die "闇€瑕?ssh"
-command -v scp >/dev/null || die "闇€瑕?scp"
+command -v ssh >/dev/null || die "ssh is required"
+command -v scp >/dev/null || die "scp is required"
 
 if [[ "$DRY_RUN" == "true" ]]; then
-  step "DryRun: Host=$SSH_HOST 婧?$FRONT 鐩爣=$REMOTE_WEB"
+  step "DryRun: Host=$SSH_HOST source=$FRONT target=$REMOTE_WEB"
   exit 0
 fi
 
-step "鑾峰彇杩滅 UTC 鏃堕棿鎴?..."
+step "Fetch remote UTC timestamp ..."
 TS="$(ssh "$SSH_HOST" 'date -u +%Y%m%dT%H%M%SZ' | tr -d '\r\n')"
-[[ -n "$TS" ]] || die "鏃犳硶鍙栧緱杩滅鏃堕棿鎴?
+[[ -n "$TS" ]] || die "Could not read remote timestamp"
 
 BACKUP="$REMOTE_BACKUP_PARENT/yongbo.cloud_${TS}"
 STAGING="/tmp/yongbo.cloud_dist_${TS}"
 
-step "杩滅澶囦唤: $BACKUP"
+step "Remote backup: $BACKUP"
 ssh "$SSH_HOST" "mkdir -p \"$BACKUP\" && cp -a \"$REMOTE_WEB\"/. \"$BACKUP\"/ && mkdir -p \"$STAGING\""
 
-step "涓婁紶鍒? $STAGING"
+step "Upload to staging: $STAGING"
 if command -v rsync >/dev/null 2>&1; then
   rsync -av --delete "$FRONT/" "$SSH_HOST:$STAGING/"
 else
   scp -r "$FRONT"/* "$SSH_HOST:$STAGING/"
 fi
 
-step "鍚屾鑷虫寮忕洰褰曘€佹潈闄愩€乶ginx reload"
+step "Sync to web root, chmod, nginx reload"
 ssh "$SSH_HOST" "rsync -a --delete \"$STAGING\"/ \"$REMOTE_WEB\"/ && chmod -R a+rX \"$REMOTE_WEB\" && nginx -t && systemctl reload nginx"
 
-step "鍙戝竷瀹屾垚銆傚浠? $BACKUP"
+step "Done. Backup kept at: $BACKUP"
 
 if [[ "$SKIP_VERIFY" != "true" ]] && command -v curl >/dev/null 2>&1; then
-  step "HTTP 鎺㈡祴 yongbo.cloud ..."
+  step "HTTP probe: yongbo.cloud ..."
   code="$(curl -sS -o /dev/null -w '%{http_code}' "https://yongbo.cloud/")"
-  [[ "$code" == "200" ]] || echo "[publish-front] WARN: 棣栭〉 HTTP $code" >&2
+  [[ "$code" == "200" ]] || echo "[publish-front] WARN: home HTTP $code" >&2
   code="$(curl -sS -o /dev/null -w '%{http_code}' "https://yongbo.cloud/login")"
   [[ "$code" == "200" ]] || echo "[publish-front] WARN: /login HTTP $code" >&2
   code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "https://yongbo.cloud/v1/auth/login" -H "Content-Type: application/json" -d '{}')"
-  [[ "$code" == "404" ]] || true
-  step "楠岃瘉缁撴潫锛堣娴忚鍣ㄤ笌鐪熷疄璐﹀彿鎶芥煡锛?
+  [[ "$code" != "404" ]] || echo "[publish-front] WARN: POST /v1/auth/login returned 404; check Nginx /v1 proxy" >&2
+  step "HTTP probe done; use a browser and a real account for functional smoke test."
 fi
