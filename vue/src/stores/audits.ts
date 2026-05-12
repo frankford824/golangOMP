@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { AuditRecord, AuditHandover } from '@/types'
-import { mockAuditRecords, mockHandovers } from '@/mock/audits'
 import { auditLogApi } from '@/services/api/auditLogApi'
 import { nowISO } from '@/utils/date'
 
@@ -22,8 +21,8 @@ function mapAuditRecord(raw: Record<string, unknown>): AuditRecord {
 }
 
 export const useAuditsStore = defineStore('audits', () => {
-  const records = ref<AuditRecord[]>([...mockAuditRecords])
-  const handovers = ref<AuditHandover[]>([...mockHandovers])
+  const records = ref<AuditRecord[]>([])
+  const handovers = ref<AuditHandover[]>([])
   const loading = ref(false)
   const loadError = ref('')
 
@@ -36,9 +35,10 @@ export const useAuditsStore = defineStore('audits', () => {
       const list = Array.isArray(body) ? body : (body?.data ?? body?.items ?? [])
       const rawList = Array.isArray(list) ? list : []
       records.value = rawList.map((r) => mapAuditRecord(typeof r === 'object' && r !== null ? (r as Record<string, unknown>) : {}))
-    } catch {
-      loadError.value = ''
-      records.value = [...mockAuditRecords]
+    } catch (e) {
+      loadError.value = '加载审计日志失败'
+      records.value = []
+      throw e
     } finally {
       loading.value = false
     }

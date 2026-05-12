@@ -31,6 +31,16 @@ This file is an assistant guidance note. It is not the backend specification.
 - Before running commands, confirm the working directory: use the repository root for Go/backend commands, and `cd vue` for Node/Vue commands.
 - Do not move frontend files out of `vue/` or place new backend files under `vue/` unless the user explicitly requests a layout change.
 
+## Branch Review And Publish Rule
+
+- `dev/external-developer` is the external developer branch. Fetch it and inspect `origin/main...origin/dev/external-developer` before judging or publishing external work.
+- External branch changes must be reviewed locally before any deploy or static publish.
+- Classify every external-branch diff as `backend`, `frontend`, or `both`.
+- Frontend publish authority is `deploy/FRONTEND_DIST_PUBLISH_SOP.md`; the static artifact path is `dist/front`, built from `vue/`.
+- Backend publish authority is `deploy/DEPLOYMENT_WORKFLOW.md`; do not replace it with frontend SOP commands.
+- If both sides changed and the frontend depends on new backend behavior, deploy or validate the backend first, then publish the frontend.
+- Do not merge `dev/external-developer` into `main` automatically. The project owner decides when the branch is stable enough to merge.
+
 ## Reading Order
 
 1. `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`
