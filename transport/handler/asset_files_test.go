@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -61,6 +63,51 @@ func TestAssetFilesHandlerServeFileProxiesHeadersAndStatus(t *testing.T) {
 	}
 	if rec.Header().Get("Accept-Ranges") != "bytes" {
 		t.Fatalf("accept-ranges = %q", rec.Header().Get("Accept-Ranges"))
+	}
+	if rec.Body.String() != "data" {
+		t.Fatalf("body = %q, want data", rec.Body.String())
+	}
+}
+
+func TestAssetFilesHandlerServeFileSetsDownloadFilenameHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const filename = "交付 文件.psd"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get(service.DownloadFilenameQueryParam); got != "" {
+			t.Fatalf("upstream download_filename = %q, want empty", got)
+		}
+		if got := r.URL.Query().Get("download"); got != "1" {
+			t.Fatalf("upstream download = %q, want 1", got)
+		}
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `inline; filename="storage.psd"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	h := NewAssetFilesHandler(upstream.URL, "oss-token", "oss", zap.NewNop())
+	router.GET("/v1/assets/files/*path", h.ServeFile)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/files/objects/reference/ref-1.psd?download=1&"+service.DownloadFilenameQueryParam+"="+url.QueryEscape(filename), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	disposition := rec.Header().Get("Content-Disposition")
+	if !strings.Contains(disposition, "attachment") {
+		t.Fatalf("Content-Disposition = %q, want attachment", disposition)
+	}
+	if !strings.Contains(disposition, "filename*=") {
+		t.Fatalf("Content-Disposition = %q, want encoded filename parameter", disposition)
+	}
+	if !strings.Contains(disposition, "%E4%BA%A4%E4%BB%98%20%E6%96%87%E4%BB%B6.psd") {
+		t.Fatalf("Content-Disposition = %q, want encoded filename", disposition)
 	}
 	if rec.Body.String() != "data" {
 		t.Fatalf("body = %q, want data", rec.Body.String())

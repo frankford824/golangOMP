@@ -105,6 +105,44 @@ func TestBuildObjectKey_ASCIIStorageFilename(t *testing.T) {
 	}
 }
 
+func TestResolveAssetDownloadFilename(t *testing.T) {
+	tests := []struct {
+		name             string
+		originalFilename string
+		fileName         string
+		assetID          int64
+		want             string
+	}{
+		{
+			name:             "original filename wins",
+			originalFilename: " 原始文件.psd ",
+			fileName:         "storage-name.psd",
+			assetID:          42,
+			want:             "原始文件.psd",
+		},
+		{
+			name:     "file name fallback",
+			fileName: " storage-name.psd ",
+			assetID: 42,
+			want:    "storage-name.psd",
+		},
+		{
+			name:    "asset id fallback",
+			assetID: 42,
+			want:    "asset-42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveAssetDownloadFilename(tt.originalFilename, tt.fileName, tt.assetID)
+			if got != tt.want {
+				t.Fatalf("ResolveAssetDownloadFilename() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPresignDownloadURL(t *testing.T) {
 	svc := newTestOSSDirectService()
 	info := svc.PresignDownloadURL("tasks/T1/assets/A1/v1/delivery/test.psd")
@@ -136,6 +174,32 @@ func TestPresignDownloadURL(t *testing.T) {
 	}
 	if !strings.Contains(info.DownloadURL, "attachment") {
 		t.Fatal("expected attachment disposition for download")
+	}
+}
+
+func TestPresignDownloadURLWithFilename(t *testing.T) {
+	svc := newTestOSSDirectService()
+	info := svc.PresignDownloadURLWithFilename("tasks/T1/assets/A1/v1/delivery/test.psd", "交付 文件.psd")
+	if info == nil || info.DownloadURL == "" {
+		t.Fatalf("PresignDownloadURLWithFilename() = %+v", info)
+	}
+
+	u, err := url.Parse(info.DownloadURL)
+	if err != nil {
+		t.Fatalf("invalid download URL: %v", err)
+	}
+	disposition := u.Query().Get("response-content-disposition")
+	if disposition == "" {
+		t.Fatal("expected response-content-disposition in URL")
+	}
+	if !strings.Contains(disposition, "attachment") {
+		t.Fatalf("disposition = %q, want attachment", disposition)
+	}
+	if !strings.Contains(disposition, "filename*=") {
+		t.Fatalf("disposition = %q, want encoded filename parameter", disposition)
+	}
+	if !strings.Contains(disposition, "%E4%BA%A4%E4%BB%98%20%E6%96%87%E4%BB%B6.psd") {
+		t.Fatalf("disposition = %q, want encoded unicode filename", disposition)
 	}
 }
 

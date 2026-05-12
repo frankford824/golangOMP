@@ -19,6 +19,10 @@ type DownloadPresigner interface {
 	PresignDownloadURL(objectKey string) *baseservice.OSSDirectDownloadInfo
 }
 
+type DownloadFilenamePresigner interface {
+	PresignDownloadURLWithFilename(objectKey, filename string) *baseservice.OSSDirectDownloadInfo
+}
+
 type BrowserURLBuilder interface {
 	BuildBrowserFileURL(storageKey string) *string
 }

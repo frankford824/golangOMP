@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -110,6 +111,8 @@ type OSSCompletePart struct {
 	PartNumber int    `xml:"PartNumber" json:"part_number"`
 	ETag       string `xml:"ETag" json:"etag"`
 }
+
+const DownloadFilenameQueryParam = "download_filename"
 
 func (s *OSSDirectService) BuildObjectKey(taskRef, assetNo string, versionNo int, assetType domain.TaskAssetType, filename string) string {
 	roleSubdir := assetTypeToSubdir(assetType)
@@ -285,6 +288,10 @@ func (s *OSSDirectService) AbortMultipartUpload(ctx context.Context, objectKey, 
 
 func (s *OSSDirectService) PresignDownloadURL(objectKey string) *OSSDirectDownloadInfo {
 	return s.presignGetURL(objectKey, "attachment")
+}
+
+func (s *OSSDirectService) PresignDownloadURLWithFilename(objectKey, filename string) *OSSDirectDownloadInfo {
+	return s.presignGetURL(objectKey, attachmentContentDisposition(filename))
 }
 
 func (s *OSSDirectService) PresignPreviewURL(objectKey string) *OSSDirectDownloadInfo {
@@ -628,6 +635,57 @@ func ossEscapePath(objectKey string) string {
 		escaped[i] = strings.ReplaceAll(url.PathEscape(part), "+", "%2B")
 	}
 	return strings.Join(escaped, "/")
+}
+
+func ResolveAssetDownloadFilename(originalFilename, fileName string, assetID int64) string {
+	if filename := strings.TrimSpace(originalFilename); filename != "" {
+		return filename
+	}
+	if filename := strings.TrimSpace(fileName); filename != "" {
+		return filename
+	}
+	if assetID > 0 {
+		return "asset-" + strconv.FormatInt(assetID, 10)
+	}
+	return "asset"
+}
+
+func ContentDispositionAttachment(filename string) string {
+	return attachmentContentDisposition(filename)
+}
+
+func attachmentContentDisposition(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return "attachment"
+	}
+	if value := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); value != "" {
+		return value
+	}
+	return "attachment"
+}
+
+func AppendProxyDownloadFilenameQuery(rawURL, filename string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	filename = strings.TrimSpace(filename)
+	if rawURL == "" || filename == "" {
+		return rawURL
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = parsed.Path
+	}
+	if !strings.HasPrefix(path, "/v1/assets/files/") && !strings.HasPrefix(path, "/files/") {
+		return rawURL
+	}
+	query := parsed.Query()
+	query.Set(DownloadFilenameQueryParam, filename)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func assetTypeToSubdir(assetType domain.TaskAssetType) string {

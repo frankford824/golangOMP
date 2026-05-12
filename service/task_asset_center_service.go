@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -1179,6 +1180,7 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 	if version == nil {
 		return nil
 	}
+	filename := ResolveAssetDownloadFilename(version.OriginalFilename, "", version.AssetID)
 	if ossDirect != nil && ossDirect.Enabled() && strings.TrimSpace(version.StorageKey) != "" {
 		key := strings.TrimSpace(version.StorageKey)
 		var info *OSSDirectDownloadInfo
@@ -1193,7 +1195,7 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 				info = ossDirect.PresignPreviewURL(key)
 			}
 		} else {
-			info = ossDirect.PresignDownloadURL(key)
+			info = ossDirect.PresignDownloadURLWithFilename(key, filename)
 		}
 		if info != nil && strings.TrimSpace(info.DownloadURL) != "" {
 			downloadURL := info.DownloadURL
@@ -1206,7 +1208,7 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 				DownloadURL:      &downloadURL,
 				AccessHint:       "oss_presigned",
 				PreviewAvailable: version.PreviewAvailable,
-				Filename:         version.OriginalFilename,
+				Filename:         filename,
 				FileSize:         fileSize,
 				MimeType:         mimeType,
 				ExpiresAt:        &info.ExpiresAt,
@@ -1220,14 +1222,15 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 	if version == nil {
 		return nil
 	}
+	filename := ResolveAssetDownloadFilename(version.OriginalFilename, "", version.AssetID)
 	downloadMode := domain.AssetDownloadModeProxy
 	downloadURL := version.DownloadURL
 	if uploadClient != nil {
 		if directURL := uploadClient.BuildBrowserFileURL(version.StorageKey); directURL != nil && strings.TrimSpace(*directURL) != "" {
 			urlValue := strings.TrimSpace(*directURL)
+			downloadURL = directURL
 			if isDirectBrowserURL(urlValue) {
 				downloadMode = domain.AssetDownloadModeDirect
-				downloadURL = directURL
 			}
 		}
 	}
@@ -1236,6 +1239,10 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 		if strings.HasPrefix(urlValue, "http://") || strings.HasPrefix(urlValue, "https://") {
 			downloadMode = domain.AssetDownloadModeDirect
 		}
+	}
+	if downloadMode == domain.AssetDownloadModeProxy && downloadURL != nil {
+		urlValue := AppendProxyDownloadFilenameQuery(*downloadURL, filename)
+		downloadURL = &urlValue
 	}
 	fileSize := int64(0)
 	if version.FileSize != nil {
@@ -1246,7 +1253,7 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 		DownloadURL:      downloadURL,
 		AccessHint:       version.AccessHint,
 		PreviewAvailable: version.PreviewAvailable,
-		Filename:         version.OriginalFilename,
+		Filename:         filename,
 		FileSize:         fileSize,
 		MimeType:         version.MimeType,
 	}
@@ -1259,6 +1266,11 @@ func isDirectBrowserURL(urlValue string) bool {
 	}
 	if strings.HasPrefix(urlValue, "/v1/assets/files/") || strings.HasPrefix(urlValue, "/files/") {
 		return false
+	}
+	if parsed, err := url.Parse(urlValue); err == nil && parsed.Path != "" {
+		if strings.HasPrefix(parsed.Path, "/v1/assets/files/") || strings.HasPrefix(parsed.Path, "/files/") {
+			return false
+		}
 	}
 	return strings.HasPrefix(urlValue, "http://") || strings.HasPrefix(urlValue, "https://") || strings.HasPrefix(urlValue, "/")
 }

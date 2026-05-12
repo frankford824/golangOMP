@@ -57,6 +57,7 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 	}
 	storageKey := strings.TrimPrefix(pathParam, "/")
 	traceID := domain.TraceIDFromContext(c.Request.Context())
+	downloadFilename := strings.TrimSpace(c.Query(service.DownloadFilenameQueryParam))
 	upstreamURL, err := domain.BuildAbsoluteEscapedURLPath(h.uploadServiceBaseURL, "/files", storageKey)
 	if err != nil {
 		h.logger.Warn("asset_files_proxy_upstream_url_invalid",
@@ -67,7 +68,7 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build upstream request"})
 		return
 	}
-	if rawQuery := strings.TrimSpace(c.Request.URL.RawQuery); rawQuery != "" {
+	if rawQuery := strings.TrimSpace(upstreamRawQuery(c)); rawQuery != "" {
 		upstreamURL += "?" + rawQuery
 	}
 	h.logger.Info("asset_files_proxy_downstream_request",
@@ -75,6 +76,7 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 		zap.String("method", c.Request.Method),
 		zap.String("storage_key", storageKey),
 		zap.String("raw_query", c.Request.URL.RawQuery),
+		zap.Bool("has_download_filename", downloadFilename != ""),
 	)
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, upstreamURL, nil)
@@ -131,12 +133,15 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 		zap.String("probe_prefix_b64", encodeProbe(probe)),
 	)
 	if resp.StatusCode == http.StatusNotFound {
-		if h.redirectToOSSDirect(c, storageKey, traceID) {
+		if h.redirectToOSSDirect(c, storageKey, downloadFilename, traceID) {
 			return
 		}
 	}
 
 	copyHeaders(c.Writer.Header(), resp.Header)
+	if downloadFilename != "" && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		c.Writer.Header().Set("Content-Disposition", service.ContentDispositionAttachment(downloadFilename))
+	}
 	if c.Request.Method != http.MethodHead && len(probe) > 0 && resp.ContentLength == 0 {
 		c.Writer.Header().Del("Content-Length")
 		h.logger.Warn("asset_files_proxy_drop_zero_content_length",
@@ -150,6 +155,7 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 		zap.Int("status_code", resp.StatusCode),
 		zap.String("content_length", c.Writer.Header().Get("Content-Length")),
 		zap.String("content_type", c.Writer.Header().Get("Content-Type")),
+		zap.String("content_disposition", c.Writer.Header().Get("Content-Disposition")),
 	)
 	if c.Request.Method == http.MethodHead {
 		return
@@ -164,11 +170,14 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 	)
 }
 
-func (h *AssetFilesHandler) redirectToOSSDirect(c *gin.Context, storageKey, traceID string) bool {
+func (h *AssetFilesHandler) redirectToOSSDirect(c *gin.Context, storageKey, downloadFilename, traceID string) bool {
 	if h == nil || h.ossPresigner == nil {
 		return false
 	}
 	info := h.ossPresigner.PresignPreviewURL(storageKey)
+	if filenamePresigner, ok := h.ossPresigner.(assetFilesOSSDownloadPresigner); ok && strings.TrimSpace(downloadFilename) != "" {
+		info = filenamePresigner.PresignDownloadURLWithFilename(storageKey, downloadFilename)
+	}
 	if info == nil || strings.TrimSpace(info.DownloadURL) == "" {
 		return false
 	}
@@ -180,6 +189,10 @@ func (h *AssetFilesHandler) redirectToOSSDirect(c *gin.Context, storageKey, trac
 	return true
 }
 
+type assetFilesOSSDownloadPresigner interface {
+	PresignDownloadURLWithFilename(objectKey, filename string) *service.OSSDirectDownloadInfo
+}
+
 func firstAssetFilesOSSPresigner(values []assetFilesOSSPresigner) assetFilesOSSPresigner {
 	for _, value := range values {
 		if value != nil {
@@ -187,6 +200,15 @@ func firstAssetFilesOSSPresigner(values []assetFilesOSSPresigner) assetFilesOSSP
 		}
 	}
 	return nil
+}
+
+func upstreamRawQuery(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return ""
+	}
+	query := c.Request.URL.Query()
+	query.Del(service.DownloadFilenameQueryParam)
+	return query.Encode()
 }
 
 func copyHeaders(dst, src http.Header) {
