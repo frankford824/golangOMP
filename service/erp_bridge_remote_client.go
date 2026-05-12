@@ -240,7 +240,7 @@ func NewRemoteERPBridgeClient(cfg ERPRemoteClientConfig) (ERPBridgeClient, error
 		unshelveBatchPath:        normalizeERPRemotePath(unshelveBatchPath),
 		virtualQtyPath:           normalizeERPRemotePath(virtualQtyPath),
 		syncLogsPath:             normalizeERPRemotePath(syncLogsPath),
-		getCompanyUsersPath:     normalizeERPRemotePath(getCompanyUsersPath),
+		getCompanyUsersPath:      normalizeERPRemotePath(getCompanyUsersPath),
 		skuQueryPath:             normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.SkuQueryPath), "/open/sku/query")),
 		openWebCharset:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebCharset), "utf-8"),
 		openWebVersion:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebVersion), "2"),
@@ -1215,7 +1215,7 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			item["short_name"] = shortName
 		}
 		if payload.SPrice != nil {
-			item["s_price"] = *payload.SPrice
+			item["sale_price"] = *payload.SPrice
 		}
 		if categoryName := strings.TrimSpace(payload.CategoryName); categoryName != "" {
 			item["category_name"] = categoryName
@@ -1440,7 +1440,7 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			"page_action":  pageAction,
 			"current_page": currentPage,
 			"page_size":    pageSize,
-			"version":     version,
+			"version":      version,
 		}
 		if filter.Enabled != nil {
 			biz["enabled"] = *filter.Enabled

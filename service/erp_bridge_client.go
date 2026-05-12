@@ -1013,6 +1013,7 @@ func adaptERPProduct(root interface{}) *domain.ERPProduct {
 		ImageURL:         firstString(mapped, "image_url", "image", "main_image", "cover", "cover_url", "pic_url", "pic", "thumbnail", "thumb", "imageUrl"),
 		Price:            firstFloatPtr(mapped, "price", "sale_price", "sales_price", "market_price", "unit_price", "amount", "min_price", "retail_price"),
 		SPrice:           firstFloatPtr(mapped, "s_price", "sale_price", "sales_price", "price"),
+		CostPrice:        firstFloatPtr(mapped, "cost_price", "c_price"),
 		WMSCoID:          firstString(mapped, "wms_co_id", "warehouse_code"),
 		Currency:         firstString(mapped, "currency", "currency_code", "currencyCode"),
 	}

@@ -14,6 +14,7 @@ export const OPERATION_EVENT_TYPE_LABELS: Record<string, string> = {
   'task.assigned': '任务已指派',
   'task.reassigned': '任务已改派',
   'task.business_info.updated': '业务信息已更新',
+  'task.cost.updated': '成本已更新',
   /** 与部分后端/旧 mock 的裸字段名对齐（无 task. 前缀） */
   'business_info.updated': '业务信息已更新',
   'task.design.submitted': '设计已提交',

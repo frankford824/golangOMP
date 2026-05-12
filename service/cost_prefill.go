@@ -15,6 +15,7 @@ type costPreviewComputation struct {
 }
 
 func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
+	req = withTextDerivedCostRuleDimensions(req)
 	sortedRules := make([]*domain.CostRule, 0, len(rules))
 	for _, rule := range rules {
 		if rule == nil {
@@ -144,6 +145,23 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 		},
 		MatchedRule: matchedRule,
 	}
+}
+
+func withTextDerivedCostRuleDimensions(req domain.CostRulePreviewRequest) domain.CostRulePreviewRequest {
+	if req.Area != nil || (req.Width != nil && req.Height != nil) {
+		return req
+	}
+	extracted := extractCostDimensionsFromText(strings.Join(nonEmptyStrings(req.Process, req.Notes), " "))
+	if req.Width == nil {
+		req.Width = cloneFloat64Ptr(extracted.WidthM)
+	}
+	if req.Height == nil {
+		req.Height = cloneFloat64Ptr(extracted.HeightM)
+	}
+	if req.Area == nil {
+		req.Area = cloneFloat64Ptr(extracted.AreaM2)
+	}
+	return req
 }
 
 func previewMatchFromRule(rule *domain.CostRule) *domain.CostRulePreviewMatch {

@@ -125,6 +125,12 @@ func jstMapsToERPProducts(rows []map[string]interface{}, keyword string) []*doma
 				price = &f
 			}
 		}
+		var costPrice *float64
+		if cp := firstString(m, "cost_price", "c_price"); cp != "" {
+			if f, err := strconv.ParseFloat(cp, 64); err == nil {
+				costPrice = &f
+			}
+		}
 		out = append(out, &domain.ERPProduct{
 			ProductID:   sku,
 			SKUID:       sku,
@@ -137,8 +143,9 @@ func jstMapsToERPProducts(rows []map[string]interface{}, keyword string) []*doma
 				firstString(m, "category", "category_name", "vc_name"),
 				"",
 			),
-			ImageURL: firstNonEmptyString(firstString(m, "pic_big", "pic"), ""),
-			SPrice:   price,
+			ImageURL:  firstNonEmptyString(firstString(m, "pic_big", "pic"), ""),
+			SPrice:    price,
+			CostPrice: costPrice,
 		})
 	}
 	return out
@@ -155,11 +162,11 @@ func jstMapsToERPProductRecords(rows []map[string]interface{}) []domain.ERPProdu
 		name := firstNonEmptyString(jstRowName(m), sku)
 		cat := firstNonEmptyString(firstString(m, "category", "category_name", "vc_name"), "")
 		spec := map[string]interface{}{
-			"i_id":              firstString(m, "i_id", "iId"),
-			"properties_value":  firstString(m, "properties_value"),
-			"jst_sale_price":    firstString(m, "sale_price"),
-			"jst_cost_price":    firstString(m, "cost_price"),
-			"jst_source":        "jst_openweb_sku_query",
+			"i_id":             firstString(m, "i_id", "iId"),
+			"properties_value": firstString(m, "properties_value"),
+			"jst_sale_price":   firstString(m, "sale_price"),
+			"jst_cost_price":   firstString(m, "cost_price"),
+			"jst_source":       "jst_openweb_sku_query",
 		}
 		b, _ := json.Marshal(spec)
 		out = append(out, domain.ERPProductRecord{

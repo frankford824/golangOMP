@@ -17,7 +17,7 @@ export function defaultBatchTemplateValues(kind: TaskKind): TaskBatchTemplateVal
       materialOther: undefined,
       purchaseSku: undefined,
       skuRuleId: null,
-      costPriceMode: 'manual',
+      costPriceMode: 'template',
       costPriceAmount: undefined,
       quantity: undefined,
       baseSalePrice: undefined,

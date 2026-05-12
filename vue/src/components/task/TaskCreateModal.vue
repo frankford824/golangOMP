@@ -581,7 +581,7 @@ const form = ref<TaskCreateFormModel>({
   customizationRequired: false,
   customizationSourceType: undefined,
   note: '',
-  costPriceMode: 'manual',
+  costPriceMode: 'template',
   category: undefined,
   material: undefined,
   materialOther: undefined,
@@ -772,10 +772,11 @@ watch(taskKind, (mode) => {
     form.value.purchaseQuantity = undefined
     form.value.basePriceAmount = undefined
     form.value.productChannel = undefined
-    form.value.costPriceMode = 'manual'
+    form.value.costPriceMode = 'template'
   }
   if (mode === 'PURCHASE_TASK') {
     form.value.designRequirement = ''
+    form.value.costPriceMode = form.value.costPriceMode || 'template'
   }
 })
 

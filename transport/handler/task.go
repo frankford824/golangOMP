@@ -1638,7 +1638,18 @@ func (h *TaskHandler) PreviewCostQuote(c *gin.Context) {
 	if req.Process != nil {
 		process = strings.TrimSpace(*req.Process)
 	}
-	notes := strings.TrimSpace(detail.Material + " " + detail.CraftText + " " + detail.SpecText)
+	notes := strings.TrimSpace(strings.Join([]string{
+		detail.SizeText,
+		detail.SpecText,
+		detail.Material,
+		detail.CraftText,
+		detail.Process,
+		detail.DesignRequirement,
+		detail.ChangeRequest,
+		detail.Note,
+		detail.Remark,
+		detail.DemandText,
+	}, " "))
 	if req.Notes != nil {
 		notes = strings.TrimSpace(*req.Notes)
 	}

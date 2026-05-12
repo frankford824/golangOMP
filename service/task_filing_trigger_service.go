@@ -309,6 +309,10 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 	if shortName == "" {
 		shortName = name
 	}
+	sPrice := cloneFloat64Ptr(detail.BaseSalePrice)
+	if sPrice == nil && task.SourceMode == domain.TaskSourceModeNewProduct {
+		sPrice = zeroFloat64Ptr()
+	}
 	skuImmutable := task.TaskType == domain.TaskTypeOriginalProductDevelopment
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        productID,
@@ -321,6 +325,7 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 		ProductShortName: shortName,
 		CategoryCode:     categoryCode,
 		CategoryName:     categoryName,
+		SPrice:           sPrice,
 		Remark:           strings.TrimSpace(remark),
 		CostPrice:        cloneFloat64Ptr(detail.CostPrice),
 		Operation:        "product_profile_upsert",
@@ -378,6 +383,10 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 	name := firstNonEmptyString(strings.TrimSpace(item.ProductNameSnapshot), strings.TrimSpace(task.ProductNameSnapshot), skuCode)
 	shortName := firstNonEmptyString(strings.TrimSpace(item.ProductShortName), name)
 	imageURL := firstReferenceImageURL(item.ReferenceFileRefs)
+	sPrice := cloneFloat64Ptr(item.BaseSalePrice)
+	if sPrice == nil {
+		sPrice = zeroFloat64Ptr()
+	}
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        skuCode,
 		SKUID:            skuCode,
@@ -392,6 +401,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		SKUPic:           imageURL,
 		CategoryCode:     strings.TrimSpace(item.CategoryCode),
 		CategoryName:     strings.TrimSpace(detail.CategoryName),
+		SPrice:           sPrice,
 		Remark:           strings.TrimSpace(remark),
 		Operation:        "product_profile_upsert",
 		Source:           strings.TrimSpace(source),
@@ -421,6 +431,11 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		},
 	}
 	return normalizeERPProductUpsertPayload(payload), nil
+}
+
+func zeroFloat64Ptr() *float64 {
+	zero := 0.0
+	return &zero
 }
 
 func firstReferenceImageURL(refs []domain.ReferenceFileRef) string {

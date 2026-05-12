@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -1852,6 +1853,152 @@ func TestTaskServiceUpdateBusinessInfoAutoPrefillsCost(t *testing.T) {
 	}
 	if detail.RequiresManualReview {
 		t.Fatalf("requires_manual_review = true, want false")
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromExistingRemark(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "KT Standard",
+		DisplayName:  "KT Standard",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       1,
+			RuleVersion:  1,
+			RuleName:     "KT Standard Base",
+			CategoryCode: "KT_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    float64Ptr(10),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			131: {ID: 131, TaskType: domain.TaskTypePurchaseTask},
+		},
+		details: map[int64]*domain.TaskDetail{
+			131: {TaskID: 131, Remark: "运营备注：客户要50x70cm，尽快处理"},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:       131,
+		OperatorID:   9,
+		CategoryCode: "KT_STANDARD",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.Area == nil || math.Abs(*detail.Area-0.35) > 0.000001 {
+		t.Fatalf("area = %+v, want 0.35", detail.Area)
+	}
+	if detail.EstimatedCost == nil || *detail.EstimatedCost != 3.5 {
+		t.Fatalf("estimated_cost = %+v, want 3.5", detail.EstimatedCost)
+	}
+	if detail.CostPrice == nil || *detail.CostPrice != 3.5 {
+		t.Fatalf("cost_price = %+v, want 3.5", detail.CostPrice)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoResolvesChineseCategoryNameForCost(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规kt板",
+		DisplayName:  "常规kt板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规KT板基础单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(11),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+		{
+			RuleID:          2,
+			RuleVersion:     1,
+			RuleName:        "常规KT板小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   float64Ptr(0.15),
+			SurchargeAmount: float64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			132: {ID: 132, TaskType: domain.TaskTypeNewProductDevelopment},
+		},
+		details: map[int64]*domain.TaskDetail{
+			132: {TaskID: 132},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     132,
+		OperatorID: 9,
+		Category:   "常规kt板",
+		SpecText:   "10x22",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.Category != "常规kt板" || detail.CategoryName != "常规kt板" {
+		t.Fatalf("category fields = %q / %q, want 常规kt板", detail.Category, detail.CategoryName)
+	}
+	if detail.Area == nil || math.Abs(*detail.Area-0.022) > 0.000001 {
+		t.Fatalf("area = %+v, want 0.022", detail.Area)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-3.2662) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 3.2662", detail.CostPrice)
 	}
 }
 

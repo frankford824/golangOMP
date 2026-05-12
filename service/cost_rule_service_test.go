@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +115,60 @@ func TestCostRulePreviewAppliesFixedThresholdAndProcessSurcharge(t *testing.T) {
 	}
 	if result.EstimatedCost == nil || *result.EstimatedCost <= 0 {
 		t.Fatalf("estimated_cost = %+v, want > 0", result.EstimatedCost)
+	}
+}
+
+func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   21,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规KT板",
+		DisplayName:  "常规KT板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       21,
+			RuleVersion:  1,
+			RuleName:     "KT板面积单价",
+			CategoryCode: "KT_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    costRuleFloat64Ptr(11),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "test",
+		},
+		{
+			RuleID:          22,
+			RuleVersion:     1,
+			RuleName:        "小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   costRuleFloat64Ptr(0.15),
+			SurchargeAmount: costRuleFloat64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "运营备注：尺寸20x20cm，做常规KT板",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-3.44) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 3.44", result.EstimatedCost)
+	}
+	if result.RequiresManualReview {
+		t.Fatalf("requires_manual_review = true, want false")
 	}
 }
 
@@ -343,8 +399,34 @@ func (r *categoryRepoStub) List(_ context.Context, _ repo.CategoryListFilter) ([
 	return nil, 0, nil
 }
 
-func (r *categoryRepoStub) Search(_ context.Context, _ repo.CategorySearchFilter) ([]*domain.Category, error) {
-	return nil, nil
+func (r *categoryRepoStub) Search(_ context.Context, filter repo.CategorySearchFilter) ([]*domain.Category, error) {
+	keyword := strings.TrimSpace(filter.Keyword)
+	activeOnly := filter.IsActive != nil && *filter.IsActive
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	items := make([]*domain.Category, 0)
+	for _, item := range r.byID {
+		if item == nil {
+			continue
+		}
+		if activeOnly && !item.IsActive {
+			continue
+		}
+		if keyword != "" &&
+			!strings.Contains(item.CategoryCode, keyword) &&
+			!strings.Contains(item.CategoryName, keyword) &&
+			!strings.Contains(item.DisplayName, keyword) {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+		if len(items) >= limit {
+			break
+		}
+	}
+	return items, nil
 }
 
 func (r *categoryRepoStub) Create(_ context.Context, _ repo.Tx, category *domain.Category) (int64, error) {

@@ -23,6 +23,7 @@ type ERPProduct struct {
 	ImageURL         string   `json:"image_url"`
 	Price            *float64 `json:"price,omitempty"`
 	SPrice           *float64 `json:"s_price,omitempty"`
+	CostPrice        *float64 `json:"cost_price,omitempty"`
 	WMSCoID          string   `json:"wms_co_id,omitempty"`
 	Currency         string   `json:"currency,omitempty"`
 }

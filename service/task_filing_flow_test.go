@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"workflow/domain"
@@ -447,6 +448,12 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 	if bridgeStub.upsertPayloads[0].IID != "I-1001" || bridgeStub.upsertPayloads[1].IID != "I-1002" {
 		t.Fatalf("upsert iids = %s/%s, want I-1001/I-1002", bridgeStub.upsertPayloads[0].IID, bridgeStub.upsertPayloads[1].IID)
 	}
+	if got := bridgeStub.upsertPayloads[0].SPrice; got == nil || *got != 0 {
+		t.Fatalf("batch upsert[0] s_price = %v, want explicit 0 to avoid ERP default sale price", got)
+	}
+	if got := bridgeStub.upsertPayloads[1].SPrice; got == nil || *got != 0 {
+		t.Fatalf("batch upsert[1] s_price = %v, want explicit 0 to avoid ERP default sale price", got)
+	}
 	items := taskRepo.skuItems[task.ID]
 	if len(items) != 2 || items[0].ProductIID != "I-1001" || items[1].ProductIID != "I-1002" {
 		t.Fatalf("sku item product_i_id = %+v", items)
@@ -512,6 +519,91 @@ func TestPurchaseFilingDoesNotRegressToPendingWhenBaseSalePriceMissingAfterCreat
 	}
 	if bridgeStub.upsertCalls != 2 {
 		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayloads[0].SPrice; got == nil || *got != 0 {
+		t.Fatalf("create upsert s_price = %v, want explicit 0 to avoid ERP default sale price", got)
+	}
+	if got := bridgeStub.upsertPayloads[1].SPrice; got == nil || *got != 0 {
+		t.Fatalf("refile upsert s_price = %v, want explicit 0 to avoid ERP default sale price", got)
+	}
+}
+
+func TestUpdateBusinessInfoCostChangeRefilesERPAndAppendsCostEvent(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{}
+	eventRepo := &prdTaskEventRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		eventRepo,
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypePurchaseTask,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		PurchaseSKU:         "NSCK000000",
+		ProductNameSnapshot: "上线前采购单SKU任务",
+		ProductIID:          "定制海报",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		CostPrice:           float64Ptr(22),
+		Quantity:            int64Ptr(22),
+		SyncERPOnCreate:     true,
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:                   task.ID,
+		OperatorID:               11,
+		ProductName:              "上线前采购单SKU任务",
+		ProductIID:               "定制海报",
+		Category:                 "定制海报",
+		SpecText:                 "20*20",
+		CostPrice:                float64Ptr(25),
+		ManualCostOverride:       true,
+		ManualCostOverrideReason: "仓库维护成本价",
+		Quantity:                 int64Ptr(22),
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got == nil || *got != 25 {
+		t.Fatalf("refile cost_price = %v, want 25", got)
+	}
+
+	var costEvent *domain.TaskEvent
+	for _, event := range eventRepo.events {
+		if event.EventType == domain.TaskEventCostUpdated {
+			costEvent = event
+			break
+		}
+	}
+	if costEvent == nil {
+		t.Fatalf("events = %+v, want cost updated event", eventRepo.events)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(costEvent.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal cost event payload: %v", err)
+	}
+	if payload["manual_cost_override_reason"] != "仓库维护成本价" || payload["erp_sync_requested"] != true {
+		t.Fatalf("cost event payload = %#v, want reason and erp_sync_requested", payload)
 	}
 }
 

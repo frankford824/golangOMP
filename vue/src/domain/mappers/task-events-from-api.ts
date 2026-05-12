@@ -140,6 +140,13 @@ function filingStatusDisplayCn(raw: string | undefined): string {
   return FILING_STATUS_CN[k] ?? raw.trim()
 }
 
+function moneyDisplay(raw: unknown): string {
+  if (raw == null || raw === '') return '—'
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n)) return String(raw)
+  return `${n.toFixed(2)} 元`
+}
+
 function formatActorSegment(raw: Record<string, unknown>, payload: Record<string, unknown>): string {
   const id =
     pickField(raw, payload, 'operator_id') ??
@@ -285,6 +292,23 @@ function buildTaskEventSummaryCn(
 
   if (et === 'task.business_info.updated' || et === 'business_info.updated') {
     return `${actor} 更新了业务信息${pickField(raw, payload, 'note') ? `（${pickField(raw, payload, 'note')}）` : ''}。`
+  }
+
+  if (et === 'task.cost.updated') {
+    const previous = payload.previous_cost_price ?? payload.previousCostPrice
+    const current = payload.cost_price ?? payload.costPrice
+    const estimated = payload.estimated_cost ?? payload.estimatedCost
+    const manual = payload.manual_cost_override ?? payload.manualCostOverride
+    const reason = pickFirst(raw, payload, ['manual_cost_override_reason', 'override_reason', 'remark'])
+    const syncRequested = payload.erp_sync_requested ?? payload.erpSyncRequested
+    const parts = [`${actor} 更新了成本价：${moneyDisplay(previous)} → ${moneyDisplay(current)}`]
+    if (estimated != null && estimated !== '') parts.push(`系统预估 ${moneyDisplay(estimated)}`)
+    if (manual === true || manual === 1 || String(manual).toLowerCase() === 'true') parts.push('人工覆盖')
+    if (reason) parts.push(`原因：${reason}`)
+    if (syncRequested === true || syncRequested === 1 || String(syncRequested).toLowerCase() === 'true') {
+      parts.push('已请求同步 ERP')
+    }
+    return `${parts.join('，')}。`
   }
 
   if (et === 'task.asset.upload_session.created' ||

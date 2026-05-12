@@ -8,12 +8,12 @@
       <span class="font-black text-[20rem] text-slate-200/30 leading-none">YONGBO</span>
     </div>
 
-    <div class="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-8">
-    <!-- 居中卡片 -->
-    <div
-      class="relative z-10 w-full max-w-[480px] rounded-[2rem] p-12 my-8"
-      style="background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 12px 48px -12px rgba(28, 25, 23, 0.08);"
-    >
+    <div class="relative z-10 flex w-full flex-1 flex-col items-center justify-center px-4 py-8">
+      <!-- 居中卡片 -->
+      <div
+        class="relative z-10 my-8 rounded-[2rem] p-6 sm:p-12"
+        style="width: min(100%, 480px); max-width: min(480px, calc(100vw - 4rem)); background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 12px 48px -12px rgba(28, 25, 23, 0.08);"
+      >
       <!-- 顶部 Header -->
       <div class="text-center mb-10">
         <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-stone-200/80 mb-4">

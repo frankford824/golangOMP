@@ -1683,7 +1683,11 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			detail.CategoryCode = strings.ToUpper(strings.TrimSpace(p.CategoryCode))
 		}
 	} else if p.CategoryID != nil || strings.TrimSpace(p.CategoryCode) != "" || strings.TrimSpace(p.Category) != "" {
-		category, appErr := s.resolveTaskCategory(ctx, p.CategoryID, p.CategoryCode)
+		categoryLookupValue := strings.TrimSpace(p.CategoryCode)
+		if categoryLookupValue == "" {
+			categoryLookupValue = strings.TrimSpace(p.Category)
+		}
+		category, appErr := s.resolveTaskCategory(ctx, p.CategoryID, categoryLookupValue)
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -1753,6 +1757,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	if strings.TrimSpace(p.Process) != "" {
 		detail.Process = strings.TrimSpace(p.Process)
 	}
+	applyTextDerivedCostDimensions(detail)
 	detail.ManualCostOverride = p.ManualCostOverride
 	detail.ManualCostOverrideReason = strings.TrimSpace(p.ManualCostOverrideReason)
 	costRule, appErr := s.resolveTaskCostRule(ctx, p.CostRuleID)
@@ -1865,6 +1870,24 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		p.Remark,
 		governanceStatus,
 	)
+	costChanged := hasTaskCostStateChanged(
+		previousCostPrice,
+		detail.CostPrice,
+		previousEstimatedCost,
+		detail.EstimatedCost,
+		previousOverrideActive,
+		detail.ManualCostOverride,
+		previousOverrideReason,
+		detail.ManualCostOverrideReason,
+		previousMatchedRuleID,
+		detail.CostRuleID,
+		previousMatchedRuleVersion,
+		detail.MatchedRuleVersion,
+		previousCategoryCode,
+		detail.CategoryCode,
+		previousCostRuleSource,
+		detail.CostRuleSource,
+	)
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if bindingChanged {
@@ -1927,6 +1950,31 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				"remark":                      p.Remark,
 			},
 		)
+		if err != nil {
+			return err
+		}
+		if costChanged {
+			_, err = s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventCostUpdated, &p.OperatorID,
+				mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
+					"previous_cost_price":           previousCostPrice,
+					"cost_price":                    detail.CostPrice,
+					"estimated_cost":                detail.EstimatedCost,
+					"previous_estimated_cost":       previousEstimatedCost,
+					"cost_rule_id":                  detail.CostRuleID,
+					"cost_rule_name":                detail.CostRuleName,
+					"cost_rule_source":              detail.CostRuleSource,
+					"matched_rule_version":          detail.MatchedRuleVersion,
+					"manual_cost_override":          detail.ManualCostOverride,
+					"manual_cost_override_reason":   detail.ManualCostOverrideReason,
+					"previous_manual_cost_override": previousOverrideActive,
+					"previous_override_reason":      previousOverrideReason,
+					"override_actor":                detail.OverrideActor,
+					"override_at":                   detail.OverrideAt,
+					"erp_sync_requested":            true,
+					"remark":                        p.Remark,
+				}),
+			)
+		}
 		return err
 	})
 	if txErr != nil {
@@ -1934,7 +1982,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	}
 
 	triggerSource := TaskFilingTriggerSourceBusinessInfoPatch
-	forceTrigger := p.TriggerFiling
+	forceTrigger := p.TriggerFiling || costChanged
 	if p.FiledAt != nil {
 		triggerSource = TaskFilingTriggerSourceLegacyFiledAt
 		forceTrigger = true
@@ -1999,27 +2047,116 @@ func applyTaskDetailDemandTextEdit(task *domain.Task, detail *domain.TaskDetail,
 }
 
 func (s *taskService) previewTaskCost(ctx context.Context, detail *domain.TaskDetail) (costPreviewComputation, *domain.AppError) {
-	if s.costRuleRepo == nil || detail == nil || strings.TrimSpace(detail.CategoryCode) == "" {
+	if s.costRuleRepo == nil || detail == nil {
 		return costPreviewComputation{}, nil
 	}
-	rules, err := s.costRuleRepo.ListActiveByCategory(ctx, detail.CategoryID, detail.CategoryCode, time.Now())
+	categoryID, ruleCategoryCode, appErr := s.resolveTaskCostRuleCategory(ctx, detail)
+	if appErr != nil {
+		return costPreviewComputation{}, appErr
+	}
+	if categoryID == nil && strings.TrimSpace(ruleCategoryCode) == "" {
+		return costPreviewComputation{}, nil
+	}
+	rules, err := s.costRuleRepo.ListActiveByCategory(ctx, categoryID, ruleCategoryCode, time.Now())
 	if err != nil {
 		return costPreviewComputation{}, infraError("list active cost rules for task business info", err)
 	}
 	if len(rules) == 0 {
 		return costPreviewComputation{}, nil
 	}
-	notes := strings.Join(nonEmptyStrings(detail.Material, detail.CraftText, detail.SpecText), " ")
+	notes := taskCostPreviewText(detail)
+	width, height, area := taskCostPreviewDimensions(detail, notes)
 	return previewCostRules(domain.CostRulePreviewRequest{
-		CategoryID:   detail.CategoryID,
-		CategoryCode: detail.CategoryCode,
-		Width:        detail.Width,
-		Height:       detail.Height,
-		Area:         detail.Area,
+		CategoryID:   categoryID,
+		CategoryCode: ruleCategoryCode,
+		Width:        width,
+		Height:       height,
+		Area:         area,
 		Quantity:     detail.Quantity,
 		Process:      detail.Process,
 		Notes:        notes,
 	}, rules), nil
+}
+
+func (s *taskService) resolveTaskCostRuleCategory(ctx context.Context, detail *domain.TaskDetail) (*int64, string, *domain.AppError) {
+	if detail == nil {
+		return nil, "", nil
+	}
+	if detail.CategoryID != nil || strings.TrimSpace(detail.CategoryCode) != "" {
+		return detail.CategoryID, strings.TrimSpace(detail.CategoryCode), nil
+	}
+	categoryKey := firstNonEmptyString(
+		strings.TrimSpace(detail.Category),
+		strings.TrimSpace(detail.CategoryName),
+	)
+	if categoryKey == "" {
+		return nil, "", nil
+	}
+	category, err := s.resolveTaskCategoryByDisplayValue(ctx, categoryKey)
+	if err != nil {
+		return nil, "", infraError("resolve cost rule category from task category", err)
+	}
+	if category == nil {
+		return nil, "", nil
+	}
+	return &category.CategoryID, category.CategoryCode, nil
+}
+
+func applyTextDerivedCostDimensions(detail *domain.TaskDetail) {
+	if detail == nil {
+		return
+	}
+	notes := taskCostPreviewText(detail)
+	width, height, area := taskCostPreviewDimensions(detail, notes)
+	if detail.Width == nil && width != nil {
+		detail.Width = cloneFloat64Ptr(width)
+	}
+	if detail.Height == nil && height != nil {
+		detail.Height = cloneFloat64Ptr(height)
+	}
+	if detail.Area == nil && area != nil {
+		detail.Area = cloneFloat64Ptr(area)
+	}
+}
+
+func taskCostPreviewText(detail *domain.TaskDetail) string {
+	if detail == nil {
+		return ""
+	}
+	return strings.Join(nonEmptyStrings(
+		detail.SizeText,
+		detail.SpecText,
+		detail.Material,
+		detail.CraftText,
+		detail.Process,
+		detail.DesignRequirement,
+		detail.ChangeRequest,
+		detail.Note,
+		detail.Remark,
+		detail.DemandText,
+	), " ")
+}
+
+func taskCostPreviewDimensions(detail *domain.TaskDetail, text string) (*float64, *float64, *float64) {
+	if detail == nil {
+		return nil, nil, nil
+	}
+	width := cloneFloat64Ptr(detail.Width)
+	height := cloneFloat64Ptr(detail.Height)
+	area := cloneFloat64Ptr(detail.Area)
+	if area == nil && (width == nil || height == nil) {
+		extracted := extractCostDimensionsFromText(text)
+		if width == nil {
+			width = cloneFloat64Ptr(extracted.WidthM)
+		}
+		if height == nil {
+			height = cloneFloat64Ptr(extracted.HeightM)
+		}
+		if area == nil {
+			area = cloneFloat64Ptr(extracted.AreaM2)
+		}
+	}
+	return width, height, area
 }
 
 func cloneFloat64Ptr(value *float64) *float64 {
@@ -2110,6 +2247,26 @@ func nonEmptyStrings(values ...string) []string {
 
 func formatOverrideActor(operatorID int64) string {
 	return fmt.Sprintf("operator:%d", operatorID)
+}
+
+func hasTaskCostStateChanged(
+	previousCostPrice, currentCostPrice *float64,
+	previousEstimatedCost, currentEstimatedCost *float64,
+	previousOverrideActive, currentOverrideActive bool,
+	previousOverrideReason, currentOverrideReason string,
+	previousMatchedRuleID, currentMatchedRuleID *int64,
+	previousMatchedRuleVersion, currentMatchedRuleVersion *int,
+	previousCategoryCode, currentCategoryCode string,
+	previousCostRuleSource, currentCostRuleSource string,
+) bool {
+	return !sameFloat64Ptr(previousCostPrice, currentCostPrice) ||
+		!sameFloat64Ptr(previousEstimatedCost, currentEstimatedCost) ||
+		previousOverrideActive != currentOverrideActive ||
+		strings.TrimSpace(previousOverrideReason) != strings.TrimSpace(currentOverrideReason) ||
+		!sameInt64Ptr(previousMatchedRuleID, currentMatchedRuleID) ||
+		!sameIntPtr(previousMatchedRuleVersion, currentMatchedRuleVersion) ||
+		strings.TrimSpace(previousCategoryCode) != strings.TrimSpace(currentCategoryCode) ||
+		strings.TrimSpace(previousCostRuleSource) != strings.TrimSpace(currentCostRuleSource)
 }
 
 func buildTaskCostOverrideAuditEvent(

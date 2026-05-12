@@ -100,9 +100,12 @@
             v-model="form.manual_cost_override_reason"
             class="sm:col-span-2"
             label="覆盖原因"
-            placeholder="勾选人工覆盖时建议填写"
+            placeholder="如：仓库维护成本价、ERP 同步前修正"
           />
         </div>
+        <p class="section-hint mt-2">
+          系统预估成本仅作参考；保存成本单价后将按人工维护成本处理，并请求同步 ERP。
+        </p>
       </section>
 
       <section v-if="isPurchaseTask" class="form-card">
@@ -460,14 +463,17 @@ function buildCostPatch(b: EditForm, c: EditForm): Record<string, unknown> | nul
   const remark = optionalRemark()
   const bc = b.cost_price
   const cc = c.cost_price
+  const reason = normStr(c.manual_cost_override_reason)
   if (cc !== bc) {
     patch.cost_price = cc == null || Number.isNaN(cc) ? null : cc
-  }
-  if (Boolean(c.manual_cost_override) !== Boolean(b.manual_cost_override)) {
+    patch.manual_cost_override = true
+    patch.manual_cost_override_reason = reason || '仓库/运营手动维护成本'
+    patch.trigger_filing = true
+  } else if (Boolean(c.manual_cost_override) !== Boolean(b.manual_cost_override)) {
     patch.manual_cost_override = c.manual_cost_override
   }
-  if (normStr(c.manual_cost_override_reason) !== normStr(b.manual_cost_override_reason)) {
-    patch.manual_cost_override_reason = normStr(c.manual_cost_override_reason) || null
+  if (reason !== normStr(b.manual_cost_override_reason) && !('manual_cost_override_reason' in patch)) {
+    patch.manual_cost_override_reason = reason || null
   }
   const touched = Object.keys(patch).length > 0
   if (touched && remark) patch.remark = remark
