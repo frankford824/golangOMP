@@ -383,6 +383,38 @@ func (s *OSSDirectService) HeadObject(ctx context.Context, objectKey string) (bo
 	}
 }
 
+func (s *OSSDirectService) OpenObject(ctx context.Context, objectKey string) (io.ReadCloser, error) {
+	if !s.Enabled() {
+		return nil, fmt.Errorf("oss direct service is not enabled")
+	}
+	objectKey = strings.TrimSpace(objectKey)
+	if objectKey == "" {
+		return nil, fmt.Errorf("oss direct open object_key is required")
+	}
+	reqURL := s.bucketURL() + "/" + ossEscapePath(objectKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("oss direct open build request: %w", err)
+	}
+	date := time.Now().UTC().Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+
+	canonResource := "/" + s.cfg.Bucket + "/" + objectKey
+	sig := s.signV1(http.MethodGet, "", "", date, "", canonResource)
+	req.Header.Set("Authorization", "OSS "+s.cfg.AccessKeyID+":"+sig)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("oss direct open request: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("oss direct open failed: status=%d body=%s", resp.StatusCode, string(raw))
+	}
+	return resp.Body, nil
+}
+
 func (s *OSSDirectService) CopyObject(ctx context.Context, srcKey, dstKey string) error {
 	if !s.Enabled() {
 		return fmt.Errorf("oss direct service is not enabled")

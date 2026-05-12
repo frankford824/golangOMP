@@ -2178,6 +2178,14 @@ func (c *stubUploadServiceClient) ProbeStoredFile(_ context.Context, _ RemotePro
 	}, nil
 }
 
+func (c *stubUploadServiceClient) OpenStoredFile(_ context.Context, req RemoteProbeStoredFileRequest) (io.ReadCloser, error) {
+	storageKey := strings.TrimSpace(req.StorageKey)
+	if storageKey == "" {
+		return nil, fmt.Errorf("missing storage key")
+	}
+	return io.NopCloser(strings.NewReader("stub-stream:" + storageKey)), nil
+}
+
 func (c *stubUploadServiceClient) BuildBrowserFileURL(storageKey string) *string {
 	storageKey = strings.TrimSpace(storageKey)
 	if storageKey == "" {

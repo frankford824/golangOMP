@@ -99,6 +99,13 @@ func (f *fakeSearchRepo) GetCurrentByAssetID(context.Context, int64) (*repo.Task
 	return f.current, nil
 }
 
+func (f *fakeSearchRepo) ListCurrentByAssetIDs(context.Context, []int64) ([]*repo.TaskAssetSearchRow, error) {
+	if f.current == nil {
+		return []*repo.TaskAssetSearchRow{}, nil
+	}
+	return []*repo.TaskAssetSearchRow{f.current}, nil
+}
+
 func (f *fakeSearchRepo) ListVersionsByAssetID(context.Context, int64) ([]*repo.TaskAssetSearchRow, error) {
 	if f.current == nil {
 		return nil, nil

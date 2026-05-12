@@ -4630,6 +4630,15 @@ components:
           format: date-time
           nullable: true
           description: Expiry time for signed direct URL when present.
+    AssetBatchDownloadRequest:
+      type: object
+      required: [asset_ids]
+      properties:
+        asset_ids:
+          type: array
+          minItems: 1
+          items:
+            type: integer
     ValidationViolation:
       type: object
       properties:
@@ -9287,6 +9296,41 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/DesignAsset'
+  /v1/assets/batch-download:
+    post:
+      summary: Batch download assets as ZIP
+      description: Build one ZIP package from current versions of the requested assets.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetBatchDownloadRequest'
+      responses:
+        '200':
+          description: ZIP archive bytes
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid request or all assets unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error while building ZIP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/assets/{asset_id}:
     get:
       summary: Get asset

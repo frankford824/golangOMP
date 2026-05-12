@@ -20,6 +20,7 @@ type TaskAssetSearchRow struct {
 type TaskAssetSearchRepo interface {
 	Search(ctx context.Context, query domain.AssetSearchQuery) ([]*TaskAssetSearchRow, int64, error)
 	GetCurrentByAssetID(ctx context.Context, assetID int64) (*TaskAssetSearchRow, error)
+	ListCurrentByAssetIDs(ctx context.Context, assetIDs []int64) ([]*TaskAssetSearchRow, error)
 	ListVersionsByAssetID(ctx context.Context, assetID int64) ([]*TaskAssetSearchRow, error)
 	GetVersion(ctx context.Context, assetID, versionID int64) (*TaskAssetSearchRow, error)
 }

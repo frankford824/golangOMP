@@ -9,9 +9,10 @@ import (
 )
 
 type Service struct {
-	searchRepo repo.TaskAssetSearchRepo
-	presigner  DownloadPresigner
-	urlBuilder BrowserURLBuilder
+	searchRepo   repo.TaskAssetSearchRepo
+	presigner    DownloadPresigner
+	urlBuilder   BrowserURLBuilder
+	streamOpener baseservice.StorageStreamOpener
 }
 
 type DownloadPresigner interface {
@@ -29,6 +30,10 @@ type BrowserURLBuilder interface {
 
 func NewService(searchRepo repo.TaskAssetSearchRepo, presigner DownloadPresigner, urlBuilder BrowserURLBuilder) *Service {
 	return &Service{searchRepo: searchRepo, presigner: presigner, urlBuilder: urlBuilder}
+}
+
+func (s *Service) SetStorageStreamOpener(opener baseservice.StorageStreamOpener) {
+	s.streamOpener = opener
 }
 
 func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*SearchResult, *domain.AppError) {

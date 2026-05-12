@@ -66,6 +66,19 @@ func (r *taskAssetSearchRepo) GetCurrentByAssetID(ctx context.Context, assetID i
 	return scanTaskAssetSearchRow(row)
 }
 
+func (r *taskAssetSearchRepo) ListCurrentByAssetIDs(ctx context.Context, assetIDs []int64) ([]*repo.TaskAssetSearchRow, error) {
+	query, args := buildListCurrentByAssetIDsQuery(assetIDs)
+	if query == "" {
+		return []*repo.TaskAssetSearchRow{}, nil
+	}
+	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list current assets by ids: %w", err)
+	}
+	defer rows.Close()
+	return scanTaskAssetSearchRows(rows)
+}
+
 func (r *taskAssetSearchRepo) ListVersionsByAssetID(ctx context.Context, assetID int64) ([]*repo.TaskAssetSearchRow, error) {
 	rows, err := r.db.db.QueryContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+`
 		WHERE da.id = ?
@@ -244,4 +257,29 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 		DesignUpdatedAt: designUpdatedAt,
 		OwnerTeamCode:   ownerTeamCode,
 	}, nil
+}
+
+func buildListCurrentByAssetIDsQuery(assetIDs []int64) (string, []interface{}) {
+	if len(assetIDs) == 0 {
+		return "", nil
+	}
+	placeholders := make([]string, 0, len(assetIDs))
+	args := make([]interface{}, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		if assetID <= 0 {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, assetID)
+	}
+	if len(placeholders) == 0 {
+		return "", nil
+	}
+	query := taskAssetSearchSelect + taskAssetSearchFrom + `
+		WHERE da.id IN (` + strings.Join(placeholders, ", ") + `)
+		  AND ta.id = COALESCE(da.current_version_id, (
+		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
+		  ))
+		ORDER BY ta.created_at DESC, ta.id DESC`
+	return query, args
 }

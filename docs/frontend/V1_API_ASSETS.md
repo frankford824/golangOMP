@@ -11,7 +11,7 @@
 
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
-- 本文件覆盖 `15` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `16` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/assets
 
@@ -72,6 +72,60 @@
 ```bash
 curl -X GET https://api.example.com/v1/assets \
   -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/batch-download
+
+### 简介
+支持方法: POST。
+
+- `POST`: Build one ZIP package from current versions of the requested assets.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `asset_ids` | array<integer> | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/zip`
+
+```json
+"string"
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | string | 视接口 | OpenAPI 声明的整体对象。 |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request or all assets unavailable |
+| 500 | 见 `error.code` | 见 `deny_code` | Internal error while building ZIP |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/batch-download \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
 ```
 
 ### 前端最佳实践

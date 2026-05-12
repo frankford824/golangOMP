@@ -75,3 +75,51 @@ func TestBuildTaskAssetSearchWhereKeywordWithTaskStatusKeepsArgsAligned(t *testi
 		t.Fatalf("placeholder count = %d, args count = %d", got, want)
 	}
 }
+
+func TestBuildListCurrentByAssetIDsQueryBuildsParameterizedINClause(t *testing.T) {
+	query, args := buildListCurrentByAssetIDsQuery([]int64{101, 202, 303})
+	if query == "" {
+		t.Fatal("query is empty")
+	}
+	if !strings.Contains(query, "WHERE da.id IN (?, ?, ?)") {
+		t.Fatalf("query missing IN placeholders: %s", query)
+	}
+	if strings.Contains(query, "IN (101") {
+		t.Fatalf("query should be parameterized, got: %s", query)
+	}
+	if !strings.Contains(query, "ta.id = COALESCE(da.current_version_id") {
+		t.Fatalf("query missing current-version guard: %s", query)
+	}
+	if got, want := strings.Count(query, "?"), len(args); got != want {
+		t.Fatalf("placeholder count = %d, args count = %d", got, want)
+	}
+	if got, want := len(args), 3; got != want {
+		t.Fatalf("args len = %d, want %d", got, want)
+	}
+	if args[0] != int64(101) || args[1] != int64(202) || args[2] != int64(303) {
+		t.Fatalf("args = %#v, want [101 202 303]", args)
+	}
+}
+
+func TestBuildListCurrentByAssetIDsQueryEmptyIDsReturnsNoQuery(t *testing.T) {
+	query, args := buildListCurrentByAssetIDsQuery([]int64{})
+	if query != "" {
+		t.Fatalf("query = %q, want empty", query)
+	}
+	if len(args) != 0 {
+		t.Fatalf("args = %#v, want empty", args)
+	}
+}
+
+func TestBuildListCurrentByAssetIDsQueryUsesCurrentReadModelSelect(t *testing.T) {
+	query, _ := buildListCurrentByAssetIDsQuery([]int64{77})
+	if !strings.Contains(query, taskAssetSearchSelect) {
+		t.Fatalf("query should reuse taskAssetSearchSelect")
+	}
+	if !strings.Contains(query, taskAssetSearchFrom) {
+		t.Fatalf("query should reuse taskAssetSearchFrom")
+	}
+	if !strings.Contains(query, "ta.original_filename") || !strings.Contains(query, "ta.storage_key") {
+		t.Fatalf("query missing key ZIP fields: %s", query)
+	}
+}
