@@ -163,7 +163,7 @@
 | POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel` | Cancel upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort` | Abort upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/assets` | List assets | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| POST | `/v1/assets/batch-download` | Batch download OSS direct URL manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/batch-download` | Batch download asset direct URL manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/download` | Get asset download info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/preview` | Get asset preview info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
