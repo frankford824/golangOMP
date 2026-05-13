@@ -161,7 +161,7 @@ curl -X POST https://api.example.com/v1/assets/batch-download \
 
 ### 前端最佳实践
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
-- 批量下载先请求 manifest，再逐个打开 `download_url`；后端不代理文件字节，也不在 API 服务内打 ZIP 包。
+- 批量下载先请求 manifest，再由浏览器拉取每个 `download_url` 并在前端生成 ZIP；后端不代理文件字节，也不在 API 服务内打 ZIP 包。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。

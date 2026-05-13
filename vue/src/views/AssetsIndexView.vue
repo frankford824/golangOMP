@@ -91,6 +91,7 @@
       >
         {{ batchDownloading ? '批量下载中...' : '批量下载' }}
       </button>
+      <span v-if="batchDownloadStatus" class="ac-batch-status">{{ batchDownloadStatus }}</span>
       <span v-if="batchDownloadError" class="ac-batch-error">{{ batchDownloadError }}</span>
     </div>
 
@@ -407,7 +408,11 @@ import {
   fetchTaskAssetPreviewWithDerivedFallback,
   primeAssetDownloadMetaCache,
 } from '@/domain/asset-access'
-import { assetsApi, type AssetBatchDownloadItem } from '@/services/api/assetsApi'
+import {
+  assetsApi,
+  type AssetBatchDownloadFailure,
+  type AssetBatchDownloadItem,
+} from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -433,12 +438,14 @@ const listPageSize = ref(20)
 const listTotal = ref(0)
 const AUTO_RELOAD_DELAY_MS = 400
 const MAX_BATCH_DOWNLOAD_ASSETS = 100
+const BATCH_ZIP_DOWNLOAD_CONCURRENCY = 4
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 const previewLightboxSrc = ref<string | null>(null)
 const filtersExpanded = ref(false)
 const copyHint = ref('')
 const selectedModalOpen = ref(false)
 const batchDownloading = ref(false)
+const batchDownloadStatus = ref('')
 const batchDownloadError = ref('')
 
 const filters = reactive({
@@ -613,29 +620,140 @@ function normalizeSelectedAssetIDs(): number[] {
   return Array.from(new Set(ids))
 }
 
-function delayBatchDownloadClick(index: number): Promise<void> | undefined {
-  if (index === 0 || index % 5 !== 0) return undefined
-  return new Promise((resolve) => window.setTimeout(resolve, 150))
+function resolveBatchZipFilename(): string {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `assets-${stamp}.zip`
 }
 
-async function triggerDirectBatchDownloads(items: AssetBatchDownloadItem[]) {
-  for (const [index, item] of items.entries()) {
-    await delayBatchDownloadClick(index)
-    const url = typeof item.download_url === 'string' ? item.download_url.trim() : ''
-    if (!url) continue
+function sanitizeZipEntryName(name: string, fallback: string): string {
+  const cleaned = name
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/\.\./g, '_')
+  return cleaned || fallback
+}
 
-    const link = document.createElement('a')
-    link.href = url
-    link.download = item.filename || ''
-    link.rel = 'noopener'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
+function ensureUniqueZipEntryName(filename: string, usedNames: Map<string, number>): string {
+  const normalized = filename.trim() || 'asset'
+  const count = (usedNames.get(normalized) ?? 0) + 1
+  usedNames.set(normalized, count)
+  if (count === 1) return normalized
+
+  const dotIndex = normalized.lastIndexOf('.')
+  if (dotIndex <= 0) return `${normalized} (${count})`
+  return `${normalized.slice(0, dotIndex)} (${count})${normalized.slice(dotIndex)}`
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const objectURL = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectURL
+  link.download = filename
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const workerCount = Math.min(Math.max(1, concurrency), items.length)
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      for (;;) {
+        const index = cursor
+        cursor += 1
+        if (index >= items.length) return
+        results[index] = await worker(items[index], index)
+      }
+    }),
+  )
+  return results
+}
+
+function formatServerBatchDownloadFailure(item: AssetBatchDownloadFailure): string {
+  return [
+    `asset_id=${item.asset_id}`,
+    item.task_id != null ? `task_id=${item.task_id}` : '',
+    item.filename ? `filename=${item.filename}` : '',
+    `reason=${item.reason || 'unavailable'}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+async function downloadBatchAsClientZip(
+  items: AssetBatchDownloadItem[],
+  serverFailures: AssetBatchDownloadFailure[],
+) {
+  const { default: JSZip } = await import('jszip')
+  const zip = new JSZip()
+  const usedNames = new Map<string, number>()
+  const failures: string[] = serverFailures.map(formatServerBatchDownloadFailure)
+  let completed = 0
+
+  await mapWithConcurrency(items, BATCH_ZIP_DOWNLOAD_CONCURRENCY, async (item) => {
+    const url = typeof item.download_url === 'string' ? item.download_url.trim() : ''
+    const filename = ensureUniqueZipEntryName(
+      sanitizeZipEntryName(item.filename || '', `asset-${item.asset_id}`),
+      usedNames,
+    )
+    if (!url) {
+      failures.push(`asset_id=${item.asset_id} filename=${filename} reason=missing_download_url`)
+      return
+    }
+
+    try {
+      const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
+      if (!response.ok) {
+        failures.push(`asset_id=${item.asset_id} filename=${filename} reason=http_${response.status}`)
+        return
+      }
+      const blob = await response.blob()
+      zip.file(filename, blob, { binary: true, compression: 'STORE' })
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'fetch_failed'
+      failures.push(`asset_id=${item.asset_id} filename=${filename} reason=${reason}`)
+    } finally {
+      completed += 1
+      batchDownloadStatus.value = `正在下载并打包 ${completed}/${items.length}`
+    }
+  })
+
+  if (failures.length > 0) {
+    zip.file('download_errors.txt', failures.join('\n') + '\n')
   }
+  if (Object.keys(zip.files).length === 0) {
+    throw new Error('没有文件成功写入 ZIP')
+  }
+
+  batchDownloadStatus.value = '正在生成 ZIP'
+  const blob = await zip.generateAsync(
+    {
+      type: 'blob',
+      compression: 'STORE',
+      streamFiles: true,
+    },
+    (metadata) => {
+      batchDownloadStatus.value = `正在生成 ZIP ${Math.floor(metadata.percent)}%`
+    },
+  )
+  downloadBlob(blob, resolveBatchZipFilename())
+  return failures.length
 }
 
 async function handleBatchDownload() {
   if (batchDownloading.value) return
+  batchDownloadStatus.value = ''
   batchDownloadError.value = ''
 
   const assetIDs = normalizeSelectedAssetIDs()
@@ -657,9 +775,12 @@ async function handleBatchDownload() {
       batchDownloadError.value = '没有可下载的资产'
       return
     }
-    await triggerDirectBatchDownloads(items)
-    const failureCount = Number(manifest?.failure_count ?? 0)
-    batchDownloadError.value = failureCount > 0 ? `已开始下载 ${items.length} 个文件，${failureCount} 个文件不可下载` : ''
+    const serverFailures = Array.isArray(manifest?.failures) ? manifest.failures : []
+    const clientFailureCount = await downloadBatchAsClientZip(items, serverFailures)
+    const serverFailureCount = Number(manifest?.failure_count ?? 0)
+    const totalFailureCount = serverFailureCount + clientFailureCount
+    batchDownloadStatus.value = `已生成 ZIP，共 ${items.length} 个文件`
+    batchDownloadError.value = totalFailureCount > 0 ? `${totalFailureCount} 个文件未打包，详情见 ZIP 内 download_errors.txt` : ''
   } catch (err) {
     batchDownloadError.value = resolveApiUserMessage(err, { fallback: '批量下载失败，请稍后重试' })
   } finally {
@@ -1119,6 +1240,11 @@ onBeforeUnmount(() => {
 .ac-batch-error {
   font-size: 12px;
   color: #b91c1c;
+}
+
+.ac-batch-status {
+  font-size: 12px;
+  color: #334155;
 }
 
 .ac-grid {
