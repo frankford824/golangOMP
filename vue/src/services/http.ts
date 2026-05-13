@@ -10,6 +10,7 @@
 
 import axios, { type AxiosResponse, type AxiosError } from 'axios'
 import { parseApiErrorPayload, resolveApiUserMessage } from '@/utils/api-message-zh'
+import { createMockAdapter, isMockEnabled } from '@/mocks'
 
 const TOKEN_KEY = 'access_token'
 
@@ -33,6 +34,7 @@ const http = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  adapter: isMockEnabled() ? createMockAdapter() : undefined,
 })
 
 export interface HttpAppError extends Error {

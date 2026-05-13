@@ -292,6 +292,7 @@ export function humanizeViolationCode(code: string, field: string): string {
   if (code === 'missing_required_field') {
     const leaf = field.replace(/^.*[\].]\s*/, '') || field
     const label = humanizeTaskCreateFields([leaf])[0] ?? field
+    if (leaf === 'i_id') return `必填字段缺失：${label} (i_id)`
     return `必填字段缺失：${label}`
   }
   if (code === 'field_not_allowed_for_task_type') {

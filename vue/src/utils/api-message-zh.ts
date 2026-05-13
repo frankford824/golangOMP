@@ -53,7 +53,7 @@ export const API_DENY_CODE_ZH: Record<string, string> = {
   module_state_mismatch: '模块状态已变化，请刷新后重试',
   module_claim_conflict: '该任务已被他人领取',
   module_blueprint_missing_team: '池组配置缺失，请联系管理员',
-  task_already_claimed: '任务已被其他人接单',
+  task_already_claimed: '任务已被接单，无法作废',
 }
 
 /**
