@@ -7,20 +7,23 @@
         :key="item.key"
         type="button"
         class="thumb-btn"
-        :class="[{ 'thumb-btn--sm': size === 'sm', 'thumb-btn--md': size === 'md' }, item.unavailable ? 'thumb-btn--placeholder' : '']"
+        :class="[
+          { 'thumb-btn--sm': size === 'sm', 'thumb-btn--md': size === 'md' },
+          item.unavailable || !item.imageLike ? 'thumb-btn--placeholder' : '',
+        ]"
         :title="item.label || item.alt"
         role="listitem"
         @click="onThumbClick(item)"
       >
         <img
-          v-if="item.src && !item.previewAssetId && !item.unavailable"
+          v-if="item.src && !item.previewAssetId && !item.unavailable && item.imageLike"
           :src="item.src"
           :alt="item.alt"
           class="thumb-img"
           loading="lazy"
         />
         <AssetPreviewMedia
-          v-else-if="item.previewAssetId && !item.unavailable"
+          v-else-if="item.previewAssetId && !item.unavailable && item.imageLike"
           class="thumb-media"
           :asset-id="item.previewAssetId"
           :fallback-asset-id="item.fallbackAssetId || null"
@@ -31,7 +34,9 @@
           :defer-until-visible="true"
           @open-full="openLightbox"
         />
-        <span v-else class="thumb-placeholder">{{ item.label || '文件' }}</span>
+        <span v-else class="thumb-placeholder">
+          {{ item.extension ? item.extension.toUpperCase() : (item.label || '文件') }}
+        </span>
       </button>
     </div>
   </div>
@@ -69,6 +74,44 @@ const emit = defineEmits<{
   select: [key: string]
 }>()
 
+const IMAGE_EXTENSIONS = new Set([
+  'jpg',
+  'jpeg',
+  'png',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'avif',
+  'heic',
+  'heif',
+])
+
+function extractExtensionFromPath(input: string): string {
+  const raw = input.trim()
+  if (!raw) return ''
+  const clean = raw.split('?')[0].split('#')[0]
+  const file = clean.split('/').pop() ?? clean
+  const idx = file.lastIndexOf('.')
+  if (idx <= 0 || idx === file.length - 1) return ''
+  return file.slice(idx + 1).toLowerCase()
+}
+
+function detectFileExtension(item: AssetThumbItem): string {
+  const fromLabel = extractExtensionFromPath(item.label ?? '')
+  if (fromLabel) return fromLabel
+  const fromDownload = extractExtensionFromPath(item.downloadUrl ?? '')
+  if (fromDownload) return fromDownload
+  return extractExtensionFromPath(item.src ?? '')
+}
+
+function isImageLike(item: AssetThumbItem, ext: string): boolean {
+  if (item.previewAssetId?.trim()) return true
+  if (!item.src?.trim()) return false
+  if (!ext) return true
+  return IMAGE_EXTENSIONS.has(ext)
+}
+
 const normalizedItems = computed(() =>
   props.items
     .map((item) => ({
@@ -79,6 +122,16 @@ const normalizedItems = computed(() =>
       downloadUrl: (item.downloadUrl ?? '').trim(),
       label: (item.label ?? '').trim(),
     }))
+    .map((item) => {
+      const extension = detectFileExtension(item)
+      const imageLike = isImageLike(item, extension)
+      return {
+        ...item,
+        extension,
+        imageLike,
+        openHref: item.downloadUrl || item.src,
+      }
+    })
     .filter((item) => item.key.trim().length > 0),
 )
 
@@ -86,8 +139,11 @@ const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
 
 function onThumbClick(item: AssetThumbItem) {
   emit('select', item.key)
-  if (item.unavailable && item.downloadUrl) {
-    window.open(item.downloadUrl, '_blank', 'noopener')
+  const ext = detectFileExtension(item)
+  const imageLike = isImageLike(item, ext)
+  const openHref = (item.downloadUrl ?? '').trim() || (item.src ?? '').trim()
+  if ((item.unavailable || !imageLike) && openHref) {
+    window.open(openHref, '_blank', 'noopener')
     return
   }
   if (item.src) openLightbox(item.src)
