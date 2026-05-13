@@ -38,6 +38,8 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 	ruleSource := ""
 	manualReview := false
 	var estimated float64
+	fixedUnitTaxMultiplier := 1.0
+	hasFixedUnitPrice := false
 	var matchedRule *domain.CostRule
 	applied := make([]domain.CostRulePreviewMatch, 0, len(sortedRules))
 	explanations := make([]string, 0, len(sortedRules))
@@ -80,6 +82,8 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				continue
 			}
 			estimated += *baseCharge
+			hasFixedUnitPrice = true
+			fixedUnitTaxMultiplier = taxMultiplierOrOne(rule.TaxMultiplier)
 			applied = append(applied, match)
 			explanations = append(explanations, fmt.Sprintf("%s applied fixed price %.2f", rule.RuleName, *baseCharge))
 		case domain.CostRuleTypeAreaThresholdSurcharge:
@@ -91,10 +95,13 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				applied = append(applied, match)
 				explanations = append(explanations, fmt.Sprintf("%s requires width/height/area input before threshold surcharge can be evaluated", rule.RuleName))
 			case area < *rule.AreaThreshold:
-				extra := (*rule.SurchargeAmount) * float64(quantity)
+				extra := (*rule.SurchargeAmount) * area * float64(quantity)
+				if hasFixedUnitPrice {
+					extra = extra * fixedUnitTaxMultiplier
+				}
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s added surcharge %.2f because area %.4f < %.4f", rule.RuleName, extra, area, *rule.AreaThreshold))
+				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.2f and applied %.2f because area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, area, *rule.AreaThreshold))
 			}
 		case domain.CostRuleTypeSpecialProcessPrice:
 			if rule.SpecialProcessPrice != nil && containsProcessKeyword(req.Process, req.Notes, rule.SpecialProcessKeyword) {
@@ -145,6 +152,13 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 		},
 		MatchedRule: matchedRule,
 	}
+}
+
+func taxMultiplierOrOne(value *float64) float64 {
+	if value == nil || *value <= 0 {
+		return 1
+	}
+	return *value
 }
 
 func withTextDerivedCostRuleDimensions(req domain.CostRulePreviewRequest) domain.CostRulePreviewRequest {

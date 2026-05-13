@@ -113,10 +113,9 @@
           :key="asset.id"
           class="ac-card"
           :class="{
-            'ac-card--active': selectedAsset?.id === asset.id,
+            'ac-card--active': selectedAssetId === String(asset.id),
             'ac-card--selected': isAssetSelected(asset),
           }"
-          @click="selectAsset(asset)"
         >
           <label class="ac-card-check" @click.stop>
             <input
@@ -875,13 +874,6 @@ function versionCount(asset: BackendAsset): number {
   return Array.isArray(asset.versions) ? asset.versions.length : 0
 }
 
-function selectAsset(asset: BackendAsset) {
-  selectedAssetId.value = String(asset.id)
-  syncQuerySelection()
-  detailModalOpen.value = true
-  void loadAssetDetail(String(asset.id))
-}
-
 function goListPage(next: number) {
   const clamped = Math.min(Math.max(1, next), listTotalPages.value)
   listPage.value = clamped
@@ -1293,16 +1285,14 @@ onBeforeUnmount(() => {
   border-radius: 22px;
   padding: clamp(16px, 2vw, 24px);
   min-width: 0;
-  transition: transform 0.35s, box-shadow 0.35s;
+  transition: box-shadow 0.18s;
   display: flex;
   flex-direction: column;
-  cursor: pointer;
   border: 1px solid rgba(0, 0, 0, 0.04);
   position: relative;
 }
 
 .ac-card:hover {
-  transform: scale(1.02) translateY(-5px);
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.06);
 }
 

@@ -1997,8 +1997,168 @@ func TestTaskServiceUpdateBusinessInfoResolvesChineseCategoryNameForCost(t *test
 	if detail.Area == nil || math.Abs(*detail.Area-0.022) > 0.000001 {
 		t.Fatalf("area = %+v, want 0.022", detail.Area)
 	}
-	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-3.2662) > 0.000001 {
-		t.Fatalf("cost_price = %+v, want 3.2662", detail.CostPrice)
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-0.3388) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 0.3388", detail.CostPrice)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoAppliesSmallAreaSurchargeAsUnitPriceIncrease(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规kt板",
+		DisplayName:  "常规kt板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规KT板基础单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(11),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+		{
+			RuleID:          2,
+			RuleVersion:     1,
+			RuleName:        "常规KT板小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   float64Ptr(0.15),
+			SurchargeAmount: float64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			671: {ID: 671, TaskType: domain.TaskTypeNewProductDevelopment},
+		},
+		details: map[int64]*domain.TaskDetail{
+			671: {TaskID: 671},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     671,
+		OperatorID: 9,
+		Category:   "常规kt板",
+		SpecText:   "30*42cm（镂空18*18cm）",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.Area == nil || math.Abs(*detail.Area-0.126) > 0.000001 {
+		t.Fatalf("area = %+v, want 0.126", detail.Area)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-1.9404) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 1.9404", detail.CostPrice)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoRefreshesStoredDimensionsWhenSpecSizeChanges(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规kt板",
+		DisplayName:  "常规kt板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规KT板基础单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(11),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+		{
+			RuleID:          2,
+			RuleVersion:     1,
+			RuleName:        "常规KT板小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   float64Ptr(0.15),
+			SurchargeAmount: float64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			672: {ID: 672, TaskType: domain.TaskTypeNewProductDevelopment},
+		},
+		details: map[int64]*domain.TaskDetail{
+			672: {
+				TaskID:   672,
+				Category: "常规kt板",
+				Width:    float64Ptr(0.3),
+				Height:   float64Ptr(0.42),
+				Area:     float64Ptr(0.126),
+			},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     672,
+		OperatorID: 9,
+		Category:   "常规kt板",
+		SpecText:   "50*70cm",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.Area == nil || math.Abs(*detail.Area-0.35) > 0.000001 {
+		t.Fatalf("area = %+v, want 0.35", detail.Area)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-4.235) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 4.235", detail.CostPrice)
 	}
 }
 
