@@ -127,17 +127,14 @@
           </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
-              v-if="listCardResolvedPreviewUrl(asset)"
+              :asset-id="String(asset.id)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
+              defer-until-visible
               alt=""
               img-class="ac-card-apm"
               inner-img-class="ac-card-preview-img"
               @open-full="(u) => (previewLightboxSrc = u)"
             />
-            <div v-else class="ac-card-preview-placeholder" aria-label="暂无预览">
-              <span class="ac-card-placeholder-icon" aria-hidden="true"></span>
-              <span>资产预览不可用</span>
-            </div>
           </div>
           <div class="ac-card-info">
             <h2 class="ac-card-title" :title="cardTitle(asset)">{{ cardTitle(asset) }}</h2>
@@ -1288,32 +1285,6 @@ onBeforeUnmount(() => {
   font-size: 11px;
   min-height: 100%;
   border-radius: 0;
-}
-
-.ac-card-preview-placeholder {
-  width: 100%;
-  height: 100%;
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: 16px;
-  background: #f8fafc;
-  color: #ef4444;
-  font-size: 12px;
-}
-
-.ac-card-placeholder-icon {
-  width: 56px;
-  height: 44px;
-  border-radius: 12px;
-  border: 1px solid #dbe3ef;
-  background:
-    linear-gradient(135deg, transparent 50%, #dbe3ef 51%) right 10px top 10px / 18px 18px no-repeat,
-    linear-gradient(135deg, #e7edf5 0 55%, transparent 56%) left 12px bottom 10px / 30px 22px no-repeat,
-    #f1f5f9;
 }
 
 .ac-card-preview-img {
