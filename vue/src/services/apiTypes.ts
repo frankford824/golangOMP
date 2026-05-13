@@ -282,6 +282,7 @@ export interface OperationLogEntry {
   event_type: string
   summary: string
   actor_id: number | null
+  actor_username?: string
   actor_type: string
   status?: string
   payload?: Record<string, unknown> | unknown
@@ -425,6 +426,8 @@ export interface CustomizationJobRaw {
   assigned_operator_id?: number | string | null
   last_operator_id?: number | string | null
   replacement_actor_id?: number | string | null
+  replacement_actor_name?: string | null
+  replacement_actor_username?: string | null
   /**
    * pricing identity（定价身份），不是权限角色。
    * 后端可能返回 `employment_type`，也可能返回历史字段 `pricing_worker_type`。

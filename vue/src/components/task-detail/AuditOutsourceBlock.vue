@@ -164,7 +164,7 @@
           </div>
           <div class="info-pair">
             <dt>替换人</dt>
-            <dd class="mono">{{ dash(latestCustomizationJob.replacement_actor_id) }}</dd>
+            <dd>{{ replacementActorText(latestCustomizationJob) }}</dd>
           </div>
           <div class="info-pair">
             <dt>最新更新时间</dt>
@@ -292,6 +292,7 @@ import type { CustomizationJobRaw } from '@/services/apiTypes'
 import { listCustomizationJobs } from '@/services/api/customizationApi'
 import { formatDateBeijing } from '@/utils/date'
 import { employmentTypeLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { userAccountDisplay } from '@/domain/user-display'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
@@ -551,6 +552,10 @@ function factorDisplay(value: unknown): string {
     return value.toFixed(2)
   }
   return '—'
+}
+
+function replacementActorText(job: CustomizationJobRaw): string {
+  return userAccountDisplay(job.replacement_actor_name, job.replacement_actor_username)
 }
 
 function openCustomizationDialog() {

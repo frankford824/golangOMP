@@ -52,7 +52,7 @@
             </div>
             <div>
               <dt>替换人</dt>
-              <dd>{{ e.replacement_actor_name || e.replacement_actor_id || e.actor || '—' }}</dd>
+              <dd>{{ replacementActorText(e) }}</dd>
             </div>
             <div>
               <dt>来源</dt>
@@ -86,6 +86,7 @@ import { ref, watch } from 'vue'
 import type { RecentEvent } from '@/types/dashboard'
 import { tasksApi } from '@/services/api/tasksApi'
 import { extractTaskEventsList, mapTaskEventRowToRecentEvent } from '@/domain/mappers/task-events-from-api'
+import { userAccountDisplay } from '@/domain/user-display'
 
 const props = defineProps<{ modelValue: boolean; taskId?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean] }>()
@@ -133,6 +134,10 @@ async function load() {
 
 function isReplacementEvent(event: RecentEvent): boolean {
   return Boolean(event.previous_asset_id || event.current_asset_id || event.replacement_actor_id)
+}
+
+function replacementActorText(event: RecentEvent): string {
+  return userAccountDisplay(event.replacement_actor_name, event.actor)
 }
 
 function laneAndDepartmentText(lane?: string, department?: string): string {

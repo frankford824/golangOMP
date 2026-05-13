@@ -76,8 +76,7 @@ async function loadAuditorOptions() {
     const list = Array.isArray(body) ? body : (body as { items?: unknown[] })?.items ?? []
     toUserOptions.value = (list as Record<string, unknown>[]).map((raw) => {
       const id = String(raw.id ?? '')
-      const label =
-        String(raw.display_name ?? raw.displayName ?? raw.username ?? id) + (id ? ` (#${id})` : '')
+      const label = String(raw.username ?? raw.display_name ?? raw.displayName ?? '未知用户')
       return { value: id, label }
     })
   } catch {

@@ -78,7 +78,7 @@
           </div>
           <div class="detail-row">
             <dt>替换人</dt>
-            <dd class="cell-mono">{{ displayText(asset.replacement_actor_id) }}</dd>
+            <dd>{{ replacementActorText(asset) }}</dd>
           </div>
           <div class="detail-row">
             <dt>业务线 / 来源部门</dt>
@@ -164,6 +164,7 @@ import {
 import { assetsApi } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
+import { userAccountDisplay } from '@/domain/user-display'
 
 const route = useRoute()
 const router = useRouter()
@@ -206,6 +207,10 @@ function displayTime(value: unknown): string {
   const text = displayText(value)
   if (text === '—') return text
   return formatDateTimeBeijing(text) || text
+}
+
+function replacementActorText(row: BackendAsset): string {
+  return userAccountDisplay(row.replacement_actor_name, row.replacement_actor_username)
 }
 
 function assetKind(input: BackendAsset | string | null | undefined): string {

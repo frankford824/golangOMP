@@ -661,6 +661,7 @@ components:
         actor_id:
           type: integer
           nullable: true
+        actor_username: { type: string }
         actor_type: { type: string }
         status: { type: string }
         payload: {}

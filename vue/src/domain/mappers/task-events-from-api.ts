@@ -4,6 +4,7 @@ import { getTaskStatusLabel } from '@/domain/enums/task-status'
 import { formatDateTimeBeijingOffsetAware } from '@/utils/date'
 import { getTaskEventDisplayTitle } from '@/utils/operation-event-type-labels'
 import { assetKindLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { userAccountDisplay, userAccountOrEmpty } from '@/domain/user-display'
 
 export function extractTaskEventsList(body: unknown): Record<string, unknown>[] {
   if (!body || typeof body !== 'object') return []
@@ -165,12 +166,13 @@ function moneyDisplay(raw: unknown): string {
 }
 
 function formatActorSegment(raw: Record<string, unknown>, payload: Record<string, unknown>): string {
-  const id =
-    pickField(raw, payload, 'operator_id') ??
-    pickField(raw, payload, 'creator_id') ??
-    pickField(raw, payload, 'actor_id')
   const name =
-    (pickField(raw, payload, 'operator_name') ?? pickField(raw, payload, 'creator_name') ?? pickField(
+    (pickField(raw, payload, 'operator_username') ??
+      pickField(raw, payload, 'actor_username') ??
+      pickField(raw, payload, 'creator_username') ??
+      pickField(raw, payload, 'operator_name') ??
+      pickField(raw, payload, 'creator_name') ??
+      pickField(
       raw,
       payload,
       'actor_name',
@@ -180,9 +182,8 @@ function formatActorSegment(raw: Record<string, unknown>, payload: Record<string
       pickField(raw, payload, 'actor_role_short') ??
       pickField(raw, payload, 'actor_role'))?.trim() ?? ''
 
-  if (roleShort && id && !name) return `${roleShort} ${id}`
-  if (name) return name
-  if (id) return `用户 ${id}`
+  if (name) return userAccountDisplay(name)
+  if (roleShort) return userAccountDisplay(roleShort)
   return '系统'
 }
 
@@ -255,11 +256,22 @@ function buildTaskEventSummaryCn(
 
   if (et === 'task.assigned' || et === 'task.unassigned') {
     const designerId = pickFirst(raw, payload, ['designer_id', 'assignee_id', 'to_user_id', 'current_handler_id'])
-    const designerName = pickFirst(raw, payload, ['designer_name', 'assignee_name', 'current_handler_name'])
+    const designerName = pickFirst(raw, payload, [
+      'designer_username',
+      'assignee_username',
+      'current_handler_username',
+      'designer_name',
+      'assignee_name',
+      'current_handler_name',
+    ])
     const assigneeSeg =
       designerName && designerId
-        ? `${designerName}（${designerId}）`
-        : designerName || (designerId ? `用户 ${designerId}` : '—')
+        ? userAccountDisplay(designerName)
+        : designerName
+          ? userAccountDisplay(designerName)
+          : designerId
+            ? '未知用户'
+            : '—'
     const selfRaw = payload.self_assign ?? payload.self_claim ?? payload.is_self_claim
     const self =
       selfRaw === true ||
@@ -288,12 +300,27 @@ function buildTaskEventSummaryCn(
 
   if (et === 'task.reassigned' || et === 'module.reassigned') {
     const fromId = pickFirst(raw, payload, ['from_assignee_id', 'from_designer_id', 'previous_assignee_id'])
-    const fromName = pickFirst(raw, payload, ['from_assignee_name', 'from_designer_name', 'previous_assignee_name'])
+    const fromName = pickFirst(raw, payload, [
+      'from_assignee_username',
+      'from_designer_username',
+      'previous_assignee_username',
+      'from_assignee_name',
+      'from_designer_name',
+      'previous_assignee_name',
+    ])
     const toId = pickFirst(raw, payload, ['to_assignee_id', 'assignee_id', 'designer_id', 'target_user_id'])
-    const toName = pickFirst(raw, payload, ['to_assignee_name', 'assignee_name', 'designer_name'])
+    const toName = pickFirst(raw, payload, [
+      'to_assignee_username',
+      'assignee_username',
+      'designer_username',
+      'target_username',
+      'to_assignee_name',
+      'assignee_name',
+      'designer_name',
+    ])
     const fromSeg =
-      fromName && fromId ? `${fromName}（${fromId}）` : fromName || (fromId ? `用户 ${fromId}` : '—')
-    const toSeg = toName && toId ? `${toName}（${toId}）` : toName || (toId ? `用户 ${toId}` : '—')
+      fromName && fromId ? userAccountDisplay(fromName) : fromName ? userAccountDisplay(fromName) : fromId ? '未知用户' : '—'
+    const toSeg = toName && toId ? userAccountDisplay(toName) : toName ? userAccountDisplay(toName) : toId ? '未知用户' : '—'
     const mk =
       moduleKeyLabelCn(pickField(raw, payload, 'module_key')) ||
       moduleKeyLabelCn(raw.module_key != null ? String(raw.module_key) : '')
@@ -385,10 +412,13 @@ export function mapTaskEventRowToRecentEvent(raw: Record<string, unknown>, taskI
     pickField(raw, payload, 'replacement_actor_id') ??
     pickField(raw, payload, 'creator_id')
   const actor =
+    pickField(raw, payload, 'operator_username') ??
+    pickField(raw, payload, 'actor_username') ??
+    pickField(raw, payload, 'creator_username') ??
     pickField(raw, payload, 'operator_name') ??
     pickField(raw, payload, 'actor_name') ??
     pickField(raw, payload, 'creator_name') ??
-    (operatorId ? `用户 ${operatorId}` : '—')
+    (operatorId ? '未知用户' : '—')
 
   const title = titleForEvent(eventType, raw, payload)
   const summary = buildTaskEventSummaryCn(eventType, raw, payload)
@@ -400,7 +430,7 @@ export function mapTaskEventRowToRecentEvent(raw: Record<string, unknown>, taskI
     summary,
     refId: String(raw.task_id ?? taskId),
     refNo: pickField(raw, payload, 'task_no') ?? '—',
-    actor,
+    actor: userAccountDisplay(actor),
     at,
     ...(created ? { createdAtIso: created } : {}),
     previous_asset_id: pickField(raw, payload, 'previous_asset_id'),
@@ -428,7 +458,16 @@ export function mapCostOverrideEventToRecentEvent(
   const eventType = String(raw.event_type ?? raw.eventType ?? 'cost_override')
   const id = String(raw.event_id ?? raw.eventId ?? raw.sequence ?? `${taskId}-cost-${Math.random()}`)
   const created = String(raw.override_at ?? raw.overrideAt ?? raw.occurred_at ?? raw.occurredAt ?? '')
-  const actor = String(raw.override_actor ?? raw.overrideActor ?? raw.actor ?? '系统').trim() || '系统'
+  const actor =
+    userAccountOrEmpty(
+      raw.override_actor_username,
+      raw.overrideActorUsername,
+      raw.actor_username,
+      raw.actorUsername,
+      raw.override_actor,
+      raw.overrideActor,
+      raw.actor,
+    ) || '系统'
   const title = COST_OVERRIDE_EVENT_CN[eventType] ?? '成本操作'
   const previous = raw.previous_cost_price ?? raw.previousCostPrice
   const current = raw.result_cost_price ?? raw.resultCostPrice ?? raw.cost_price ?? raw.costPrice
