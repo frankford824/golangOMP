@@ -4699,6 +4699,100 @@ components:
           type: string
           format: date-time
           nullable: true
+    AssetExcelPackageRow:
+      type: object
+      required: [order_no, quantity]
+      properties:
+        row_number:
+          type: integer
+          description: Original Excel row number, used in failure reports.
+        order_no:
+          type: string
+          description: Order number used as the ZIP folder name.
+        sku_code:
+          type: string
+          description: SKU code for asset matching.
+        sku_name:
+          type: string
+          description: Optional SKU/product name for secondary matching.
+        quantity:
+          type: integer
+          minimum: 1
+          description: Number of image copies to place under the order folder.
+        keyword:
+          type: string
+          description: Optional filename/product keyword for disambiguation.
+    AssetExcelPackagePreviewRequest:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/AssetExcelPackageRow'
+    AssetExcelPackageItem:
+      type: object
+      required: [order_no, sku_code, quantity, asset_id, task_id, filename, file_size, download_url]
+      properties:
+        row_number: { type: integer }
+        order_no: { type: string }
+        sku_code: { type: string }
+        sku_name: { type: string }
+        quantity: { type: integer }
+        asset_id: { type: integer }
+        task_id: { type: integer }
+        task_no: { type: string }
+        filename: { type: string }
+        file_size:
+          type: integer
+          format: int64
+        mime_type: { type: string }
+        download_url:
+          type: string
+          format: uri
+          description: Presigned OSS direct download URL for a JPG/PNG asset.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    AssetExcelPackageFailure:
+      type: object
+      required: [reason, message]
+      properties:
+        row_number: { type: integer }
+        order_no: { type: string }
+        sku_code: { type: string }
+        sku_name: { type: string }
+        quantity: { type: integer }
+        reason: { type: string }
+        message: { type: string }
+    AssetExcelPackageManifest:
+      type: object
+      required: [items, success_count, failure_count, total_files, total_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetExcelPackageItem'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetExcelPackageFailure'
+        success_count: { type: integer }
+        failure_count: { type: integer }
+        total_files:
+          type: integer
+          description: Expanded file count after applying row quantities.
+        total_size:
+          type: integer
+          format: int64
+          description: Expanded byte size after applying row quantities.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
     ValidationViolation:
       type: object
       properties:
@@ -9389,6 +9483,43 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal error while building direct download manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/assets/excel-package/preview:
+    post:
+      summary: Preview Excel image package manifest
+      description: Matches uploaded Excel rows to current JPG/PNG assets only, returns presigned download URLs and per-row failures. The frontend builds the ZIP with order-number folders and quantity-based image copies.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetExcelPackagePreviewRequest'
+      responses:
+        '200':
+          description: Excel image package manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetExcelPackageManifest'
+        '400':
+          description: Invalid rows or no rows matched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error while matching assets
           content:
             application/json:
               schema:

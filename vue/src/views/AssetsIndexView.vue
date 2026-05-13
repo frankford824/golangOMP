@@ -43,6 +43,16 @@
           <button type="button" class="ac-icon-btn" :disabled="loading" @click="reload">
             {{ loading ? '刷新中' : '刷新' }}
           </button>
+          <button type="button" class="ac-icon-btn ac-icon-btn--primary" :disabled="excelPackaging" @click="openExcelPicker">
+            {{ excelPackaging ? '模板打包中' : 'Excel 图片分拣下载' }}
+          </button>
+          <input
+            ref="excelFileInput"
+            type="file"
+            class="ac-hidden-file"
+            accept=".xlsx"
+            @change="handleExcelPackageFile"
+          />
         </div>
       </div>
 
@@ -93,6 +103,10 @@
       </button>
       <span v-if="batchDownloadStatus" class="ac-batch-status">{{ batchDownloadStatus }}</span>
       <span v-if="batchDownloadError" class="ac-batch-error">{{ batchDownloadError }}</span>
+    </div>
+    <div v-if="excelPackageStatus || excelPackageError" class="ac-excel-package-bar">
+      <span v-if="excelPackageStatus" class="ac-batch-status">{{ excelPackageStatus }}</span>
+      <span v-if="excelPackageError" class="ac-batch-error">{{ excelPackageError }}</span>
     </div>
 
     <main class="ac-grid">
@@ -406,6 +420,9 @@ import {
   assetsApi,
   type AssetBatchDownloadFailure,
   type AssetBatchDownloadItem,
+  type AssetExcelPackageFailure,
+  type AssetExcelPackageItem,
+  type AssetExcelPackageRow,
 } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
@@ -441,6 +458,10 @@ const selectedModalOpen = ref(false)
 const batchDownloading = ref(false)
 const batchDownloadStatus = ref('')
 const batchDownloadError = ref('')
+const excelFileInput = ref<HTMLInputElement | null>(null)
+const excelPackaging = ref(false)
+const excelPackageStatus = ref('')
+const excelPackageError = ref('')
 
 const filters = reactive({
   keyword: '',
@@ -489,6 +510,8 @@ const selectedAssets = computed(() => Array.from(selectedAssetMap.values()))
 const canBatchDownload = computed(
   () => selectedCount.value > 0 && selectedCount.value <= MAX_BATCH_DOWNLOAD_ASSETS && !batchDownloading.value,
 )
+
+const EXCEL_PACKAGE_CONCURRENCY = 4
 
 const effectiveSearchKeyword = computed(
   () => filters.keyword.trim() || filters.taskId.trim() || filters.scopeSkuCode.trim(),
@@ -650,6 +673,219 @@ function downloadBlob(blob: Blob, filename: string) {
   link.click()
   link.remove()
   window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
+}
+
+function openExcelPicker() {
+  if (excelPackaging.value) return
+  excelPackageStatus.value = ''
+  excelPackageError.value = ''
+  if (excelFileInput.value) {
+    excelFileInput.value.value = ''
+    excelFileInput.value.click()
+  }
+}
+
+function normalizeExcelCell(value: unknown): string {
+  if (value == null) return ''
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (typeof record.text === 'string') return record.text.trim()
+    if (typeof record.result === 'string' || typeof record.result === 'number') return normalizeExcelCell(record.result)
+    if (Array.isArray(record.richText)) {
+      return record.richText
+        .map((item) => (item && typeof item === 'object' ? String((item as Record<string, unknown>).text ?? '') : ''))
+        .join('')
+        .trim()
+    }
+  }
+  const text = String(value).trim()
+  if (/^\d+\.0$/.test(text)) return String(Math.trunc(Number(text)))
+  return text
+}
+
+function normalizeExcelQuantity(value: unknown): number {
+  const text = normalizeExcelCell(value)
+  if (!text) return 1
+  const n = Number(text)
+  if (!Number.isFinite(n)) return 1
+  return Math.max(1, Math.trunc(n))
+}
+
+function normalizeExcelHeader(value: unknown): string {
+  return normalizeExcelCell(value).replace(/\s+/g, '').toLowerCase()
+}
+
+function resolveExcelColumn(headers: string[], candidates: string[], fallbackIndex: number): number {
+  const normalizedCandidates = candidates.map((item) => normalizeExcelHeader(item))
+  const found = headers.findIndex((header) => normalizedCandidates.includes(header))
+  return found >= 0 ? found : fallbackIndex
+}
+
+async function parseExcelPackageRows(file: File): Promise<AssetExcelPackageRow[]> {
+  if (!/\.xlsx$/i.test(file.name)) throw new Error('当前仅支持 .xlsx 模板，请将 .xls 另存为 .xlsx 后再上传')
+  const ExcelJS = await import('exceljs')
+  const data = await file.arrayBuffer()
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(data)
+  const worksheet = workbook.worksheets[0]
+  if (!worksheet) throw new Error('Excel 文件没有工作表')
+  const table: unknown[][] = []
+  worksheet.eachRow({ includeEmpty: true }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : []
+    table.push(values)
+  })
+  if (table.length < 2) throw new Error('Excel 至少需要表头和一行数据')
+
+  const headers = (table[0] ?? []).map(normalizeExcelHeader)
+  const orderCol = resolveExcelColumn(headers, ['订单号', '订单编号', 'order_no', 'order'], 0)
+  const skuCol = resolveExcelColumn(headers, ['SKU编码', 'SKU', 'sku_code', '商品编码'], 1)
+  const skuNameCol = resolveExcelColumn(headers, ['SKU名称', '商品名称', 'sku_name', '名称'], 2)
+  const quantityCol = resolveExcelColumn(headers, ['数量', 'qty', 'quantity', 'num'], 3)
+  const keywordCol = resolveExcelColumn(headers, ['匹配关键词', '关键词', 'keyword', 'kw'], 4)
+
+  return table
+    .slice(1)
+    .map((row, index): AssetExcelPackageRow => {
+      const values = Array.isArray(row) ? row : []
+      return {
+        row_number: index + 2,
+        order_no: normalizeExcelCell(values[orderCol]),
+        sku_code: normalizeExcelCell(values[skuCol]).toUpperCase(),
+        sku_name: normalizeExcelCell(values[skuNameCol]),
+        quantity: normalizeExcelQuantity(values[quantityCol]),
+        keyword: normalizeExcelCell(values[keywordCol]),
+      }
+    })
+    .filter((row) => row.order_no || row.sku_code || row.sku_name)
+}
+
+function resolveExcelPackageFilename(item: AssetExcelPackageItem, copyIndex: number): string {
+  const ext = (() => {
+    const i = item.filename.lastIndexOf('.')
+    return i > 0 ? item.filename.slice(i) : '.jpg'
+  })()
+  const rawSku = item.sku_code || item.sku_name || `asset-${item.asset_id}`
+  const rowSuffix = item.row_number ? `_row${item.row_number}` : ''
+  const base = sanitizeZipEntryName(`${rawSku}${rowSuffix}`, `asset-${item.asset_id}`)
+  return `${base}_${copyIndex}${ext}`
+}
+
+function formatExcelFailure(item: AssetExcelPackageFailure): string {
+  return [
+    item.row_number ? `row=${item.row_number}` : '',
+    item.order_no ? `order=${item.order_no}` : '',
+    item.sku_code ? `sku=${item.sku_code}` : '',
+    item.quantity ? `qty=${item.quantity}` : '',
+    `reason=${item.reason}`,
+    item.message ? `message=${item.message}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+async function downloadExcelPackageAsZip(items: AssetExcelPackageItem[], failures: AssetExcelPackageFailure[]): Promise<number> {
+  const { default: JSZip } = await import('jszip')
+  const zip = new JSZip()
+  const reportLines: string[] = [
+    'Excel 图片分拣下载报告',
+    `生成时间：${formatDateTimeBeijing(new Date().toISOString())}`,
+    `成功行数：${items.length}`,
+    `失败行数：${failures.length}`,
+    '',
+    '失败明细：',
+    ...(failures.length ? failures.map(formatExcelFailure) : ['无']),
+    '',
+  ]
+  let completed = 0
+  let copied = 0
+
+  await mapWithConcurrency(items, EXCEL_PACKAGE_CONCURRENCY, async (item) => {
+    const url = String(item.download_url ?? '').trim()
+    if (!url) {
+      reportLines.push(formatExcelFailure({
+        row_number: item.row_number,
+        order_no: item.order_no,
+        sku_code: item.sku_code,
+        quantity: item.quantity,
+        reason: 'missing_download_url',
+        message: '下载地址为空',
+      }))
+      return
+    }
+    try {
+      const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
+      if (!response.ok) throw new Error(`http_${response.status}`)
+      const blob = await response.blob()
+      const folder = sanitizeZipEntryName(item.order_no, '未知订单')
+      for (let i = 1; i <= item.quantity; i += 1) {
+        zip.file(`${folder}/${resolveExcelPackageFilename(item, i)}`, blob, { binary: true, compression: 'STORE' })
+        copied += 1
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'fetch_failed'
+      reportLines.push(formatExcelFailure({
+        row_number: item.row_number,
+        order_no: item.order_no,
+        sku_code: item.sku_code,
+        quantity: item.quantity,
+        reason,
+        message: '文件下载失败',
+      }))
+    } finally {
+      completed += 1
+      excelPackageStatus.value = `正在下载并分拣 ${completed}/${items.length} 行，已写入 ${copied} 个文件`
+    }
+  })
+
+  zip.file('打包报告.txt', reportLines.join('\n') + '\n')
+
+  excelPackageStatus.value = '正在生成 ZIP'
+  const blob = await zip.generateAsync(
+    { type: 'blob', compression: 'STORE', streamFiles: true },
+    (metadata) => {
+      excelPackageStatus.value = `正在生成 ZIP ${Math.floor(metadata.percent)}%`
+    },
+  )
+  downloadBlob(blob, resolveExcelPackageZipFilename())
+  return copied
+}
+
+function resolveExcelPackageZipFilename(): string {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `excel-image-package-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.zip`
+}
+
+async function handleExcelPackageFile(event: Event) {
+  const file = (event.target as HTMLInputElement | null)?.files?.[0]
+  if (!file || excelPackaging.value) return
+  excelPackaging.value = true
+  excelPackageStatus.value = '正在解析 Excel 模板'
+  excelPackageError.value = ''
+  try {
+    const rows = await parseExcelPackageRows(file)
+    if (!rows.length) throw new Error('Excel 中没有可处理的数据行')
+    excelPackageStatus.value = `已解析 ${rows.length} 行，正在匹配资产`
+    const res = await assetsApi.excelPackagePreview(rows)
+    const manifest = res.data?.data
+    const items = Array.isArray(manifest?.items) ? manifest.items : []
+    const failures = Array.isArray(manifest?.failures) ? manifest.failures : []
+    if (!items.length) throw new Error('没有匹配到可下载的 JPG/PNG 资产')
+    excelPackageStatus.value = `匹配成功 ${items.length} 行，准备生成 ${manifest?.total_files ?? 0} 个文件`
+    const copied = await downloadExcelPackageAsZip(items, failures)
+    excelPackageStatus.value = `已生成 ZIP，共写入 ${copied} 个文件`
+    const errors: string[] = []
+    if (failures.length > 0) errors.push(`${failures.length} 行未匹配`)
+    if (copied <= 0) errors.push('没有图片文件下载成功')
+    excelPackageError.value = errors.length > 0 ? `${errors.join('；')}，详情见 ZIP 内打包报告.txt` : ''
+  } catch (err) {
+    excelPackageStatus.value = ''
+    excelPackageError.value = resolveApiUserMessage(err, { fallback: 'Excel 图片分拣下载失败' })
+  } finally {
+    excelPackaging.value = false
+    if (excelFileInput.value) excelFileInput.value.value = ''
+  }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -1090,6 +1326,16 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+.ac-icon-btn--primary {
+  background: var(--ac-accent);
+  border-color: var(--ac-accent);
+  color: #fff;
+}
+
+.ac-hidden-file {
+  display: none;
+}
+
 .ac-filters-panel {
   max-width: var(--ac-content-max);
   margin: 12px auto 0;
@@ -1131,6 +1377,19 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.ac-excel-package-bar {
+  max-width: var(--ac-content-max);
+  margin: 10px auto 0;
+  padding: 10px clamp(30px, 3vw, 50px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: rgba(0, 113, 227, 0.06);
+  border-top: 1px solid rgba(0, 113, 227, 0.12);
+  border-bottom: 1px solid rgba(0, 113, 227, 0.12);
 }
 
 .ac-batch-count {

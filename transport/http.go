@@ -301,6 +301,7 @@ func NewRouter(
 		assetGroup.GET("", access(assetGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.ListAssetResources)
 		assetGroup.GET("/search", access(assetGroup, http.MethodGet, "/search", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.SearchGlobalAssets)
 		assetGroup.POST("/batch-download", access(assetGroup, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.BatchDownloadGlobalAssets)
+		assetGroup.POST("/excel-package/preview", access(assetGroup, http.MethodPost, "/excel-package/preview", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.PreviewExcelPackage)
 		assetGroup.GET("/:asset_id", access(assetGroup, http.MethodGet, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.GetGlobalAsset)
 		assetGroup.DELETE("/:asset_id", access(assetGroup, http.MethodDelete, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DeleteGlobalAsset)
 		assetGroup.GET("/:asset_id/download", access(assetGroup, http.MethodGet, "/:asset_id/download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DownloadGlobalAsset)

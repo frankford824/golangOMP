@@ -275,6 +275,55 @@ export interface AssetBatchDownloadResponse {
   data?: AssetBatchDownloadManifest
 }
 
+export interface AssetExcelPackageRow {
+  row_number?: number
+  order_no: string
+  sku_code: string
+  sku_name?: string
+  quantity: number
+  keyword?: string
+}
+
+export interface AssetExcelPackageItem {
+  row_number?: number
+  order_no: string
+  sku_code: string
+  sku_name?: string
+  quantity: number
+  asset_id: number
+  task_id: number
+  task_no?: string
+  filename: string
+  file_size: number
+  mime_type?: string
+  download_url: string
+  expires_at?: string | null
+}
+
+export interface AssetExcelPackageFailure {
+  row_number?: number
+  order_no?: string
+  sku_code?: string
+  sku_name?: string
+  quantity?: number
+  reason: string
+  message: string
+}
+
+export interface AssetExcelPackageManifest {
+  items: AssetExcelPackageItem[]
+  failures?: AssetExcelPackageFailure[]
+  success_count: number
+  failure_count: number
+  total_files: number
+  total_size: number
+  expires_at?: string | null
+}
+
+export interface AssetExcelPackagePreviewResponse {
+  data?: AssetExcelPackageManifest
+}
+
 export const assetsApi = {
   /**
    * 任务上下文资产列表
@@ -339,6 +388,13 @@ export const assetsApi = {
     http.post<AssetBatchDownloadResponse>(
       '/v1/assets/batch-download',
       { asset_ids: assetIds } as AssetBatchDownloadPayload,
+      { signal },
+    ),
+
+  excelPackagePreview: (rows: AssetExcelPackageRow[], signal?: AbortSignal) =>
+    http.post<AssetExcelPackagePreviewResponse>(
+      '/v1/assets/excel-package/preview',
+      { rows },
       { signal },
     ),
 
