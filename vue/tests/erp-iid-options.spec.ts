@@ -23,7 +23,7 @@ describe('useErpIidOptions', () => {
     expect(items.value.length).toBe(ERP_IID_PRESETS.length)
   })
 
-  it('API 成功时使用后端返回的 i_id 选项', async () => {
+  it('API 成功时本地命中结果优先，ERP 结果按原顺序衔接', async () => {
     vi.mocked(erpApi.getIids).mockResolvedValue({
       data: {
         data: [
@@ -34,21 +34,51 @@ describe('useErpIidOptions', () => {
             category_name: '常规KT板',
             product_count: 12,
           },
+          {
+            i_id: '海报-ERP新增款',
+            label: '海报-ERP新增款',
+            category: '海报',
+            category_name: '海报',
+            product_count: 3,
+          },
         ],
         pagination: { page: 1, page_size: 200, total: 1 },
       },
     } as never)
 
     const { loadIids, items, lastSourceMode, selectOptions } = useErpIidOptions()
-    await loadIids('api-success')
+    await loadIids('海报')
 
-    expect(lastSourceMode.value).toBe('api')
-    expect(items.value.length).toBe(1)
-    expect(items.value[0]?.i_id).toBe('常规kt板')
+    expect(lastSourceMode.value).toBe('mixed')
+    expect(items.value.length).toBeGreaterThan(1)
+    // 本地“常规海报”先于 ERP 扩展项
+    expect(items.value[0]?.i_id).toBe('常规海报')
+    expect(items.value[items.value.length - 1]?.i_id).toBe('海报-ERP新增款')
     expect(selectOptions.value[0]).toEqual({
-      value: '常规kt板',
-      label: '常规kt板（常规KT板）',
+      value: '常规海报',
+      label: '常规海报',
     })
+  })
+
+  it('合并时去重：本地已存在的 i_id 不重复追加 ERP 项', async () => {
+    vi.mocked(erpApi.getIids).mockResolvedValue({
+      data: {
+        data: [
+          {
+            i_id: '常规海报',
+            label: '常规海报',
+            category: '常规海报',
+            category_name: '常规海报',
+          },
+        ],
+        pagination: { page: 1, page_size: 200, total: 1 },
+      },
+    } as never)
+
+    const { loadIids, items } = useErpIidOptions()
+    await loadIids('海报')
+
+    expect(items.value.filter((item) => item.i_id === '常规海报')).toHaveLength(1)
   })
 
   it('API 失败时回退到本地 56 项预置', async () => {

@@ -45,7 +45,7 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 const hintText = computed(() => {
   if (loading.value) return '正在搜索 ERP 款式编码...'
   if (lastSourceMode.value === 'fallback') return '默认展示本地预置 56 项，输入关键字后搜索 ERP'
-  if (lastSourceMode.value === 'mixed') return 'ERP 返回为空，已回退到本地预置 56 项'
+  if (lastSourceMode.value === 'mixed') return '本地常用结果优先展示，ERP 搜索结果衔接显示在后'
   return '支持滚动浏览与关键字搜索'
 })
 
