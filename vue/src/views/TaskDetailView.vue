@@ -3397,18 +3397,25 @@ watch(taskId, (id) => {
   opacity: 1;
 }
 .lightbox-overlay {
+  --lightbox-header-height: 64px;
+  --lightbox-margin: 12px;
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: calc(var(--lightbox-header-height) + var(--lightbox-margin));
+  bottom: 0;
+  padding: var(--lightbox-margin);
   background: rgba(0, 0, 0, 0.7);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   z-index: 9999;
   cursor: zoom-out;
+  overflow: auto;
 }
 .lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
+  max-width: calc(100vw - (var(--lightbox-margin) * 2));
+  max-height: calc(100vh - var(--lightbox-header-height) - (var(--lightbox-margin) * 2));
   object-fit: contain;
   border-radius: 6px;
 }
