@@ -3,8 +3,11 @@
     <!-- 统一走 canonical asset upload-session -->
     <div
       class="upload-zone"
-      :class="{ 'upload-zone-disabled': uploading }"
-      @dragover.prevent
+      :class="{ 'upload-zone-disabled': uploading, 'upload-zone-drag-active': isDragActive }"
+      @click="openFilePicker"
+      @dragenter.prevent="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave.prevent="onDragLeave"
       @drop.prevent="handleDrop"
     >
       <input
@@ -13,6 +16,7 @@
         :accept="UPLOAD_ACCEPT_ATTRIBUTE"
         multiple
         class="hidden-input"
+        :disabled="uploading"
         @change="onFileChange"
       />
       <span class="upload-plus">+</span>
@@ -108,6 +112,8 @@ const fileRefs = ref<RefItem[]>([])
 const limitError = ref('')
 const uploadError = ref('')
 const uploading = ref(false)
+const isDragActive = ref(false)
+const dragDepth = ref(0)
 const retriedThumbKeys = ref(new Set<string>())
 
 const emit = defineEmits<{
@@ -161,7 +167,42 @@ function syncFromModelValue() {
   fileRefs.value = nextItems
 }
 
+function hasDraggedFiles(e: DragEvent): boolean {
+  const types = e.dataTransfer?.types
+  return Array.isArray(types) && types.includes('Files')
+}
+
+function openFilePicker() {
+  if (uploading.value) return
+  fileInput.value?.click()
+}
+
+function onDragEnter(e: DragEvent) {
+  if (uploading.value || !hasDraggedFiles(e)) return
+  dragDepth.value += 1
+  isDragActive.value = true
+}
+
+function onDragOver(e: DragEvent) {
+  if (uploading.value || !hasDraggedFiles(e)) return
+  isDragActive.value = true
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onDragLeave(e: DragEvent) {
+  if (!hasDraggedFiles(e)) return
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+  if (dragDepth.value === 0) {
+    isDragActive.value = false
+  }
+}
+
 function handleDrop(e: DragEvent) {
+  isDragActive.value = false
+  dragDepth.value = 0
+  if (uploading.value) return
   const files = e.dataTransfer?.files
   if (files?.length) processFiles(files)
 }
@@ -173,6 +214,7 @@ function onFileChange(e: Event) {
 }
 
 async function processFiles(files: FileList) {
+  if (uploading.value) return
   limitError.value = ''
   uploadError.value = ''
   const picked = Array.from(files)
@@ -301,6 +343,10 @@ watch(
   border-radius: 6px;
   transition: background 0.15s, border-color 0.15s;
 }
+.upload-zone-drag-active {
+  background: #e8f1ff;
+  box-shadow: inset 0 0 0 1px #3b82f6;
+}
 .upload-panel-compact .upload-zone {
   flex-direction: row;
   justify-content: flex-start;
@@ -337,11 +383,14 @@ watch(
 .upload-zone-disabled { cursor: not-allowed; opacity: 0.7; }
 .hidden-input {
   position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .upload-plus { font-size: 1.375rem; color: #94a3b8; line-height: 1; }
 .upload-zone p {
