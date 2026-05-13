@@ -153,7 +153,7 @@ const MENU_CONFIG: MenuConfig[] = [
   {
     key: 'resource_management',
     label: '资产管理',
-    to: '/assets',
+    to: '/asset-center',
     aliases: ['assets_index'],
     section: 'data',
     icon: 'perm_media',

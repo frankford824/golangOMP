@@ -278,7 +278,7 @@ function goResult(result: GlobalSearchOverlayHit, groupKey: string): void {
   if (groupKey === 'tasks') {
     void router.push(`/tasks/${result.id}`)
   } else if (groupKey === 'assets') {
-    void router.push(`/assets/${result.id}`)
+    void router.push(`/asset-center/${result.id}`)
   }
   close()
 }
