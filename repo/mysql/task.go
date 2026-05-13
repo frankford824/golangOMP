@@ -163,8 +163,11 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 		INSERT INTO task_sku_items
 		  (task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
 		   product_name_snapshot, product_short_name, category_code, material_mode,
-		   cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, reference_file_refs_json, dedupe_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		   cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+		   cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
+		   manual_cost_override, manual_cost_override_reason, override_actor, override_at,
+		   design_requirement, variant_json, reference_file_refs_json, dedupe_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert task_sku_items: %w", err)
 	}
@@ -189,6 +192,19 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 			item.CostPriceMode,
 			toNullInt64(item.Quantity),
 			toNullFloat64(item.BaseSalePrice),
+			toNullFloat64(item.CostPrice),
+			toNullFloat64(item.EstimatedCost),
+			toNullInt64(item.CostRuleID),
+			item.CostRuleName,
+			item.CostRuleSource,
+			toNullInt(item.MatchedRuleVersion),
+			item.PrefillSource,
+			toNullTime(item.PrefillAt),
+			item.RequiresManualReview,
+			item.ManualCostOverride,
+			item.ManualCostOverrideReason,
+			item.OverrideActor,
+			toNullTime(item.OverrideAt),
 			item.DesignRequirement,
 			toNullJSONString(item.VariantJSON),
 			marshalReferenceFileRefs(item.ReferenceFileRefs),
@@ -302,7 +318,10 @@ func (r *taskRepo) GetSKUItemBySKUCode(ctx context.Context, skuCode string) (*do
 		SELECT id, task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
 		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version, last_filed_at, COALESCE(filing_error_message, ''),
 		       product_name_snapshot, product_short_name, category_code, material_mode,
-		       cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
+		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
+		       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
 		       dedupe_key, created_at, updated_at
 		FROM task_sku_items
 		WHERE sku_code = ?`, skuCode)
@@ -321,7 +340,10 @@ func (r *taskRepo) ListSKUItemsByTaskID(ctx context.Context, taskID int64) ([]*d
 		SELECT id, task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
 		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version, last_filed_at, COALESCE(filing_error_message, ''),
 		       product_name_snapshot, product_short_name, category_code, material_mode,
-		       cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
+		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
+		       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
 		       dedupe_key, created_at, updated_at
 		FROM task_sku_items
 		WHERE task_id = ?
@@ -376,6 +398,52 @@ func (r *taskRepo) UpdateSKUItemsFilingProjection(ctx context.Context, tx repo.T
 	)
 	if err != nil {
 		return fmt.Errorf("update task_sku_items filing projection: %w", err)
+	}
+	return nil
+}
+
+func (r *taskRepo) UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error {
+	if item == nil {
+		return fmt.Errorf("update task_sku_item cost info: item is nil")
+	}
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_sku_items
+		SET cost_price = ?,
+		    estimated_cost = ?,
+		    cost_rule_id = ?,
+		    cost_rule_name = ?,
+		    cost_rule_source = ?,
+		    matched_rule_version = ?,
+		    prefill_source = ?,
+		    prefill_at = ?,
+		    requires_manual_review = ?,
+		    manual_cost_override = ?,
+		    manual_cost_override_reason = ?,
+		    override_actor = ?,
+		    override_at = ?,
+		    erp_sync_required = 1,
+		    erp_sync_version = erp_sync_version + 1,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND task_id = ?`,
+		toNullFloat64(item.CostPrice),
+		toNullFloat64(item.EstimatedCost),
+		toNullInt64(item.CostRuleID),
+		item.CostRuleName,
+		item.CostRuleSource,
+		toNullInt(item.MatchedRuleVersion),
+		item.PrefillSource,
+		toNullTime(item.PrefillAt),
+		item.RequiresManualReview,
+		item.ManualCostOverride,
+		item.ManualCostOverrideReason,
+		item.OverrideActor,
+		toNullTime(item.OverrideAt),
+		item.ID,
+		item.TaskID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task_sku_item cost info: %w", err)
 	}
 	return nil
 }
@@ -1111,8 +1179,11 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	var filingStatus string
 	var erpSyncStatus string
 	var lastFiledAt sql.NullTime
+	var prefillAt, overrideAt sql.NullTime
 	var quantity sql.NullInt64
-	var baseSalePrice sql.NullFloat64
+	var baseSalePrice, costPrice, estimatedCost sql.NullFloat64
+	var costRuleID sql.NullInt64
+	var matchedRuleVersion sql.NullInt64
 	var variantJSON []byte
 	var referenceFileRefsJSON sql.NullString
 	if err := scanner.Scan(
@@ -1136,6 +1207,19 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 		&item.CostPriceMode,
 		&quantity,
 		&baseSalePrice,
+		&costPrice,
+		&estimatedCost,
+		&costRuleID,
+		&item.CostRuleName,
+		&item.CostRuleSource,
+		&matchedRuleVersion,
+		&item.PrefillSource,
+		&prefillAt,
+		&item.RequiresManualReview,
+		&item.ManualCostOverride,
+		&item.ManualCostOverrideReason,
+		&item.OverrideActor,
+		&overrideAt,
 		&item.DesignRequirement,
 		&variantJSON,
 		&referenceFileRefsJSON,
@@ -1161,6 +1245,12 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	item.LastFiledAt = fromNullTime(lastFiledAt)
 	item.Quantity = fromNullInt64(quantity)
 	item.BaseSalePrice = fromNullFloat64(baseSalePrice)
+	item.CostPrice = fromNullFloat64(costPrice)
+	item.EstimatedCost = fromNullFloat64(estimatedCost)
+	item.CostRuleID = fromNullInt64(costRuleID)
+	item.MatchedRuleVersion = fromNullInt(matchedRuleVersion)
+	item.PrefillAt = fromNullTime(prefillAt)
+	item.OverrideAt = fromNullTime(overrideAt)
 	if len(variantJSON) > 0 {
 		item.VariantJSON = append(item.VariantJSON[:0], variantJSON...)
 		item.ProductIID = productIIDFromVariantJSON(variantJSON)

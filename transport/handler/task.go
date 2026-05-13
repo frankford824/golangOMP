@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"strings"
@@ -115,6 +116,7 @@ type createTaskBatchItemReq struct {
 	NewSKU            string                    `json:"new_sku"`
 	PurchaseSKU       string                    `json:"purchase_sku"`
 	CostPriceMode     string                    `json:"cost_price_mode"`
+	CostPrice         *float64                  `json:"cost_price"`
 	Quantity          *int64                    `json:"quantity"`
 	BaseSalePrice     *float64                  `json:"base_sale_price"`
 	VariantJSON       json.RawMessage           `json:"variant_json"`
@@ -274,6 +276,14 @@ type patchTaskCostInfoReq struct {
 	CostRuleID               *int64   `json:"cost_rule_id"`
 	CostRuleName             *string  `json:"cost_rule_name"`
 	CostRuleSource           *string  `json:"cost_rule_source"`
+	ManualCostOverride       *bool    `json:"manual_cost_override"`
+	ManualCostOverrideReason *string  `json:"manual_cost_override_reason"`
+	Remark                   *string  `json:"remark"`
+}
+
+type patchTaskSKUItemCostInfoReq struct {
+	OperatorID               *int64   `json:"operator_id"`
+	CostPrice                *float64 `json:"cost_price"`
 	ManualCostOverride       *bool    `json:"manual_cost_override"`
 	ManualCostOverrideReason *string  `json:"manual_cost_override_reason"`
 	Remark                   *string  `json:"remark"`
@@ -850,6 +860,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 				NewSKU:            item.NewSKU,
 				PurchaseSKU:       item.PurchaseSKU,
 				CostPriceMode:     item.CostPriceMode,
+				CostPrice:         item.CostPrice,
 				Quantity:          item.Quantity,
 				BaseSalePrice:     item.BaseSalePrice,
 				VariantJSON:       item.VariantJSON,
@@ -1601,6 +1612,63 @@ func (h *TaskHandler) PatchCostInfo(c *gin.Context) {
 		params.Remark = strings.TrimSpace(*req.Remark)
 	}
 	updated, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), params)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, updated)
+}
+
+// PatchSKUItemCostInfo handles PATCH /v1/tasks/:id/sku-items/:sku_item_id/cost-info
+func (h *TaskHandler) PatchSKUItemCostInfo(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	skuItemID, err := parseInt64(strings.TrimSpace(c.Param("sku_item_id")))
+	if err != nil || skuItemID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid sku item id", nil))
+		return
+	}
+	var req patchTaskSKUItemCostInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	updater, ok := h.svc.(interface {
+		UpdateSKUItemCostInfo(context.Context, service.UpdateTaskSKUItemCostInfoParams) (*domain.TaskSKUItem, *domain.AppError)
+	})
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "task sku item cost service not configured", nil))
+		return
+	}
+	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID, "operator_id")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	manual := true
+	if req.ManualCostOverride != nil {
+		manual = *req.ManualCostOverride
+	}
+	reason := ""
+	if req.ManualCostOverrideReason != nil {
+		reason = strings.TrimSpace(*req.ManualCostOverrideReason)
+	}
+	remark := ""
+	if req.Remark != nil {
+		remark = strings.TrimSpace(*req.Remark)
+	}
+	updated, appErr := updater.UpdateSKUItemCostInfo(c.Request.Context(), service.UpdateTaskSKUItemCostInfoParams{
+		TaskID:                   taskID,
+		SKUItemID:                skuItemID,
+		OperatorID:               operatorID,
+		CostPrice:                req.CostPrice,
+		ManualCostOverride:       manual,
+		ManualCostOverrideReason: reason,
+		Remark:                   remark,
+	})
 	if appErr != nil {
 		respondError(c, appErr)
 		return

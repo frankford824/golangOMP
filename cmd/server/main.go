@@ -263,6 +263,7 @@ func main() {
 	integrationCenterSvc := service.NewIntegrationCenterService(integrationCallLogRepo, integrationExecutionRepo, mdb)
 	taskAssetSvc := service.NewTaskAssetService(taskRepo, taskAssetRepo, taskEventRepo, uploadRequestRepo, assetStorageRefRepo, mdb,
 		service.WithTaskAssetModuleRepo(taskModuleRepo),
+		service.WithTaskAssetBlueprintRuleEngine(blueprintRules),
 		service.WithTaskAssetDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetScopeUserRepo(userRepo),
 		service.WithTaskAssetUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
@@ -287,6 +288,7 @@ func main() {
 	taskAssetCenterSvc := service.NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, assetStorageRefRepo, taskEventRepo, mdb, uploadClient,
 		service.WithOSSDirectService(ossDirectSvc),
 		service.WithTaskAssetCenterModuleRepo(taskModuleRepo),
+		service.WithTaskAssetCenterBlueprintRuleEngine(blueprintRules),
 		service.WithTaskAssetCenterDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetCenterScopeUserRepo(userRepo),
 		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))

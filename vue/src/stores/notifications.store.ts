@@ -58,6 +58,12 @@ export const useNotificationsStore = defineStore('notifications', () => {
     if (Number.isFinite(n)) unreadCount.value = n
   }
 
+  function reset(): void {
+    items.value = []
+    unreadCount.value = 0
+    loading.value = false
+  }
+
   async function markRead(id: number): Promise<void> {
     await notificationsApi.markRead(id)
     await load()
@@ -76,6 +82,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     load,
     refreshUnreadCount,
     applyUnreadCount,
+    reset,
     markRead,
     readAll,
   }

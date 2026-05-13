@@ -427,7 +427,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(item.Quantity),
-			CostPrice:    cloneFloat64Ptr(detail.CostPrice),
+			CostPrice:    cloneFloat64Ptr(firstFloat64Ptr(item.CostPrice, detail.CostPrice)),
 		},
 	}
 	return normalizeERPProductUpsertPayload(payload), nil

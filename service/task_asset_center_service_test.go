@@ -752,8 +752,10 @@ func TestTaskAssetCenterServiceBatchDeliveryAdvancesOnlyAfterAllSKUCompleted(t *
 	storageRefRepo := newStep37AssetStorageRefRepo()
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+	workflow := &step04DesignSubmissionWorkflow{}
 
-	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient,
+		WithTaskAssetCenterBlueprintRuleEngine(workflow)).(*taskAssetCenterService)
 
 	createA, appErr := svc.CreateMultipartUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
 		TaskID:        2006,
@@ -805,6 +807,12 @@ func TestTaskAssetCenterServiceBatchDeliveryAdvancesOnlyAfterAllSKUCompleted(t *
 	}
 	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventDesignSubmitted) != 1 {
 		t.Fatalf("design submitted events = %+v, want exactly one", taskEventRepo.events)
+	}
+	if len(workflow.calls) != 1 {
+		t.Fatalf("workflow calls = %+v, want one design submit", workflow.calls)
+	}
+	if got := workflow.calls[0]; got.taskID != 2006 || got.moduleKey != domain.ModuleKeyDesign || got.action != domain.ModuleActionSubmit || got.actorID == nil || *got.actorID != 530 {
+		t.Fatalf("workflow call = %+v", got)
 	}
 	if last := taskEventRepo.events[len(taskEventRepo.events)-1]; last.EventType != domain.TaskEventDesignSubmitted {
 		t.Fatalf("last event = %s, want design submitted after asset version and upload completion", last.EventType)

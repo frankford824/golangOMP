@@ -113,7 +113,10 @@ function displayTime(createdAt: string | undefined): string {
   return formatDateTimeBeijing(createdAt)
 }
 
-function openTask(item: NotificationItem): void {
+async function openTask(item: NotificationItem): Promise<void> {
+  if (!isRead(item)) {
+    await notificationsStore.markRead(item.id).catch(() => undefined)
+  }
   const payload = (item.payload ?? {}) as Record<string, unknown>
   const taskId = Number(payload.task_id)
   if (!Number.isFinite(taskId) || taskId <= 0) return

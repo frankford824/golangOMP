@@ -55,6 +55,7 @@ type taskAssetService struct {
 	dataScopeResolver       DataScopeResolver
 	scopeUserRepo           repo.UserRepo
 	userDisplayNameResolver UserDisplayNameResolver
+	workflowRules           designSubmissionWorkflowEngine
 }
 
 type TaskAssetServiceOption func(*taskAssetService)
@@ -80,6 +81,12 @@ func WithTaskAssetUserDisplayNameResolver(resolver UserDisplayNameResolver) Task
 func WithTaskAssetModuleRepo(moduleRepo repo.TaskModuleRepo) TaskAssetServiceOption {
 	return func(s *taskAssetService) {
 		s.taskModuleRepo = moduleRepo
+	}
+}
+
+func WithTaskAssetBlueprintRuleEngine(rules designSubmissionWorkflowEngine) TaskAssetServiceOption {
+	return func(s *taskAssetService) {
+		s.workflowRules = rules
 	}
 }
 
@@ -337,6 +344,9 @@ func (s *taskAssetService) createAsset(
 				return err
 			}
 			if err := s.markDesignSubmissionModuleState(ctx, tx, taskID, transition); err != nil {
+				return err
+			}
+			if err := applyDesignSubmissionWorkflow(ctx, tx, s.workflowRules, task, transition, uploadedBy); err != nil {
 				return err
 			}
 			eventType = domain.TaskEventDesignSubmitted
