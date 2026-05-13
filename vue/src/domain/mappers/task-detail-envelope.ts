@@ -38,6 +38,18 @@ export function mergeDetailEnvelopeIntoTaskRaw(
     'skuItems',
     'asset_versions',
     'assetVersions',
+    'procurement_summary',
+    'procurementSummary',
+    'matched_rule_governance',
+    'matchedRuleGovernance',
+    'override_summary',
+    'overrideSummary',
+    'governance_audit_summary',
+    'governanceAuditSummary',
+    'override_governance_boundary',
+    'overrideGovernanceBoundary',
+    'platform_entry_boundary',
+    'platformEntryBoundary',
   ] as const) {
     if (envelope[k] != null) merged[k] = envelope[k]
   }

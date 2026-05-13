@@ -407,9 +407,10 @@ import {
   fetchTaskAssetPreviewWithDerivedFallback,
   primeAssetDownloadMetaCache,
 } from '@/domain/asset-access'
-import { assetsApi } from '@/services/api/assetsApi'
+import { assetsApi, type AssetBatchDownloadItem } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 const route = useRoute()
 const router = useRouter()
@@ -431,6 +432,7 @@ const listJumpPage = ref(1)
 const listPageSize = ref(20)
 const listTotal = ref(0)
 const AUTO_RELOAD_DELAY_MS = 400
+const MAX_BATCH_DOWNLOAD_ASSETS = 100
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 const previewLightboxSrc = ref<string | null>(null)
 const filtersExpanded = ref(false)
@@ -483,7 +485,9 @@ interface SelectedAssetSummary {
 const selectedAssetMap = reactive(new Map<string, SelectedAssetSummary>())
 const selectedCount = computed(() => selectedAssetMap.size)
 const selectedAssets = computed(() => Array.from(selectedAssetMap.values()))
-const canBatchDownload = computed(() => selectedCount.value > 0 && !batchDownloading.value)
+const canBatchDownload = computed(
+  () => selectedCount.value > 0 && selectedCount.value <= MAX_BATCH_DOWNLOAD_ASSETS && !batchDownloading.value,
+)
 
 const effectiveSearchKeyword = computed(
   () => filters.keyword.trim() || filters.taskId.trim() || filters.scopeSkuCode.trim(),
@@ -576,17 +580,25 @@ function toggleAssetSelection(asset: BackendAsset, checked?: boolean) {
   const nextChecked = typeof checked === 'boolean' ? checked : !selectedAssetMap.has(id)
   if (!nextChecked) {
     selectedAssetMap.delete(id)
+    if (selectedAssetMap.size <= MAX_BATCH_DOWNLOAD_ASSETS) batchDownloadError.value = ''
     return
   }
+  if (!selectedAssetMap.has(id) && selectedAssetMap.size >= MAX_BATCH_DOWNLOAD_ASSETS) {
+    batchDownloadError.value = `最多一次选择 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资产`
+    return
+  }
+  batchDownloadError.value = ''
   selectedAssetMap.set(id, toSelectedAssetSummary(asset))
 }
 
 function clearSelectedAssets() {
   selectedAssetMap.clear()
+  batchDownloadError.value = ''
 }
 
 function removeSelectedAsset(assetId: string) {
   selectedAssetMap.delete(assetId)
+  if (selectedAssetMap.size <= MAX_BATCH_DOWNLOAD_ASSETS) batchDownloadError.value = ''
 }
 
 function onAssetSelectionChange(asset: BackendAsset, event: Event) {
@@ -594,45 +606,32 @@ function onAssetSelectionChange(asset: BackendAsset, event: Event) {
   toggleAssetSelection(asset, checked)
 }
 
-function decodeDispositionFilename(value: string): string {
-  const trimmed = value.trim().replace(/^["']|["']$/g, '')
-  try {
-    return decodeURIComponent(trimmed)
-  } catch {
-    return trimmed
-  }
-}
-
-function resolveBatchDownloadFilename(contentDisposition: string | undefined): string {
-  const fallback = 'assets-batch-download.zip'
-  if (!contentDisposition) return fallback
-
-  const starMatch = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
-  if (starMatch?.[1]) {
-    const name = decodeDispositionFilename(starMatch[1])
-    if (name) return name
-  }
-
-  const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i)
-  if (quotedMatch?.[1]) {
-    const name = decodeDispositionFilename(quotedMatch[1])
-    if (name) return name
-  }
-
-  const plainMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i)
-  if (plainMatch?.[1]) {
-    const name = decodeDispositionFilename(plainMatch[1])
-    if (name) return name
-  }
-
-  return fallback
-}
-
 function normalizeSelectedAssetIDs(): number[] {
   const ids = selectedAssets.value
     .map((item) => Number(item.id))
     .filter((id) => Number.isInteger(id) && id > 0)
   return Array.from(new Set(ids))
+}
+
+function delayBatchDownloadClick(index: number): Promise<void> | undefined {
+  if (index === 0 || index % 5 !== 0) return undefined
+  return new Promise((resolve) => window.setTimeout(resolve, 150))
+}
+
+async function triggerDirectBatchDownloads(items: AssetBatchDownloadItem[]) {
+  for (const [index, item] of items.entries()) {
+    await delayBatchDownloadClick(index)
+    const url = typeof item.download_url === 'string' ? item.download_url.trim() : ''
+    if (!url) continue
+
+    const link = document.createElement('a')
+    link.href = url
+    link.download = item.filename || ''
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
 }
 
 async function handleBatchDownload() {
@@ -644,25 +643,25 @@ async function handleBatchDownload() {
     batchDownloadError.value = '未找到可下载的资产 ID，请重新勾选后重试'
     return
   }
+  if (assetIDs.length > MAX_BATCH_DOWNLOAD_ASSETS) {
+    batchDownloadError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资产`
+    return
+  }
 
   batchDownloading.value = true
   try {
     const res = await assetsApi.batchDownload(assetIDs)
-    const blob = res.data instanceof Blob ? res.data : new Blob([res.data as BlobPart], { type: 'application/zip' })
-    const disposition = String(res.headers?.['content-disposition'] ?? '')
-    const filename = resolveBatchDownloadFilename(disposition)
-
-    const objectURL = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectURL
-    link.download = filename
-    link.rel = 'noopener'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(objectURL)
+    const manifest = res.data?.data
+    const items = Array.isArray(manifest?.items) ? manifest.items : []
+    if (!items.length) {
+      batchDownloadError.value = '没有可下载的资产'
+      return
+    }
+    await triggerDirectBatchDownloads(items)
+    const failureCount = Number(manifest?.failure_count ?? 0)
+    batchDownloadError.value = failureCount > 0 ? `已开始下载 ${items.length} 个文件，${failureCount} 个文件不可下载` : ''
   } catch (err) {
-    batchDownloadError.value = err instanceof Error ? err.message : '批量下载失败，请稍后重试'
+    batchDownloadError.value = resolveApiUserMessage(err, { fallback: '批量下载失败，请稍后重试' })
   } finally {
     batchDownloading.value = false
   }

@@ -1,29 +1,29 @@
 package asset_center
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"errors"
-	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
+	baseservice "workflow/service"
 )
 
-func TestBuildBatchDownloadZipSuccessWithTaskPathAndFilenameFallback(t *testing.T) {
+func TestBuildBatchDownloadManifestReturnsDirectOSSURLs(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	expiresAt := time.Date(2026, 5, 12, 10, 30, 0, 0, time.UTC)
 	repoRows := []*repo.TaskAssetSearchRow{
 		{
 			Asset: &domain.TaskAsset{
 				ID:           11,
-				AssetID:      int64Ptr(101),
+				AssetID:      int64PtrBatchSvc(101),
 				TaskID:       9001,
 				FileName:     "fallback.psd",
 				StorageKey:   strPtr("k-101"),
-				FileSize:     int64Ptr(4),
+				FileSize:     int64PtrBatchSvc(4),
+				MimeType:     strPtr("image/vnd.adobe.photoshop"),
 				UploadStatus: &uploaded,
 				OriginalName: strPtr("原始文件.psd"),
 			},
@@ -32,49 +32,61 @@ func TestBuildBatchDownloadZipSuccessWithTaskPathAndFilenameFallback(t *testing.
 		{
 			Asset: &domain.TaskAsset{
 				ID:           12,
-				AssetID:      int64Ptr(102),
+				AssetID:      int64PtrBatchSvc(102),
 				TaskID:       9001,
 				FileName:     "fallback2.psd",
 				StorageKey:   strPtr("k-102"),
-				FileSize:     int64Ptr(4),
+				FileSize:     int64PtrBatchSvc(5),
 				UploadStatus: &uploaded,
 			},
 			Task: &domain.Task{ID: 9001},
 		},
 	}
-	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, nil, nil)
-	svc.SetStorageStreamOpener(&streamOpenerStub{contentByKey: map[string]string{
-		"k-101": "A101",
-		"k-102": "A102",
-	}})
+	presigner := &batchPresignerStub{
+		enabled:   true,
+		expiresAt: expiresAt,
+		urlByKey: map[string]string{
+			"k-101": "https://oss.example/k-101",
+			"k-102": "https://oss.example/k-102",
+		},
+	}
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, presigner, nil)
 
-	result, appErr := svc.BuildBatchDownloadZip(context.Background(), []int64{101, 102})
+	result, appErr := svc.BuildBatchDownloadManifest(context.Background(), []int64{101, 102})
 	if appErr != nil {
-		t.Fatalf("BuildBatchDownloadZip error = %+v", appErr)
+		t.Fatalf("BuildBatchDownloadManifest error = %+v", appErr)
 	}
-	if result.SuccessCount != 2 || result.FailureCount != 0 {
-		t.Fatalf("result counts = %+v", result)
+	if result.SuccessCount != 2 || result.FailureCount != 0 || result.TotalSize != 9 {
+		t.Fatalf("manifest summary = %+v", result)
 	}
-	entries := unzipEntries(t, result.ZipBytes)
-	if _, ok := entries["task-9001/原始文件.psd"]; !ok {
-		t.Fatalf("missing original filename entry, got keys=%v", mapKeys(entries))
+	if len(result.Items) != 2 {
+		t.Fatalf("items len = %d", len(result.Items))
 	}
-	if _, ok := entries["task-9001/fallback2.psd"]; !ok {
-		t.Fatalf("missing fallback filename entry, got keys=%v", mapKeys(entries))
+	if result.Items[0].Filename != "原始文件.psd" || result.Items[0].DownloadURL != "https://oss.example/k-101" {
+		t.Fatalf("first item = %+v", result.Items[0])
+	}
+	if result.Items[1].Filename != "fallback2.psd" || result.Items[1].DownloadURL != "https://oss.example/k-102" {
+		t.Fatalf("second item = %+v", result.Items[1])
+	}
+	if got := presigner.filenameByKey["k-101"]; got != "原始文件.psd" {
+		t.Fatalf("presigned filename = %q", got)
+	}
+	if result.ExpiresAt == nil || !result.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("manifest expires_at = %v", result.ExpiresAt)
 	}
 }
 
-func TestBuildBatchDownloadZipDuplicateNamesAddSuffix(t *testing.T) {
+func TestBuildBatchDownloadManifestDuplicateNamesAddSuffix(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	repoRows := []*repo.TaskAssetSearchRow{
 		{
 			Asset: &domain.TaskAsset{
 				ID:           21,
-				AssetID:      int64Ptr(201),
+				AssetID:      int64PtrBatchSvc(201),
 				TaskID:       9100,
 				FileName:     "same.psd",
 				StorageKey:   strPtr("k-201"),
-				FileSize:     int64Ptr(1),
+				FileSize:     int64PtrBatchSvc(1),
 				UploadStatus: &uploaded,
 			},
 			Task: &domain.Task{ID: 9100},
@@ -82,46 +94,44 @@ func TestBuildBatchDownloadZipDuplicateNamesAddSuffix(t *testing.T) {
 		{
 			Asset: &domain.TaskAsset{
 				ID:           22,
-				AssetID:      int64Ptr(202),
+				AssetID:      int64PtrBatchSvc(202),
 				TaskID:       9100,
 				FileName:     "same.psd",
 				StorageKey:   strPtr("k-202"),
-				FileSize:     int64Ptr(1),
+				FileSize:     int64PtrBatchSvc(1),
 				UploadStatus: &uploaded,
 			},
 			Task: &domain.Task{ID: 9100},
 		},
 	}
-	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, nil, nil)
-	svc.SetStorageStreamOpener(&streamOpenerStub{contentByKey: map[string]string{
-		"k-201": "x",
-		"k-202": "y",
-	}})
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, &batchPresignerStub{
+		enabled: true,
+		urlByKey: map[string]string{
+			"k-201": "https://oss.example/k-201",
+			"k-202": "https://oss.example/k-202",
+		},
+	}, nil)
 
-	result, appErr := svc.BuildBatchDownloadZip(context.Background(), []int64{201, 202})
+	result, appErr := svc.BuildBatchDownloadManifest(context.Background(), []int64{201, 202})
 	if appErr != nil {
-		t.Fatalf("BuildBatchDownloadZip error = %+v", appErr)
+		t.Fatalf("BuildBatchDownloadManifest error = %+v", appErr)
 	}
-	entries := unzipEntries(t, result.ZipBytes)
-	if _, ok := entries["task-9100/same.psd"]; !ok {
-		t.Fatalf("missing first duplicate entry")
-	}
-	if _, ok := entries["task-9100/same (2).psd"]; !ok {
-		t.Fatalf("missing second duplicate entry")
+	if result.Items[0].Filename != "same.psd" || result.Items[1].Filename != "same (2).psd" {
+		t.Fatalf("filenames = %+v", result.Items)
 	}
 }
 
-func TestBuildBatchDownloadZipPartialFailureWritesDownloadErrors(t *testing.T) {
+func TestBuildBatchDownloadManifestPartialFailure(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	repoRows := []*repo.TaskAssetSearchRow{
 		{
 			Asset: &domain.TaskAsset{
 				ID:           31,
-				AssetID:      int64Ptr(301),
+				AssetID:      int64PtrBatchSvc(301),
 				TaskID:       9200,
 				FileName:     "ok.psd",
 				StorageKey:   strPtr("k-301"),
-				FileSize:     int64Ptr(2),
+				FileSize:     int64PtrBatchSvc(2),
 				UploadStatus: &uploaded,
 			},
 			Task: &domain.Task{ID: 9200},
@@ -129,7 +139,7 @@ func TestBuildBatchDownloadZipPartialFailureWritesDownloadErrors(t *testing.T) {
 		{
 			Asset: &domain.TaskAsset{
 				ID:           32,
-				AssetID:      int64Ptr(302),
+				AssetID:      int64PtrBatchSvc(302),
 				TaskID:       9200,
 				FileName:     "bad.psd",
 				UploadStatus: &uploaded,
@@ -137,41 +147,38 @@ func TestBuildBatchDownloadZipPartialFailureWritesDownloadErrors(t *testing.T) {
 			Task: &domain.Task{ID: 9200},
 		},
 	}
-	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, nil, nil)
-	svc.SetStorageStreamOpener(&streamOpenerStub{contentByKey: map[string]string{
-		"k-301": "ok",
-	}})
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, &batchPresignerStub{
+		enabled:  true,
+		urlByKey: map[string]string{"k-301": "https://oss.example/k-301"},
+	}, nil)
 
-	result, appErr := svc.BuildBatchDownloadZip(context.Background(), []int64{301, 302})
+	result, appErr := svc.BuildBatchDownloadManifest(context.Background(), []int64{301, 302})
 	if appErr != nil {
-		t.Fatalf("BuildBatchDownloadZip error = %+v", appErr)
+		t.Fatalf("BuildBatchDownloadManifest error = %+v", appErr)
 	}
 	if result.SuccessCount != 1 || result.FailureCount != 1 {
 		t.Fatalf("result counts = %+v", result)
 	}
-	entries := unzipEntries(t, result.ZipBytes)
-	errFile := entries["download_errors.txt"]
-	if !strings.Contains(errFile, "asset_id=302") || !strings.Contains(errFile, "reason=missing_storage_key") {
-		t.Fatalf("download_errors.txt = %q", errFile)
+	if result.Failures[0].AssetID != 302 || result.Failures[0].Reason != "missing_storage_key" {
+		t.Fatalf("failure = %+v", result.Failures[0])
 	}
 }
 
-func TestBuildBatchDownloadZipAllFailedReturnsError(t *testing.T) {
+func TestBuildBatchDownloadManifestAllFailedReturnsError(t *testing.T) {
 	repoRows := []*repo.TaskAssetSearchRow{
 		{
 			Asset: &domain.TaskAsset{
 				ID:       41,
-				AssetID:  int64Ptr(401),
+				AssetID:  int64PtrBatchSvc(401),
 				TaskID:   9300,
 				FileName: "x.psd",
 			},
 			Task: &domain.Task{ID: 9300},
 		},
 	}
-	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, nil, nil)
-	svc.SetStorageStreamOpener(&streamOpenerStub{})
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, &batchPresignerStub{enabled: true}, nil)
 
-	result, appErr := svc.BuildBatchDownloadZip(context.Background(), []int64{401})
+	result, appErr := svc.BuildBatchDownloadManifest(context.Background(), []int64{401})
 	if appErr == nil {
 		t.Fatalf("expected error, result=%+v", result)
 	}
@@ -180,20 +187,67 @@ func TestBuildBatchDownloadZipAllFailedReturnsError(t *testing.T) {
 	}
 }
 
-func TestBuildBatchDownloadZipAssetCountLimit(t *testing.T) {
-	svc := NewService(&batchRepoStub{}, nil, nil)
-	svc.SetStorageStreamOpener(&streamOpenerStub{})
+func TestBuildBatchDownloadManifestAssetCountLimit(t *testing.T) {
+	svc := NewService(&batchRepoStub{}, &batchPresignerStub{enabled: true}, nil)
 	assetIDs := make([]int64, MaxBatchDownloadAssets+1)
 	for i := range assetIDs {
 		assetIDs[i] = int64(i + 1)
 	}
 
-	result, appErr := svc.BuildBatchDownloadZip(context.Background(), assetIDs)
+	result, appErr := svc.BuildBatchDownloadManifest(context.Background(), assetIDs)
 	if appErr == nil {
 		t.Fatalf("expected limit error, result=%+v", result)
 	}
 	if appErr.Code != domain.ErrCodeInvalidRequest {
 		t.Fatalf("error code = %s, want %s", appErr.Code, domain.ErrCodeInvalidRequest)
+	}
+}
+
+func TestBuildBatchDownloadManifestSizeLimitUsesMetadata(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	repoRows := []*repo.TaskAssetSearchRow{
+		{
+			Asset: &domain.TaskAsset{
+				ID:           51,
+				AssetID:      int64PtrBatchSvc(501),
+				TaskID:       9500,
+				FileName:     "ok.psd",
+				StorageKey:   strPtr("k-501"),
+				FileSize:     int64PtrBatchSvc(2),
+				UploadStatus: &uploaded,
+			},
+			Task: &domain.Task{ID: 9500},
+		},
+		{
+			Asset: &domain.TaskAsset{
+				ID:           52,
+				AssetID:      int64PtrBatchSvc(502),
+				TaskID:       9500,
+				FileName:     "too-large.psd",
+				StorageKey:   strPtr("k-502"),
+				FileSize:     int64PtrBatchSvc(MaxBatchDownloadTotalBytes),
+				UploadStatus: &uploaded,
+			},
+			Task: &domain.Task{ID: 9500},
+		},
+	}
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, &batchPresignerStub{
+		enabled: true,
+		urlByKey: map[string]string{
+			"k-501": "https://oss.example/k-501",
+			"k-502": "https://oss.example/k-502",
+		},
+	}, nil)
+
+	result, appErr := svc.BuildBatchDownloadManifest(context.Background(), []int64{501, 502})
+	if appErr != nil {
+		t.Fatalf("BuildBatchDownloadManifest error = %+v", appErr)
+	}
+	if result.SuccessCount != 1 || result.FailureCount != 1 {
+		t.Fatalf("result counts = %+v", result)
+	}
+	if result.Failures[0].AssetID != 502 || result.Failures[0].Reason != "total_size_limit_exceeded" {
+		t.Fatalf("failure = %+v", result.Failures[0])
 	}
 }
 
@@ -224,50 +278,36 @@ func (b *batchRepoStub) GetVersion(context.Context, int64, int64) (*repo.TaskAss
 	return nil, nil
 }
 
-type streamOpenerStub struct {
-	contentByKey map[string]string
-	errByKey     map[string]error
+type batchPresignerStub struct {
+	enabled       bool
+	expiresAt     time.Time
+	urlByKey      map[string]string
+	filenameByKey map[string]string
 }
 
-func (s *streamOpenerStub) Open(_ context.Context, storageKey string) (io.ReadCloser, error) {
-	if err := s.errByKey[storageKey]; err != nil {
-		return nil, err
-	}
-	content, ok := s.contentByKey[storageKey]
-	if !ok {
-		return nil, errors.New("missing stream content")
-	}
-	return io.NopCloser(strings.NewReader(content)), nil
+func (p *batchPresignerStub) Enabled() bool {
+	return p.enabled
 }
 
-func unzipEntries(t *testing.T, raw []byte) map[string]string {
-	t.Helper()
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil {
-		t.Fatalf("zip reader error: %v", err)
-	}
-	out := map[string]string{}
-	for _, f := range reader.File {
-		rc, err := f.Open()
-		if err != nil {
-			t.Fatalf("zip open file error: %v", err)
-		}
-		body, err := io.ReadAll(rc)
-		_ = rc.Close()
-		if err != nil {
-			t.Fatalf("zip read file error: %v", err)
-		}
-		out[f.Name] = string(body)
-	}
-	return out
+func (p *batchPresignerStub) PresignDownloadURL(objectKey string) *baseservice.OSSDirectDownloadInfo {
+	return p.PresignDownloadURLWithFilename(objectKey, "")
 }
 
-func mapKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
+func (p *batchPresignerStub) PresignDownloadURLWithFilename(objectKey, filename string) *baseservice.OSSDirectDownloadInfo {
+	if p.filenameByKey == nil {
+		p.filenameByKey = map[string]string{}
 	}
-	return keys
+	p.filenameByKey[objectKey] = filename
+	url := strings.TrimSpace(p.urlByKey[objectKey])
+	if url == "" {
+		return nil
+	}
+	expiresAt := p.expiresAt
+	if expiresAt.IsZero() {
+		expiresAt = time.Date(2026, 5, 12, 11, 0, 0, 0, time.UTC)
+	}
+	return &baseservice.OSSDirectDownloadInfo{DownloadURL: url, ExpiresAt: expiresAt}
 }
 
-func strPtr(v string) *string { return &v }
+func strPtr(v string) *string         { return &v }
+func int64PtrBatchSvc(v int64) *int64 { return &v }

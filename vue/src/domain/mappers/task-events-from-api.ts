@@ -28,6 +28,23 @@ export function extractTaskEventsList(body: unknown): Record<string, unknown>[] 
   return []
 }
 
+export function extractCostOverrideEventsList(body: unknown): Record<string, unknown>[] {
+  if (!body || typeof body !== 'object') return []
+  const root = body as Record<string, unknown>
+  const data = root.data
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const events = (data as Record<string, unknown>).events
+    if (Array.isArray(events)) {
+      return events.filter((x): x is Record<string, unknown> => x != null && typeof x === 'object')
+    }
+  }
+  const events = root.events
+  if (Array.isArray(events)) {
+    return events.filter((x): x is Record<string, unknown> => x != null && typeof x === 'object')
+  }
+  return []
+}
+
 function payloadObject(raw: Record<string, unknown>): Record<string, unknown> {
   const p = raw.payload
   if (p && typeof p === 'object' && !Array.isArray(p)) return p as Record<string, unknown>
@@ -394,5 +411,44 @@ export function mapTaskEventRowToRecentEvent(raw: Record<string, unknown>, taskI
     replacement_task_id: pickField(raw, payload, 'replacement_task_id') ?? pickField(raw, payload, 'task_id'),
     workflow_lane: pickField(raw, payload, 'workflow_lane'),
     source_department: pickField(raw, payload, 'source_department'),
+  }
+}
+
+const COST_OVERRIDE_EVENT_CN: Record<string, string> = {
+  override_applied: '成本人工覆盖',
+  override_updated: '成本覆盖更新',
+  override_released: '成本覆盖解除',
+}
+
+export function mapCostOverrideEventToRecentEvent(
+  raw: Record<string, unknown>,
+  taskId: string,
+  taskNo?: string,
+): RecentEvent {
+  const eventType = String(raw.event_type ?? raw.eventType ?? 'cost_override')
+  const id = String(raw.event_id ?? raw.eventId ?? raw.sequence ?? `${taskId}-cost-${Math.random()}`)
+  const created = String(raw.override_at ?? raw.overrideAt ?? raw.occurred_at ?? raw.occurredAt ?? '')
+  const actor = String(raw.override_actor ?? raw.overrideActor ?? raw.actor ?? '系统').trim() || '系统'
+  const title = COST_OVERRIDE_EVENT_CN[eventType] ?? '成本操作'
+  const previous = raw.previous_cost_price ?? raw.previousCostPrice
+  const current = raw.result_cost_price ?? raw.resultCostPrice ?? raw.cost_price ?? raw.costPrice
+  const overrideCost = raw.override_cost ?? raw.overrideCost
+  const reason = String(raw.override_reason ?? raw.reason ?? raw.note ?? '').trim()
+  const governance = String(raw.governance_status ?? raw.governanceStatus ?? '').trim()
+  const parts = [`${actor} 执行了「${title}」`]
+  if (previous != null || current != null) parts.push(`成本 ${moneyDisplay(previous)} → ${moneyDisplay(current)}`)
+  else if (overrideCost != null) parts.push(`覆盖成本 ${moneyDisplay(overrideCost)}`)
+  if (reason) parts.push(`原因：${reason}`)
+  if (governance) parts.push(`规则状态：${governance}`)
+  return {
+    id,
+    type: `task.cost.${eventType}`,
+    title,
+    summary: `${parts.join('，')}。`,
+    refId: taskId,
+    refNo: taskNo || '—',
+    actor,
+    at: created ? formatDateTimeBeijingOffsetAware(created) : '—',
+    ...(created ? { createdAtIso: created } : {}),
   }
 }

@@ -309,6 +309,14 @@ export interface Task {
   basePriceAmount?: number
   /** 采购任务：成本单价来源 */
   costPriceMode?: 'manual' | 'template'
+  /** 成本治理读模型：GET /v1/tasks/{id} 的采购摘要，用于详情页展示与仓库/财务判断 */
+  procurementSummary?: Record<string, unknown>
+  /** 成本人工覆盖摘要：GET /v1/tasks/{id} override_summary */
+  costOverrideSummary?: Record<string, unknown>
+  /** 成本治理审计摘要：GET /v1/tasks/{id} governance_audit_summary */
+  governanceAuditSummary?: Record<string, unknown>
+  /** 成本覆盖审批/财务边界：GET /v1/tasks/{id} override_governance_boundary */
+  costOverrideBoundary?: Record<string, unknown>
 
   /**
    * 与创建任务 3-in-1 表单对齐的只读字段（GET task 归一化）。
