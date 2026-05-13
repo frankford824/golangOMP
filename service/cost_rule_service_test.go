@@ -172,6 +172,45 @@ func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewExtractsLongestSideFromNotes(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规kt板",
+		DisplayName:  "常规kt板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       1,
+			RuleVersion:  1,
+			RuleName:     "常规KT板基础单价",
+			CategoryCode: "KT_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    float64Ptr(11),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "常规kt板 心理手举牌 最长边25cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.6875) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.6875", result.EstimatedCost)
+	}
+}
+
 func TestCostRulePreviewCopperPaperSizeLookupUsesNameAndPrintSide(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

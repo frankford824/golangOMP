@@ -2236,9 +2236,30 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 	if !ok {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "task sku item cost updater is not configured", nil)
 	}
+	syncDetailCost := len(items) == 1 || strings.TrimSpace(task.PrimarySKUCode) == strings.TrimSpace(item.SKUCode) || strings.TrimSpace(task.SKUCode) == strings.TrimSpace(item.SKUCode)
+	if syncDetailCost {
+		detail.CostPrice = cloneFloat64Ptr(item.CostPrice)
+		detail.EstimatedCost = cloneFloat64Ptr(item.EstimatedCost)
+		detail.CostRuleID = cloneInt64Ptr(item.CostRuleID)
+		detail.CostRuleName = item.CostRuleName
+		detail.CostRuleSource = item.CostRuleSource
+		detail.MatchedRuleVersion = cloneIntPtr(item.MatchedRuleVersion)
+		detail.PrefillSource = item.PrefillSource
+		detail.PrefillAt = cloneTimePtr(item.PrefillAt)
+		detail.RequiresManualReview = item.RequiresManualReview
+		detail.ManualCostOverride = item.ManualCostOverride
+		detail.ManualCostOverrideReason = item.ManualCostOverrideReason
+		detail.OverrideActor = item.OverrideActor
+		detail.OverrideAt = cloneTimePtr(item.OverrideAt)
+	}
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := updater.UpdateSKUItemCostInfo(ctx, tx, item); err != nil {
 			return err
+		}
+		if syncDetailCost {
+			if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
+				return err
+			}
 		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventCostUpdated, &p.OperatorID,
 			mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
@@ -2259,6 +2280,7 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 				"previous_override_reason":      previousOverrideReason,
 				"override_actor":                item.OverrideActor,
 				"override_at":                   item.OverrideAt,
+				"task_detail_cost_synced":       syncDetailCost,
 				"erp_sync_requested":            true,
 				"remark":                        strings.TrimSpace(p.Remark),
 			}),

@@ -216,7 +216,35 @@ func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task
 	if len(missingFields) > 0 {
 		return nil, missingFields, missingSummary, nil
 	}
-	payload, appErr := buildTaskERPBridgeProductUpsertPayload(task, detail, operatorID, remark, source)
+	detailForFiling := detail
+	if items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID); err == nil && len(items) == 1 && items[0] != nil {
+		useItemCost := detail.CostPrice == nil && items[0].CostPrice != nil
+		useItemEstimatedCost := detail.EstimatedCost == nil && items[0].EstimatedCost != nil
+		if useItemCost || useItemEstimatedCost {
+			copied := *detail
+			copied.CostPrice = cloneFloat64Ptr(firstFloat64Ptr(detail.CostPrice, items[0].CostPrice))
+			copied.EstimatedCost = cloneFloat64Ptr(firstFloat64Ptr(detail.EstimatedCost, items[0].EstimatedCost))
+			if useItemCost && items[0].CostRuleID != nil {
+				copied.CostRuleID = cloneInt64Ptr(items[0].CostRuleID)
+			}
+			if useItemCost && strings.TrimSpace(items[0].CostRuleName) != "" {
+				copied.CostRuleName = items[0].CostRuleName
+			}
+			if useItemCost && strings.TrimSpace(items[0].CostRuleSource) != "" {
+				copied.CostRuleSource = items[0].CostRuleSource
+			}
+			if useItemCost {
+				copied.MatchedRuleVersion = cloneIntPtr(items[0].MatchedRuleVersion)
+				copied.RequiresManualReview = items[0].RequiresManualReview
+				copied.ManualCostOverride = items[0].ManualCostOverride
+				copied.ManualCostOverrideReason = items[0].ManualCostOverrideReason
+			}
+			detailForFiling = &copied
+		}
+	} else if err != nil {
+		return nil, nil, "", infraError("list sku item for filing cost projection", err)
+	}
+	payload, appErr := buildTaskERPBridgeProductUpsertPayload(task, detailForFiling, operatorID, remark, source)
 	if appErr != nil {
 		return nil, nil, "", appErr
 	}

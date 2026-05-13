@@ -13,9 +13,10 @@ type extractedCostDimensions struct {
 }
 
 var (
-	costAreaPattern      = regexp.MustCompile(`(?i)(?:面积|area)?\s*([0-9]+(?:\.[0-9]+)?)\s*(平方米|平方|平米|㎡|m2|m²|平方厘米|cm2|cm²|平方毫米|mm2|mm²)`)
-	costSizePairPattern  = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
-	costNamedSizePattern = regexp.MustCompile(`(?i)(?:宽|w|width)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?[\s,，;；/]*(?:高|长|h|height|l|length)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
+	costAreaPattern        = regexp.MustCompile(`(?i)(?:面积|area)?\s*([0-9]+(?:\.[0-9]+)?)\s*(平方米|平方|平米|㎡|m2|m²|平方厘米|cm2|cm²|平方毫米|mm2|mm²)`)
+	costSizePairPattern    = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
+	costNamedSizePattern   = regexp.MustCompile(`(?i)(?:宽|w|width)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?[\s,，;；/]*(?:高|长|h|height|l|length)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
+	costLongestSidePattern = regexp.MustCompile(`(?i)(?:最长边|长边|最大边|直径)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
 )
 
 func extractCostDimensionsFromText(text string) extractedCostDimensions {
@@ -29,7 +30,10 @@ func extractCostDimensionsFromText(text string) extractedCostDimensions {
 	if dims := extractCostSizePairM(normalized, costNamedSizePattern); dims.AreaM2 != nil {
 		return dims
 	}
-	return extractCostSizePairM(normalized, costSizePairPattern)
+	if dims := extractCostSizePairM(normalized, costSizePairPattern); dims.AreaM2 != nil {
+		return dims
+	}
+	return extractCostLongestSideM(normalized)
 }
 
 func extractCostAreaM2(text string) *float64 {
@@ -77,6 +81,24 @@ func extractCostSizePairM(text string, pattern *regexp.Regexp) extractedCostDime
 	}
 	area := widthM * heightM
 	return extractedCostDimensions{WidthM: &widthM, HeightM: &heightM, AreaM2: &area}
+}
+
+func extractCostLongestSideM(text string) extractedCostDimensions {
+	matches := costLongestSidePattern.FindStringSubmatch(text)
+	if len(matches) < 3 {
+		return extractedCostDimensions{}
+	}
+	value, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil || value <= 0 {
+		return extractedCostDimensions{}
+	}
+	unit := normalizeDimensionUnit(matches[2], value, value)
+	sideM := dimensionToMeters(value, unit)
+	if sideM <= 0 {
+		return extractedCostDimensions{}
+	}
+	area := sideM * sideM
+	return extractedCostDimensions{WidthM: &sideM, HeightM: &sideM, AreaM2: &area}
 }
 
 func normalizeDimensionUnit(raw string, width, height float64) string {

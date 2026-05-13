@@ -3686,6 +3686,33 @@ func (r *prdTaskRepo) ListSKUItemsByTaskID(_ context.Context, taskID int64) ([]*
 	return r.skuItems[taskID], nil
 }
 
+func (r *prdTaskRepo) UpdateSKUItemCostInfo(_ context.Context, _ repo.Tx, item *domain.TaskSKUItem) error {
+	if item == nil {
+		return nil
+	}
+	items := r.skuItems[item.TaskID]
+	for i, existing := range items {
+		if existing != nil && existing.ID == item.ID {
+			copied := *item
+			items[i] = &copied
+			if r.skuByCode != nil && copied.SKUCode != "" {
+				r.skuByCode[copied.SKUCode] = &copied
+			}
+			r.skuItems[item.TaskID] = items
+			return nil
+		}
+	}
+	copied := *item
+	r.skuItems[item.TaskID] = append(items, &copied)
+	if r.skuByCode == nil {
+		r.skuByCode = map[string]*domain.TaskSKUItem{}
+	}
+	if copied.SKUCode != "" {
+		r.skuByCode[copied.SKUCode] = &copied
+	}
+	return nil
+}
+
 func (r *prdTaskRepo) List(_ context.Context, filter repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
 	r.lastListFilter = filter
 	r.listCalls++
