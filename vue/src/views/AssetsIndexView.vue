@@ -91,6 +91,7 @@
       >
         {{ batchDownloading ? '批量下载中...' : '批量下载' }}
       </button>
+      <span v-if="batchDownloadStatus" class="ac-batch-status">{{ batchDownloadStatus }}</span>
       <span v-if="batchDownloadError" class="ac-batch-error">{{ batchDownloadError }}</span>
     </div>
 
@@ -112,10 +113,9 @@
           :key="asset.id"
           class="ac-card"
           :class="{
-            'ac-card--active': selectedAsset?.id === asset.id,
+            'ac-card--active': selectedAssetId === String(asset.id),
             'ac-card--selected': isAssetSelected(asset),
           }"
-          @click="selectAsset(asset)"
         >
           <label class="ac-card-check" @click.stop>
             <input
@@ -127,14 +127,17 @@
           </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
-              :asset-id="String(asset.id)"
+              v-if="listCardResolvedPreviewUrl(asset)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
-              defer-until-visible
               alt=""
               img-class="ac-card-apm"
               inner-img-class="ac-card-preview-img"
               @open-full="(u) => (previewLightboxSrc = u)"
             />
+            <div v-else class="ac-card-preview-placeholder" aria-label="暂无预览">
+              <span class="ac-card-placeholder-icon" aria-hidden="true"></span>
+              <span>资产预览不可用</span>
+            </div>
           </div>
           <div class="ac-card-info">
             <h2 class="ac-card-title" :title="cardTitle(asset)">{{ cardTitle(asset) }}</h2>
@@ -402,14 +405,14 @@ import {
   assetKindLabelCn,
   assetUploadStatusLabelCn,
 } from '@/domain/mappers/read-model-labels-cn'
-import { normalizeAssetDetailFromApi } from '@/domain/mappers/asset-detail-from-api'
 import {
-  fetchTaskAssetPreviewWithDerivedFallback,
-  primeAssetDownloadMetaCache,
-} from '@/domain/asset-access'
-import { assetsApi } from '@/services/api/assetsApi'
+  assetsApi,
+  type AssetBatchDownloadFailure,
+  type AssetBatchDownloadItem,
+} from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 const route = useRoute()
 const router = useRouter()
@@ -431,12 +434,15 @@ const listJumpPage = ref(1)
 const listPageSize = ref(20)
 const listTotal = ref(0)
 const AUTO_RELOAD_DELAY_MS = 400
+const MAX_BATCH_DOWNLOAD_ASSETS = 100
+const BATCH_ZIP_DOWNLOAD_CONCURRENCY = 4
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 const previewLightboxSrc = ref<string | null>(null)
 const filtersExpanded = ref(false)
 const copyHint = ref('')
 const selectedModalOpen = ref(false)
 const batchDownloading = ref(false)
+const batchDownloadStatus = ref('')
 const batchDownloadError = ref('')
 
 const filters = reactive({
@@ -483,7 +489,9 @@ interface SelectedAssetSummary {
 const selectedAssetMap = reactive(new Map<string, SelectedAssetSummary>())
 const selectedCount = computed(() => selectedAssetMap.size)
 const selectedAssets = computed(() => Array.from(selectedAssetMap.values()))
-const canBatchDownload = computed(() => selectedCount.value > 0 && !batchDownloading.value)
+const canBatchDownload = computed(
+  () => selectedCount.value > 0 && selectedCount.value <= MAX_BATCH_DOWNLOAD_ASSETS && !batchDownloading.value,
+)
 
 const effectiveSearchKeyword = computed(
   () => filters.keyword.trim() || filters.taskId.trim() || filters.scopeSkuCode.trim(),
@@ -576,56 +584,30 @@ function toggleAssetSelection(asset: BackendAsset, checked?: boolean) {
   const nextChecked = typeof checked === 'boolean' ? checked : !selectedAssetMap.has(id)
   if (!nextChecked) {
     selectedAssetMap.delete(id)
+    if (selectedAssetMap.size <= MAX_BATCH_DOWNLOAD_ASSETS) batchDownloadError.value = ''
     return
   }
+  if (!selectedAssetMap.has(id) && selectedAssetMap.size >= MAX_BATCH_DOWNLOAD_ASSETS) {
+    batchDownloadError.value = `最多一次选择 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资产`
+    return
+  }
+  batchDownloadError.value = ''
   selectedAssetMap.set(id, toSelectedAssetSummary(asset))
 }
 
 function clearSelectedAssets() {
   selectedAssetMap.clear()
+  batchDownloadError.value = ''
 }
 
 function removeSelectedAsset(assetId: string) {
   selectedAssetMap.delete(assetId)
+  if (selectedAssetMap.size <= MAX_BATCH_DOWNLOAD_ASSETS) batchDownloadError.value = ''
 }
 
 function onAssetSelectionChange(asset: BackendAsset, event: Event) {
   const checked = (event.target as HTMLInputElement | null)?.checked
   toggleAssetSelection(asset, checked)
-}
-
-function decodeDispositionFilename(value: string): string {
-  const trimmed = value.trim().replace(/^["']|["']$/g, '')
-  try {
-    return decodeURIComponent(trimmed)
-  } catch {
-    return trimmed
-  }
-}
-
-function resolveBatchDownloadFilename(contentDisposition: string | undefined): string {
-  const fallback = 'assets-batch-download.zip'
-  if (!contentDisposition) return fallback
-
-  const starMatch = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
-  if (starMatch?.[1]) {
-    const name = decodeDispositionFilename(starMatch[1])
-    if (name) return name
-  }
-
-  const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i)
-  if (quotedMatch?.[1]) {
-    const name = decodeDispositionFilename(quotedMatch[1])
-    if (name) return name
-  }
-
-  const plainMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i)
-  if (plainMatch?.[1]) {
-    const name = decodeDispositionFilename(plainMatch[1])
-    if (name) return name
-  }
-
-  return fallback
 }
 
 function normalizeSelectedAssetIDs(): number[] {
@@ -635,8 +617,140 @@ function normalizeSelectedAssetIDs(): number[] {
   return Array.from(new Set(ids))
 }
 
+function resolveBatchZipFilename(): string {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `assets-${stamp}.zip`
+}
+
+function sanitizeZipEntryName(name: string, fallback: string): string {
+  const cleaned = name
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/\.\./g, '_')
+  return cleaned || fallback
+}
+
+function ensureUniqueZipEntryName(filename: string, usedNames: Map<string, number>): string {
+  const normalized = filename.trim() || 'asset'
+  const count = (usedNames.get(normalized) ?? 0) + 1
+  usedNames.set(normalized, count)
+  if (count === 1) return normalized
+
+  const dotIndex = normalized.lastIndexOf('.')
+  if (dotIndex <= 0) return `${normalized} (${count})`
+  return `${normalized.slice(0, dotIndex)} (${count})${normalized.slice(dotIndex)}`
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const objectURL = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectURL
+  link.download = filename
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const workerCount = Math.min(Math.max(1, concurrency), items.length)
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      for (;;) {
+        const index = cursor
+        cursor += 1
+        if (index >= items.length) return
+        results[index] = await worker(items[index], index)
+      }
+    }),
+  )
+  return results
+}
+
+function formatServerBatchDownloadFailure(item: AssetBatchDownloadFailure): string {
+  return [
+    `asset_id=${item.asset_id}`,
+    item.task_id != null ? `task_id=${item.task_id}` : '',
+    item.filename ? `filename=${item.filename}` : '',
+    `reason=${item.reason || 'unavailable'}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+async function downloadBatchAsClientZip(
+  items: AssetBatchDownloadItem[],
+  serverFailures: AssetBatchDownloadFailure[],
+) {
+  const { default: JSZip } = await import('jszip')
+  const zip = new JSZip()
+  const usedNames = new Map<string, number>()
+  const failures: string[] = serverFailures.map(formatServerBatchDownloadFailure)
+  let completed = 0
+
+  await mapWithConcurrency(items, BATCH_ZIP_DOWNLOAD_CONCURRENCY, async (item) => {
+    const url = typeof item.download_url === 'string' ? item.download_url.trim() : ''
+    const filename = ensureUniqueZipEntryName(
+      sanitizeZipEntryName(item.filename || '', `asset-${item.asset_id}`),
+      usedNames,
+    )
+    if (!url) {
+      failures.push(`asset_id=${item.asset_id} filename=${filename} reason=missing_download_url`)
+      return
+    }
+
+    try {
+      const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
+      if (!response.ok) {
+        failures.push(`asset_id=${item.asset_id} filename=${filename} reason=http_${response.status}`)
+        return
+      }
+      const blob = await response.blob()
+      zip.file(filename, blob, { binary: true, compression: 'STORE' })
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'fetch_failed'
+      failures.push(`asset_id=${item.asset_id} filename=${filename} reason=${reason}`)
+    } finally {
+      completed += 1
+      batchDownloadStatus.value = `正在下载并打包 ${completed}/${items.length}`
+    }
+  })
+
+  if (failures.length > 0) {
+    zip.file('download_errors.txt', failures.join('\n') + '\n')
+  }
+  if (Object.keys(zip.files).length === 0) {
+    throw new Error('没有文件成功写入 ZIP')
+  }
+
+  batchDownloadStatus.value = '正在生成 ZIP'
+  const blob = await zip.generateAsync(
+    {
+      type: 'blob',
+      compression: 'STORE',
+      streamFiles: true,
+    },
+    (metadata) => {
+      batchDownloadStatus.value = `正在生成 ZIP ${Math.floor(metadata.percent)}%`
+    },
+  )
+  downloadBlob(blob, resolveBatchZipFilename())
+  return failures.length
+}
+
 async function handleBatchDownload() {
   if (batchDownloading.value) return
+  batchDownloadStatus.value = ''
   batchDownloadError.value = ''
 
   const assetIDs = normalizeSelectedAssetIDs()
@@ -644,25 +758,28 @@ async function handleBatchDownload() {
     batchDownloadError.value = '未找到可下载的资产 ID，请重新勾选后重试'
     return
   }
+  if (assetIDs.length > MAX_BATCH_DOWNLOAD_ASSETS) {
+    batchDownloadError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资产`
+    return
+  }
 
   batchDownloading.value = true
   try {
     const res = await assetsApi.batchDownload(assetIDs)
-    const blob = res.data instanceof Blob ? res.data : new Blob([res.data as BlobPart], { type: 'application/zip' })
-    const disposition = String(res.headers?.['content-disposition'] ?? '')
-    const filename = resolveBatchDownloadFilename(disposition)
-
-    const objectURL = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectURL
-    link.download = filename
-    link.rel = 'noopener'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(objectURL)
+    const manifest = res.data?.data
+    const items = Array.isArray(manifest?.items) ? manifest.items : []
+    if (!items.length) {
+      batchDownloadError.value = '没有可下载的资产'
+      return
+    }
+    const serverFailures = Array.isArray(manifest?.failures) ? manifest.failures : []
+    const clientFailureCount = await downloadBatchAsClientZip(items, serverFailures)
+    const serverFailureCount = Number(manifest?.failure_count ?? 0)
+    const totalFailureCount = serverFailureCount + clientFailureCount
+    batchDownloadStatus.value = `已生成 ZIP，共 ${items.length} 个文件`
+    batchDownloadError.value = totalFailureCount > 0 ? `${totalFailureCount} 个文件未打包，详情见 ZIP 内 download_errors.txt` : ''
   } catch (err) {
-    batchDownloadError.value = err instanceof Error ? err.message : '批量下载失败，请稍后重试'
+    batchDownloadError.value = resolveApiUserMessage(err, { fallback: '批量下载失败，请稍后重试' })
   } finally {
     batchDownloading.value = false
   }
@@ -755,13 +872,6 @@ function versionCount(asset: BackendAsset): number {
   return Array.isArray(asset.versions) ? asset.versions.length : 0
 }
 
-function selectAsset(asset: BackendAsset) {
-  selectedAssetId.value = String(asset.id)
-  syncQuerySelection()
-  detailModalOpen.value = true
-  void loadAssetDetail(String(asset.id))
-}
-
 function goListPage(next: number) {
   const clamped = Math.min(Math.max(1, next), listTotalPages.value)
   listPage.value = clamped
@@ -798,65 +908,6 @@ function openAssetDetail(assetId: string) {
   const query: Record<string, string> = {}
   if (filters.taskId.trim()) query.task_id = filters.taskId.trim()
   void router.push({ name: 'AssetDetail', params: { id: assetId }, query })
-}
-
-async function loadAssetDetail(assetId: string) {
-  detailLoading.value = true
-  detailError.value = ''
-  selectedAssetDetail.value = null
-  downloadMeta.value = null
-  previewMeta.value = null
-  previewUnavailable.value = false
-  previewNotFound.value = false
-  try {
-    const [assetRes, downloadRes] = await Promise.allSettled([
-      assetsApi.getAsset(assetId),
-      assetsApi.getAssetDownloadMeta(assetId),
-    ])
-
-    if (assetRes.status === 'fulfilled') {
-      selectedAssetDetail.value = normalizeAssetDetailFromApi(assetRes.value.data)
-    }
-
-    if (downloadRes.status === 'fulfilled') {
-      const body = downloadRes.value.data as { data?: Record<string, unknown> } | undefined
-      downloadMeta.value = body?.data ?? null
-      primeAssetDownloadMetaCache(assetId, downloadRes.value.data)
-    }
-
-    const tid =
-      filters.taskId.trim() ||
-      String(
-        (selectedAssetDetail.value as Record<string, unknown> | null)?.task_id ??
-          assets.value.find((a) => String(a.id) === assetId)?.task_id ??
-          '',
-      ).trim()
-    const previewResult = await fetchTaskAssetPreviewWithDerivedFallback(
-      assetId,
-      tid || undefined,
-    )
-    if (previewResult.status === 'ok' && previewResult.displayUrl) {
-      previewMeta.value = {
-        download_url: previewResult.displayUrl,
-        preview_available: true,
-      }
-    } else if (previewResult.status === 'unavailable') {
-      previewUnavailable.value = true
-    } else if (previewResult.status === 'not_found') {
-      previewNotFound.value = true
-    }
-
-    if (!selectedAssetDetail.value) {
-      selectedAssetDetail.value =
-        assets.value.find((item) => String(item.id) === assetId) ?? null
-    }
-  } catch (err) {
-    detailError.value = err instanceof Error ? err.message : '加载资产详情失败'
-    selectedAssetDetail.value =
-      assets.value.find((item) => String(item.id) === assetId) ?? null
-  } finally {
-    detailLoading.value = false
-  }
 }
 
 async function reload() {
@@ -1122,6 +1173,11 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 
+.ac-batch-status {
+  font-size: 12px;
+  color: #334155;
+}
+
 .ac-grid {
   width: 100%;
   max-width: var(--ac-content-max);
@@ -1168,16 +1224,14 @@ onBeforeUnmount(() => {
   border-radius: 22px;
   padding: clamp(16px, 2vw, 24px);
   min-width: 0;
-  transition: transform 0.35s, box-shadow 0.35s;
+  transition: box-shadow 0.18s;
   display: flex;
   flex-direction: column;
-  cursor: pointer;
   border: 1px solid rgba(0, 0, 0, 0.04);
   position: relative;
 }
 
 .ac-card:hover {
-  transform: scale(1.02) translateY(-5px);
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.06);
 }
 
@@ -1234,6 +1288,32 @@ onBeforeUnmount(() => {
   font-size: 11px;
   min-height: 100%;
   border-radius: 0;
+}
+
+.ac-card-preview-placeholder {
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 16px;
+  background: #f8fafc;
+  color: #ef4444;
+  font-size: 12px;
+}
+
+.ac-card-placeholder-icon {
+  width: 56px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid #dbe3ef;
+  background:
+    linear-gradient(135deg, transparent 50%, #dbe3ef 51%) right 10px top 10px / 18px 18px no-repeat,
+    linear-gradient(135deg, #e7edf5 0 55%, transparent 56%) left 12px bottom 10px / 30px 22px no-repeat,
+    #f1f5f9;
 }
 
 .ac-card-preview-img {

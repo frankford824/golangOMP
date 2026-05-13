@@ -75,7 +75,7 @@ func enrichTaskEventsWithActors(ctx context.Context, resolver UserDisplayNameRes
 			event.CreatorID = &creatorID
 			event.CreatorName = creatorName
 		}
-		if resolver != nil && event.OperatorID != nil && *event.OperatorID > 0 {
+		if event.OperatorName == "" && resolver != nil && event.OperatorID != nil && *event.OperatorID > 0 {
 			event.OperatorName = resolver.GetDisplayName(ctx, *event.OperatorID)
 		}
 	}

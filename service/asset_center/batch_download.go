@@ -1,13 +1,9 @@
 package asset_center
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,21 +17,33 @@ const (
 	MaxBatchDownloadTotalBytes = int64(512 * 1024 * 1024)
 )
 
-type BatchDownloadResult struct {
-	Filename     string
-	ZipBytes     []byte
-	SuccessCount int
-	FailureCount int
+type BatchDownloadManifest struct {
+	Items        []BatchDownloadItem    `json:"items"`
+	Failures     []BatchDownloadFailure `json:"failures,omitempty"`
+	SuccessCount int                    `json:"success_count"`
+	FailureCount int                    `json:"failure_count"`
+	TotalSize    int64                  `json:"total_size"`
+	ExpiresAt    *time.Time             `json:"expires_at,omitempty"`
 }
 
-type batchDownloadFailure struct {
-	AssetID  int64
-	TaskID   int64
-	Filename string
-	Reason   string
+type BatchDownloadItem struct {
+	AssetID     int64      `json:"asset_id"`
+	TaskID      int64      `json:"task_id"`
+	Filename    string     `json:"filename"`
+	FileSize    int64      `json:"file_size"`
+	MimeType    string     `json:"mime_type,omitempty"`
+	DownloadURL string     `json:"download_url"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 
-func (s *Service) BuildBatchDownloadZip(ctx context.Context, assetIDs []int64) (*BatchDownloadResult, *domain.AppError) {
+type BatchDownloadFailure struct {
+	AssetID  int64  `json:"asset_id"`
+	TaskID   int64  `json:"task_id,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Reason   string `json:"reason"`
+}
+
+func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int64) (*BatchDownloadManifest, *domain.AppError) {
 	if len(assetIDs) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids must not be empty", nil)
 	}
@@ -44,8 +52,8 @@ func (s *Service) BuildBatchDownloadZip(ctx context.Context, assetIDs []int64) (
 			"limit": MaxBatchDownloadAssets,
 		})
 	}
-	if s.streamOpener == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "storage stream opener is not configured", nil)
+	if s.presigner == nil || !s.presigner.Enabled() {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "oss direct download presigner is not configured", nil)
 	}
 
 	rows, err := s.searchRepo.ListCurrentByAssetIDs(ctx, assetIDs)
@@ -64,105 +72,104 @@ func (s *Service) BuildBatchDownloadZip(ctx context.Context, assetIDs []int64) (
 		}
 	}
 
-	var buf bytes.Buffer
-	zipWriter := zip.NewWriter(&buf)
-	nameRegistry := map[string]map[string]int{}
-	failures := make([]batchDownloadFailure, 0)
-	successCount := 0
+	manifest := &BatchDownloadManifest{
+		Items:    make([]BatchDownloadItem, 0, len(assetIDs)),
+		Failures: make([]BatchDownloadFailure, 0),
+	}
+	usedNames := map[string]int{}
 	var totalSize int64
 
 	for _, requestedAssetID := range assetIDs {
-		row := rowMap[requestedAssetID]
-		if row == nil || row.Asset == nil || row.Task == nil {
-			failures = append(failures, batchDownloadFailure{
-				AssetID: requestedAssetID,
-				Reason:  "asset_not_found",
+		item, failure := s.buildBatchDownloadItem(rowMap[requestedAssetID], requestedAssetID, totalSize, usedNames)
+		if failure != nil {
+			manifest.Failures = append(manifest.Failures, *failure)
+			continue
+		}
+		if item.DownloadURL == "" {
+			manifest.Failures = append(manifest.Failures, BatchDownloadFailure{
+				AssetID:  item.AssetID,
+				TaskID:   item.TaskID,
+				Filename: item.Filename,
+				Reason:   "download_url_unavailable",
 			})
 			continue
 		}
-		asset := row.Asset
-		taskID := asset.TaskID
-		assetID := valueInt64(asset.AssetID, asset.ID)
-		filename := resolveBatchFilename(asset, assetID)
-
-		if asset.DeletedAt != nil {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "deleted"})
-			continue
+		totalSize += item.FileSize
+		if manifest.ExpiresAt == nil || (item.ExpiresAt != nil && item.ExpiresAt.Before(*manifest.ExpiresAt)) {
+			manifest.ExpiresAt = item.ExpiresAt
 		}
-		if asset.CleanedAt != nil {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "cleaned"})
-			continue
-		}
-		storageKey := ""
-		if asset.StorageKey != nil {
-			storageKey = strings.TrimSpace(*asset.StorageKey)
-		}
-		if storageKey == "" {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "missing_storage_key"})
-			continue
-		}
-		if asset.UploadStatus == nil || domain.DesignAssetUploadStatus(strings.TrimSpace(*asset.UploadStatus)) != domain.DesignAssetUploadStatusUploaded {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "upload_status_not_uploaded"})
-			continue
-		}
-		fileSize := int64(0)
-		if asset.FileSize != nil {
-			fileSize = *asset.FileSize
-		}
-		if fileSize > 0 && totalSize+fileSize > MaxBatchDownloadTotalBytes {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "total_size_limit_exceeded"})
-			continue
-		}
-
-		stream, openErr := s.streamOpener.Open(ctx, storageKey)
-		if openErr != nil {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "stream_open_failed"})
-			continue
-		}
-
-		dir := "task-" + strconv.FormatInt(taskID, 10)
-		entryName := ensureUniqueEntry(dir, filename, nameRegistry)
-		entryWriter, createErr := zipWriter.Create(entryName)
-		if createErr != nil {
-			_ = stream.Close()
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, createErr.Error(), nil)
-		}
-		written, copyErr := io.Copy(entryWriter, stream)
-		closeErr := stream.Close()
-		if copyErr != nil || closeErr != nil {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "stream_read_failed"})
-			continue
-		}
-		totalSize += written
-		if totalSize > MaxBatchDownloadTotalBytes {
-			failures = append(failures, batchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "total_size_limit_exceeded"})
-			continue
-		}
-		successCount++
+		manifest.Items = append(manifest.Items, item)
 	}
 
-	if successCount == 0 {
+	if len(manifest.Items) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "all requested assets are unavailable for download", map[string]interface{}{
 			"asset_ids":      assetIDs,
-			"failure_count":  len(failures),
+			"failure_count":  len(manifest.Failures),
 			"total_size_max": MaxBatchDownloadTotalBytes,
 		})
 	}
+	manifest.SuccessCount = len(manifest.Items)
+	manifest.FailureCount = len(manifest.Failures)
+	manifest.TotalSize = totalSize
+	return manifest, nil
+}
 
-	if len(failures) > 0 {
-		if err := writeDownloadErrors(zipWriter, failures); err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
-		}
+func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requestedAssetID int64, currentTotal int64, usedNames map[string]int) (BatchDownloadItem, *BatchDownloadFailure) {
+	if row == nil || row.Asset == nil || row.Task == nil {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: requestedAssetID, Reason: "asset_not_found"}
 	}
-	if err := zipWriter.Close(); err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	asset := row.Asset
+	taskID := asset.TaskID
+	assetID := valueInt64(asset.AssetID, asset.ID)
+	filename := resolveBatchFilename(asset, assetID)
+
+	if asset.DeletedAt != nil {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "deleted"}
+	}
+	if asset.CleanedAt != nil {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "cleaned"}
+	}
+	storageKey := ""
+	if asset.StorageKey != nil {
+		storageKey = strings.TrimSpace(*asset.StorageKey)
+	}
+	if storageKey == "" {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "missing_storage_key"}
+	}
+	if asset.UploadStatus == nil || domain.DesignAssetUploadStatus(strings.TrimSpace(*asset.UploadStatus)) != domain.DesignAssetUploadStatusUploaded {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "upload_status_not_uploaded"}
 	}
 
-	return &BatchDownloadResult{
-		Filename:     "assets-" + time.Now().UTC().Format("20060102-150405") + ".zip",
-		ZipBytes:     buf.Bytes(),
-		SuccessCount: successCount,
-		FailureCount: len(failures),
+	fileSize := int64(0)
+	if asset.FileSize != nil {
+		fileSize = *asset.FileSize
+	}
+	if fileSize > 0 && currentTotal+fileSize > MaxBatchDownloadTotalBytes {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "total_size_limit_exceeded"}
+	}
+
+	filename = ensureUniqueBatchFilename(filename, usedNames)
+	signed := s.presigner.PresignDownloadURL(storageKey)
+	if filenamePresigner, ok := s.presigner.(DownloadFilenamePresigner); ok {
+		signed = filenamePresigner.PresignDownloadURLWithFilename(storageKey, filename)
+	}
+	if signed == nil || strings.TrimSpace(signed.DownloadURL) == "" {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "download_url_unavailable"}
+	}
+
+	mimeType := ""
+	if asset.MimeType != nil {
+		mimeType = strings.TrimSpace(*asset.MimeType)
+	}
+	expiresAt := signed.ExpiresAt
+	return BatchDownloadItem{
+		AssetID:     assetID,
+		TaskID:      taskID,
+		Filename:    filename,
+		FileSize:    fileSize,
+		MimeType:    mimeType,
+		DownloadURL: strings.TrimSpace(signed.DownloadURL),
+		ExpiresAt:   &expiresAt,
 	}, nil
 }
 
@@ -175,10 +182,10 @@ func resolveBatchFilename(asset *domain.TaskAsset, assetID int64) string {
 	if asset != nil {
 		fileName = asset.FileName
 	}
-	return sanitizeZipFilename(baseservice.ResolveAssetDownloadFilename(originalName, fileName, assetID))
+	return sanitizeBatchFilename(baseservice.ResolveAssetDownloadFilename(originalName, fileName, assetID))
 }
 
-func sanitizeZipFilename(name string) string {
+func sanitizeBatchFilename(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "asset"
@@ -193,29 +200,16 @@ func sanitizeZipFilename(name string) string {
 	return name
 }
 
-func ensureUniqueEntry(dir, filename string, registry map[string]map[string]int) string {
-	if registry[dir] == nil {
-		registry[dir] = map[string]int{}
-	}
-	count := registry[dir][filename] + 1
-	registry[dir][filename] = count
+func ensureUniqueBatchFilename(filename string, registry map[string]int) string {
+	count := registry[filename] + 1
+	registry[filename] = count
 	if count == 1 {
-		return dir + "/" + filename
+		return filename
 	}
 	ext := filepath.Ext(filename)
 	base := strings.TrimSuffix(filename, ext)
-	return dir + "/" + fmt.Sprintf("%s (%d)%s", base, count, ext)
-}
-
-func writeDownloadErrors(zipWriter *zip.Writer, failures []batchDownloadFailure) error {
-	entryWriter, err := zipWriter.Create("download_errors.txt")
-	if err != nil {
-		return err
+	if strings.TrimSpace(base) == "" {
+		base = "asset"
 	}
-	var b strings.Builder
-	for _, item := range failures {
-		_, _ = b.WriteString(fmt.Sprintf("asset_id=%d task_id=%d filename=%s reason=%s\n", item.AssetID, item.TaskID, item.Filename, item.Reason))
-	}
-	_, err = io.Copy(entryWriter, strings.NewReader(b.String()))
-	return err
+	return fmt.Sprintf("%s (%d)%s", base, count, ext)
 }

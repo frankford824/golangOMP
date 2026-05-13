@@ -304,6 +304,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
 import { beijingDateTimeLocalToISO, formatDateTimeBeijing } from '@/utils/date'
 import { getOperationEventTypeLabel } from '@/utils/operation-event-type-labels'
+import { userAccountDisplay } from '@/domain/user-display'
 
 const permissionsStore = usePermissionsStore()
 const { can } = usePermission()
@@ -374,18 +375,6 @@ function opSourceLabel(s: OperationLogEntry['source']) {
   return OP_SOURCE_LABEL[s] ?? s
 }
 
-const ACTOR_TYPE_LABEL: Record<string, string> = {
-  user: '用户',
-  system: '系统',
-  service: '服务',
-  admin: '管理员',
-  designer: '设计师',
-  auditor: '审核人',
-  api: '接口',
-  job: '定时任务',
-  integration: '集成',
-}
-
 const REFERENCE_TYPE_LABEL: Record<string, string> = {
   task: '任务',
   asset: '资产',
@@ -432,10 +421,6 @@ function localizeEnum(dict: Record<string, string>, raw: unknown): string {
   return dict[key.toLowerCase()] ?? key
 }
 
-function actorTypeLabel(t: string | undefined | null): string {
-  return localizeEnum(ACTOR_TYPE_LABEL, t)
-}
-
 function referenceTypeLabel(t: string | undefined | null): string {
   return localizeEnum(REFERENCE_TYPE_LABEL, t)
 }
@@ -449,11 +434,7 @@ function statusLabel(t: string | undefined | null): string {
 }
 
 function formatOperationActor(r: OperationLogEntry) {
-  const t = actorTypeLabel(r.actor_type)
-  if (r.actor_id != null && r.actor_id !== undefined) {
-    return t !== '—' ? `${t} #${r.actor_id}` : String(r.actor_id)
-  }
-  return t
+  return userAccountDisplay(r.actor_username)
 }
 
 function hasPayload(r: OperationLogEntry) {
@@ -524,15 +505,11 @@ function hasServerDetails(r: ServerLog): boolean {
 }
 
 function formatPermActor(r: PermissionLog) {
-  if (r.actor_username?.trim()) return r.actor_username
-  if (r.actor_id != null) return `#${r.actor_id}`
-  return '—'
+  return userAccountDisplay(r.actor_username)
 }
 
 function formatPermTarget(r: PermissionLog) {
-  if (r.target_username?.trim()) return r.target_username
-  if (r.target_user_id != null) return String(r.target_user_id)
-  return '—'
+  return userAccountDisplay(r.target_username)
 }
 
 const PERM_ACTION_LABEL: Record<string, string> = {

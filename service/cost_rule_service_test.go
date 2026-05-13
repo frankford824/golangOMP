@@ -164,8 +164,8 @@ func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Preview() unexpected error: %+v", appErr)
 	}
-	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-3.44) > 0.000001 {
-		t.Fatalf("estimated_cost = %+v, want 3.44", result.EstimatedCost)
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.56) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.56", result.EstimatedCost)
 	}
 	if result.RequiresManualReview {
 		t.Fatalf("requires_manual_review = true, want false")

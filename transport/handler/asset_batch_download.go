@@ -1,12 +1,9 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
-	baseservice "workflow/service"
 )
 
 type assetBatchDownloadReq struct {
@@ -25,13 +22,10 @@ func (h *TaskAssetCenterHandler) BatchDownloadGlobalAssets(c *gin.Context) {
 		return
 	}
 
-	result, appErr := h.globalSvc.BuildBatchDownloadZip(c.Request.Context(), req.AssetIDs)
+	manifest, appErr := h.globalSvc.BuildBatchDownloadManifest(c.Request.Context(), req.AssetIDs)
 	if appErr != nil {
 		respondAssetCenterError(c, appErr)
 		return
 	}
-
-	c.Header("Content-Type", "application/zip")
-	c.Header("Content-Disposition", baseservice.ContentDispositionAttachment(result.Filename))
-	c.Data(http.StatusOK, "application/zip", result.ZipBytes)
+	respondOK(c, manifest)
 }

@@ -514,7 +514,7 @@ func (s *OSSDirectService) presignGetURLWithQuery(objectKey string, subresources
 	if len(keys) > 0 {
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
-			parts = append(parts, key+"="+url.QueryEscape(normalized[key]))
+			parts = append(parts, key+"="+normalized[key])
 		}
 		canonResource += "?" + strings.Join(parts, "&")
 	}

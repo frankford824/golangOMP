@@ -63,6 +63,60 @@ function parseCostPriceFromRaw(raw: unknown): Task['costPrice'] | undefined {
   return undefined
 }
 
+function objectOrUndefined(raw: unknown): Record<string, unknown> | undefined {
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : undefined
+}
+
+function mergeReadModelCostGovernanceFields(
+  target: Record<string, unknown>,
+  readModel: Record<string, unknown> | undefined,
+) {
+  if (!readModel) return
+  for (const key of [
+    'procurement_summary',
+    'procurementSummary',
+    'matched_rule_governance',
+    'matchedRuleGovernance',
+    'override_summary',
+    'overrideSummary',
+    'governance_audit_summary',
+    'governanceAuditSummary',
+    'override_governance_boundary',
+    'overrideGovernanceBoundary',
+    'platform_entry_boundary',
+    'platformEntryBoundary',
+  ] as const) {
+    if (readModel[key] != null) target[key] = readModel[key]
+  }
+  for (const key of [
+    'cost_price',
+    'costPrice',
+    'cost_price_mode',
+    'costPriceMode',
+    'estimated_cost',
+    'estimatedCost',
+    'base_sale_price',
+    'baseSalePrice',
+    'quantity',
+    'manual_cost_override',
+    'manualCostOverride',
+    'manual_cost_override_reason',
+    'manualCostOverrideReason',
+    'override_actor',
+    'overrideActor',
+    'override_at',
+    'overrideAt',
+    'erp_sync_required',
+    'erpSyncRequired',
+    'erp_sync_version',
+    'erpSyncVersion',
+  ] as const) {
+    if (target[key] == null && readModel[key] != null) target[key] = readModel[key]
+  }
+}
+
 function parseModuleSummariesFromEnvelope(envelope: unknown): ModuleSummary[] | undefined {
   if (!envelope || typeof envelope !== 'object') return undefined
   const modules = (envelope as Record<string, unknown>).modules
@@ -578,9 +632,12 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
         ? 'new'
         : 'existing'
 
-  const procurementSummary = (raw.procurement_summary ?? raw.procurementSummary) as
-    | Record<string, unknown>
-    | undefined
+  const procurementSummary = objectOrUndefined(raw.procurement_summary ?? raw.procurementSummary)
+  const costOverrideSummary = objectOrUndefined(raw.override_summary ?? raw.overrideSummary)
+  const governanceAuditSummary = objectOrUndefined(raw.governance_audit_summary ?? raw.governanceAuditSummary)
+  const costOverrideBoundary = objectOrUndefined(
+    raw.override_governance_boundary ?? raw.overrideGovernanceBoundary,
+  )
   const procurementRaw = raw.procurement as Record<string, unknown> | undefined
   const procurementApiStatus =
     typeof procurementRaw?.status === 'string' ? procurementRaw.status : undefined
@@ -666,6 +723,9 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     mergeProcurementSummaryIntoPurchase(purchaseInfo, procurementSummary) ?? purchaseInfo
 
   let costPrice = parseCostPriceFromRaw(raw.cost_price ?? raw.costPrice)
+  if (!costPrice && costOverrideSummary && typeof costOverrideSummary.current_cost_price === 'number') {
+    costPrice = { amount: costOverrideSummary.current_cost_price, currency: 'CNY' }
+  }
   if (!costPrice && procurementSummary && typeof procurementSummary.cost_price === 'number') {
     costPrice = { amount: procurementSummary.cost_price, currency: 'CNY' }
   }
@@ -690,6 +750,10 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     const cpm = ps.cost_price_mode ?? ps.costPriceMode
     if (cpm === 'manual' || cpm === 'template') costPriceMode = cpm as Task['costPriceMode']
     if (costPriceMode == null && ps.manual_cost_override === true) costPriceMode = 'manual'
+  }
+  if (costPriceMode == null) {
+    const manualOverride = raw.manual_cost_override ?? raw.manualCostOverride ?? costOverrideSummary?.current_override_active
+    if (manualOverride === true) costPriceMode = 'manual'
   }
 
   const isRetouchType = String(rawTaskType).toLowerCase() === 'retouch_task'
@@ -931,6 +995,10 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     purchaseInfo,
     basePriceAmount,
     costPriceMode,
+    ...(procurementSummary != null ? { procurementSummary } : {}),
+    ...(costOverrideSummary != null ? { costOverrideSummary } : {}),
+    ...(governanceAuditSummary != null ? { governanceAuditSummary } : {}),
+    ...(costOverrideBoundary != null ? { costOverrideBoundary } : {}),
     ...(designSubStatusFromApi != null ? { designSubStatus: designSubStatusFromApi } : {}),
     ...parseWarehouseFieldsFromApi(raw),
     ...(canPrepareWarehouse !== undefined ? { canPrepareWarehouse } : {}),
@@ -1285,6 +1353,17 @@ export const useTasksStore = defineStore('tasks', () => {
         envelope && typeof envelope === 'object' && 'task' in (envelope as Record<string, unknown>)
           ? mergeDetailEnvelopeIntoTaskRaw(envelope as Record<string, unknown>)
           : (envelope as Record<string, unknown>)
+      let richEnvelope: Record<string, unknown> | undefined
+      try {
+        const richRes = await tasksApi.getById(id)
+        const richData = richRes?.data?.data ?? richRes?.data ?? richRes
+        if (richData && typeof richData === 'object') {
+          richEnvelope = richData as Record<string, unknown>
+          mergeReadModelCostGovernanceFields(raw, richEnvelope)
+        }
+      } catch {
+        // 成本治理补充读模型失败不阻塞详情主流程，详情仍使用 /detail 主响应。
+      }
       const moduleSummaries = parseModuleSummariesFromEnvelope(envelope)
       const parsed = normalizeBackendTask(raw)
       const needsSkuItemsBackfill =
@@ -1293,8 +1372,6 @@ export const useTasksStore = defineStore('tasks', () => {
       if (needsSkuItemsBackfill) {
         try {
           // /detail 未返回 sku_items 时，仅对子项做一次 rich detail 回填。
-          const richRes = await tasksApi.getById(id)
-          const richEnvelope = richRes?.data?.data ?? richRes?.data ?? richRes
           if (richEnvelope && typeof richEnvelope === 'object') {
             const richParsed = normalizeBackendTask(richEnvelope as Record<string, unknown>)
             if (Array.isArray(richParsed.skuItems) && richParsed.skuItems.length > 0) {

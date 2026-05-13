@@ -1,24 +1,24 @@
 package handler
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
 	"workflow/repo"
+	baseservice "workflow/service"
 	assetcenter "workflow/service/asset_center"
 )
 
-func TestBatchDownloadGlobalAssetsReturnsZip(t *testing.T) {
+func TestBatchDownloadGlobalAssetsReturnsDirectURLManifest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	globalSvc := assetcenter.NewService(&batchDownloadRepoStub{
@@ -37,10 +37,9 @@ func TestBatchDownloadGlobalAssetsReturnsZip(t *testing.T) {
 				Task: &domain.Task{ID: 7001},
 			},
 		},
-	}, nil, nil)
-	globalSvc.SetStorageStreamOpener(&batchDownloadStreamStub{
-		contentByKey: map[string]string{"k-1001": "zip-content"},
-	})
+	}, batchDownloadPresignerStub{
+		urlByKey: map[string]string{"k-1001": "https://oss.example/k-1001"},
+	}, nil)
 
 	h := NewTaskAssetCenterHandler(&taskAssetCenterServiceStub{})
 	h.SetGlobalAssetServices(globalSvc, nil)
@@ -57,36 +56,35 @@ func TestBatchDownloadGlobalAssetsReturnsZip(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/zip") {
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
 		t.Fatalf("Content-Type=%q", got)
 	}
-	disposition := rec.Header().Get("Content-Disposition")
-	if !strings.Contains(disposition, "attachment") || !strings.Contains(disposition, ".zip") {
-		t.Fatalf("Content-Disposition=%q", disposition)
+	var payload struct {
+		Data struct {
+			Items []struct {
+				AssetID     int64  `json:"asset_id"`
+				TaskID      int64  `json:"task_id"`
+				Filename    string `json:"filename"`
+				DownloadURL string `json:"download_url"`
+			} `json:"items"`
+			SuccessCount int `json:"success_count"`
+		} `json:"data"`
 	}
-	if rec.Body.Len() == 0 {
-		t.Fatal("zip body is empty")
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid manifest json: %v body=%s", err, rec.Body.String())
 	}
-
-	reader, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
-	if err != nil {
-		t.Fatalf("zip parse error: %v", err)
+	if payload.Data.SuccessCount != 1 || len(payload.Data.Items) != 1 {
+		t.Fatalf("payload = %+v", payload)
 	}
-	found := false
-	for _, f := range reader.File {
-		if f.Name == "task-7001/原始稿.psd" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected zip entry task-7001/原始稿.psd")
+	item := payload.Data.Items[0]
+	if item.AssetID != 1001 || item.TaskID != 7001 || item.Filename != "原始稿.psd" || item.DownloadURL != "https://oss.example/k-1001" {
+		t.Fatalf("item = %+v", item)
 	}
 }
 
 func TestBatchDownloadGlobalAssetsInvalidBodyAndRoutePriority(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	globalSvc := assetcenter.NewService(&batchDownloadRepoStub{}, nil, nil)
-	globalSvc.SetStorageStreamOpener(&batchDownloadStreamStub{})
+	globalSvc := assetcenter.NewService(&batchDownloadRepoStub{}, batchDownloadPresignerStub{}, nil)
 	h := NewTaskAssetCenterHandler(&taskAssetCenterServiceStub{})
 	h.SetGlobalAssetServices(globalSvc, nil)
 
@@ -117,8 +115,7 @@ func TestBatchDownloadGlobalAssetsInvalidBodyAndRoutePriority(t *testing.T) {
 
 func TestBatchDownloadGlobalAssetsEmptyAssetIDsReturnsErrorEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	globalSvc := assetcenter.NewService(&batchDownloadRepoStub{}, nil, nil)
-	globalSvc.SetStorageStreamOpener(&batchDownloadStreamStub{})
+	globalSvc := assetcenter.NewService(&batchDownloadRepoStub{}, batchDownloadPresignerStub{}, nil)
 
 	h := NewTaskAssetCenterHandler(&taskAssetCenterServiceStub{})
 	h.SetGlobalAssetServices(globalSvc, nil)
@@ -164,16 +161,27 @@ func (b *batchDownloadRepoStub) GetVersion(context.Context, int64, int64) (*repo
 	return nil, nil
 }
 
-type batchDownloadStreamStub struct {
-	contentByKey map[string]string
+type batchDownloadPresignerStub struct {
+	urlByKey map[string]string
 }
 
-func (b *batchDownloadStreamStub) Open(_ context.Context, storageKey string) (io.ReadCloser, error) {
-	content := ""
-	if b.contentByKey != nil {
-		content = b.contentByKey[storageKey]
+func (b batchDownloadPresignerStub) Enabled() bool {
+	return true
+}
+
+func (b batchDownloadPresignerStub) PresignDownloadURL(objectKey string) *baseservice.OSSDirectDownloadInfo {
+	return b.PresignDownloadURLWithFilename(objectKey, "")
+}
+
+func (b batchDownloadPresignerStub) PresignDownloadURLWithFilename(objectKey, _ string) *baseservice.OSSDirectDownloadInfo {
+	url := strings.TrimSpace(b.urlByKey[objectKey])
+	if url == "" {
+		return nil
 	}
-	return io.NopCloser(strings.NewReader(content)), nil
+	return &baseservice.OSSDirectDownloadInfo{
+		DownloadURL: url,
+		ExpiresAt:   time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC),
+	}
 }
 
 func strPtrBatch(v string) *string { return &v }

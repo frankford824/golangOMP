@@ -245,6 +245,36 @@ export interface AssetBatchDownloadPayload {
   asset_ids: number[]
 }
 
+export interface AssetBatchDownloadItem {
+  asset_id: number
+  task_id: number
+  filename: string
+  file_size: number
+  mime_type?: string
+  download_url: string
+  expires_at?: string | null
+}
+
+export interface AssetBatchDownloadFailure {
+  asset_id: number
+  task_id?: number
+  filename?: string
+  reason: string
+}
+
+export interface AssetBatchDownloadManifest {
+  items: AssetBatchDownloadItem[]
+  failures?: AssetBatchDownloadFailure[]
+  success_count: number
+  failure_count: number
+  total_size: number
+  expires_at?: string | null
+}
+
+export interface AssetBatchDownloadResponse {
+  data?: AssetBatchDownloadManifest
+}
+
 export const assetsApi = {
   /**
    * 任务上下文资产列表
@@ -306,13 +336,10 @@ export const assetsApi = {
     }),
 
   batchDownload: (assetIds: number[], signal?: AbortSignal) =>
-    http.post<Blob>(
+    http.post<AssetBatchDownloadResponse>(
       '/v1/assets/batch-download',
       { asset_ids: assetIds } as AssetBatchDownloadPayload,
-      {
-        signal,
-        responseType: 'blob',
-      },
+      { signal },
     ),
 
   /** GET /v1/assets/{id} */

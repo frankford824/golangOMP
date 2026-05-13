@@ -127,8 +127,8 @@ func TestResolveAssetDownloadFilename(t *testing.T) {
 		{
 			name:     "file name fallback",
 			fileName: " storage-name.psd ",
-			assetID: 42,
-			want:    "storage-name.psd",
+			assetID:  42,
+			want:     "storage-name.psd",
 		},
 		{
 			name:    "asset id fallback",
@@ -204,6 +204,11 @@ func TestPresignDownloadURLWithFilename(t *testing.T) {
 	}
 	if !strings.Contains(disposition, "%E4%BA%A4%E4%BB%98%20%E6%96%87%E4%BB%B6.psd") {
 		t.Fatalf("disposition = %q, want encoded unicode filename", disposition)
+	}
+	expectedCanonicalResource := "/test-bucket/tasks/T1/assets/A1/v1/delivery/test.psd?response-content-disposition=" + disposition
+	expectedSignature := svc.signV1(http.MethodGet, "", "", u.Query().Get("Expires"), "", expectedCanonicalResource)
+	if got := u.Query().Get("Signature"); got != expectedSignature {
+		t.Fatalf("signature = %q, want %q for canonical resource %q", got, expectedSignature, expectedCanonicalResource)
 	}
 }
 

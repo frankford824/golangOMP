@@ -73,12 +73,12 @@ require_cmd() {
 }
 
 go_cmd() {
-  if command -v go >/dev/null 2>&1; then
-    printf '%s\n' go
-    return
-  fi
   if command -v go.exe >/dev/null 2>&1; then
     printf '%s\n' go.exe
+    return
+  fi
+  if command -v go >/dev/null 2>&1; then
+    printf '%s\n' go
     return
   fi
   fail "go is required."
@@ -369,11 +369,32 @@ resolve_go_entrypoint() {
 native_path_for_tool() {
   local tool="$1"
   local path="$2"
-  if [[ "$tool" = *.exe ]] && command -v wslpath >/dev/null 2>&1; then
+  if go_tool_is_windows_exe "$tool" && command -v wslpath >/dev/null 2>&1; then
     wslpath -w "$path"
     return
   fi
   printf '%s\n' "$path"
+}
+
+go_tool_resolved_path() {
+  local tool="$1"
+  local resolved
+  resolved="$(command -v "$tool" 2>/dev/null || printf '%s\n' "$tool")"
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$resolved" 2>/dev/null || printf '%s\n' "$resolved"
+    return
+  fi
+  printf '%s\n' "$resolved"
+}
+
+go_tool_is_windows_exe() {
+  local tool="$1"
+  local resolved
+  resolved="$(go_tool_resolved_path "$tool")"
+  case "${tool,,}:${resolved,,}" in
+    *.exe:*|*:*.exe) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 ps_single_quote_escape() {
@@ -386,13 +407,13 @@ go_build_linux_amd64() {
   local output_path="$3"
   local entrypoint="$4"
 
-  if [[ "$go_tool" = *.exe ]]; then
+  if go_tool_is_windows_exe "$go_tool"; then
     command -v powershell.exe >/dev/null 2>&1 || fail "powershell.exe is required when using go.exe from bash."
 
     local go_tool_path
     local native_root
     local native_output
-    go_tool_path="$(command -v "$go_tool" || printf '%s' "$go_tool")"
+    go_tool_path="$(go_tool_resolved_path "$go_tool")"
     go_tool_path="$(native_path_for_tool "$go_tool" "$go_tool_path")"
     native_root="$(native_path_for_tool "$go_tool" "$root")"
     native_output="$(native_path_for_tool "$go_tool" "$output_path")"

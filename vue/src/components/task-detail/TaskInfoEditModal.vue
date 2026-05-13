@@ -103,7 +103,7 @@
             placeholder="如：仓库维护成本价、ERP 同步前修正"
           />
         </div>
-        <p class="section-hint mt-2">
+        <p class="section-hint section-hint--after-grid">
           系统预估成本仅作参考；保存成本单价后将按人工维护成本处理，并请求同步 ERP。
         </p>
       </section>
@@ -609,10 +609,13 @@ watch(
   color: #64748b;
 }
 .section-hint {
-  margin: -0.35rem 0 0.65rem;
+  margin: 0.35rem 0 0.65rem;
   font-size: 0.75rem;
   color: #64748b;
   line-height: 1.45;
+}
+.section-hint--after-grid {
+  margin-top: 0.75rem;
 }
 .form-grid {
   display: grid;

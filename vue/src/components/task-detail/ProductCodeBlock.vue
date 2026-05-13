@@ -347,7 +347,12 @@ const categoryLabelByCode = computed(() => {
 const categoryCodeDisplay = computed(() => {
   const code = currentRow.value.categoryCode?.trim()
   if (!code) return '—'
-  const label = categoryLabelByCode.value.get(code)?.trim()
+  const directTaskCode = task.value.newProductCategoryCode?.trim()
+  const directTaskLabel =
+    directTaskCode === code
+      ? (task.value.categoryName?.trim() || task.value.category?.trim() || '')
+      : ''
+  const label = categoryLabelByCode.value.get(code)?.trim() || directTaskLabel
   if (!label || label === code) return code
   return `${label}（${code}）`
 })

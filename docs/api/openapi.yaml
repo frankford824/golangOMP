@@ -661,6 +661,7 @@ components:
         actor_id:
           type: integer
           nullable: true
+        actor_username: { type: string }
         actor_type: { type: string }
         status: { type: string }
         payload: {}
@@ -4637,8 +4638,67 @@ components:
         asset_ids:
           type: array
           minItems: 1
+          maxItems: 100
           items:
             type: integer
+    AssetBatchDownloadItem:
+      type: object
+      required: [asset_id, task_id, filename, file_size, download_url]
+      properties:
+        asset_id:
+          type: integer
+        task_id:
+          type: integer
+        filename:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+        download_url:
+          type: string
+          format: uri
+          description: Presigned OSS direct download URL. The backend does not proxy file bytes.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    AssetBatchDownloadFailure:
+      type: object
+      required: [asset_id, reason]
+      properties:
+        asset_id:
+          type: integer
+        task_id:
+          type: integer
+        filename:
+          type: string
+        reason:
+          type: string
+    AssetBatchDownloadManifest:
+      type: object
+      required: [items, success_count, failure_count, total_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetBatchDownloadItem'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetBatchDownloadFailure'
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        total_size:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
     ValidationViolation:
       type: object
       properties:
@@ -9298,8 +9358,8 @@ paths:
                       $ref: '#/components/schemas/DesignAsset'
   /v1/assets/batch-download:
     post:
-      summary: Batch download assets as ZIP
-      description: Build one ZIP package from current versions of the requested assets.
+      summary: Batch download asset direct URL manifest
+      description: Return presigned OSS direct download URLs for current versions of the requested assets. The backend does not proxy file bytes or build ZIP packages.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -9313,12 +9373,14 @@ paths:
               $ref: '#/components/schemas/AssetBatchDownloadRequest'
       responses:
         '200':
-          description: ZIP archive bytes
+          description: Direct download manifest
           content:
-            application/zip:
+            application/json:
               schema:
-                type: string
-                format: binary
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetBatchDownloadManifest'
         '400':
           description: Invalid request or all assets unavailable
           content:
@@ -9326,7 +9388,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
-          description: Internal error while building ZIP
+          description: Internal error while building direct download manifest
           content:
             application/json:
               schema:

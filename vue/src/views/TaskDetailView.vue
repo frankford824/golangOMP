@@ -326,6 +326,18 @@
                           <dt>数量</dt>
                           <dd>{{ detailQuantityLabel }}</dd>
                         </div>
+                        <div>
+                          <dt>成本状态</dt>
+                          <dd>{{ detailCostStatusLabel }}</dd>
+                        </div>
+                        <div>
+                          <dt>覆盖原因</dt>
+                          <dd>{{ detailCostOverrideReasonLabel }}</dd>
+                        </div>
+                        <div>
+                          <dt>最新操作</dt>
+                          <dd>{{ detailCostLatestActionLabel }}</dd>
+                        </div>
                       </dl>
                     </article>
                   </div>
@@ -776,7 +788,9 @@ import { latestDeliveryBatchVersionsForSelection } from '@/domain/task-final-del
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
 import { formatDateOnlyBeijing, formatMonthDayTimeBeijingOffsetAware, formatTaskDueAtDisplay } from '@/utils/date'
 import {
+  extractCostOverrideEventsList,
   extractTaskEventsList,
+  mapCostOverrideEventToRecentEvent,
   mapTaskEventRowToRecentEvent,
 } from '@/domain/mappers/task-events-from-api'
 import { workflowGateReasonLabelCn } from '@/domain/mappers/read-model-labels-cn'
@@ -895,14 +909,23 @@ const isCustomizationTask = computed(
       task.value.customizationRequired === true ||
       Boolean(task.value.customizationSourceType)),
 )
-/** 与 CostPriceBlock 展示条件一致，避免原品任务下空占位 */
+/** 成本同步已经覆盖原品、新品、采购；P 图等任务有成本数据时也展示。 */
 const showCostInDetail = computed(
-  () =>
-    !!task.value &&
-    (task.value.businessType === 'NEW_PRODUCT_DEV' ||
-      task.value.taskType === 'NEW_PRODUCT_DEV' ||
-      task.value.businessType === 'PURCHASE_TASK' ||
-      task.value.taskType === 'PURCHASE_TASK'),
+  () => {
+    const t = task.value
+    if (!t) return false
+    if (
+      t.businessType === 'ORIGINAL_PRODUCT_DEV' ||
+      t.taskType === 'ORIGINAL_PRODUCT_DEV' ||
+      t.businessType === 'NEW_PRODUCT_DEV' ||
+      t.taskType === 'NEW_PRODUCT_DEV' ||
+      t.businessType === 'PURCHASE_TASK' ||
+      t.taskType === 'PURCHASE_TASK'
+    ) {
+      return true
+    }
+    return Boolean(t.costPrice || t.costOverrideSummary || t.governanceAuditSummary || t.procurementSummary)
+  },
 )
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -1036,7 +1059,13 @@ const detailCostLabel = computed(() => {
 })
 const detailCostModeLabel = computed(() => {
   const mode = String(task.value?.costPriceMode ?? '').trim().toLowerCase()
-  if (!mode) return '-'
+  if (!mode) {
+    const active = task.value?.costOverrideSummary?.current_override_active ??
+      task.value?.costOverrideSummary?.currentOverrideActive
+    if (active === true) return '手动录入'
+    if (task.value?.costPrice) return '按系统规则计算'
+    return '-'
+  }
   if (mode === 'manual') return '手动录入'
   if (mode === 'template') return '按模板/系统计算'
   return dash(task.value?.costPriceMode)
@@ -1044,6 +1073,49 @@ const detailCostModeLabel = computed(() => {
 const detailQuantityLabel = computed(() =>
   dash(activeSkuItem.value?.quantity ?? task.value?.newProductQuantity),
 )
+function recordField(record: Record<string, unknown> | undefined, ...keys: string[]): unknown {
+  if (!record) return undefined
+  for (const key of keys) {
+    const value = record[key]
+    if (value != null && String(value).trim() !== '') return value
+  }
+  return undefined
+}
+const detailCostStatusLabel = computed(() => {
+  const t = task.value
+  const summary = t?.costOverrideSummary
+  const active = recordField(summary, 'current_override_active', 'currentOverrideActive')
+  const finance = recordField(t?.costOverrideBoundary, 'finance_status', 'financeStatus')
+  const review = recordField(t?.costOverrideBoundary, 'review_status', 'reviewStatus')
+  const bits: string[] = []
+  if (active === true) bits.push('人工覆盖生效')
+  else if (active === false) bits.push('系统规则成本')
+  if (review) bits.push(`审核：${review}`)
+  if (finance) bits.push(`财务：${finance}`)
+  return bits.length > 0 ? bits.join('；') : '-'
+})
+const detailCostOverrideReasonLabel = computed(() =>
+  dash(recordField(task.value?.costOverrideSummary, 'current_override_reason', 'currentOverrideReason')),
+)
+const detailCostLatestActionLabel = computed(() => {
+  const summary = task.value?.costOverrideSummary
+  const latest = recordField(summary, 'latest_audit_event', 'latestAuditEvent')
+  if (!latest || typeof latest !== 'object') return '-'
+  const row = latest as Record<string, unknown>
+  const eventType = String(row.event_type ?? row.eventType ?? '').trim()
+  const actor = String(row.actor ?? row.override_actor ?? row.overrideActor ?? '').trim()
+  const at = String(row.occurred_at ?? row.occurredAt ?? row.override_at ?? row.overrideAt ?? '').trim()
+  const typeLabel =
+    eventType === 'override_applied'
+      ? '人工覆盖'
+      : eventType === 'override_updated'
+        ? '覆盖更新'
+        : eventType === 'override_released'
+          ? '解除覆盖'
+          : eventType || '成本操作'
+  const timeLabel = at ? formatMonthDayTimeBeijingOffsetAware(at) : ''
+  return [typeLabel, actor, timeLabel].filter(Boolean).join(' · ') || '-'
+})
 const topLevelReferenceThumbItems = computed((): AssetThumbItem[] =>
   (task.value?.referenceFileRefs ?? [])
     .map((ref, index) => {
@@ -1831,9 +1903,30 @@ async function loadSideEvents() {
   }
   sideEventsLoading.value = true
   try {
-    const res = await tasksApi.listTaskEvents(tid)
-    const list = extractTaskEventsList(res.data)
-    sideEvents.value = list.map((row) => mapTaskEventRowToRecentEvent(row, tid))
+    const [taskEventsResult, costEventsResult] = await Promise.allSettled([
+      tasksApi.listTaskEvents(tid),
+      tasksApi.getCostOverrides(tid),
+    ])
+    if (taskEventsResult.status === 'rejected' && costEventsResult.status === 'rejected') {
+      throw taskEventsResult.reason
+    }
+    const taskEvents =
+      taskEventsResult.status === 'fulfilled'
+        ? extractTaskEventsList(taskEventsResult.value.data).map((row) =>
+            mapTaskEventRowToRecentEvent(row, tid),
+          )
+        : []
+    const costEvents =
+      costEventsResult.status === 'fulfilled'
+        ? extractCostOverrideEventsList(costEventsResult.value.data).map((row) =>
+            mapCostOverrideEventToRecentEvent(row, tid, task.value?.taskNo),
+          )
+        : []
+    sideEvents.value = [...costEvents, ...taskEvents].sort((a, b) => {
+      const at = a.createdAtIso ? Date.parse(a.createdAtIso) : 0
+      const bt = b.createdAtIso ? Date.parse(b.createdAtIso) : 0
+      return bt - at
+    })
   } catch (e) {
     sideEventsError.value = e instanceof Error ? e.message : '事件加载失败'
   } finally {

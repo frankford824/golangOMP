@@ -129,6 +129,7 @@ func (s *operationLogService) listTaskEntries(ctx context.Context, eventType str
 			EventType:     event.EventType,
 			Summary:       "Task workflow event",
 			ActorID:       event.OperatorID,
+			ActorUsername: strings.TrimSpace(event.OperatorName),
 			ActorType:     "session_actor",
 			Payload:       cloneRawJSON(event.Payload),
 			CreatedAt:     event.CreatedAt,

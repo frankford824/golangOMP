@@ -21,6 +21,7 @@ type OperationLogEntry struct {
 	EventType     string             `json:"event_type"`
 	Summary       string             `json:"summary"`
 	ActorID       *int64             `json:"actor_id,omitempty"`
+	ActorUsername string             `json:"actor_username,omitempty"`
 	ActorType     string             `json:"actor_type,omitempty"`
 	Status        string             `json:"status,omitempty"`
 	Payload       json.RawMessage    `json:"payload,omitempty"`

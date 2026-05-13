@@ -65,8 +65,12 @@ func (r *taskEventRepo) Append(
 
 func (r *taskEventRepo) ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskEvent, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, task_id, sequence, event_type, operator_id, payload, created_at
-		FROM task_event_logs WHERE task_id = ? ORDER BY sequence ASC`, taskID)
+		SELECT tel.id, tel.task_id, tel.sequence, tel.event_type, tel.operator_id,
+		       COALESCE(NULLIF(u.username, ''), NULLIF(u.display_name, ''), '') AS operator_name,
+		       tel.payload, tel.created_at
+		FROM task_event_logs tel
+		LEFT JOIN users u ON u.id = tel.operator_id
+		WHERE tel.task_id = ? ORDER BY tel.sequence ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list task_event_logs: %w", err)
 	}
@@ -76,12 +80,14 @@ func (r *taskEventRepo) ListByTaskID(ctx context.Context, taskID int64) ([]*doma
 	for rows.Next() {
 		var e domain.TaskEvent
 		var operatorID sql.NullInt64
+		var operatorName string
 		if err := rows.Scan(
-			&e.ID, &e.TaskID, &e.Sequence, &e.EventType, &operatorID, &e.Payload, &e.CreatedAt,
+			&e.ID, &e.TaskID, &e.Sequence, &e.EventType, &operatorID, &operatorName, &e.Payload, &e.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan task_event_log: %w", err)
 		}
 		e.OperatorID = fromNullInt64(operatorID)
+		e.OperatorName = strings.TrimSpace(operatorName)
 		events = append(events, &e)
 	}
 	return events, rows.Err()
@@ -109,10 +115,13 @@ func (r *taskEventRepo) ListRecent(ctx context.Context, filter repo.TaskEventLis
 	queryArgs := append([]interface{}{}, args...)
 	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, task_id, sequence, event_type, operator_id, payload, created_at
-		FROM task_event_logs
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY created_at DESC, sequence DESC
+		SELECT tel.id, tel.task_id, tel.sequence, tel.event_type, tel.operator_id,
+		       COALESCE(NULLIF(u.username, ''), NULLIF(u.display_name, ''), '') AS operator_name,
+		       tel.payload, tel.created_at
+		FROM task_event_logs tel
+		LEFT JOIN users u ON u.id = tel.operator_id
+		WHERE `+strings.Join(prefixedTaskEventWhere(where, "tel"), " AND ")+`
+		ORDER BY tel.created_at DESC, tel.sequence DESC
 		LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list recent task_event_logs: %w", err)
@@ -123,13 +132,32 @@ func (r *taskEventRepo) ListRecent(ctx context.Context, filter repo.TaskEventLis
 	for rows.Next() {
 		var e domain.TaskEvent
 		var operatorID sql.NullInt64
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.Sequence, &e.EventType, &operatorID, &e.Payload, &e.CreatedAt); err != nil {
+		var operatorName string
+		if err := rows.Scan(&e.ID, &e.TaskID, &e.Sequence, &e.EventType, &operatorID, &operatorName, &e.Payload, &e.CreatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan recent task_event_log: %w", err)
 		}
 		e.OperatorID = fromNullInt64(operatorID)
+		e.OperatorName = strings.TrimSpace(operatorName)
 		events = append(events, &e)
 	}
 	return events, total, rows.Err()
+}
+
+func prefixedTaskEventWhere(where []string, alias string) []string {
+	out := make([]string, 0, len(where))
+	for _, clause := range where {
+		switch clause {
+		case "1=1":
+			out = append(out, clause)
+		case "task_id = ?":
+			out = append(out, alias+".task_id = ?")
+		case "event_type = ?":
+			out = append(out, alias+".event_type = ?")
+		default:
+			out = append(out, clause)
+		}
+	}
+	return out
 }
 
 // nextTaskEventSequence atomically returns the next sequence number for a task.

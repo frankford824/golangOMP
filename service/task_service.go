@@ -1708,20 +1708,25 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			}
 		}
 	}
+	textMayContainCostDimensions := false
 	if strings.TrimSpace(p.SpecText) != "" {
 		detail.SpecText = p.SpecText
+		textMayContainCostDimensions = true
 	}
 	if strings.TrimSpace(p.Material) != "" {
 		detail.Material = p.Material
 	}
 	if strings.TrimSpace(p.SizeText) != "" {
 		detail.SizeText = p.SizeText
+		textMayContainCostDimensions = true
 	}
 	if strings.TrimSpace(p.Note) != "" {
 		detail.Note = strings.TrimSpace(p.Note)
+		textMayContainCostDimensions = true
 	}
 	if strings.TrimSpace(p.ChangeRequest) != "" || strings.TrimSpace(p.DesignRequirement) != "" {
 		applyTaskDetailDemandTextEdit(task, detail, p.ChangeRequest, p.DesignRequirement)
+		textMayContainCostDimensions = true
 	}
 	if strings.TrimSpace(p.ReferenceLink) != "" {
 		detail.ReferenceLink = strings.TrimSpace(p.ReferenceLink)
@@ -1741,12 +1746,16 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	}
 	if strings.TrimSpace(p.CraftText) != "" {
 		detail.CraftText = p.CraftText
+		textMayContainCostDimensions = true
 	}
+	widthOrHeightChanged := false
 	if p.Width != nil {
 		detail.Width = p.Width
+		widthOrHeightChanged = true
 	}
 	if p.Height != nil {
 		detail.Height = p.Height
+		widthOrHeightChanged = true
 	}
 	if p.Area != nil {
 		detail.Area = p.Area
@@ -1756,8 +1765,9 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	}
 	if strings.TrimSpace(p.Process) != "" {
 		detail.Process = strings.TrimSpace(p.Process)
+		textMayContainCostDimensions = true
 	}
-	applyTextDerivedCostDimensions(detail)
+	applyTextDerivedCostDimensions(detail, textMayContainCostDimensions, widthOrHeightChanged && p.Area == nil)
 	detail.ManualCostOverride = p.ManualCostOverride
 	detail.ManualCostOverrideReason = strings.TrimSpace(p.ManualCostOverrideReason)
 	costRule, appErr := s.resolveTaskCostRule(ctx, p.CostRuleID)
@@ -2102,11 +2112,29 @@ func (s *taskService) resolveTaskCostRuleCategory(ctx context.Context, detail *d
 	return &category.CategoryID, category.CategoryCode, nil
 }
 
-func applyTextDerivedCostDimensions(detail *domain.TaskDetail) {
+func applyTextDerivedCostDimensions(detail *domain.TaskDetail, refreshFromText bool, refreshAreaFromWidthHeight bool) {
 	if detail == nil {
 		return
 	}
+	if refreshAreaFromWidthHeight && detail.Width != nil && detail.Height != nil && *detail.Width > 0 && *detail.Height > 0 {
+		area := (*detail.Width) * (*detail.Height)
+		detail.Area = &area
+		return
+	}
 	notes := taskCostPreviewText(detail)
+	if refreshFromText {
+		extracted := extractCostDimensionsFromText(notes)
+		if extracted.WidthM != nil {
+			detail.Width = cloneFloat64Ptr(extracted.WidthM)
+		}
+		if extracted.HeightM != nil {
+			detail.Height = cloneFloat64Ptr(extracted.HeightM)
+		}
+		if extracted.AreaM2 != nil {
+			detail.Area = cloneFloat64Ptr(extracted.AreaM2)
+		}
+		return
+	}
 	width, height, area := taskCostPreviewDimensions(detail, notes)
 	if detail.Width == nil && width != nil {
 		detail.Width = cloneFloat64Ptr(width)
