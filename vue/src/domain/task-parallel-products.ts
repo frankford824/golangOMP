@@ -7,6 +7,7 @@ import type { ReferenceFileRef } from '@/services/api/assetsApi'
  */
 export interface TaskParallelProductRow {
   index: number
+  id?: number
   label: string
   skuCode: string | null
   productName: string
@@ -20,6 +21,12 @@ export interface TaskParallelProductRow {
   sequenceNo?: number
   quantity?: number
   baseSalePrice?: number
+  costPrice?: number
+  estimatedCost?: number
+  costPriceMode?: string
+  manualCostOverride?: boolean
+  manualCostOverrideReason?: string
+  requiresManualReview?: boolean
 }
 
 export function buildParallelProductRows(task: Task): TaskParallelProductRow[] {
@@ -29,6 +36,7 @@ export function buildParallelProductRows(task: Task): TaskParallelProductRow[] {
   if (items.length > 0) {
     return items.map((item, i) => ({
       index: i,
+      id: item.id,
       label: `商品 ${i + 1}`,
       skuCode: item.skuCode ?? task.sku ?? null,
       productName: (item.productNameSnapshot ?? task.productName ?? '').trim() || '—',
@@ -42,6 +50,12 @@ export function buildParallelProductRows(task: Task): TaskParallelProductRow[] {
       sequenceNo: item.sequenceNo ?? i + 1,
       quantity: item.quantity,
       baseSalePrice: item.baseSalePrice,
+      costPrice: item.costPrice,
+      estimatedCost: item.estimatedCost,
+      costPriceMode: item.costPriceMode,
+      manualCostOverride: item.manualCostOverride,
+      manualCostOverrideReason: item.manualCostOverrideReason,
+      requiresManualReview: item.requiresManualReview,
     }))
   }
 

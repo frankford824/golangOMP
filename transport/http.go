@@ -97,7 +97,7 @@ func NewRouter(
 
 	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
 
-	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH)
+	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH, notificationH)
 
 	// SKU endpoints
 	skuGroup := v1.Group("/sku")

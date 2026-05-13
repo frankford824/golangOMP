@@ -438,6 +438,15 @@ func zeroFloat64Ptr() *float64 {
 	return &zero
 }
 
+func firstFloat64Ptr(values ...*float64) *float64 {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
 func firstReferenceImageURL(refs []domain.ReferenceFileRef) string {
 	for _, ref := range domain.NormalizeReferenceFileRefs(refs) {
 		if ref.DownloadURL != nil {

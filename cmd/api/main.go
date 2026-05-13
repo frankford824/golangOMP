@@ -251,7 +251,9 @@ func main() {
 		service.WithWarehouseFilingTrigger(taskSvc))
 	operationLogSvc := service.NewOperationLogService(taskEventRepo, exportJobEventRepo, integrationCallLogRepo)
 	wsHub := wsservice.NewHub(logger.Named("websocket"))
-	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"))
+	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"),
+		notificationsvc.WithUserRepo(userRepo),
+		notificationsvc.WithTxRunner(mdb))
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
 	blueprintRules.SetNotificationGenerator(notificationGen)
 	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,

@@ -1840,7 +1840,11 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		if governanceStatus == domain.CostRuleGovernanceStatusNoMatch {
 			governanceStatus = resolvedRule.GovernanceStatusAt(time.Now().UTC())
 		}
-		detail.CostRuleID = &resolvedRule.RuleID
+		if resolvedRule.RuleID > 0 {
+			detail.CostRuleID = &resolvedRule.RuleID
+		} else {
+			detail.CostRuleID = nil
+		}
 		detail.CostRuleName = resolvedRule.RuleName
 		detail.CostRuleSource = resolvedRule.Source
 		if detail.MatchedRuleVersion == nil && resolvedRule.RuleVersion > 0 {
@@ -2099,14 +2103,14 @@ func (s *taskService) previewTaskCost(ctx context.Context, detail *domain.TaskDe
 	if categoryID == nil && strings.TrimSpace(ruleCategoryCode) == "" {
 		return costPreviewComputation{}, nil
 	}
-	rules, err := s.costRuleRepo.ListActiveByCategory(ctx, categoryID, ruleCategoryCode, time.Now())
+	notes := taskCostPreviewText(detail)
+	rules, err := s.listActiveCostRulesForText(ctx, categoryID, ruleCategoryCode, notes)
 	if err != nil {
 		return costPreviewComputation{}, infraError("list active cost rules for task business info", err)
 	}
 	if len(rules) == 0 {
 		return costPreviewComputation{}, nil
 	}
-	notes := taskCostPreviewText(detail)
 	width, height, area := taskCostPreviewDimensions(detail, notes)
 	return previewCostRules(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
@@ -2188,7 +2192,11 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 		item.PrefillAt = &now
 	}
 	if prefill.MatchedRule != nil {
-		item.CostRuleID = &prefill.MatchedRule.RuleID
+		if prefill.MatchedRule.RuleID > 0 {
+			item.CostRuleID = &prefill.MatchedRule.RuleID
+		} else {
+			item.CostRuleID = nil
+		}
 		item.CostRuleName = prefill.MatchedRule.RuleName
 		item.CostRuleSource = prefill.MatchedRule.Source
 		if item.MatchedRuleVersion == nil && prefill.MatchedRule.RuleVersion > 0 {
@@ -2311,7 +2319,11 @@ func (s *taskService) applyTaskSKUItemCostPrefill(ctx context.Context, detail *d
 		item.PrefillAt = &now
 	}
 	if prefill.MatchedRule != nil {
-		item.CostRuleID = &prefill.MatchedRule.RuleID
+		if prefill.MatchedRule.RuleID > 0 {
+			item.CostRuleID = &prefill.MatchedRule.RuleID
+		} else {
+			item.CostRuleID = nil
+		}
 		item.CostRuleName = prefill.MatchedRule.RuleName
 		item.CostRuleSource = prefill.MatchedRule.Source
 	}
@@ -2345,13 +2357,6 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	if categoryID == nil && categoryCode == "" {
 		return costPreviewComputation{}, nil
 	}
-	rules, err := s.costRuleRepo.ListActiveByCategory(ctx, categoryID, categoryCode, time.Now())
-	if err != nil {
-		return costPreviewComputation{}, infraError("list active cost rules for task sku item", err)
-	}
-	if len(rules) == 0 {
-		return costPreviewComputation{}, nil
-	}
 	notes := strings.Join(nonEmptyStrings(
 		taskCostPreviewText(detail),
 		item.ProductNameSnapshot,
@@ -2359,6 +2364,13 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		item.DesignRequirement,
 		item.CategoryCode,
 	), " ")
+	rules, err := s.listActiveCostRulesForText(ctx, categoryID, categoryCode, notes)
+	if err != nil {
+		return costPreviewComputation{}, infraError("list active cost rules for task sku item", err)
+	}
+	if len(rules) == 0 {
+		return costPreviewComputation{}, nil
+	}
 	width, height, area := taskCostPreviewDimensions(detail, notes)
 	quantity := cloneInt64Ptr(item.Quantity)
 	if quantity == nil {
@@ -2374,6 +2386,109 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		Process:      detail.Process,
 		Notes:        notes,
 	}, rules), nil
+}
+
+func (s *taskService) listActiveCostRulesForText(ctx context.Context, categoryID *int64, categoryCode, notes string) ([]*domain.CostRule, error) {
+	asOf := time.Now()
+	rules := make([]*domain.CostRule, 0, 4)
+	seen := make(map[int64]bool)
+	for _, alias := range costCategoryAliasesFromText(categoryCode, notes) {
+		aliasRules, err := s.costRuleRepo.ListActiveByCategory(ctx, nil, alias, asOf)
+		if err != nil {
+			return nil, err
+		}
+		for _, rule := range aliasRules {
+			if rule == nil || seen[rule.RuleID] {
+				continue
+			}
+			rules = append(rules, rule)
+			seen[rule.RuleID] = true
+		}
+	}
+	if len(rules) > 0 {
+		return append(rules, virtualCostRulesFromText(categoryCode, notes)...), nil
+	}
+	var err error
+	rules, err = s.costRuleRepo.ListActiveByCategory(ctx, categoryID, categoryCode, asOf)
+	if err != nil {
+		return nil, err
+	}
+	if len(rules) == 0 {
+		if virtual := virtualCostRulesFromText(categoryCode, notes); len(virtual) > 0 {
+			rules = append(rules, virtual...)
+		}
+		return rules, nil
+	}
+	rules = append(rules, virtualCostRulesFromText(categoryCode, notes)...)
+	return rules, nil
+}
+
+func costCategoryAliasesFromText(categoryCode, notes string) []string {
+	combined := strings.ToLower(strings.TrimSpace(categoryCode + " " + notes))
+	aliases := make([]string, 0, 1)
+	add := func(code string) []string {
+		code = strings.TrimSpace(code)
+		if code == "" || strings.EqualFold(code, categoryCode) {
+			return aliases
+		}
+		for _, existing := range aliases {
+			if existing == code {
+				return aliases
+			}
+		}
+		aliases = append(aliases, code)
+		return aliases
+	}
+
+	if strings.Contains(combined, "kt") {
+		switch {
+		case strings.Contains(combined, "覆膜") && strings.Contains(combined, "定制"):
+			return add("KT_CUSTOM_FILM")
+		case strings.Contains(combined, "覆膜"):
+			return add("KT_STANDARD_FILM")
+		case strings.Contains(combined, "河南"):
+			return add("KT_HENAN")
+		case strings.Contains(combined, "红色"):
+			return add("KT_RED")
+		case strings.Contains(combined, "金色"):
+			return add("KT_GOLD")
+		case strings.Contains(combined, "定制"):
+			return add("KT_CUSTOM")
+		case strings.Contains(combined, "常规"):
+			return add("KT_STANDARD")
+		}
+	}
+	if strings.Contains(combined, "写真布") {
+		if strings.Contains(combined, "定制") {
+			return add("PHOTO_CLOTH_CUSTOM")
+		}
+		return add("PHOTO_CLOTH_STANDARD")
+	}
+	if strings.Contains(combined, "旗帜布") {
+		if strings.Contains(combined, "车缝") {
+			return add("FLAG_CLOTH_SEWED")
+		}
+		return add("FLAG_CLOTH_STANDARD")
+	}
+	if strings.Contains(combined, "铜版纸") {
+		return add("COPPER_PAPER")
+	}
+	if strings.Contains(combined, "白卡纸") {
+		return add("WHITE_CARD")
+	}
+	if strings.Contains(combined, "无背胶") && strings.Contains(combined, "pp") {
+		return add("PP_PLAIN")
+	} else if strings.Contains(combined, "背胶") && strings.Contains(combined, "pp") {
+		return add("PP_STICKY")
+	}
+	if strings.Contains(combined, "模切不干胶") || (strings.Contains(combined, "不干胶") && !strings.Contains(combined, "pp")) {
+		return add("DIECUT_STICKER")
+	}
+	return aliases
+}
+
+func virtualCostRulesFromText(categoryCode, notes string) []*domain.CostRule {
+	return nil
 }
 
 func (s *taskService) resolveTaskCostRuleCategory(ctx context.Context, detail *domain.TaskDetail) (*int64, string, *domain.AppError) {

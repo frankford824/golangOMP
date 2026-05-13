@@ -176,6 +176,19 @@ export interface TaskSkuItem {
   categoryCode?: string
   materialMode?: string
   costPriceMode?: string
+  costPrice?: number
+  estimatedCost?: number
+  costRuleId?: number
+  costRuleName?: string
+  costRuleSource?: string
+  matchedRuleVersion?: number
+  prefillSource?: string
+  prefillAt?: string | null
+  requiresManualReview?: boolean
+  manualCostOverride?: boolean
+  manualCostOverrideReason?: string
+  overrideActor?: string
+  overrideAt?: string | null
   quantity?: number
   baseSalePrice?: number
   /** GET 任务读模型 sku_items[].reference_file_refs，与任务级字段解析规则一致 */

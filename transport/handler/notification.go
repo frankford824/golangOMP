@@ -13,6 +13,13 @@ type NotificationHandler struct {
 	svc *notificationsvc.Service
 }
 
+type broadcastNotificationReq struct {
+	Audience string  `json:"audience"`
+	UserIDs  []int64 `json:"user_ids"`
+	Title    string  `json:"title"`
+	Content  string  `json:"content"`
+}
+
 func NewNotificationHandler(svc *notificationsvc.Service) *NotificationHandler {
 	return &NotificationHandler{svc: svc}
 }
@@ -68,4 +75,24 @@ func (h *NotificationHandler) UnreadCount(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"unread_count": count})
+}
+
+func (h *NotificationHandler) Broadcast(c *gin.Context) {
+	var req broadcastNotificationReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid request body", nil))
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	result, appErr := h.svc.Broadcast(c.Request.Context(), actor, notificationsvc.BroadcastParams{
+		Audience: notificationsvc.BroadcastAudience(req.Audience),
+		UserIDs:  req.UserIDs,
+		Title:    req.Title,
+		Content:  req.Content,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }

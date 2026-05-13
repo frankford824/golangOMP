@@ -427,9 +427,16 @@ export const tasksApi = {
     http.patch(`/v1/tasks/${id}/cost-info`, patch, { signal }),
 
   /**
-   * POST /v1/tOps/Warehouse/Admin；设计/审核/外协不可调用
-   asks/{id}/cost-quote/preview
-   * 权限：*/
+   * PATCH /v1/tasks/{id}/sku-items/{sku_item_id}/cost-info
+   * 批量母任务子项成本维护；保存后后端按该子项成本重新请求 ERP 同步。
+   */
+  patchSkuItemCostInfo: (id: string, skuItemId: number | string, patch: Record<string, unknown>, signal?: AbortSignal) =>
+    http.patch(`/v1/tasks/${id}/sku-items/${skuItemId}/cost-info`, patch, { signal }),
+
+  /**
+   * POST /v1/tasks/{id}/cost-quote/preview
+   * 权限：Ops/Warehouse/Admin；设计/审核/外协不可调用
+   */
   costQuotePreview: (id: string, payload: Record<string, unknown>, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/cost-quote/preview`, payload, { signal }),
 

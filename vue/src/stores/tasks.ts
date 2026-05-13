@@ -795,6 +795,43 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
           erpProductId: typeof o.erp_product_id === 'string' ? o.erp_product_id : undefined,
           categoryCode: typeof o.category_code === 'string' ? o.category_code : undefined,
           materialMode: typeof o.material_mode === 'string' ? o.material_mode : undefined,
+          costPriceMode: typeof o.cost_price_mode === 'string' ? o.cost_price_mode : undefined,
+          costPrice:
+            typeof o.cost_price === 'number' && Number.isFinite(o.cost_price) ? o.cost_price : undefined,
+          estimatedCost:
+            typeof o.estimated_cost === 'number' && Number.isFinite(o.estimated_cost)
+              ? o.estimated_cost
+              : undefined,
+          costRuleId:
+            typeof o.cost_rule_id === 'number' && Number.isFinite(o.cost_rule_id)
+              ? o.cost_rule_id
+              : undefined,
+          costRuleName: typeof o.cost_rule_name === 'string' ? o.cost_rule_name : undefined,
+          costRuleSource: typeof o.cost_rule_source === 'string' ? o.cost_rule_source : undefined,
+          matchedRuleVersion:
+            typeof o.matched_rule_version === 'number' && Number.isFinite(o.matched_rule_version)
+              ? o.matched_rule_version
+              : undefined,
+          prefillSource: typeof o.prefill_source === 'string' ? o.prefill_source : undefined,
+          prefillAt:
+            typeof o.prefill_at === 'string'
+              ? o.prefill_at
+              : o.prefill_at === null
+                ? null
+                : undefined,
+          requiresManualReview:
+            typeof o.requires_manual_review === 'boolean' ? o.requires_manual_review : undefined,
+          manualCostOverride:
+            typeof o.manual_cost_override === 'boolean' ? o.manual_cost_override : undefined,
+          manualCostOverrideReason:
+            typeof o.manual_cost_override_reason === 'string' ? o.manual_cost_override_reason : undefined,
+          overrideActor: typeof o.override_actor === 'string' ? o.override_actor : undefined,
+          overrideAt:
+            typeof o.override_at === 'string'
+              ? o.override_at
+              : o.override_at === null
+                ? null
+                : undefined,
           filing_status: typeof o.filing_status === 'string' ? o.filing_status : undefined,
           erp_sync_status: typeof o.erp_sync_status === 'string' ? o.erp_sync_status : undefined,
           erp_sync_required:
@@ -1651,7 +1688,7 @@ export const useTasksStore = defineStore('tasks', () => {
           baseItem.base_sale_price = item.baseSalePrice ?? undefined
           if (item.productChannel) baseItem.product_channel = item.productChannel
           if (item.costPriceMode === 'manual' && item.costPriceAmount != null && !Number.isNaN(item.costPriceAmount)) {
-            baseItem.cost_unit_price = item.costPriceAmount
+            baseItem.cost_price = item.costPriceAmount
           }
           const refs = item.referenceFileRefs as unknown[] | undefined
           if (Array.isArray(refs) && refs.length) {

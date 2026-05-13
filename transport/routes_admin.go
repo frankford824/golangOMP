@@ -17,6 +17,7 @@ func registerV1AdminRoutes(
 	orgMoveH *handler.OrgMoveRequestHandler,
 	auditLogH *handler.AuditLogHandler,
 	serverLogH *handler.ServerLogHandler,
+	notificationH *handler.NotificationHandler,
 ) {
 	v1.GET("/roles", access(v1, http.MethodGet, "/roles", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleDeptAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin), userAdminH.ListRoles)
 	v1.GET("/access-rules", access(v1, http.MethodGet, "/access-rules", domain.APIReadinessReadyForFrontend), userAdminH.ListRouteAccessRules)
@@ -34,6 +35,9 @@ func registerV1AdminRoutes(
 	v1.DELETE("/users/:id/roles/:role", append(legacyRoleConvergedAccess(v1, http.MethodDelete, "/users/:id/roles/:role", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.RemoveRole)...)
 	v1.GET("/permission-logs", access(v1, http.MethodGet, "/permission-logs", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin), userAdminH.ListPermissionLogs)
 	v1.GET("/operation-logs", access(v1, http.MethodGet, "/operation-logs", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin), userAdminH.ListOperationLogs)
+	if notificationH != nil {
+		v1.POST("/notifications/broadcast", access(v1, http.MethodPost, "/notifications/broadcast", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleDeptAdmin), notificationH.Broadcast)
+	}
 	v1.GET("/org/options", access(v1, http.MethodGet, "/org/options", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleDeptAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin), userAdminH.GetOrgOptions)
 	v1.POST("/org/departments", append(legacyRoleConvergedAccess(v1, http.MethodPost, "/org/departments", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.CreateDepartment)...)
 	v1.PUT("/org/departments/:id", append(legacyRoleConvergedAccess(v1, http.MethodPut, "/org/departments/:id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.UpdateDepartment)...)

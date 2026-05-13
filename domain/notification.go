@@ -14,6 +14,7 @@ const (
 	NotificationTypeClaimConflict    NotificationType = "claim_conflict"
 	NotificationTypePoolReassigned   NotificationType = "pool_reassigned"
 	NotificationTypeTaskCancelled    NotificationType = "task_cancelled"
+	NotificationTypeSystemBroadcast  NotificationType = "system_broadcast"
 )
 
 func (t NotificationType) Valid() bool {
@@ -23,7 +24,8 @@ func (t NotificationType) Valid() bool {
 		NotificationTypeTaskPendingAudit,
 		NotificationTypeClaimConflict,
 		NotificationTypePoolReassigned,
-		NotificationTypeTaskCancelled:
+		NotificationTypeTaskCancelled,
+		NotificationTypeSystemBroadcast:
 		return true
 	default:
 		return false
