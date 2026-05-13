@@ -127,14 +127,17 @@
           </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
-              :asset-id="String(asset.id)"
+              v-if="listCardResolvedPreviewUrl(asset)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
-              defer-until-visible
               alt=""
               img-class="ac-card-apm"
               inner-img-class="ac-card-preview-img"
               @open-full="(u) => (previewLightboxSrc = u)"
             />
+            <div v-else class="ac-card-preview-placeholder" aria-label="暂无预览">
+              <span class="ac-card-placeholder-icon" aria-hidden="true"></span>
+              <span>资产预览不可用</span>
+            </div>
           </div>
           <div class="ac-card-info">
             <h2 class="ac-card-title" :title="cardTitle(asset)">{{ cardTitle(asset) }}</h2>
@@ -402,11 +405,6 @@ import {
   assetKindLabelCn,
   assetUploadStatusLabelCn,
 } from '@/domain/mappers/read-model-labels-cn'
-import { normalizeAssetDetailFromApi } from '@/domain/mappers/asset-detail-from-api'
-import {
-  fetchTaskAssetPreviewWithDerivedFallback,
-  primeAssetDownloadMetaCache,
-} from '@/domain/asset-access'
 import {
   assetsApi,
   type AssetBatchDownloadFailure,
@@ -912,65 +910,6 @@ function openAssetDetail(assetId: string) {
   void router.push({ name: 'AssetDetail', params: { id: assetId }, query })
 }
 
-async function loadAssetDetail(assetId: string) {
-  detailLoading.value = true
-  detailError.value = ''
-  selectedAssetDetail.value = null
-  downloadMeta.value = null
-  previewMeta.value = null
-  previewUnavailable.value = false
-  previewNotFound.value = false
-  try {
-    const [assetRes, downloadRes] = await Promise.allSettled([
-      assetsApi.getAsset(assetId),
-      assetsApi.getAssetDownloadMeta(assetId),
-    ])
-
-    if (assetRes.status === 'fulfilled') {
-      selectedAssetDetail.value = normalizeAssetDetailFromApi(assetRes.value.data)
-    }
-
-    if (downloadRes.status === 'fulfilled') {
-      const body = downloadRes.value.data as { data?: Record<string, unknown> } | undefined
-      downloadMeta.value = body?.data ?? null
-      primeAssetDownloadMetaCache(assetId, downloadRes.value.data)
-    }
-
-    const tid =
-      filters.taskId.trim() ||
-      String(
-        (selectedAssetDetail.value as Record<string, unknown> | null)?.task_id ??
-          assets.value.find((a) => String(a.id) === assetId)?.task_id ??
-          '',
-      ).trim()
-    const previewResult = await fetchTaskAssetPreviewWithDerivedFallback(
-      assetId,
-      tid || undefined,
-    )
-    if (previewResult.status === 'ok' && previewResult.displayUrl) {
-      previewMeta.value = {
-        download_url: previewResult.displayUrl,
-        preview_available: true,
-      }
-    } else if (previewResult.status === 'unavailable') {
-      previewUnavailable.value = true
-    } else if (previewResult.status === 'not_found') {
-      previewNotFound.value = true
-    }
-
-    if (!selectedAssetDetail.value) {
-      selectedAssetDetail.value =
-        assets.value.find((item) => String(item.id) === assetId) ?? null
-    }
-  } catch (err) {
-    detailError.value = err instanceof Error ? err.message : '加载资产详情失败'
-    selectedAssetDetail.value =
-      assets.value.find((item) => String(item.id) === assetId) ?? null
-  } finally {
-    detailLoading.value = false
-  }
-}
-
 async function reload() {
   loading.value = true
   error.value = ''
@@ -1349,6 +1288,32 @@ onBeforeUnmount(() => {
   font-size: 11px;
   min-height: 100%;
   border-radius: 0;
+}
+
+.ac-card-preview-placeholder {
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 16px;
+  background: #f8fafc;
+  color: #ef4444;
+  font-size: 12px;
+}
+
+.ac-card-placeholder-icon {
+  width: 56px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid #dbe3ef;
+  background:
+    linear-gradient(135deg, transparent 50%, #dbe3ef 51%) right 10px top 10px / 18px 18px no-repeat,
+    linear-gradient(135deg, #e7edf5 0 55%, transparent 56%) left 12px bottom 10px / 30px 22px no-repeat,
+    #f1f5f9;
 }
 
 .ac-card-preview-img {
