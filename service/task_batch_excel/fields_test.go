@@ -85,6 +85,24 @@ func TestTemplateGeneratePT(t *testing.T) {
 	assertTemplateHeaders(t, domain.TaskTypePurchaseTask)
 }
 
+func TestParseExcelSupportsTemplateReferenceColumns(t *testing.T) {
+	content := testWorkbookWithReferenceHeaders(
+		t,
+		domain.TaskTypeNewProductDevelopment,
+		[]string{"参考图1", "参考图2", "参考图3", "参考图4"},
+	)
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v, want none", result.Violations)
+	}
+	if len(result.Preview) != 2 {
+		t.Fatalf("preview len = %d, want 2", len(result.Preview))
+	}
+}
+
 func TestParseValidExcel(t *testing.T) {
 	content := testWorkbook(t, domain.TaskTypeNewProductDevelopment, nil)
 	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
@@ -225,15 +243,28 @@ func assertTemplateHeaders(t *testing.T, taskType domain.TaskType) {
 	if err != nil {
 		t.Fatalf("GetRows: %v", err)
 	}
-	fields, _ := FieldsForTaskType(taskType)
-	if len(rows) == 0 || len(rows[0]) != len(fields) {
-		t.Fatalf("header row = %#v, fields=%d", rows, len(fields))
+	expectedHeaders := expectedTemplateHeaders(taskType)
+	if len(rows) == 0 || len(rows[0]) != len(expectedHeaders) {
+		t.Fatalf("header row = %#v, expected headers=%d", rows, len(expectedHeaders))
 	}
-	for i, field := range fields {
-		if rows[0][i] != field.Column {
-			t.Fatalf("header[%d] = %q, want %q", i, rows[0][i], field.Column)
+	for i, header := range expectedHeaders {
+		if rows[0][i] != header {
+			t.Fatalf("header[%d] = %q, want %q", i, rows[0][i], header)
 		}
 	}
+}
+
+func expectedTemplateHeaders(taskType domain.TaskType) []string {
+	fields, _ := FieldsForTaskType(taskType)
+	headers := make([]string, 0, len(fields)+3)
+	for _, field := range fields {
+		if field.Key != "reference_image" {
+			headers = append(headers, field.Column)
+			continue
+		}
+		headers = append(headers, "参考图1", "参考图2", "参考图3", "参考图4")
+	}
+	return headers
 }
 
 func testWorkbook(t *testing.T, taskType domain.TaskType, mutate func(map[string]string)) []byte {
@@ -325,6 +356,51 @@ func testWorkbookWithCustomHeaderColumns(
 			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
 		}
 	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func testWorkbookWithReferenceHeaders(
+	t *testing.T,
+	taskType domain.TaskType,
+	referenceHeaders []string,
+) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(taskType)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+
+	col := 1
+	for _, field := range fields {
+		if field.Key != "reference_image" {
+			cell, _ := excelize.CoordinatesToCellName(col, 1)
+			_ = f.SetCellValue(itemsSheet, cell, field.Column)
+			col++
+			continue
+		}
+		for _, header := range referenceHeaders {
+			cell, _ := excelize.CoordinatesToCellName(col, 1)
+			_ = f.SetCellValue(itemsSheet, cell, header)
+			col++
+		}
+	}
+	for row := 2; row <= 3; row++ {
+		values := validRowValues(taskType, row-1)
+		col = 1
+		for _, field := range fields {
+			cell, _ := excelize.CoordinatesToCellName(col, row)
+			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
+			col++
+			if field.Key == "reference_image" {
+				col += len(referenceHeaders) - 1
+			}
+		}
+	}
+
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
 		t.Fatalf("write workbook: %v", err)
