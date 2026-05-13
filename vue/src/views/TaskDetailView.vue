@@ -774,7 +774,7 @@ import {
 } from '@/domain/task-batch-assets'
 import { latestDeliveryBatchVersionsForSelection } from '@/domain/task-final-delivery'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
-import { formatDateOnlyBeijing, formatMonthDayTimeBeijingOffsetAware } from '@/utils/date'
+import { formatDateOnlyBeijing, formatMonthDayTimeBeijingOffsetAware, formatTaskDueAtDisplay } from '@/utils/date'
 import {
   extractTaskEventsList,
   mapTaskEventRowToRecentEvent,
@@ -979,7 +979,7 @@ const detailOwnerLabel = computed(() => {
 })
 const detailDueLabel = computed(() => {
   const due = task.value?.dueAt
-  return due ? formatDateOnlyBeijing(due) : '无截止时间'
+  return due ? formatTaskDueAtDisplay(due) : '无截止时间'
 })
 const activeSkuItem = computed(() => task.value?.skuItems?.[detailProductIndex.value] ?? null)
 const detailSkuLabel = computed(() => dash(activeSkuItem.value?.skuCode ?? task.value?.sku))

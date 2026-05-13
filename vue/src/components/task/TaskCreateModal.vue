@@ -137,12 +137,19 @@
               <section class="batch-meta-compact">
                 <div class="batch-meta-card field-group">
                   <label class="field-label">任务截止时间</label>
-                  <input
-                    v-model="dueAtLocal"
-                    type="date"
-                    class="native-input"
-                    :min="dueAtMin"
-                  />
+                  <div class="due-at-input-row">
+                    <input
+                      v-model="dueAtLocal"
+                      type="date"
+                      class="native-input"
+                      :min="dueAtMin"
+                    />
+                    <select v-model="dueAtHourLocal" class="native-input due-hour-select">
+                      <option v-for="opt in dueHourOptions" :key="opt.value" :value="opt.value">
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                  </div>
                 </div>
                 <div class="batch-meta-card field-group">
                   <BaseSelect
@@ -226,12 +233,19 @@
               <section class="meta-card-grid">
                 <div class="field-group">
                   <label class="field-label">任务截止时间</label>
-                  <input
-                    v-model="dueAtLocal"
-                    type="date"
-                    class="native-input"
-                    :min="dueAtMin"
-                  />
+                  <div class="due-at-input-row">
+                    <input
+                      v-model="dueAtLocal"
+                      type="date"
+                      class="native-input"
+                      :min="dueAtMin"
+                    />
+                    <select v-model="dueAtHourLocal" class="native-input due-hour-select">
+                      <option v-for="opt in dueHourOptions" :key="opt.value" :value="opt.value">
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                  </div>
                 </div>
 
                 <div class="field-group">
@@ -395,7 +409,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useActorOwnerScope } from '@/composables/useActorOwnerScope'
 import { tasksApi } from '@/services/api/tasksApi'
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
-import { getBeijingDateString, nowISO, taskBeijingDateKey, toBeijingEndOfDayISO } from '@/utils/date'
+import { getBeijingDateString, nowISO, taskBeijingDateKey, taskBeijingHour, toBeijingHourISO } from '@/utils/date'
 import { humanizeTaskCreateFields, humanizeViolationCode } from '@/domain/task-create-fields'
 import { normalizePriorityForApi } from '@/domain/task-priority'
 import { buildCategoryPatchFields } from '@/domain/category-payload'
@@ -793,6 +807,12 @@ watch(
 )
 
 const actionId = ref(generateActionId())
+const dueAtHourFallback = 18
+
+const dueHourOptions = Array.from({ length: 24 }, (_, hour) => ({
+  value: String(hour),
+  label: `${String(hour).padStart(2, '0')}:00`,
+}))
 
 const dueAtLocal = computed({
   get: () => {
@@ -803,7 +823,24 @@ const dueAtLocal = computed({
       form.value.dueAt = null
       return
     }
-    form.value.dueAt = toBeijingEndOfDayISO(v)
+    const parsed = Number.parseInt(dueAtHourLocal.value, 10)
+    const hour = Number.isFinite(parsed) ? parsed : dueAtHourFallback
+    form.value.dueAt = toBeijingHourISO(v, hour)
+  },
+})
+
+const dueAtHourLocal = computed({
+  get: () => {
+    const hour = taskBeijingHour(form.value.dueAt)
+    return String(hour ?? dueAtHourFallback)
+  },
+  set: (v: string) => {
+    const parsed = Number.parseInt(v, 10)
+    const hour =
+      Number.isFinite(parsed) && parsed >= 0 && parsed <= 23 ? parsed : dueAtHourFallback
+    const currentDate = taskBeijingDateKey(form.value.dueAt)
+    if (!currentDate) return
+    form.value.dueAt = toBeijingHourISO(currentDate, hour)
   },
 })
 
@@ -1894,6 +1931,14 @@ async function submit() {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 0.875rem;
+}
+.due-at-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6.25rem;
+  gap: 0.5rem;
+}
+.due-hour-select {
+  min-width: 6.25rem;
 }
 .switch-row {
   display: flex;

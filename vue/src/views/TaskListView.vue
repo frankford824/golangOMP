@@ -308,8 +308,8 @@ import { tasksApi } from '@/services/api/tasksApi'
 import type { TaskListParams } from '@/services/apiTypes'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import {
-  formatDateOnlyBeijing,
-  isOverdueByBeijingDay as checkOverdue,
+  formatTaskDueAtDisplay,
+  isOverdueByTimestamp as checkOverdue,
 } from '@/utils/date'
 import { getTaskOwnershipDisplay } from '@/domain/task-ownership'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
@@ -808,7 +808,7 @@ async function claimTask(task: Task) {
 }
 
 function formatDate(iso: string): string {
-  return formatDateOnlyBeijing(iso)
+  return formatTaskDueAtDisplay(iso)
 }
 
 function goCreate() {
