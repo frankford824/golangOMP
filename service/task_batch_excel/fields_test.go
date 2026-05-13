@@ -140,6 +140,55 @@ func TestParseExcelRejectsInvalidIIDBeforeUploadingImages(t *testing.T) {
 	}
 }
 
+func TestParseExcelSupportsLegacyIIDColumnName(t *testing.T) {
+	content := testWorkbookWithCustomHeaderColumns(
+		t,
+		domain.TaskTypeNewProductDevelopment,
+		map[string]string{"product_i_id": "商品编码"},
+		func(row map[string]string) {
+			row["product_i_id"] = "IID-LEGACY-ONLY"
+		},
+	)
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v, want none", result.Violations)
+	}
+	if len(result.Preview) == 0 || strings.TrimSpace(result.Preview[0].ProductIID) != "IID-LEGACY-ONLY" {
+		t.Fatalf("preview product_i_id = %+v, want IID-LEGACY-ONLY", result.Preview)
+	}
+}
+
+func TestParseExcelDualIIDColumnsUseSingleNonEmptyValue(t *testing.T) {
+	content := testWorkbookWithDualIIDColumns(t, "IID-ONLY-NEW", "")
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v, want none", result.Violations)
+	}
+	if got := strings.TrimSpace(result.Preview[0].ProductIID); got != "IID-ONLY-NEW" {
+		t.Fatalf("preview product_i_id = %q, want IID-ONLY-NEW", got)
+	}
+}
+
+func TestParseExcelDualIIDColumnsConflictReturnsRowViolation(t *testing.T) {
+	content := testWorkbookWithDualIIDColumns(t, "IID-NEW", "IID-LEGACY")
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) == 0 {
+		t.Fatalf("violations = %+v, want conflict violation", result.Violations)
+	}
+	if !hasViolation(result.Violations, "product_i_id", "conflicting_product_i_id_columns") {
+		t.Fatalf("violations = %+v, want conflicting_product_i_id_columns", result.Violations)
+	}
+}
+
 func TestParseMissingRequired(t *testing.T) {
 	content := testWorkbook(t, domain.TaskTypeNewProductDevelopment, func(row map[string]string) {
 		row["product_name"] = ""
@@ -239,6 +288,88 @@ func testWorkbookWithImage(t *testing.T, iid string) []byte {
 		File:      tinyPNG(),
 	}); err != nil {
 		t.Fatalf("AddPictureFromBytes: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func testWorkbookWithCustomHeaderColumns(
+	t *testing.T,
+	taskType domain.TaskType,
+	headerOverrides map[string]string,
+	mutate func(map[string]string),
+) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(taskType)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+	for i, field := range fields {
+		header := field.Column
+		if override, ok := headerOverrides[field.Key]; ok && strings.TrimSpace(override) != "" {
+			header = strings.TrimSpace(override)
+		}
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(itemsSheet, cell, header)
+	}
+	for row := 2; row <= 3; row++ {
+		values := validRowValues(taskType, row-1)
+		if mutate != nil {
+			mutate(values)
+		}
+		for i, field := range fields {
+			cell, _ := excelize.CoordinatesToCellName(i+1, row)
+			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func testWorkbookWithDualIIDColumns(t *testing.T, primaryIID string, legacyIID string) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+	productIIDColumn := 0
+	for i, field := range fields {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(itemsSheet, cell, field.Column)
+		if field.Key == "product_i_id" {
+			productIIDColumn = i + 1
+		}
+	}
+	if productIIDColumn == 0 {
+		t.Fatal("product_i_id column not found")
+	}
+	legacyColumn := len(fields) + 1
+	legacyHeaderCell, _ := excelize.CoordinatesToCellName(legacyColumn, 1)
+	_ = f.SetCellValue(itemsSheet, legacyHeaderCell, "商品编码")
+	for row := 2; row <= 3; row++ {
+		values := validRowValues(domain.TaskTypeNewProductDevelopment, row-1)
+		primaryCell, _ := excelize.CoordinatesToCellName(productIIDColumn, row)
+		legacyCell, _ := excelize.CoordinatesToCellName(legacyColumn, row)
+		if row == 2 {
+			_ = f.SetCellValue(itemsSheet, primaryCell, primaryIID)
+			_ = f.SetCellValue(itemsSheet, legacyCell, legacyIID)
+		} else {
+			_ = f.SetCellValue(itemsSheet, primaryCell, values["product_i_id"])
+			_ = f.SetCellValue(itemsSheet, legacyCell, values["product_i_id"])
+		}
+		for i, field := range fields {
+			if field.Key == "product_i_id" {
+				continue
+			}
+			cell, _ := excelize.CoordinatesToCellName(i+1, row)
+			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
+		}
 	}
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {

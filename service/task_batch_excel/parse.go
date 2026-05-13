@@ -124,10 +124,33 @@ func parseHeader(header []string, fields []FieldSpec) (map[string]int, *domain.A
 	for _, field := range fields {
 		byColumn[strings.TrimSpace(field.Column)] = field
 	}
+	legacyProductIIDColumn := "商品编码"
+	productIIDColumn := ""
+	for _, field := range fields {
+		if field.Key == "product_i_id" {
+			productIIDColumn = strings.TrimSpace(field.Column)
+			break
+		}
+	}
 	for i, raw := range header {
 		column := strings.TrimSpace(raw)
 		if field, ok := byColumn[column]; ok {
 			index[field.Key] = i
+			continue
+		}
+		if column == legacyProductIIDColumn && productIIDColumn != "" {
+			if _, exists := index["product_i_id"]; !exists {
+				index["product_i_id"] = i
+			}
+			index["product_i_id__legacy"] = i
+		}
+	}
+	if productIIDColumn != "" {
+		if idx, ok := index["product_i_id"]; ok {
+			legacyIdx, hasLegacy := index["product_i_id__legacy"]
+			if hasLegacy && legacyIdx != idx {
+				index["product_i_id__primary"] = idx
+			}
 		}
 	}
 	for _, field := range fields {
@@ -150,7 +173,14 @@ func parseHeader(header []string, fields []FieldSpec) (map[string]int, *domain.A
 func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) (service.CreateTaskBatchSKUItemParams, []ParseViolation) {
 	var item service.CreateTaskBatchSKUItemParams
 	var violations []ParseViolation
+	var productIIDField FieldSpec
+	var hasProductIIDField bool
 	for _, field := range fields {
+		if field.Key == "product_i_id" {
+			productIIDField = field
+			hasProductIIDField = true
+			continue
+		}
 		idx, ok := columnIndex[field.Key]
 		if !ok || idx >= len(row) {
 			continue
@@ -166,8 +196,6 @@ func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) 
 			item.ProductShortName = value
 		case "category_code":
 			item.CategoryCode = value
-		case "product_i_id":
-			item.ProductIID = value
 		case "reference_image":
 			// Images pasted into the workbook are extracted from worksheet drawings
 			// by row anchor. Text in this column is only an operator hint.
@@ -201,6 +229,34 @@ func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) 
 				continue
 			}
 			item.VariantJSON = json.RawMessage(value)
+		}
+	}
+	if hasProductIIDField {
+		primaryIdx, hasPrimary := columnIndex["product_i_id"]
+		legacyIdx, hasLegacy := columnIndex["product_i_id__legacy"]
+		dualPrimaryIdx, hasDualPrimary := columnIndex["product_i_id__primary"]
+		if hasDualPrimary {
+			primaryIdx = dualPrimaryIdx
+			hasPrimary = true
+		}
+		primaryValue := ""
+		legacyValue := ""
+		if hasPrimary && primaryIdx < len(row) {
+			primaryValue = strings.TrimSpace(row[primaryIdx])
+		}
+		if hasLegacy && legacyIdx < len(row) {
+			legacyValue = strings.TrimSpace(row[legacyIdx])
+		}
+		if hasPrimary && hasLegacy && primaryIdx != legacyIdx && primaryValue != "" && legacyValue != "" && primaryValue != legacyValue {
+			violations = append(violations, ParseViolation{
+				Column:  productIIDField.Column,
+				Code:    "conflicting_product_i_id_columns",
+				Message: "产品款识编码与商品编码列值不一致，请保持一致后重试",
+			})
+		} else if primaryValue != "" {
+			item.ProductIID = primaryValue
+		} else if legacyValue != "" {
+			item.ProductIID = legacyValue
 		}
 	}
 	return item, violations
@@ -303,7 +359,7 @@ func (s *parseService) validateProductIIDs(ctx context.Context, items []service.
 			}
 			violations = append(violations, ParseViolation{
 				Row:     row,
-				Column:  "商品编码",
+				Column:  "产品款识编码",
 				Code:    "invalid_i_id",
 				Message: "batch_items[].product_i_id must be selected from ERP product i_id options",
 			})
