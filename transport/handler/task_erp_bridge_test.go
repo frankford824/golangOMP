@@ -657,6 +657,7 @@ type taskServiceCaptureStub struct {
 	createParams service.CreateTaskParams
 	createResult *domain.Task
 	readResult   *domain.TaskReadModel
+	listFilter   service.TaskFilter
 	appErr       *domain.AppError
 }
 
@@ -665,7 +666,8 @@ func (s *taskServiceCaptureStub) Create(_ context.Context, p service.CreateTaskP
 	return s.createResult, s.appErr
 }
 
-func (s *taskServiceCaptureStub) List(context.Context, service.TaskFilter) ([]*domain.TaskListItem, domain.PaginationMeta, *domain.AppError) {
+func (s *taskServiceCaptureStub) List(_ context.Context, filter service.TaskFilter) ([]*domain.TaskListItem, domain.PaginationMeta, *domain.AppError) {
+	s.listFilter = filter
 	return nil, domain.PaginationMeta{}, nil
 }
 
@@ -741,4 +743,39 @@ func testHandlerReferenceImageDataURI(sizeBytes int) string {
 	}
 	raw := strings.Repeat("a", sizeBytes)
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte(raw))
+}
+
+func TestTaskHandlerListAppliesMineFilterToCurrentActorCreatorID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	taskSvc := &taskServiceCaptureStub{
+		createResult: &domain.Task{ID: 1},
+	}
+	handler := NewTaskHandler(taskSvc, nil, nil)
+	router.GET("/v1/tasks", handler.List)
+
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       88,
+		Roles:    []domain.Role{domain.RoleOps},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	ctx = domain.WithRouteAccessMeta(ctx, domain.RouteAccessMeta{
+		Readiness:     domain.APIReadinessReadyForFrontend,
+		RequiredRoles: []domain.Role{domain.RoleOps},
+		AuthMode:      domain.AuthModeSessionTokenRoleEnforced,
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks?filter=mine", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/tasks?filter=mine code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if taskSvc.listFilter.CreatorID == nil {
+		t.Fatalf("captured list filter creator_id is nil, want actor id")
+	}
+	if got, want := *taskSvc.listFilter.CreatorID, int64(88); got != want {
+		t.Fatalf("captured list filter creator_id = %d, want %d", got, want)
+	}
 }

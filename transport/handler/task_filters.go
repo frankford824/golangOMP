@@ -10,6 +10,7 @@ import (
 )
 
 func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError) {
+	mineFilterEnabled := strings.EqualFold(strings.TrimSpace(c.Query("filter")), "mine")
 	filter := service.TaskFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
 			Statuses:                     parseTaskStatuses(c, "status"),
@@ -36,6 +37,14 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "creator_id must be an integer", nil)
 		}
 		filter.CreatorID = &id
+	}
+	if mineFilterEnabled {
+		actorID, appErr := actorIDOrRequestValue(c, nil, "creator_id")
+		if appErr != nil {
+			return service.TaskFilter{}, appErr
+		}
+		// "mine" is an actor-scoped view; always narrow to current actor's creator_id.
+		filter.CreatorID = &actorID
 	}
 	if raw := c.Query("designer_id"); raw != "" {
 		id, err := parseInt64(raw)
