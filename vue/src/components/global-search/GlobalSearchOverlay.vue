@@ -324,3 +324,54 @@ onUnmounted(() => {
   searchAbort?.abort()
 })
 </script>
+
+<style scoped>
+.fixed.inset-0 {
+  background:
+    radial-gradient(circle at 16% 4%, rgba(255, 45, 141, 0.3), transparent 30rem),
+    radial-gradient(circle at 88% 2%, rgba(100, 210, 255, 0.24), transparent 32rem),
+    rgba(0, 0, 0, 0.66) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.mx-auto.max-w-4xl {
+  border-color: var(--yb-music-border-strong) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07)) !important;
+  box-shadow: 0 34px 90px -38px rgba(0, 0, 0, 0.95) !important;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+input {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  background: rgba(3, 3, 5, 0.38) !important;
+  color: #fff !important;
+}
+
+button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--yb-music-text-2) !important;
+}
+
+section {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(3, 3, 5, 0.28) !important;
+}
+
+p,
+div,
+span {
+  color: var(--yb-music-text-2);
+}
+
+.bg-white,
+.hover\:bg-white\/70:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.shadow-sm {
+  box-shadow: inset 0 0 0 1px rgba(100, 210, 255, 0.22) !important;
+}
+</style>

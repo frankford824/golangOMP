@@ -139,7 +139,10 @@
             />
           </div>
           <div class="ac-card-info">
-            <h2 class="ac-card-title" :title="cardTitle(asset)">{{ cardTitle(asset) }}</h2>
+            <div class="ac-title-row">
+              <h2 class="ac-card-title" :title="cardTitle(asset)">{{ cardTitle(asset) }}</h2>
+              <span class="ac-format-pill">{{ fileFormatLabel(asset) }}</span>
+            </div>
             <div class="ac-card-meta">
               <span class="ac-mono">ID: {{ asset.id }}</span>
               <button
@@ -167,7 +170,7 @@
               class="ac-card-link-btn"
               @click.stop="openAssetDetail(String(asset.id))"
             >
-              打开详情页
+              打开详情
             </button>
           </div>
         </article>
@@ -563,6 +566,20 @@ function cardTitle(asset: BackendAsset): string {
   const fn = r.file_name
   if (typeof fn === 'string' && fn.trim()) return fn.trim()
   return `${assetKind(asset)} #${asset.id}`
+}
+
+function fileFormatLabel(asset: BackendAsset): string {
+  const title = cardTitle(asset)
+  const match = /\.([a-z0-9]{2,8})(?:$|[?#])/i.exec(title)
+  if (match?.[1]) return match[1].toUpperCase()
+
+  const r = asset as Record<string, unknown>
+  const mime = r.mime_type
+  if (typeof mime === 'string' && mime.includes('/')) {
+    const subtype = mime.split('/').pop()?.split(/[;+]/)[0]?.trim()
+    if (subtype) return subtype.toUpperCase().replace('JPEG', 'JPG')
+  }
+  return '文件'
 }
 
 function toSelectedAssetSummary(asset: BackendAsset): SelectedAssetSummary {
@@ -1604,5 +1621,1352 @@ onBeforeUnmount(() => {
   max-height: 90vh;
   object-fit: contain;
   border-radius: 12px;
+}
+
+/* Apple Music / iOS liquid glass asset center skin. Style-only. */
+.assets-index-view {
+  --ac-bg: transparent;
+  --ac-card: #171b25;
+  --ac-text: #f8fafc;
+  --ac-sec: #b8c2d6;
+  --ac-accent: #2563eb;
+  --ac-card-border: #465164;
+  --ac-card-border-hover: #64748b;
+  --ac-card-subpanel: #0f141d;
+  --ac-field-label: #8fa0b8;
+  --ac-field-value: #f8fafc;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 45, 141, 0.1), transparent 30rem),
+    radial-gradient(circle at 88% 8%, rgba(100, 210, 255, 0.08), transparent 32rem),
+    linear-gradient(135deg, #07080d 0%, #10131b 52%, #071019 100%) !important;
+}
+
+.ac-header,
+.ac-card,
+.ac-pagination,
+.ac-batch-bar,
+.ac-excel-package-bar,
+.ac-selected-item {
+  border-color: rgba(70, 81, 100, 0.88) !important;
+  background: linear-gradient(145deg, rgba(23, 27, 37, 0.98), rgba(13, 17, 26, 0.98)) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow: 0 16px 34px -26px rgba(0, 0, 0, 0.9) !important;
+}
+
+.ac-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 34rem), 1fr));
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+@media (min-width: 1800px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(31rem, 1fr));
+    gap: 0.85rem;
+  }
+
+  .ac-card {
+    grid-template-columns: 9.25rem minmax(0, 1fr);
+    min-height: 11.75rem;
+  }
+
+  .ac-card-img-box {
+    width: 9.25rem;
+  }
+}
+
+@media (min-width: 1180px) and (max-width: 1799px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+  }
+
+  .ac-card {
+    grid-template-columns: 8.75rem minmax(0, 1fr);
+    min-height: 11.25rem;
+  }
+
+  .ac-card-img-box {
+    width: 8.75rem;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1179px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 27rem), 1fr));
+    gap: 0.7rem;
+  }
+
+  .ac-card {
+    grid-template-columns: 7.75rem minmax(0, 1fr);
+    grid-template-areas:
+      "preview info"
+      "preview footer"
+      "actions actions";
+    min-height: 12rem;
+  }
+
+  .ac-card-img-box {
+    width: 7.75rem;
+  }
+
+  .ac-card-footer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ac-header {
+  border-radius: 1.125rem;
+  margin: 0 0 0.75rem;
+}
+
+.ac-brand,
+.ac-card-title,
+.ac-footer-stat,
+.ac-selected-title {
+  color: #fff !important;
+}
+
+.ac-card {
+  min-height: 12.75rem;
+  padding: 0.875rem;
+  border-radius: 1rem;
+  display: grid;
+  grid-template-columns: 9.75rem minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "preview info"
+    "preview footer"
+    "preview actions";
+  gap: 0.75rem 1rem;
+  border: 1px solid var(--ac-card-border) !important;
+  overflow: hidden;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.ac-card:hover {
+  border-color: var(--ac-card-border-hover) !important;
+  background: linear-gradient(145deg, rgba(28, 33, 45, 0.99), rgba(15, 20, 30, 0.99)) !important;
+  box-shadow: 0 18px 34px -28px rgba(100, 116, 139, 0.72) !important;
+}
+
+.ac-card--active,
+.ac-card--selected {
+  border-color: rgba(96, 165, 250, 0.92) !important;
+  background:
+    linear-gradient(145deg, rgba(24, 38, 58, 0.99), rgba(14, 22, 35, 0.99)) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(96, 165, 250, 0.28),
+    0 16px 34px -26px rgba(37, 99, 235, 0.72) !important;
+}
+
+.ac-card-check {
+  top: 0.7rem;
+  left: 0.7rem;
+  width: 1.65rem;
+  height: 1.65rem;
+  background: rgba(17, 24, 39, 0.88) !important;
+  border: 2px solid rgba(229, 231, 235, 0.9) !important;
+  box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.9);
+}
+
+.ac-card--selected .ac-card-check {
+  background: #2563eb !important;
+  border-color: #93c5fd !important;
+}
+
+.ac-card-checkbox {
+  width: 0.9rem;
+  height: 0.9rem;
+  accent-color: #60a5fa;
+}
+
+.ac-card-img-box,
+.preview-media-shell {
+  background: #f8fafc !important;
+  border-color: #d7e4f4 !important;
+}
+
+.ac-card-img-box {
+  grid-area: preview;
+  width: 9.75rem;
+  aspect-ratio: 1;
+  margin: 0;
+  border-radius: 0.75rem;
+  border: 1px solid #d7e4f4;
+  align-self: center;
+}
+
+.ac-card-info {
+  grid-area: info;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.ac-card-title {
+  margin: 0;
+  min-height: 2.55rem;
+  max-height: 2.55rem;
+  color: #f8fafc !important;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.ac-card-meta {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.78fr) auto minmax(8rem, 1.22fr);
+  gap: 0.45rem;
+  color: var(--ac-field-value) !important;
+  font-family: var(--yb-font-data);
+  align-items: stretch;
+}
+
+.ac-mono,
+.ac-card-spec,
+.ac-footer-stat {
+  font-family: var(--yb-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-mono,
+.ac-card-spec {
+  min-width: 0;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid #303847;
+  border-radius: 0.625rem;
+  background: var(--ac-card-subpanel);
+  color: var(--ac-field-value) !important;
+  font-size: 0.76rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ac-mono::before {
+  content: "资产 ID";
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--ac-field-label);
+  font-family: var(--yb-font-text);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.ac-card-spec::before {
+  content: "任务 / SKU";
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--ac-field-label);
+  font-family: var(--yb-font-text);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.ac-copy-tag {
+  align-self: stretch;
+  justify-self: start;
+  min-height: auto;
+  margin: 0;
+  padding: 0 0.75rem;
+  border: 1px solid #475569 !important;
+  border-radius: 0.625rem;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #dde6f5 !important;
+  font-family: var(--yb-font-text);
+  font-size: 0.76rem;
+  font-weight: 800;
+  opacity: 1;
+}
+
+.ac-card:hover .ac-copy-tag {
+  opacity: 1;
+}
+
+.ac-icon-btn,
+.ac-batch-btn,
+.ac-pg-btn,
+.ac-selected-remove,
+.ac-card-link-btn,
+.ac-copy-tag,
+.ac-page-size-select,
+.ac-page-jump-input {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+.ac-icon-btn--primary,
+.ac-batch-btn--primary {
+  background: #2563eb !important;
+  border-color: #60a5fa !important;
+  color: #fff !important;
+}
+
+.ac-card-footer {
+  grid-area: footer;
+  align-self: stretch;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.78fr) minmax(8rem, 1.22fr);
+  gap: 0.45rem;
+}
+
+.ac-card-footer > div,
+.ac-footer-right {
+  max-width: none;
+  min-width: 0;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid #303847;
+  border-radius: 0.625rem;
+  background: var(--ac-card-subpanel);
+  text-align: left;
+}
+
+.ac-footer-label {
+  color: var(--ac-field-label) !important;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ac-footer-stat {
+  margin-top: 0.18rem;
+  color: var(--ac-field-value) !important;
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.ac-footer-tag {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 1.75rem;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid #48617e;
+  border-radius: 0.5rem;
+  background: #223047;
+  color: #aeebff !important;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.ac-card-actions {
+  grid-area: actions;
+  margin: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+}
+
+.ac-card-link-btn {
+  width: auto;
+  min-width: 6.75rem;
+  padding: 0.5rem 0.78rem;
+  border-radius: 0.625rem;
+  border-color: #475569 !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #dde6f5 !important;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.ac-card-link-btn:hover,
+.ac-copy-tag:hover {
+  border-color: #64748b !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+.ac-card-meta,
+.ac-card-spec,
+.ac-footer-label,
+.ac-selected-meta,
+.preview-state-hint,
+.state-text {
+  color: var(--yb-music-muted) !important;
+}
+
+@media (max-width: 720px) {
+  .ac-card {
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    grid-template-areas:
+      "preview info"
+      "footer footer"
+      "actions actions";
+  }
+
+  .ac-card-img-box {
+    width: 7.5rem;
+  }
+
+  .ac-card-meta {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ac-card-spec {
+    grid-column: 1 / -1;
+  }
+
+  .ac-card-footer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .ac-grid {
+    padding-inline: 1rem;
+  }
+
+  .ac-card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "preview"
+      "info"
+      "footer"
+      "actions";
+  }
+
+  .ac-card-img-box {
+    width: min(100%, 12rem);
+    justify-self: center;
+  }
+
+  .ac-card-actions {
+    justify-content: stretch;
+  }
+
+  .ac-card-link-btn {
+    width: 100%;
+  }
+}
+
+/* Final responsive pass: keep these after the base card rules so breakpoints win. */
+@media (min-width: 1800px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(31rem, 1fr));
+    gap: 0.85rem;
+  }
+
+  .ac-card {
+    grid-template-columns: 9.25rem minmax(0, 1fr);
+    min-height: 11.75rem;
+  }
+
+  .ac-card-img-box {
+    width: 9.25rem;
+  }
+}
+
+@media (min-width: 1180px) and (max-width: 1799px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+  }
+
+  .ac-card {
+    grid-template-columns: 8.75rem minmax(0, 1fr);
+    min-height: 11.25rem;
+  }
+
+  .ac-card-img-box {
+    width: 8.75rem;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1179px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 27rem), 1fr));
+    gap: 0.7rem;
+  }
+
+  .ac-card {
+    grid-template-columns: 7.75rem minmax(0, 1fr);
+    grid-template-areas:
+      "preview info"
+      "preview footer"
+      "actions actions";
+    min-height: 12rem;
+  }
+
+  .ac-card-img-box {
+    width: 7.75rem;
+  }
+}
+
+/* Final asset-center pass: continuous page surface and denser, readable cards. */
+.assets-index-view {
+  margin: -0.75rem !important;
+  min-height: calc(100dvh - 3.85rem);
+  padding: 0.9rem 0.9rem 3rem !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(148, 163, 184, 0.12), transparent 30rem),
+    radial-gradient(circle at 100% 0%, rgba(100, 210, 255, 0.08), transparent 34rem),
+    linear-gradient(145deg, #111827 0%, #0b111a 52%, #05070b 100%) !important;
+  color: #f8fafc;
+}
+
+.ac-header,
+.ac-status-bar,
+.ac-batch-bar,
+.ac-excel-package-bar,
+.ac-pagination {
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+.ac-header,
+.ac-status-bar,
+.ac-batch-bar,
+.ac-excel-package-bar,
+.ac-pagination,
+.ac-card {
+  overflow: hidden;
+  background-clip: padding-box !important;
+  contain: paint;
+  transform: translateZ(0);
+}
+
+.ac-header,
+.ac-batch-bar,
+.ac-excel-package-bar,
+.ac-pagination {
+  border: 1px solid rgba(190, 209, 240, 0.28) !important;
+  border-radius: 1rem !important;
+  background:
+    radial-gradient(120% 150% at 0% 0%, rgba(148, 163, 184, 0.1), transparent 44%),
+    radial-gradient(120% 140% at 100% 0%, rgba(100, 210, 255, 0.08), transparent 52%),
+    linear-gradient(145deg, rgba(31, 41, 55, 0.94), rgba(12, 18, 28, 0.98)) !important;
+  clip-path: inset(0 round 1rem);
+}
+
+.ac-status-bar {
+  border: 1px solid rgba(190, 209, 240, 0.18);
+  border-radius: 0.85rem;
+  padding: 0.65rem 0.85rem;
+  background: rgba(15, 23, 42, 0.45);
+  color: rgba(226, 232, 240, 0.86);
+}
+
+.ac-grid {
+  max-width: none !important;
+  margin: 0.85rem 0 0 !important;
+  padding: 0 !important;
+  grid-template-columns: repeat(auto-fill, minmax(31rem, 1fr)) !important;
+  gap: 0.85rem !important;
+}
+
+.ac-card {
+  min-height: 10.6rem !important;
+  grid-template-columns: 8.25rem minmax(0, 1fr) !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  grid-template-areas:
+    "preview info"
+    "preview footer"
+    "preview actions" !important;
+  gap: 0.65rem 0.9rem !important;
+  border: 1px solid rgba(148, 163, 184, 0.32) !important;
+  border-radius: 0.95rem !important;
+  padding: 0.78rem !important;
+  background:
+    radial-gradient(115% 120% at 0% 0%, rgba(255, 45, 141, 0.12), transparent 36%),
+    radial-gradient(110% 120% at 100% 0%, rgba(100, 210, 255, 0.08), transparent 52%),
+    linear-gradient(145deg, rgba(22, 32, 48, 0.98), rgba(11, 18, 30, 0.99)) !important;
+  clip-path: inset(0 round 0.95rem);
+}
+
+.ac-card:hover {
+  border-color: rgba(100, 210, 255, 0.44) !important;
+  background:
+    radial-gradient(115% 120% at 0% 0%, rgba(255, 45, 141, 0.16), transparent 36%),
+    radial-gradient(110% 120% at 100% 0%, rgba(100, 210, 255, 0.12), transparent 52%),
+    linear-gradient(145deg, rgba(28, 41, 60, 0.99), rgba(14, 24, 39, 0.99)) !important;
+}
+
+.ac-card-check {
+  top: 0.62rem !important;
+  left: 0.62rem !important;
+  width: 1.45rem !important;
+  height: 1.45rem !important;
+}
+
+.ac-card-img-box {
+  width: 8.25rem !important;
+  border-radius: 0.72rem !important;
+  align-self: stretch !important;
+}
+
+.ac-card-info {
+  gap: 0.5rem !important;
+}
+
+.ac-card-title {
+  min-height: auto !important;
+  max-height: calc(1.34em * 2) !important;
+  font-size: 0.96rem !important;
+  line-height: 1.34 !important;
+  text-align: left !important;
+}
+
+.ac-card-meta {
+  grid-template-columns: minmax(6.8rem, 0.78fr) auto minmax(8.5rem, 1.22fr) !important;
+  gap: 0.42rem !important;
+}
+
+.ac-mono,
+.ac-card-spec,
+.ac-card-footer > div,
+.ac-footer-right {
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  background: rgba(2, 6, 23, 0.28) !important;
+}
+
+.ac-card-footer {
+  align-self: start !important;
+  grid-template-columns: minmax(6.8rem, 0.78fr) minmax(8.5rem, 1.22fr) !important;
+  gap: 0.42rem !important;
+}
+
+.ac-card-link-btn {
+  min-width: 6.5rem !important;
+}
+
+@media (max-width: 1280px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 28rem), 1fr)) !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .assets-index-view {
+    margin: -0.75rem !important;
+    padding: 0.75rem !important;
+  }
+
+  .ac-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ac-card {
+    grid-template-columns: 7.25rem minmax(0, 1fr) !important;
+    grid-template-areas:
+      "preview info"
+      "footer footer"
+      "actions actions" !important;
+  }
+
+  .ac-card-img-box {
+    width: 7.25rem !important;
+  }
+}
+
+/* Asset card redesign: compact media + data strip + small actions. */
+.ac-grid {
+  grid-template-columns: repeat(auto-fill, minmax(34rem, 1fr)) !important;
+  gap: 0.72rem !important;
+}
+
+.ac-card {
+  min-height: 8.9rem !important;
+  grid-template-columns: 7.6rem minmax(0, 1fr) !important;
+  grid-template-rows: auto auto 1fr !important;
+  grid-template-areas:
+    "preview info"
+    "preview footer"
+    "preview actions" !important;
+  gap: 0.5rem 0.78rem !important;
+  padding: 0.72rem !important;
+  border-radius: 0.9rem !important;
+  background:
+    radial-gradient(90% 120% at 0% 0%, rgba(255, 45, 141, 0.1), transparent 34%),
+    radial-gradient(90% 120% at 100% 0%, rgba(100, 210, 255, 0.11), transparent 54%),
+    linear-gradient(145deg, rgba(20, 31, 48, 0.99), rgba(10, 17, 29, 1)) !important;
+  clip-path: inset(0 round 0.9rem);
+}
+
+.ac-card-img-box {
+  width: 7.6rem !important;
+  min-height: 7.6rem;
+  align-self: stretch !important;
+  border-radius: 0.72rem !important;
+  border: 1px solid rgba(210, 229, 255, 0.26) !important;
+  background:
+    linear-gradient(145deg, rgba(236, 243, 255, 0.96), rgba(208, 220, 237, 0.96)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.ac-card-img-box :deep(.apm-placeholder) {
+  color: #64748b !important;
+}
+
+.ac-card-img-box :deep(.apm-placeholder p),
+.ac-card-img-box :deep(.apm-placeholder span) {
+  color: #64748b !important;
+}
+
+.ac-card-info {
+  gap: 0.42rem !important;
+  justify-content: flex-start;
+}
+
+.ac-card-title {
+  margin: 0 !important;
+  min-height: auto !important;
+  max-height: calc(1.32em * 2) !important;
+  color: #f8fafc !important;
+  font-size: 0.98rem !important;
+  font-weight: 850 !important;
+  line-height: 1.32 !important;
+}
+
+.ac-card-meta {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.38rem !important;
+  color: #dbeafe !important;
+}
+
+.ac-mono,
+.ac-card-spec,
+.ac-card-footer > div,
+.ac-footer-right {
+  min-height: 1.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.55rem !important;
+  border-radius: 0.55rem !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background: rgba(2, 6, 23, 0.24) !important;
+  color: #e6eefc !important;
+  line-height: 1.1 !important;
+}
+
+.ac-mono::before,
+.ac-card-spec::before {
+  display: none !important;
+}
+
+.ac-mono,
+.ac-card-spec {
+  max-width: min(100%, 14rem);
+  font-size: 0.74rem !important;
+  white-space: nowrap;
+}
+
+.ac-card-spec {
+  flex: 1 1 11rem;
+}
+
+.ac-copy-tag {
+  width: auto !important;
+  min-width: 2.45rem !important;
+  min-height: 1.82rem !important;
+  align-self: center !important;
+  padding: 0 0.58rem !important;
+  border-radius: 0.55rem !important;
+  font-size: 0.72rem !important;
+  line-height: 1 !important;
+}
+
+.ac-card-footer {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center !important;
+  gap: 0.38rem !important;
+  align-self: start !important;
+}
+
+.ac-card-footer > div {
+  flex: 0 0 auto;
+}
+
+.ac-footer-label {
+  display: inline;
+  margin: 0;
+  color: #93a4bd !important;
+  font-size: 0.68rem !important;
+}
+
+.ac-footer-stat {
+  margin: 0 !important;
+  color: #f8fafc !important;
+  font-size: 0.82rem !important;
+  line-height: 1 !important;
+}
+
+.ac-footer-right {
+  max-width: none !important;
+  flex: 0 1 auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.ac-footer-tag {
+  min-height: 1.82rem !important;
+  border: 1px solid rgba(100, 210, 255, 0.26) !important;
+  border-radius: 0.55rem !important;
+  padding: 0.32rem 0.58rem !important;
+  background: rgba(8, 47, 73, 0.38) !important;
+  color: #bae6fd !important;
+  font-size: 0.72rem !important;
+  font-weight: 800 !important;
+}
+
+.ac-card-actions {
+  align-self: stretch !important;
+  justify-content: flex-start !important;
+  align-items: flex-end !important;
+}
+
+.ac-card-link-btn {
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 2.15rem !important;
+  padding: 0 0.72rem !important;
+  border-radius: 0.62rem !important;
+  font-size: 0.74rem !important;
+}
+
+.ac-card-check {
+  top: 0.55rem !important;
+  left: 0.55rem !important;
+  width: 1.35rem !important;
+  height: 1.35rem !important;
+}
+
+@media (max-width: 1280px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)) !important;
+  }
+
+  .ac-card {
+    grid-template-columns: 7.25rem minmax(0, 1fr) !important;
+    grid-template-areas:
+      "preview info"
+      "preview footer"
+      "preview actions" !important;
+  }
+
+  .ac-card-img-box {
+    width: 7.25rem !important;
+  }
+}
+
+/* Selected A implementation: media-led compact cards. */
+.ac-grid {
+  grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr)) !important;
+  gap: 0.8rem !important;
+}
+
+.ac-card {
+  min-height: 12rem !important;
+  grid-template-columns: 11.2rem minmax(0, 1fr) !important;
+  grid-template-rows: auto 1fr auto !important;
+  grid-template-areas:
+    "preview info"
+    "preview footer"
+    "preview actions" !important;
+  gap: 0.78rem 1rem !important;
+  padding: 0.82rem !important;
+  border-radius: 1rem !important;
+  border-color: rgba(132, 153, 186, 0.36) !important;
+  background:
+    radial-gradient(120% 130% at 0% 0%, rgba(255, 45, 141, 0.1), transparent 36%),
+    radial-gradient(120% 130% at 100% 0%, rgba(100, 210, 255, 0.12), transparent 54%),
+    linear-gradient(145deg, rgba(20, 33, 52, 0.98), rgba(9, 16, 28, 1)) !important;
+  clip-path: inset(0 round 1rem);
+}
+
+.ac-card-img-box {
+  width: 11.2rem !important;
+  min-height: 10.35rem !important;
+  align-self: stretch !important;
+  border-radius: 0.82rem !important;
+  border: 1px solid rgba(220, 231, 247, 0.68) !important;
+  background:
+    linear-gradient(145deg, #f8fbff, #dbe7f6) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 12px 24px -22px rgba(0, 0, 0, 0.8);
+}
+
+.ac-card-preview-img {
+  object-fit: contain !important;
+}
+
+.ac-card-img-box :deep(.apm-placeholder) {
+  background: transparent !important;
+  color: #64748b !important;
+}
+
+.ac-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.62rem;
+}
+
+.ac-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 !important;
+  max-height: calc(1.32em * 2) !important;
+  color: #ffffff !important;
+  font-size: 1.02rem !important;
+  font-weight: 860 !important;
+  line-height: 1.32 !important;
+}
+
+.ac-format-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  min-height: 1.55rem;
+  align-items: center;
+  border: 1px solid rgba(165, 180, 252, 0.46);
+  border-radius: 999px;
+  padding: 0 0.58rem;
+  background: rgba(79, 70, 229, 0.28);
+  color: #e0e7ff;
+  font-family: var(--yb-font-data);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.ac-card-info {
+  gap: 0.55rem !important;
+}
+
+.ac-card-meta {
+  display: grid !important;
+  grid-template-columns: minmax(6.2rem, auto) auto minmax(8rem, 1fr);
+  gap: 0.42rem !important;
+  align-items: center;
+}
+
+.ac-mono,
+.ac-card-spec {
+  min-height: 1.8rem !important;
+  padding: 0.34rem 0.54rem !important;
+  border-radius: 0.52rem !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  background: rgba(2, 6, 23, 0.3) !important;
+  color: #dbeafe !important;
+  font-size: 0.72rem !important;
+  font-weight: 820;
+}
+
+.ac-copy-tag {
+  min-width: 2.35rem !important;
+  min-height: 1.8rem !important;
+  padding: 0 0.5rem !important;
+  border-radius: 0.52rem !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #e5edf8 !important;
+  font-size: 0.7rem !important;
+  font-weight: 820;
+}
+
+.ac-card-footer {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-self: start !important;
+  align-items: center !important;
+  gap: 0.42rem !important;
+}
+
+.ac-card-footer > div {
+  min-height: 1.85rem;
+  padding: 0.35rem 0.55rem !important;
+  border-radius: 0.52rem !important;
+}
+
+.ac-footer-label {
+  color: #91a4bf !important;
+  font-size: 0.66rem !important;
+  font-weight: 820;
+}
+
+.ac-footer-stat {
+  color: #f8fafc !important;
+  font-size: 0.8rem !important;
+  font-weight: 860;
+}
+
+.ac-footer-right {
+  flex: 0 1 auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.ac-footer-tag {
+  min-height: 1.85rem !important;
+  border-radius: 0.52rem !important;
+  padding: 0.34rem 0.58rem !important;
+  background: rgba(8, 47, 73, 0.42) !important;
+  color: #bae6fd !important;
+  font-size: 0.7rem !important;
+  font-weight: 860 !important;
+}
+
+.ac-card-actions {
+  align-items: flex-end !important;
+  justify-content: flex-start !important;
+}
+
+.ac-card-link-btn {
+  min-height: 2rem !important;
+  border-color: rgba(96, 165, 250, 0.38) !important;
+  border-radius: 0.58rem !important;
+  padding: 0 0.72rem !important;
+  background: rgba(37, 99, 235, 0.16) !important;
+  color: #dbeafe !important;
+  font-size: 0.73rem !important;
+  font-weight: 860 !important;
+}
+
+@media (max-width: 1280px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 28rem), 1fr)) !important;
+  }
+
+  .ac-card {
+    grid-template-columns: 8.8rem minmax(0, 1fr) !important;
+    min-height: 10.4rem !important;
+  }
+
+  .ac-card-img-box {
+    width: 8.8rem !important;
+    min-height: 8.8rem !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .ac-card {
+    grid-template-columns: 7.5rem minmax(0, 1fr) !important;
+    grid-template-areas:
+      "preview info"
+      "footer footer"
+      "actions actions" !important;
+  }
+
+  .ac-card-img-box {
+    width: 7.5rem !important;
+    min-height: 7.5rem !important;
+  }
+
+  .ac-card-meta {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ac-card-spec {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Selected A+C implementation: media first, C-style readable data/action bands. */
+.ac-grid {
+  grid-template-columns: repeat(auto-fill, minmax(31rem, 1fr)) !important;
+  gap: 0.85rem !important;
+}
+
+.ac-card {
+  min-height: 11.4rem !important;
+  grid-template-columns: 10.25rem minmax(0, 1fr) !important;
+  grid-template-rows: auto auto 1fr !important;
+  grid-template-areas:
+    "preview info"
+    "preview footer"
+    "preview actions" !important;
+  gap: 0.72rem 1rem !important;
+  padding: 0.85rem !important;
+  border-radius: 1rem !important;
+  border-color: rgba(132, 153, 186, 0.34) !important;
+  background:
+    radial-gradient(110% 130% at 0% 0%, rgba(148, 163, 184, 0.08), transparent 36%),
+    radial-gradient(115% 130% at 100% 0%, rgba(100, 210, 255, 0.1), transparent 56%),
+    linear-gradient(145deg, rgba(19, 32, 51, 0.99), rgba(9, 16, 28, 1)) !important;
+  clip-path: inset(0 round 1rem);
+}
+
+.ac-card:hover {
+  border-color: rgba(100, 210, 255, 0.48) !important;
+  background:
+    radial-gradient(110% 130% at 0% 0%, rgba(148, 163, 184, 0.11), transparent 36%),
+    radial-gradient(115% 130% at 100% 0%, rgba(100, 210, 255, 0.14), transparent 56%),
+    linear-gradient(145deg, rgba(24, 39, 61, 0.99), rgba(11, 20, 34, 1)) !important;
+}
+
+.ac-card-img-box {
+  width: 10.25rem !important;
+  min-height: 9.9rem !important;
+  align-self: stretch !important;
+  border-radius: 0.82rem !important;
+  border: 1px solid rgba(220, 231, 247, 0.7) !important;
+  background:
+    linear-gradient(145deg, #f8fbff, #dbe7f6) !important;
+}
+
+.ac-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.ac-card-title {
+  max-height: calc(1.32em * 2) !important;
+  color: #ffffff !important;
+  font-size: 1rem !important;
+  font-weight: 880 !important;
+  line-height: 1.32 !important;
+}
+
+.ac-format-pill {
+  min-height: 1.55rem;
+  border-color: rgba(165, 180, 252, 0.48);
+  background: rgba(79, 70, 229, 0.28);
+  color: #e0e7ff;
+}
+
+.ac-card-meta,
+.ac-card-footer,
+.ac-card-actions {
+  align-self: start !important;
+}
+
+.ac-card-meta {
+  display: grid !important;
+  grid-template-columns: minmax(6.5rem, auto) auto minmax(9rem, 1fr);
+  gap: 0.42rem !important;
+}
+
+.ac-card-footer {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 0.42rem !important;
+  justify-content: flex-start !important;
+}
+
+.ac-card-actions {
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: flex-start !important;
+}
+
+.ac-mono,
+.ac-card-spec,
+.ac-card-footer > div,
+.ac-copy-tag,
+.ac-card-link-btn {
+  min-height: 1.9rem !important;
+  border-radius: 0.58rem !important;
+  line-height: 1 !important;
+}
+
+.ac-mono,
+.ac-card-spec,
+.ac-card-footer > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  background: rgba(2, 6, 23, 0.3) !important;
+  color: #e6eefc !important;
+  font-size: 0.72rem !important;
+  font-weight: 820;
+}
+
+.ac-mono::before {
+  content: "资产";
+  display: inline;
+  margin: 0;
+  color: #64d2ff;
+  font-family: var(--yb-font-text);
+  font-size: 0.68rem;
+  font-weight: 860;
+}
+
+.ac-card-spec::before {
+  content: "任务";
+  display: inline;
+  margin: 0;
+  color: #64d2ff;
+  font-family: var(--yb-font-text);
+  font-size: 0.68rem;
+  font-weight: 860;
+}
+
+.ac-mono,
+.ac-card-spec {
+  max-width: none;
+  padding: 0 0.58rem !important;
+  white-space: nowrap;
+}
+
+.ac-card-spec {
+  min-width: 0;
+}
+
+.ac-copy-tag {
+  min-width: 2.4rem !important;
+  padding: 0 0.52rem !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #e5edf8 !important;
+  font-size: 0.7rem !important;
+  font-weight: 840;
+}
+
+.ac-card-footer > div {
+  padding: 0 0.58rem !important;
+}
+
+.ac-footer-label {
+  display: inline;
+  color: #64d2ff !important;
+  font-size: 0.68rem !important;
+  font-weight: 860;
+}
+
+.ac-footer-stat {
+  margin: 0 !important;
+  color: #f8fafc !important;
+  font-size: 0.82rem !important;
+  font-weight: 880;
+}
+
+.ac-footer-right {
+  display: inline-flex !important;
+  justify-content: flex-start !important;
+  flex: 0 1 auto !important;
+  max-width: min(100%, 12rem) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  text-align: left !important;
+}
+
+.ac-footer-tag {
+  min-height: 1.68rem !important;
+  border: 1px solid rgba(100, 210, 255, 0.22) !important;
+  border-radius: 0.58rem !important;
+  padding: 0.25rem 0.52rem !important;
+  background: rgba(8, 47, 73, 0.3) !important;
+  color: #bae6fd !important;
+  font-size: 0.68rem !important;
+  font-weight: 880 !important;
+  max-width: 100%;
+}
+
+.ac-card-link-btn {
+  padding: 0 0.82rem !important;
+  border-color: rgba(96, 165, 250, 0.4) !important;
+  background: rgba(37, 99, 235, 0.18) !important;
+  color: #dbeafe !important;
+  font-size: 0.74rem !important;
+  font-weight: 880 !important;
+}
+
+@media (max-width: 1280px) {
+  .ac-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 29rem), 1fr)) !important;
+  }
+
+  .ac-card {
+    grid-template-columns: 8.8rem minmax(0, 1fr) !important;
+    min-height: 10.5rem !important;
+  }
+
+  .ac-card-img-box {
+    width: 8.8rem !important;
+    min-height: 8.8rem !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .ac-card {
+    grid-template-columns: 7.5rem minmax(0, 1fr) !important;
+    grid-template-areas:
+      "preview info"
+      "footer footer"
+      "actions actions" !important;
+  }
+
+  .ac-card-img-box {
+    width: 7.5rem !important;
+    min-height: 7.5rem !important;
+  }
+
+  .ac-card-meta {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ac-card-spec {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Asset preview fix: only one preview frame; remove the nested placeholder box from AssetPreviewMedia. */
+.ac-card-img-box :deep(.ac-card-apm),
+.ac-card-img-box :deep(.apm) {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  border-radius: inherit !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.ac-card-img-box :deep(.apm-placeholder),
+.ac-card-img-box :deep(.apm-empty) {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.ac-card-img-box :deep(.apm-placeholder-img) {
+  max-width: 82% !important;
+  max-height: 82% !important;
+}
+
+/* Asset type is metadata text, not a button-like framed control. */
+.ac-card-footer .ac-footer-right {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.ac-card-footer .ac-footer-tag {
+  min-height: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #9fdcf3 !important;
+  font-size: 0.72rem !important;
+  font-weight: 820 !important;
 }
 </style>

@@ -773,4 +773,110 @@ onMounted(() => {
 .clean-label .required { color: #dc2626; }
 .clean-textarea { width: 100%; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; font-size: 0.875rem; resize: vertical; }
 .clean-input { width: 100%; max-width: 120px; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; font-size: 0.875rem; }
+
+/* Apple Music / iOS liquid glass logs skin. Style-only. */
+.logs-management-view {
+  color: var(--yb-music-text-2);
+}
+
+.page-title,
+.section-title {
+  color: #fff;
+}
+
+.tabs {
+  display: inline-flex;
+  padding: 0.25rem;
+  gap: 0.25rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.tab {
+  border-radius: 0.7rem;
+  border-color: transparent;
+  background: transparent;
+  color: rgba(220, 230, 255, 0.72);
+  font-weight: 700;
+}
+
+.tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.tab.active {
+  background: linear-gradient(120deg, #ff2d55 0%, #ff2d8d 48%, #af52de 100%);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  box-shadow: 0 14px 30px -20px rgba(255, 45, 141, 0.86);
+}
+
+.content-card {
+  border-color: rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.05));
+  box-shadow: var(--yb-glass-shadow);
+}
+
+.filter-row {
+  gap: 0.65rem;
+}
+
+.filter-select,
+.filter-input,
+.clean-textarea,
+.clean-input {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.075);
+  color: #fff;
+}
+
+.simple-table th {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(220, 230, 255, 0.76);
+}
+
+.simple-table td {
+  background: rgba(3, 3, 5, 0.2);
+  color: var(--yb-music-text-2);
+}
+
+.simple-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.085);
+}
+
+.json-cell-preview,
+.json-body {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(3, 3, 5, 0.42);
+  color: var(--yb-music-text-2);
+}
+
+.pager-btn {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.075);
+  color: var(--yb-music-text-2);
+}
+
+.pager-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
+.level-info {
+  background: rgba(100, 210, 255, 0.16);
+  color: #9be6ff;
+}
+
+.level-warn {
+  background: rgba(255, 149, 0, 0.16);
+  color: #ffd28a;
+}
+
+.level-error {
+  background: rgba(255, 69, 58, 0.16);
+  color: #ffb4ad;
+}
 </style>

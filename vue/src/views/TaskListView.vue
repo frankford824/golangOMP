@@ -49,8 +49,25 @@
           class="search-input w-72"
           @input="debouncedSearch"
         />
+        <BaseButton
+          size="sm"
+          variant="secondary"
+          class="advanced-filter-toggle"
+          :class="{
+            'advanced-filter-toggle--active': advancedFilterOpen || activeAdvancedFilterCount > 0,
+          }"
+          @click="advancedFilterOpen = !advancedFilterOpen"
+        >
+          {{
+            advancedFilterOpen
+              ? '收起筛选'
+              : activeAdvancedFilterCount > 0
+                ? `筛选 ${activeAdvancedFilterCount}`
+                : '高级筛选'
+          }}
+        </BaseButton>
       </div>
-      <div class="filter-bar-wrap">
+      <div v-show="advancedFilterOpen || activeAdvancedFilterCount > 0" class="filter-bar-wrap">
         <TaskFilterBar v-model:filters="filters" @update:filters="page = 1" />
       </div>
     </div>
@@ -120,6 +137,11 @@
           v-for="task in pagedList"
           :key="task.id"
           class="task-card"
+          :class="{
+            'task-card--selected': selectedIds.has(task.id),
+            'task-card--overdue': isOverdue(task),
+            'task-card--claimable': canClaimTask(task),
+          }"
           @click="goDetail(task)"
         >
           <div class="card-row card-row-top">
@@ -151,7 +173,7 @@
           >
             {{ task.productName }}
           </div>
-          <div class="flex flex-wrap items-center gap-1 mt-1">
+          <div class="card-status-row flex flex-wrap items-center gap-1 mt-1">
             <TaskMainStatusBadge v-if="task.mainStatus" :status="task.mainStatus" />
             <TaskStatusTag v-else :status="task.status" />
             <FilingStatusBadge
@@ -414,6 +436,7 @@ const showBatchAssign = ref(false)
 const batchReminding = ref(false)
 const batchReceiving = ref(false)
 const refreshingList = ref(false)
+const advancedFilterOpen = ref(false)
 const claimingTaskId = ref<string | null>(null)
 const jumpPage = ref<number | string>(page.value)
 const {
@@ -511,6 +534,23 @@ const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
   ...(savedFiltersRaw as Partial<TaskListFilters>),
 })
+
+const activeAdvancedFilterCount = computed(() => {
+  const f = filters.value
+  let count = 0
+  if (f.status.length > 0) count += 1
+  if (f.taskType) count += 1
+  if (f.priority) count += 1
+  if (f.ownerDepartment) count += 1
+  if (f.ownerOrgTeam) count += 1
+  if (f.creatorId) count += 1
+  if (f.assigneeId) count += 1
+  if (f.warehouseStatus) count += 1
+  if (f.dateFrom || f.dateTo) count += 1
+  if (f.overdueOnly) count += 1
+  return count
+})
+
 if (typeof route.query.owner_department === 'string') {
   filters.value.ownerDepartment = route.query.owner_department
 }
@@ -1356,5 +1396,1064 @@ watch(totalPages, (value) => {
 }
 .page-jump-input {
   width: 5rem;
+}
+
+/* Apple Music / iOS liquid glass task list skin. Style-only. */
+.task-list-view {
+  color: var(--yb-music-text-2);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 45, 141, 0.18), transparent 28rem),
+    radial-gradient(circle at 86% 10%, rgba(100, 210, 255, 0.16), transparent 30rem);
+}
+
+.header-card,
+.batch-action-bar,
+.task-card,
+.footer-card {
+  border: 1px solid var(--yb-music-border) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.06)) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow: var(--yb-glass-shadow) !important;
+  backdrop-filter: blur(var(--yb-glass-blur));
+  -webkit-backdrop-filter: blur(var(--yb-glass-blur));
+}
+
+.header-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.header-card::before {
+  content: '';
+  position: absolute;
+  inset: -5rem auto auto -4rem;
+  width: 22rem;
+  height: 16rem;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(255, 45, 141, 0.26), transparent 68%);
+}
+
+.page-title {
+  position: relative;
+  color: #fff !important;
+  font-size: clamp(1.8rem, 2.6vw, 3rem);
+  font-weight: 900;
+}
+
+.filter-bar-wrap,
+.task-category-switch,
+.card-no-row {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.task-tabs,
+.task-category-switch,
+.toolbar,
+.filter-bar-wrap,
+.page-header {
+  position: relative;
+}
+
+.task-tab-active,
+.task-category-active {
+  background: linear-gradient(105deg, rgba(255, 45, 85, 0.88), rgba(175, 82, 222, 0.88), rgba(100, 210, 255, 0.78)) !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  color: #fff !important;
+  box-shadow: 0 14px 28px -20px rgba(255, 45, 141, 0.95);
+}
+
+.task-card {
+  overflow: hidden;
+}
+
+.task-card:hover {
+  border-color: rgba(255, 255, 255, 0.32) !important;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 45, 141, 0.15), transparent 12rem),
+    rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 28px 58px -34px rgba(0, 0, 0, 0.95) !important;
+}
+
+.card-no,
+.card-product,
+.batch-count {
+  color: #fff !important;
+}
+
+.card-meta-value,
+.card-updated,
+.card-due,
+.pager-info,
+.footer-card,
+.page-jump {
+  color: var(--yb-music-muted) !important;
+}
+
+.card-meta-key {
+  color: var(--yb-music-cyan) !important;
+}
+
+.task-category-pill-normal,
+.task-category-pill-custom {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+.checkbox {
+  accent-color: var(--yb-music-pink);
+}
+
+.list-action-error {
+  background: rgba(255, 69, 58, 0.16);
+  border-color: rgba(255, 69, 58, 0.34);
+  color: #ffd5d2;
+}
+
+/* Task center final skin: A visual language + B information hierarchy. */
+.task-list-view {
+  --tc-page: #0a0e18;
+  --tc-panel: rgba(22, 30, 44, 0.78);
+  --tc-panel-strong: rgba(27, 38, 56, 0.9);
+  --tc-card: rgba(23, 33, 50, 0.9);
+  --tc-card-soft: rgba(18, 26, 40, 0.76);
+  --tc-border: rgba(190, 209, 240, 0.24);
+  --tc-border-strong: rgba(210, 229, 255, 0.38);
+  --tc-text: #f6f9ff;
+  --tc-muted: #b6c4da;
+  --tc-faint: #8392aa;
+  --tc-cyan: #64d2ff;
+  --tc-blue: #7dd3fc;
+  --tc-green: #86efac;
+  --tc-amber: #ffd166;
+  --tc-pink: #ff2d8d;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(255, 45, 141, 0.14), transparent 28rem),
+    radial-gradient(circle at 92% 7%, rgba(100, 210, 255, 0.14), transparent 30rem),
+    linear-gradient(145deg, #0a0e18 0%, #101827 52%, #0b121d 100%);
+}
+
+.header-card,
+.batch-action-bar,
+.footer-card {
+  border-color: var(--tc-border-strong) !important;
+  background:
+    linear-gradient(145deg, rgba(38, 50, 70, 0.82), rgba(20, 28, 42, 0.86)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 22px 48px -36px rgba(0, 0, 0, 0.72) !important;
+}
+
+.header-card {
+  border-radius: 1.1rem;
+  padding: 1.1rem;
+}
+
+.page-title {
+  font-size: clamp(1.75rem, 2.4vw, 2.85rem);
+  line-height: 1.05;
+}
+
+.toolbar {
+  align-items: stretch;
+}
+
+.search-input {
+  width: min(32rem, 100%) !important;
+}
+
+.task-category-switch,
+.task-tabs {
+  gap: 0.4rem;
+}
+
+.task-category-switch :deep(button),
+.task-tabs :deep(button),
+.toolbar :deep(button),
+.batch-action-bar :deep(button),
+.footer-card :deep(button) {
+  border-color: rgba(210, 229, 255, 0.18) !important;
+  background: rgba(20, 30, 46, 0.68) !important;
+  color: #dce8ff !important;
+}
+
+.task-tab-active,
+.task-category-active {
+  background:
+    linear-gradient(115deg, rgba(255, 45, 141, 0.78), rgba(175, 82, 222, 0.74) 56%, rgba(100, 210, 255, 0.62)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 16px 30px -24px rgba(100, 210, 255, 0.82) !important;
+}
+
+.filter-bar-wrap {
+  border-color: rgba(210, 229, 255, 0.14) !important;
+}
+
+.filter-bar-wrap :deep(.filter-bar) {
+  gap: 0.65rem;
+}
+
+.filter-bar-wrap :deep(.field-label) {
+  color: var(--tc-muted) !important;
+  font-weight: 750;
+}
+
+.task-cards {
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 0.9rem;
+}
+
+@media (min-width: 1600px) {
+  .task-cards {
+    grid-template-columns: repeat(auto-fill, minmax(390px, 1fr));
+  }
+}
+
+.task-card {
+  position: relative;
+  display: flex;
+  min-height: 16.2rem;
+  flex-direction: column;
+  gap: 0.48rem;
+  overflow: hidden;
+  border-color: var(--tc-border) !important;
+  border-radius: 0.95rem;
+  padding: 0.95rem;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.12), transparent 12rem),
+    linear-gradient(145deg, rgba(31, 42, 60, 0.92), rgba(18, 26, 40, 0.94)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 16px 34px -28px rgba(0, 0, 0, 0.72) !important;
+}
+
+.task-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, rgba(100, 210, 255, 0.9), rgba(255, 45, 141, 0.45));
+  opacity: 0.62;
+}
+
+.task-card:hover {
+  border-color: rgba(100, 210, 255, 0.5) !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.16), transparent 12rem),
+    linear-gradient(145deg, rgba(38, 52, 74, 0.96), rgba(22, 31, 47, 0.96)) !important;
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 24px 48px -30px rgba(0, 0, 0, 0.82) !important;
+}
+
+.task-card--selected {
+  border-color: rgba(100, 210, 255, 0.72) !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(100, 210, 255, 0.2), transparent 13rem),
+    linear-gradient(145deg, rgba(35, 51, 76, 0.98), rgba(24, 37, 57, 0.98)) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(100, 210, 255, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 26px 52px -34px rgba(100, 210, 255, 0.55) !important;
+}
+
+.task-card--selected::before {
+  width: 4px;
+  opacity: 1;
+}
+
+.task-card--overdue {
+  border-color: rgba(255, 159, 10, 0.62) !important;
+}
+
+.task-card--overdue::before {
+  background: linear-gradient(180deg, #ff9f0a, rgba(255, 45, 85, 0.72));
+  opacity: 0.96;
+}
+
+.card-row-top {
+  position: relative;
+  z-index: 1;
+  min-height: 1.7rem;
+  margin-bottom: 0.2rem;
+}
+
+.card-check {
+  border-radius: 0.42rem;
+}
+
+.checkbox {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 0.28rem;
+  accent-color: var(--tc-cyan);
+}
+
+.card-tags {
+  gap: 0.35rem;
+}
+
+.card-tags :deep(*) {
+  max-width: 100%;
+}
+
+.task-category-pill,
+.card-tags :deep(.task-type-badge),
+.card-tags :deep(.workflow-lane-tag) {
+  border: 1px solid rgba(210, 229, 255, 0.18) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #e9f2ff !important;
+  font-weight: 850 !important;
+}
+
+.task-category-pill-normal {
+  background: rgba(100, 210, 255, 0.14) !important;
+  color: #bfefff !important;
+}
+
+.task-category-pill-custom {
+  background: rgba(255, 209, 102, 0.16) !important;
+  color: #ffe7a3 !important;
+}
+
+.card-no-row {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 0.2rem;
+  border-color: rgba(210, 229, 255, 0.13) !important;
+}
+
+.card-no {
+  color: #edf5ff !important;
+  font-family: var(--yb-font-data);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.card-product {
+  position: relative;
+  z-index: 1;
+  min-height: calc(1.38em * 2);
+  color: #ffffff !important;
+  font-size: 0.96rem;
+  font-weight: 850;
+  line-height: 1.38;
+}
+
+.card-meta-block {
+  position: relative;
+  z-index: 1;
+  margin-top: 0.2rem;
+  gap: 0.25rem;
+  border: 1px solid rgba(210, 229, 255, 0.1);
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.62rem;
+  background: rgba(10, 16, 26, 0.34);
+}
+
+.card-meta-line {
+  grid-template-columns: 2.6rem minmax(0, 1fr);
+  column-gap: 0.55rem;
+  font-size: 0.77rem;
+}
+
+.card-meta-key {
+  color: var(--tc-cyan) !important;
+  font-weight: 850;
+}
+
+.card-meta-value {
+  color: #d7e3f4 !important;
+  font-weight: 650;
+}
+
+.card-row-bottom {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+  gap: 0.55rem 0.75rem;
+  border-top: 1px solid rgba(210, 229, 255, 0.1);
+  padding-top: 0.55rem;
+}
+
+.card-updated,
+.card-due {
+  color: var(--tc-muted) !important;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.card-due-overdue {
+  color: #ffd166 !important;
+  font-weight: 850;
+}
+
+.card-row-bottom :deep(button) {
+  min-height: 1.9rem;
+  border-color: rgba(100, 210, 255, 0.28) !important;
+  background: rgba(100, 210, 255, 0.12) !important;
+  color: #dff6ff !important;
+}
+
+.footer-card {
+  border-radius: 1rem;
+}
+
+@media (max-width: 760px) {
+  .task-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .toolbar,
+  .page-header,
+  .footer-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-input {
+    width: 100% !important;
+  }
+}
+
+/* Task center correction: readable density and stable wide-screen columns. */
+.task-list-view {
+  gap: 1rem;
+  padding-inline: clamp(0.75rem, 1vw, 1.25rem);
+}
+
+.header-card {
+  gap: 0.82rem !important;
+  border-radius: 1rem !important;
+  padding: 1rem !important;
+}
+
+.header-card::before {
+  opacity: 0.48;
+}
+
+.page-header {
+  min-height: 3.1rem;
+  border-bottom: 1px solid rgba(210, 229, 255, 0.14);
+  padding-bottom: 0.7rem;
+}
+
+.page-title {
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem) !important;
+  line-height: 1.04 !important;
+}
+
+.page-header-actions :deep(button) {
+  min-height: 2.15rem;
+}
+
+.task-category-switch {
+  padding-top: 0.55rem !important;
+}
+
+.task-tabs {
+  border-bottom: 1px solid rgba(210, 229, 255, 0.11);
+  padding-bottom: 0.55rem;
+}
+
+.task-category-switch :deep(button),
+.task-tabs :deep(button) {
+  min-height: 1.85rem;
+  padding-inline: 0.72rem;
+  font-size: 0.75rem;
+}
+
+.toolbar {
+  gap: 0.7rem;
+}
+
+.search-input {
+  width: min(27rem, 100%) !important;
+}
+
+.filter-bar-wrap {
+  margin-top: 0 !important;
+  padding-top: 0.75rem !important;
+}
+
+.filter-bar-wrap :deep(.filter-bar) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.25rem, 1fr));
+  gap: 0.68rem;
+  align-items: end;
+}
+
+.filter-bar-wrap :deep(.filter-field) {
+  min-width: 0;
+  width: auto;
+}
+
+.filter-bar-wrap :deep(.filter-field-wide) {
+  min-width: 0;
+}
+
+.filter-bar-wrap :deep(.filter-bar-trailing) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.task-cards {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 1rem !important;
+}
+
+@media (min-width: 900px) {
+  .task-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  .task-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1680px) {
+  .task-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+.task-card {
+  min-height: 14.8rem;
+  gap: 0.52rem;
+  border-radius: 1rem;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.1), transparent 11rem),
+    linear-gradient(145deg, rgba(29, 41, 59, 0.94), rgba(16, 24, 38, 0.96)) !important;
+}
+
+.task-card--claimable:not(.task-card--overdue)::before {
+  background: linear-gradient(180deg, rgba(100, 210, 255, 0.95), rgba(52, 199, 89, 0.56));
+}
+
+.card-row-top {
+  min-height: 1.55rem;
+  margin-bottom: 0.05rem;
+}
+
+.card-no-row {
+  margin-bottom: 0.12rem;
+  padding-bottom: 0.5rem;
+}
+
+.card-no {
+  font-size: 0.76rem;
+  color: #dbeafe !important;
+}
+
+.card-product {
+  min-height: calc(1.42em * 2);
+  font-size: 1rem;
+  line-height: 1.42;
+}
+
+.card-meta-block {
+  margin-top: 0.12rem;
+  border-color: rgba(210, 229, 255, 0.13);
+  padding: 0.58rem 0.66rem;
+  background: rgba(8, 15, 26, 0.38);
+}
+
+.card-meta-line {
+  grid-template-columns: 2.45rem minmax(0, 1fr);
+  font-size: 0.78rem;
+}
+
+.card-row-bottom {
+  min-height: 2rem;
+  padding-top: 0.58rem;
+}
+
+.card-row-bottom :deep(button) {
+  min-height: 1.85rem;
+  padding-inline: 0.72rem;
+}
+
+/* Task center defect pass: badges, filters, card scale, and icon/button language. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.advanced-filter-toggle {
+  min-width: 6.25rem;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  background: rgba(15, 23, 42, 0.6) !important;
+  color: #cbd5e1 !important;
+}
+
+.advanced-filter-toggle--active {
+  border-color: rgba(100, 210, 255, 0.45) !important;
+  background: rgba(14, 116, 144, 0.2) !important;
+  color: #e0f7ff !important;
+}
+
+.filter-bar-wrap {
+  border-top: 1px solid rgba(148, 163, 184, 0.16) !important;
+  padding-top: 0.72rem !important;
+}
+
+.filter-bar-wrap :deep(.filter-bar) {
+  grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
+  gap: 0.58rem;
+}
+
+.filter-bar-wrap :deep(.field-label) {
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+.filter-bar-wrap :deep(.filter-overdue) {
+  color: #cbd5e1;
+}
+
+.filter-bar-wrap :deep(.filter-overdue-input) {
+  accent-color: var(--tc-cyan);
+}
+
+.task-cards {
+  gap: 0.78rem !important;
+}
+
+.task-card {
+  min-height: 12.9rem;
+  gap: 0.4rem;
+  border-color: rgba(148, 163, 184, 0.26) !important;
+  border-radius: 0.86rem;
+  padding: 0.82rem;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.08), transparent 8.5rem),
+    linear-gradient(145deg, rgba(25, 36, 53, 0.94), rgba(13, 21, 34, 0.98)) !important;
+}
+
+.task-card:hover {
+  border-color: rgba(100, 210, 255, 0.38) !important;
+}
+
+.task-card--selected {
+  border-color: rgba(100, 210, 255, 0.66) !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(100, 210, 255, 0.16), transparent 10rem),
+    linear-gradient(145deg, rgba(28, 44, 65, 0.98), rgba(16, 27, 43, 0.98)) !important;
+}
+
+.card-tags {
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.task-category-pill,
+.card-tags :deep(.task-type-badge),
+.card-tags :deep(.lane-tag) {
+  display: inline-flex !important;
+  height: 1.25rem;
+  align-items: center;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  border-radius: 999px;
+  padding: 0 0.45rem !important;
+  background: rgba(30, 41, 59, 0.78) !important;
+  color: #dbeafe !important;
+  font-size: 0.66rem !important;
+  font-weight: 750 !important;
+  line-height: 1 !important;
+}
+
+.task-category-pill-normal,
+.task-category-pill-custom,
+.card-tags :deep(.badge-new),
+.card-tags :deep(.badge-original),
+.card-tags :deep(.badge-purchase),
+.card-tags :deep(.badge-retouch),
+.card-tags :deep(.is-normal),
+.card-tags :deep(.is-customization) {
+  background: rgba(30, 41, 59, 0.78) !important;
+  color: #dbeafe !important;
+}
+
+.task-category-pill-custom,
+.card-tags :deep(.badge-new),
+.card-tags :deep(.is-customization) {
+  border-color: rgba(52, 211, 153, 0.32) !important;
+  color: #bbf7d0 !important;
+}
+
+.card-status-row {
+  gap: 0.32rem !important;
+  margin-top: 0 !important;
+}
+
+.card-status-row :deep(.inline-flex),
+.card-status-row :deep(.filing-status-badge) {
+  min-height: 1.28rem;
+  border-color: rgba(100, 210, 255, 0.26) !important;
+  border-radius: 999px;
+  padding: 0.1rem 0.48rem !important;
+  background: rgba(8, 47, 73, 0.44) !important;
+  color: #bae6fd !important;
+  font-size: 0.68rem !important;
+  font-weight: 780 !important;
+  line-height: 1 !important;
+}
+
+.card-status-row :deep(.bg-emerald-100),
+.card-status-row :deep(.text-emerald-800),
+.card-status-row :deep(.border-emerald-200) {
+  border-color: rgba(52, 211, 153, 0.3) !important;
+  background: rgba(6, 78, 59, 0.42) !important;
+  color: #bbf7d0 !important;
+}
+
+.card-status-row :deep(.bg-blue-100),
+.card-status-row :deep(.text-blue-800),
+.card-status-row :deep(.border-blue-200) {
+  border-color: rgba(96, 165, 250, 0.3) !important;
+  background: rgba(30, 64, 175, 0.34) !important;
+  color: #bfdbfe !important;
+}
+
+.card-status-row :deep(.bg-amber-100),
+.card-status-row :deep(.text-amber-800),
+.card-status-row :deep(.border-amber-200) {
+  border-color: rgba(251, 191, 36, 0.32) !important;
+  background: rgba(120, 53, 15, 0.36) !important;
+  color: #fde68a !important;
+}
+
+.card-status-row :deep(.bg-red-100),
+.card-status-row :deep(.text-red-800),
+.card-status-row :deep(.border-red-200) {
+  border-color: rgba(248, 113, 113, 0.34) !important;
+  background: rgba(127, 29, 29, 0.38) !important;
+  color: #fecaca !important;
+}
+
+.card-no-row {
+  padding-bottom: 0.4rem;
+}
+
+.card-no {
+  font-size: 0.72rem;
+}
+
+.card-product {
+  min-height: calc(1.36em * 2);
+  font-size: 0.93rem;
+  line-height: 1.36;
+}
+
+.card-meta-block {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.28rem 0.58rem;
+  border-color: rgba(148, 163, 184, 0.14);
+  border-radius: 0.66rem;
+  padding: 0.48rem 0.56rem;
+  background: rgba(2, 6, 23, 0.26);
+}
+
+.card-meta-line {
+  min-width: 0;
+  grid-template-columns: 2.15rem minmax(0, 1fr);
+  column-gap: 0.38rem;
+  font-size: 0.7rem;
+}
+
+.card-row-bottom {
+  min-height: 1.55rem;
+  gap: 0.35rem 0.55rem;
+  padding-top: 0.42rem;
+}
+
+.card-updated,
+.card-due {
+  font-size: 0.68rem;
+}
+
+.page-header-actions :deep(button),
+.toolbar :deep(button),
+.card-row-bottom :deep(button),
+.footer-card :deep(button) {
+  border-radius: 0.62rem !important;
+  border-color: rgba(148, 163, 184, 0.26) !important;
+  background: rgba(15, 23, 42, 0.68) !important;
+  color: #dbeafe !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.page-header-actions :deep(button:hover),
+.toolbar :deep(button:hover),
+.card-row-bottom :deep(button:hover),
+.footer-card :deep(button:hover) {
+  border-color: rgba(100, 210, 255, 0.4) !important;
+  background: rgba(30, 41, 59, 0.9) !important;
+}
+
+.page-header-actions :deep(button svg),
+.toolbar :deep(button svg),
+.footer-card :deep(button svg) {
+  width: 1rem;
+  height: 1rem;
+  color: #93c5fd;
+  stroke-width: 2;
+}
+
+/* Narrow viewport repair: prevent the left rail from eating content. */
+.task-list-view,
+.header-card,
+.task-card,
+.card-product,
+.card-no-row,
+.card-meta-block,
+.card-row-bottom {
+  min-width: 0;
+}
+
+.task-list-view {
+  overflow-x: hidden;
+}
+
+.card-no,
+.card-meta-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-product {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .task-list-view {
+    gap: 0.75rem;
+    padding-inline: 0.35rem;
+  }
+
+  .header-card {
+    border-radius: 0.82rem !important;
+    padding: 0.72rem !important;
+  }
+
+  .page-header {
+    gap: 0.65rem;
+    align-items: flex-start;
+  }
+
+  .page-title {
+    font-size: clamp(1.75rem, 10vw, 2.35rem) !important;
+  }
+
+  .page-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .task-category-switch,
+  .task-tabs {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .task-category-switch::-webkit-scrollbar,
+  .task-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .toolbar {
+    align-items: stretch;
+  }
+
+  .search-input {
+    width: 100% !important;
+    flex: 1 1 100%;
+  }
+
+  .advanced-filter-toggle {
+    width: 100%;
+  }
+
+  .task-cards {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .task-card {
+    min-height: auto;
+    padding: 0.72rem;
+  }
+
+  .card-row-top {
+    align-items: flex-start;
+    gap: 0.45rem;
+  }
+
+  .card-tags {
+    min-width: 0;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+
+  .card-product {
+    display: -webkit-box;
+    min-height: auto;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .card-meta-block {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .card-meta-line {
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+  }
+
+  .card-row-bottom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* Edge and radius repair: keep a consistent gutter so rounded glass corners render cleanly. */
+.task-list-view {
+  padding-inline: clamp(0.45rem, 0.7vw, 0.75rem) !important;
+}
+
+.header-card,
+.task-card,
+.batch-action-bar,
+.footer-card {
+  isolation: isolate;
+  background-clip: padding-box !important;
+  contain: paint;
+  transform: translateZ(0);
+}
+
+.header-card::before,
+.task-card::before {
+  border-radius: inherit;
+}
+
+@media (max-width: 720px) {
+  .task-list-view {
+    padding-inline: 0.35rem !important;
+  }
+}
+
+/* Final task-center layout stabilization under the persistent sidebar. */
+.task-list-view {
+  padding-inline: 0 !important;
+}
+
+.task-cards {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+@media (min-width: 1180px) {
+  .task-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1520px) {
+  .task-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1900px) {
+  .task-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+.header-card,
+.task-card,
+.batch-action-bar,
+.footer-card {
+  overflow: hidden;
+  clip-path: inset(0 round 1rem);
+}
+
+.task-card {
+  clip-path: inset(0 round 0.86rem);
+}
+
+.batch-action-bar,
+.footer-card {
+  clip-path: inset(0 round 1rem);
+}
+
+/* Remove the dark-corner artifact by making the rounded panels self-painted instead of relying on the page backdrop. */
+.header-card,
+.batch-action-bar,
+.footer-card {
+  border-color: rgba(190, 209, 240, 0.3) !important;
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(255, 45, 141, 0.2), transparent 42%),
+    radial-gradient(120% 120% at 100% 0%, rgba(100, 210, 255, 0.12), transparent 48%),
+    linear-gradient(145deg, rgba(38, 47, 70, 0.96), rgba(18, 27, 43, 0.98)) !important;
+}
+
+.header-card::before {
+  display: none !important;
+}
+
+.task-card {
+  background:
+    radial-gradient(115% 120% at 0% 0%, rgba(255, 45, 141, 0.13), transparent 36%),
+    radial-gradient(110% 120% at 100% 0%, rgba(100, 210, 255, 0.08), transparent 52%),
+    linear-gradient(145deg, rgba(25, 36, 54, 0.98), rgba(13, 21, 34, 0.99)) !important;
+}
+
+.task-card:hover {
+  background:
+    radial-gradient(115% 120% at 0% 0%, rgba(255, 45, 141, 0.17), transparent 36%),
+    radial-gradient(110% 120% at 100% 0%, rgba(100, 210, 255, 0.11), transparent 52%),
+    linear-gradient(145deg, rgba(31, 45, 66, 0.99), rgba(17, 28, 45, 0.99)) !important;
+}
+
+/* Final corner fix: cover the parent gutter so rounded cards no longer expose a black rectangular page layer. */
+.task-list-view {
+  margin: -0.75rem !important;
+  min-height: calc(100dvh - 3.85rem);
+  padding: 0.75rem !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(148, 163, 184, 0.12), transparent 30rem),
+    radial-gradient(circle at 100% 0%, rgba(100, 210, 255, 0.08), transparent 32rem),
+    linear-gradient(145deg, #111827 0%, #0b111a 52%, #05070b 100%) !important;
+}
+
+.header-card {
+  margin: 0 !important;
+}
+
+@media (max-width: 720px) {
+  .task-list-view {
+    margin: -0.75rem !important;
+    padding: 0.75rem !important;
+  }
 }
 </style>

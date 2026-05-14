@@ -112,3 +112,631 @@ a:hover {
 .indicator-breath {
   animation: breath 2.5s infinite ease-in-out;
 }
+
+/* Apple Music / iOS liquid glass skin tokens.
+   Source: outputs/shell.pen -> pgCqB / cxzus. Style-only mapping. */
+:root {
+  color-scheme: dark;
+  --yb-font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC',
+    'Microsoft YaHei', 'Segoe UI', sans-serif;
+  --yb-font-text: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC',
+    'Microsoft YaHei', 'Segoe UI', sans-serif;
+  --yb-font-data: 'SF Mono', 'IBM Plex Mono', 'Cascadia Code', Consolas, 'Liberation Mono',
+    monospace;
+  --yb-music-bg: #0a0d14;
+  --yb-music-bg-2: #111723;
+  --yb-music-plum: #2a0e3c;
+  --yb-work-bg: #0b1019;
+  --yb-work-panel: #121824;
+  --yb-work-panel-2: #171f2d;
+  --yb-work-panel-3: #1d2635;
+  --yb-music-surface: rgba(18, 23, 33, 0.92);
+  --yb-music-surface-strong: rgba(21, 27, 39, 0.96);
+  --yb-music-surface-soft: rgba(16, 21, 30, 0.82);
+  --yb-music-border: rgba(160, 176, 204, 0.22);
+  --yb-music-border-strong: rgba(190, 205, 232, 0.34);
+  --yb-music-text: #ffffff;
+  --yb-music-text-2: #edf3ff;
+  --yb-music-muted: #b8c4d9;
+  --yb-music-faint: #7f8da6;
+  --yb-field-label: #92a0b8;
+  --yb-field-value: #f7faff;
+  --yb-music-pink: #ff2d55;
+  --yb-music-magenta: #ff2d8d;
+  --yb-music-purple: #af52de;
+  --yb-music-cyan: #64d2ff;
+  --yb-music-green: #30d158;
+  --yb-music-orange: #ff9500;
+  --yb-music-danger: #ff453a;
+  --yb-glass-blur: 6px;
+  --yb-glass-shadow: 0 12px 26px -22px rgba(0, 0, 0, 0.82);
+  --yb-cover-glow:
+    radial-gradient(circle at 12% 6%, rgba(255, 45, 141, 0.32), transparent 28rem),
+    radial-gradient(circle at 84% 8%, rgba(100, 210, 255, 0.25), transparent 30rem),
+    radial-gradient(circle at 48% 92%, rgba(255, 149, 0, 0.2), transparent 26rem);
+  --v1-bg-page: #0a0d14;
+  --v1-bg-surface: var(--yb-work-panel);
+  --v1-bg-surface-soft: var(--yb-work-panel-2);
+  --v1-bg-primary: #ff2d8d;
+  --v1-border: rgba(255, 255, 255, 0.18);
+  --v1-text-primary: #ffffff;
+  --v1-text-secondary: #dce6ff;
+  --v1-text-muted: #aab5cc;
+  --v1-danger: #ff453a;
+}
+
+html,
+body,
+#app {
+  min-height: 100dvh;
+}
+
+body {
+  font-family: var(--yb-font-text);
+  color: var(--yb-music-text-2);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 45, 141, 0.13), transparent 30rem),
+    radial-gradient(circle at 88% 0%, rgba(100, 210, 255, 0.11), transparent 32rem),
+    radial-gradient(circle at 20% 5%, #21162c 0, var(--yb-music-bg-2) 44%, var(--yb-music-bg) 100%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(100, 210, 255, 0.34);
+  color: #ffffff;
+  text-shadow: none;
+}
+
+::-moz-selection {
+  background: rgba(100, 210, 255, 0.34);
+  color: #ffffff;
+  text-shadow: none;
+}
+
+#app {
+  isolation: isolate;
+  background:
+    linear-gradient(135deg, rgba(255, 45, 85, 0.045), transparent 26%),
+    linear-gradient(315deg, rgba(100, 210, 255, 0.045), transparent 24%);
+}
+
+#app,
+#app .font-body,
+#app .font-headline {
+  font-family: var(--yb-font-text);
+}
+
+#app h1,
+#app h2,
+#app h3,
+#app .page-title,
+#app .ac-brand,
+#app .detail-top-taskno {
+  font-family: var(--yb-font-display);
+  letter-spacing: 0;
+}
+
+#app code,
+#app pre,
+#app .card-no,
+#app .ac-mono,
+#app .kpi-card__value,
+#app .ac-footer-stat,
+#app .detail-v3-kv-list dd,
+#app .batch-sku-tab {
+  font-family: var(--yb-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+#app input,
+#app textarea,
+#app select,
+#app button {
+  font-family: var(--yb-font-text);
+}
+
+#app button,
+#app [role='button'],
+#app a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app button {
+  border-radius: 0.75rem;
+  background-clip: padding-box;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.12s ease,
+    opacity 0.16s ease;
+}
+
+#app button:hover {
+  text-decoration: none;
+}
+
+#app button:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+#app button:focus-visible,
+#app a:focus-visible,
+#app input:focus-visible,
+#app select:focus-visible,
+#app textarea:focus-visible {
+  outline: none !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.28),
+    0 0 0 5px rgba(100, 210, 255, 0.12) !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(220, 230, 255, 0.22);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 45, 141, 0.42);
+}
+
+#app :where(input, textarea, select) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: var(--yb-music-text) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#app :where(.relative > .flex.h-11.w-full.items-center) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: var(--yb-music-text) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#app :where(.relative > .flex.h-11.w-full.items-center button, .relative > .flex.h-11.w-full.items-center span) {
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(input, textarea, select)::placeholder {
+  color: rgba(220, 230, 255, 0.52) !important;
+}
+
+#app :where(input, textarea, select):focus {
+  border-color: rgba(100, 210, 255, 0.5) !important;
+  box-shadow:
+    0 0 0 1px rgba(100, 210, 255, 0.26),
+    0 0 0 5px rgba(100, 210, 255, 0.08) !important;
+}
+
+#app :where(label, dt, .text-slate-400, .text-slate-500, .text-stone-400, .text-stone-500) {
+  color: var(--yb-music-muted) !important;
+}
+
+#app :where(.bg-white, .bg-stone-50, .bg-slate-50, .bg-stone-100, .bg-slate-100) {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+#app :where(.border-stone-200, .border-slate-200, .ring-slate-200\\/60, .ring-slate-200\\/70) {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  --tw-ring-color: rgba(255, 255, 255, 0.16) !important;
+}
+
+#app :where(button.bg-stone-600, .detail-top-chip--primary, .detail-v3-edit-base-btn, .detail-v3-upload-ref-btn, .detail-v3-dark-btn) {
+  background: linear-gradient(120deg, #ff2d55 0%, #ff2d8d 48%, #af52de 100%) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 14px 30px -20px rgba(255, 45, 141, 0.86) !important;
+}
+
+#app :where(button.bg-stone-50, button.bg-transparent, .pager-btn, .detail-top-chip, .detail-v3-soft-chip, .detail-v3-link-chip) {
+  background: rgba(255, 255, 255, 0.075) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(button.bg-stone-50, button.bg-transparent, .pager-btn, .detail-top-chip, .detail-v3-soft-chip, .detail-v3-link-chip):hover {
+  background: rgba(255, 255, 255, 0.125) !important;
+  border-color: rgba(255, 255, 255, 0.26) !important;
+  color: #fff !important;
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  #app :where(.glass-card, .board-header, .board-panel, .risk-card, .kpi-card, .header-card, .task-card, .footer-card, .detail-top-unified, .detail-v3-module, .detail-v3-side, .detail-v3-info-card, .detail-block) {
+    backdrop-filter: blur(var(--yb-glass-blur));
+    -webkit-backdrop-filter: blur(var(--yb-glass-blur));
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --yb-glass-blur: 0px;
+  }
+}
+
+/* Full-app dark glass compatibility layer for legacy light pages and shared widgets. */
+#app :where(
+  .content-card,
+  .detail-card,
+  .rule-card,
+  .panel-card,
+  .metric-card,
+  .user-card,
+  .org-card,
+  .export-card,
+  .report-card,
+  .log-card,
+  .rounded-xl,
+  .rounded-2xl
+) {
+  border-color: var(--yb-music-border) !important;
+}
+
+#app :where(section.rounded-xl, div.rounded-xl, div.rounded-2xl, .content-card, .detail-card) {
+  background: linear-gradient(145deg, rgba(20, 26, 36, 0.96), rgba(12, 16, 24, 0.96)) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow: var(--yb-glass-shadow);
+}
+
+#app :where(
+  .asset-detail-view,
+  .task-assets-view,
+  .rule-config-view,
+  .logs-management-view,
+  .export-center-view,
+  .finance-view,
+  .kpi-view,
+  .user-management-view,
+  .notifications-view
+) {
+  background:
+    radial-gradient(circle at 14% 0%, rgba(255, 45, 141, 0.16), transparent 28rem),
+    radial-gradient(circle at 88% 4%, rgba(100, 210, 255, 0.14), transparent 30rem),
+    transparent !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(
+  .page-title,
+  .section-title,
+  .subsection-title,
+  .block-title,
+  .card-title,
+  .table-title,
+  .version-title,
+  .content-title,
+  h1,
+  h2,
+  h3
+) {
+  color: #fff !important;
+}
+
+#app :where(
+  .page-subtitle,
+  .section-meta,
+  .state-text,
+  .hint-text,
+  .action-muted,
+  .pager-info,
+  .card-subtitle,
+  .muted,
+  p,
+  dd,
+  td
+) {
+  color: var(--yb-music-text-2);
+}
+
+#app :where(
+  table,
+  .data-table,
+  .table,
+  .task-table,
+  .version-card,
+  .asset-row,
+  .list-row,
+  .user-row,
+  .log-row,
+  .org-row
+) {
+  background: rgba(18, 25, 38, 0.46) !important;
+  border-color: rgba(210, 226, 255, 0.14) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(thead, th, .data-table th, .task-table__head) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(220, 230, 255, 0.72) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+#app :where(td, tr, .data-table td, .task-table__row) {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+#app :where(tbody tr:hover, .data-table tbody tr:hover, .list-row:hover, .user-row:hover) {
+  background: rgba(255, 255, 255, 0.09) !important;
+}
+
+#app :where(
+  .active,
+  [aria-selected='true'],
+  [data-state='active'],
+  .router-link-active,
+  .tab-btn.active,
+  .version-btn.version-active
+) {
+  color: #ffffff !important;
+}
+
+#app :where(
+  .bg-red-50,
+  .bg-rose-50,
+  .bg-orange-50,
+  .bg-amber-50,
+  .bg-yellow-50,
+  .bg-blue-50,
+  .bg-indigo-50,
+  .bg-violet-50,
+  .bg-purple-50,
+  .bg-emerald-50,
+  .bg-green-50,
+  .bg-sky-50
+) {
+  background-color: rgba(255, 255, 255, 0.11) !important;
+}
+
+#app :where(
+  .text-slate-900,
+  .text-stone-900,
+  .text-zinc-900,
+  .text-neutral-900,
+  .text-gray-900,
+  .text-slate-800,
+  .text-stone-800,
+  .text-zinc-800,
+  .text-neutral-800,
+  .text-gray-800
+) {
+  color: #fff !important;
+}
+
+#app :where(
+  .text-slate-700,
+  .text-stone-700,
+  .text-zinc-700,
+  .text-neutral-700,
+  .text-gray-700,
+  .text-slate-600,
+  .text-stone-600,
+  .text-zinc-600,
+  .text-neutral-600,
+  .text-gray-600
+) {
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(
+  .text-blue-600,
+  .text-indigo-600,
+  .text-sky-600
+) {
+  color: var(--yb-music-cyan) !important;
+}
+
+#app :where(
+  .text-emerald-600,
+  .text-green-600
+) {
+  color: #8fffc1 !important;
+}
+
+#app :where(
+  .text-red-600,
+  .text-rose-600
+) {
+  color: #ffb4ad !important;
+}
+
+#app :where(
+  .text-amber-600,
+  .text-yellow-600,
+  .text-orange-600
+) {
+  color: #ffd28a !important;
+}
+
+#app :where(.ring-1, .border, .divide-y > :not([hidden]) ~ :not([hidden])) {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  --tw-ring-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+#app :where(.shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl) {
+  --tw-shadow-color: rgba(0, 0, 0, 0.55) !important;
+}
+
+#app :where(mark) {
+  border-radius: 0.35rem;
+  background: rgba(255, 214, 10, 0.26) !important;
+  color: #fff8cc !important;
+  padding: 0 0.15rem;
+}
+
+body > :where(.fixed, [role='listbox'], [role='dialog']) {
+  color: var(--yb-music-text-2);
+}
+
+/* Legacy admin pages and popovers that predate the skin tokens. */
+#app :where(
+  .table-wrap,
+  .selector-panel,
+  .panel-header,
+  .field-list,
+  .selected-list,
+  .modal-panel,
+  .modal-user-list,
+  .notif-recipient-panel,
+  .notif-user-options,
+  .roles-grid,
+  .tabs
+) {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.045)) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(
+  .field-chip,
+  .selected-item,
+  .role-check,
+  .modal-user-row,
+  .notif-user-option,
+  .version-btn,
+  .tab-btn,
+  .arrow-btn,
+  .um-btn--ghost,
+  .status-pill
+) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(.field-chip:hover, .arrow-btn:hover, .tab-btn:hover, .version-btn:hover) {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(100, 210, 255, 0.34) !important;
+  color: #fff !important;
+}
+
+#app :where(.tab-btn.active, .version-btn.version-active, .um-btn--primary, .modal-user-action) {
+  background: linear-gradient(120deg, #ff2d55 0%, #ff2d8d 48%, #af52de 100%) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 14px 30px -20px rgba(255, 45, 141, 0.9) !important;
+}
+
+#app :where(.simple-table, table) {
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(.simple-table thead, .simple-table th, table thead, table th) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(220, 230, 255, 0.76) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+#app :where(.simple-table tbody, .simple-table tbody tr, .simple-table td, table tbody, table tbody tr, table td) {
+  background: rgba(18, 25, 38, 0.34) !important;
+  color: var(--yb-music-text-2) !important;
+  border-color: rgba(210, 226, 255, 0.12) !important;
+}
+
+#app :where(.simple-table tbody tr:hover, table tbody tr:hover) {
+  background: rgba(255, 255, 255, 0.095) !important;
+}
+
+#app :where(.td-mono, .cell-mono, .mono) {
+  color: #f5f8ff !important;
+  font-family: var(--yb-font-data) !important;
+}
+
+#app :where(.status-pill--on) {
+  background: rgba(48, 209, 88, 0.16) !important;
+  color: #a7fbc1 !important;
+}
+
+#app :where(.status-pill--off) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--yb-music-muted) !important;
+}
+
+#app :where(.link-btn, .panel-action, .chip-add) {
+  color: var(--yb-music-cyan) !important;
+}
+
+#app :where(
+  .bg-white:hover,
+  .hover\:bg-white\/70:hover,
+  .hover\:bg-stone-50:hover,
+  .hover\:bg-slate-100:hover,
+  .hover\:bg-neutral-50:hover,
+  .hover\:bg-amber-100:hover
+) {
+  background-color: rgba(255, 255, 255, 0.115) !important;
+  color: #fff !important;
+}
+
+#app :where(.echarts-tooltip, .echarts-tooltip *) {
+  color: var(--yb-music-text-2) !important;
+}
+
+/* Interaction performance pass: repeated work panels should be cheap to click and scroll. */
+#app :where(
+  .ac-card,
+  .task-card,
+  .board-panel,
+  .kpi-card,
+  .risk-card,
+  .detail-v3-module,
+  .detail-v3-info-card,
+  .detail-v3-side-event,
+  .stream-item,
+  .task-table__row,
+  .field-chip,
+  .selected-item
+) {
+  contain: layout paint style;
+}
+
+#app :where(.ac-card, .task-card, .detail-v3-module, .board-panel) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
+}
+
+#app :where(
+  .ac-card,
+  .task-card,
+  .board-panel,
+  .kpi-card,
+  .risk-card,
+  .detail-v3-module,
+  .detail-v3-info-card,
+  .detail-v3-side-event
+) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#app :where(button, [role='button'], .ac-card, .task-card, .field-chip, .selected-item) {
+  will-change: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app *,
+  #app *::before,
+  #app *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-reduced-motion: reduce) {
+  :root {
+    --yb-glass-blur: 0px;
+    --yb-glass-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  #app :where(.glass-card, .board-header, .board-panel, .risk-card, .kpi-card, .header-card, .task-card, .footer-card, .detail-top-unified, .detail-v3-module, .detail-v3-side, .detail-v3-info-card, .detail-block) {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  }
+}

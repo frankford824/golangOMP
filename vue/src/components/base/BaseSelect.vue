@@ -290,6 +290,39 @@ watch(filterQuery, () => {
 </script>
 
 <style scoped>
+/* Apple Music / iOS liquid glass select dropdown skin. Style-only. */
+.fixed {
+  border-color: var(--yb-music-border-strong) !important;
+  background:
+    linear-gradient(145deg, rgba(20, 21, 30, 0.96), rgba(10, 11, 18, 0.92)) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow: 0 24px 70px -30px rgba(0, 0, 0, 0.95) !important;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.fixed :deep(input) {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  background: rgba(3, 3, 5, 0.36) !important;
+  color: #fff !important;
+}
+
+.fixed button {
+  color: var(--yb-music-text-2) !important;
+}
+
+.fixed button:hover,
+.fixed .bg-stone-100 {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+.fixed .border-b {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+</style>
+
+<style scoped>
 .fade-scale-enter-active,
 .fade-scale-leave-active {
   transition: opacity 0.12s ease-out, transform 0.12s ease-out;

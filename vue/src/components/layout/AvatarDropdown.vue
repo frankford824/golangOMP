@@ -216,4 +216,62 @@ function logout(): void {
   border-color: #f87171;
   background: #fef2f2;
 }
+
+/* Apple Music / iOS liquid glass avatar menu skin. Style-only. */
+button[aria-haspopup='menu'] {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #fff !important;
+}
+
+.avatar-dropdown-menu {
+  z-index: 5000 !important;
+  pointer-events: auto;
+  overflow: hidden;
+  gap: 0.4rem !important;
+  padding: 0.55rem !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  background:
+    linear-gradient(145deg, rgba(31, 33, 43, 0.96), rgba(12, 13, 20, 0.94)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 24px 70px -30px rgba(0, 0, 0, 0.98) !important;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.avatar-dropdown-menu :deep(a.avatar-menu-row) {
+  border-radius: 0.75rem;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--yb-music-text-2) !important;
+}
+
+.avatar-dropdown-menu :deep(a.avatar-menu-row:hover),
+.avatar-dropdown-menu :deep(a.avatar-menu-row:focus-visible),
+.avatar-dropdown-menu :deep(a.avatar-menu-row--current) {
+  border-color: rgba(100, 210, 255, 0.3);
+  background: rgba(100, 210, 255, 0.12);
+  color: #fff !important;
+}
+
+.avatar-dropdown-menu :deep(a.avatar-menu-row--current::before) {
+  background: linear-gradient(180deg, var(--yb-music-pink), var(--yb-music-cyan));
+}
+
+.avatar-menu-sep {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.avatar-menu-logout {
+  border-color: rgba(255, 69, 58, 0.32);
+  background: rgba(255, 69, 58, 0.12);
+  color: #ffb4ad;
+}
+
+.avatar-menu-logout:hover,
+.avatar-menu-logout:focus-visible {
+  border-color: rgba(255, 69, 58, 0.5);
+  background: rgba(255, 69, 58, 0.18);
+}
 </style>

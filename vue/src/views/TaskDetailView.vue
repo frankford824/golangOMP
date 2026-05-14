@@ -261,12 +261,31 @@
                         {{ isBatchTask ? '全部参考图汇总（母任务）' : '参考图 / 附件' }}
                       </p>
                       <p class="detail-v3-card-text">{{ detailReferenceLabel }}</p>
-                      <AssetThumbStrip :items="opsReferenceThumbItems" empty-text="暂无参考图" size="sm" />
-                      <details v-if="isBatchTask" class="detail-v3-summary-fold">
+                      <AssetThumbStrip
+                        v-if="opsReferenceThumbItems.length > 0"
+                        :items="opsReferenceThumbItems"
+                        empty-text="暂无参考图"
+                        size="sm"
+                      />
+                      <details
+                        v-if="isBatchTask && topLevelReferenceThumbItems.length > 0"
+                        class="detail-v3-summary-fold"
+                      >
                         <summary>展开母任务汇总参考图</summary>
-                        <AssetThumbStrip :items="topLevelReferenceThumbItems" empty-text="暂无母任务汇总图" size="sm" />
+                        <AssetThumbStrip
+                          :items="topLevelReferenceThumbItems"
+                          empty-text="暂无母任务汇总图"
+                          size="sm"
+                        />
                       </details>
-                      <div class="detail-v3-ref-actions">
+                      <div
+                        v-if="
+                          canUploadReferenceFromOps ||
+                          opsReferenceThumbItems.length > 0 ||
+                          topLevelReferenceThumbItems.length > 0
+                        "
+                        class="detail-v3-ref-actions"
+                      >
                         <input
                           ref="opsReferenceUploadInputRef"
                           type="file"
@@ -283,7 +302,12 @@
                         >
                           上传参考图
                         </button>
-                        <button type="button" class="detail-v3-link-btn" @click="focusReferenceSectionFromDetail">
+                        <button
+                          v-if="opsReferenceThumbItems.length > 0 || topLevelReferenceThumbItems.length > 0"
+                          type="button"
+                          class="detail-v3-link-btn"
+                          @click="focusReferenceSectionFromDetail"
+                        >
                           查看全部
                         </button>
                         <button
@@ -3659,5 +3683,785 @@ watch(taskId, (id) => {
 .batch-sku-tab--active:hover {
   background: #0f1218;
   border-color: #0f1218;
+}
+
+/* Apple Music / iOS liquid glass task detail skin. Style-only. */
+.task-detail-view {
+  color: var(--yb-music-text-2);
+  background:
+    radial-gradient(circle at 14% 0%, rgba(255, 45, 141, 0.18), transparent 30rem),
+    radial-gradient(circle at 88% 8%, rgba(100, 210, 255, 0.16), transparent 32rem),
+    transparent;
+}
+
+.detail-v6-surface {
+  --dv-border-soft: rgba(255, 255, 255, 0.16);
+  --dw-title: #ffffff;
+  --dw-label: rgba(220, 230, 255, 0.66);
+  --dv-surface-elev: var(--yb-glass-shadow);
+}
+
+.detail-top-unified.detail-top-v6,
+.detail-v3-module,
+.detail-v3-side,
+.detail-v3-info-card,
+.detail-merge-card--center,
+.batch-sku-switcher,
+.create-success-banner {
+  border-color: var(--yb-music-border) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.06)) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow: var(--yb-glass-shadow) !important;
+  backdrop-filter: blur(var(--yb-glass-blur));
+  -webkit-backdrop-filter: blur(var(--yb-glass-blur));
+}
+
+.detail-top-unified.detail-top-v6 {
+  position: relative;
+  overflow: hidden;
+}
+
+.detail-top-unified.detail-top-v6::before {
+  content: '';
+  position: absolute;
+  inset: -5rem -3rem auto auto;
+  width: 30rem;
+  height: 16rem;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(100, 210, 255, 0.2), transparent 68%);
+}
+
+.detail-top-grid,
+.detail-v3-module-head,
+.detail-v3-info-grid,
+.detail-v3-workflow-grid {
+  position: relative;
+}
+
+.detail-top-taskno,
+.detail-v3-module-title,
+.detail-v3-side-title,
+.detail-v3-card-kicker,
+.detail-v3-side-event-title,
+.detail-v6-surface :deep(.block-title) {
+  color: #fff !important;
+}
+
+.detail-top-sub,
+.detail-v3-card-text,
+.detail-v3-card-muted,
+.detail-v3-side-event-desc,
+.detail-v3-module-note,
+.detail-v3-side-desc,
+.detail-v3-kv-list dt,
+.detail-v3-kv-list dd,
+.detail-v6-surface :deep(dt),
+.detail-v6-surface :deep(.field-label),
+.detail-v6-surface :deep(.section-label) {
+  color: var(--yb-music-muted) !important;
+}
+
+.detail-top-flow-shell,
+.detail-v3-requirement-box,
+.detail-v3-fake-textarea,
+.detail-v3-side-event,
+.detail-v3-side-empty,
+.detail-v6-surface :deep(section.detail-block),
+.detail-col--right :deep(.detail-block),
+.detail-col--left :deep(section.detail-block),
+.detail-v3-layout :deep(section.detail-block) {
+  border-color: rgba(255, 255, 255, 0.13) !important;
+  background: rgba(3, 3, 5, 0.34) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+.detail-top-current.detail-top-status-pill,
+.detail-top-type-pill,
+.detail-top-priority-pill--muted,
+.detail-top-batch-pill,
+.detail-v3-state-pill,
+.batch-sku-tab {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+.detail-top-status-dot {
+  background: var(--yb-music-cyan);
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.18), 0 0 20px rgba(100, 210, 255, 0.38);
+}
+
+.detail-top-chip--danger,
+.detail-v3-danger-btn,
+.create-success-banner.banner-error {
+  background: rgba(255, 69, 58, 0.16) !important;
+  border-color: rgba(255, 69, 58, 0.34) !important;
+  color: #ffd5d2 !important;
+}
+
+.detail-v3-link-chip,
+.detail-v3-link-btn,
+.detail-v3-ref-status,
+.detail-top-flow-shell :deep(.step-current .step-label) {
+  color: var(--yb-music-cyan) !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-dot--sm) {
+  background: var(--yb-music-cyan);
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.18);
+}
+
+.detail-top-flow-shell :deep(.step-done .step-dot--sm),
+.detail-top-flow-shell :deep(.step-done .step-label) {
+  background: var(--yb-music-green);
+  color: var(--yb-music-green) !important;
+}
+
+.detail-col--left,
+.detail-col--center,
+.detail-col--right,
+.detail-design-band {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Bmhxp readable-work-panel pass: keep the Apple atmosphere behind the content. */
+.task-detail-view {
+  background:
+    radial-gradient(circle at 10% -8%, rgba(255, 45, 141, 0.11), transparent 28rem),
+    radial-gradient(circle at 92% -4%, rgba(100, 210, 255, 0.1), transparent 30rem),
+    linear-gradient(135deg, #07080d 0%, #10131b 52%, #071019 100%);
+}
+
+.detail-top-unified.detail-top-v6,
+.detail-v3-module,
+.detail-v3-side,
+.detail-v3-info-card,
+.detail-merge-card--center,
+.batch-sku-switcher {
+  border-color: rgba(160, 176, 204, 0.22) !important;
+  background: linear-gradient(145deg, rgba(20, 26, 36, 0.97), rgba(10, 13, 20, 0.98)) !important;
+  box-shadow: 0 14px 32px -28px rgba(0, 0, 0, 0.9) !important;
+}
+
+.detail-top-unified.detail-top-v6::before {
+  opacity: 0.42;
+  filter: saturate(0.8);
+}
+
+.detail-v3-info-card,
+.detail-v3-requirement-box,
+.detail-v3-fake-textarea,
+.detail-v3-layout :deep(section.detail-block),
+.detail-v6-surface :deep(section.detail-block),
+.detail-col--right :deep(.detail-block),
+.detail-col--left :deep(section.detail-block) {
+  background: #10151e !important;
+  border-color: rgba(160, 176, 204, 0.2) !important;
+}
+
+.detail-v3-card-kicker,
+.detail-v3-module-title,
+.detail-v3-side-title,
+.detail-v3-layout :deep(.block-title) {
+  color: #f8fafc !important;
+}
+
+.detail-v3-eyebrow,
+.detail-v3-side-kicker,
+.detail-v3-kv-list dt,
+.detail-v6-surface :deep(dt),
+.detail-v6-surface :deep(.field-label),
+.detail-v6-surface :deep(.section-label),
+.detail-v3-requirement-box span {
+  color: #92a0b8 !important;
+}
+
+.detail-v3-kv-list dd,
+.detail-v3-card-text,
+.detail-v3-requirement-box p,
+.detail-v6-surface :deep(dd),
+.detail-v6-surface :deep(.field-value),
+.detail-v6-surface :deep(.value),
+.detail-v6-surface :deep(input),
+.detail-v6-surface :deep(textarea) {
+  color: #f7faff !important;
+}
+
+.detail-v3-card-muted,
+.detail-v3-side-desc,
+.detail-v3-module-note,
+.detail-v3-side-event-desc {
+  color: #aeb9cc !important;
+}
+
+/* Design stage becomes the primary operation surface without changing DOM. */
+.detail-v3-module {
+  position: relative;
+  overflow: hidden;
+}
+
+.detail-v3-module--design {
+  border-color: rgba(100, 210, 255, 0.34) !important;
+  background:
+    linear-gradient(145deg, rgba(16, 24, 36, 0.99), rgba(8, 11, 18, 0.99)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(100, 210, 255, 0.08),
+    0 22px 44px -32px rgba(100, 210, 255, 0.52) !important;
+}
+
+.detail-v3-module--design::before {
+  content: '';
+  position: absolute;
+  inset: -8rem -6rem auto auto;
+  width: 28rem;
+  height: 18rem;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(100, 210, 255, 0.14), transparent 68%);
+}
+
+.detail-v3-module--design .detail-v3-module-head,
+.detail-v3-module--design .batch-sku-switcher,
+.detail-v3-module--design .detail-v3-workflow-grid {
+  position: relative;
+}
+
+.detail-v3-module--design .detail-v3-info-card--wide {
+  border-color: rgba(100, 210, 255, 0.3) !important;
+  background: linear-gradient(145deg, rgba(13, 19, 30, 0.99), rgba(7, 11, 18, 0.99)) !important;
+}
+
+.detail-v3-module--design .detail-v3-workflow-grid--design > .detail-v3-info-card:nth-child(3),
+.detail-v3-module--design .detail-v3-workflow-grid--design > .detail-v3-info-card:nth-child(4),
+.detail-v3-module--design .detail-v3-workflow-grid--design > .detail-v3-info-card--refs {
+  border-color: rgba(100, 210, 255, 0.32) !important;
+  background:
+    linear-gradient(145deg, rgba(14, 27, 41, 0.98), rgba(8, 13, 21, 0.99)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 12px 28px -24px rgba(100, 210, 255, 0.6) !important;
+}
+
+.detail-v3-module--design .detail-v3-workflow-grid--design > .detail-v3-info-card:nth-child(3) .detail-v3-card-kicker,
+.detail-v3-module--design .detail-v3-workflow-grid--design > .detail-v3-info-card:nth-child(4) .detail-v3-card-kicker,
+.detail-v3-module--design .detail-v3-workflow-grid--design > .detail-v3-info-card--refs .detail-v3-card-kicker {
+  color: #e0f7ff !important;
+}
+
+.detail-v3-module--design .detail-v3-dark-btn,
+.detail-v3-module--design .detail-v3-upload-ref-btn,
+.detail-v3-module--design .detail-v3-link-btn {
+  background: linear-gradient(120deg, #1d4ed8 0%, #38bdf8 100%) !important;
+  border-color: rgba(125, 211, 252, 0.42) !important;
+  color: #f8fcff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 14px 28px -20px rgba(56, 189, 248, 0.86) !important;
+}
+
+.detail-v3-module--audit,
+.detail-v3-module--warehouse {
+  border-color: rgba(148, 163, 184, 0.14) !important;
+  background: linear-gradient(145deg, rgba(15, 19, 27, 0.9), rgba(8, 10, 16, 0.94)) !important;
+  opacity: 0.78;
+}
+
+.detail-v3-module--audit:hover,
+.detail-v3-module--warehouse:hover,
+.detail-v3-module--audit:focus-within,
+.detail-v3-module--warehouse:focus-within {
+  opacity: 0.94;
+  border-color: rgba(160, 176, 204, 0.24) !important;
+}
+
+.detail-v3-module--audit .detail-v3-info-card,
+.detail-v3-module--warehouse .detail-v3-info-card,
+.detail-v3-module--audit :deep(section.detail-block),
+.detail-v3-module--warehouse :deep(section.detail-block) {
+  background: rgba(12, 16, 24, 0.88) !important;
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+.detail-v3-module--audit .detail-v3-state-pill,
+.detail-v3-module--warehouse .detail-v3-state-pill {
+  background: rgba(148, 163, 184, 0.1) !important;
+  color: #aeb9cc !important;
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+/* Right rail activity becomes a readable timeline; newest event gets the only highlight. */
+.detail-v3-side {
+  background: linear-gradient(180deg, rgba(13, 17, 26, 0.98), rgba(7, 9, 14, 0.98)) !important;
+}
+
+.detail-v3-side-events {
+  position: relative;
+  gap: 0.5rem;
+  padding-left: 0.9rem;
+}
+
+.detail-v3-side-events::before {
+  content: '';
+  position: absolute;
+  left: 0.25rem;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(100, 210, 255, 0.5), rgba(148, 163, 184, 0.12));
+}
+
+.detail-v3-side-event {
+  position: relative;
+  gap: 0.28rem;
+  padding: 0.72rem 0.78rem;
+  border-color: rgba(148, 163, 184, 0.14) !important;
+  background: rgba(16, 21, 30, 0.82) !important;
+  opacity: 0.72;
+  transition:
+    opacity 0.16s ease,
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.detail-v3-side-event::before {
+  content: '';
+  position: absolute;
+  left: -0.92rem;
+  top: 1rem;
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 999px;
+  background: #64748b;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.16);
+}
+
+.detail-v3-side-event:first-child {
+  opacity: 1;
+  border-color: rgba(100, 210, 255, 0.35) !important;
+  background: linear-gradient(145deg, rgba(17, 31, 45, 0.98), rgba(10, 15, 23, 0.98)) !important;
+}
+
+.detail-v3-side-event:first-child::before {
+  background: #64d2ff;
+  box-shadow: 0 0 0 4px rgba(100, 210, 255, 0.16), 0 0 18px rgba(100, 210, 255, 0.32);
+}
+
+.detail-v3-side-event:hover {
+  opacity: 1;
+  transform: translateX(2px);
+  border-color: rgba(160, 176, 204, 0.26) !important;
+}
+
+.detail-v3-side-event-title {
+  color: #f7faff !important;
+  font-weight: 750;
+}
+
+.detail-v3-side-event:not(:first-child) .detail-v3-side-event-title {
+  color: #dbe5f7 !important;
+}
+
+/* Top workflow: restore connector visibility and map CORTP motion to existing markup. */
+.detail-top-flow-shell {
+  border-color: rgba(100, 210, 255, 0.22) !important;
+  background: #070b12 !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal) {
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.detail-top-flow-shell :deep(.step-chip) {
+  min-height: 2.15rem;
+}
+
+.detail-top-flow-shell :deep(.step-dot--sm) {
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: rgba(71, 85, 105, 0.24);
+}
+
+.detail-top-flow-shell :deep(.step-done .step-dot--sm) {
+  background: #22c55e;
+  border-color: #86efac;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-dot--sm) {
+  background: #64d2ff;
+  border-color: #bae6fd;
+  box-shadow: 0 0 0 5px rgba(100, 210, 255, 0.14), 0 0 24px rgba(100, 210, 255, 0.32);
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal .step-label) {
+  color: #cbd5e1;
+  font-size: 0.75rem;
+}
+
+.detail-top-flow-shell :deep(.step-done .step-label) {
+  color: #eafbf0 !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-label) {
+  color: #e0f7ff !important;
+}
+
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  display: inline;
+  color: #92a0b8;
+}
+
+.detail-top-flow-shell :deep(.step-sep) {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-v3-side-event,
+  .detail-top-flow-shell :deep(.step-chip),
+  .detail-top-flow-shell :deep(.step-dot--sm),
+  .detail-top-flow-shell :deep(.step-sep::after) {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.lightbox-overlay {
+  background: rgba(0, 0, 0, 0.84);
+}
+
+.batch-sku-tab--active,
+.detail-v6-surface :deep(.product-tab-active) {
+  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan)) !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  color: #fff !important;
+}
+
+/* Final workflow rail pass: no legacy green, no scrollbar, compact equal-width stage rail. */
+.detail-top-flow-shell {
+  overflow: hidden !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal) {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  gap: clamp(0.25rem, 0.7vw, 0.55rem) !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  padding: 0.35rem 0.2rem !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip) {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  min-height: 2rem !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  padding: 0.15rem 0.32rem !important;
+  background: rgba(15, 23, 42, 0.24) !important;
+  opacity: 1 !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip.step-current) {
+  background: rgba(100, 210, 255, 0.1) !important;
+}
+
+.detail-top-flow-shell :deep(.step-dot--sm) {
+  width: 0.72rem !important;
+  height: 0.72rem !important;
+  background: rgba(71, 85, 105, 0.34) !important;
+  border-color: rgba(148, 163, 184, 0.38) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.detail-top-flow-shell :deep(.step-done .step-dot--sm) {
+  background: linear-gradient(135deg, #334155, #38bdf8) !important;
+  border-color: rgba(125, 211, 252, 0.72) !important;
+  color: #06111d !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.11), 0 0 14px rgba(56, 189, 248, 0.18) !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-dot--sm) {
+  background: #64d2ff !important;
+  border-color: #e0f7ff !important;
+  color: #031420 !important;
+  box-shadow: 0 0 0 4px rgba(100, 210, 255, 0.14), 0 0 22px rgba(100, 210, 255, 0.34) !important;
+}
+
+.detail-top-flow-shell :deep(.step-skipped .step-dot--sm),
+.detail-top-flow-shell :deep(.step-pending .step-dot--sm) {
+  background: rgba(71, 85, 105, 0.26) !important;
+  border-color: rgba(100, 116, 139, 0.42) !important;
+  color: rgba(148, 163, 184, 0.7) !important;
+  box-shadow: none !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal .step-label) {
+  color: #b7c4d8 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.detail-top-flow-shell :deep(.step-done .step-label) {
+  color: #dcefff !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-label) {
+  color: #f7fcff !important;
+}
+
+.detail-top-flow-shell :deep(.step-pending .step-label),
+.detail-top-flow-shell :deep(.step-skipped .step-label) {
+  color: #7f8da3 !important;
+}
+
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  display: none !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-sublabel-inline) {
+  display: inline !important;
+  max-width: min(7.5rem, 45%) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  color: #8fa0b8 !important;
+}
+
+.detail-top-flow-shell :deep(.step-sep) {
+  flex: 0 1 clamp(0.8rem, 2vw, 2.4rem) !important;
+  width: auto !important;
+  min-width: 0.55rem !important;
+  height: 0.125rem !important;
+  background: rgba(71, 85, 105, 0.45) !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip.step-done + .step-sep) {
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.75), rgba(100, 210, 255, 0.42)) !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip.step-current + .step-sep) {
+  background: linear-gradient(90deg, rgba(100, 210, 255, 0.62), rgba(71, 85, 105, 0.42)) !important;
+}
+
+/* Task detail alignment repair: prevent the top card from inheriting oversized three-column minimums. */
+.task-detail-view {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(56, 189, 248, 0.08), transparent 24rem),
+    linear-gradient(145deg, #111827 0%, #0b111a 54%, #060a10 100%) !important;
+  overflow-x: hidden;
+}
+
+.detail-shell {
+  max-width: 100%;
+  padding: 0.9rem clamp(0.9rem, 1.4vw, 1.35rem) 1.35rem !important;
+  overflow-x: hidden;
+}
+
+.detail-v6-surface {
+  max-width: 100%;
+  overflow: visible;
+}
+
+.detail-top-unified.detail-top-v6 {
+  max-width: 100%;
+  margin: 0 !important;
+  padding: clamp(0.95rem, 1.25vw, 1.2rem) !important;
+  border-radius: 1rem !important;
+  background:
+    linear-gradient(145deg, rgba(31, 39, 54, 0.96), rgba(13, 19, 30, 0.98)) !important;
+  border-color: rgba(100, 116, 139, 0.42) !important;
+}
+
+.detail-top-unified.detail-top-v6::before {
+  inset: -8rem -7rem auto auto !important;
+  opacity: 0.22 !important;
+}
+
+.detail-top-grid {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: clamp(0.75rem, 1vw, 1rem) !important;
+  width: 100%;
+  min-width: 0;
+  align-items: start !important;
+}
+
+.detail-top-left,
+.detail-top-mid,
+.detail-top-right,
+.detail-top-identity {
+  min-width: 0;
+}
+
+.detail-top-taskno {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.detail-top-sub,
+.detail-top-current.detail-top-status-pill {
+  max-width: 100%;
+}
+
+.detail-top-flow-shell {
+  max-width: 100% !important;
+  min-width: 0;
+}
+
+.detail-top-mid {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: stretch;
+  width: 100%;
+}
+
+.detail-top-right {
+  justify-self: end;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal) {
+  justify-content: center !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  margin-inline: auto !important;
+  overflow: visible !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip) {
+  flex: 0 0 auto !important;
+  justify-content: flex-start !important;
+  min-width: auto !important;
+  max-width: none !important;
+  padding: 0.2rem 0.3rem !important;
+  background: transparent !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal .step-label),
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  display: inline !important;
+}
+
+.detail-top-flow-shell :deep(.step-sep) {
+  flex: 1 1 clamp(1.5rem, 5vw, 5rem) !important;
+  max-width: 5.5rem !important;
+}
+
+.detail-v3-info-card--refs .detail-v3-link-btn {
+  min-height: 2rem !important;
+  border: 1px solid rgba(125, 211, 252, 0.36) !important;
+  border-radius: 0.625rem !important;
+  background: rgba(8, 145, 178, 0.12) !important;
+  color: #9be8ff !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.detail-v3-info-card--refs .detail-v3-link-btn:hover {
+  border-color: rgba(125, 211, 252, 0.62) !important;
+  background: rgba(8, 145, 178, 0.2) !important;
+  color: #f0fbff !important;
+}
+
+.detail-v3-info-card--refs .detail-v3-card-text {
+  color: #dce7f7 !important;
+}
+
+.detail-v3-module-note {
+  background:
+    linear-gradient(135deg, rgba(14, 26, 40, 0.96), rgba(9, 14, 22, 0.98)) !important;
+  border: 1px solid rgba(100, 210, 255, 0.22) !important;
+  color: #aebdd2 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 10px 28px rgba(0, 0, 0, 0.16) !important;
+}
+
+.detail-v3-module-note::before {
+  color: #e8f7ff !important;
+  background: rgba(100, 210, 255, 0.16) !important;
+  border: 1px solid rgba(125, 211, 252, 0.26) !important;
+}
+
+/* Naive Steps redraw: remove the old black wrapper and keep the rail aligned with the global glass skin. */
+.detail-top-flow-shell {
+  width: auto !important;
+  max-width: 100% !important;
+  padding: 0.16rem 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive.workflow-progress--horizontal) {
+  width: auto !important;
+  max-width: 100% !important;
+  margin-inline: auto !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: visible !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step) {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: max-content !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content) {
+  min-width: 0 !important;
+  overflow: visible !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content-header__title),
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content__description) {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-splitor) {
+  flex: 0 0 clamp(1.25rem, 2.4vw, 2.6rem) !important;
+  width: clamp(1.25rem, 2.4vw, 2.6rem) !important;
+  min-width: clamp(1.25rem, 2.4vw, 2.6rem) !important;
+  background: linear-gradient(90deg, rgba(148, 113, 255, 0.38), rgba(100, 210, 255, 0.46)) !important;
+}
+
+@media (max-width: 1280px) {
+  .detail-top-grid {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: start !important;
+  }
+
+  .detail-top-mid {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .detail-top-right {
+    justify-self: end;
+  }
 }
 </style>

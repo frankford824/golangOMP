@@ -161,7 +161,7 @@ onMounted(notificationsStore.load)
 .notif-drawer-mask {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 6000;
   background: rgba(24, 24, 27, 0.38);
   padding: 1.25rem;
 }
@@ -267,6 +267,7 @@ onMounted(notificationsStore.load)
   gap: 0.65rem;
   overflow: auto;
   padding-right: 0.2rem;
+  min-height: 0;
 }
 
 .notif-drawer-row {
@@ -374,6 +375,154 @@ onMounted(notificationsStore.load)
   .notif-drawer-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+}
+
+/* Apple Music / iOS liquid glass drawer skin. Style-only. */
+.notif-drawer-mask {
+  background:
+    radial-gradient(circle at 9% 8%, rgba(255, 45, 141, 0.22), transparent 26rem),
+    radial-gradient(circle at 86% 10%, rgba(100, 210, 255, 0.18), transparent 30rem),
+    rgba(2, 6, 12, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.notif-drawer {
+  border-color: rgba(100, 210, 255, 0.24);
+  border-radius: 1.35rem;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 45, 141, 0.16), transparent 18rem),
+    radial-gradient(circle at 100% 14%, rgba(100, 210, 255, 0.15), transparent 20rem),
+    linear-gradient(145deg, rgba(22, 28, 41, 0.97), rgba(9, 13, 22, 0.99));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 34px 90px -38px rgba(0, 0, 0, 0.95);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.notif-drawer-eyebrow,
+.notif-drawer-top h3 {
+  color: #f8fbff;
+}
+
+.notif-drawer-head p,
+.notif-drawer-body p,
+.notif-drawer-top time,
+.notif-drawer-segment button,
+.notif-drawer-foot span {
+  color: #aab8cf;
+}
+
+.notif-drawer-btn,
+.notif-drawer-mini,
+.notif-drawer-segment,
+.notif-drawer-foot span,
+.notif-drawer-empty {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(12, 18, 29, 0.72);
+  color: #dce6f7;
+}
+
+.notif-drawer-btn,
+.notif-drawer-mini,
+.notif-drawer-segment button,
+.notif-drawer-row {
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.notif-drawer-btn:hover,
+.notif-drawer-mini:hover,
+.notif-drawer-row:hover {
+  border-color: rgba(125, 211, 252, 0.36);
+  background-color: rgba(24, 35, 52, 0.92);
+}
+
+.notif-drawer-btn:focus-visible,
+.notif-drawer-mini:focus-visible,
+.notif-drawer-segment button:focus-visible,
+.notif-drawer-row:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.42);
+  outline-offset: 2px;
+}
+
+.notif-drawer-btn--brand,
+.notif-drawer-segment button.is-active {
+  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan));
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #fff;
+}
+
+.notif-drawer-btn--brand:disabled {
+  background: rgba(31, 41, 55, 0.72);
+  border-color: rgba(148, 163, 184, 0.18);
+  color: #7f8da3;
+}
+
+.notif-drawer-segment {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.notif-drawer-row:not(.is-read) {
+  border-color: rgba(100, 210, 255, 0.26);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.18), transparent 12rem),
+    linear-gradient(135deg, rgba(23, 37, 58, 0.92), rgba(13, 20, 32, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.notif-drawer-row.is-read {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(11, 16, 26, 0.72);
+}
+
+.notif-drawer-top h3 {
+  line-height: 1.35;
+}
+
+.notif-drawer-body p {
+  color: #c4cfe1;
+}
+
+.notif-drawer-dot {
+  background: var(--yb-music-pink);
+  box-shadow: 0 0 18px rgba(255, 45, 85, 0.6);
+}
+
+.notif-drawer-row.is-read .notif-drawer-dot {
+  background: rgba(220, 230, 255, 0.32);
+  box-shadow: none;
+}
+
+.notif-drawer-foot span {
+  border-color: rgba(100, 210, 255, 0.2);
+  background: rgba(34, 48, 71, 0.78);
+  color: #aee9ff;
+}
+
+.notif-drawer-empty {
+  border-style: dashed;
+  color: #9badc6;
+}
+
+@media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce) {
+  .notif-drawer-mask,
+  .notif-drawer {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .notif-drawer-btn,
+  .notif-drawer-mini,
+  .notif-drawer-segment button,
+  .notif-drawer-row {
+    transition: none !important;
   }
 }
 </style>

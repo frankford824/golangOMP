@@ -1025,4 +1025,171 @@ async function onDeliveryPanelSuccess() {
 .meta-item--replace { color: #1d4ed8; font-weight: 600; }
 .meta-sep { color: #cbd5e1; }
 .empty-assets { font-size: 0.75rem; color: #9ca3af; padding: 0.5rem 0; }
+
+/* Task detail dark skin override. Style-only: keep data flow, uploads, and audit logic unchanged. */
+.detail-block {
+  background:
+    linear-gradient(145deg, rgba(39, 48, 63, 0.96), rgba(9, 18, 31, 0.98)) !important;
+  border-color: rgba(56, 189, 248, 0.32) !important;
+  color: #eef6ff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 40px rgba(0, 0, 0, 0.24) !important;
+}
+
+.block-title,
+.info-row-simple,
+.empty-assets {
+  color: #f8fbff;
+}
+
+.status-inline,
+.row-label,
+.section-label,
+.ref-pane-hint,
+.shared-asset-note {
+  color: #aebbd0;
+}
+
+.block-icon {
+  background: rgba(248, 250, 252, 0.92);
+  color: #1f2937;
+}
+
+.outsource-flag,
+.object-switch-bar,
+.design-asset-pane--refs,
+.design-asset-pane--drafts,
+.nonpreview-panel {
+  background:
+    linear-gradient(145deg, rgba(21, 32, 48, 0.94), rgba(7, 14, 25, 0.96));
+  border-color: rgba(148, 163, 184, 0.24);
+  color: #e8f2ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.design-asset-pane--drafts > .asset-section:first-of-type {
+  min-height: 16.25rem;
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  background:
+    linear-gradient(160deg, rgba(15, 24, 38, 0.92), rgba(6, 12, 22, 0.94));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.version-header {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  padding-bottom: 0.45rem;
+}
+
+.version-group {
+  border-radius: 0.625rem;
+  padding: 0.35rem 0.45rem;
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.version-group-kind.kind-delivery {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #8fd8ff;
+}
+
+.version-group-kind.kind-source {
+  background: rgba(236, 72, 153, 0.16);
+  border-color: rgba(244, 114, 182, 0.36);
+  color: #ff9dd2;
+}
+
+.version-group-no,
+.meta-item,
+.nonpreview-hint {
+  color: #aebbd0;
+}
+
+.version-btn {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.26);
+  color: #d7e7fb;
+}
+
+.version-btn:hover:not(:disabled) {
+  border-color: rgba(125, 211, 252, 0.62);
+  background: rgba(14, 35, 56, 0.86);
+}
+
+.version-btn.version-active {
+  color: #ffffff;
+  border-color: rgba(244, 114, 182, 0.72);
+  background:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(236, 72, 153, 0.68));
+  box-shadow: 0 10px 26px rgba(236, 72, 153, 0.18);
+}
+
+.version-btn.version-disabled {
+  color: rgba(174, 187, 208, 0.5);
+  border-color: rgba(148, 163, 184, 0.15);
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.version-file-count,
+.version-replace-tag,
+.version-unavailable-tag {
+  border-color: rgba(125, 211, 252, 0.32);
+  background: rgba(8, 145, 178, 0.18);
+  color: #a5f3fc;
+}
+
+.version-preview {
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(2, 8, 17, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.version-preview-dl {
+  border-top-color: rgba(148, 163, 184, 0.14);
+}
+
+.nonpreview-name {
+  color: #e8f2ff;
+}
+
+.meta-item--replace {
+  color: #7dd3fc;
+}
+
+.meta-sep {
+  color: rgba(148, 163, 184, 0.45);
+}
+
+:deep(.thumb-btn) {
+  background: rgba(12, 20, 32, 0.92);
+  border-color: rgba(148, 163, 184, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+:deep(.thumb-btn:hover) {
+  border-color: rgba(125, 211, 252, 0.62);
+}
+
+:deep(.thumb-placeholder),
+:deep(.thumb-empty),
+:deep(.apm-placeholder),
+:deep(.apm-empty) {
+  background: rgba(15, 23, 42, 0.72);
+  color: #aebbd0;
+}
+
+:deep(.asset-dl-link--button) {
+  color: #f8fbff;
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+  border-color: rgba(125, 211, 252, 0.52);
+  box-shadow: 0 12px 24px rgba(8, 145, 178, 0.22);
+}
+
+:deep(.asset-dl-link--button:hover) {
+  background: linear-gradient(135deg, #1d4ed8, #0e7490);
+  border-color: rgba(165, 243, 252, 0.72);
+}
 </style>

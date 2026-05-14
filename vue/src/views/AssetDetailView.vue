@@ -447,4 +447,44 @@ onMounted(() => {
   font-size: 0.6875rem;
   font-weight: 600;
 }
+
+/* Apple Music / iOS liquid glass asset detail skin. Style-only. */
+.asset-detail-view {
+  background:
+    radial-gradient(circle at 14% 0%, rgba(255, 45, 141, 0.16), transparent 30rem),
+    radial-gradient(circle at 86% 6%, rgba(100, 210, 255, 0.15), transparent 32rem) !important;
+  color: var(--yb-music-text-2);
+}
+
+.detail-card,
+.version-card,
+.preview-media-shell {
+  border-color: var(--yb-music-border) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.055)) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow: var(--yb-glass-shadow) !important;
+  backdrop-filter: blur(var(--yb-glass-blur));
+  -webkit-backdrop-filter: blur(var(--yb-glass-blur));
+}
+
+.page-title,
+.section-title,
+.version-title,
+.detail-row dd {
+  color: #fff !important;
+}
+
+.page-subtitle,
+.section-meta,
+.detail-row dt,
+.state-text {
+  color: var(--yb-music-muted) !important;
+}
+
+.version-pill {
+  background: rgba(100, 210, 255, 0.15) !important;
+  border: 1px solid rgba(100, 210, 255, 0.28);
+  color: var(--yb-music-cyan) !important;
+}
 </style>

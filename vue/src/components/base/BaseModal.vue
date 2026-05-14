@@ -117,5 +117,40 @@ function confirm() {
   opacity: 0;
   transform: scale(0.95);
 }
-</style>
 
+/* Apple Music / iOS liquid glass modal skin. Style-only. */
+.fixed.inset-0 {
+  background:
+    radial-gradient(circle at 18% 5%, rgba(255, 45, 141, 0.28), transparent 30rem),
+    radial-gradient(circle at 86% 0%, rgba(100, 210, 255, 0.2), transparent 32rem),
+    rgba(0, 0, 0, 0.66) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.fixed.inset-0 > div {
+  border-color: var(--yb-music-border-strong) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07)) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow: 0 34px 90px -38px rgba(0, 0, 0, 0.95) !important;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+h2 {
+  color: #fff !important;
+}
+
+.flex-1 {
+  color: var(--yb-music-text-2) !important;
+}
+
+footer {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+button {
+  color: var(--yb-music-text-2);
+}
+</style>
