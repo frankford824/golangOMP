@@ -569,6 +569,108 @@ body > :where(.fixed, [role='listbox'], [role='dialog']) {
   color: var(--yb-music-text-2);
 }
 
+#app :where(.modal-mask, .drawer-overlay) {
+  z-index: 7200 !important;
+}
+
+/* Global dark-skin guardrail for legacy pages/components still carrying light CSS.
+   This deliberately targets common UI nouns so newly discovered pages do not
+   fall back to white panels after the Apple Music skin. */
+#app :where(
+  [class*='-card'],
+  [class*='-panel'],
+  [class*='-section'],
+  [class*='-surface'],
+  [class*='-box'],
+  [class*='-pane'],
+  [class*='-block'],
+  [class*='-wrap'],
+  [class*='-drawer'],
+  [class*='-dialog'],
+  [class*='-modal'],
+  [class*='-empty'],
+  [class*='-loading'],
+  [class*='-error'],
+  [class*='-warning'],
+  [class*='-banner'],
+  .bg-white,
+  .bg-slate-50,
+  .bg-stone-50,
+  .bg-neutral-50,
+  .bg-gray-50,
+  .bg-slate-100,
+  .bg-stone-100,
+  .bg-neutral-100,
+  .bg-gray-100
+) {
+  border-color: rgba(160, 176, 204, 0.18) !important;
+}
+
+#app :where(
+  [class*='-card'],
+  [class*='-panel'],
+  [class*='-section'],
+  [class*='-surface'],
+  [class*='-box'],
+  [class*='-pane'],
+  [class*='-block'],
+  [class*='-wrap'],
+  [class*='-drawer'],
+  [class*='-dialog'],
+  [class*='-modal'],
+  [class*='-empty'],
+  [class*='-loading'],
+  .bg-white,
+  .bg-slate-50,
+  .bg-stone-50,
+  .bg-neutral-50,
+  .bg-gray-50,
+  .bg-slate-100,
+  .bg-stone-100,
+  .bg-neutral-100,
+  .bg-gray-100
+) {
+  background-color: rgba(17, 24, 39, 0.94) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+#app :where(
+  .bg-red-50,
+  .bg-rose-50,
+  .bg-orange-50,
+  .bg-amber-50,
+  .bg-yellow-50,
+  .bg-blue-50,
+  .bg-indigo-50,
+  .bg-violet-50,
+  .bg-purple-50,
+  .bg-emerald-50,
+  .bg-green-50,
+  .bg-sky-50,
+  [class*='-error'],
+  [class*='-warning'],
+  [class*='-banner']
+) {
+  background-color: rgba(34, 48, 71, 0.88) !important;
+  color: var(--yb-music-text-2) !important;
+}
+
+body > :where(.fixed, [role='listbox'], [role='dialog']) :where(
+  .bg-white,
+  .bg-slate-50,
+  .bg-stone-50,
+  .bg-neutral-50,
+  .bg-gray-50,
+  .bg-slate-100,
+  .bg-stone-100,
+  .bg-neutral-100,
+  .bg-gray-100
+) {
+  background-color: rgba(17, 24, 39, 0.96) !important;
+  color: var(--yb-music-text-2) !important;
+  border-color: rgba(160, 176, 204, 0.18) !important;
+}
+
 /* Legacy admin pages and popovers that predate the skin tokens. */
 #app :where(
   .table-wrap,

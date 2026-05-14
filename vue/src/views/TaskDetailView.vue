@@ -3808,6 +3808,30 @@ watch(taskId, (id) => {
   color: var(--yb-music-cyan) !important;
 }
 
+.action-success,
+.create-success-banner.banner-info {
+  border: 1px solid rgba(48, 209, 88, 0.32) !important;
+  background: rgba(48, 209, 88, 0.14) !important;
+  color: #b7fbd0 !important;
+}
+
+.action-error,
+.create-success-banner.banner-error {
+  border: 1px solid rgba(255, 69, 58, 0.34) !important;
+  background: rgba(255, 69, 58, 0.14) !important;
+  color: #ffd5d2 !important;
+}
+
+.create-success-banner.banner-warning {
+  border: 1px solid rgba(255, 149, 0, 0.34) !important;
+  background: rgba(255, 149, 0, 0.14) !important;
+  color: #ffd28a !important;
+}
+
+.banner-dismiss {
+  color: inherit !important;
+}
+
 .detail-top-flow-shell :deep(.step-current .step-dot--sm) {
   background: var(--yb-music-cyan);
   box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.18);

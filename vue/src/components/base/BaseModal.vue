@@ -120,6 +120,7 @@ function confirm() {
 
 /* Apple Music / iOS liquid glass modal skin. Style-only. */
 .fixed.inset-0 {
+  z-index: 7100 !important;
   background:
     radial-gradient(circle at 18% 5%, rgba(255, 45, 141, 0.18), transparent 30rem),
     radial-gradient(circle at 86% 0%, rgba(100, 210, 255, 0.14), transparent 32rem),
