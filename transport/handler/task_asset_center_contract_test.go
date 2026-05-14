@@ -183,5 +183,8 @@ func (s *taskAssetCenterServiceStub) CancelUploadSessionByID(context.Context, se
 func (s *taskAssetCenterServiceStub) CancelUploadSession(context.Context, service.CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError) {
 	return nil, nil
 }
+func (s *taskAssetCenterServiceStub) BuildTaskReferenceBatchDownloadManifest(context.Context, int64, int64) (*service.TaskReferenceBatchDownloadManifest, *domain.AppError) {
+	return &service.TaskReferenceBatchDownloadManifest{}, nil
+}
 
 var _ service.TaskAssetCenterService = (*taskAssetCenterServiceStub)(nil)

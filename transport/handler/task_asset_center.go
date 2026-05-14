@@ -62,6 +62,25 @@ type cancelTaskAssetUploadSessionReq struct {
 	Remark      string `json:"remark"`
 }
 
+func (h *TaskAssetCenterHandler) BatchDownloadTaskReferenceAssets(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	actor, ok := domain.RequestActorFromContext(c.Request.Context())
+	if !ok || actor.ID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeUnauthorized, "actor context required", nil))
+		return
+	}
+	manifest, appErr := h.svc.BuildTaskReferenceBatchDownloadManifest(c.Request.Context(), taskID, actor.ID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, manifest)
+}
+
 func (h *TaskAssetCenterHandler) ListAssets(c *gin.Context) {
 	taskID, err := parseID(c)
 	if err != nil {

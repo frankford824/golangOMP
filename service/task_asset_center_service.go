@@ -88,6 +88,7 @@ type TaskAssetCenterService interface {
 	CompleteUploadSession(ctx context.Context, params CompleteTaskAssetUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError)
 	CancelUploadSessionByID(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
 	CancelUploadSession(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
+	BuildTaskReferenceBatchDownloadManifest(ctx context.Context, taskID int64, actorID int64) (*TaskReferenceBatchDownloadManifest, *domain.AppError)
 }
 
 type taskAssetCenterService struct {
