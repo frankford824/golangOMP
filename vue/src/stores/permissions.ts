@@ -11,6 +11,7 @@ import type {
 import { RoleEnum, DataScopeEnum, PermissionEnum } from '@/types'
 import { authApi } from '@/services/api/authApi'
 import { setToken, clearToken } from '@/services/http'
+import { useNotificationsStore } from '@/stores/notifications.store'
 import { useTasksStore } from '@/stores/tasks'
 import type { BackendUser, FrontendAccess, LoginResponse } from '@/services/apiTypes'
 
@@ -307,6 +308,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
       String(user.display_name ?? user.displayName ?? user.username ?? ''),
       normalizeFrontendAccess(access),
     )
+    void useNotificationsStore().load().catch(() => undefined)
   }
 
   /**
@@ -436,6 +438,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
 
   function logout() {
     clearToken()
+    useNotificationsStore().reset()
     currentUser.value = null
     menus.value = []
     pages.value = []

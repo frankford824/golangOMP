@@ -108,6 +108,7 @@ type taskAssetCenterService struct {
 	dataScopeResolver         DataScopeResolver
 	scopeUserRepo             repo.UserRepo
 	userDisplayNameResolver   UserDisplayNameResolver
+	workflowRules             designSubmissionWorkflowEngine
 }
 
 const (
@@ -176,6 +177,12 @@ func WithTaskAssetCenterScopeUserRepo(userRepo repo.UserRepo) TaskAssetCenterSer
 func WithTaskAssetCenterUserDisplayNameResolver(resolver UserDisplayNameResolver) TaskAssetCenterServiceOption {
 	return func(s *taskAssetCenterService) {
 		s.userDisplayNameResolver = resolver
+	}
+}
+
+func WithTaskAssetCenterBlueprintRuleEngine(rules designSubmissionWorkflowEngine) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.workflowRules = rules
 	}
 }
 
@@ -667,6 +674,9 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					}
 					if err := s.markDesignSubmissionModuleState(ctx, tx, params.TaskID, transition); err != nil {
 						return fmt.Errorf("mark design module submitted after delivery upload: %w", err)
+					}
+					if err := applyDesignSubmissionWorkflow(ctx, tx, s.workflowRules, task, transition, params.CompletedBy); err != nil {
+						return fmt.Errorf("apply design submission workflow after delivery upload: %w", err)
 					}
 					shouldAppendDesignSubmitted = true
 				}

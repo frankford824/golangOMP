@@ -171,10 +171,36 @@
           }}</a>
         </p>
       </div>
-      <div v-if="currentRow.skuStatus" class="status-pill-row">
-        <span class="status-pill-label">状态</span>
-        <span class="status-pill">{{ skuStatusDisplay }}</span>
-      </div>
+        <div v-if="currentRow.skuStatus" class="status-pill-row">
+          <span class="status-pill-label">状态</span>
+          <span class="status-pill">{{ skuStatusDisplay }}</span>
+        </div>
+        <div v-if="showSkuCostPanel" class="sku-cost-panel">
+          <div class="sku-cost-head">
+            <div>
+              <span class="sku-cost-label">子项成本</span>
+              <strong>{{ formatCostMoney(currentRow.costPrice) }}</strong>
+            </div>
+            <span class="sku-cost-mode">{{ skuCostModeLabel }}</span>
+          </div>
+          <div class="sku-cost-edit">
+            <input
+              v-model.number="skuCostDraft"
+              type="number"
+              min="0"
+              step="0.01"
+              class="sku-cost-input"
+              placeholder="维护成本"
+            />
+            <button type="button" class="sku-cost-save" :disabled="savingSkuCost" @click="saveSkuCost">
+              {{ savingSkuCost ? '保存中' : '保存成本' }}
+            </button>
+          </div>
+          <p v-if="skuCostError" class="sku-cost-error">{{ skuCostError }}</p>
+          <p v-else class="sku-cost-hint">
+            估算 {{ formatCostMoney(currentRow.estimatedCost) }}；保存后该 SKU 将按子项成本同步 ERP。
+          </p>
+        </div>
       </div>
     </template>
 
@@ -201,7 +227,37 @@
           <dt>基本售价</dt>
           <dd>{{ currentRow.baseSalePrice }}</dd>
         </div>
+        <div class="info-row">
+          <dt>成本</dt>
+          <dd>{{ formatCostMoney(currentRow.costPrice) }}</dd>
+        </div>
       </dl>
+      <div v-if="showSkuCostPanel" class="sku-cost-panel">
+        <div class="sku-cost-head">
+          <div>
+            <span class="sku-cost-label">子项成本</span>
+            <strong>{{ formatCostMoney(currentRow.costPrice) }}</strong>
+          </div>
+          <span class="sku-cost-mode">{{ skuCostModeLabel }}</span>
+        </div>
+        <div class="sku-cost-edit">
+          <input
+            v-model.number="skuCostDraft"
+            type="number"
+            min="0"
+            step="0.01"
+            class="sku-cost-input"
+            placeholder="维护成本"
+          />
+          <button type="button" class="sku-cost-save" :disabled="savingSkuCost" @click="saveSkuCost">
+            {{ savingSkuCost ? '保存中' : '保存成本' }}
+          </button>
+        </div>
+        <p v-if="skuCostError" class="sku-cost-error">{{ skuCostError }}</p>
+        <p v-else class="sku-cost-hint">
+          估算 {{ formatCostMoney(currentRow.estimatedCost) }}；保存后该 SKU 将按子项成本同步 ERP。
+        </p>
+      </div>
       <div v-if="currentRow.skuStatus" class="status-pill-row">
         <span class="status-pill-label">状态</span>
         <span class="status-pill">{{ skuStatusDisplay }}</span>
@@ -221,6 +277,7 @@ import { buildParallelProductRows, type TaskParallelProductRow } from '@/domain/
 import { materialModeLabelCn, skuItemStatusLabelCn } from '@/domain/mappers/read-model-labels-cn'
 import { useCategoryOptions } from '@/composables/useCategoryOptions'
 import { useTasksStore } from '@/stores/tasks'
+import { tasksApi } from '@/services/api/tasksApi'
 
 withDefaults(
   defineProps<{
@@ -275,6 +332,9 @@ watch(
 )
 
 const tasksStore = useTasksStore()
+const skuCostDraft = ref<number | undefined>(undefined)
+const savingSkuCost = ref(false)
+const skuCostError = ref('')
 
 const showReferenceBlock = computed(() => isNewProduct.value)
 const currentReferenceRefs = computed((): ReferenceFileRef[] => currentRow.value?.referenceFileRefs ?? [])
@@ -359,8 +419,55 @@ const categoryCodeDisplay = computed(() => {
 
 const skuStatusDisplay = computed(() => skuItemStatusLabelCn(currentRow.value.skuStatus))
 
+const showSkuCostPanel = computed(() => (isNewProduct.value || isPurchase.value) && currentRow.value.id != null)
+const skuCostModeLabel = computed(() => {
+  if (currentRow.value.manualCostOverride === true || currentRow.value.costPriceMode === 'manual') return '手动维护'
+  if (currentRow.value.requiresManualReview === true) return '需人工确认'
+  if (currentRow.value.costPrice != null) return '系统计算'
+  return '未生成'
+})
+
+function formatCostMoney(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  return `${value.toFixed(2)} CNY`
+}
+
+async function saveSkuCost() {
+  const skuItemID = currentRow.value.id
+  if (skuItemID == null) return
+  const value = Number(skuCostDraft.value)
+  if (!Number.isFinite(value) || value < 0) {
+    skuCostError.value = '请输入有效成本'
+    return
+  }
+  savingSkuCost.value = true
+  skuCostError.value = ''
+  try {
+    await tasksApi.patchSkuItemCostInfo(task.value.id, skuItemID, {
+      cost_price: value,
+      manual_cost_override: true,
+      manual_cost_override_reason: '仓库/运营手动维护子项成本',
+      remark: `维护子项成本 ${currentRow.value.skuCode ?? ''}`.trim(),
+    })
+    await tasksStore.loadTaskById(task.value.id)
+  } catch (err) {
+    skuCostError.value = err instanceof Error ? err.message : '保存失败'
+  } finally {
+    savingSkuCost.value = false
+  }
+}
+
 const materialLineDisplay = computed(() =>
   materialModeLabelCn(currentRow.value.materialMode, task.value.newProductMaterialOther),
+)
+
+watch(
+  () => [task.value?.id, safeProductIndex.value, currentRow.value.costPrice] as const,
+  () => {
+    skuCostDraft.value = currentRow.value.costPrice ?? currentRow.value.estimatedCost
+    skuCostError.value = ''
+  },
+  { immediate: true },
 )
 
 function filingStatusLabel(status: string | undefined): string {
@@ -493,6 +600,81 @@ watch(
   background: rgb(241 245 249);
   color: rgb(51 65 85);
   font-size: 0.75rem;
+}
+.sku-cost-panel {
+  margin-top: 0.75rem;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.625rem;
+  background: rgb(248 250 252);
+  padding: 0.75rem;
+}
+.sku-cost-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: rgb(15 23 42);
+}
+.sku-cost-label,
+.sku-cost-mode {
+  display: block;
+  font-size: 0.7rem;
+  line-height: 1rem;
+  color: rgb(100 116 139);
+}
+.sku-cost-mode {
+  white-space: nowrap;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgb(226 232 240);
+  padding: 0.1rem 0.45rem;
+}
+.sku-cost-edit {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
+}
+.sku-cost-input {
+  min-width: 0;
+  flex: 1;
+  height: 2rem;
+  border: 1px solid rgb(203 213 225);
+  border-radius: 0.5rem;
+  background: #fff;
+  padding: 0 0.625rem;
+  font-size: 0.8125rem;
+  outline: none;
+}
+.sku-cost-input:focus {
+  border-color: rgb(37 99 235);
+  box-shadow: 0 0 0 2px rgb(191 219 254);
+}
+.sku-cost-save {
+  flex: 0 0 auto;
+  height: 2rem;
+  border: 1px solid rgb(37 99 235);
+  border-radius: 0.5rem;
+  background: rgb(37 99 235);
+  color: #fff;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.sku-cost-save:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.sku-cost-hint,
+.sku-cost-error {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.15rem;
+}
+.sku-cost-hint {
+  color: rgb(100 116 139);
+}
+.sku-cost-error {
+  color: rgb(220 38 38);
 }
 .info-grid {
   display: grid;

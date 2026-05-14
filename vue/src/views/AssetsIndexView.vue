@@ -43,6 +43,9 @@
           <button type="button" class="ac-icon-btn" :disabled="loading" @click="reload">
             {{ loading ? '刷新中' : '刷新' }}
           </button>
+          <button type="button" class="ac-icon-btn ac-icon-btn--primary" @click="selectedModalOpen = true">
+            已选资产
+          </button>
         </div>
       </div>
 
@@ -94,7 +97,6 @@
       <span v-if="batchDownloadStatus" class="ac-batch-status">{{ batchDownloadStatus }}</span>
       <span v-if="batchDownloadError" class="ac-batch-error">{{ batchDownloadError }}</span>
     </div>
-
     <main class="ac-grid">
       <div v-if="loading" class="ac-loading-state">
         <p class="ac-loading-title">正在加载</p>
@@ -127,17 +129,14 @@
           </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
-              v-if="listCardResolvedPreviewUrl(asset)"
+              :asset-id="String(asset.id)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
+              defer-until-visible
               alt=""
               img-class="ac-card-apm"
               inner-img-class="ac-card-preview-img"
               @open-full="(u) => (previewLightboxSrc = u)"
             />
-            <div v-else class="ac-card-preview-placeholder" aria-label="暂无预览">
-              <span class="ac-card-placeholder-icon" aria-hidden="true"></span>
-              <span>资产预览不可用</span>
-            </div>
           </div>
           <div class="ac-card-info">
             <h2 class="ac-card-title" :title="cardTitle(asset)">{{ cardTitle(asset) }}</h2>
@@ -898,10 +897,9 @@ onBeforeUnmount(() => {
   --ac-text: #1d1d1f;
   --ac-sec: #86868b;
   --ac-accent: #0071e3;
-  /** 主内容最大宽度；随主栏变宽可增至约 6 列，典型宽度约 5 列 */
+  /** 资产页铺满主内容区，列数由视口宽度控制，卡片按比例伸缩 */
   --ac-content-max: 100%;
-  /** 列宽下限：窄屏为整行一列；宽约 1400px 内容区时约 5 列 */
-  --ac-grid-min: 220px;
+  --ac-grid-columns: 5;
   background: var(--ac-bg);
   color: var(--ac-text);
   padding: 0 0 3.75rem;
@@ -998,6 +996,12 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+.ac-icon-btn--primary {
+  background: var(--ac-accent);
+  border-color: var(--ac-accent);
+  color: #fff;
+}
+
 .ac-filters-panel {
   max-width: var(--ac-content-max);
   margin: 12px auto 0;
@@ -1089,12 +1093,33 @@ onBeforeUnmount(() => {
   margin: 24px auto;
   padding: 0 clamp(30px, 3vw, 50px);
   display: grid;
-  grid-template-columns: repeat(
-    auto-fill,
-    minmax(min(100%, var(--ac-grid-min)), 1fr)
-  );
+  grid-template-columns: repeat(var(--ac-grid-columns), minmax(0, 1fr));
   gap: clamp(16px, 2vw, 22px);
   align-items: stretch;
+}
+
+@media (max-width: 1679px) {
+  .assets-index-view {
+    --ac-grid-columns: 4;
+  }
+}
+
+@media (max-width: 1279px) {
+  .assets-index-view {
+    --ac-grid-columns: 3;
+  }
+}
+
+@media (max-width: 979px) {
+  .assets-index-view {
+    --ac-grid-columns: 2;
+  }
+}
+
+@media (max-width: 639px) {
+  .assets-index-view {
+    --ac-grid-columns: 1;
+  }
 }
 
 .ac-grid-empty {
@@ -1193,32 +1218,6 @@ onBeforeUnmount(() => {
   font-size: 11px;
   min-height: 100%;
   border-radius: 0;
-}
-
-.ac-card-preview-placeholder {
-  width: 100%;
-  height: 100%;
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: 16px;
-  background: #f8fafc;
-  color: #ef4444;
-  font-size: 12px;
-}
-
-.ac-card-placeholder-icon {
-  width: 56px;
-  height: 44px;
-  border-radius: 12px;
-  border: 1px solid #dbe3ef;
-  background:
-    linear-gradient(135deg, transparent 50%, #dbe3ef 51%) right 10px top 10px / 18px 18px no-repeat,
-    linear-gradient(135deg, #e7edf5 0 55%, transparent 56%) left 12px bottom 10px / 30px 22px no-repeat,
-    #f1f5f9;
 }
 
 .ac-card-preview-img {

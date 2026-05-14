@@ -2,6 +2,7 @@ import type {
   ClaimConflictPayload,
   NotificationType,
   PoolReassignedPayload,
+  SystemBroadcastPayload,
   TaskAssignedPayload,
   TaskCancelledPayload,
   TaskRejectedPayload,
@@ -60,6 +61,12 @@ export function formatNotification(
         title: '任务已取消',
         content: reason ? `${task}已被${actor}取消：${reason}` : `${task}已被${actor}取消`,
       }
+    }
+    case 'system_broadcast': {
+      const p = safePayload as unknown as SystemBroadcastPayload
+      const title = String(p.title ?? '').trim() || '系统广播'
+      const content = String(p.content ?? '').trim() || '你收到一条系统广播'
+      return { title, content }
     }
     default:
       return { title: '系统通知', content: '你收到一条新通知' }

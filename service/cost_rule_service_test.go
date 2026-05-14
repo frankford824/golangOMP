@@ -172,6 +172,123 @@ func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewExtractsLongestSideFromNotes(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规kt板",
+		DisplayName:  "常规kt板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       1,
+			RuleVersion:  1,
+			RuleName:     "常规KT板基础单价",
+			CategoryCode: "KT_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    float64Ptr(11),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "常规kt板 心理手举牌 最长边25cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.6875) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.6875", result.EstimatedCost)
+	}
+}
+
+func TestCostRulePreviewCopperPaperSizeLookupUsesNameAndPrintSide(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   22,
+		CategoryCode: "COPPER_PAPER",
+		CategoryName: "铜版纸",
+		DisplayName:  "铜版纸",
+		CategoryType: domain.CategoryTypePaper,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:            22,
+			RuleVersion:       1,
+			RuleName:          "铜版纸尺寸规则骨架",
+			CategoryCode:      "COPPER_PAPER",
+			RuleType:          domain.CostRuleTypeSizeBasedFormula,
+			FormulaExpression: "size_lookup_required",
+			Priority:          10,
+			IsActive:          true,
+			Source:            "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "COPPER_PAPER",
+		Notes:        "常规250g铜版纸 双面 10*15cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.RequiresManualReview {
+		t.Fatalf("requires_manual_review = true, want false; result=%+v", result)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.6) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.6", result.EstimatedCost)
+	}
+}
+
+func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
+	tests := []struct {
+		name         string
+		categoryCode string
+		notes        string
+		want         []string
+	}{
+		{
+			name:         "custom film kt does not also add normal kt",
+			categoryCode: "GENERAL",
+			notes:        "定制覆膜kt板 30*40cm",
+			want:         []string{"KT_CUSTOM_FILM"},
+		},
+		{
+			name:         "copper paper can be found from product name",
+			categoryCode: "GENERAL",
+			notes:        "常规250g铜版纸 双面 10*15cm",
+			want:         []string{"COPPER_PAPER"},
+		},
+		{
+			name:         "plain pp is not mistaken for sticky pp",
+			categoryCode: "PP_STICKY",
+			notes:        "PP纸无背胶 20*30cm",
+			want:         []string{"PP_PLAIN"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := costCategoryAliasesFromText(tt.categoryCode, tt.notes)
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("aliases = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCostRulePreviewReturnsManualReviewForManualQuote(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

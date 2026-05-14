@@ -102,7 +102,7 @@ describe('V1 mock E2E flow', () => {
       http.post('/v1/tasks/batch-create/parse-excel', { file_name: 'sku.xlsx' }),
     ])
     expect((tpl.data as { file_name?: string }).file_name).toContain('.xlsx')
-    const parseData = parsed.data as { preview?: unknown[]; violations?: unknown[] }
+    const parseData = ((parsed.data as { data?: unknown }).data ?? parsed.data) as { preview?: unknown[]; violations?: unknown[] }
     expect(Array.isArray(parseData.preview)).toBe(true)
     expect(Array.isArray(parseData.violations)).toBe(true)
   })

@@ -102,13 +102,13 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, emptyTitle: '通知中心' },
       },
       {
-        path: 'assets',
+        path: 'asset-center',
         name: 'AssetsIndex',
         component: () => import('@/views/AssetsIndexView.vue'),
         meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
       },
       {
-        path: 'assets/:id',
+        path: 'asset-center/:id',
         name: 'AssetDetail',
         component: () => import('@/views/AssetDetailView.vue'),
         meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
@@ -311,4 +311,3 @@ router.beforeEach(async (to, _from, next) => {
 
   next()
 })
-

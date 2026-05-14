@@ -1036,17 +1036,19 @@ const detailShowTypeBadge = computed(() => {
   return !!(p && p !== '-')
 })
 
-const detailCategoryLabel = computed(() =>
-  dash(
-    task.value?.newProductCategoryCode ??
-      task.value?.category ??
-      task.value?.erpCategoryCode ??
-      task.value?.categoryName ??
-      task.value?.erpCategoryName ??
-      activeSkuItem.value?.categoryCode ??
-      task.value?.erpIId,
-  ),
-)
+function formatCategoryNameWithCode(name?: string | null, code?: string | null): string {
+  const n = String(name ?? '').trim()
+  const c = String(code ?? '').trim()
+  if (n && c && n !== c) return `${n}（${c}）`
+  return n || c
+}
+
+const detailCategoryLabel = computed(() => {
+  const t = task.value
+  const code = activeSkuItem.value?.categoryCode ?? t?.newProductCategoryCode ?? t?.erpCategoryCode ?? t?.erpIId
+  const name = t?.categoryName ?? t?.category ?? t?.erpCategoryName
+  return dash(formatCategoryNameWithCode(name, code))
+})
 /** 设计/修改需求与文案，不含运营 note（见 detailNoteLabel） */
 const detailRequirementLabel = computed(() => {
   // 非批量任务优先使用任务级 designRequirement（编辑弹窗写入目标），

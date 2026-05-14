@@ -1215,15 +1215,15 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			item["short_name"] = shortName
 		}
 		if payload.SPrice != nil {
-			item["sale_price"] = *payload.SPrice
+			item["s_price"] = *payload.SPrice
 		}
 		if categoryName := strings.TrimSpace(payload.CategoryName); categoryName != "" {
 			item["category_name"] = categoryName
 		}
 		if payload.CostPrice != nil {
-			item["cost_price"] = *payload.CostPrice
+			item["c_price"] = *payload.CostPrice
 		} else if payload.BusinessInfo != nil && payload.BusinessInfo.CostPrice != nil {
-			item["cost_price"] = *payload.BusinessInfo.CostPrice
+			item["c_price"] = *payload.BusinessInfo.CostPrice
 		}
 		if payload.Remark != "" {
 			item["remark"] = payload.Remark

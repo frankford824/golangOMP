@@ -772,7 +772,9 @@ func TestTaskAssetServiceSubmitDesignFromInProgress(t *testing.T) {
 	})
 	assetRepo := newStep04TaskAssetRepo()
 	eventRepo := &step04TaskEventRepo{}
-	svc := NewTaskAssetService(taskRepo, assetRepo, eventRepo, newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), step04TxRunner{})
+	workflow := &step04DesignSubmissionWorkflow{}
+	svc := NewTaskAssetService(taskRepo, assetRepo, eventRepo, newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), step04TxRunner{},
+		WithTaskAssetBlueprintRuleEngine(workflow))
 
 	asset, appErr := svc.SubmitDesign(ctx, SubmitDesignParams{
 		TaskID:     2,
@@ -795,6 +797,12 @@ func TestTaskAssetServiceSubmitDesignFromInProgress(t *testing.T) {
 	}
 	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventDesignSubmitted {
 		t.Fatalf("SubmitDesign() expected one task.design.submitted event, got %+v", eventRepo.events)
+	}
+	if len(workflow.calls) != 1 {
+		t.Fatalf("SubmitDesign() workflow calls = %+v, want one design submit", workflow.calls)
+	}
+	if got := workflow.calls[0]; got.taskID != 2 || got.moduleKey != domain.ModuleKeyDesign || got.action != domain.ModuleActionSubmit || got.actorID == nil || *got.actorID != designerID {
+		t.Fatalf("SubmitDesign() workflow call = %+v", got)
 	}
 }
 
@@ -1324,6 +1332,31 @@ func (r *step04TaskModuleEventRepo) ListByTaskModule(context.Context, int64, int
 
 func (r *step04TaskModuleEventRepo) ListRecentByTask(context.Context, int64, int) ([]*domain.TaskModuleEvent, error) {
 	return r.events, nil
+}
+
+type step04DesignSubmissionWorkflowCall struct {
+	taskID    int64
+	moduleKey string
+	action    string
+	actorID   *int64
+}
+
+type step04DesignSubmissionWorkflow struct {
+	calls []step04DesignSubmissionWorkflowCall
+}
+
+func (w *step04DesignSubmissionWorkflow) ApplyAfterAction(_ context.Context, _ repo.Tx, task *domain.Task, moduleKey, action string, actorID *int64, _ int64) error {
+	var taskID int64
+	if task != nil {
+		taskID = task.ID
+	}
+	w.calls = append(w.calls, step04DesignSubmissionWorkflowCall{
+		taskID:    taskID,
+		moduleKey: moduleKey,
+		action:    action,
+		actorID:   cloneInt64Ptr(actorID),
+	})
+	return nil
 }
 
 type step04AssignmentNotification struct {

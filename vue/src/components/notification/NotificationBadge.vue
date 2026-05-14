@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useNotificationsStore } from '@/stores/notifications.store'
 
@@ -29,8 +29,25 @@ useWebSocket({
       notificationsStore.applyUnreadCount(event.payload.unread_count)
     }
   },
-  onFallbackPoll: notificationsStore.refreshUnreadCount,
+  onFallbackPoll: notificationsStore.load,
 })
 
-onMounted(notificationsStore.refreshUnreadCount)
+function syncNotifications(): void {
+  void notificationsStore.load()
+}
+
+function handleVisibilityChange(): void {
+  if (document.visibilityState === 'visible') syncNotifications()
+}
+
+onMounted(() => {
+  syncNotifications()
+  window.addEventListener('focus', syncNotifications)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', syncNotifications)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 </script>

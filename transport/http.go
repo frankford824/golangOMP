@@ -97,7 +97,7 @@ func NewRouter(
 
 	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
 
-	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH)
+	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH, notificationH)
 
 	// SKU endpoints
 	skuGroup := v1.Group("/sku")
@@ -219,6 +219,7 @@ func NewRouter(
 		taskGroup.PATCH("/:id/product-info", access(taskGroup, http.MethodPatch, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchProductInfo)
 		taskGroup.GET("/:id/cost-info", access(taskGroup, http.MethodGet, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetCostInfo)
 		taskGroup.PATCH("/:id/cost-info", access(taskGroup, http.MethodPatch, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchCostInfo)
+		taskGroup.PATCH("/:id/sku-items/:sku_item_id/cost-info", access(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchSKUItemCostInfo)
 		taskGroup.POST("/:id/cost-quote/preview", access(taskGroup, http.MethodPost, "/:id/cost-quote/preview", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), taskH.PreviewCostQuote)
 		// business-info remains a compatibility filing entry, but Step 87 filing policy
 		// also auto-triggers from create/audit/procurement/warehouse checkpoints.
@@ -302,6 +303,7 @@ func NewRouter(
 		assetGroup.GET("", access(assetGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.ListAssetResources)
 		assetGroup.GET("/search", access(assetGroup, http.MethodGet, "/search", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.SearchGlobalAssets)
 		assetGroup.POST("/batch-download", access(assetGroup, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.BatchDownloadGlobalAssets)
+		assetGroup.POST("/excel-package/preview", access(assetGroup, http.MethodPost, "/excel-package/preview", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.PreviewExcelPackage)
 		assetGroup.GET("/:asset_id", access(assetGroup, http.MethodGet, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.GetGlobalAsset)
 		assetGroup.DELETE("/:asset_id", access(assetGroup, http.MethodDelete, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DeleteGlobalAsset)
 		assetGroup.GET("/:asset_id/download", access(assetGroup, http.MethodGet, "/:asset_id/download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DownloadGlobalAsset)

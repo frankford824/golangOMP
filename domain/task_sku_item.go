@@ -59,34 +59,47 @@ func (s TaskSKUStatus) Valid() bool {
 }
 
 type TaskSKUItem struct {
-	ID                  int64              `db:"id"                    json:"id"`
-	TaskID              int64              `db:"task_id"               json:"task_id"`
-	SequenceNo          int                `db:"sequence_no"           json:"sequence_no"`
-	SKUCode             string             `db:"sku_code"              json:"sku_code"`
-	SKUStatus           TaskSKUStatus      `db:"sku_status"            json:"sku_status"`
-	ProductID           *int64             `db:"product_id"            json:"product_id,omitempty"`
-	ERPProductID        *string            `db:"erp_product_id"        json:"erp_product_id,omitempty"`
-	FilingStatus        FilingStatus       `db:"filing_status"         json:"filing_status,omitempty"`
-	ERPSyncStatus       FilingStatus       `db:"erp_sync_status"       json:"erp_sync_status,omitempty"`
-	ERPSyncRequired     bool               `db:"erp_sync_required"     json:"erp_sync_required"`
-	ERPSyncVersion      int64              `db:"erp_sync_version"      json:"erp_sync_version"`
-	LastFiledAt         *time.Time         `db:"last_filed_at"         json:"last_filed_at,omitempty"`
-	FilingErrorMessage  string             `db:"filing_error_message"  json:"filing_error_message,omitempty"`
-	ProductNameSnapshot string             `db:"product_name_snapshot" json:"product_name_snapshot"`
-	ProductShortName    string             `db:"product_short_name"    json:"product_short_name,omitempty"`
-	ProductIID          string             `db:"-"                     json:"product_i_id,omitempty"`
-	CategoryCode        string             `db:"category_code"         json:"category_code,omitempty"`
-	MaterialMode        string             `db:"material_mode"         json:"material_mode,omitempty"`
-	CostPriceMode       string             `db:"cost_price_mode"       json:"cost_price_mode,omitempty"`
-	Quantity            *int64             `db:"quantity"              json:"quantity,omitempty"`
-	BaseSalePrice       *float64           `db:"base_sale_price"       json:"base_sale_price,omitempty"`
-	DesignRequirement   string             `db:"design_requirement"    json:"design_requirement,omitempty"`
-	ChangeRequest       string             `db:"-"                     json:"change_request,omitempty"`
-	VariantJSON         json.RawMessage    `db:"variant_json"          json:"variant_json,omitempty"`
-	ReferenceFileRefs   []ReferenceFileRef `db:"-"                  json:"reference_file_refs"`
-	DedupeKey           string             `db:"dedupe_key"            json:"dedupe_key,omitempty"`
-	CreatedAt           time.Time          `db:"created_at"            json:"created_at"`
-	UpdatedAt           time.Time          `db:"updated_at"            json:"updated_at"`
+	ID                       int64              `db:"id"                    json:"id"`
+	TaskID                   int64              `db:"task_id"               json:"task_id"`
+	SequenceNo               int                `db:"sequence_no"           json:"sequence_no"`
+	SKUCode                  string             `db:"sku_code"              json:"sku_code"`
+	SKUStatus                TaskSKUStatus      `db:"sku_status"            json:"sku_status"`
+	ProductID                *int64             `db:"product_id"            json:"product_id,omitempty"`
+	ERPProductID             *string            `db:"erp_product_id"        json:"erp_product_id,omitempty"`
+	FilingStatus             FilingStatus       `db:"filing_status"         json:"filing_status,omitempty"`
+	ERPSyncStatus            FilingStatus       `db:"erp_sync_status"       json:"erp_sync_status,omitempty"`
+	ERPSyncRequired          bool               `db:"erp_sync_required"     json:"erp_sync_required"`
+	ERPSyncVersion           int64              `db:"erp_sync_version"      json:"erp_sync_version"`
+	LastFiledAt              *time.Time         `db:"last_filed_at"         json:"last_filed_at,omitempty"`
+	FilingErrorMessage       string             `db:"filing_error_message"  json:"filing_error_message,omitempty"`
+	ProductNameSnapshot      string             `db:"product_name_snapshot" json:"product_name_snapshot"`
+	ProductShortName         string             `db:"product_short_name"    json:"product_short_name,omitempty"`
+	ProductIID               string             `db:"-"                     json:"product_i_id,omitempty"`
+	CategoryCode             string             `db:"category_code"         json:"category_code,omitempty"`
+	MaterialMode             string             `db:"material_mode"         json:"material_mode,omitempty"`
+	CostPriceMode            string             `db:"cost_price_mode"       json:"cost_price_mode,omitempty"`
+	Quantity                 *int64             `db:"quantity"              json:"quantity,omitempty"`
+	BaseSalePrice            *float64           `db:"base_sale_price"       json:"base_sale_price,omitempty"`
+	CostPrice                *float64           `db:"cost_price"            json:"cost_price,omitempty"`
+	EstimatedCost            *float64           `db:"estimated_cost"        json:"estimated_cost,omitempty"`
+	CostRuleID               *int64             `db:"cost_rule_id"          json:"cost_rule_id,omitempty"`
+	CostRuleName             string             `db:"cost_rule_name"        json:"cost_rule_name,omitempty"`
+	CostRuleSource           string             `db:"cost_rule_source"      json:"cost_rule_source,omitempty"`
+	MatchedRuleVersion       *int               `db:"matched_rule_version"  json:"matched_rule_version,omitempty"`
+	PrefillSource            string             `db:"prefill_source"        json:"prefill_source,omitempty"`
+	PrefillAt                *time.Time         `db:"prefill_at"            json:"prefill_at,omitempty"`
+	RequiresManualReview     bool               `db:"requires_manual_review" json:"requires_manual_review"`
+	ManualCostOverride       bool               `db:"manual_cost_override"  json:"manual_cost_override"`
+	ManualCostOverrideReason string             `db:"manual_cost_override_reason" json:"manual_cost_override_reason,omitempty"`
+	OverrideActor            string             `db:"override_actor"        json:"override_actor,omitempty"`
+	OverrideAt               *time.Time         `db:"override_at"           json:"override_at,omitempty"`
+	DesignRequirement        string             `db:"design_requirement"    json:"design_requirement,omitempty"`
+	ChangeRequest            string             `db:"-"                     json:"change_request,omitempty"`
+	VariantJSON              json.RawMessage    `db:"variant_json"          json:"variant_json,omitempty"`
+	ReferenceFileRefs        []ReferenceFileRef `db:"-"                  json:"reference_file_refs"`
+	DedupeKey                string             `db:"dedupe_key"            json:"dedupe_key,omitempty"`
+	CreatedAt                time.Time          `db:"created_at"            json:"created_at"`
+	UpdatedAt                time.Time          `db:"updated_at"            json:"updated_at"`
 }
 
 type ProcurementRecordItem struct {

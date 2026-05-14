@@ -607,6 +607,86 @@ func TestUpdateBusinessInfoCostChangeRefilesERPAndAppendsCostEvent(t *testing.T)
 	}
 }
 
+func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "铜版纸", Label: "铜版纸"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			692: {
+				ID:                  692,
+				TaskNo:              "RW-20260513-A-000689",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				SKUCode:             "NSCO000000",
+				PrimarySKUCode:      "NSCO000000",
+				ProductNameSnapshot: "真/常规250g铜版纸/双面/红字拱圆形桌牌/主桌1张/10*15cm",
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			692: {
+				TaskID:       692,
+				Category:     "铜版纸",
+				CategoryCode: "COPPER_PAPER",
+				CategoryName: "铜版纸",
+				SpecText:     "10*15cm",
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			692: {
+				{
+					ID:                  526,
+					TaskID:              692,
+					SequenceNo:          1,
+					SKUCode:             "NSCO000000",
+					ProductNameSnapshot: "真/常规250g铜版纸/双面/红字拱圆形桌牌/主桌1张/10*15cm",
+					CategoryCode:        "COPPER_PAPER",
+				},
+			},
+		},
+	}
+	eventRepo := &prdTaskEventRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		eventRepo,
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	updated, appErr := svc.UpdateSKUItemCostInfo(context.Background(), UpdateTaskSKUItemCostInfoParams{
+		TaskID:             692,
+		SKUItemID:          526,
+		OperatorID:         1,
+		CostPrice:          float64Ptr(0.6),
+		ManualCostOverride: true,
+		Remark:             "test single sku item cost",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateSKUItemCostInfo() unexpected error: %+v", appErr)
+	}
+	if updated.CostPrice == nil || *updated.CostPrice != 0.6 {
+		t.Fatalf("updated sku cost = %+v, want 0.6", updated.CostPrice)
+	}
+	if got := taskRepo.details[692].CostPrice; got == nil || *got != 0.6 {
+		t.Fatalf("task detail cost = %+v, want synced 0.6", got)
+	}
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatalf("upsert calls = %d, want 1", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || *got != 0.6 {
+		t.Fatalf("erp business_info cost_price = %+v, want 0.6", got)
+	}
+	if got := bridgeStub.upsertPayload.CostPrice; got == nil || *got != 0.6 {
+		t.Fatalf("erp top-level cost_price = %+v, want 0.6", got)
+	}
+}
+
 func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreateSync(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},

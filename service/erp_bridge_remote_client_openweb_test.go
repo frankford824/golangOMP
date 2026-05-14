@@ -49,17 +49,17 @@ func TestBuildERPRemoteOpenWebBizUpsert(t *testing.T) {
 	if item["category_name"] != "Demo Category" {
 		t.Fatalf("category_name = %#v, want Demo Category", item["category_name"])
 	}
-	if item["sale_price"] != 99.5 {
-		t.Fatalf("sale_price = %#v, want 99.5", item["sale_price"])
+	if item["s_price"] != 99.5 {
+		t.Fatalf("s_price = %#v, want 99.5", item["s_price"])
 	}
-	if _, ok := item["s_price"]; ok {
-		t.Fatalf("s_price should not be sent to ERP OpenWeb item: %#v", item["s_price"])
+	if _, ok := item["sale_price"]; ok {
+		t.Fatalf("sale_price should not be sent to ERP OpenWeb item: %#v", item["sale_price"])
 	}
-	if item["cost_price"] != 12.5 {
-		t.Fatalf("cost_price = %#v, want 12.5", item["cost_price"])
+	if item["c_price"] != 12.5 {
+		t.Fatalf("c_price = %#v, want 12.5", item["c_price"])
 	}
-	if _, ok := item["c_price"]; ok {
-		t.Fatalf("c_price should not be sent to ERP OpenWeb item: %#v", item["c_price"])
+	if _, ok := item["cost_price"]; ok {
+		t.Fatalf("cost_price should not be sent to ERP OpenWeb item: %#v", item["cost_price"])
 	}
 	if item["remark"] != "task_business_info_filing" {
 		t.Fatalf("remark = %#v, want task_business_info_filing", item["remark"])

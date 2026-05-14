@@ -1,10 +1,10 @@
-# V1 API 速查表(212 path · 一行一条)
+# V1 API 速查表(215 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 212 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 215 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -50,6 +50,7 @@
 | GET | `/v1/tasks/{id}` | Get task read model | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/product-info` | Get per-task product information；Patch per-task product information | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/cost-info` | Get per-task cost information；Patch per-task cost information | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/tasks/{id}/sku-items/{sku_item_id}/cost-info` | Patch per-SKU cost information for a batch task item | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-quote/preview` | Preview cost quote for one task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/tasks/{id}/business-info` | Update task business-info and generic cost fields | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/filing-status` | Get task filing status view | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -147,6 +148,7 @@
 | POST | `/v1/tasks/{id}/modules/{module_key}/reassign` | Reassign a task module within team scope | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/modules/{module_key}/pool-reassign` | Reassign a task module between pools | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cancel` | Cancel or close a task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/notifications/broadcast` | Broadcast a notification to one, many, or all users | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/task-create/asset-center/upload-sessions` | Create task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/task-create/asset-center/upload-sessions/{session_id}` | Get task-create reference upload session | GET:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/complete` | Complete task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
@@ -165,6 +167,7 @@
 | POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort` | Abort upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/assets` | List assets | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/batch-download` | Batch download asset direct URL manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/excel-package/preview` | Preview Excel image package manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/download` | Get asset download info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/preview` | Get asset preview info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |

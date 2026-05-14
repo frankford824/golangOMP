@@ -273,6 +273,7 @@ func main() {
 	integrationCenterSvc := service.NewIntegrationCenterService(integrationCallLogRepo, integrationExecutionRepo, mdb)
 	taskAssetSvc := service.NewTaskAssetService(taskRepo, taskAssetRepo, taskEventRepo, uploadRequestRepo, assetStorageRefRepo, mdb,
 		service.WithTaskAssetModuleRepo(taskModuleRepo),
+		service.WithTaskAssetBlueprintRuleEngine(blueprintRules),
 		service.WithTaskAssetDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetScopeUserRepo(userRepo),
 		service.WithTaskAssetUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
@@ -297,6 +298,7 @@ func main() {
 	taskAssetCenterSvc := service.NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, assetStorageRefRepo, taskEventRepo, mdb, uploadClient,
 		service.WithOSSDirectService(ossDirectSvc),
 		service.WithTaskAssetCenterModuleRepo(taskModuleRepo),
+		service.WithTaskAssetCenterBlueprintRuleEngine(blueprintRules),
 		service.WithTaskAssetCenterDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetCenterScopeUserRepo(userRepo),
 		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
@@ -322,7 +324,9 @@ func main() {
 		service.WithWarehouseFilingTrigger(taskSvc))
 	operationLogSvc := service.NewOperationLogService(taskEventRepo, exportJobEventRepo, integrationCallLogRepo)
 	wsHub := wsservice.NewHub(logger.Named("websocket"))
-	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"))
+	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"),
+		notificationsvc.WithUserRepo(userRepo),
+		notificationsvc.WithTxRunner(mdb))
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
 	blueprintRules.SetNotificationGenerator(notificationGen)
 	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,
