@@ -73,7 +73,7 @@
       <p v-if="templateName" class="template-line">模板：{{ templateName }}</p>
       <p class="rule-line">
         请按模板填写后上传，最多支持 200 行。<br>
-        必填：产品名称、设计要求；可选：产品款识编码、参考图。<br>
+        必填：产品名称、设计要求；可选：产品款式编码、参考图。<br>
         参考图请放在对应产品所在行。
       </p>
     </div>
@@ -90,7 +90,7 @@
               <th>行</th>
               <th>产品名</th>
               <th>设计要求</th>
-              <th>产品款识编码</th>
+              <th>产品款式编码</th>
               <th>参考图</th>
               <th>错误</th>
             </tr>

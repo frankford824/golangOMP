@@ -251,7 +251,7 @@ func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) 
 			violations = append(violations, ParseViolation{
 				Column:  productIIDField.Column,
 				Code:    "conflicting_product_i_id_columns",
-				Message: "产品款识编码与商品编码列值不一致，请保持一致后重试",
+				Message: "产品款式编码与商品编码列值不一致，请保持一致后重试",
 			})
 		} else if primaryValue != "" {
 			item.ProductIID = primaryValue
@@ -359,7 +359,7 @@ func (s *parseService) validateProductIIDs(ctx context.Context, items []service.
 			}
 			violations = append(violations, ParseViolation{
 				Row:     row,
-				Column:  "产品款识编码",
+				Column:  "产品款式编码",
 				Code:    "invalid_i_id",
 				Message: "batch_items[].product_i_id must be selected from ERP product i_id options",
 			})
