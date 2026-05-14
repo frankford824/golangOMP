@@ -110,40 +110,18 @@ Content-Type: `application/json`
 {
   "data": {
     "items": [
-      {
-        "asset_id": 1001,
-        "task_id": 7001,
-        "filename": "design.psd",
-        "file_size": 1024,
-        "mime_type": "image/vnd.adobe.photoshop",
-        "download_url": "https://oss.example/...",
-        "expires_at": "2026-05-12T12:00:00Z"
-      }
+      "..."
     ],
-    "failures": [],
-    "success_count": 1,
-    "failure_count": 0,
-    "total_size": 1024,
-    "expires_at": "2026-05-12T12:00:00Z"
+    "success_count": 123,
+    "failure_count": 123,
+    "total_size": 123
   }
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `data.items` | array<object> | 是 | 可下载资产列表。 |
-| `data.items[].asset_id` | integer | 是 | 资产 ID。 |
-| `data.items[].task_id` | integer | 是 | 资产所属任务 ID。 |
-| `data.items[].filename` | string | 是 | 下载时使用的文件名，同批次重名会自动追加序号。 |
-| `data.items[].file_size` | integer | 是 | 文件大小，单位 byte。 |
-| `data.items[].mime_type` | string | 否 | 文件 MIME 类型。 |
-| `data.items[].download_url` | string | 是 | OSS 预签名直链，浏览器直接从 OSS 下载。 |
-| `data.items[].expires_at` | string | 否 | 单个下载链接过期时间。 |
-| `data.failures` | array<object> | 否 | 单个资产不可下载原因，如 asset_not_found、missing_storage_key、cleaned、deleted、upload_status_not_uploaded、total_size_limit_exceeded。 |
-| `data.success_count` | integer | 是 | 成功签出直链数量。 |
-| `data.failure_count` | integer | 是 | 不可下载资产数量。 |
-| `data.total_size` | integer | 是 | 返回资产的已知总大小，最大 512MB。 |
-| `data.expires_at` | string | 否 | 本批次中最早的下载链接过期时间。 |
+| `data` | AssetBatchDownloadManifest | 否 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -156,12 +134,11 @@ Content-Type: `application/json`
 curl -X POST https://api.example.com/v1/assets/batch-download \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"asset_ids":[1001,1002]}'
+  -d '{"example":"value"}'
 ```
 
 ### 前端最佳实践
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
-- 批量下载先请求 manifest，再由浏览器拉取每个 `download_url` 并在前端生成 ZIP；后端不代理文件字节，也不在 API 服务内打 ZIP 包。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -1086,3 +1063,4 @@ curl -X POST https://api.example.com/v1/assets/<asset_id>/restore \
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+

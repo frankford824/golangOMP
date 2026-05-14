@@ -4699,6 +4699,82 @@ components:
           type: string
           format: date-time
           nullable: true
+    TaskReferenceBatchDownloadRequest:
+      type: object
+      additionalProperties: false
+      description: Reserved for future filters. Send `{}` for now.
+    TaskReferenceBatchDownloadItem:
+      type: object
+      required: [key, filename, file_size, download_url, source_kind]
+      properties:
+        key:
+          type: string
+        filename:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+        download_url:
+          type: string
+          format: uri
+          description: Presigned OSS direct download URL or compatibility proxy path.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        source_kind:
+          type: string
+          enum: [formalized_asset, legacy_ref]
+        asset_id:
+          type: integer
+          nullable: true
+        ref_id:
+          type: string
+          nullable: true
+    TaskReferenceBatchDownloadFailure:
+      type: object
+      required: [reason]
+      properties:
+        key:
+          type: string
+        source_kind:
+          type: string
+          enum: [formalized_asset, legacy_ref]
+        asset_id:
+          type: integer
+          nullable: true
+        ref_id:
+          type: string
+          nullable: true
+        filename:
+          type: string
+        reason:
+          type: string
+    TaskReferenceBatchDownloadManifest:
+      type: object
+      required: [items, success_count, failure_count, total_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskReferenceBatchDownloadItem'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskReferenceBatchDownloadFailure'
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        total_size:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
     ValidationViolation:
       type: object
       properties:
@@ -10659,6 +10735,64 @@ paths:
                       $ref: '#/components/schemas/DesignAsset'
         '404':
           description: Task not found
+  /v1/tasks/{id}/reference-assets/batch-download:
+    post:
+      summary: Batch download task reference direct URL manifest
+      description: |
+        Return a task-scoped direct-download manifest that aggregates all reference images visible on task detail:
+        - formalized reference assets under task asset center
+        - legacy reference_file_refs persisted on task detail or sku_items
+        The backend does not build ZIP packages; frontend should use JSZip.
+      tags: [TaskAssetCenter, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskReferenceBatchDownloadRequest'
+      responses:
+        '200':
+          description: Task reference direct download manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskReferenceBatchDownloadManifest'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error while building manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/tasks/{id}/assets/timeline:
     get:
       summary: List legacy task asset timeline
