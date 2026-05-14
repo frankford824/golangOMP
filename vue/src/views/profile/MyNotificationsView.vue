@@ -923,4 +923,240 @@ onMounted(() => {
     flex-wrap: wrap;
   }
 }
+
+/* Apple Music / iOS liquid glass notification page skin. Style-only. */
+.notif-page {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 8% 2%, rgba(255, 45, 141, 0.16), transparent 25rem),
+    radial-gradient(circle at 92% 4%, rgba(100, 210, 255, 0.14), transparent 30rem),
+    linear-gradient(145deg, #101722 0%, #0b1019 46%, #06080d 100%);
+  color: #eaf1ff;
+}
+
+.notif-page::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.045), transparent 32%),
+    radial-gradient(circle at 62% 16%, rgba(148, 113, 255, 0.10), transparent 24rem);
+}
+
+.notif-hero,
+.notif-broadcast,
+.notif-list-panel,
+.notif-summary {
+  border-color: rgba(100, 210, 255, 0.22);
+  background:
+    linear-gradient(145deg, rgba(22, 30, 44, 0.94), rgba(11, 16, 26, 0.97));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 22px 60px -42px rgba(0, 0, 0, 0.86);
+}
+
+.notif-hero,
+.notif-broadcast,
+.notif-list-panel {
+  border-radius: 1.1rem;
+}
+
+.notif-summary {
+  border-radius: 1rem;
+}
+
+.notif-eyebrow {
+  color: #9be8ff;
+}
+
+.notif-hero h1,
+.notif-section-head h2,
+.notif-row h3 {
+  color: #f8fbff;
+  letter-spacing: 0;
+}
+
+.notif-hero p,
+.notif-section-head p,
+.notif-broadcast-footer p,
+.notif-row p {
+  color: #b8c4d8;
+}
+
+.notif-field span,
+.notif-summary span,
+.notif-row time,
+.notif-user-option small {
+  color: #8fa0b8;
+}
+
+.notif-segment,
+.notif-choice,
+.notif-recipient-panel,
+.notif-empty,
+.notif-empty-inline {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(10, 15, 24, 0.68);
+}
+
+.notif-segment,
+.notif-choice {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.notif-segment button,
+.notif-choice button {
+  color: #aab8cf;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.notif-segment button.is-active,
+.notif-choice button.is-active,
+.notif-btn--primary {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan));
+  color: #fff;
+  box-shadow: 0 14px 28px -20px rgba(255, 45, 141, 0.82);
+}
+
+.notif-btn--ghost,
+.notif-mini-btn {
+  border-color: rgba(148, 163, 184, 0.26);
+  background: rgba(12, 18, 29, 0.72);
+  color: #dce7f7;
+}
+
+.notif-btn--ghost:hover:not(:disabled),
+.notif-mini-btn:hover {
+  border-color: rgba(125, 211, 252, 0.42);
+  background: rgba(24, 35, 52, 0.92);
+  color: #f8fbff;
+}
+
+.notif-btn:disabled {
+  opacity: 0.48;
+}
+
+.notif-field input,
+.notif-field textarea,
+.notif-recipient-search input {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(7, 12, 20, 0.82);
+  color: #f8fbff;
+}
+
+.notif-field input::placeholder,
+.notif-field textarea::placeholder,
+.notif-recipient-search input::placeholder {
+  color: #64748b;
+}
+
+.notif-field input:focus,
+.notif-field textarea:focus,
+.notif-recipient-search input:focus {
+  border-color: rgba(125, 211, 252, 0.62);
+  background: rgba(10, 18, 29, 0.94);
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12);
+}
+
+.notif-recipient-search svg {
+  color: #7dd3fc;
+}
+
+.notif-selected-users button {
+  border-color: rgba(125, 211, 252, 0.28);
+  background: rgba(8, 145, 178, 0.16);
+  color: #aee9ff;
+}
+
+.notif-user-option {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(12, 18, 29, 0.72);
+}
+
+.notif-user-option:hover {
+  border-color: rgba(125, 211, 252, 0.32);
+  background: rgba(24, 35, 52, 0.82);
+}
+
+.notif-user-option strong {
+  color: #eef6ff;
+}
+
+.notif-broadcast-footer p.is-error {
+  color: #ffb4ad;
+}
+
+.notif-row {
+  border-color: rgba(100, 210, 255, 0.26);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.16), transparent 13rem),
+    linear-gradient(135deg, rgba(23, 37, 58, 0.92), rgba(13, 20, 32, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.notif-row:hover {
+  border-color: rgba(125, 211, 252, 0.42);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 38px -30px rgba(100, 210, 255, 0.72);
+}
+
+.notif-row.is-read {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(10, 15, 24, 0.70);
+}
+
+.notif-row-icon {
+  color: #64d2ff;
+}
+
+.notif-row.is-read .notif-row-icon {
+  color: #64748b;
+}
+
+.notif-row span {
+  background: rgba(34, 48, 71, 0.78);
+  color: #aee9ff;
+}
+
+.notif-summary div {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    linear-gradient(135deg, rgba(24, 35, 52, 0.86), rgba(10, 15, 24, 0.82));
+}
+
+.notif-summary strong {
+  color: #f8fbff;
+  font-family: 'SF Mono', 'IBM Plex Mono', Consolas, monospace;
+}
+
+.notif-empty,
+.notif-empty-inline {
+  color: #9badc6;
+}
+
+@media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce) {
+  .notif-row,
+  .notif-btn,
+  .notif-mini-btn,
+  .notif-segment button,
+  .notif-choice button {
+    transition: none !important;
+    transform: none !important;
+  }
+}
 </style>

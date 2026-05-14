@@ -2081,6 +2081,210 @@ async function submit() {
 .create-context-panel.is-retouch .context-card-body {
   color: #fff;
 }
+
+/* Apple Music / iOS liquid glass create-task modal skin. Style-only except parent visibility fix. */
+:global(.create-task-modal-panel) {
+  border-color: rgba(100, 210, 255, 0.28) !important;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 45, 141, 0.12), transparent 18rem),
+    radial-gradient(circle at 100% 10%, rgba(100, 210, 255, 0.14), transparent 20rem),
+    linear-gradient(145deg, rgba(20, 28, 41, 0.98), rgba(8, 12, 20, 0.99)) !important;
+  color: #dce7f7 !important;
+}
+
+:global(.create-task-modal-panel > header) {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(8, 12, 20, 0.22);
+}
+
+:global(.create-task-modal-panel > div.flex-1) {
+  color: #dce7f7 !important;
+}
+
+.create-type-panel,
+.field-group,
+.batch-preview-section,
+.batch-meta-compact,
+.batch-meta-card,
+.batch-public,
+.batch-field-card,
+.batch-template-card,
+.prefill-section,
+.v1-extra-section,
+.meta-card-grid,
+.form-card,
+.submit-check-section,
+.create-context-panel,
+.context-card {
+  border-color: rgba(148, 163, 184, 0.20) !important;
+  background:
+    linear-gradient(145deg, rgba(23, 32, 47, 0.92), rgba(11, 17, 28, 0.96)) !important;
+  color: #dce7f7 !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.create-type-panel {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.10), transparent 14rem),
+    linear-gradient(145deg, rgba(24, 35, 52, 0.92), rgba(11, 17, 28, 0.96)) !important;
+}
+
+.eyebrow,
+.field-label,
+.batch-preview-header span,
+.batch-bridge-hint,
+.submit-check-hint,
+.context-card-body,
+.erp-sync-toggle-hint {
+  color: #9dadc4 !important;
+}
+
+.batch-section-title,
+.summary-title,
+.context-panel-header h4,
+.context-card-title,
+.erp-sync-title {
+  color: #f8fbff !important;
+}
+
+.task-kind-switch,
+.mode-switch {
+  border-color: rgba(148, 163, 184, 0.20) !important;
+  background: rgba(8, 13, 22, 0.68) !important;
+}
+
+.task-kind-button {
+  border: 1px solid transparent;
+  color: #aab8cf !important;
+}
+
+.task-kind-button.is-inactive:hover {
+  border-color: rgba(125, 211, 252, 0.24);
+  background: rgba(24, 35, 52, 0.8) !important;
+  color: #f8fbff !important;
+}
+
+.task-kind-button.is-active {
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan)) !important;
+  color: #fff !important;
+  box-shadow: 0 14px 28px -20px rgba(255, 45, 141, 0.8) !important;
+}
+
+.native-input,
+.batch-meta-card :deep(input),
+.batch-meta-card :deep(.relative > div),
+.batch-meta-card :deep(textarea),
+.v1-extra-section :deep(input),
+.form-card :deep(input),
+.batch-public :deep(input),
+.batch-field-card :deep(input),
+.meta-card-grid :deep(input),
+.v1-extra-section :deep(.relative > div),
+.form-card :deep(.relative > div),
+.batch-public :deep(.relative > div),
+.batch-field-card :deep(.relative > div),
+.meta-card-grid :deep(.relative > div),
+.v1-extra-section :deep(textarea),
+.form-card :deep(textarea),
+.batch-public :deep(textarea),
+.batch-field-card :deep(textarea),
+.meta-card-grid :deep(textarea) {
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background: rgba(7, 12, 20, 0.82) !important;
+  color: #f8fbff !important;
+}
+
+.native-input::placeholder,
+.v1-extra-section :deep(input::placeholder),
+.form-card :deep(input::placeholder),
+.batch-public :deep(input::placeholder),
+.batch-field-card :deep(input::placeholder),
+.meta-card-grid :deep(input::placeholder),
+.v1-extra-section :deep(textarea::placeholder),
+.form-card :deep(textarea::placeholder),
+.batch-public :deep(textarea::placeholder),
+.batch-field-card :deep(textarea::placeholder),
+.meta-card-grid :deep(textarea::placeholder) {
+  color: #64748b !important;
+}
+
+.native-input:focus,
+.v1-extra-section :deep(input:focus),
+.form-card :deep(input:focus),
+.batch-public :deep(input:focus),
+.batch-field-card :deep(input:focus),
+.meta-card-grid :deep(input:focus),
+.v1-extra-section :deep(textarea:focus),
+.form-card :deep(textarea:focus),
+.batch-public :deep(textarea:focus),
+.batch-field-card :deep(textarea:focus),
+.meta-card-grid :deep(textarea:focus) {
+  border-color: rgba(125, 211, 252, 0.62) !important;
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
+}
+
+.erp-sync-toggle-card {
+  border-color: rgba(148, 163, 184, 0.20) !important;
+  background: rgba(12, 18, 29, 0.76) !important;
+}
+
+.erp-sync-badge,
+.batch-ref-thumb-file,
+.batch-bridge-hint {
+  border-color: rgba(100, 210, 255, 0.20) !important;
+  background: rgba(34, 48, 71, 0.78) !important;
+  color: #aee9ff !important;
+}
+
+.batch-preview-table th {
+  background: rgba(34, 48, 71, 0.86) !important;
+  color: #cbd8ec !important;
+}
+
+.batch-preview-table th,
+.batch-preview-table td {
+  border-top-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+.batch-preview-table tr.has-error,
+.submit-error-banner {
+  border-color: rgba(255, 69, 58, 0.32) !important;
+  background: rgba(255, 69, 58, 0.12) !important;
+  color: #ffb4ad !important;
+}
+
+.issue-list,
+.field-hint-error {
+  color: #ffb4ad !important;
+}
+
+.issue-ok {
+  color: #86efac !important;
+}
+
+.issue-warn,
+.erp-sync-toggle-hint.warning {
+  color: #ffd18a !important;
+}
+
+.summary-footer {
+  border-top-color: rgba(148, 163, 184, 0.18) !important;
+  background: rgba(8, 12, 20, 0.74) !important;
+}
+
+.context-dot {
+  background: #64d2ff;
+  box-shadow: 0 0 0 4px rgba(100, 210, 255, 0.12), 0 0 20px rgba(100, 210, 255, 0.28);
+}
+
+.create-context-panel.is-customization,
+.create-context-panel.is-retouch {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(148, 113, 255, 0.12), transparent 13rem),
+    linear-gradient(145deg, rgba(23, 32, 47, 0.92), rgba(11, 17, 28, 0.96)) !important;
+}
+
 @media (max-width: 900px) {
   .create-workspace {
     grid-template-columns: 1fr;

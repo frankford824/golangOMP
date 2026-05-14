@@ -157,6 +157,49 @@ const costPriceModeOptions = [
   box-shadow: none;
   resize: vertical;
 }
+
+/* Apple Music / iOS liquid glass create-task embedded form skin. Style-only. */
+.form-card,
+.card-hint {
+  border-color: rgba(148, 163, 184, 0.20);
+  background:
+    linear-gradient(145deg, rgba(22, 31, 47, 0.92), rgba(9, 14, 23, 0.96));
+  color: #dce7f7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.field-label {
+  color: #cbd8ec;
+}
+
+.form-hint,
+.optional-text {
+  color: #8fa0b8;
+}
+
+.form-hint.danger,
+.required {
+  color: #ffb4ad;
+}
+
+.form-card :deep(input),
+.form-card :deep(.relative > div),
+.form-card :deep(textarea) {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(7, 12, 20, 0.82);
+  color: #f8fbff;
+}
+
+.form-card :deep(input::placeholder),
+.form-card :deep(textarea::placeholder) {
+  color: #64748b;
+}
+
+.form-card :deep(input:focus),
+.form-card :deep(textarea:focus) {
+  border-color: rgba(125, 211, 252, 0.62);
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12);
+}
 @media (max-width: 760px) {
   .type-section {
     grid-template-columns: 1fr;

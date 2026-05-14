@@ -486,4 +486,57 @@ watch(
   color: #94a3b8;
   text-align: center;
 }
+
+/* Apple Music / iOS liquid glass upload panel skin. Style-only. */
+.upload-panel,
+.upload-panel-compact {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(8, 13, 22, 0.70);
+  color: #dce7f7;
+}
+
+.upload-zone,
+.upload-panel-compact .upload-zone {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(7, 12, 20, 0.72);
+}
+
+.upload-zone:hover:not(.upload-zone-disabled),
+.upload-zone-drag-active {
+  border-color: rgba(125, 211, 252, 0.44);
+  background: rgba(34, 48, 71, 0.78);
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.10);
+}
+
+.upload-plus,
+.upload-panel-compact .upload-plus {
+  color: #aee9ff;
+}
+
+.upload-zone p,
+.upload-panel-compact .upload-zone p {
+  color: #dce7f7;
+}
+
+.upload-hint,
+.upload-panel-compact .upload-hint,
+.compact-upload-summary,
+.thumb-label,
+.thumb-placeholder-label {
+  color: #8fa0b8;
+}
+
+.thumb-img {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(7, 12, 20, 0.82);
+}
+
+.thumb-placeholder {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(10, 15, 24, 0.72);
+}
+
+.limit-error {
+  color: #ffb4ad;
+}
 </style>

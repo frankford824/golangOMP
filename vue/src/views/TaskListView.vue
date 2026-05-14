@@ -67,7 +67,7 @@
           }}
         </BaseButton>
       </div>
-      <div v-show="advancedFilterOpen || activeAdvancedFilterCount > 0" class="filter-bar-wrap">
+      <div v-show="advancedFilterOpen" class="filter-bar-wrap">
         <TaskFilterBar v-model:filters="filters" @update:filters="page = 1" />
       </div>
     </div>

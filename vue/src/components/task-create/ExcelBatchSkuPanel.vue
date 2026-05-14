@@ -537,4 +537,115 @@ function reset(): void {
   white-space: nowrap;
   border: 0;
 }
+
+/* Apple Music / iOS liquid glass create-task embedded panel skin. Style-only. */
+.excel-panel {
+  border-color: rgba(148, 163, 184, 0.20);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(100, 210, 255, 0.10), transparent 12rem),
+    linear-gradient(145deg, rgba(22, 31, 47, 0.92), rgba(9, 14, 23, 0.96));
+  color: #dce7f7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.excel-eyebrow,
+.excel-status,
+.preview-header span,
+.rule-line,
+.template-line {
+  color: #8fa0b8;
+}
+
+.excel-title,
+.preview-header p,
+.file-line {
+  color: #f8fbff;
+}
+
+.excel-status,
+.excel-step,
+.excel-actions-card,
+.excel-meta,
+.preview-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(8, 13, 22, 0.70);
+}
+
+.excel-step.is-active {
+  border-color: rgba(125, 211, 252, 0.36);
+  background: rgba(34, 48, 71, 0.92);
+  color: #aee9ff;
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.10);
+}
+
+.excel-step.is-done {
+  border-color: rgba(74, 222, 128, 0.24);
+  background: rgba(22, 101, 52, 0.22);
+  color: #86efac;
+}
+
+.step-index {
+  background: rgba(248, 251, 255, 0.12);
+}
+
+.hh-btn-primary {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan));
+  color: #fff;
+  box-shadow: 0 14px 28px -20px rgba(255, 45, 141, 0.82);
+}
+
+.hh-btn-file,
+.hh-btn-secondary,
+.hh-btn-ghost {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(12, 18, 29, 0.74);
+  color: #dce7f7;
+}
+
+.hh-btn-file:not(:disabled):hover,
+.hh-btn-secondary:not(:disabled):hover,
+.hh-btn-ghost:not(:disabled):hover {
+  border-color: rgba(125, 211, 252, 0.44);
+  background: rgba(24, 35, 52, 0.94);
+  color: #f8fbff;
+}
+
+.file-dot {
+  background: #64d2ff;
+  box-shadow: 0 0 0 4px rgba(100, 210, 255, 0.10);
+}
+
+.preview-table th {
+  background: rgba(34, 48, 71, 0.86);
+  color: #cbd8ec;
+}
+
+.preview-table td {
+  color: #dce7f7;
+}
+
+.preview-table th,
+.preview-table td {
+  border-top-color: rgba(148, 163, 184, 0.16);
+}
+
+.preview-table tr.has-error {
+  background: rgba(255, 69, 58, 0.12);
+  color: #ffb4ad;
+}
+
+.ref-thumb-img {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(7, 12, 20, 0.82);
+}
+
+.ref-thumb-file {
+  background: rgba(34, 48, 71, 0.78);
+  color: #aee9ff;
+}
+
+.excel-error {
+  color: #ffb4ad;
+}
 </style>
