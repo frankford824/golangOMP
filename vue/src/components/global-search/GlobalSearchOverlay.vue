@@ -327,26 +327,29 @@ onUnmounted(() => {
 
 <style scoped>
 .fixed.inset-0 {
+  z-index: 7000 !important;
   background:
-    radial-gradient(circle at 16% 4%, rgba(255, 45, 141, 0.3), transparent 30rem),
-    radial-gradient(circle at 88% 2%, rgba(100, 210, 255, 0.24), transparent 32rem),
-    rgba(0, 0, 0, 0.66) !important;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+    radial-gradient(circle at 16% 4%, rgba(255, 45, 141, 0.18), transparent 30rem),
+    radial-gradient(circle at 88% 2%, rgba(100, 210, 255, 0.14), transparent 32rem),
+    rgba(0, 0, 0, 0.86) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .mx-auto.max-w-4xl {
   border-color: var(--yb-music-border-strong) !important;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07)) !important;
+    radial-gradient(circle at 10% 0%, rgba(255, 45, 141, 0.08), transparent 18rem),
+    radial-gradient(circle at 100% 0%, rgba(100, 210, 255, 0.08), transparent 20rem),
+    linear-gradient(145deg, rgba(17, 24, 39, 0.99), rgba(7, 12, 20, 0.995)) !important;
   box-shadow: 0 34px 90px -38px rgba(0, 0, 0, 0.95) !important;
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 input {
   border-color: rgba(255, 255, 255, 0.2) !important;
-  background: rgba(3, 3, 5, 0.38) !important;
+  background: rgba(3, 7, 14, 0.92) !important;
   color: #fff !important;
 }
 
@@ -357,7 +360,7 @@ button {
 
 section {
   border-color: rgba(255, 255, 255, 0.14) !important;
-  background: rgba(3, 3, 5, 0.28) !important;
+  background: rgba(5, 10, 18, 0.92) !important;
 }
 
 p,
@@ -368,10 +371,16 @@ span {
 
 .bg-white,
 .hover\:bg-white\/70:hover {
-  background: rgba(255, 255, 255, 0.1) !important;
+  background: rgba(34, 48, 71, 0.92) !important;
 }
 
 .shadow-sm {
   box-shadow: inset 0 0 0 1px rgba(100, 210, 255, 0.22) !important;
+}
+
+:deep(mark) {
+  border-radius: 0.25rem;
+  background: rgba(100, 210, 255, 0.22) !important;
+  color: #f8fbff !important;
 }
 </style>
