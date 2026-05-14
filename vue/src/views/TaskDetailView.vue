@@ -286,9 +286,20 @@
                         <button type="button" class="detail-v3-link-btn" @click="focusReferenceSectionFromDetail">
                           查看全部
                         </button>
+                        <button
+                          v-if="totalReferenceCount > 0"
+                          type="button"
+                          class="detail-v3-link-btn"
+                          :disabled="referenceBatchDownloading"
+                          @click="handleReferenceBatchDownload"
+                        >
+                          {{ referenceBatchDownloading ? '打包中...' : `下载全部参考图（${totalReferenceCount}）` }}
+                        </button>
                       </div>
                       <p v-if="opsReferenceUploadStatus" class="detail-v3-ref-status">{{ opsReferenceUploadStatus }}</p>
                       <p v-if="opsReferenceUploadError" class="detail-v3-ref-error">{{ opsReferenceUploadError }}</p>
+                      <p v-if="referenceBatchDownloadStatus" class="detail-v3-ref-status">{{ referenceBatchDownloadStatus }}</p>
+                      <p v-if="referenceBatchDownloadError" class="detail-v3-ref-error">{{ referenceBatchDownloadError }}</p>
                     </article>
 
                     <article class="detail-v3-info-card">
@@ -774,6 +785,8 @@ import { tasksApi } from '@/services/api/tasksApi'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
 import type { AssetKind } from '@/services/api/assetsApi'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
+import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import {
   TASK_DETAIL_PRODUCT_INDEX_KEY,
@@ -1137,6 +1150,11 @@ const detailReferenceLabel = computed(() => {
   const total = taskRefs + skuRefs
   return total > 0 ? `${total} 张图片 · 单文件 <= 300MB` : '暂无参考附件'
 })
+const totalReferenceCount = computed(() => {
+  const taskRefs = task.value?.referenceFileRefs?.length ?? 0
+  const skuRefs = task.value?.skuItems?.reduce((sum, item) => sum + (item.referenceFileRefs?.length ?? 0), 0) ?? 0
+  return taskRefs + skuRefs
+})
 const RETOUCH_MODULE_STATE_LABELS: Record<string, string> = {
   pending_claim: '待领取',
   in_progress: '精修中',
@@ -1250,6 +1268,9 @@ const opsReferenceThumbItems = computed((): AssetThumbItem[] =>
 const opsReferenceUploadInputRef = ref<HTMLInputElement | null>(null)
 const opsReferenceUploadError = ref('')
 const opsReferenceUploadStatus = ref('')
+const referenceBatchDownloading = ref(false)
+const referenceBatchDownloadStatus = ref('')
+const referenceBatchDownloadError = ref('')
 const auditSourceUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditDeliveryUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditAssetUploadError = ref('')
@@ -1701,6 +1722,83 @@ async function handleOpsReferenceUpload(e: Event) {
   } catch (err) {
     opsReferenceUploadError.value = formatUploadFailureMessage('reference_upload', err)
     opsReferenceUploadStatus.value = ''
+  }
+}
+
+function formatTaskReferenceBatchFailure(item: {
+  reason?: string
+  key?: string
+  source_kind?: string
+  filename?: string
+  asset_id?: number | null
+  ref_id?: string | null
+}): string {
+  const bits = [
+    item.key ? `key=${item.key}` : '',
+    item.source_kind ? `source=${item.source_kind}` : '',
+    item.asset_id != null ? `asset_id=${item.asset_id}` : '',
+    item.ref_id ? `ref_id=${item.ref_id}` : '',
+    item.filename ? `filename=${item.filename}` : '',
+    `reason=${item.reason || 'unavailable'}`,
+  ]
+  return bits.filter(Boolean).join(' ')
+}
+
+async function handleReferenceBatchDownload() {
+  if (referenceBatchDownloading.value) return
+  const currentTask = task.value
+  if (!currentTask?.id) {
+    referenceBatchDownloadError.value = '任务 ID 缺失，无法下载参考图'
+    return
+  }
+  if (totalReferenceCount.value <= 0) {
+    referenceBatchDownloadError.value = '暂无参考图可下载'
+    return
+  }
+  referenceBatchDownloading.value = true
+  referenceBatchDownloadStatus.value = ''
+  referenceBatchDownloadError.value = ''
+  try {
+    const response = await tasksApi.batchDownloadTaskReferences(currentTask.id)
+    const manifest = response.data?.data
+    const items = Array.isArray(manifest?.items) ? manifest.items : []
+    if (!items.length) {
+      referenceBatchDownloadError.value = '没有可下载的参考图'
+      return
+    }
+    const failures = Array.isArray(manifest?.failures) ? manifest.failures : []
+    const result = await downloadBatchAsZip({
+      items: items.map((item, index) => ({
+        key: item.key || `ref-${index + 1}`,
+        filename: item.filename,
+        downloadURL: item.download_url,
+        fallbackName: item.asset_id ? `asset-${item.asset_id}` : `ref-${index + 1}`,
+        failureHint: formatTaskReferenceBatchFailure({
+          key: item.key,
+          source_kind: item.source_kind,
+          asset_id: item.asset_id ?? null,
+          ref_id: item.ref_id ?? null,
+          filename: item.filename,
+          reason: 'fetch_failed',
+        }),
+      })),
+      zipFilename: buildTimestampedZipFilename('task-references'),
+      serverFailures: failures.map((entry) => formatTaskReferenceBatchFailure(entry)),
+      onStatus: (message) => {
+        referenceBatchDownloadStatus.value = message
+      },
+    })
+    referenceBatchDownloadStatus.value = `已生成 ZIP，共 ${items.length} 个文件`
+    if (result.failureCount > 0) {
+      referenceBatchDownloadError.value = `部分文件下载失败（${result.failureCount} 项），ZIP 内已附带 download_errors.txt`
+    } else {
+      flashSuccess(`参考图打包完成（${items.length} 个）`)
+    }
+  } catch (err) {
+    referenceBatchDownloadError.value = resolveApiUserMessage(err, { fallback: '下载参考图失败，请稍后重试' })
+    referenceBatchDownloadStatus.value = ''
+  } finally {
+    referenceBatchDownloading.value = false
   }
 }
 

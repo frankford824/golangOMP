@@ -413,6 +413,7 @@ import {
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 
 const route = useRoute()
 const router = useRouter()
@@ -435,7 +436,6 @@ const listPageSize = ref(20)
 const listTotal = ref(0)
 const AUTO_RELOAD_DELAY_MS = 400
 const MAX_BATCH_DOWNLOAD_ASSETS = 100
-const BATCH_ZIP_DOWNLOAD_CONCURRENCY = 4
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 const previewLightboxSrc = ref<string | null>(null)
 const filtersExpanded = ref(false)
@@ -618,63 +618,7 @@ function normalizeSelectedAssetIDs(): number[] {
 }
 
 function resolveBatchZipFilename(): string {
-  const now = new Date()
-  const pad = (value: number) => String(value).padStart(2, '0')
-  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  return `assets-${stamp}.zip`
-}
-
-function sanitizeZipEntryName(name: string, fallback: string): string {
-  const cleaned = name
-    .trim()
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
-    .replace(/\.\./g, '_')
-  return cleaned || fallback
-}
-
-function ensureUniqueZipEntryName(filename: string, usedNames: Map<string, number>): string {
-  const normalized = filename.trim() || 'asset'
-  const count = (usedNames.get(normalized) ?? 0) + 1
-  usedNames.set(normalized, count)
-  if (count === 1) return normalized
-
-  const dotIndex = normalized.lastIndexOf('.')
-  if (dotIndex <= 0) return `${normalized} (${count})`
-  return `${normalized.slice(0, dotIndex)} (${count})${normalized.slice(dotIndex)}`
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const objectURL = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = objectURL
-  link.download = filename
-  link.rel = 'noopener'
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
-}
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length)
-  let cursor = 0
-  const workerCount = Math.min(Math.max(1, concurrency), items.length)
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      for (;;) {
-        const index = cursor
-        cursor += 1
-        if (index >= items.length) return
-        results[index] = await worker(items[index], index)
-      }
-    }),
-  )
-  return results
+  return buildTimestampedZipFilename('assets')
 }
 
 function formatServerBatchDownloadFailure(item: AssetBatchDownloadFailure): string {
@@ -692,60 +636,21 @@ async function downloadBatchAsClientZip(
   items: AssetBatchDownloadItem[],
   serverFailures: AssetBatchDownloadFailure[],
 ) {
-  const { default: JSZip } = await import('jszip')
-  const zip = new JSZip()
-  const usedNames = new Map<string, number>()
-  const failures: string[] = serverFailures.map(formatServerBatchDownloadFailure)
-  let completed = 0
-
-  await mapWithConcurrency(items, BATCH_ZIP_DOWNLOAD_CONCURRENCY, async (item) => {
-    const url = typeof item.download_url === 'string' ? item.download_url.trim() : ''
-    const filename = ensureUniqueZipEntryName(
-      sanitizeZipEntryName(item.filename || '', `asset-${item.asset_id}`),
-      usedNames,
-    )
-    if (!url) {
-      failures.push(`asset_id=${item.asset_id} filename=${filename} reason=missing_download_url`)
-      return
-    }
-
-    try {
-      const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
-      if (!response.ok) {
-        failures.push(`asset_id=${item.asset_id} filename=${filename} reason=http_${response.status}`)
-        return
-      }
-      const blob = await response.blob()
-      zip.file(filename, blob, { binary: true, compression: 'STORE' })
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : 'fetch_failed'
-      failures.push(`asset_id=${item.asset_id} filename=${filename} reason=${reason}`)
-    } finally {
-      completed += 1
-      batchDownloadStatus.value = `正在下载并打包 ${completed}/${items.length}`
-    }
+  const result = await downloadBatchAsZip({
+    items: items.map((item) => ({
+      key: `asset-${item.asset_id}`,
+      filename: item.filename,
+      downloadURL: item.download_url,
+      fallbackName: `asset-${item.asset_id}`,
+      failureHint: `asset_id=${item.asset_id} filename=${item.filename || `asset-${item.asset_id}`} reason=fetch_failed`,
+    })),
+    zipFilename: resolveBatchZipFilename(),
+    serverFailures: serverFailures.map(formatServerBatchDownloadFailure),
+    onStatus: (message) => {
+      batchDownloadStatus.value = message
+    },
   })
-
-  if (failures.length > 0) {
-    zip.file('download_errors.txt', failures.join('\n') + '\n')
-  }
-  if (Object.keys(zip.files).length === 0) {
-    throw new Error('没有文件成功写入 ZIP')
-  }
-
-  batchDownloadStatus.value = '正在生成 ZIP'
-  const blob = await zip.generateAsync(
-    {
-      type: 'blob',
-      compression: 'STORE',
-      streamFiles: true,
-    },
-    (metadata) => {
-      batchDownloadStatus.value = `正在生成 ZIP ${Math.floor(metadata.percent)}%`
-    },
-  )
-  downloadBlob(blob, resolveBatchZipFilename())
-  return failures.length
+  return result.failureCount
 }
 
 async function handleBatchDownload() {

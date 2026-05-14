@@ -15,6 +15,40 @@ import type {
   SubmitDesignPayload,
 } from '@/services/apiTypes'
 
+export interface TaskReferenceBatchDownloadItem {
+  key: string
+  filename: string
+  file_size: number
+  mime_type?: string
+  download_url: string
+  expires_at?: string | null
+  source_kind: 'formalized_asset' | 'legacy_ref' | string
+  asset_id?: number | null
+  ref_id?: string | null
+}
+
+export interface TaskReferenceBatchDownloadFailure {
+  key?: string
+  source_kind?: 'formalized_asset' | 'legacy_ref' | string
+  asset_id?: number | null
+  ref_id?: string | null
+  filename?: string
+  reason: string
+}
+
+export interface TaskReferenceBatchDownloadManifest {
+  items: TaskReferenceBatchDownloadItem[]
+  failures?: TaskReferenceBatchDownloadFailure[]
+  success_count: number
+  failure_count: number
+  total_size: number
+  expires_at?: string | null
+}
+
+export interface TaskReferenceBatchDownloadResponse {
+  data?: TaskReferenceBatchDownloadManifest
+}
+
 // ─── 任务列表 / 详情 ──────────────────────────────────────────────────────────
 
 export const tasksApi = {
@@ -76,6 +110,13 @@ export const tasksApi = {
    */
   getDetail: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/tasks/${id}/detail`, { signal }),
+
+  batchDownloadTaskReferences: (id: string, signal?: AbortSignal) =>
+    http.post<TaskReferenceBatchDownloadResponse>(
+      `/v1/tasks/${encodeURIComponent(id)}/reference-assets/batch-download`,
+      {},
+      { signal },
+    ),
 
   /**
    * 任务业务事件流（审核替换、指派等）
