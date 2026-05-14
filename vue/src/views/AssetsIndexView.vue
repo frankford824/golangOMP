@@ -1226,10 +1226,9 @@ onBeforeUnmount(() => {
   --ac-text: #1d1d1f;
   --ac-sec: #86868b;
   --ac-accent: #0071e3;
-  /** 主内容最大宽度；随主栏变宽可增至约 6 列，典型宽度约 5 列 */
+  /** 资产页铺满主内容区，列数由视口宽度控制，卡片按比例伸缩 */
   --ac-content-max: 100%;
-  /** 列宽下限：窄屏为整行一列；宽约 1400px 内容区时约 5 列 */
-  --ac-grid-min: 220px;
+  --ac-grid-columns: 5;
   background: var(--ac-bg);
   color: var(--ac-text);
   padding: 0 0 3.75rem;
@@ -1440,12 +1439,33 @@ onBeforeUnmount(() => {
   margin: 24px auto;
   padding: 0 clamp(30px, 3vw, 50px);
   display: grid;
-  grid-template-columns: repeat(
-    auto-fill,
-    minmax(min(100%, var(--ac-grid-min)), 1fr)
-  );
+  grid-template-columns: repeat(var(--ac-grid-columns), minmax(0, 1fr));
   gap: clamp(16px, 2vw, 22px);
   align-items: stretch;
+}
+
+@media (max-width: 1679px) {
+  .assets-index-view {
+    --ac-grid-columns: 4;
+  }
+}
+
+@media (max-width: 1279px) {
+  .assets-index-view {
+    --ac-grid-columns: 3;
+  }
+}
+
+@media (max-width: 979px) {
+  .assets-index-view {
+    --ac-grid-columns: 2;
+  }
+}
+
+@media (max-width: 639px) {
+  .assets-index-view {
+    --ac-grid-columns: 1;
+  }
 }
 
 .ac-grid-empty {
