@@ -24,6 +24,8 @@ const (
 	TaskEventAssetVersionCreated         = "task.asset.version.created"
 	TaskEventAssetUploadSessionCompleted = "task.asset.upload_session.completed"
 	TaskEventAssetUploadSessionCancelled = "task.asset.upload_session.cancelled"
+	TaskEventReferenceAssetFormalized    = "task.reference.asset.formalized"
+	TaskEventReferenceAssetFormalizeFail = "task.reference.asset.formalize_failed"
 	TaskEventOutsourceCreated            = "task.outsource.created"
 	TaskEventOutsourceReturned           = "task.outsource.returned"
 	TaskEventOutsourceReviewed           = "task.outsource.reviewed"

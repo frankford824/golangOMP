@@ -677,6 +677,12 @@ type DesignAssetRepo interface {
 	UpdateCurrentVersionID(ctx context.Context, tx Tx, id int64, currentVersionID *int64) error
 }
 
+type TaskReferenceAssetBindingRepo interface {
+	Create(ctx context.Context, tx Tx, binding *domain.TaskReferenceAssetBinding) (*domain.TaskReferenceAssetBinding, error)
+	GetByTaskAndRefID(ctx context.Context, taskID int64, refID string) (*domain.TaskReferenceAssetBinding, error)
+	ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskReferenceAssetBinding, error)
+}
+
 // TaskEventRepo handles task_event_logs and task_event_sequences tables.
 // Append MUST be called inside the same transaction as the state-changing operation.
 type TaskEventRepo interface {

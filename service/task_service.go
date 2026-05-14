@@ -272,6 +272,7 @@ type taskService struct {
 	uploadRequestRepo            repo.UploadRequestRepo
 	assetStorageRefRepo          repo.AssetStorageRefRepo
 	referenceFileRefFlatRepo     repo.ReferenceFileRefFlatRepo
+	taskReferenceAssetFormalizer TaskReferenceAssetFormalizer
 	productCodeSeqRepo           repo.ProductCodeSequenceRepo
 	erpBridgeSvc                 ERPBridgeService
 	codeRuleSvc                  CodeRuleService
@@ -323,6 +324,12 @@ func WithTaskReferenceFileRefValidation(uploadRequestRepo repo.UploadRequestRepo
 func WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo repo.ReferenceFileRefFlatRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.referenceFileRefFlatRepo = referenceFileRefFlatRepo
+	}
+}
+
+func WithTaskReferenceAssetFormalizer(formalizer TaskReferenceAssetFormalizer) TaskServiceOption {
+	return func(s *taskService) {
+		s.taskReferenceAssetFormalizer = formalizer
 	}
 }
 
@@ -859,6 +866,7 @@ func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, 
 	if err != nil || created == nil {
 		return nil, infraError("re-read created task", err)
 	}
+	s.formalizeTaskCreateReferenceAssetsBestEffort(ctx, p, newID)
 	s.triggerFilingBestEffort(ctx, TriggerTaskFilingParams{
 		TaskID:     newID,
 		OperatorID: p.CreatorID,
@@ -867,6 +875,35 @@ func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, 
 		Force:      p.SyncERPOnCreate,
 	}, "task_create_auto_policy")
 	return created, nil
+}
+
+func (s *taskService) formalizeTaskCreateReferenceAssetsBestEffort(ctx context.Context, p CreateTaskParams, taskID int64) {
+	if s.taskReferenceAssetFormalizer == nil {
+		return
+	}
+	refs := domain.NormalizeReferenceFileRefs(p.ReferenceFileRefs)
+	if len(refs) == 0 {
+		return
+	}
+	if appErr := s.taskReferenceAssetFormalizer.FormalizeTaskCreateRefs(ctx, taskID, p.CreatorID, refs, string(domain.ModuleKeyBasicInfo)); appErr != nil {
+		log.Printf("task_reference_asset_formalize_failed trace_id=%s task_id=%d creator_id=%d code=%s message=%s",
+			domain.TraceIDFromContext(ctx),
+			taskID,
+			p.CreatorID,
+			appErr.Code,
+			appErr.Message,
+		)
+		if s.taskEventRepo != nil && s.txRunner != nil {
+			_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+				_, err := s.taskEventRepo.Append(ctx, tx, taskID, domain.TaskEventReferenceAssetFormalizeFail, &p.CreatorID, map[string]interface{}{
+					"error_code":    appErr.Code,
+					"error_message": appErr.Message,
+					"details":       appErr.Details,
+				})
+				return err
+			})
+		}
+	}
 }
 
 func (s *taskService) resolveCreateTaskProductIID(ctx context.Context, p *CreateTaskParams) *domain.AppError {

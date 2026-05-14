@@ -118,6 +118,7 @@ func main() {
 	taskModuleRepo := mysqlrepo.NewTaskModuleRepo(mdb)
 	taskModuleEventRepo := mysqlrepo.NewTaskModuleEventRepo(mdb)
 	referenceFileRefFlatRepo := mysqlrepo.NewReferenceFileRefFlatRepo(mdb)
+	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
 	orgMoveRequestRepo := mysqlrepo.NewOrgMoveRequestRepo(mdb)
@@ -170,6 +171,14 @@ func main() {
 		Logger:           logger.Named("erp_sync"),
 	})
 	taskDataScopeResolver := service.NewRoleBasedDataScopeResolver()
+	taskReferenceAssetFormalizer := service.NewTaskReferenceAssetFormalizer(
+		designAssetRepo,
+		taskAssetRepo,
+		assetStorageRefRepo,
+		taskReferenceAssetBindingRepo,
+		taskEventRepo,
+		mdb,
+	)
 	ossDirectSvc := service.NewOSSDirectService(service.OSSDirectConfig{
 		Enabled:         cfg.OSSDirect.Enabled,
 		Endpoint:        cfg.OSSDirect.Endpoint,
@@ -186,6 +195,7 @@ func main() {
 		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
 		service.WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
 		service.WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
+		service.WithTaskReferenceAssetFormalizer(taskReferenceAssetFormalizer),
 		service.WithTaskReferenceFileRefsOSSDirectService(ossDirectSvc),
 		service.WithTaskDesignAssetReadModel(designAssetRepo),
 		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
