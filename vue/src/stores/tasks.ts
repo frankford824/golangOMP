@@ -1908,18 +1908,6 @@ export const useTasksStore = defineStore('tasks', () => {
     return true
   }
 
-  /** 指派任务给设计师，调用 POST /v1/tasks/{id}/assign（后端 designer_id 为 int64） */
-  function assignPayloadToRetouchModuleBody(payload: AssignTaskPayload): Record<string, unknown> {
-    const body: Record<string, unknown> = { designer_id: payload.designer_id }
-    if (payload.designer_name != null && String(payload.designer_name).trim() !== '') {
-      body.designer_name = payload.designer_name
-    }
-    if (payload.remark != null && String(payload.remark).trim() !== '') {
-      body.remark = payload.remark
-    }
-    return body
-  }
-
   async function assignTask(taskId: string, payload: { assigneeId: string; assigneeName: string }) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
@@ -1931,11 +1919,7 @@ export const useTasksStore = defineStore('tasks', () => {
       designer_id: designerIdNum,
       designer_name: payload.assigneeName,
     }
-    if (isRetouchTask(task)) {
-      await tasksApi.reassignModule(taskId, 'retouch', assignPayloadToRetouchModuleBody(assignPayload))
-    } else {
-      await tasksApi.assign(taskId, assignPayload)
-    }
+    await tasksApi.assign(taskId, assignPayload)
     await loadTaskById(taskId)
   }
 
@@ -1963,11 +1947,7 @@ export const useTasksStore = defineStore('tasks', () => {
       designer_id: designerIdNum,
       designer_name: payload.assigneeName,
     }
-    if (isRetouchTask(task)) {
-      await tasksApi.reassignModule(taskId, 'retouch', assignPayloadToRetouchModuleBody(assignPayload))
-    } else {
-      await tasksApi.assign(taskId, assignPayload)
-    }
+    await tasksApi.assign(taskId, assignPayload)
     await loadTaskById(taskId)
   }
 
@@ -1980,11 +1960,7 @@ export const useTasksStore = defineStore('tasks', () => {
       throw new Error('当前状态不可重新指派')
     }
     const clearPayload = buildClearDesignerAssigneePayload(remark)
-    if (isRetouchTask(task)) {
-      await tasksApi.reassignModule(taskId, 'retouch', assignPayloadToRetouchModuleBody(clearPayload))
-    } else {
-      await tasksApi.assign(taskId, clearPayload)
-    }
+    await tasksApi.assign(taskId, clearPayload)
     await loadTaskById(taskId)
   }
 
