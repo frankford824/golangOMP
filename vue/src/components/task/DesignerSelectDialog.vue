@@ -114,12 +114,24 @@ function onConfirm() {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background-color: rgba(255, 255, 255, 0.04);
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .designer-item:hover {
-  background-color: #f8fafc;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.designer-item:has(.designer-radio:checked) {
+  border-color: rgba(96, 165, 250, 0.9);
+  background-color: rgba(59, 130, 246, 0.18);
+}
+
+.designer-item:has(.designer-radio:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .designer-radio {
@@ -129,13 +141,21 @@ function onConfirm() {
 .designer-name {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #0f172a;
+  color: #f8fafc;
 }
 
 .designer-role {
   margin-left: auto;
   font-size: 0.75rem;
-  color: #64748b;
+  color: #cbd5e1;
+}
+
+.designer-item:has(.designer-radio:checked) .designer-name {
+  color: #ffffff;
+}
+
+.designer-item:has(.designer-radio:checked) .designer-role {
+  color: #dbeafe;
 }
 </style>
 
