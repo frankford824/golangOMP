@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="open" class="fixed inset-0 z-[4000] flex items-center justify-center bg-slate-900/40">
+    <div v-if="open" class="fixed inset-0 z-[7200] flex items-center justify-center bg-slate-900/40">
       <div class="w-full max-w-sm rounded-xl border border-[var(--v1-border)] bg-white p-4">
         <h3 class="text-sm font-semibold text-[var(--v1-text-primary)]">表单未提交</h3>
         <p class="mt-2 text-xs text-[var(--v1-text-secondary)]">
