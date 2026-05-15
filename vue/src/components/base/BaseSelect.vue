@@ -230,7 +230,8 @@ function updatePanelPosition() {
     top: `${Math.max(8, top)}px`,
     left: `${Math.max(8, rect.left)}px`,
     width: `${rect.width}px`,
-    zIndex: '4000',
+    // Must stay above BaseModal overlay (7100) after visual upgrade.
+    zIndex: '7200',
   }
 }
 
