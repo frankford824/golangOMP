@@ -7,9 +7,9 @@
   >
     <template #default>
       <div v-if="step === 'form'" class="reassign-body space-y-4">
-        <p class="text-sm text-slate-600 leading-relaxed">
+        <p class="intro-copy text-sm leading-relaxed">
           这是任务级调度动作：用于在设计阶段调整负责人。确认后将由
-          <strong class="text-slate-800">新设计师</strong>继续负责该任务。
+          <strong class="intro-copy-strong">新设计师</strong>继续负责该任务。
         </p>
         <div
           v-if="hasDesignOutputHint"
@@ -28,6 +28,7 @@
         <div class="field-block">
           <BaseSelect
             v-model="reasonCode"
+            class="reassign-select"
             label="转派原因"
             placeholder="请选择原因"
             :options="reasonOptions"
@@ -47,6 +48,7 @@
         <div class="field-block">
           <BaseSelect
             v-model="selectedId"
+            class="reassign-select"
             label="新设计师"
             :placeholder="loading ? '加载设计师列表...' : '请选择新设计师'"
             :disabled="loading"
@@ -61,24 +63,24 @@
       </div>
 
       <div v-else class="reassign-body space-y-3">
-        <p v-if="pendingConfirm?.mode === 'clear'" class="text-sm text-slate-800 leading-relaxed">
+        <p v-if="pendingConfirm?.mode === 'clear'" class="confirm-copy-primary text-sm leading-relaxed">
           确认清空任务当前指派人并退回
           <strong>待指派</strong>
           状态吗？
         </p>
-        <p v-else class="text-sm text-slate-800 leading-relaxed">
+        <p v-else class="confirm-copy-primary text-sm leading-relaxed">
           确认将该任务从 <strong>{{ currentAssigneeName || '当前负责人' }}</strong> 重新指派给
           <strong>{{ pendingConfirm?.assigneeName }}</strong> 吗？
         </p>
         <p v-if="hasDesignOutputHint" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           当前任务可能已有设计产出，请确认已与原设计师沟通后再继续。重新指派后，新设计师将继续在现有任务基础上处理。
         </p>
-        <p v-else-if="pendingConfirm?.mode === 'clear'" class="text-sm text-slate-600">
+        <p v-else-if="pendingConfirm?.mode === 'clear'" class="confirm-copy-secondary text-sm">
           清空后任务将回到待指派，需要重新指定设计负责人。
         </p>
-        <p v-else class="text-sm text-slate-600">确认后由新设计师负责后续设计推进。</p>
-        <p class="text-sm text-slate-600">
-          转派原因：<span class="font-medium text-slate-800">{{ pendingConfirm?.reasonLabel }}</span>
+        <p v-else class="confirm-copy-secondary text-sm">确认后由新设计师负责后续设计推进。</p>
+        <p class="confirm-copy-secondary text-sm">
+          转派原因：<span class="confirm-reason-label font-medium">{{ pendingConfirm?.reasonLabel }}</span>
           <template v-if="pendingConfirm?.reasonNote">
             · {{ pendingConfirm.reasonNote }}
           </template>
@@ -318,5 +320,47 @@ function submitConfirm() {
   margin: 0;
   font-size: 0.8125rem;
   color: #b91c1c;
+}
+
+.intro-copy {
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.intro-copy-strong {
+  color: #ffffff;
+}
+
+.confirm-copy-primary {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+.confirm-copy-secondary {
+  color: rgba(203, 213, 225, 0.96);
+}
+
+.confirm-reason-label {
+  color: #ffffff;
+}
+
+.reassign-select :deep(label) {
+  color: rgba(203, 213, 225, 0.96);
+}
+
+.reassign-select :deep(.h-11) {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.65);
+  color: rgba(248, 250, 252, 0.96);
+}
+
+.reassign-select :deep(.h-11 > button) {
+  color: inherit;
+}
+
+.reassign-select :deep(.h-11 .text-slate-500) {
+  color: rgba(148, 163, 184, 0.95) !important;
+}
+
+.reassign-select :deep(.h-11 .text-slate-400) {
+  color: rgba(148, 163, 184, 0.95) !important;
 }
 </style>
