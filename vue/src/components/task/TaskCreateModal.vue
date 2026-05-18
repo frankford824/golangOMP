@@ -1839,10 +1839,20 @@ async function submit() {
   width: auto;
   min-width: 4.7rem;
   justify-content: center;
+  flex-shrink: 0;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .erp-sync-toggle-card :deep(.erp-switch[aria-pressed='true']) {
   background: #111827;
   color: #f9fafb;
+  border-color: rgba(125, 211, 252, 0.35) !important;
+  box-shadow:
+    0 0 0 1px rgba(34, 197, 94, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 .erp-sync-toggle-card :deep(.erp-switch[aria-pressed='false']) {
   background: #e5e7eb;
@@ -2130,13 +2140,26 @@ async function submit() {
 }
 
 .eyebrow,
-.field-label,
 .batch-preview-header span,
 .batch-bridge-hint,
 .submit-check-hint,
 .context-card-body,
 .erp-sync-toggle-hint {
   color: #9dadc4 !important;
+}
+
+/*
+ * 左侧表单区字段标题：与 eyebrow/说明文案区分层级，统一覆盖
+ * - 本组件内 label.field-label
+ * - 子表单内 label.field-label（:deep）
+ * - BaseInput/BaseTextarea/BaseSelect 的 label（Tailwind text-slate-600）
+ * 限定在 .form-fields，避免影响右侧说明面板、ERP 同步标题等。
+ */
+.form-fields :deep(label.field-label),
+.form-fields :deep(label.text-sm.font-medium.text-slate-600) {
+  color: #d6e6fb !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .batch-section-title,
@@ -2227,6 +2250,39 @@ async function submit() {
 .erp-sync-toggle-card {
   border-color: rgba(148, 163, 184, 0.20) !important;
   background: rgba(12, 18, 29, 0.76) !important;
+}
+
+/* 深色玻璃皮肤：ERP「立即同步」行作为主配置项，提亮主文案并承托整行（仅样式） */
+.erp-sync-toggle-card .erp-sync-control {
+  margin-top: 0.12rem;
+  padding: 0.55rem 0.72rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.065) 0%,
+    rgba(255, 255, 255, 0.028) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  gap: 0.85rem;
+}
+.erp-sync-toggle-card .erp-sync-main-label {
+  color: #f2f7ff !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+.erp-sync-toggle-card .erp-sync-toggle-hint:not(.warning) {
+  color: #7c8eaa !important;
+  font-weight: 400;
+}
+.erp-sync-toggle-card :deep(.erp-switch[aria-pressed='false']) {
+  background: rgba(30, 41, 59, 0.88) !important;
+  color: #d5e0f2 !important;
+  border-color: rgba(148, 163, 184, 0.38) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .erp-sync-badge,

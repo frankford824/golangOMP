@@ -123,7 +123,7 @@ const emit = defineEmits<{
 
 const uploadHintText = computed(() =>
   props.compact
-    ? (uploading.value ? '上传中...' : '点击按钮选择文件')
+    ? (uploading.value ? '上传中...' : '点击选择，或拖拽文件到此处')
     : (
   props.taskId?.trim()
     ? '已关联当前任务，上传的参考图会直接绑定到该任务。'
@@ -368,7 +368,10 @@ watch(
   margin-left: auto;
   color: #94a3b8;
   font-weight: 400;
-  white-space: nowrap;
+  min-width: 0;
+  text-align: right;
+  line-height: 1.35;
+  white-space: normal;
 }
 .compact-upload-summary {
   display: flex;

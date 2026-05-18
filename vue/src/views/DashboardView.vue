@@ -1122,7 +1122,6 @@ onMounted(load)
   border-radius: 0.875rem;
 }
 
-.kpi-card,
 .board-panel,
 .risk-card {
   border: 1px solid var(--yb-music-border) !important;
@@ -1134,26 +1133,50 @@ onMounted(load)
     0 18px 36px -30px rgba(0, 0, 0, 0.58) !important;
 }
 
+/* KPI 八卡：默认即「统一雾面面板」，避免浅色渐变 + 顶条伪元素在默认态形成横向碎层 */
 .kpi-card {
   position: relative;
   overflow: hidden;
   min-height: 7.85rem;
   border-radius: 0.875rem !important;
   padding: 1rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: var(--yb-music-text-2) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 18px 36px -30px rgba(0, 0, 0, 0.58) !important;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.18s ease;
 }
 
 .kpi-card::before {
   content: '';
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at 84% 12%, rgba(100, 210, 255, 0.13), transparent 9rem),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent);
-  opacity: 0.85;
+  background: radial-gradient(circle at 84% 12%, rgba(100, 210, 255, 0.14), transparent 8rem);
+  opacity: 0.35;
   pointer-events: none;
 }
 
-.kpi-card:hover,
+.kpi-card:hover {
+  border-color: rgba(255, 255, 255, 0.36) !important;
+  background: rgba(255, 255, 255, 0.18) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 22px 44px -26px rgba(0, 0, 0, 0.62) !important;
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kpi-card:hover {
+    transform: none;
+  }
+}
+
 .board-panel:hover,
 .risk-card:hover {
   border-color: rgba(255, 255, 255, 0.3) !important;
