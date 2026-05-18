@@ -1624,7 +1624,7 @@ async function submit() {
   border-radius: 0.875rem;
   padding: 0.75rem;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr) minmax(0, 0.9fr);
   gap: 0.65rem;
   align-items: stretch;
   background: #f8fafc;
@@ -1934,7 +1934,7 @@ async function submit() {
 }
 .due-at-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 6.25rem;
+  grid-template-columns: minmax(8.75rem, 1fr) 6.25rem;
   gap: 0.5rem;
 }
 .due-hour-select {
