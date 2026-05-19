@@ -2,6 +2,7 @@
   <section
     ref="designAssetSectionRef"
     class="detail-block h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6"
+    :class="{ 'detail-block--result': showResultDisplayState }"
   >
     <div class="block-header">
       <div class="flex items-center gap-2">
@@ -23,6 +24,27 @@
       已标记外协意图（need_outsource）
     </div>
 
+    <DesignAssetResultBlock
+      v-if="showResultDisplayState"
+      :is-retouch-task="isRetouchTask"
+      :batch-ui="batchUi"
+      :show-reference-pane="showReferencePane"
+      :reference-thumb-items="referenceThumbItems"
+      :reference-entry-count="referencePaneEntries.length"
+      :design-asset-layout-class="designAssetLayoutClass"
+      :scoped-asset-version-groups="scopedAssetVersionGroups"
+      :shared-asset-versions="sharedAssetVersions"
+      :active-version-idx="activeVersionIdx"
+      :active-version="activeVersion"
+      :flat-index-of-version="flatIndexOfVersion"
+      :is-version-unavailable="isVersionUnavailable"
+      :is-audit-replacement-version="isAuditReplacementVersion"
+      @activate-version="activateVersion"
+      @open-lightbox="openLightbox"
+      @open-shared-version="(v) => openLightbox(v.fileRefs?.[0] ?? '')"
+    />
+
+    <template v-else>
     <!-- 并列商品切换在「商品与编码信息」卡片；本区随详情页共用 productIndex -->
     <!-- 分栏：左参考图（审核工作台式）、右版本/交付/源文件与上传（采购任务仅单列参考） -->
     <div :class="designAssetLayoutClass">
@@ -182,6 +204,7 @@
     />
       </div>
     </div>
+    </template>
 
   </section>
 </template>
@@ -204,6 +227,7 @@ import { usePermission } from '@/composables/usePermission'
 import { useTasksStore } from '@/stores/tasks'
 import { assetsApi } from '@/services/api/assetsApi'
 import DesignAssetPanel from '@/components/business/DesignAssetPanel.vue'
+import DesignAssetResultBlock from '@/components/task-detail/DesignAssetResultBlock.vue'
 import { formatDateTimeBeijingOffsetAware } from '@/utils/date'
 import { toRelativeAssetUrl } from '@/utils/url'
 import { resolveBackendPreviewAssetId } from '@/domain/asset-access'
@@ -252,15 +276,47 @@ const isRetouchTask = computed(
     task.value.businessType === 'RETOUCH_TASK' || task.value.taskType === 'RETOUCH_TASK',
 )
 
+const retouchModuleSummary = computed(() =>
+  task.value.moduleSummaries?.find((m: { module_key: string }) => m.module_key === 'retouch'),
+)
+
+const retouchModuleState = computed(() => retouchModuleSummary.value?.state ?? '')
+
 const retouchModuleCanUpload = computed(() => {
   if (!isRetouchTask.value) return false
-  const mod = task.value.moduleSummaries?.find(
-    (m: { module_key: string }) => m.module_key === 'retouch',
-  )
+  const mod = retouchModuleSummary.value
   if (mod?.state === 'in_progress') return true
   if (task.value.designerId) return true
   return false
 })
+
+const isDesignChainTask = computed(() => !isPurchase.value && !isRetouchTask.value)
+
+/** 设计链：已有版本且已离开上传/提交审核操作态 */
+const showDesignResultDisplayState = computed(() => {
+  if (!isDesignChainTask.value) return false
+  if (scopedAssetVersions.value.length === 0) return false
+  if (canUploadDesignDelivery(task.value)) return false
+  if (canSubmitAudit(task.value)) return false
+  return true
+})
+
+/** 精修：已有版本且模块已进入提交/完成类状态 */
+const showRetouchResultDisplayState = computed(() => {
+  if (!isRetouchTask.value || isPurchase.value) return false
+  if (scopedAssetVersions.value.length === 0) return false
+  const state = retouchModuleState.value
+  if (state === 'submitted' || state === 'closed' || state === 'completed') return true
+  const ts = task.value.status
+  if (ts === 'PendingAuditA' || ts === 'PendingAuditB' || ts === 'Completed' || ts === 'Archived') {
+    return true
+  }
+  return false
+})
+
+const showResultDisplayState = computed(
+  () => showDesignResultDisplayState.value || showRetouchResultDisplayState.value,
+)
 
 const batchUi = computed(
   () => taskHasSkuItemsForBatchUi(task.value) && !isPurchase.value,
@@ -1068,6 +1124,10 @@ async function onDeliveryPanelSuccess() {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+.detail-block--result :deep(.design-asset-pane--drafts > .asset-section:first-of-type) {
+  min-height: 0;
+}
+
 .design-asset-pane--drafts > .asset-section:first-of-type {
   min-height: 16.25rem;
   border-radius: 0.75rem;
@@ -1075,6 +1135,58 @@ async function onDeliveryPanelSuccess() {
   background:
     linear-gradient(160deg, rgba(15, 24, 38, 0.92), rgba(6, 12, 22, 0.94));
   border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.detail-block--result :deep(.design-asset-result-manuscript),
+.detail-block--result :deep(.design-asset-pane--refs),
+.detail-block--result :deep(.design-asset-pane--timeline) {
+  background:
+    linear-gradient(145deg, rgba(21, 32, 48, 0.94), rgba(7, 14, 25, 0.96));
+  border-color: rgba(148, 163, 184, 0.24);
+  color: #e8f2ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.detail-block--result :deep(.manuscript-title),
+.detail-block--result :deep(.manuscript-card-label),
+.detail-block--result :deep(.nonpreview-name) {
+  color: #e8f2ff;
+}
+
+.detail-block--result :deep(.manuscript-meta),
+.detail-block--result :deep(.manuscript-empty),
+.detail-block--result :deep(.timeline-empty),
+.detail-block--result :deep(.nonpreview-hint) {
+  color: #aebbd0;
+}
+
+.detail-block--result :deep(.manuscript-card) {
+  background: rgba(12, 20, 32, 0.92);
+  border-color: rgba(148, 163, 184, 0.26);
+}
+
+.detail-block--result :deep(.manuscript-card-visual) {
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.detail-block--result :deep(.version-group) {
+  border-radius: 0.625rem;
+  padding: 0.35rem 0.45rem;
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.detail-block--result :deep(.version-btn) {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.26);
+  color: #d7e7fb;
+}
+
+.detail-block--result :deep(.version-btn.version-active) {
+  color: #ffffff;
+  border-color: rgba(244, 114, 182, 0.72);
+  background:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(236, 72, 153, 0.68));
 }
 
 .version-header {

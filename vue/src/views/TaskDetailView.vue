@@ -443,47 +443,86 @@
                     <article class="detail-v3-info-card detail-v3-info-card--wide">
                       <DesignAssetBlock />
                     </article>
-                    <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">设计负责人</p>
-                      <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
-                      <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
-                    </article>
-                    <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">上传设计稿</p>
-                      <p class="detail-v3-card-text">请在上方"设计与资产"区域上传文件</p>
-                    </article>
-                    <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">设计资产版本</p>
-                      <p class="detail-v3-card-text">{{ designVersionSummary }}</p>
-                    </article>
-                    <article class="detail-v3-info-card detail-v3-info-card--refs">
-                      <template v-if="isRetouchTask">
-                        <p class="detail-v3-card-kicker">精修任务操作</p>
-                        <template v-if="showRetouchClaimAction">
-                          <p class="detail-v3-card-text">精修任务尚未领取，请先领取后再上传设计稿并提交。</p>
-                          <button
-                            type="button"
-                            class="detail-v3-dark-btn"
-                            :disabled="actionLoading === 'claim-retouch'"
-                            @click="claimRetouchFromDetail"
-                          >
-                            {{ actionLoading === 'claim-retouch' ? '领取中...' : '领取精修任务' }}
-                          </button>
+                    <template v-if="isDesignOrRetouchModuleResultState">
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">
+                          {{ isRetouchTask ? '精修负责人' : '设计负责人' }}
+                        </p>
+                        <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
+                        <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">
+                          {{ isRetouchTask ? '精修版本' : '设计资产版本' }}
+                        </p>
+                        <p class="detail-v3-card-text">
+                          {{ isRetouchTask ? retouchVersionSummary : designVersionSummary }}
+                        </p>
+                        <p class="detail-v3-card-muted">
+                          {{ isRetouchTask ? '切换上方时间线可查看各版本精修稿件' : '切换上方时间线可查看各版本设计稿件' }}
+                        </p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">结果状态</p>
+                        <p class="detail-v3-card-text">{{ designStatusText }}</p>
+                      </article>
+                      <article class="detail-v3-info-card detail-v3-info-card--refs">
+                        <p class="detail-v3-card-kicker">资产操作</p>
+                        <p class="detail-v3-card-text">
+                          在上方{{ isRetouchTask ? '精修稿件' : '设计稿件' }}区预览或下载当前版本文件。
+                        </p>
+                        <button
+                          type="button"
+                          class="detail-v3-link-btn"
+                          @click="openTaskAssetsPage"
+                        >
+                          打开任务资产页
+                        </button>
+                      </article>
+                    </template>
+                    <template v-else>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">设计负责人</p>
+                        <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
+                        <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">上传设计稿</p>
+                        <p class="detail-v3-card-text">请在上方"设计与资产"区域上传文件</p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">设计资产版本</p>
+                        <p class="detail-v3-card-text">{{ designVersionSummary }}</p>
+                      </article>
+                      <article class="detail-v3-info-card detail-v3-info-card--refs">
+                        <template v-if="isRetouchTask">
+                          <p class="detail-v3-card-kicker">精修任务操作</p>
+                          <template v-if="showRetouchClaimAction">
+                            <p class="detail-v3-card-text">精修任务尚未领取，请先领取后再上传设计稿并提交。</p>
+                            <button
+                              type="button"
+                              class="detail-v3-dark-btn"
+                              :disabled="actionLoading === 'claim-retouch'"
+                              @click="claimRetouchFromDetail"
+                            >
+                              {{ actionLoading === 'claim-retouch' ? '领取中...' : '领取精修任务' }}
+                            </button>
+                          </template>
+                          <template v-else>
+                            <p class="detail-v3-card-text">
+                              请在上方"设计与资产"区域上传精修稿后点击"提交精修"按钮完成任务。
+                            </p>
+                          </template>
                         </template>
                         <template v-else>
+                          <p class="detail-v3-card-kicker">提交审核</p>
                           <p class="detail-v3-card-text">
-                            请在上方"设计与资产"区域上传精修稿后点击"提交精修"按钮完成任务。
+                            请在上方“设计与资产”区域选择交付文件后提交审核。
                           </p>
+                          <p class="detail-v3-card-muted">提交动作统一由设计与资产面板处理。</p>
                         </template>
-                      </template>
-                      <template v-else>
-                        <p class="detail-v3-card-kicker">提交审核</p>
-                        <p class="detail-v3-card-text">
-                          请在上方“设计与资产”区域选择交付文件后提交审核。
-                        </p>
-                        <p class="detail-v3-card-muted">提交动作统一由设计与资产面板处理。</p>
-                      </template>
-                    </article>
+                      </article>
+                    </template>
                   </div>
                 </section>
 
@@ -787,6 +826,7 @@ import {
 } from '@/domain/task-close-eligibility'
 import {
   canAssign,
+  canSubmitAudit,
   canUploadDesignDelivery,
   canReassignDesigner,
   isLegacyTaskStatusInDesignerEditablePhase,
@@ -817,9 +857,11 @@ import {
   type TaskDetailProductIndexContext,
 } from '@/composables/task-detail-product-index'
 import {
+  assetVersionMatchesActiveSku,
   parallelProductTabCount,
   selectionFromProductIndex,
   targetSkuCodeForUpload,
+  taskHasSkuItemsForBatchUi,
 } from '@/domain/task-batch-assets'
 import { latestDeliveryBatchVersionsForSelection } from '@/domain/task-final-delivery'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
@@ -1218,6 +1260,54 @@ const designVersionSummary = computed(() => {
   return versions
     .slice(-2)
     .map((v) => `v${v.rootVersionNo ?? 1} ${v.assetNo ?? v.note ?? '设计稿'}`)
+    .join('；')
+})
+
+function isTimelineEligibleAssetKind(kind: string | undefined): boolean {
+  const k = (kind ?? '').trim().toLowerCase()
+  return k === 'delivery' || k === 'source'
+}
+
+const detailScopedAssetVersionCount = computed(() => {
+  const t = task.value
+  if (!t) return 0
+  const all = (t.assetVersions ?? []).filter((v) => isTimelineEligibleAssetKind(v.assetKind))
+  if (!taskHasSkuItemsForBatchUi(t) || isPurchaseTask.value) return all.length
+  const sel = selectionFromProductIndex(t, detailProductIndex.value)
+  return all.filter((v) => assetVersionMatchesActiveSku(v, sel, t)).length
+})
+
+const isDesignModuleResultState = computed(() => {
+  if (!task.value || isPurchaseTask.value || isRetouchTask.value) return false
+  if (detailScopedAssetVersionCount.value === 0) return false
+  if (canUploadDesignDelivery(task.value)) return false
+  if (canSubmitAudit(task.value)) return false
+  return true
+})
+
+const isRetouchModuleResultState = computed(() => {
+  if (!task.value || !isRetouchTask.value) return false
+  if (detailScopedAssetVersionCount.value === 0) return false
+  const state = retouchModuleState.value
+  if (state === 'submitted' || state === 'closed' || state === 'completed') return true
+  const ts = task.value.status
+  if (ts === 'PendingAuditA' || ts === 'PendingAuditB' || ts === 'Completed' || ts === 'Archived') {
+    return true
+  }
+  return false
+})
+
+const isDesignOrRetouchModuleResultState = computed(
+  () => isDesignModuleResultState.value || isRetouchModuleResultState.value,
+)
+
+const retouchVersionSummary = computed(() => {
+  if (!isRetouchTask.value) return designVersionSummary.value
+  const versions = task.value?.assetVersions ?? []
+  if (!versions.length) return '暂无精修稿版本'
+  return versions
+    .slice(-2)
+    .map((v) => `v${v.rootVersionNo ?? 1} ${v.assetNo ?? v.note ?? '精修稿'}`)
     .join('；')
 })
 /** `warehouse_receive_status` 过渡期读模型枚举，仅 UI 映射 */
