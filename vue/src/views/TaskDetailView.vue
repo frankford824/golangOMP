@@ -1596,7 +1596,9 @@ const showWarehouseCompleteActionButton = computed(
 
 const canEditBasicInfo = computed(
   () => {
-    if (!task.value || !hasTaskScopeAccess.value || !can('task.edit')) return false
+    // 运营维护入口以 basic_info.allowed_actions 为准，不与通用 task.edit 绑定：
+    // Ops 创建人常具备 update_basic_info 投影但无 task.edit，强绑会导致「编辑信息 / 重传参考图」误隐藏。
+    if (!task.value || !hasTaskScopeAccess.value) return false
     if (hasModuleActionProjection(basicInfoModuleSummary.value)) {
       return hasModuleAction(basicInfoModuleSummary.value, [
         'update_basic_info',
