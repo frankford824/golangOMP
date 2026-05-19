@@ -14,7 +14,7 @@ Use this file as a current task-create guide only. Historical notes were moved t
 
 - Create task: `POST /v1/tasks`
 - Pre-task reference upload: `POST /v1/tasks/reference-upload`
-- Product-code preview: `POST /v1/tasks/prepare-product-codes`
+- Product-code allocation: `POST /v1/tasks/prepare-product-codes`
 - Original-product lookup: `GET /v1/erp/products` and `GET /v1/erp/products/{id}`
 
 Compatibility-only entry points:
@@ -24,6 +24,7 @@ Compatibility-only entry points:
 Rejected legacy input:
 
 - `reference_images` on `POST /v1/tasks`
+- legacy CodeRule `new_sku` generation. Do not use `/v1/code-rules/generate-sku` for new development.
 
 ## Shared Rules
 
@@ -66,7 +67,9 @@ Current rules:
 - requires `product_short_name`
 - requires `design_requirement`
 - backend owns default product-code generation during create
-- `new_sku` remains optional
+- `new_sku` remains optional only as an explicit manual override
+- default SKU/product-code format is `NS` + 2-letter category short code + 6-digit sequence, for example `NSKT000277`
+- legacy CodeRule `new_sku` is archived and must not be used as a fallback
 
 ### `purchase_task`
 
@@ -78,6 +81,7 @@ Current rules:
 - requires `quantity`
 - requires `base_sale_price`
 - `cost_price` is required when `cost_price_mode=manual`
+- `purchase_sku` is the explicit manual SKU; if omitted in supported flows, backend allocates the default product-code format
 
 ## Batch SKU Rules
 

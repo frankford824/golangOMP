@@ -16,7 +16,6 @@ import (
 const (
 	createTaskBatchSKUModeSingle   = "single"
 	createTaskBatchSKUModeMultiple = "multiple"
-	maxBatchSKUGenerateAttempts    = 8
 )
 
 type taskBatchItemBuild struct {
@@ -328,27 +327,9 @@ func (s *taskService) generateOrReserveSkuForBatchItem(ctx context.Context, task
 		return skuCode, true, nil
 	}
 
-	for attempt := 0; attempt < maxBatchSKUGenerateAttempts; attempt++ {
-		skuCode, appErr := s.codeRuleSvc.GenerateCode(ctx, domain.CodeRuleTypeNewSKU)
-		if appErr != nil {
-			return "", false, appErr
-		}
-		skuCode = strings.TrimSpace(skuCode)
-		if skuCode == "" {
-			return "", false, domain.NewAppError(domain.ErrCodeInternalError, "generated sku_code is empty", nil)
-		}
-		existing, err := s.taskRepo.GetSKUItemBySKUCode(ctx, skuCode)
-		if err != nil {
-			return "", false, infraError("check generated batch sku uniqueness", err)
-		}
-		if existing == nil {
-			return skuCode, true, nil
-		}
-	}
-
 	return "", false, domain.NewAppError(
 		domain.ErrCodeInvalidRequest,
-		fmt.Sprintf("failed to generate unique sku for %s", taskType),
+		"automatic sku_code generation is only enabled for new_product_development and purchase_task",
 		map[string]interface{}{"task_type": taskType},
 	)
 }

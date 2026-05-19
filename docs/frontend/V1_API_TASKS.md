@@ -5783,7 +5783,8 @@ curl -X GET https://api.example.com/v1/code-rules/<id>/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Generate SKU code
+- `POST`: 已归档。旧 CodeRule `new_sku` 生成被禁用。
+- 新 SKU / 产品编码统一使用 `POST /v1/tasks/prepare-product-codes` 或 `POST /v1/tasks` 创建时的默认产品编码分配。
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5802,9 +5803,7 @@ Content-Type: `application/json`
 | `rule_id` | integer | 是 | - |
 
 ### 响应体 schema
-成功响应: `200`
-
-无 JSON 响应体或响应体由文件流承载。
+该接口不再返回成功 SKU。调用会返回 `400 INVALID_REQUEST`，提示旧 `new_sku` 规则已归档。
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -5820,7 +5819,7 @@ Content-Type: `application/json`
 curl -X POST https://api.example.com/v1/code-rules/generate-sku \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
+  -d '{"rule_id":1}'
 ```
 
 ### 前端最佳实践
@@ -5830,6 +5829,7 @@ curl -X POST https://api.example.com/v1/code-rules/generate-sku \
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 禁止新前端继续调用 `/v1/code-rules/generate-sku`；该旧路径仅保留归档错误响应。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/sku/preview_code
@@ -7287,4 +7287,3 @@ curl -X POST https://api.example.com/v1/notifications/broadcast \
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-

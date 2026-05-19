@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"sync"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -44,6 +45,27 @@ type PrepareTaskProductCodesResult struct {
 
 type TaskProductCodePrepareService interface {
 	PrepareProductCodes(ctx context.Context, p PrepareTaskProductCodesParams) (*PrepareTaskProductCodesResult, *domain.AppError)
+}
+
+type volatileProductCodeSequenceRepo struct {
+	mu   sync.Mutex
+	next map[string]int64
+}
+
+// newVolatileProductCodeSequenceRepo is a non-persistent fallback for unit tests
+// and partial service wiring. Production cmd wiring must provide the MySQL-backed
+// product_code_sequences repo so allocated product codes survive restarts.
+func newVolatileProductCodeSequenceRepo() repo.ProductCodeSequenceRepo {
+	return &volatileProductCodeSequenceRepo{next: make(map[string]int64)}
+}
+
+func (r *volatileProductCodeSequenceRepo) AllocateRange(_ context.Context, _ repo.Tx, prefix, categoryShortCode string, count int) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := strings.ToUpper(strings.TrimSpace(prefix)) + "|" + strings.ToUpper(strings.TrimSpace(categoryShortCode))
+	start := r.next[key]
+	r.next[key] += int64(count)
+	return start, nil
 }
 
 func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProductCodesParams) (*PrepareTaskProductCodesResult, *domain.AppError) {
@@ -213,25 +235,7 @@ func (s *taskService) generateDefaultTaskProductCodes(ctx context.Context, taskT
 	}
 
 	if s.productCodeSeqRepo == nil {
-		// Backward-compatible fallback used only in tests or partial wiring environments.
-		codes := make([]string, 0, count)
-		seen := make(map[string]struct{}, count)
-		for i := 0; i < count; i++ {
-			code, appErr := s.codeRuleSvc.GenerateCode(ctx, domain.CodeRuleTypeNewSKU)
-			if appErr != nil {
-				return nil, appErr
-			}
-			code = strings.TrimSpace(code)
-			if code == "" {
-				return nil, domain.NewAppError(domain.ErrCodeInternalError, "generated sku_code is empty", nil)
-			}
-			if _, exists := seen[code]; exists {
-				return nil, domain.NewAppError(domain.ErrCodeInternalError, "duplicate generated sku_code in one allocation", map[string]interface{}{"sku_code": code})
-			}
-			seen[code] = struct{}{}
-			codes = append(codes, code)
-		}
-		return codes, nil
+		s.productCodeSeqRepo = newVolatileProductCodeSequenceRepo()
 	}
 
 	var start int64

@@ -347,11 +347,13 @@ func TestNewAndPurchaseTaskPendingThenAutoFilingOnPatch(t *testing.T) {
 		t.Fatalf("new task filing_status = %s, want pending_filing", taskRepo.details[newTask.ID].FilingStatus)
 	}
 	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
-		TaskID:       newTask.ID,
-		OperatorID:   11,
-		CategoryCode: "CAT-NEW",
-		Category:     "CAT-NEW",
-		Remark:       "fill missing category",
+		TaskID:             newTask.ID,
+		OperatorID:         11,
+		CategoryCode:       "CAT-NEW",
+		Category:           "CAT-NEW",
+		CostPrice:          float64Ptr(7.2),
+		ManualCostOverride: true,
+		Remark:             "fill missing category and cost",
 	})
 	if appErr != nil {
 		t.Fatalf("UpdateBusinessInfo(new) unexpected error: %+v", appErr)
@@ -419,7 +421,7 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 		TaskType:        domain.TaskTypeNewProductDevelopment,
 		SourceMode:      domain.TaskSourceModeNewProduct,
 		CreatorID:       11,
-		OwnerTeam:       domain.AllValidTeams()[0],
+		OwnerTeam:       "设计组",
 		DeadlineAt:      timePtr(),
 		BatchSKUMode:    "multiple",
 		SyncERPOnCreate: true,
@@ -428,11 +430,13 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 				ProductName:       "Batch A",
 				DesignRequirement: "draw A",
 				ProductIID:        "I-1001",
+				CostPrice:         float64Ptr(5.1),
 			},
 			{
 				ProductName:       "Batch B",
 				DesignRequirement: "draw B",
 				ProductIID:        "I-1002",
+				CostPrice:         float64Ptr(6.2),
 			},
 		},
 	})
@@ -454,9 +458,73 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 	if got := bridgeStub.upsertPayloads[1].SPrice; got == nil || *got != 0 {
 		t.Fatalf("batch upsert[1] s_price = %v, want explicit 0 to avoid ERP default sale price", got)
 	}
+	if got := bridgeStub.upsertPayloads[0].BusinessInfo.CostPrice; got == nil || *got != 5.1 {
+		t.Fatalf("batch upsert[0] business_info.cost_price = %v, want 5.1", got)
+	}
+	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got == nil || *got != 6.2 {
+		t.Fatalf("batch upsert[1] business_info.cost_price = %v, want 6.2", got)
+	}
 	items := taskRepo.skuItems[task.ID]
 	if len(items) != 2 || items[0].ProductIID != "I-1001" || items[1].ProductIID != "I-1002" {
 		t.Fatalf("sku item product_i_id = %+v", items)
+	}
+}
+
+func TestBatchNewProductCreateSyncDefersUntilEverySKUHasCost(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions: []*domain.ERPIIDOption{
+			{IID: "I-1001", Label: "I-1001"},
+			{IID: "I-1002", Label: "I-1002"},
+		},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "ok"},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:        domain.TaskTypeNewProductDevelopment,
+		SourceMode:      domain.TaskSourceModeNewProduct,
+		CreatorID:       11,
+		OwnerTeam:       domain.AllValidTeams()[0],
+		DeadlineAt:      timePtr(),
+		BatchSKUMode:    "multiple",
+		SyncERPOnCreate: true,
+		BatchItems: []CreateTaskBatchSKUItemParams{
+			{
+				ProductName:       "Batch A",
+				DesignRequirement: "draw A",
+				ProductIID:        "I-1001",
+				CostPrice:         float64Ptr(5.1),
+			},
+			{
+				ProductName:       "Batch B",
+				DesignRequirement: "draw B",
+				ProductIID:        "I-1002",
+			},
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusPending {
+		t.Fatalf("filing_status after create = %s, want pending_filing", taskRepo.details[task.ID].FilingStatus)
+	}
+	if bridgeStub.upsertCalls != 0 {
+		t.Fatalf("upsert calls after create = %d, want 0", bridgeStub.upsertCalls)
+	}
+	if got := taskRepo.details[task.ID].MissingFields; len(got) == 0 || got[len(got)-1] != "sku_items[1].cost_price" {
+		t.Fatalf("missing fields = %v, want sku_items[1].cost_price", got)
 	}
 }
 
@@ -687,7 +755,7 @@ func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) 
 	}
 }
 
-func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreateSync(t *testing.T) {
+func TestNewProductCreateSyncDefersUntilCostAvailable(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
 		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
@@ -721,17 +789,22 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
-		t.Fatalf("filing_status after create = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusPending {
+		t.Fatalf("filing_status after create = %s, want pending_filing", taskRepo.details[task.ID].FilingStatus)
+	}
+	if bridgeStub.upsertCalls != 0 {
+		t.Fatalf("upsert calls after create = %d, want 0", bridgeStub.upsertCalls)
 	}
 
 	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
-		TaskID:      task.ID,
-		OperatorID:  11,
-		ProductName: "上线前新款单SKU任务3",
-		ProductIID:  "KT_STANDARD",
-		Category:    "KT_STANDARD",
-		SpecText:    "20*20",
+		TaskID:             task.ID,
+		OperatorID:         11,
+		ProductName:        "上线前新款单SKU任务3",
+		ProductIID:         "KT_STANDARD",
+		Category:           "KT_STANDARD",
+		SpecText:           "20*20",
+		CostPrice:          float64Ptr(5.69),
+		ManualCostOverride: true,
 	})
 	if appErr != nil {
 		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
@@ -739,8 +812,14 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
 		t.Fatalf("filing_status after business-info patch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
 	}
-	if bridgeStub.upsertCalls != 2 {
-		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatalf("upsert calls = %d, want 1", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayload.CostPrice; got == nil || *got != 5.69 {
+		t.Fatalf("erp cost_price = %v, want 5.69", got)
+	}
+	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || *got != 5.69 {
+		t.Fatalf("erp business_info.cost_price = %v, want 5.69", got)
 	}
 }
 

@@ -991,8 +991,8 @@ func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T)
 	if task.SourceMode != domain.TaskSourceModeNewProduct {
 		t.Fatalf("Create() source_mode = %s, want %s", task.SourceMode, domain.TaskSourceModeNewProduct)
 	}
-	if task.SKUCode != "SKU-TEST" {
-		t.Fatalf("Create() sku_code = %s, want SKU-TEST", task.SKUCode)
+	if task.SKUCode != "NSLI000000" {
+		t.Fatalf("Create() sku_code = %s, want NSLI000000", task.SKUCode)
 	}
 	if task.ProductID != nil {
 		t.Fatalf("Create() product_id = %+v, want nil", task.ProductID)
@@ -4079,13 +4079,13 @@ func (prdCodeRuleService) Preview(context.Context, int64) (*domain.CodePreview, 
 
 func (prdCodeRuleService) GenerateCode(_ context.Context, ruleType domain.CodeRuleType) (string, *domain.AppError) {
 	if ruleType == domain.CodeRuleTypeNewSKU {
-		return "SKU-TEST", nil
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 	}
 	return "RW-TEST", nil
 }
 
 func (prdCodeRuleService) GenerateSKU(context.Context, int64) (string, *domain.AppError) {
-	return "SKU-TEST", nil
+	return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 }
 
 func int64Ptr(v int64) *int64 {

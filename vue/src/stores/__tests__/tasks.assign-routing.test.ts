@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-const assignMock = vi.fn(async () => ({}))
-const reassignModuleMock = vi.fn(async () => ({}))
-const listMock = vi.fn(async () => ({ data: { data: [], pagination: { total: 0 } } }))
-const getDetailMock = vi.fn(async () => ({ data: { data: { task: {} } } }))
-const getByIdMock = vi.fn(async () => ({ data: { data: {} } }))
+const assignMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({}))
+const reassignModuleMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({}))
+const listMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
+  data: { data: [], pagination: { total: 0 } },
+}))
+const getDetailMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({ data: { data: { task: {} } } }))
+const getByIdMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({ data: { data: {} } }))
 
 vi.mock('@/services/api/tasksApi', () => ({
   tasksApi: {

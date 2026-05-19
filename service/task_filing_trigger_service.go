@@ -564,6 +564,9 @@ func hydrateTaskDetailFilingProjection(task *domain.Task, detail *domain.TaskDet
 		return
 	}
 	normalizeTaskDetailFilingState(detail)
+	if isBatchNewProductTask(task) && detail.FilingStatus == domain.FilingStatusPending && len(detail.MissingFields) > 0 {
+		return
+	}
 	missing, summary := ComputeFilingMissingFields(task, detail)
 	detail.MissingFields = missing
 	detail.MissingFieldsSummaryCN = summary
@@ -711,6 +714,9 @@ func computeBatchNewProductFilingMissingFields(task *domain.Task, items []*domai
 		}
 		if taskSKUItemProductIID(item) == "" {
 			add(fieldPrefix+".product_i_id", labelPrefix+"产品i_id")
+		}
+		if item.CostPrice == nil {
+			add(fieldPrefix+".cost_price", labelPrefix+"成本价")
 		}
 	}
 	if len(labels) == 0 {

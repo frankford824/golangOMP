@@ -44,7 +44,9 @@ type generateSKUReq struct {
 	RuleID int64 `json:"rule_id" binding:"required"`
 }
 
-// GenerateSKU handles POST /v1/code-rules/generate-sku
+// GenerateSKU is retained as an archived compatibility endpoint.
+// Legacy CodeRule new_sku generation is disabled; task product codes are
+// allocated through POST /v1/tasks/prepare-product-codes or task creation.
 func (h *CodeRuleHandler) GenerateSKU(c *gin.Context) {
 	var req generateSKUReq
 	if err := c.ShouldBindJSON(&req); err != nil {

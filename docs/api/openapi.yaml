@@ -13957,8 +13957,10 @@ paths:
           description: Rule not found
   /v1/code-rules/generate-sku:
     post:
-      summary: Generate SKU code
-      tags: [CodeRules, ReadyForFrontend]
+      summary: "[ARCHIVED] Legacy CodeRule SKU generation"
+      description: "Archived. Legacy CodeRule new_sku generation is disabled. Use POST /v1/tasks/prepare-product-codes or task creation default product-code allocation instead."
+      deprecated: true
+      tags: [CodeRules, Archived]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
@@ -13973,8 +13975,8 @@ paths:
               properties:
                 rule_id: { type: integer }
       responses:
-        '200':
-          description: SKU generated
+        '400':
+          description: Legacy new_sku CodeRule is archived
   /v1/sku/preview_code:
     post:
       summary: "[V6] Preview SKU code"

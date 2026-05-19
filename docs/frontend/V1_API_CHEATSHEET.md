@@ -124,7 +124,7 @@
 | GET | `/v1/tasks/{id}/events` | List task events | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/code-rules` | List code rules | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/code-rules/{id}/preview` | Preview generated code | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/code-rules/generate-sku` | Generate SKU code | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/code-rules/generate-sku` | [ARCHIVED] legacy CodeRule new_sku disabled; use `/v1/tasks/prepare-product-codes` | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/sku/preview_code` | [V6] Preview SKU code | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/sku/list` | [V6] List SKUs | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/sku` | [V6] Create SKU | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

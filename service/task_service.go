@@ -501,6 +501,9 @@ func NewTaskServiceWithCatalog(
 			opt(svc)
 		}
 	}
+	if svc.productCodeSeqRepo == nil {
+		svc.productCodeSeqRepo = newVolatileProductCodeSequenceRepo()
+	}
 	return svc
 }
 
@@ -1447,15 +1450,10 @@ func (s *taskService) resolveCreateTaskSKU(ctx context.Context, p *CreateTaskPar
 		return nil
 	}
 
-	skuCode, appErr := s.codeRuleSvc.GenerateCode(ctx, domain.CodeRuleTypeNewSKU)
-	if appErr != nil {
-		return appErr
-	}
-	p.SKUCode = strings.TrimSpace(skuCode)
-	if p.SKUCode == "" {
-		return domain.NewAppError(domain.ErrCodeInternalError, "generated sku_code is empty", nil)
-	}
-	return nil
+	return domain.NewAppError(domain.ErrCodeInvalidRequest,
+		"automatic sku_code generation is only enabled for new_product_development and purchase_task",
+		map[string]interface{}{"task_type": p.TaskType},
+	)
 }
 
 func taskTypeDoesNotUseSKU(taskType domain.TaskType) bool {
