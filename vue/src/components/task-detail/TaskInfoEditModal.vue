@@ -4,16 +4,16 @@
     :title="isBatchTask ? '编辑母任务信息' : '编辑任务信息'"
     :show-confirm="false"
     cancel-text="关闭"
-    panel-class="max-w-[min(1060px,96vw)] !max-h-[94vh] task-info-edit-modal"
+    panel-class="max-w-[min(1060px,96vw)] !max-h-[94vh] task-info-edit-modal-panel"
     @update:model-value="onClose"
   >
-    <div v-if="loadError" class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+    <div v-if="loadError" class="edit-error-banner">
       {{ loadError }}
     </div>
-    <div v-if="submitError" class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+    <div v-if="submitError" class="edit-error-banner">
       {{ submitError }}
     </div>
-    <div v-if="loading" class="py-8 text-center text-sm text-slate-500">加载可编辑数据…</div>
+    <div v-if="loading" class="edit-loading-text">加载可编辑数据…</div>
     <div v-else class="edit-workspace">
       <section v-if="!isBatchTask" class="form-card">
         <p class="section-eyebrow">商品信息</p>
@@ -48,8 +48,8 @@
             class="sm:col-span-2"
           />
         </div>
-        <label v-if="showField.trigger_filing" class="mt-3 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-          <input v-model="form.trigger_filing" type="checkbox" class="rounded border-slate-300" />
+        <label v-if="showField.trigger_filing" class="field-checkbox-label mt-3">
+          <input v-model="form.trigger_filing" type="checkbox" class="native-checkbox" />
           <span>保存商品信息时强制触发一次 ERP 建档同步</span>
         </label>
       </section>
@@ -92,8 +92,8 @@
             label="成本单价（CNY）"
             placeholder="请输入成本单价，可不填"
           />
-          <label class="flex cursor-pointer items-center gap-2 self-end pb-1 text-sm text-slate-700">
-            <input v-model="form.manual_cost_override" type="checkbox" class="rounded border-slate-300" />
+          <label class="field-checkbox-label self-end pb-1">
+            <input v-model="form.manual_cost_override" type="checkbox" class="native-checkbox" />
             <span>手动指定成本</span>
           </label>
           <BaseInput
@@ -591,70 +591,264 @@ watch(
 .edit-workspace {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding-bottom: 0.5rem;
+  gap: 0.75rem;
+  padding-bottom: 0.35rem;
 }
+
 .form-card {
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 0.875rem;
-  background: #f8fafc;
-  padding: 1rem 1.1rem;
+  background: linear-gradient(145deg, rgba(23, 32, 47, 0.92), rgba(11, 17, 28, 0.96));
+  padding: 0.875rem 1rem;
+  color: #dce7f7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
+
 .section-eyebrow {
-  margin: 0 0 0.75rem;
-  font-size: 0.6875rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  margin: 0 0 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #64748b;
+  color: #9dadc4;
 }
+
 .section-hint {
   margin: 0.35rem 0 0.65rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: #7c8eaa;
   line-height: 1.45;
 }
+
 .section-hint--after-grid {
-  margin-top: 0.75rem;
+  margin-top: 0.65rem;
+  margin-bottom: 0;
 }
+
 .form-grid {
   display: grid;
-  gap: 0.75rem 1rem;
+  gap: 0.65rem 0.875rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
 @media (max-width: 720px) {
   .form-grid {
     grid-template-columns: 1fr;
   }
 }
+
 .field-label {
   display: block;
   margin-bottom: 0.35rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #475569;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #d6e6fb;
+  letter-spacing: 0.01em;
 }
+
+.field-checkbox-label {
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: #d6e6fb;
+  line-height: 1.4;
+}
+
 .native-input {
   width: 100%;
-  border: 1px solid #d0d5dd;
-  border-radius: 0.625rem;
-  background: #fff;
-  color: #101828;
-  font-size: 0.8125rem;
-  padding: 0.5rem 0.65rem;
+  min-height: 2.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 0.75rem;
+  background: rgba(7, 12, 20, 0.82);
+  color: #f8fbff;
+  font-size: 0.875rem;
+  padding: 0.45rem 0.65rem;
   outline: none;
+  color-scheme: dark;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
+
+.native-input::placeholder {
+  color: #64748b;
+}
+
 .native-input:focus {
-  border-color: #98a2b3;
-  box-shadow: 0 0 0 3px rgb(152 162 179 / 0.14);
+  border-color: rgba(125, 211, 252, 0.62);
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12);
 }
+
+.native-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: rgba(7, 12, 20, 0.5);
+}
+
+select.native-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #9dadc4 50%),
+    linear-gradient(135deg, #9dadc4 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.1rem) calc(50% + 0.12rem),
+    calc(100% - 0.75rem) calc(50% + 0.12rem);
+  background-size:
+    0.35rem 0.35rem,
+    0.35rem 0.35rem;
+  background-repeat: no-repeat;
+  padding-right: 2rem;
+}
+
+input.native-input[type='date']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.75;
+  filter: invert(0.85);
+}
+
+.native-checkbox {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 0.25rem;
+  accent-color: #64d2ff;
+  cursor: pointer;
+}
+
+.edit-error-banner {
+  margin-bottom: 0.65rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(255, 69, 58, 0.32);
+  border-radius: 0.5rem;
+  background: rgba(255, 69, 58, 0.12);
+  font-size: 0.875rem;
+  color: #ffb4ad;
+  line-height: 1.45;
+}
+
+.edit-loading-text {
+  padding: 2rem 0;
+  text-align: center;
+  font-size: 0.875rem;
+  color: #9dadc4;
+}
+
 .edit-modal-footer {
   display: flex;
+  flex-shrink: 0;
   justify-content: flex-end;
   gap: 0.5rem;
   width: 100%;
   padding: 1rem 1.25rem;
-  border-top: 1px solid #e2e8f0;
-  background: #fff;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(8, 12, 20, 0.74);
+}
+
+/* BaseInput / BaseTextarea / IIdSelector（BaseSelect）局部深色覆写 */
+.edit-workspace :deep(label.text-sm.font-medium.text-slate-600),
+.edit-workspace :deep(label.field-label) {
+  color: #d6e6fb !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.form-card :deep(.flex.flex-col.gap-1) {
+  gap: 0.4rem;
+}
+
+.form-card :deep(input),
+.form-card :deep(textarea) {
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background: rgba(7, 12, 20, 0.82) !important;
+  color: #f8fbff !important;
+  box-shadow: none !important;
+}
+
+.form-card :deep(input) {
+  min-height: 2.75rem;
+  border-radius: 0.75rem !important;
+}
+
+.form-card :deep(textarea) {
+  border-radius: 0.75rem !important;
+  resize: vertical;
+}
+
+.form-card :deep(input::placeholder),
+.form-card :deep(textarea::placeholder) {
+  color: #64748b !important;
+}
+
+.form-card :deep(input:focus),
+.form-card :deep(textarea:focus) {
+  border-color: rgba(125, 211, 252, 0.62) !important;
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
+}
+
+.form-card :deep(input:disabled),
+.form-card :deep(textarea:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: rgba(7, 12, 20, 0.5) !important;
+}
+
+.form-card :deep(.relative > div) {
+  min-height: 2.75rem;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  border-radius: 0.75rem !important;
+  background: rgba(7, 12, 20, 0.82) !important;
+  color: #f8fbff !important;
+  box-shadow: none !important;
+}
+
+.form-card :deep(.relative > div:focus-within) {
+  border-color: rgba(125, 211, 252, 0.62) !important;
+  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
+}
+
+.form-card :deep(.relative button) {
+  color: #f8fbff !important;
+}
+
+.form-card :deep(.relative .text-slate-500) {
+  color: #64748b !important;
+}
+
+.form-card :deep(.text-xs.text-slate-400) {
+  color: #7c8eaa !important;
+}
+
+/* 深色玻璃态弹窗外壳（对齐创建任务弹窗） */
+:global(.task-info-edit-modal-panel) {
+  border-color: rgba(100, 210, 255, 0.28) !important;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 45, 141, 0.12), transparent 18rem),
+    radial-gradient(circle at 100% 10%, rgba(100, 210, 255, 0.14), transparent 20rem),
+    linear-gradient(145deg, rgba(20, 28, 41, 0.98), rgba(8, 12, 20, 0.99)) !important;
+  color: #dce7f7 !important;
+}
+
+:global(.task-info-edit-modal-panel > header) {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(8, 12, 20, 0.22);
+}
+
+:global(.task-info-edit-modal-panel > header h2) {
+  color: #f8fbff !important;
+}
+
+:global(.task-info-edit-modal-panel > header button) {
+  color: #9dadc4 !important;
+}
+
+:global(.task-info-edit-modal-panel > header button:hover) {
+  color: #f8fbff !important;
+}
+
+:global(.task-info-edit-modal-panel > div.flex-1) {
+  color: #dce7f7 !important;
 }
 </style>
