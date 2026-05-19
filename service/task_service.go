@@ -25,6 +25,7 @@ type CreateTaskBatchSKUItemParams struct {
 	DesignRequirement string
 	NewSKU            string
 	PurchaseSKU       string
+	SKUCodeType       domain.TaskSKUCodeType
 	CostPriceMode     string
 	CostPrice         *float64
 	Quantity          *int64
@@ -88,6 +89,7 @@ type CreateTaskParams struct {
 	// Batch create
 	BatchSKUMode        string
 	BatchItems          []CreateTaskBatchSKUItemParams
+	SKUCodeType         domain.TaskSKUCodeType
 	TopLevelNewSKU      string
 	TopLevelPurchaseSKU string
 	SyncERPOnCreate     bool
@@ -696,6 +698,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		BaseSalePrice:         p.BaseSalePrice,
 		Quantity:              p.Quantity,
 		ProductChannel:        strings.TrimSpace(p.ProductChannel),
+		SKUCodeType:           p.SKUCodeType,
 		ReferenceImagesJSON:   referenceImagesJSON,
 		ReferenceFileRefsJSON: referenceFileRefsJSON,
 		ReferenceLink:         strings.TrimSpace(p.ReferenceLink),
@@ -819,6 +822,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		BaseSalePrice:         cloneFloat64Ptr(primaryItem.BaseSalePrice),
 		Quantity:              cloneInt64Ptr(primaryItem.Quantity),
 		ProductChannel:        strings.TrimSpace(p.ProductChannel),
+		SKUCodeType:           primaryItem.SKUCodeType,
 		ReferenceImagesJSON:   "[]",
 		ReferenceFileRefsJSON: referenceFileRefsJSON,
 		ReferenceLink:         strings.TrimSpace(p.ReferenceLink),
@@ -1073,6 +1077,10 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 				p.CustomizationSourceType = domain.CustomizationSourceTypeNewProduct
 			}
 		}
+	}
+	p.SKUCodeType = normalizeTaskSKUCodeType(p.SKUCodeType, p.CustomizationRequired)
+	for i := range p.BatchItems {
+		p.BatchItems[i].SKUCodeType = normalizeTaskSKUCodeType(p.BatchItems[i].SKUCodeType, p.CustomizationRequired)
 	}
 	ownerTeamResolution := normalizeOwnerTeamForTaskCreate(p.OwnerTeam)
 	p.OwnerTeam = ownerTeamResolution.Normalized
@@ -1439,7 +1447,7 @@ func (s *taskService) resolveCreateTaskSKU(ctx context.Context, p *CreateTaskPar
 		)
 	}
 	if supportsDefaultTaskProductCode(p.TaskType) {
-		skuCode, appErr := s.generateDefaultTaskProductCode(ctx, p.TaskType, p.CategoryCode)
+		skuCode, appErr := s.generateDefaultTaskProductCode(ctx, p.TaskType, p.CategoryCode, p.SKUCodeType)
 		if appErr != nil {
 			return appErr
 		}
@@ -1535,6 +1543,7 @@ func (s *taskService) GetByID(ctx context.Context, id int64) (*domain.TaskReadMo
 func enrichTaskReadModelDetail(ctx context.Context, resolver UserDisplayNameResolver, enricher *ReferenceFileRefsEnricher, rm *domain.TaskReadModel, task *domain.Task, detail *domain.TaskDetail) {
 	rm.AssigneeID = task.DesignerID
 	rm.ChangeRequest = strings.TrimSpace(detail.ChangeRequest)
+	rm.SKUCodeType = detail.SKUCodeType
 	if task.TaskType == domain.TaskTypeOriginalProductDevelopment {
 		// For original product tasks, design_requirement is an output alias
 		// for change_request and mirrors create-side normalization.

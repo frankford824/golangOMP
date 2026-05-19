@@ -40,8 +40,8 @@ func TestTaskServiceCreateNewProductUsesDefaultProductCodeRule(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if task.SKUCode != "NSKT000000" {
-		t.Fatalf("Create() sku_code=%s, want NSKT000000", task.SKUCode)
+	if task.SKUCode != "CGK000000" {
+		t.Fatalf("Create() sku_code=%s, want CGK000000", task.SKUCode)
 	}
 
 	task2, appErr := svc.Create(context.Background(), CreateTaskParams{
@@ -60,8 +60,8 @@ func TestTaskServiceCreateNewProductUsesDefaultProductCodeRule(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() second unexpected error: %+v", appErr)
 	}
-	if task2.SKUCode != "NSKT000001" {
-		t.Fatalf("Create() second sku_code=%s, want NSKT000001", task2.SKUCode)
+	if task2.SKUCode != "CGK000001" {
+		t.Fatalf("Create() second sku_code=%s, want CGK000001", task2.SKUCode)
 	}
 }
 
@@ -94,8 +94,81 @@ func TestTaskServiceCreatePurchaseTaskUsesDefaultProductCodeRule(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if task.SKUCode != "NSKT000000" {
-		t.Fatalf("Create() sku_code=%s, want NSKT000000", task.SKUCode)
+	if task.SKUCode != "CGK000000" {
+		t.Fatalf("Create() sku_code=%s, want CGK000000", task.SKUCode)
+	}
+}
+
+func TestTaskServiceCreateCustomizationSKUUsesDZRule(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           9,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		CategoryCode:        "KT_STANDARD",
+		ProductNameSnapshot: "Custom KT",
+		ProductShortName:    "KT",
+		MaterialMode:        string(domain.MaterialModePreset),
+		Material:            "Al",
+		DesignRequirement:   "custom design",
+		SKUCodeType:         domain.TaskSKUCodeTypeCustomization,
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.SKUCode != "DZK000000" {
+		t.Fatalf("Create() sku_code=%s, want DZK000000", task.SKUCode)
+	}
+}
+
+func TestTaskServiceCustomizationLaneDefaultsSKUToDZ(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithTaskCustomizationJobRepo(newCustomizationFlowJobRepo()),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		SourceMode:            domain.TaskSourceModeNewProduct,
+		CreatorID:             9,
+		OwnerTeam:             domain.AllValidTeams()[0],
+		DeadlineAt:            timePtr(),
+		CategoryCode:          "KT_STANDARD",
+		ProductNameSnapshot:   "Lane Custom KT",
+		ProductShortName:      "KT",
+		MaterialMode:          string(domain.MaterialModePreset),
+		Material:              "Al",
+		DesignRequirement:     "custom design",
+		CustomizationRequired: true,
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.SKUCode != "DZK000000" {
+		t.Fatalf("Create() sku_code=%s, want DZK000000", task.SKUCode)
 	}
 }
 
@@ -167,7 +240,7 @@ func TestTaskServicePrepareProductCodesBatchAndConcurrentUnique(t *testing.T) {
 	if len(batchResult.Codes) != 3 {
 		t.Fatalf("PrepareProductCodes(batch) len=%d, want 3", len(batchResult.Codes))
 	}
-	if batchResult.Codes[0].SKUCode != "NSKT000000" || batchResult.Codes[1].SKUCode != "NSKT000001" || batchResult.Codes[2].SKUCode != "NSAB000000" {
+	if batchResult.Codes[0].SKUCode != "CGK000000" || batchResult.Codes[1].SKUCode != "CGK000001" || batchResult.Codes[2].SKUCode != "CGA000000" {
 		t.Fatalf("PrepareProductCodes(batch) codes=%+v", batchResult.Codes)
 	}
 
@@ -219,16 +292,16 @@ func TestDefaultTaskProductCategoryShortCodeRules(t *testing.T) {
 		if appErr != nil {
 			t.Fatalf("derive short code error: %+v", appErr)
 		}
-		if code != "KT" {
-			t.Fatalf("short code=%s, want KT", code)
+		if code != "K" {
+			t.Fatalf("short code=%s, want K", code)
 		}
 	})
 
 	t.Run("extract_first_two_letters", func(t *testing.T) {
 		cases := map[string]string{
-			"kt_standard":  "KT",
-			"K-T-standard": "KT",
-			"A1B2":         "AB",
+			"kt_standard":  "K",
+			"K-T-standard": "K",
+			"A1B2":         "A",
 		}
 		for input, want := range cases {
 			got, appErr := deriveDefaultTaskProductCategoryShortCode(input)
@@ -253,8 +326,8 @@ func TestDefaultTaskProductCategoryShortCodeRules(t *testing.T) {
 		if first != second {
 			t.Fatalf("fallback not stable: first=%s second=%s", first, second)
 		}
-		if !regexp.MustCompile(`^[A-Z]{2}$`).MatchString(first) {
-			t.Fatalf("fallback short code=%s, want ^[A-Z]{2}$", first)
+		if !regexp.MustCompile(`^[A-Z]$`).MatchString(first) {
+			t.Fatalf("fallback short code=%s, want ^[A-Z]$", first)
 		}
 	})
 }
@@ -283,7 +356,7 @@ func TestTaskServiceDefaultProductCodesFollowRegex(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("PrepareProductCodes unexpected error: %+v", appErr)
 	}
-	pattern := regexp.MustCompile(`^NS[A-Z]{2}[0-9]{6}$`)
+	pattern := regexp.MustCompile(`^CG[A-Z][0-9]{6}$`)
 	for _, item := range result.Codes {
 		if !pattern.MatchString(item.SKUCode) {
 			t.Fatalf("sku_code=%s, want %s", item.SKUCode, pattern.String())
@@ -317,7 +390,7 @@ func TestTaskServicePrepareAndCreateUseSameShortCodeSequence(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("PrepareProductCodes unexpected error: %+v", appErr)
 	}
-	if len(prepared.Codes) != 1 || prepared.Codes[0].SKUCode != "NSKT000000" {
+	if len(prepared.Codes) != 1 || prepared.Codes[0].SKUCode != "CGK000000" {
 		t.Fatalf("prepared codes=%+v", prepared.Codes)
 	}
 
@@ -337,8 +410,8 @@ func TestTaskServicePrepareAndCreateUseSameShortCodeSequence(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if created.SKUCode != "NSKT000001" {
-		t.Fatalf("Create() sku_code=%s, want NSKT000001", created.SKUCode)
+	if created.SKUCode != "CGK000001" {
+		t.Fatalf("Create() sku_code=%s, want CGK000001", created.SKUCode)
 	}
 }
 

@@ -63,6 +63,7 @@ type TaskSKUItem struct {
 	TaskID                   int64              `db:"task_id"               json:"task_id"`
 	SequenceNo               int                `db:"sequence_no"           json:"sequence_no"`
 	SKUCode                  string             `db:"sku_code"              json:"sku_code"`
+	SKUCodeType              TaskSKUCodeType    `db:"sku_code_type"         json:"sku_code_type,omitempty"`
 	SKUStatus                TaskSKUStatus      `db:"sku_status"            json:"sku_status"`
 	ProductID                *int64             `db:"product_id"            json:"product_id,omitempty"`
 	ERPProductID             *string            `db:"erp_product_id"        json:"erp_product_id,omitempty"`

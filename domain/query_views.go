@@ -241,14 +241,15 @@ type TaskReadModel struct {
 	PolicyScopeSummary     *PolicyScopeSummary                 `json:"policy_scope_summary,omitempty"`
 	PlatformEntryBoundary  *PlatformEntryBoundary              `json:"platform_entry_boundary,omitempty"`
 	// Frontend detail fields (v0.5)
-	AssigneeID         *int64 `json:"assignee_id,omitempty"` // alias for designer_id
-	AssigneeName       string `json:"assignee_name,omitempty"`
-	RequesterName      string `json:"requester_name,omitempty"`
-	DesignerName       string `json:"designer_name,omitempty"`
-	CurrentHandlerName string `json:"current_handler_name,omitempty"`
-	DesignRequirement  string `json:"design_requirement,omitempty"`
-	ChangeRequest      string `json:"change_request,omitempty"`
-	Note               string `json:"note,omitempty"`
+	AssigneeID         *int64          `json:"assignee_id,omitempty"` // alias for designer_id
+	AssigneeName       string          `json:"assignee_name,omitempty"`
+	RequesterName      string          `json:"requester_name,omitempty"`
+	DesignerName       string          `json:"designer_name,omitempty"`
+	CurrentHandlerName string          `json:"current_handler_name,omitempty"`
+	DesignRequirement  string          `json:"design_requirement,omitempty"`
+	ChangeRequest      string          `json:"change_request,omitempty"`
+	Note               string          `json:"note,omitempty"`
+	SKUCodeType        TaskSKUCodeType `json:"sku_code_type,omitempty"`
 	// Always JSON-encode as an array (including empty) so detail clients do not confuse omission with missing data.
 	ReferenceFileRefs []ReferenceFileRef `json:"reference_file_refs"`
 	CreatorName       string             `json:"creator_name,omitempty"`
@@ -261,6 +262,7 @@ type TaskListItem struct {
 	ProductID                    *int64                       `json:"-"`
 	SKUCode                      string                       `json:"sku_code"`
 	PrimarySKUCode               string                       `json:"primary_sku_code,omitempty"`
+	SKUCodeType                  TaskSKUCodeType              `json:"sku_code_type,omitempty"`
 	ProductNameSnapshot          string                       `json:"product_name_snapshot"`
 	TaskType                     TaskType                     `json:"task_type"`
 	SourceMode                   TaskSourceMode               `json:"source_mode"`

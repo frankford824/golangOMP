@@ -278,6 +278,7 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 		item := &domain.TaskSKUItem{
 			SequenceNo:          idx + 1,
 			SKUCode:             skuCode,
+			SKUCodeType:         rawItem.SKUCodeType,
 			SKUStatus:           domain.TaskSKUStatusGenerated,
 			ProductNameSnapshot: rawItem.ProductName,
 			ProductShortName:    defaultBatchItemProductShortName(rawItem),
@@ -316,7 +317,7 @@ func (s *taskService) generateOrReserveSkuForBatchItem(ctx context.Context, task
 	}
 
 	if supportsDefaultTaskProductCode(taskType) {
-		skuCode, appErr := s.generateDefaultTaskProductCode(ctx, taskType, item.CategoryCode)
+		skuCode, appErr := s.generateDefaultTaskProductCode(ctx, taskType, item.CategoryCode, item.SKUCodeType)
 		if appErr != nil {
 			return "", false, appErr
 		}
@@ -546,6 +547,7 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 	item := &domain.TaskSKUItem{
 		SequenceNo:               1,
 		SKUCode:                  task.SKUCode,
+		SKUCodeType:              detail.SKUCodeType,
 		SKUStatus:                domain.TaskSKUStatusGenerated,
 		ProductNameSnapshot:      task.ProductNameSnapshot,
 		ProductShortName:         detail.ProductShortName,

@@ -2,6 +2,7 @@ import type { TaskPriorityApi } from '@/domain/task-priority'
 
 export type TaskKind = 'ORIGINAL_PRODUCT_DEV' | 'NEW_PRODUCT_DEV' | 'PURCHASE_TASK' | 'RETOUCH_TASK'
 export type TaskCreateSkuMode = 'single' | 'multiple'
+export type TaskSkuCodeType = 'regular' | 'customization'
 
 /**
  * 批量商品行：完整业务字段（由录入模板复制并可编辑），提交时进入 batch_items。
@@ -21,6 +22,7 @@ export interface TaskBatchItem {
   designRequirement?: string
   newSku?: string
   purchaseSku?: string
+  skuCodeType?: TaskSkuCodeType
   /** 预生成 SKU 所用规则 id，与 SkuRulePreviewCard 选择同步 */
   skuRuleId?: string | null
   costPriceMode?: 'manual' | 'template'
@@ -95,6 +97,8 @@ export interface TaskCreateFormModel {
   customizationRequired: boolean
   /** 定制来源类型：当 customizationRequired=true 时必填 */
   customizationSourceType?: 'new_product' | 'existing_product'
+  /** 自动生成 SKU 类型：regular=CG+类目1位+6位序号；customization=DZ+类目1位+6位序号 */
+  skuCodeType?: TaskSkuCodeType
   note: string
   /** 成本价格模式（manual=手动录入，template=按模板/系统计算） */
   costPriceMode?: 'manual' | 'template'
@@ -145,4 +149,3 @@ export interface TaskCreateFormModel {
   // ── 创建阶段前置结单/建档主档信息（仅白名单分型展示，均可选）───────────────────
   prefillSpecText?: string
 }
-

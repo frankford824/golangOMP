@@ -313,9 +313,32 @@
                   }}
                 </p>
               </div>
-            </section>
+	            </section>
 
-            <section class="submit-check-section">
+	            <section v-if="showSkuCodeTypeCard" class="sku-code-type-card">
+	              <div class="erp-sync-toggle-head">
+	                <label class="field-label erp-sync-title">SKU 编码</label>
+	                <span class="erp-sync-badge">{{ form.skuCodeType === 'customization' ? 'DZ' : 'CG' }}</span>
+	              </div>
+	              <div class="erp-sync-toggle-row">
+	                <div class="erp-sync-control">
+	                  <span class="erp-sync-main-label">{{ allowSkuCodeTypeSwitch ? '生成定制 SKU' : '定制任务默认标记' }}</span>
+	                  <BaseSwitch v-if="allowSkuCodeTypeSwitch" v-model="customizationSkuSwitchValue" class="erp-switch">
+	                    {{ form.skuCodeType === 'customization' ? 'DZ' : 'CG' }}
+	                  </BaseSwitch>
+	                  <span v-else class="erp-sync-locked-badge">DZ</span>
+	                </div>
+	                <p class="erp-sync-toggle-hint" :class="{ warning: form.skuCodeType === 'customization' }">
+	                  {{
+	                    form.skuCodeType === 'customization'
+	                      ? '将使用 DZ + 类目首字母 + 6 位序号，ERP 中可直接识别定制 SKU。'
+	                      : '将使用 CG + 类目首字母 + 6 位序号，适用于常规新品或采购 SKU。'
+	                  }}
+	                </p>
+	              </div>
+	            </section>
+
+	            <section class="submit-check-section">
               <div class="submit-check-header">
                 <div>
                   <h4 class="summary-title">提交校验</h4>
@@ -604,11 +627,12 @@ const form = ref<TaskCreateFormModel>({
   costUnitPrice: undefined,
   quantity: undefined,
   basePriceAmount: undefined,
-  productChannel: undefined,
-  costPriceAmount: undefined,
-  costPriceCurrency: 'CNY',
-  syncErpOnCreate: true,
-  purchaseQuantity: undefined,
+	  productChannel: undefined,
+	  costPriceAmount: undefined,
+	  costPriceCurrency: 'CNY',
+	  syncErpOnCreate: true,
+	  skuCodeType: 'regular',
+	  purchaseQuantity: undefined,
   purchaseUnit: undefined,
   prefillSpecText: undefined,
   skuMode: 'single',
@@ -687,6 +711,26 @@ const showSyncErpToggle = computed(() =>
   createType.value === 'new_batch' ||
   createType.value === 'purchase_single',
 )
+const allowSkuCodeTypeSwitch = computed(() =>
+  createType.value === 'new_single' ||
+  createType.value === 'new_batch' ||
+  createType.value === 'purchase_single',
+)
+const showSkuCodeTypeCard = computed(() =>
+  allowSkuCodeTypeSwitch.value ||
+  createType.value === 'customer_customization' ||
+  createType.value === 'regular_customization',
+)
+const customizationSkuSwitchValue = computed({
+  get: () => form.value.skuCodeType === 'customization',
+  set: (enabled: boolean) => {
+    form.value.skuCodeType = enabled ? 'customization' : 'regular'
+    form.value.batchItems = (form.value.batchItems ?? []).map((item) => ({
+      ...item,
+      skuCodeType: form.value.skuCodeType,
+    }))
+  },
+})
 
 const copyContentModel = computed({
   get: () => form.value.copyContent ?? '',
@@ -704,13 +748,14 @@ const styleKeywordsModel = computed({
 function applyCreateType(option: (typeof createTypeOptions)[number]) {
   createType.value = option.value
   taskKind.value = option.kind
-  form.value.skuMode = option.value === 'new_batch' ? 'multiple' : 'single'
-  form.value.customizationRequired = option.group === 'customization'
-  form.value.customizationSourceType = option.group === 'customization'
-    ? option.kind === 'ORIGINAL_PRODUCT_DEV'
-      ? 'existing_product'
-      : 'new_product'
-    : undefined
+	form.value.skuMode = option.value === 'new_batch' ? 'multiple' : 'single'
+	form.value.customizationRequired = option.group === 'customization'
+	form.value.customizationSourceType = option.group === 'customization'
+	  ? option.kind === 'ORIGINAL_PRODUCT_DEV'
+	    ? 'existing_product'
+	    : 'new_product'
+	  : undefined
+	form.value.skuCodeType = option.group === 'customization' ? 'customization' : 'regular'
   designSourceVerified.value = false
   erpProductVerified.value = false
   batchPreviewRows.value = []
@@ -939,8 +984,9 @@ function onExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchV
     clientKey: `excel-${idx + 1}`,
     productName: row.product_name ?? '',
     designRequirement: row.design_requirement ?? '',
-    productIId: row.product_i_id ?? undefined,
-    referenceFileRefs: (row.reference_file_refs ?? []).map((ref) => ({ ...ref })) as Record<string, unknown>[],
+	  productIId: row.product_i_id ?? undefined,
+	  skuCodeType: form.value.skuCodeType,
+	  referenceFileRefs: (row.reference_file_refs ?? []).map((ref) => ({ ...ref })) as Record<string, unknown>[],
   }))
   form.value.batchTemplateSaved = payload.preview.length > 0
 }
@@ -1097,10 +1143,11 @@ async function prepareSkuPreview() {
       designRequirement: businessType === 'PURCHASE_TASK' ? undefined : form.value.designRequirement || undefined,
       referenceFileRefs: referenceFileRefs as unknown as Task['referenceFileRefs'],
       dueAt: form.value.dueAt,
-      priority: normalizedPriority,
-      customizationRequired: false,
-      customizationSourceType: undefined,
-      note: form.value.note,
+	      priority: normalizedPriority,
+	      customizationRequired: form.value.customizationRequired,
+	      customizationSourceType: form.value.customizationSourceType,
+	      skuCodeType: form.value.skuCodeType,
+	      note: form.value.note,
       assetVersions: [],
       businessType,
       requiresAssetVersions: businessType !== 'PURCHASE_TASK',
@@ -1289,9 +1336,10 @@ async function submit() {
     note: form.value.note,
     assetVersions: [],
     businessType,
-    workflowLane: taskGroup.value,
-    taskCreateType: createType.value,
-    orderNumber: form.value.orderNumber,
+	    workflowLane: taskGroup.value,
+	    taskCreateType: createType.value,
+	    skuCodeType: form.value.skuCodeType,
+	    orderNumber: form.value.orderNumber,
     copyContent: form.value.copyContent,
     styleKeywords: form.value.styleKeywords,
     designSourceVerified: designSourceVerified.value,
@@ -1352,7 +1400,7 @@ async function submit() {
       sku: null,
       productName: '',
       designRequirement: undefined,
-      batchItems: normalizedItems,
+	        batchItems: normalizedItems,
       batchExcelImported: true,
       ...(businessType === 'PURCHASE_TASK'
         ? {
@@ -1783,10 +1831,11 @@ async function submit() {
 .meta-card-grid :deep(textarea) {
   grid-column: 1 / -1;
 }
-.erp-sync-toggle-card {
-  border: 1px solid #d9dee7;
-  border-radius: 0.875rem;
-  padding: 0.7rem 0.8rem;
+.erp-sync-toggle-card,
+.sku-code-type-card {
+	border: 1px solid #d9dee7;
+	border-radius: 0.875rem;
+	padding: 0.7rem 0.8rem;
   background: linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
@@ -1809,6 +1858,19 @@ async function submit() {
   color: #6b7280;
   background: #e5e7eb;
   border: 1px solid #d1d5db;
+}
+.erp-sync-locked-badge {
+  min-width: 3.2rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 83, 9, 0.18);
+  background: rgba(251, 191, 36, 0.16);
+  color: #92400e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.38rem 0.62rem;
+  text-align: center;
 }
 .erp-sync-toggle-row {
   display: flex;
@@ -2247,13 +2309,15 @@ async function submit() {
   box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
 }
 
-.erp-sync-toggle-card {
+.erp-sync-toggle-card,
+.sku-code-type-card {
   border-color: rgba(148, 163, 184, 0.20) !important;
   background: rgba(12, 18, 29, 0.76) !important;
 }
 
 /* 深色玻璃皮肤：ERP「立即同步」行作为主配置项，提亮主文案并承托整行（仅样式） */
-.erp-sync-toggle-card .erp-sync-control {
+.erp-sync-toggle-card .erp-sync-control,
+.sku-code-type-card .erp-sync-control {
   margin-top: 0.12rem;
   padding: 0.55rem 0.72rem;
   border-radius: 0.65rem;
@@ -2266,17 +2330,20 @@ async function submit() {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   gap: 0.85rem;
 }
-.erp-sync-toggle-card .erp-sync-main-label {
+.erp-sync-toggle-card .erp-sync-main-label,
+.sku-code-type-card .erp-sync-main-label {
   color: #f2f7ff !important;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.35;
 }
-.erp-sync-toggle-card .erp-sync-toggle-hint:not(.warning) {
+.erp-sync-toggle-card .erp-sync-toggle-hint:not(.warning),
+.sku-code-type-card .erp-sync-toggle-hint:not(.warning) {
   color: #7c8eaa !important;
   font-weight: 400;
 }
-.erp-sync-toggle-card :deep(.erp-switch[aria-pressed='false']) {
+.erp-sync-toggle-card :deep(.erp-switch[aria-pressed='false']),
+.sku-code-type-card :deep(.erp-switch[aria-pressed='false']) {
   background: rgba(30, 41, 59, 0.88) !important;
   color: #d5e0f2 !important;
   border-color: rgba(148, 163, 184, 0.38) !important;
@@ -2286,6 +2353,7 @@ async function submit() {
 }
 
 .erp-sync-badge,
+.erp-sync-locked-badge,
 .batch-ref-thumb-file,
 .batch-bridge-hint {
   border-color: rgba(100, 210, 255, 0.20) !important;

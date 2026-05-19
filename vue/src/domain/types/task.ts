@@ -168,6 +168,7 @@ export interface TaskSkuItem {
   id?: number
   sequenceNo?: number
   skuCode?: string
+  skuCodeType?: 'regular' | 'customization' | string
   skuStatus?: string
   productNameSnapshot?: string
   productShortName?: string
@@ -280,6 +281,7 @@ export interface Task {
   ownerOrgTeam?: string
   /** 工作流业务 lane：普通 / 定制（GET 任务读模型 `workflow_lane`） */
   workflowLane?: 'normal' | 'customization'
+  skuCodeType?: 'regular' | 'customization' | string
   /** GET /v1/tasks/{id}/detail modules projection, including backend allowed actions. */
   moduleSummaries?: ModuleSummary[]
   /** 上游来源部门（GET 任务读模型 `source_department`） */

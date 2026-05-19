@@ -80,13 +80,13 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		   source_product_id, source_product_name, source_search_entry_code, source_match_type, source_match_rule,
 		   matched_category_code, matched_search_entry_code, matched_mapping_rule_json, product_selection_snapshot_json,
 		   change_request, design_requirement, product_short_name, material_mode, material_other,
-		   cost_price_mode, base_sale_price, product_channel, reference_images_json, reference_file_refs_json, reference_link,
+			   cost_price_mode, base_sale_price, product_channel, sku_code_type, reference_images_json, reference_file_refs_json, reference_link,
 		   spec_text, material, size_text, craft_text,
 		   width, height, area, quantity, process,
 		   procurement_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name, cost_rule_source,
 		   matched_rule_version, prefill_source, prefill_at,
 		   requires_manual_review, manual_cost_override, manual_cost_override_reason, override_actor, override_at, filing_status, filing_error_message, filed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID,
 		detail.DemandText,
 		detail.CopyText,
@@ -115,6 +115,7 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		detail.CostPriceMode,
 		toNullFloat64(detail.BaseSalePrice),
 		detail.ProductChannel,
+		string(detail.SKUCodeType),
 		detail.ReferenceImagesJSON,
 		detail.ReferenceFileRefsJSON,
 		detail.ReferenceLink,
@@ -162,12 +163,12 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 	stmt, err := sqlTx.PrepareContext(ctx, `
 		INSERT INTO task_sku_items
 		  (task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
-		   product_name_snapshot, product_short_name, category_code, material_mode,
-		   cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+			   product_name_snapshot, product_short_name, category_code, material_mode,
+			   cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
 		   cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
 		   manual_cost_override, manual_cost_override_reason, override_actor, override_at,
-		   design_requirement, variant_json, reference_file_refs_json, dedupe_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			   design_requirement, variant_json, reference_file_refs_json, dedupe_key, sku_code_type)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert task_sku_items: %w", err)
 	}
@@ -209,6 +210,7 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 			toNullJSONString(item.VariantJSON),
 			marshalReferenceFileRefs(item.ReferenceFileRefs),
 			item.DedupeKey,
+			string(item.SKUCodeType),
 		)
 		if err != nil {
 			return fmt.Errorf("insert task_sku_item: %w", err)
@@ -239,7 +241,7 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		       source_product_id, source_product_name, source_search_entry_code, source_match_type, source_match_rule,
 		       matched_category_code, matched_search_entry_code, matched_mapping_rule_json, product_selection_snapshot_json,
 		       change_request, design_requirement, product_short_name, material_mode, material_other,
-		       cost_price_mode, base_sale_price, product_channel, reference_images_json, COALESCE(reference_file_refs_json, ''), reference_link,
+			       cost_price_mode, base_sale_price, product_channel, COALESCE(sku_code_type, ''), reference_images_json, COALESCE(reference_file_refs_json, ''), reference_link,
 		       spec_text, material, size_text, craft_text,
 		       width, height, area, quantity, process,
 		       procurement_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name, cost_rule_source,
@@ -263,7 +265,7 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		&sourceProductID, &detail.SourceProductName, &detail.SourceSearchEntryCode, &detail.SourceMatchType, &detail.SourceMatchRule,
 		&detail.MatchedCategoryCode, &detail.MatchedSearchEntryCode, &detail.MatchedMappingRuleJSON, &detail.ProductSelectionSnapshotJSON,
 		&detail.ChangeRequest, &detail.DesignRequirement, &detail.ProductShortName, &detail.MaterialMode, &detail.MaterialOther,
-		&detail.CostPriceMode, &baseSalePrice, &detail.ProductChannel, &detail.ReferenceImagesJSON, &detail.ReferenceFileRefsJSON, &detail.ReferenceLink,
+		&detail.CostPriceMode, &baseSalePrice, &detail.ProductChannel, &detail.SKUCodeType, &detail.ReferenceImagesJSON, &detail.ReferenceFileRefsJSON, &detail.ReferenceLink,
 		&detail.SpecText,
 		&detail.Material, &detail.SizeText, &detail.CraftText,
 		&width, &height, &area, &quantity, &detail.Process,
@@ -303,6 +305,9 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		detail.ERPSyncVersion = erpSyncVersion.Int64
 	}
 	detail.FiledAt = fromNullTime(filedAt)
+	if !detail.SKUCodeType.Valid() {
+		detail.SKUCodeType = domain.TaskSKUCodeTypeRegular
+	}
 	if !detail.FilingStatus.Valid() {
 		if detail.FiledAt != nil {
 			detail.FilingStatus = domain.FilingStatusFiled
@@ -321,8 +326,8 @@ func (r *taskRepo) GetSKUItemBySKUCode(ctx context.Context, skuCode string) (*do
 		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
 		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
 		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
-		       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
-		       dedupe_key, created_at, updated_at
+			       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+			       dedupe_key, COALESCE(sku_code_type, ''), created_at, updated_at
 		FROM task_sku_items
 		WHERE sku_code = ?`, skuCode)
 	item, err := scanTaskSKUItem(row)
@@ -343,8 +348,8 @@ func (r *taskRepo) ListSKUItemsByTaskID(ctx context.Context, taskID int64) ([]*d
 		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
 		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
 		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
-		       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
-		       dedupe_key, created_at, updated_at
+			       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+			       dedupe_key, COALESCE(sku_code_type, ''), created_at, updated_at
 		FROM task_sku_items
 		WHERE task_id = ?
 		ORDER BY sequence_no ASC, id ASC`, taskID)
@@ -469,7 +474,7 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
 		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
-		       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''),
+			       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''), COALESCE(td.sku_code_type, ''),
 		       td.category, td.category_code, td.category_name,
 		       td.source_product_id, td.source_product_name, td.source_search_entry_code, td.source_match_type, td.source_match_rule,
 		       td.matched_category_code, td.matched_search_entry_code, td.product_selection_snapshot_json,
@@ -526,7 +531,7 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
 		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
-		       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''),
+			       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''), COALESCE(td.sku_code_type, ''),
 		       td.category, td.category_code, td.category_name,
 		       td.source_product_id, td.source_product_name, td.source_search_entry_code, td.source_match_type, td.source_match_rule,
 		       td.matched_category_code, td.matched_search_entry_code, td.product_selection_snapshot_json,
@@ -992,7 +997,7 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 		&requesterName, &creatorName, &designerName, &currentHandlerName,
 		&item.TaskStatus, &item.CreatedAt, &item.UpdatedAt, &deadlineAt, &item.NeedOutsource, &item.IsOutsource, &item.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
-		&item.IsBatchTask, &item.BatchItemCount, &batchMode, &primarySKUCode,
+		&item.IsBatchTask, &item.BatchItemCount, &batchMode, &primarySKUCode, &item.SKUCodeType,
 		&category, &categoryCode, &categoryName,
 		&sourceProductID, &sourceProductName, &sourceSearchEntryCode, &sourceMatchType, &sourceMatchRule,
 		&matchedCategoryCode, &matchedSearchEntryCode, &productSelectionSnapshotJSON,
@@ -1034,6 +1039,9 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	}
 	if item.PrimarySKUCode == "" {
 		item.PrimarySKUCode = item.SKUCode
+	}
+	if !item.SKUCodeType.Valid() {
+		item.SKUCodeType = domain.TaskSKUCodeTypeRegular
 	}
 	if item.BatchItemCount == 0 && item.SKUCode != "" {
 		item.BatchItemCount = 1
@@ -1224,6 +1232,7 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 		&variantJSON,
 		&referenceFileRefsJSON,
 		&item.DedupeKey,
+		&item.SKUCodeType,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
@@ -1234,6 +1243,9 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	}
 	item.ProductID = fromNullInt64(productID)
 	item.ERPProductID = fromNullString(erpProductID)
+	if !item.SKUCodeType.Valid() {
+		item.SKUCodeType = domain.TaskSKUCodeTypeRegular
+	}
 	item.FilingStatus = domain.FilingStatus(filingStatus)
 	if !item.FilingStatus.Valid() {
 		item.FilingStatus = domain.FilingStatusPending

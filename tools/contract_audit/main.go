@@ -121,6 +121,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/erp/products/by-code"):                                      "legitimate-reserved-placeholder-route",
 	knownGapKey("GET", "/v1/erp/products/*id"):                                          "tool-deref-limit-inline-route",
 	knownGapKey("GET", "/v1/erp/sync-logs"):                                             "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/me"):                                                        "legitimate-reserved-placeholder-route",
 	knownGapKey("GET", "/v1/me/notifications"):                                          "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/me/notifications/unread-count"):                             "legitimate-reserved-placeholder-route",
 	knownGapKey("GET", "/v1/me/org"):                                                    "legitimate-reserved-placeholder-route",

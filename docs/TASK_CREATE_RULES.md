@@ -68,7 +68,8 @@ Current rules:
 - requires `design_requirement`
 - backend owns default product-code generation during create
 - `new_sku` remains optional only as an explicit manual override
-- default SKU/product-code format is `NS` + 2-letter category short code + 6-digit sequence, for example `NSKT000277`
+- default regular SKU/product-code format is `CG` + 1-letter category short code + 6-digit sequence, for example `CGK000277`
+- customization SKU/product-code format is `DZ` + 1-letter category short code + 6-digit sequence, for example `DZK000277`; use `sku_code_type=customization` for regular new/purchase tasks that should be visible as customization SKUs in ERP
 - legacy CodeRule `new_sku` is archived and must not be used as a fallback
 
 ### `purchase_task`

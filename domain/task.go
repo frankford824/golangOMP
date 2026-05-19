@@ -35,6 +35,22 @@ func WorkflowLaneFromCustomizationRequired(customizationRequired bool) WorkflowL
 	return WorkflowLaneNormal
 }
 
+type TaskSKUCodeType string
+
+const (
+	TaskSKUCodeTypeRegular       TaskSKUCodeType = "regular"
+	TaskSKUCodeTypeCustomization TaskSKUCodeType = "customization"
+)
+
+func (t TaskSKUCodeType) Valid() bool {
+	switch t {
+	case TaskSKUCodeTypeRegular, TaskSKUCodeTypeCustomization:
+		return true
+	default:
+		return false
+	}
+}
+
 // Task is the V7 business aggregate root (spec V7 §7.1).
 // Every formal workflow must start with a Task that is bound to a SKU.
 type Task struct {
@@ -111,6 +127,7 @@ type TaskDetail struct {
 	CostPriceMode                string                       `db:"cost_price_mode"             json:"cost_price_mode"`
 	BaseSalePrice                *float64                     `db:"base_sale_price"             json:"base_sale_price,omitempty"`
 	ProductChannel               string                       `db:"product_channel"             json:"product_channel"`
+	SKUCodeType                  TaskSKUCodeType              `db:"sku_code_type"               json:"sku_code_type,omitempty"`
 	ReferenceImagesJSON          string                       `db:"reference_images_json"       json:"reference_images_json"`
 	ReferenceFileRefsJSON        string                       `db:"reference_file_refs_json"    json:"reference_file_refs_json"`
 	ReferenceLink                string                       `db:"reference_link"              json:"reference_link"`

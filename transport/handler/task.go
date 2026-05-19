@@ -64,6 +64,7 @@ type createTaskReq struct {
 	Note                    string                    `json:"note"`
 	BatchSKUMode            string                    `json:"batch_sku_mode"`
 	BatchItems              []createTaskBatchItemReq  `json:"batch_items"`
+	SKUCodeType             string                    `json:"sku_code_type"`
 
 	// Original product development fields
 	ProductID           createTaskProductID      `json:"product_id"`
@@ -115,6 +116,7 @@ type createTaskBatchItemReq struct {
 	DesignRequirement string                    `json:"design_requirement"`
 	NewSKU            string                    `json:"new_sku"`
 	PurchaseSKU       string                    `json:"purchase_sku"`
+	SKUCodeType       string                    `json:"sku_code_type"`
 	CostPriceMode     string                    `json:"cost_price_mode"`
 	CostPrice         *float64                  `json:"cost_price"`
 	Quantity          *int64                    `json:"quantity"`
@@ -126,12 +128,14 @@ type createTaskBatchItemReq struct {
 type prepareTaskProductCodesReq struct {
 	TaskType     string                            `json:"task_type" binding:"required"`
 	CategoryCode string                            `json:"category_code"`
+	SKUCodeType  string                            `json:"sku_code_type"`
 	Count        int                               `json:"count"`
 	BatchItems   []prepareTaskProductCodeBatchItem `json:"batch_items"`
 }
 
 type prepareTaskProductCodeBatchItem struct {
 	CategoryCode string `json:"category_code"`
+	SKUCodeType  string `json:"sku_code_type"`
 }
 
 func (r *createTaskReq) UnmarshalJSON(data []byte) error {
@@ -843,6 +847,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		PurchaseSKU:         req.PurchaseSKU,
 		ProductChannel:      req.ProductChannel,
 		BatchSKUMode:        req.BatchSKUMode,
+		SKUCodeType:         domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
 		TopLevelNewSKU:      req.NewSKU,
 		TopLevelPurchaseSKU: req.PurchaseSKU,
 		SyncERPOnCreate:     req.SyncERPOnCreate,
@@ -859,6 +864,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 				DesignRequirement: item.DesignRequirement,
 				NewSKU:            item.NewSKU,
 				PurchaseSKU:       item.PurchaseSKU,
+				SKUCodeType:       domain.TaskSKUCodeType(strings.TrimSpace(item.SKUCodeType)),
 				CostPriceMode:     item.CostPriceMode,
 				CostPrice:         item.CostPrice,
 				Quantity:          item.Quantity,
@@ -899,6 +905,7 @@ func (h *TaskHandler) PrepareProductCodes(c *gin.Context) {
 	params := service.PrepareTaskProductCodesParams{
 		TaskType:     domain.TaskType(strings.TrimSpace(req.TaskType)),
 		CategoryCode: strings.TrimSpace(req.CategoryCode),
+		SKUCodeType:  domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
 		Count:        req.Count,
 	}
 	if len(req.BatchItems) > 0 {
@@ -906,6 +913,7 @@ func (h *TaskHandler) PrepareProductCodes(c *gin.Context) {
 		for _, item := range req.BatchItems {
 			params.BatchItems = append(params.BatchItems, service.PrepareTaskProductCodeBatchItemParams{
 				CategoryCode: strings.TrimSpace(item.CategoryCode),
+				SKUCodeType:  domain.TaskSKUCodeType(strings.TrimSpace(item.SKUCodeType)),
 			})
 		}
 	}

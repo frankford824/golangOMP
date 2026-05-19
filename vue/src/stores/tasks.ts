@@ -775,10 +775,11 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
           (o.changeRequest as string | undefined)?.trim() ||
           undefined
         return {
-          id: typeof o.id === 'number' ? o.id : undefined,
-          sequenceNo: typeof o.sequence_no === 'number' ? o.sequence_no : undefined,
-          skuCode: typeof o.sku_code === 'string' ? o.sku_code : undefined,
-          quantity:
+	          id: typeof o.id === 'number' ? o.id : undefined,
+	          sequenceNo: typeof o.sequence_no === 'number' ? o.sequence_no : undefined,
+	          skuCode: typeof o.sku_code === 'string' ? o.sku_code : undefined,
+	          skuCodeType: typeof o.sku_code_type === 'string' ? o.sku_code_type : undefined,
+	          quantity:
             typeof o.quantity === 'number' && Number.isFinite(o.quantity) ? o.quantity : undefined,
           skuStatus: typeof o.sku_status === 'string' ? o.sku_status : undefined,
           productNameSnapshot:
@@ -1019,10 +1020,14 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       typeof (raw.batch_mode ?? raw.batchMode) === 'string'
         ? String(raw.batch_mode ?? raw.batchMode)
         : undefined,
-    primarySkuCode:
-      typeof (raw.primary_sku_code ?? raw.primarySkuCode) === 'string'
-        ? String(raw.primary_sku_code ?? raw.primarySkuCode)
-        : undefined,
+	    primarySkuCode:
+	      typeof (raw.primary_sku_code ?? raw.primarySkuCode) === 'string'
+	        ? String(raw.primary_sku_code ?? raw.primarySkuCode)
+	        : undefined,
+	    skuCodeType:
+	      typeof (raw.sku_code_type ?? raw.skuCodeType) === 'string'
+	        ? String(raw.sku_code_type ?? raw.skuCodeType)
+	        : undefined,
     skuGenerationStatus:
       typeof (raw.sku_generation_status ?? raw.skuGenerationStatus) === 'string'
         ? String(raw.sku_generation_status ?? raw.skuGenerationStatus)
@@ -1525,7 +1530,11 @@ export const useTasksStore = defineStore('tasks', () => {
     const isOriginal = frontendTaskType === 'ORIGINAL_PRODUCT_DEV'
     const isRetouch = frontendTaskType === 'RETOUCH_TASK'
     const skuModeRaw = (t.skuMode ?? 'single') as string
-    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
+	    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
+	    const skuCodeType =
+	      (t.skuCodeType ?? (task as Record<string, unknown>).skuCodeType) === 'customization'
+	        ? 'customization'
+	        : 'regular'
 
     const ownerTeam = t.groupId ?? task.groupId ?? ''
     const ownerDepartment =
@@ -1568,8 +1577,9 @@ export const useTasksStore = defineStore('tasks', () => {
       // Legacy compatibility: keep owner_team for old backend branches.
       owner_team: ownerTeam,
       deadline_at: t.dueAt ?? task.dueAt ?? null,
-      priority,
-      customization_required: Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
+	      priority,
+	      sku_code_type: skuCodeType,
+	      customization_required: Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
       customization_source_type:
         (t.customizationRequired ?? task.customizationRequired)
           ? (t.customizationSourceType ?? task.customizationSourceType ?? undefined)
@@ -1667,10 +1677,11 @@ export const useTasksStore = defineStore('tasks', () => {
       if (taskType === 'purchase_task' && topCategoryCode) payload.i_id = topCategoryCode
       const rawBatchItems = Array.isArray(t.batchItems) ? t.batchItems : []
       payload.batch_items = rawBatchItems.map((itemRaw) => {
-        const item = itemRaw as Record<string, unknown>
-        const baseItem: Record<string, unknown> = {
-          product_name: item.productName ?? '',
-        }
+	        const item = itemRaw as Record<string, unknown>
+	        const baseItem: Record<string, unknown> = {
+	          product_name: item.productName ?? '',
+	          sku_code_type: item.skuCodeType === 'customization' ? 'customization' : skuCodeType,
+	        }
         if (taskType === 'new_product_development') {
           baseItem.design_requirement = item.designRequirement ?? undefined
           if (item.productIId) baseItem.product_i_id = item.productIId
@@ -1812,7 +1823,13 @@ export const useTasksStore = defineStore('tasks', () => {
     // prepare-product-codes 与 create-task 的字段白名单不同：
     // - 单个模式：必须有顶层 category_code（当前端点尚未切 i_id 字段名）
     // - 批量模式：每个 batch_items[i] 必须有 category_code
-    const preparePayload: Record<string, unknown> = { task_type: payloadTaskType }
+	    const preparePayload: Record<string, unknown> = { task_type: payloadTaskType }
+	    const skuCodeType =
+	      (task as Record<string, unknown>).skuCodeType === 'customization' ||
+	      payload.sku_code_type === 'customization'
+	        ? 'customization'
+	        : 'regular'
+	    preparePayload.sku_code_type = skuCodeType
     const rawBatchItems = Array.isArray((task as Record<string, unknown>).batchItems)
       ? ((task as Record<string, unknown>).batchItems as Array<Record<string, unknown>>)
       : []
@@ -1827,7 +1844,10 @@ export const useTasksStore = defineStore('tasks', () => {
         if (!categoryCode) {
           throw new Error(`批量第 ${idx + 1} 行缺少产品款式编码，无法预展示 SKU`)
         }
-        return { category_code: categoryCode }
+	        return {
+	          category_code: categoryCode,
+	          sku_code_type: item.skuCodeType === 'customization' ? 'customization' : skuCodeType,
+	        }
       })
       preparePayload.batch_items = batch_items
     } else {

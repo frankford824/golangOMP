@@ -61,11 +61,11 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now()
-	columns := make([]string, 79)
+	columns := make([]string, 80)
 	for i := range columns {
 		columns[i] = fmt.Sprintf("c%d", i)
 	}
-	values := make([]driver.Value, 79)
+	values := make([]driver.Value, 80)
 	values[0] = int64(26)                               // id
 	values[1] = "RW-20260313-A-000022"                  // task_no
 	values[3] = "SKU-000005"                            // sku_code
@@ -93,6 +93,7 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	values[31] = int64(1)                               // batch_item_count
 	values[32] = string(domain.TaskBatchModeSingle)     // batch_mode
 	values[33] = "SKU-000005"                           // primary_sku_code
+	values[34] = string(domain.TaskSKUCodeTypeRegular)  // sku_code_type
 
 	rows := sqlmock.NewRows(columns).AddRow(values...)
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)

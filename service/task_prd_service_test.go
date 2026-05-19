@@ -991,8 +991,8 @@ func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T)
 	if task.SourceMode != domain.TaskSourceModeNewProduct {
 		t.Fatalf("Create() source_mode = %s, want %s", task.SourceMode, domain.TaskSourceModeNewProduct)
 	}
-	if task.SKUCode != "NSLI000000" {
-		t.Fatalf("Create() sku_code = %s, want NSLI000000", task.SKUCode)
+	if task.SKUCode != "CGL000000" {
+		t.Fatalf("Create() sku_code = %s, want CGL000000", task.SKUCode)
 	}
 	if task.ProductID != nil {
 		t.Fatalf("Create() product_id = %+v, want nil", task.ProductID)

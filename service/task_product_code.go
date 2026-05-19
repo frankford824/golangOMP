@@ -12,25 +12,26 @@ import (
 )
 
 const (
-	defaultTaskProductCodePrefix    = "NS"
-	defaultTaskProductCodeShortLen  = 2
+	defaultTaskProductCodeShortLen  = 1
 	defaultTaskProductCodeSeqLength = 6
 	maxPrepareProductCodeCount      = 500
 )
 
 var defaultTaskProductCodeExplicitShortCodeMap = map[string]string{
-	"KT_STANDARD": "KT",
+	"KT_STANDARD": "K",
 }
 
 type PrepareTaskProductCodesParams struct {
 	TaskType     domain.TaskType
 	CategoryCode string
+	SKUCodeType  domain.TaskSKUCodeType
 	Count        int
 	BatchItems   []PrepareTaskProductCodeBatchItemParams
 }
 
 type PrepareTaskProductCodeBatchItemParams struct {
 	CategoryCode string
+	SKUCodeType  domain.TaskSKUCodeType
 }
 
 type PreparedTaskProductCode struct {
@@ -79,7 +80,11 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 
 	if len(p.BatchItems) > 0 {
 		result := make([]PreparedTaskProductCode, len(p.BatchItems))
-		categoryIndexes := make(map[string][]int, len(p.BatchItems))
+		type batchGroupKey struct {
+			categoryCode string
+			skuCodeType  domain.TaskSKUCodeType
+		}
+		categoryIndexes := make(map[batchGroupKey][]int, len(p.BatchItems))
 		for idx, item := range p.BatchItems {
 			categoryCode, appErr := normalizeDefaultTaskProductCategoryCode(item.CategoryCode)
 			if appErr != nil {
@@ -88,18 +93,20 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 				}
 				return nil, appErr
 			}
-			categoryIndexes[categoryCode] = append(categoryIndexes[categoryCode], idx)
+			skuCodeType := normalizeTaskSKUCodeType(item.SKUCodeType, false)
+			key := batchGroupKey{categoryCode: categoryCode, skuCodeType: skuCodeType}
+			categoryIndexes[key] = append(categoryIndexes[key], idx)
 		}
 
-		for categoryCode, indexes := range categoryIndexes {
-			codes, appErr := s.generateDefaultTaskProductCodes(ctx, p.TaskType, categoryCode, len(indexes))
+		for key, indexes := range categoryIndexes {
+			codes, appErr := s.generateDefaultTaskProductCodes(ctx, p.TaskType, key.categoryCode, key.skuCodeType, len(indexes))
 			if appErr != nil {
 				return nil, appErr
 			}
 			for i, idx := range indexes {
 				result[idx] = PreparedTaskProductCode{
 					Index:        idx,
-					CategoryCode: categoryCode,
+					CategoryCode: key.categoryCode,
 					SKUCode:      codes[i],
 				}
 			}
@@ -123,7 +130,7 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 	if appErr != nil {
 		return nil, appErr
 	}
-	codes, appErr := s.generateDefaultTaskProductCodes(ctx, p.TaskType, categoryCode, count)
+	codes, appErr := s.generateDefaultTaskProductCodes(ctx, p.TaskType, categoryCode, normalizeTaskSKUCodeType(p.SKUCodeType, false), count)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -143,6 +150,16 @@ func supportsDefaultTaskProductCode(taskType domain.TaskType) bool {
 	return taskType == domain.TaskTypeNewProductDevelopment || taskType == domain.TaskTypePurchaseTask
 }
 
+func normalizeTaskSKUCodeType(value domain.TaskSKUCodeType, customizationRequired bool) domain.TaskSKUCodeType {
+	if value.Valid() {
+		return value
+	}
+	if customizationRequired {
+		return domain.TaskSKUCodeTypeCustomization
+	}
+	return domain.TaskSKUCodeTypeRegular
+}
+
 func normalizeDefaultTaskProductCategoryCode(categoryCode string) (string, *domain.AppError) {
 	normalized := strings.ToUpper(strings.TrimSpace(categoryCode))
 	if normalized == "" {
@@ -152,7 +169,20 @@ func normalizeDefaultTaskProductCategoryCode(categoryCode string) (string, *doma
 }
 
 func formatDefaultTaskProductCode(categoryShortCode string, seq int64) string {
-	return defaultTaskProductCodePrefix + categoryShortCode + fmt.Sprintf("%0*d", defaultTaskProductCodeSeqLength, seq)
+	return formatTaskProductCode(domain.TaskSKUCodeTypeRegular, categoryShortCode, seq)
+}
+
+func formatTaskProductCode(skuCodeType domain.TaskSKUCodeType, categoryShortCode string, seq int64) string {
+	return prefixForTaskSKUCodeType(skuCodeType) + categoryShortCode + fmt.Sprintf("%0*d", defaultTaskProductCodeSeqLength, seq)
+}
+
+func prefixForTaskSKUCodeType(skuCodeType domain.TaskSKUCodeType) string {
+	switch normalizeTaskSKUCodeType(skuCodeType, false) {
+	case domain.TaskSKUCodeTypeCustomization:
+		return "DZ"
+	default:
+		return "CG"
+	}
 }
 
 func deriveDefaultTaskProductCategoryShortCode(categoryCode string) (string, *domain.AppError) {
@@ -206,15 +236,15 @@ func deterministicFallbackLetters(seed string, n int) string {
 	return string(out)
 }
 
-func (s *taskService) generateDefaultTaskProductCode(ctx context.Context, taskType domain.TaskType, categoryCode string) (string, *domain.AppError) {
-	codes, appErr := s.generateDefaultTaskProductCodes(ctx, taskType, categoryCode, 1)
+func (s *taskService) generateDefaultTaskProductCode(ctx context.Context, taskType domain.TaskType, categoryCode string, skuCodeType domain.TaskSKUCodeType) (string, *domain.AppError) {
+	codes, appErr := s.generateDefaultTaskProductCodes(ctx, taskType, categoryCode, skuCodeType, 1)
 	if appErr != nil {
 		return "", appErr
 	}
 	return codes[0], nil
 }
 
-func (s *taskService) generateDefaultTaskProductCodes(ctx context.Context, taskType domain.TaskType, categoryCode string, count int) ([]string, *domain.AppError) {
+func (s *taskService) generateDefaultTaskProductCodes(ctx context.Context, taskType domain.TaskType, categoryCode string, skuCodeType domain.TaskSKUCodeType, count int) ([]string, *domain.AppError) {
 	if !supportsDefaultTaskProductCode(taskType) {
 		return nil, domain.NewAppError(
 			domain.ErrCodeInvalidRequest,
@@ -233,6 +263,8 @@ func (s *taskService) generateDefaultTaskProductCodes(ctx context.Context, taskT
 	if appErr != nil {
 		return nil, appErr
 	}
+	skuCodeType = normalizeTaskSKUCodeType(skuCodeType, false)
+	prefix := prefixForTaskSKUCodeType(skuCodeType)
 
 	if s.productCodeSeqRepo == nil {
 		s.productCodeSeqRepo = newVolatileProductCodeSequenceRepo()
@@ -243,7 +275,7 @@ func (s *taskService) generateDefaultTaskProductCodes(ctx context.Context, taskT
 		var err error
 		// Allocation dimension is (prefix, category_short_code), so category_codes that
 		// collapse to the same short code share one sequence and cannot collide.
-		start, err = s.productCodeSeqRepo.AllocateRange(ctx, tx, defaultTaskProductCodePrefix, categoryShortCode, count)
+		start, err = s.productCodeSeqRepo.AllocateRange(ctx, tx, prefix, categoryShortCode, count)
 		return err
 	})
 	if txErr != nil {
@@ -252,7 +284,7 @@ func (s *taskService) generateDefaultTaskProductCodes(ctx context.Context, taskT
 
 	codes := make([]string, 0, count)
 	for i := 0; i < count; i++ {
-		codes = append(codes, formatDefaultTaskProductCode(categoryShortCode, start+int64(i)))
+		codes = append(codes, formatTaskProductCode(skuCodeType, categoryShortCode, start+int64(i)))
 	}
 	return codes, nil
 }

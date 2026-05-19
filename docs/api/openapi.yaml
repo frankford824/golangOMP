@@ -1762,6 +1762,10 @@ components:
           format: double
           nullable: true
         product_channel: { type: string }
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          description: Automatic SKU code type used for generated task SKUs. Historical rows may omit it and should be treated as `regular`.
         reference_images_json: { type: string }
         reference_file_refs_json: { type: string }
         reference_link: { type: string }
@@ -3582,6 +3586,10 @@ components:
         primary_sku_code:
           type: string
           nullable: true
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          description: Automatic SKU code type used for generated task SKUs. Historical rows may omit it and should be treated as `regular`.
         product_name_snapshot: { type: string }
         task_type:
           type: string
@@ -3749,6 +3757,10 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/TaskSKUItem'
+            sku_code_type:
+              type: string
+              enum: [regular, customization]
+              description: Automatic SKU code type used for generated task SKUs. Historical rows may omit it and should be treated as `regular`.
             workflow:
               $ref: '#/components/schemas/TaskWorkflowSnapshot'
             procurement:
@@ -3845,6 +3857,9 @@ components:
         task_id: { type: integer }
         sequence_no: { type: integer }
         sku_code: { type: string }
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
         sku_status:
           type: string
           enum: [reserved, generated, filed, filing_failed]
@@ -4034,6 +4049,11 @@ components:
           type: string
           enum: [single, multiple]
           default: single
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          default: regular
+          description: Automatic SKU code type for generated new-product/purchase task SKUs. `regular` generates `CG` + one category letter + six digits; `customization` generates `DZ` + one category letter + six digits. Historical SKU strings are not rewritten.
         source_draft_id:
           type: integer
           nullable: true
@@ -4131,6 +4151,10 @@ components:
           type: string
         purchase_sku:
           type: string
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          description: Optional per-row automatic SKU code type. Defaults to the top-level `sku_code_type`.
         cost_price_mode:
           type: string
           enum: [manual, template]
@@ -4166,6 +4190,11 @@ components:
         category_code:
           type: string
           description: Required when `batch_items` is omitted.
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          default: regular
+          description: Automatic SKU code type. `regular` allocates `CG` codes; `customization` allocates `DZ` codes.
         count:
           type: integer
           minimum: 1
@@ -4180,6 +4209,10 @@ components:
             properties:
               category_code:
                 type: string
+              sku_code_type:
+                type: string
+                enum: [regular, customization]
+                description: Optional per-row automatic SKU code type. Defaults to `regular` when omitted.
     PrepareTaskProductCodesResponse:
       type: object
       properties:
@@ -4194,7 +4227,7 @@ components:
                 type: string
               sku_code:
                 type: string
-                description: "Auto-generated default task product code. Format: `NS` + two-letter uppercase category short code + 6-digit sequence (for example `NSKT000060`)."
+                description: "Auto-generated default task product code. Format depends on `sku_code_type`: `regular` uses `CG` + one uppercase category letter + 6-digit sequence; `customization` uses `DZ` + one uppercase category letter + 6-digit sequence."
     AssignTaskRequest:
       type: object
       description: |
@@ -6551,6 +6584,9 @@ components:
           type: string
         purchase_sku:
           type: string
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
         cost_price_mode:
           type: string
           enum: [manual, template]
@@ -9909,7 +9945,7 @@ paths:
       summary: Prepare task product codes
       description: |
         Allocates unique default product codes for task-create UIs.
-        Default format is fixed to `NS + {CATEGORY_CODE} + {6-digit sequence}`.
+        Default format is selected by `sku_code_type`: `regular` allocates `CG + {CATEGORY_LETTER} + {6-digit sequence}` and `customization` allocates `DZ + {CATEGORY_LETTER} + {6-digit sequence}`.
         This endpoint does not require frontend code-rule/template selection and is available for
         `new_product_development` and `purchase_task`.
       tags: [Tasks, ReadyForFrontend]
@@ -9957,8 +9993,8 @@ paths:
         - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors.
         - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval.
         - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels.
-        - default task product-code rule is backend-only and fixed to `NS + category_short_code(2 uppercase letters) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation.
-        - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> KT`), otherwise first two alphabet letters from `category_code` (uppercased), then deterministic fallback to two letters.
+        - default task product-code rule is backend-only: `sku_code_type=regular` generates `CG + category_short_code(1 uppercase letter) + 6-digit sequence`, while `sku_code_type=customization` generates `DZ + category_short_code(1 uppercase letter) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation.
+        - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> K`), otherwise first alphabet letter from `category_code` (uppercased), then deterministic fallback to one letter.
         - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique.
         - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`.
         - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned.
