@@ -206,6 +206,148 @@ func TestAuditV7ServiceClaimDeniesDepartmentManagerOutsideScope(t *testing.T) {
 	}
 }
 
+func TestAuditV7ServiceClaimRejectsAuditorOutsideBusinessLane(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			21: {
+				ID:               21,
+				TaskNo:           "RW-021",
+				TaskType:         domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:       domain.TaskStatusPendingAuditA,
+				BusinessLane:     domain.TaskBusinessLaneCustomization,
+				OwnerDepartment:  "运营部",
+				OwnerOrgTeam:     "淘系一组",
+				CurrentHandlerID: authzInt64Ptr(211),
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[211] = &domain.User{
+		ID:          211,
+		Username:    "mqy",
+		DisplayName: "马雨琪",
+		Status:      domain.UserStatusActive,
+	}
+	userRepo.roles[211] = []domain.Role{domain.RoleAuditA}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+
+	appErr := svc.Claim(context.Background(), ClaimAuditParams{
+		TaskID:    21,
+		AuditorID: 211,
+		Stage:     domain.AuditRecordStageA,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Claim() appErr = %+v, want permission denied", appErr)
+	}
+}
+
+func TestAuditV7ServiceClaimDeniesAdminWithoutLaneBinding(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			22: {
+				ID:              22,
+				TaskNo:          "RW-022",
+				TaskType:        domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:      domain.TaskStatusPendingAuditA,
+				BusinessLane:    domain.TaskBusinessLaneNormal,
+				OwnerDepartment: "运营部",
+				OwnerOrgTeam:    "淘系一组",
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[221] = &domain.User{
+		ID:          221,
+		Username:    "admin221",
+		DisplayName: "跨域管理员",
+		Status:      domain.UserStatusActive,
+	}
+	userRepo.roles[221] = []domain.Role{domain.RoleAdmin}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+
+	appErr := svc.Claim(context.Background(), ClaimAuditParams{
+		TaskID:    22,
+		AuditorID: 221,
+		Stage:     domain.AuditRecordStageA,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Claim() appErr = %+v, want permission denied", appErr)
+	}
+}
+
+func TestAuditV7ServiceTransferRejectsCrossLaneAuditor(t *testing.T) {
+	fromAuditorID := int64(231)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			23: {
+				ID:               23,
+				TaskNo:           "RW-023",
+				TaskType:         domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:       domain.TaskStatusPendingAuditA,
+				BusinessLane:     domain.TaskBusinessLaneNormal,
+				CurrentHandlerID: &fromAuditorID,
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[231] = &domain.User{ID: 231, DisplayName: "马雨琪", Status: domain.UserStatusActive}
+	userRepo.roles[231] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[232] = &domain.User{ID: 232, DisplayName: "章鹏鹏", Status: domain.UserStatusActive}
+	userRepo.roles[232] = []domain.Role{domain.RoleAuditA}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+
+	appErr := svc.Transfer(context.Background(), TransferAuditParams{
+		TaskID:        23,
+		FromAuditorID: 231,
+		ToAuditorID:   232,
+		Stage:         domain.AuditRecordStageA,
+		Comment:       "cross lane transfer",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Transfer() appErr = %+v, want permission denied", appErr)
+	}
+}
+
+func TestAuditV7ServiceTakeoverRejectsCrossLaneHandover(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			24: {
+				ID:           24,
+				TaskNo:       "RW-024",
+				TaskType:     domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:   domain.TaskStatusPendingAuditA,
+				BusinessLane: domain.TaskBusinessLaneNormal,
+			},
+		},
+	}
+	auditRepo := &auditV7RepoStub{
+		handovers: []*domain.AuditHandover{
+			{
+				ID:            2401,
+				TaskID:        24,
+				FromAuditorID: 241,
+				ToAuditorID:   242,
+				Status:        domain.HandoverStatusPendingTakeover,
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[241] = &domain.User{ID: 241, DisplayName: "马雨琪", Status: domain.UserStatusActive}
+	userRepo.roles[241] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[242] = &domain.User{ID: 242, DisplayName: "章鹏鹏", Status: domain.UserStatusActive}
+	userRepo.roles[242] = []domain.Role{domain.RoleAuditA}
+	svc := NewAuditV7Service(taskRepo, auditRepo, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+
+	appErr := svc.Takeover(context.Background(), 24, 2401, 242)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Takeover() appErr = %+v, want permission denied", appErr)
+	}
+}
+
 type auditV7RepoStub struct {
 	records   []*domain.AuditRecord
 	handovers []*domain.AuditHandover
