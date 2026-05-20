@@ -281,6 +281,8 @@ export interface Task {
   ownerOrgTeam?: string
   /** 工作流业务 lane：普通 / 定制（GET 任务读模型 `workflow_lane`） */
   workflowLane?: 'normal' | 'customization'
+  /** 任务业务 lane：普通 / 定制（GET 任务读模型 `business_lane`） */
+  businessLane?: 'normal' | 'customization'
   skuCodeType?: 'regular' | 'customization' | string
   /** GET /v1/tasks/{id}/detail modules projection, including backend allowed actions. */
   moduleSummaries?: ModuleSummary[]

@@ -296,6 +296,14 @@ function normalizeOptionalUserId(raw: unknown): string | null {
   return s === '' ? null : s
 }
 
+function normalizeTaskLane(raw: unknown): 'normal' | 'customization' | undefined {
+  const lane = String(raw ?? '').trim().toLowerCase()
+  if (lane === 'normal' || lane === 'customization') {
+    return lane
+  }
+  return undefined
+}
+
 const DESIGN_SUB_STATUS_SET = new Set<string>([
   'NOT_REQUIRED',
   'PENDING_ASSIGN',
@@ -946,6 +954,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       String(raw.workflow_lane ?? raw.workflowLane).trim() !== ''
         ? (String(raw.workflow_lane ?? raw.workflowLane).trim() as Task['workflowLane'])
         : undefined,
+    businessLane: normalizeTaskLane(raw.business_lane ?? raw.businessLane),
     sourceDepartment:
       typeof (raw.source_department ?? raw.sourceDepartment) === 'string' &&
       String(raw.source_department ?? raw.sourceDepartment).trim() !== ''
@@ -1141,6 +1150,7 @@ function mergeListRowWithCachedDetail(prev: Task | undefined, listRow: Task): Ta
       listRow.cannotCloseReasons !== undefined ? listRow.cannotCloseReasons : prev.cannotCloseReasons,
     workflowMainStatus:
       listRow.workflowMainStatus !== undefined ? listRow.workflowMainStatus : prev.workflowMainStatus,
+    businessLane: listRow.businessLane ?? prev.businessLane,
   }
 
   const strEmpty = (s: string | null | undefined) => s == null || String(s).trim() === ''
@@ -1476,6 +1486,7 @@ export const useTasksStore = defineStore('tasks', () => {
         // （AuditQueuePanel.matchesLane）会在详情刷入后把 `undefined` 当作
         // `'normal'` 处理，导致已选中的定制任务从定制 Tab 中瞬间消失。
         workflowLane: parsed.workflowLane ?? existing?.workflowLane,
+        businessLane: parsed.businessLane ?? existing?.businessLane,
         moduleSummaries: moduleSummaries ?? existing?.moduleSummaries,
       }
       const updated = enrichTaskDomainFields(base)
@@ -1529,12 +1540,13 @@ export const useTasksStore = defineStore('tasks', () => {
     const taskType = TASK_TYPE_TO_BACKEND[frontendTaskType] ?? frontendTaskType
     const isOriginal = frontendTaskType === 'ORIGINAL_PRODUCT_DEV'
     const isRetouch = frontendTaskType === 'RETOUCH_TASK'
+    const businessLane =
+      normalizeTaskLane(t.businessLane ?? t.workflowLane) ??
+      (Boolean(t.customizationRequired ?? task.customizationRequired) ? 'customization' : 'normal')
+    const normalizedLaneSkuCodeType = businessLane === 'customization' ? 'customization' : 'regular'
     const skuModeRaw = (t.skuMode ?? 'single') as string
 	    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
-	    const skuCodeType =
-	      (t.skuCodeType ?? (task as Record<string, unknown>).skuCodeType) === 'customization'
-	        ? 'customization'
-	        : 'regular'
+	    const skuCodeType = normalizedLaneSkuCodeType
 
     const ownerTeam = t.groupId ?? task.groupId ?? ''
     const ownerDepartment =
@@ -1578,8 +1590,12 @@ export const useTasksStore = defineStore('tasks', () => {
       owner_team: ownerTeam,
       deadline_at: t.dueAt ?? task.dueAt ?? null,
 	      priority,
+	      business_lane: businessLane,
+	      workflow_lane: businessLane,
 	      sku_code_type: skuCodeType,
-	      customization_required: Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
+	      customization_required:
+          businessLane === 'customization' ||
+          Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
       customization_source_type:
         (t.customizationRequired ?? task.customizationRequired)
           ? (t.customizationSourceType ?? task.customizationSourceType ?? undefined)
@@ -1680,7 +1696,7 @@ export const useTasksStore = defineStore('tasks', () => {
 	        const item = itemRaw as Record<string, unknown>
 	        const baseItem: Record<string, unknown> = {
 	          product_name: item.productName ?? '',
-	          sku_code_type: item.skuCodeType === 'customization' ? 'customization' : skuCodeType,
+	          sku_code_type: normalizedLaneSkuCodeType,
 	        }
         if (taskType === 'new_product_development') {
           baseItem.design_requirement = item.designRequirement ?? undefined
@@ -1824,11 +1840,10 @@ export const useTasksStore = defineStore('tasks', () => {
     // - 单个模式：必须有顶层 category_code（当前端点尚未切 i_id 字段名）
     // - 批量模式：每个 batch_items[i] 必须有 category_code
 	    const preparePayload: Record<string, unknown> = { task_type: payloadTaskType }
-	    const skuCodeType =
-	      (task as Record<string, unknown>).skuCodeType === 'customization' ||
-	      payload.sku_code_type === 'customization'
-	        ? 'customization'
-	        : 'regular'
+	    const businessLane = normalizeTaskLane(payload.business_lane ?? payload.workflow_lane) ?? 'normal'
+	    const skuCodeType = businessLane === 'customization' ? 'customization' : 'regular'
+	    preparePayload.business_lane = businessLane
+	    preparePayload.workflow_lane = businessLane
 	    preparePayload.sku_code_type = skuCodeType
     const rawBatchItems = Array.isArray((task as Record<string, unknown>).batchItems)
       ? ((task as Record<string, unknown>).batchItems as Array<Record<string, unknown>>)
@@ -1846,7 +1861,7 @@ export const useTasksStore = defineStore('tasks', () => {
         }
 	        return {
 	          category_code: categoryCode,
-	          sku_code_type: item.skuCodeType === 'customization' ? 'customization' : skuCodeType,
+	          sku_code_type: skuCodeType,
 	        }
       })
       preparePayload.batch_items = batch_items

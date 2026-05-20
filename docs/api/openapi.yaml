@@ -1703,6 +1703,10 @@ components:
           nullable: true
         need_outsource: { type: boolean }
         is_outsource: { type: boolean }
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical task business lane used for workflow routing and audit-domain isolation.
         customization_required: { type: boolean }
         customization_source_type:
           type: string
@@ -3643,7 +3647,11 @@ components:
         workflow_lane:
           type: string
           enum: [normal, customization]
-          description: Explicit business lane projection derived from `customization_required`.
+          description: Compatibility lane projection. New integrations should use `business_lane`.
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical task business lane used for audit-domain isolation and routing.
         customization_source_type:
           type: string
           enum: [new_product, existing_product]
@@ -3987,12 +3995,20 @@ components:
         remark: { type: string }
     CreateTaskRequest:
       type: object
-      description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, `retouch_task`, `customer_customization`, and `regular_customization`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
+      description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, and `retouch_task`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
       required: [task_type, owner_team]
       properties:
         task_type:
           type: string
-          enum: [original_product_development, new_product_development, purchase_task, retouch_task, customer_customization, regular_customization]
+          enum: [original_product_development, new_product_development, purchase_task, retouch_task]
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical task lane selector (`normal` or `customization`). Drives audit-domain routing.
+        workflow_lane:
+          type: string
+          enum: [normal, customization]
+          description: Compatibility alias of `business_lane`.
         source_mode:
           type: string
           enum: [existing_product, new_product]
@@ -4187,6 +4203,14 @@ components:
         task_type:
           type: string
           enum: [new_product_development, purchase_task]
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical lane selector. Controls default SKU prefix (`CG` for `normal`, `DZ` for `customization`).
+        workflow_lane:
+          type: string
+          enum: [normal, customization]
+          description: Compatibility alias of `business_lane`.
         category_code:
           type: string
           description: Required when `batch_items` is omitted.
@@ -14559,7 +14583,7 @@ paths:
         - in: query
           name: task_type
           schema: { type: string }
-          description: Optional task_type filter (e.g. `new_product`, `customer_customization`).
+          description: Optional task_type filter (e.g. `new_product_development`, `purchase_task`).
         - in: query
           name: limit
           schema: { type: integer, minimum: 1, maximum: 50, default: 20 }

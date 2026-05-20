@@ -322,11 +322,8 @@
 	              </div>
 	              <div class="erp-sync-toggle-row">
 	                <div class="erp-sync-control">
-	                  <span class="erp-sync-main-label">{{ allowSkuCodeTypeSwitch ? '生成定制 SKU' : '定制任务默认标记' }}</span>
-	                  <BaseSwitch v-if="allowSkuCodeTypeSwitch" v-model="customizationSkuSwitchValue" class="erp-switch">
-	                    {{ form.skuCodeType === 'customization' ? 'DZ' : 'CG' }}
-	                  </BaseSwitch>
-	                  <span v-else class="erp-sync-locked-badge">DZ</span>
+	                  <span class="erp-sync-main-label">{{ isCustomizationFlow ? '定制任务固定标记' : '常规任务固定标记' }}</span>
+	                  <span class="erp-sync-locked-badge">{{ form.skuCodeType === 'customization' ? 'DZ' : 'CG' }}</span>
 	                </div>
 	                <p class="erp-sync-toggle-hint" :class="{ warning: form.skuCodeType === 'customization' }">
 	                  {{
@@ -401,7 +398,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Box, Images, Palette, Sparkles, ShoppingCart, Wand2 } from 'lucide-vue-next'
+import { Box, Images, Sparkles, ShoppingCart, Wand2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import type { Task } from '@/domain/types'
 import type { TaskCreateFormModel, TaskKind } from '@/domain/types'
@@ -523,8 +520,6 @@ type CreateType =
   | 'new_batch'
   | 'purchase_single'
   | 'retouch'
-  | 'customer_customization'
-  | 'regular_customization'
 
 const taskGroup = ref<TaskGroup>('normal')
 const createType = ref<CreateType>('original')
@@ -581,18 +576,18 @@ const createTypeOptions: Array<{
     icon: Wand2,
   },
   {
-    value: 'customer_customization',
+    value: 'new_single',
     group: 'customization',
-    label: '客户定制',
-    kind: 'ORIGINAL_PRODUCT_DEV',
-    icon: Palette,
-  },
-  {
-    value: 'regular_customization',
-    group: 'customization',
-    label: '常规定制',
+    label: '新款单 SKU',
     kind: 'NEW_PRODUCT_DEV',
     icon: Sparkles,
+  },
+  {
+    value: 'new_batch',
+    group: 'customization',
+    label: '新款批量',
+    kind: 'NEW_PRODUCT_DEV',
+    icon: Images,
   },
 ]
 
@@ -654,24 +649,17 @@ const contextPanelClass = computed(() => ({
 }))
 const contextPanelTitle = computed(() => {
   if (isBatchLayout.value) return 'Excel 批量流程'
-  if (createType.value === 'customer_customization') return '客户上下文'
-  if (createType.value === 'regular_customization') return '蓝图解析'
+  if (isCustomizationFlow.value) return '定制上下文'
   if (taskKind.value === 'RETOUCH_TASK') return 'P 图任务只保留必要字段'
   if (taskKind.value === 'PURCHASE_TASK') return '成本与采购规则'
   if (taskKind.value === 'NEW_PRODUCT_DEV') return 'SKU 创建状态'
   return 'ERP 产品主档'
 })
 const contextPanelItems = computed(() => {
-  if (createType.value === 'customer_customization') {
+  if (isCustomizationFlow.value) {
     return [
-      { title: '客户来单校验', body: '先命中 ERP 商品，再填写订单号、文案和风格关键词。' },
-      { title: '风险提示', body: '定制需求建议包含颜色、尺寸、用途和交付约束，降低返工。' },
-    ]
-  }
-  if (createType.value === 'regular_customization') {
-    return [
-      { title: '设计来源', body: '常规定制必须先命中设计源，未命中时禁止提交。' },
-      { title: '蓝图建议', body: '先确认蓝图版本，再提交定制说明和补充资料。' },
+      { title: '定制归属', body: '定制任务统一写入 customization 业务域，审核与流转按域隔离执行。' },
+      { title: '输入建议', body: '建议补齐订单号、文案和风格关键词，降低返工与跨岗沟通成本。' },
     ]
   }
   if (taskKind.value === 'RETOUCH_TASK') {
@@ -702,35 +690,20 @@ const contextPanelItems = computed(() => {
 const usesOriginalProductForm = computed(
   () =>
     taskKind.value === 'ORIGINAL_PRODUCT_DEV' &&
-    (createType.value === 'original' || createType.value === 'customer_customization'),
+    createType.value === 'original',
 )
-const requiresDesignSource = computed(() => createType.value === 'regular_customization')
-const requiresErpVerification = computed(() => createType.value === 'customer_customization')
+const requiresDesignSource = computed(() => false)
+const requiresErpVerification = computed(() => false)
 const showSyncErpToggle = computed(() =>
   createType.value === 'new_single' ||
   createType.value === 'new_batch' ||
   createType.value === 'purchase_single',
 )
-const allowSkuCodeTypeSwitch = computed(() =>
+const showSkuCodeTypeCard = computed(() =>
   createType.value === 'new_single' ||
   createType.value === 'new_batch' ||
-  createType.value === 'purchase_single',
+  createType.value === 'purchase_single'
 )
-const showSkuCodeTypeCard = computed(() =>
-  allowSkuCodeTypeSwitch.value ||
-  createType.value === 'customer_customization' ||
-  createType.value === 'regular_customization',
-)
-const customizationSkuSwitchValue = computed({
-  get: () => form.value.skuCodeType === 'customization',
-  set: (enabled: boolean) => {
-    form.value.skuCodeType = enabled ? 'customization' : 'regular'
-    form.value.batchItems = (form.value.batchItems ?? []).map((item) => ({
-      ...item,
-      skuCodeType: form.value.skuCodeType,
-    }))
-  },
-})
 
 const copyContentModel = computed({
   get: () => form.value.copyContent ?? '',
@@ -756,6 +729,10 @@ function applyCreateType(option: (typeof createTypeOptions)[number]) {
 	    : 'new_product'
 	  : undefined
 	form.value.skuCodeType = option.group === 'customization' ? 'customization' : 'regular'
+  form.value.batchItems = (form.value.batchItems ?? []).map((item) => ({
+    ...item,
+    skuCodeType: option.group === 'customization' ? 'customization' : 'regular',
+  }))
   designSourceVerified.value = false
   erpProductVerified.value = false
   batchPreviewRows.value = []
@@ -1024,15 +1001,16 @@ function resolveCreateTypeFromDraft(
   draftTaskKind: string,
   draftForm: Record<string, unknown>,
 ): (typeof createTypeOptions)[number] | undefined {
-  const isCustomization = Boolean(draftForm.customizationRequired)
+  const draftLane = String(draftForm.businessLane ?? draftForm.workflowLane ?? '').trim().toLowerCase()
+  const isCustomization = draftLane === 'customization' || Boolean(draftForm.customizationRequired)
   const skuMode = String(draftForm.skuMode ?? 'single')
   if (draftTaskKind === 'ORIGINAL_PRODUCT_DEV') {
-    const value = isCustomization ? 'customer_customization' : 'original'
+    const value = 'original'
     return createTypeOptions.find((option) => option.value === value)
   }
   if (draftTaskKind === 'NEW_PRODUCT_DEV') {
-    const value = skuMode === 'multiple' ? 'new_batch' : isCustomization ? 'regular_customization' : 'new_single'
-    return createTypeOptions.find((option) => option.value === value)
+    const value = skuMode === 'multiple' ? 'new_batch' : 'new_single'
+    return createTypeOptions.find((option) => option.value === value && option.group === (isCustomization ? 'customization' : 'normal'))
   }
   if (draftTaskKind === 'PURCHASE_TASK') {
     return createTypeOptions.find((option) => option.value === 'purchase_single')
@@ -1146,6 +1124,8 @@ async function prepareSkuPreview() {
 	      priority: normalizedPriority,
 	      customizationRequired: form.value.customizationRequired,
 	      customizationSourceType: form.value.customizationSourceType,
+	      businessLane: taskGroup.value,
+	      workflowLane: taskGroup.value,
 	      skuCodeType: form.value.skuCodeType,
 	      note: form.value.note,
       assetVersions: [],
@@ -1336,6 +1316,7 @@ async function submit() {
     note: form.value.note,
     assetVersions: [],
     businessType,
+    businessLane: taskGroup.value,
 	    workflowLane: taskGroup.value,
 	    taskCreateType: createType.value,
 	    skuCodeType: form.value.skuCodeType,

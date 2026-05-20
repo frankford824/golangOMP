@@ -30,7 +30,7 @@
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `task_type` | query | string | 否 | Optional task_type filter (e.g. `new_product`, `customer_customization`). |
+| `task_type` | query | string | 否 | Optional task_type filter (e.g. `new_product_development`, `purchase_task`). |
 | `limit` | query | integer | 否 | - |
 | `cursor` | query | string | 否 | Opaque cursor returned by a previous page; omit for first page. |
 

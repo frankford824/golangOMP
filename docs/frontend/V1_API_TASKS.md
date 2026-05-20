@@ -38,6 +38,8 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `task_type` | enum(new_product_development/purchase_task) | 是 | - |
+| `business_lane` | enum(normal/customization) | 否 | Canonical lane selector. Controls default SKU prefix (`CG` for `normal`, `DZ` for `customization`). |
+| `workflow_lane` | enum(normal/customization) | 否 | Compatibility alias of `business_lane`. |
 | `category_code` | string | 否 | Required when `batch_items` is omitted. |
 | `sku_code_type` | enum(regular/customization) | 否 | Automatic SKU code type. `regular` allocates `CG` codes; `customization` allocates `DZ` codes. |
 | `count` | integer | 否 | Defaults to 1 when omitted. Used only when `batch_items` is omitted. |
@@ -177,7 +179,9 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `task_type` | enum(original_product_development/new_product_development/purchase_task/retouch_task/customer_customization/regular_customization) | 是 | - |
+| `task_type` | enum(original_product_development/new_product_development/purchase_task/retouch_task) | 是 | - |
+| `business_lane` | enum(normal/customization) | 否 | Canonical task lane selector (`normal` or `customization`). Drives audit-domain routing. |
+| `workflow_lane` | enum(normal/customization) | 否 | Compatibility alias of `business_lane`. |
 | `source_mode` | enum(existing_product/new_product) | 否 | - |
 | `owner_team` | string | 是 | Required compatibility owner-team input. Supported `/v1/org/options` org-team values with deterministic task mappings may be normalized before validation and persisted into canonical ownership fields. Unsupported values return `invalid_owner_team`. |
 | `owner_department` | string | 否 | Optional canonical task owner department hint. When provided with `owner_org_team` or a compatible org-team `owner_team`, backend validates consistency before create. |
@@ -259,7 +263,6 @@ curl -X POST https://api.example.com/v1/tasks \
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
 ## GET /v1/tasks/{id}
 
 ### 简介
@@ -314,7 +317,6 @@ curl -X GET https://api.example.com/v1/tasks/<id> \
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
 ## GET /v1/tasks/{id}/product-info
 
 ### 简介
