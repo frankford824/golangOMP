@@ -43,6 +43,19 @@
           <button type="button" class="ac-icon-btn" :disabled="loading" @click="reload">
             {{ loading ? '刷新中' : '刷新' }}
           </button>
+          <button type="button" class="ac-icon-btn ac-icon-btn--primary" @click="openBulkSearchModal">
+            批量搜索下载
+          </button>
+          <button type="button" class="ac-icon-btn ac-icon-btn--primary" :disabled="excelPackaging" @click="openExcelPicker">
+            {{ excelPackaging ? '模板打包中' : 'Excel 图片分拣下载' }}
+          </button>
+          <input
+            ref="excelFileInput"
+            type="file"
+            class="ac-hidden-file"
+            accept=".xlsx"
+            @change="handleExcelPackageFile"
+          />
           <button type="button" class="ac-icon-btn ac-icon-btn--primary" @click="selectedModalOpen = true">
             已选资产
           </button>
@@ -96,6 +109,10 @@
       </button>
       <span v-if="batchDownloadStatus" class="ac-batch-status">{{ batchDownloadStatus }}</span>
       <span v-if="batchDownloadError" class="ac-batch-error">{{ batchDownloadError }}</span>
+    </div>
+    <div v-if="excelPackageStatus || excelPackageError" class="ac-excel-package-bar">
+      <span v-if="excelPackageStatus" class="ac-batch-status">{{ excelPackageStatus }}</span>
+      <span v-if="excelPackageError" class="ac-batch-error">{{ excelPackageError }}</span>
     </div>
     <main class="ac-grid">
       <div v-if="loading" class="ac-loading-state">
@@ -255,6 +272,103 @@
     </BaseModal>
 
     <BaseModal
+      v-model="bulkSearchModalOpen"
+      title="批量搜索下载"
+      :show-confirm="false"
+      cancel-text="关闭"
+      panel-class="max-w-6xl"
+    >
+      <section class="bulk-search-panel">
+        <div class="bulk-search-input-card">
+          <label class="bulk-search-label" for="bulk-asset-search-input">SKU / 任务单号</label>
+          <textarea
+            id="bulk-asset-search-input"
+            v-model="bulkSearchInput"
+            class="bulk-search-textarea"
+            rows="8"
+            placeholder="一行一个，例如：&#10;NSKT000261&#10;NSKT000294&#10;RW-20260513-A-000689"
+          />
+          <div class="bulk-search-actions">
+            <button type="button" class="ac-batch-btn ac-batch-btn--primary" :disabled="bulkSearchRunning" @click="runBulkAssetSearch">
+              {{ bulkSearchRunning ? '搜索中...' : '生成下载明细' }}
+            </button>
+            <button type="button" class="ac-batch-btn" :disabled="bulkSearchDownloading || !bulkSearchMatchedCount" @click="downloadBulkSearchResults">
+              {{ bulkSearchDownloading ? '打包中...' : `一键下载 ${bulkSearchMatchedCount} 项` }}
+            </button>
+            <button type="button" class="ac-batch-btn ac-batch-btn--ghost" :disabled="bulkSearchRunning || bulkSearchDownloading" @click="clearBulkSearch">
+              清空
+            </button>
+          </div>
+          <p class="bulk-search-hint">
+            支持粘贴多行 SKU 或任务单号，自动去重后搜索 JPG / PNG 资产。默认优先选择最终成品图，其次预览图。
+          </p>
+          <p v-if="bulkSearchStatus" class="ac-batch-status">{{ bulkSearchStatus }}</p>
+          <p v-if="bulkSearchError" class="ac-batch-error">{{ bulkSearchError }}</p>
+        </div>
+
+        <div v-if="bulkSearchResults.length" class="bulk-search-summary">
+          <span>输入 {{ bulkSearchTermCount }} 项</span>
+          <span>命中 {{ bulkSearchMatchedCount }} 项</span>
+          <span>未命中 {{ bulkSearchFailedCount }} 项</span>
+        </div>
+
+        <div v-if="bulkSearchResults.length" class="bulk-result-list">
+          <article
+            v-for="result in bulkSearchResults"
+            :key="result.term"
+            class="bulk-result-card"
+            :class="{ 'bulk-result-card--failed': result.status !== 'matched' }"
+          >
+            <div class="bulk-result-preview">
+              <AssetPreviewMedia
+                v-if="result.asset"
+                :asset-id="String(result.asset.id)"
+                :resolved-preview-url="listCardResolvedPreviewUrl(result.asset)"
+                defer-until-visible
+                alt=""
+                img-class="bulk-result-apm"
+                inner-img-class="bulk-result-img"
+                @open-full="(u) => (previewLightboxSrc = u)"
+              />
+              <span v-else class="bulk-result-empty">未命中</span>
+            </div>
+            <div class="bulk-result-main">
+              <div class="bulk-result-top">
+                <span class="bulk-result-term cell-mono">{{ result.term }}</span>
+                <span class="bulk-result-pill">{{ result.status === 'matched' ? '已匹配' : '未匹配' }}</span>
+              </div>
+              <template v-if="result.asset">
+                <h4 class="bulk-result-title" :title="cardTitle(result.asset)">{{ cardTitle(result.asset) }}</h4>
+                <dl class="bulk-result-meta">
+                  <div>
+                    <dt>资产 ID</dt>
+                    <dd class="cell-mono">{{ result.asset.id }}</dd>
+                  </div>
+                  <div>
+                    <dt>任务 ID</dt>
+                    <dd class="cell-mono">{{ displayText(result.asset.task_id) }}</dd>
+                  </div>
+                  <div>
+                    <dt>类型</dt>
+                    <dd>{{ assetKind(result.asset) }}</dd>
+                  </div>
+                  <div>
+                    <dt>格式</dt>
+                    <dd>{{ fileFormatLabel(result.asset) }}</dd>
+                  </div>
+                </dl>
+              </template>
+              <p v-else class="bulk-result-message">{{ result.message }}</p>
+              <p v-if="result.asset && result.candidates > 1" class="bulk-result-message">
+                共找到 {{ result.candidates }} 个图片候选，已按成品图优先规则选择最新匹配项。
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+    </BaseModal>
+
+    <BaseModal
       v-model="detailModalOpen"
       title="资产详情"
       :show-confirm="false"
@@ -411,11 +525,19 @@ import {
   assetsApi,
   type AssetBatchDownloadFailure,
   type AssetBatchDownloadItem,
+  type AssetExcelPackageFailure,
+  type AssetExcelPackageItem,
+  type AssetExcelPackageRow,
 } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
-import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
+import {
+  buildTimestampedZipFilename,
+  downloadBatchAsZip,
+  mapWithConcurrency,
+  sanitizeZipEntryName,
+} from '@/utils/batchZipDownload'
 
 const route = useRoute()
 const router = useRouter()
@@ -438,6 +560,7 @@ const listPageSize = ref(20)
 const listTotal = ref(0)
 const AUTO_RELOAD_DELAY_MS = 400
 const MAX_BATCH_DOWNLOAD_ASSETS = 100
+const MAX_BULK_SEARCH_TERMS = 200
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 const previewLightboxSrc = ref<string | null>(null)
 const filtersExpanded = ref(false)
@@ -446,6 +569,16 @@ const selectedModalOpen = ref(false)
 const batchDownloading = ref(false)
 const batchDownloadStatus = ref('')
 const batchDownloadError = ref('')
+const excelFileInput = ref<HTMLInputElement | null>(null)
+const excelPackaging = ref(false)
+const excelPackageStatus = ref('')
+const excelPackageError = ref('')
+const bulkSearchModalOpen = ref(false)
+const bulkSearchInput = ref('')
+const bulkSearchRunning = ref(false)
+const bulkSearchDownloading = ref(false)
+const bulkSearchStatus = ref('')
+const bulkSearchError = ref('')
 
 const filters = reactive({
   keyword: '',
@@ -488,12 +621,29 @@ interface SelectedAssetSummary {
   kind: string
 }
 
+type BulkSearchResultStatus = 'matched' | 'not_found' | 'error'
+
+interface BulkSearchResult {
+  term: string
+  status: BulkSearchResultStatus
+  message: string
+  candidates: number
+  asset?: BackendAsset
+}
+
 const selectedAssetMap = reactive(new Map<string, SelectedAssetSummary>())
 const selectedCount = computed(() => selectedAssetMap.size)
 const selectedAssets = computed(() => Array.from(selectedAssetMap.values()))
 const canBatchDownload = computed(
   () => selectedCount.value > 0 && selectedCount.value <= MAX_BATCH_DOWNLOAD_ASSETS && !batchDownloading.value,
 )
+
+const EXCEL_PACKAGE_CONCURRENCY = 4
+const bulkSearchResults = ref<BulkSearchResult[]>([])
+const bulkSearchTermCount = computed(() => parseBulkSearchTerms(bulkSearchInput.value).length)
+const bulkSearchMatchedResults = computed(() => bulkSearchResults.value.filter((item) => item.status === 'matched' && item.asset))
+const bulkSearchMatchedCount = computed(() => bulkSearchMatchedResults.value.length)
+const bulkSearchFailedCount = computed(() => bulkSearchResults.value.filter((item) => item.status !== 'matched').length)
 
 const effectiveSearchKeyword = computed(
   () => filters.keyword.trim() || filters.taskId.trim() || filters.scopeSkuCode.trim(),
@@ -635,6 +785,421 @@ function normalizeSelectedAssetIDs(): number[] {
 
 function resolveBatchZipFilename(): string {
   return buildTimestampedZipFilename('assets')
+}
+
+function openBulkSearchModal() {
+  bulkSearchModalOpen.value = true
+  bulkSearchStatus.value = ''
+  bulkSearchError.value = ''
+}
+
+function parseBulkSearchTerms(raw: string): string[] {
+  const seen = new Set<string>()
+  const terms: string[] = []
+  raw
+    .split(/[\s,，;；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const normalized = item.toUpperCase()
+      if (seen.has(normalized)) return
+      seen.add(normalized)
+      terms.push(normalized)
+    })
+  return terms
+}
+
+function clearBulkSearch() {
+  bulkSearchInput.value = ''
+  bulkSearchResults.value = []
+  bulkSearchStatus.value = ''
+  bulkSearchError.value = ''
+}
+
+function isBulkSearchImageAsset(asset: BackendAsset): boolean {
+  const format = fileFormatLabel(asset).toLowerCase()
+  if (['jpg', 'jpeg', 'png'].includes(format)) return true
+  const record = asset as Record<string, unknown>
+  const mime = String(record.mime_type ?? record.content_type ?? '').toLowerCase()
+  if (mime === 'image/jpeg' || mime === 'image/png') return true
+  const title = cardTitle(asset).toLowerCase()
+  return /\.(jpe?g|png)(?:$|[?#])/.test(title)
+}
+
+function bulkSearchAssetScore(asset: BackendAsset, term: string): number {
+  const record = asset as Record<string, unknown>
+  const normalizedTerm = term.toUpperCase()
+  const title = cardTitle(asset).toUpperCase()
+  const scopeSKU = String(record.scope_sku_code ?? '').trim().toUpperCase()
+  const skuCode = String(record.sku_code ?? '').trim().toUpperCase()
+  const primarySKU = String(record.primary_sku_code ?? '').trim().toUpperCase()
+  const taskNo = String(record.task_no ?? '').trim().toUpperCase()
+  const taskID = String(asset.task_id ?? '').trim().toUpperCase()
+  const productName = String(record.product_name ?? record.product_name_snapshot ?? '').trim().toUpperCase()
+  const kind = String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? '').trim().toLowerCase()
+
+  let score = 0
+  if (scopeSKU === normalizedTerm) score += 140
+  if (skuCode === normalizedTerm || primarySKU === normalizedTerm) score += 120
+  if (taskNo === normalizedTerm) score += 130
+  if (taskID === normalizedTerm) score += 110
+  if (title.includes(normalizedTerm)) score += 80
+  if (productName.includes(normalizedTerm)) score += 45
+
+  if (kind === 'delivery') score += 60
+  else if (kind === 'preview') score += 42
+  else if (kind === 'design_thumb') score += 34
+  else if (kind === 'reference') score += 18
+
+  if (score === 0 && title) score += 1
+  return score
+}
+
+function chooseBulkSearchAsset(term: string, assetsForTerm: BackendAsset[]): BackendAsset | undefined {
+  const candidates = assetsForTerm.filter(isBulkSearchImageAsset)
+  candidates.sort((a, b) => {
+    const diff = bulkSearchAssetScore(b, term) - bulkSearchAssetScore(a, term)
+    if (diff !== 0) return diff
+    const at = Date.parse(String((a as Record<string, unknown>).created_at ?? '')) || 0
+    const bt = Date.parse(String((b as Record<string, unknown>).created_at ?? '')) || 0
+    return bt - at
+  })
+  return candidates[0]
+}
+
+async function searchBulkAssetTerm(term: string): Promise<BulkSearchResult> {
+  try {
+    const res = await assetsApi.searchAssets({
+      keyword: term,
+      page: 1,
+      size: 50,
+      is_archived: 'false',
+      task_status: 'all',
+    })
+    const rows = Array.isArray(res.data?.data) ? res.data.data : []
+    const imageRows = rows.filter(isBulkSearchImageAsset)
+    const asset = chooseBulkSearchAsset(term, rows)
+    if (!asset) {
+      return {
+        term,
+        status: 'not_found',
+        message: rows.length ? '找到了资产，但没有可下载的 JPG/PNG 图片' : '未找到匹配资产',
+        candidates: imageRows.length,
+      }
+    }
+    return {
+      term,
+      status: 'matched',
+      message: '已匹配',
+      candidates: imageRows.length,
+      asset,
+    }
+  } catch (err) {
+    return {
+      term,
+      status: 'error',
+      message: resolveApiUserMessage(err, { fallback: '搜索失败' }),
+      candidates: 0,
+    }
+  }
+}
+
+async function runBulkAssetSearch() {
+  if (bulkSearchRunning.value) return
+  const terms = parseBulkSearchTerms(bulkSearchInput.value)
+  bulkSearchError.value = ''
+  bulkSearchStatus.value = ''
+  bulkSearchResults.value = []
+  if (!terms.length) {
+    bulkSearchError.value = '请先粘贴 SKU 或任务单号'
+    return
+  }
+  if (terms.length > MAX_BULK_SEARCH_TERMS) {
+    bulkSearchError.value = `最多一次搜索 ${MAX_BULK_SEARCH_TERMS} 个 SKU / 任务单号`
+    return
+  }
+
+  bulkSearchRunning.value = true
+  let completed = 0
+  try {
+    const results = await mapWithConcurrency(terms, 4, async (term) => {
+      const result = await searchBulkAssetTerm(term)
+      completed += 1
+      bulkSearchStatus.value = `正在搜索 ${completed}/${terms.length}`
+      return result
+    })
+    bulkSearchResults.value = results
+    bulkSearchStatus.value = `已生成明细：命中 ${results.filter((item) => item.status === 'matched').length} 项，未命中 ${results.filter((item) => item.status !== 'matched').length} 项`
+  } finally {
+    bulkSearchRunning.value = false
+  }
+}
+
+function normalizeBulkSearchAssetIDs(): number[] {
+  const ids = bulkSearchMatchedResults.value
+    .map((item) => Number(item.asset?.id))
+    .filter((id) => Number.isInteger(id) && id > 0)
+  return Array.from(new Set(ids))
+}
+
+async function downloadBulkSearchResults() {
+  if (bulkSearchDownloading.value) return
+  bulkSearchError.value = ''
+  const assetIDs = normalizeBulkSearchAssetIDs()
+  if (!assetIDs.length) {
+    bulkSearchError.value = '当前没有可下载的命中资产'
+    return
+  }
+  bulkSearchDownloading.value = true
+  try {
+    const res = await assetsApi.batchDownload(assetIDs)
+    const manifest = res.data?.data
+    const items = Array.isArray(manifest?.items) ? manifest.items : []
+    if (!items.length) {
+      bulkSearchError.value = '没有可下载的资产'
+      return
+    }
+    const serverFailures = Array.isArray(manifest?.failures) ? manifest.failures : []
+    const result = await downloadBatchAsZip({
+      items: items.map((item) => ({
+        key: `asset-${item.asset_id}`,
+        filename: item.filename,
+        downloadURL: item.download_url,
+        fallbackName: `asset-${item.asset_id}`,
+        failureHint: `asset_id=${item.asset_id} filename=${item.filename || `asset-${item.asset_id}`} reason=fetch_failed`,
+      })),
+      zipFilename: buildTimestampedZipFilename('bulk-assets'),
+      serverFailures: serverFailures.map(formatServerBatchDownloadFailure),
+      onStatus: (message) => {
+        bulkSearchStatus.value = message
+      },
+    })
+    bulkSearchStatus.value = `已生成 ZIP，共 ${result.writtenCount} 个文件`
+    bulkSearchError.value = result.failureCount > 0 ? `${result.failureCount} 个文件未打包，详情见 ZIP 内 download_errors.txt` : ''
+  } catch (err) {
+    bulkSearchError.value = resolveApiUserMessage(err, { fallback: '批量搜索下载失败' })
+  } finally {
+    bulkSearchDownloading.value = false
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const objectURL = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectURL
+  link.download = filename
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
+}
+
+function openExcelPicker() {
+  if (excelPackaging.value) return
+  excelPackageStatus.value = ''
+  excelPackageError.value = ''
+  if (excelFileInput.value) {
+    excelFileInput.value.value = ''
+    excelFileInput.value.click()
+  }
+}
+
+function normalizeExcelCell(value: unknown): string {
+  if (value == null) return ''
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (typeof record.text === 'string') return record.text.trim()
+    if (typeof record.result === 'string' || typeof record.result === 'number') return normalizeExcelCell(record.result)
+    if (Array.isArray(record.richText)) {
+      return record.richText
+        .map((item) => (item && typeof item === 'object' ? String((item as Record<string, unknown>).text ?? '') : ''))
+        .join('')
+        .trim()
+    }
+  }
+  const text = String(value).trim()
+  if (/^\d+\.0$/.test(text)) return String(Math.trunc(Number(text)))
+  return text
+}
+
+function normalizeExcelQuantity(value: unknown): number {
+  const text = normalizeExcelCell(value)
+  if (!text) return 1
+  const n = Number(text)
+  if (!Number.isFinite(n)) return 1
+  return Math.max(1, Math.trunc(n))
+}
+
+function normalizeExcelHeader(value: unknown): string {
+  return normalizeExcelCell(value).replace(/\s+/g, '').toLowerCase()
+}
+
+function resolveExcelColumn(headers: string[], candidates: string[], fallbackIndex: number): number {
+  const normalizedCandidates = candidates.map((item) => normalizeExcelHeader(item))
+  const found = headers.findIndex((header) => normalizedCandidates.includes(header))
+  return found >= 0 ? found : fallbackIndex
+}
+
+async function parseExcelPackageRows(file: File): Promise<AssetExcelPackageRow[]> {
+  if (!/\.xlsx$/i.test(file.name)) throw new Error('当前仅支持 .xlsx 模板，请将 .xls 另存为 .xlsx 后再上传')
+  const ExcelJS = await import('exceljs')
+  const data = await file.arrayBuffer()
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(data)
+  const worksheet = workbook.worksheets[0]
+  if (!worksheet) throw new Error('Excel 文件没有工作表')
+  const table: unknown[][] = []
+  worksheet.eachRow({ includeEmpty: true }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : []
+    table.push(values)
+  })
+  if (table.length < 2) throw new Error('Excel 至少需要表头和一行数据')
+
+  const headers = (table[0] ?? []).map(normalizeExcelHeader)
+  const orderCol = resolveExcelColumn(headers, ['订单号', '订单编号', 'order_no', 'order'], 0)
+  const skuCol = resolveExcelColumn(headers, ['SKU编码', 'SKU', 'sku_code', '商品编码'], 1)
+  const skuNameCol = resolveExcelColumn(headers, ['SKU名称', '商品名称', 'sku_name', '名称'], 2)
+  const quantityCol = resolveExcelColumn(headers, ['数量', 'qty', 'quantity', 'num'], 3)
+  const keywordCol = resolveExcelColumn(headers, ['匹配关键词', '关键词', 'keyword', 'kw'], 4)
+
+  return table
+    .slice(1)
+    .map((row, index): AssetExcelPackageRow => {
+      const values = Array.isArray(row) ? row : []
+      return {
+        row_number: index + 2,
+        order_no: normalizeExcelCell(values[orderCol]),
+        sku_code: normalizeExcelCell(values[skuCol]).toUpperCase(),
+        sku_name: normalizeExcelCell(values[skuNameCol]),
+        quantity: normalizeExcelQuantity(values[quantityCol]),
+        keyword: normalizeExcelCell(values[keywordCol]),
+      }
+    })
+    .filter((row) => row.order_no || row.sku_code || row.sku_name)
+}
+
+function resolveExcelPackageFilename(item: AssetExcelPackageItem, copyIndex: number): string {
+  const ext = (() => {
+    const i = item.filename.lastIndexOf('.')
+    return i > 0 ? item.filename.slice(i) : '.jpg'
+  })()
+  const rawSku = item.sku_code || item.sku_name || `asset-${item.asset_id}`
+  const rowSuffix = item.row_number ? `_row${item.row_number}` : ''
+  const base = sanitizeZipEntryName(`${rawSku}${rowSuffix}`, `asset-${item.asset_id}`)
+  return `${base}_${copyIndex}${ext}`
+}
+
+function formatExcelFailure(item: AssetExcelPackageFailure): string {
+  return [
+    item.row_number ? `row=${item.row_number}` : '',
+    item.order_no ? `order=${item.order_no}` : '',
+    item.sku_code ? `sku=${item.sku_code}` : '',
+    item.quantity ? `qty=${item.quantity}` : '',
+    `reason=${item.reason}`,
+    item.message ? `message=${item.message}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+async function downloadExcelPackageAsZip(items: AssetExcelPackageItem[], failures: AssetExcelPackageFailure[]): Promise<number> {
+  const { default: JSZip } = await import('jszip')
+  const zip = new JSZip()
+  const reportLines: string[] = [
+    'Excel 图片分拣下载报告',
+    `生成时间：${formatDateTimeBeijing(new Date().toISOString())}`,
+    `成功行数：${items.length}`,
+    `失败行数：${failures.length}`,
+    '',
+    '失败明细：',
+    ...(failures.length ? failures.map(formatExcelFailure) : ['无']),
+    '',
+  ]
+  let completed = 0
+  let copied = 0
+
+  await mapWithConcurrency(items, EXCEL_PACKAGE_CONCURRENCY, async (item) => {
+    const url = String(item.download_url ?? '').trim()
+    if (!url) {
+      reportLines.push(formatExcelFailure({
+        row_number: item.row_number,
+        order_no: item.order_no,
+        sku_code: item.sku_code,
+        quantity: item.quantity,
+        reason: 'missing_download_url',
+        message: '下载地址为空',
+      }))
+      return
+    }
+    try {
+      const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
+      if (!response.ok) throw new Error(`http_${response.status}`)
+      const blob = await response.blob()
+      const folder = sanitizeZipEntryName(item.order_no, '未知订单')
+      for (let i = 1; i <= item.quantity; i += 1) {
+        zip.file(`${folder}/${resolveExcelPackageFilename(item, i)}`, blob, { binary: true, compression: 'STORE' })
+        copied += 1
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'fetch_failed'
+      reportLines.push(formatExcelFailure({
+        row_number: item.row_number,
+        order_no: item.order_no,
+        sku_code: item.sku_code,
+        quantity: item.quantity,
+        reason,
+        message: '文件下载失败',
+      }))
+    } finally {
+      completed += 1
+      excelPackageStatus.value = `正在下载并分拣 ${completed}/${items.length} 行，已写入 ${copied} 个文件`
+    }
+  })
+
+  zip.file('打包报告.txt', reportLines.join('\n') + '\n')
+
+  excelPackageStatus.value = '正在生成 ZIP'
+  const blob = await zip.generateAsync(
+    { type: 'blob', compression: 'STORE', streamFiles: true },
+    (metadata: { percent: number }) => {
+      excelPackageStatus.value = `正在生成 ZIP ${Math.floor(metadata.percent)}%`
+    },
+  )
+  downloadBlob(blob, buildTimestampedZipFilename('excel-image-package'))
+  return copied
+}
+
+async function handleExcelPackageFile(event: Event) {
+  const file = (event.target as HTMLInputElement | null)?.files?.[0]
+  if (!file || excelPackaging.value) return
+  excelPackaging.value = true
+  excelPackageStatus.value = '正在解析 Excel 模板'
+  excelPackageError.value = ''
+  try {
+    const rows = await parseExcelPackageRows(file)
+    if (!rows.length) throw new Error('Excel 中没有可处理的数据行')
+    excelPackageStatus.value = `已解析 ${rows.length} 行，正在匹配资产`
+    const res = await assetsApi.excelPackagePreview(rows)
+    const manifest = res.data?.data
+    const items = Array.isArray(manifest?.items) ? manifest.items : []
+    const failures = Array.isArray(manifest?.failures) ? manifest.failures : []
+    if (!items.length) throw new Error('没有匹配到可下载的 JPG/PNG 资产')
+    excelPackageStatus.value = `匹配成功 ${items.length} 行，准备生成 ${manifest?.total_files ?? 0} 个文件`
+    const copied = await downloadExcelPackageAsZip(items, failures)
+    excelPackageStatus.value = `已生成 ZIP，共写入 ${copied} 个文件`
+    const errors: string[] = []
+    if (failures.length > 0) errors.push(`${failures.length} 行未匹配`)
+    if (copied <= 0) errors.push('没有图片文件下载成功')
+    excelPackageError.value = errors.length > 0 ? `${errors.join('；')}，详情见 ZIP 内打包报告.txt` : ''
+  } catch (err) {
+    excelPackageStatus.value = ''
+    excelPackageError.value = resolveApiUserMessage(err, { fallback: 'Excel 图片分拣下载失败' })
+  } finally {
+    excelPackaging.value = false
+    if (excelFileInput.value) excelFileInput.value.value = ''
+  }
 }
 
 function formatServerBatchDownloadFailure(item: AssetBatchDownloadFailure): string {
@@ -988,6 +1553,14 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.ac-hidden-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ac-aria-hint {
@@ -1602,6 +2175,222 @@ onBeforeUnmount(() => {
   font-size: 12px;
   padding: 6px 10px;
   cursor: pointer;
+}
+
+.bulk-search-panel {
+  display: grid;
+  gap: 1rem;
+  color: var(--yb-music-text-2, #f8fafc);
+}
+
+.bulk-search-input-card {
+  border: 1px solid rgba(100, 116, 139, 0.5);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(8, 13, 22, 0.98));
+  padding: 1rem;
+}
+
+.bulk-search-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #dbeafe;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.bulk-search-textarea {
+  width: 100%;
+  min-height: 11rem;
+  resize: vertical;
+  border: 1px solid rgba(100, 116, 139, 0.55);
+  border-radius: 14px;
+  background: rgba(3, 7, 18, 0.78);
+  color: #f8fafc;
+  padding: 0.85rem 0.95rem;
+  font-family: var(--yb-font-mono, "SF Mono", Consolas, monospace);
+  font-size: 0.88rem;
+  line-height: 1.7;
+  outline: none;
+}
+
+.bulk-search-textarea:focus {
+  border-color: rgba(96, 165, 250, 0.95);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+.bulk-search-actions,
+.bulk-search-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.bulk-search-hint {
+  margin: 0.75rem 0 0;
+  color: #b8c2d6;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.bulk-search-summary {
+  margin-top: 0;
+}
+
+.bulk-search-summary span {
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.14);
+  color: #dbeafe;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.bulk-result-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 28rem), 1fr));
+  gap: 0.8rem;
+  max-height: min(58vh, 42rem);
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.bulk-result-card {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: 0.85rem;
+  border: 1px solid rgba(70, 81, 100, 0.9);
+  border-radius: 18px;
+  background: #111827;
+  padding: 0.8rem;
+}
+
+.bulk-result-card--failed {
+  grid-template-columns: 5.8rem minmax(0, 1fr);
+  background: rgba(127, 29, 29, 0.18);
+  border-color: rgba(248, 113, 113, 0.36);
+}
+
+.bulk-result-preview {
+  min-height: 7.2rem;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bulk-result-apm {
+  width: 100%;
+  height: 100%;
+}
+
+.bulk-result-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.bulk-result-empty {
+  color: #fecaca;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.bulk-result-main {
+  min-width: 0;
+}
+
+.bulk-result-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.bulk-result-term {
+  color: #93c5fd;
+  font-size: 0.86rem;
+  font-weight: 950;
+}
+
+.bulk-result-pill {
+  border-radius: 999px;
+  background: rgba(34, 48, 71, 0.92);
+  color: #aeebff;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.bulk-result-card--failed .bulk-result-pill {
+  background: rgba(127, 29, 29, 0.5);
+  color: #fecaca;
+}
+
+.bulk-result-title {
+  margin: 0.45rem 0 0;
+  color: #f8fafc;
+  font-size: 0.96rem;
+  font-weight: 900;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.bulk-result-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0.7rem 0 0;
+}
+
+.bulk-result-meta div {
+  border: 1px solid rgba(70, 81, 100, 0.76);
+  border-radius: 10px;
+  background: rgba(3, 7, 18, 0.36);
+  padding: 0.45rem 0.55rem;
+}
+
+.bulk-result-meta dt {
+  color: #8fa0b8;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.bulk-result-meta dd {
+  margin: 0.15rem 0 0;
+  color: #f8fafc;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.bulk-result-message {
+  margin: 0.55rem 0 0;
+  color: #b8c2d6;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .bulk-result-card,
+  .bulk-result-card--failed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bulk-result-preview {
+    min-height: 12rem;
+  }
+
+  .bulk-result-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .preview-lightbox {
