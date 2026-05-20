@@ -111,6 +111,9 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 	if len(filter.WorkflowLanes) > 0 && !containsWorkflowLane(filter.WorkflowLanes, item.WorkflowLane) {
 		return false
 	}
+	if len(filter.BusinessLanes) > 0 && !containsBusinessLane(filter.BusinessLanes, item.BusinessLane) {
+		return false
+	}
 	if len(filter.MainStatuses) > 0 && !containsTaskMainStatus(filter.MainStatuses, item.Workflow.MainStatus) {
 		return false
 	}
@@ -309,6 +312,15 @@ func containsTaskMainStatus(values []domain.TaskMainStatus, want domain.TaskMain
 }
 
 func containsWorkflowLane(values []domain.WorkflowLane, want domain.WorkflowLane) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsBusinessLane(values []domain.TaskBusinessLane, want domain.TaskBusinessLane) bool {
 	for _, value := range values {
 		if value == want {
 			return true

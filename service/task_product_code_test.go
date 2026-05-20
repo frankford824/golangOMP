@@ -27,6 +27,7 @@ func TestTaskServiceCreateNewProductUsesDefaultProductCodeRule(t *testing.T) {
 	task, appErr := svc.Create(context.Background(), CreateTaskParams{
 		TaskType:            domain.TaskTypeNewProductDevelopment,
 		SourceMode:          domain.TaskSourceModeNewProduct,
+		BusinessLane:        domain.TaskBusinessLaneNormal,
 		CreatorID:           9,
 		OwnerTeam:           domain.AllValidTeams()[0],
 		DeadlineAt:          timePtr(),
@@ -116,6 +117,7 @@ func TestTaskServiceCreateCustomizationSKUUsesDZRule(t *testing.T) {
 	task, appErr := svc.Create(context.Background(), CreateTaskParams{
 		TaskType:            domain.TaskTypeNewProductDevelopment,
 		SourceMode:          domain.TaskSourceModeNewProduct,
+		BusinessLane:        domain.TaskBusinessLaneCustomization,
 		CreatorID:           9,
 		OwnerTeam:           domain.AllValidTeams()[0],
 		DeadlineAt:          timePtr(),

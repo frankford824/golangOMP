@@ -278,7 +278,7 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 		item := &domain.TaskSKUItem{
 			SequenceNo:          idx + 1,
 			SKUCode:             skuCode,
-			SKUCodeType:         rawItem.SKUCodeType,
+			SKUCodeType:         normalizeTaskSKUCodeTypeByBusinessLane(rawItem.SKUCodeType, p.BusinessLane),
 			SKUStatus:           domain.TaskSKUStatusGenerated,
 			ProductNameSnapshot: rawItem.ProductName,
 			ProductShortName:    defaultBatchItemProductShortName(rawItem),

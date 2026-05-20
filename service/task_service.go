@@ -39,6 +39,7 @@ type CreateTaskBatchSKUItemParams struct {
 // CreateTaskParams carries all fields needed to create a new Task.
 type CreateTaskParams struct {
 	SourceMode              domain.TaskSourceMode
+	BusinessLane            domain.TaskBusinessLane
 	ProductID               *int64
 	SKUCode                 string
 	ProductNameSnapshot     string
@@ -100,6 +101,7 @@ type CreateTaskParams struct {
 	rawOwnerTeam            string
 	rawOwnerDepartment      string
 	rawOwnerOrgTeam         string
+	rawBusinessLane         domain.TaskBusinessLane
 	ownerTeamMappingApplied bool
 	ownerTeamMappingSource  string
 }
@@ -651,6 +653,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		DeadlineAt:                  p.DeadlineAt,
 		NeedOutsource:               p.IsOutsource,
 		IsOutsource:                 p.IsOutsource,
+		BusinessLane:                p.BusinessLane,
 		CustomizationRequired:       p.CustomizationRequired,
 		CustomizationSourceType:     p.CustomizationSourceType,
 		LastCustomizationOperatorID: nil,
@@ -787,6 +790,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		DeadlineAt:                  p.DeadlineAt,
 		NeedOutsource:               p.IsOutsource,
 		IsOutsource:                 p.IsOutsource,
+		BusinessLane:                p.BusinessLane,
 		CustomizationRequired:       p.CustomizationRequired,
 		CustomizationSourceType:     p.CustomizationSourceType,
 		LastCustomizationOperatorID: nil,
@@ -1039,6 +1043,7 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 	p.rawOwnerTeam = strings.TrimSpace(p.OwnerTeam)
 	p.rawOwnerDepartment = strings.TrimSpace(p.OwnerDepartment)
 	p.rawOwnerOrgTeam = strings.TrimSpace(p.OwnerOrgTeam)
+	p.rawBusinessLane = domain.TaskBusinessLane(strings.TrimSpace(string(p.BusinessLane)))
 	p.SKUCode = strings.TrimSpace(p.SKUCode)
 	p.ProductNameSnapshot = strings.TrimSpace(p.ProductNameSnapshot)
 	p.DemandText = strings.TrimSpace(p.DemandText)
@@ -1078,9 +1083,10 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 			}
 		}
 	}
-	p.SKUCodeType = normalizeTaskSKUCodeType(p.SKUCodeType, p.CustomizationRequired)
+	p.BusinessLane = normalizeTaskBusinessLaneForTaskCreate(p.BusinessLane, p.CustomizationRequired)
+	p.SKUCodeType = normalizeTaskSKUCodeTypeByBusinessLane(p.SKUCodeType, p.BusinessLane)
 	for i := range p.BatchItems {
-		p.BatchItems[i].SKUCodeType = normalizeTaskSKUCodeType(p.BatchItems[i].SKUCodeType, p.CustomizationRequired)
+		p.BatchItems[i].SKUCodeType = normalizeTaskSKUCodeTypeByBusinessLane(p.BatchItems[i].SKUCodeType, p.BusinessLane)
 	}
 	ownerTeamResolution := normalizeOwnerTeamForTaskCreate(p.OwnerTeam)
 	p.OwnerTeam = ownerTeamResolution.Normalized
@@ -1142,6 +1148,38 @@ func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.Ap
 				"customization_source_type must be new_product or existing_product when customization_required=true",
 				p,
 				taskCreateViolation("customization_source_type", "invalid_customization_source_type", "customization_source_type must be new_product or existing_product"),
+			)
+		}
+	}
+	if p.CustomizationRequired && p.BusinessLane != domain.TaskBusinessLaneCustomization {
+		return taskCreateValidationError(
+			"business_lane must be customization when customization_required=true",
+			p,
+			taskCreateViolation("business_lane", "business_lane_conflicts_with_customization_required", "business_lane must be customization when customization_required=true"),
+		)
+	}
+	if p.BusinessLane == domain.TaskBusinessLaneCustomization && !p.CustomizationRequired {
+		if p.TaskType != domain.TaskTypeNewProductDevelopment {
+			return taskCreateValidationError(
+				"business_lane=customization only supports new_product_development when customization_required=false",
+				p,
+				taskCreateViolation("task_type", "invalid_task_type_for_customization_lane", "business_lane=customization only supports task_type=new_product_development"),
+			)
+		}
+	}
+	if p.SKUCodeType.Valid() && !taskSKUCodeTypeMatchesBusinessLane(p.SKUCodeType, p.BusinessLane) {
+		return taskCreateValidationError(
+			"sku_code_type conflicts with business_lane",
+			p,
+			taskCreateViolation("sku_code_type", "sku_code_type_business_lane_conflict", "sku_code_type conflicts with business_lane"),
+		)
+	}
+	for i := range p.BatchItems {
+		if p.BatchItems[i].SKUCodeType.Valid() && !taskSKUCodeTypeMatchesBusinessLane(p.BatchItems[i].SKUCodeType, p.BusinessLane) {
+			return taskCreateValidationError(
+				"batch_items sku_code_type conflicts with business_lane",
+				p,
+				taskCreateViolation(fmt.Sprintf("batch_items[%d].sku_code_type", i), "sku_code_type_business_lane_conflict", "batch_items sku_code_type conflicts with business_lane"),
 			)
 		}
 	}

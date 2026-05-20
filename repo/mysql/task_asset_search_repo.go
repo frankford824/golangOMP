@@ -25,7 +25,7 @@ const taskAssetSearchSelect = `
 	       t.id, t.task_no, t.source_mode, t.product_id, t.sku_code, t.product_name_snapshot,
 	       t.task_type, t.operator_group_id, t.owner_team, t.owner_department, t.owner_org_team, t.creator_id, t.requester_id,
 	       t.designer_id, t.current_handler_id, t.task_status, t.priority, t.deadline_at, t.need_outsource, t.is_outsource,
-	       t.customization_required, t.customization_source_type, t.last_customization_operator_id, t.warehouse_reject_reason,
+	       COALESCE(t.business_lane, ''), t.customization_required, t.customization_source_type, t.last_customization_operator_id, t.warehouse_reject_reason,
 	       t.warehouse_reject_category, t.is_batch_task, t.batch_item_count, t.batch_mode, t.primary_sku_code,
 	       t.sku_generation_status, t.created_at, t.updated_at,
 	       da.asset_no, da.created_by, da.created_at, da.updated_at,
@@ -181,7 +181,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	var a domain.TaskAsset
 	var t domain.Task
 	var assetID, assetVersionNo, sourceTaskModuleID, archivedBy, productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
-	var scopeSKUCode, uploadMode, uploadRequestID, storageRefID, originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var scopeSKUCode, uploadMode, uploadRequestID, storageRefID, originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var fileSize sql.NullInt64
 	var uploadedAt, archivedAt, cleanedAt, deletedAt, deadlineAt sql.NullTime
 	var needOutsource, isOutsource, customizationRequired, isBatchTask sql.NullBool
@@ -198,7 +198,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
 		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &t.OwnerDepartment, &t.OwnerOrgTeam, &t.CreatorID, &requesterID,
 		&designerID, &currentHandlerID, &t.TaskStatus, &t.Priority, &deadlineAt, &needOutsource, &isOutsource,
-		&customizationRequired, &customizationSourceType, &lastCustomizationOperatorID, &warehouseRejectReason,
+		&businessLane, &customizationRequired, &customizationSourceType, &lastCustomizationOperatorID, &warehouseRejectReason,
 		&warehouseRejectCategory, &isBatchTask, &t.BatchItemCount, &t.BatchMode, &t.PrimarySKUCode,
 		&t.SKUGenerationStatus, &t.CreatedAt, &t.UpdatedAt,
 		&assetNo, &designCreatedBy, &designCreatedAt, &designUpdatedAt,
@@ -237,6 +237,11 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	t.NeedOutsource = needOutsource.Valid && needOutsource.Bool
 	t.IsOutsource = isOutsource.Valid && isOutsource.Bool
 	t.CustomizationRequired = customizationRequired.Valid && customizationRequired.Bool
+	if businessLane.Valid {
+		t.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), t.CustomizationRequired)
+	} else {
+		t.BusinessLane = domain.TaskBusinessLaneFromLegacy(t.CustomizationRequired)
+	}
 	if customizationSourceType.Valid {
 		t.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
 	}

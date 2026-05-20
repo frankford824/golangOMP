@@ -16,6 +16,7 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 			Statuses:                     parseTaskStatuses(c, "status"),
 			TaskTypes:                    parseTaskTypes(c, "task_type"),
 			SourceModes:                  parseTaskSourceModes(c, "source_mode"),
+			BusinessLanes:                parseTaskBusinessLanes(c, "business_lane"),
 			WorkflowLanes:                parseWorkflowLanes(c, "workflow_lane"),
 			MainStatuses:                 parseTaskMainStatuses(c, "main_status"),
 			SubStatusCodes:               parseTaskSubStatusCodes(c, "sub_status_code"),
@@ -140,6 +141,15 @@ func parseWorkflowLanes(c *gin.Context, key string) []domain.WorkflowLane {
 	out := make([]domain.WorkflowLane, 0, len(values))
 	for _, value := range values {
 		out = append(out, domain.WorkflowLane(value))
+	}
+	return out
+}
+
+func parseTaskBusinessLanes(c *gin.Context, key string) []domain.TaskBusinessLane {
+	values := readQueryList(c, key)
+	out := make([]domain.TaskBusinessLane, 0, len(values))
+	for _, value := range values {
+		out = append(out, domain.TaskBusinessLane(value))
 	}
 	return out
 }

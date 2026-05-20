@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type FilingStatus string
 
@@ -33,6 +36,55 @@ func WorkflowLaneFromCustomizationRequired(customizationRequired bool) WorkflowL
 		return WorkflowLaneCustomization
 	}
 	return WorkflowLaneNormal
+}
+
+type TaskBusinessLane string
+
+const (
+	TaskBusinessLaneNormal        TaskBusinessLane = "normal"
+	TaskBusinessLaneCustomization TaskBusinessLane = "customization"
+)
+
+func (l TaskBusinessLane) Valid() bool {
+	switch l {
+	case TaskBusinessLaneNormal, TaskBusinessLaneCustomization:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l TaskBusinessLane) WorkflowLane() WorkflowLane {
+	switch l {
+	case TaskBusinessLaneCustomization:
+		return WorkflowLaneCustomization
+	default:
+		return WorkflowLaneNormal
+	}
+}
+
+func TaskBusinessLaneFromLegacy(customizationRequired bool) TaskBusinessLane {
+	if customizationRequired {
+		return TaskBusinessLaneCustomization
+	}
+	return TaskBusinessLaneNormal
+}
+
+func TaskBusinessLaneFromWorkflowLane(lane WorkflowLane) TaskBusinessLane {
+	switch lane {
+	case WorkflowLaneCustomization:
+		return TaskBusinessLaneCustomization
+	default:
+		return TaskBusinessLaneNormal
+	}
+}
+
+func NormalizeTaskBusinessLane(lane TaskBusinessLane, customizationRequired bool) TaskBusinessLane {
+	normalized := TaskBusinessLane(strings.TrimSpace(string(lane)))
+	if normalized.Valid() {
+		return normalized
+	}
+	return TaskBusinessLaneFromLegacy(customizationRequired)
 }
 
 type TaskSKUCodeType string
@@ -74,6 +126,7 @@ type Task struct {
 	DeadlineAt                  *time.Time              `db:"deadline_at"           json:"deadline_at,omitempty"`
 	NeedOutsource               bool                    `db:"need_outsource"        json:"need_outsource"`
 	IsOutsource                 bool                    `db:"is_outsource"          json:"is_outsource"`
+	BusinessLane                TaskBusinessLane        `db:"business_lane"         json:"business_lane"`
 	CustomizationRequired       bool                    `db:"customization_required" json:"customization_required"`
 	CustomizationSourceType     CustomizationSourceType `db:"customization_source_type" json:"customization_source_type"`
 	LastCustomizationOperatorID *int64                  `db:"last_customization_operator_id" json:"last_customization_operator_id,omitempty"`
@@ -92,7 +145,7 @@ func (t *Task) WorkflowLane() WorkflowLane {
 	if t == nil {
 		return WorkflowLaneNormal
 	}
-	return WorkflowLaneFromCustomizationRequired(t.CustomizationRequired)
+	return NormalizeTaskBusinessLane(t.BusinessLane, t.CustomizationRequired).WorkflowLane()
 }
 
 // TaskDetail stores supplemental demand information for a Task.

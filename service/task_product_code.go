@@ -23,6 +23,7 @@ var defaultTaskProductCodeExplicitShortCodeMap = map[string]string{
 
 type PrepareTaskProductCodesParams struct {
 	TaskType     domain.TaskType
+	BusinessLane domain.TaskBusinessLane
 	CategoryCode string
 	SKUCodeType  domain.TaskSKUCodeType
 	Count        int
@@ -78,6 +79,18 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 		)
 	}
 
+	p.BusinessLane = normalizeTaskBusinessLaneForTaskCreate(p.BusinessLane, false)
+	if p.SKUCodeType.Valid() && !taskSKUCodeTypeMatchesBusinessLane(p.SKUCodeType, p.BusinessLane) {
+		return nil, domain.NewAppError(
+			domain.ErrCodeInvalidRequest,
+			"sku_code_type conflicts with business_lane",
+			map[string]interface{}{
+				"sku_code_type": p.SKUCodeType,
+				"business_lane": p.BusinessLane,
+			},
+		)
+	}
+
 	if len(p.BatchItems) > 0 {
 		result := make([]PreparedTaskProductCode, len(p.BatchItems))
 		type batchGroupKey struct {
@@ -93,7 +106,18 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 				}
 				return nil, appErr
 			}
-			skuCodeType := normalizeTaskSKUCodeType(item.SKUCodeType, false)
+			if item.SKUCodeType.Valid() && !taskSKUCodeTypeMatchesBusinessLane(item.SKUCodeType, p.BusinessLane) {
+				return nil, domain.NewAppError(
+					domain.ErrCodeInvalidRequest,
+					fmt.Sprintf("batch_items[%d].sku_code_type conflicts with business_lane", idx),
+					map[string]interface{}{
+						"field":         fmt.Sprintf("batch_items[%d].sku_code_type", idx),
+						"sku_code_type": item.SKUCodeType,
+						"business_lane": p.BusinessLane,
+					},
+				)
+			}
+			skuCodeType := normalizeTaskSKUCodeTypeByBusinessLane(item.SKUCodeType, p.BusinessLane)
 			key := batchGroupKey{categoryCode: categoryCode, skuCodeType: skuCodeType}
 			categoryIndexes[key] = append(categoryIndexes[key], idx)
 		}
@@ -130,7 +154,7 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 	if appErr != nil {
 		return nil, appErr
 	}
-	codes, appErr := s.generateDefaultTaskProductCodes(ctx, p.TaskType, categoryCode, normalizeTaskSKUCodeType(p.SKUCodeType, false), count)
+	codes, appErr := s.generateDefaultTaskProductCodes(ctx, p.TaskType, categoryCode, normalizeTaskSKUCodeTypeByBusinessLane(p.SKUCodeType, p.BusinessLane), count)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -151,13 +175,34 @@ func supportsDefaultTaskProductCode(taskType domain.TaskType) bool {
 }
 
 func normalizeTaskSKUCodeType(value domain.TaskSKUCodeType, customizationRequired bool) domain.TaskSKUCodeType {
+	return normalizeTaskSKUCodeTypeByBusinessLane(value, normalizeTaskBusinessLaneForTaskCreate("", customizationRequired))
+}
+
+func normalizeTaskBusinessLaneForTaskCreate(lane domain.TaskBusinessLane, customizationRequired bool) domain.TaskBusinessLane {
+	return domain.NormalizeTaskBusinessLane(lane, customizationRequired)
+}
+
+func defaultTaskSKUCodeTypeForBusinessLane(lane domain.TaskBusinessLane) domain.TaskSKUCodeType {
+	switch normalizeTaskBusinessLaneForTaskCreate(lane, false) {
+	case domain.TaskBusinessLaneCustomization:
+		return domain.TaskSKUCodeTypeCustomization
+	default:
+		return domain.TaskSKUCodeTypeRegular
+	}
+}
+
+func normalizeTaskSKUCodeTypeByBusinessLane(value domain.TaskSKUCodeType, lane domain.TaskBusinessLane) domain.TaskSKUCodeType {
 	if value.Valid() {
 		return value
 	}
-	if customizationRequired {
-		return domain.TaskSKUCodeTypeCustomization
+	return defaultTaskSKUCodeTypeForBusinessLane(lane)
+}
+
+func taskSKUCodeTypeMatchesBusinessLane(value domain.TaskSKUCodeType, lane domain.TaskBusinessLane) bool {
+	if !value.Valid() {
+		return true
 	}
-	return domain.TaskSKUCodeTypeRegular
+	return value == defaultTaskSKUCodeTypeForBusinessLane(lane)
 }
 
 func normalizeDefaultTaskProductCategoryCode(categoryCode string) (string, *domain.AppError) {

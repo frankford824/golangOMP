@@ -284,6 +284,7 @@ type TaskListItem struct {
 	DeadlineAt                   *time.Time                   `json:"deadline_at,omitempty"`
 	NeedOutsource                bool                         `json:"need_outsource"`
 	IsOutsource                  bool                         `json:"is_outsource"`
+	BusinessLane                 TaskBusinessLane             `json:"business_lane"`
 	CustomizationRequired        bool                         `json:"customization_required"`
 	WorkflowLane                 WorkflowLane                 `json:"workflow_lane"`
 	CustomizationSourceType      CustomizationSourceType      `json:"customization_source_type"`

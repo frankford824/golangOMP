@@ -31,10 +31,10 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		INSERT INTO tasks
 		  (task_no, source_mode, product_id, sku_code, product_name_snapshot,
 		   task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		   task_status, priority, deadline_at, need_outsource, is_outsource, customization_required, customization_source_type,
+		   task_status, priority, deadline_at, need_outsource, is_outsource, business_lane, customization_required, customization_source_type,
 		   last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		   is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.TaskNo,
 		string(task.SourceMode),
 		toNullInt64(task.ProductID),
@@ -54,6 +54,7 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		toNullTime(task.DeadlineAt),
 		task.NeedOutsource,
 		task.IsOutsource,
+		string(domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired)),
 		task.CustomizationRequired,
 		string(task.CustomizationSourceType),
 		toNullInt64(task.LastCustomizationOperatorID),
@@ -226,7 +227,7 @@ func (r *taskRepo) GetByID(ctx context.Context, id int64) (*domain.Task, error) 
 	row := r.db.db.QueryRowContext(ctx, `
 		SELECT id, task_no, source_mode, product_id, sku_code, product_name_snapshot,
 		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		       task_status, priority, deadline_at, need_outsource, is_outsource, customization_required, customization_source_type,
+		       task_status, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
 		       last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		       is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status,
 		       created_at, updated_at
@@ -472,7 +473,7 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 		SELECT t.id, t.task_no, t.product_id, t.sku_code, t.product_name_snapshot,
 		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
-		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, t.customization_required, COALESCE(t.customization_source_type, ''),
+		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, COALESCE(t.business_lane, ''), t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
 			       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''), COALESCE(td.sku_code_type, ''),
 		       td.category, td.category_code, td.category_name,
@@ -529,7 +530,7 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 		SELECT t.id, t.task_no, t.product_id, t.sku_code, t.product_name_snapshot,
 		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
-		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, t.customization_required, COALESCE(t.customization_source_type, ''),
+		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, COALESCE(t.business_lane, ''), t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
 			       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''), COALESCE(td.sku_code_type, ''),
 		       td.category, td.category_code, td.category_name,
@@ -838,12 +839,12 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 	var t domain.Task
 	var productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var deadlineAt sql.NullTime
-	var ownerDepartment, ownerOrgTeam, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var ownerDepartment, ownerOrgTeam, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var primarySKUCode sql.NullString
 	err := row.Scan(
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
 		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &t.CreatorID, &requesterID, &designerID, &currentHandlerID,
-		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &t.CustomizationRequired, &customizationSourceType,
+		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
 		&t.IsBatchTask, &t.BatchItemCount, &t.BatchMode, &primarySKUCode, &t.SKUGenerationStatus,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -867,6 +868,11 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 		t.OwnerOrgTeam = ownerOrgTeam.String
 	}
 	t.DeadlineAt = fromNullTime(deadlineAt)
+	if businessLane.Valid {
+		t.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), t.CustomizationRequired)
+	} else {
+		t.BusinessLane = domain.TaskBusinessLaneFromLegacy(t.CustomizationRequired)
+	}
 	if customizationSourceType.Valid {
 		t.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
 	}
@@ -902,12 +908,12 @@ func scanTaskRow(rows *sql.Rows) (*domain.Task, error) {
 	var t domain.Task
 	var productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var deadlineAt sql.NullTime
-	var ownerDepartment, ownerOrgTeam, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var ownerDepartment, ownerOrgTeam, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var primarySKUCode sql.NullString
 	err := rows.Scan(
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
 		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &t.CreatorID, &requesterID, &designerID, &currentHandlerID,
-		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &t.CustomizationRequired, &customizationSourceType,
+		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
 		&t.IsBatchTask, &t.BatchItemCount, &t.BatchMode, &primarySKUCode, &t.SKUGenerationStatus,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -928,6 +934,11 @@ func scanTaskRow(rows *sql.Rows) (*domain.Task, error) {
 		t.OwnerOrgTeam = ownerOrgTeam.String
 	}
 	t.DeadlineAt = fromNullTime(deadlineAt)
+	if businessLane.Valid {
+		t.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), t.CustomizationRequired)
+	} else {
+		t.BusinessLane = domain.TaskBusinessLaneFromLegacy(t.CustomizationRequired)
+	}
 	if customizationSourceType.Valid {
 		t.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
 	}
@@ -966,7 +977,7 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	var deadlineAt sql.NullTime
 	var batchMode sql.NullString
 	var primarySKUCode sql.NullString
-	var customizationSourceType sql.NullString
+	var businessLane, customizationSourceType sql.NullString
 	var lastCustomizationOperatorID sql.NullInt64
 	var warehouseRejectReason sql.NullString
 	var warehouseRejectCategory sql.NullString
@@ -995,7 +1006,7 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 		&item.ID, &item.TaskNo, &productID, &item.SKUCode, &item.ProductNameSnapshot,
 		&item.TaskType, &item.SourceMode, &item.OwnerTeam, &item.OwnerDepartment, &item.OwnerOrgTeam, &item.Priority, &item.CreatorID, &requesterID, &designerID, &currentHandlerID,
 		&requesterName, &creatorName, &designerName, &currentHandlerName,
-		&item.TaskStatus, &item.CreatedAt, &item.UpdatedAt, &deadlineAt, &item.NeedOutsource, &item.IsOutsource, &item.CustomizationRequired, &customizationSourceType,
+		&item.TaskStatus, &item.CreatedAt, &item.UpdatedAt, &deadlineAt, &item.NeedOutsource, &item.IsOutsource, &businessLane, &item.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
 		&item.IsBatchTask, &item.BatchItemCount, &batchMode, &primarySKUCode, &item.SKUCodeType,
 		&category, &categoryCode, &categoryName,
@@ -1017,7 +1028,12 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	item.DesignerID = fromNullInt64(designerID)
 	item.CurrentHandlerID = fromNullInt64(currentHandlerID)
 	item.DeadlineAt = fromNullTime(deadlineAt)
-	item.WorkflowLane = domain.WorkflowLaneFromCustomizationRequired(item.CustomizationRequired)
+	if businessLane.Valid {
+		item.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), item.CustomizationRequired)
+	} else {
+		item.BusinessLane = domain.TaskBusinessLaneFromLegacy(item.CustomizationRequired)
+	}
+	item.WorkflowLane = item.BusinessLane.WorkflowLane()
 	item.LastCustomizationOperatorID = fromNullInt64(lastCustomizationOperatorID)
 	if customizationSourceType.Valid {
 		item.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
@@ -1497,11 +1513,15 @@ func buildManagedUserScopeClause(userColumn, ownerExpr string, values []string) 
 }
 
 func workflowLaneConditionSQL(lane domain.WorkflowLane) string {
+	return businessLaneConditionSQL(domain.TaskBusinessLaneFromWorkflowLane(lane))
+}
+
+func businessLaneConditionSQL(lane domain.TaskBusinessLane) string {
 	switch lane {
-	case domain.WorkflowLaneCustomization:
-		return "t.customization_required = 1"
-	case domain.WorkflowLaneNormal:
-		return "t.customization_required = 0"
+	case domain.TaskBusinessLaneCustomization:
+		return "COALESCE(t.business_lane, '') = 'customization'"
+	case domain.TaskBusinessLaneNormal:
+		return "(COALESCE(t.business_lane, '') = '' OR t.business_lane = 'normal')"
 	default:
 		return ""
 	}
@@ -1539,6 +1559,7 @@ func appendTaskQueryDefinitionWhere(where *[]string, args *[]interface{}, filter
 	appendInClause(where, args, "t.task_status", comparableValuesToStrings(filter.Statuses))
 	appendInClause(where, args, "t.task_type", comparableValuesToStrings(filter.TaskTypes))
 	appendInClause(where, args, "t.source_mode", comparableValuesToStrings(filter.SourceModes))
+	appendBusinessLaneClause(where, args, filter.BusinessLanes)
 	appendWorkflowLaneClause(where, args, filter.WorkflowLanes)
 	appendInClause(where, args, "t.owner_department", stringsToSlice(filter.OwnerDepartments))
 	appendInClause(where, args, "t.owner_org_team", stringsToSlice(filter.OwnerOrgTeams))
@@ -1610,11 +1631,30 @@ func appendWorkflowLaneClause(where *[]string, args *[]interface{}, lanes []doma
 			continue
 		}
 		seen[lane] = struct{}{}
-		switch lane {
-		case domain.WorkflowLaneCustomization:
-			conditions = append(conditions, "t.customization_required = 1")
-		case domain.WorkflowLaneNormal:
-			conditions = append(conditions, "t.customization_required = 0")
+		if cond := businessLaneConditionSQL(domain.TaskBusinessLaneFromWorkflowLane(lane)); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+	if len(conditions) == 0 {
+		return
+	}
+	*where = append(*where, "("+strings.Join(conditions, " OR ")+")")
+}
+
+func appendBusinessLaneClause(where *[]string, args *[]interface{}, lanes []domain.TaskBusinessLane) {
+	if len(lanes) == 0 {
+		return
+	}
+	seen := map[domain.TaskBusinessLane]struct{}{}
+	conditions := make([]string, 0, len(lanes))
+	for _, lane := range lanes {
+		lane = domain.TaskBusinessLane(strings.TrimSpace(string(lane)))
+		if _, exists := seen[lane]; exists {
+			continue
+		}
+		seen[lane] = struct{}{}
+		if cond := businessLaneConditionSQL(lane); cond != "" {
+			conditions = append(conditions, cond)
 		}
 	}
 	if len(conditions) == 0 {

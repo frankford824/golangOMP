@@ -61,11 +61,11 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now()
-	columns := make([]string, 80)
+	columns := make([]string, 81)
 	for i := range columns {
 		columns[i] = fmt.Sprintf("c%d", i)
 	}
-	values := make([]driver.Value, 80)
+	values := make([]driver.Value, 81)
 	values[0] = int64(26)                               // id
 	values[1] = "RW-20260313-A-000022"                  // task_no
 	values[3] = "SKU-000005"                            // sku_code
@@ -85,15 +85,16 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	values[21] = now                                    // updated_at
 	values[23] = false                                  // need_outsource
 	values[24] = false                                  // is_outsource
-	values[25] = false                                  // customization_required
-	values[26] = ""                                     // customization_source_type
-	values[28] = ""                                     // warehouse_reject_reason
-	values[29] = ""                                     // warehouse_reject_category
-	values[30] = false                                  // is_batch_task
-	values[31] = int64(1)                               // batch_item_count
-	values[32] = string(domain.TaskBatchModeSingle)     // batch_mode
-	values[33] = "SKU-000005"                           // primary_sku_code
-	values[34] = string(domain.TaskSKUCodeTypeRegular)  // sku_code_type
+	values[25] = string(domain.TaskBusinessLaneNormal)  // business_lane
+	values[26] = false                                  // customization_required
+	values[27] = ""                                     // customization_source_type
+	values[29] = ""                                     // warehouse_reject_reason
+	values[30] = ""                                     // warehouse_reject_category
+	values[31] = false                                  // is_batch_task
+	values[32] = int64(1)                               // batch_item_count
+	values[33] = string(domain.TaskBatchModeSingle)     // batch_mode
+	values[34] = "SKU-000005"                           // primary_sku_code
+	values[35] = string(domain.TaskSKUCodeTypeRegular)  // sku_code_type
 
 	rows := sqlmock.NewRows(columns).AddRow(values...)
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
@@ -170,7 +171,7 @@ func TestBuildTaskListQuerySpecSupportsWorkflowLaneFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
 	}
-	if !strings.Contains(spec.whereSQL, "t.customization_required = 1") {
+	if !strings.Contains(spec.whereSQL, "COALESCE(t.business_lane, '') = 'customization'") {
 		t.Fatalf("whereSQL missing customization lane clause: %s", spec.whereSQL)
 	}
 }
@@ -196,7 +197,7 @@ func TestBuildTaskListQuerySpecSupportsStageVisibilityScope(t *testing.T) {
 	if !strings.Contains(spec.whereSQL, "t.task_status IN (?, ?)") {
 		t.Fatalf("whereSQL missing stage status IN clause: %s", spec.whereSQL)
 	}
-	if !strings.Contains(spec.whereSQL, "t.customization_required = 1") {
+	if !strings.Contains(spec.whereSQL, "COALESCE(t.business_lane, '') = 'customization'") {
 		t.Fatalf("whereSQL missing stage lane clause: %s", spec.whereSQL)
 	}
 }
@@ -224,7 +225,7 @@ func TestAppendTaskDataScopeWhereOrsExistingAndStageClauses(t *testing.T) {
 	if !strings.Contains(spec.whereSQL, "t.owner_department IN (?)") {
 		t.Fatalf("whereSQL missing department scope clause: %s", spec.whereSQL)
 	}
-	if !strings.Contains(spec.whereSQL, "t.task_status IN (?) AND t.customization_required = 0") {
+	if !strings.Contains(spec.whereSQL, "t.task_status IN (?) AND (COALESCE(t.business_lane, '') = '' OR t.business_lane = 'normal')") {
 		t.Fatalf("whereSQL missing normal-lane stage clause: %s", spec.whereSQL)
 	}
 	if !strings.Contains(spec.whereSQL, "t.task_status IN (?)") {

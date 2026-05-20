@@ -26,6 +26,7 @@ type TaskQueryFilterDefinition struct {
 	Statuses                     []TaskStatus                    `json:"statuses,omitempty"`
 	TaskTypes                    []TaskType                      `json:"task_types,omitempty"`
 	SourceModes                  []TaskSourceMode                `json:"source_modes,omitempty"`
+	BusinessLanes                []TaskBusinessLane              `json:"business_lanes,omitempty"`
 	WorkflowLanes                []WorkflowLane                  `json:"workflow_lanes,omitempty"`
 	MainStatuses                 []TaskMainStatus                `json:"main_statuses,omitempty"`
 	SubStatusScope               *TaskSubStatusScope             `json:"sub_status_scope,omitempty"`

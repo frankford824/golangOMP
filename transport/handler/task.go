@@ -56,6 +56,8 @@ type createTaskReq struct {
 	DueAt                   *string                   `json:"due_at"`
 	IsOutsource             *bool                     `json:"is_outsource"`
 	NeedOutsource           *bool                     `json:"need_outsource"`
+	BusinessLane            string                    `json:"business_lane"`
+	WorkflowLane            string                    `json:"workflow_lane"`
 	CustomizationRequired   *bool                     `json:"customization_required"`
 	CustomizationSourceType string                    `json:"customization_source_type"`
 	ReferenceImages         []string                  `json:"reference_images"`
@@ -127,6 +129,8 @@ type createTaskBatchItemReq struct {
 
 type prepareTaskProductCodesReq struct {
 	TaskType     string                            `json:"task_type" binding:"required"`
+	BusinessLane string                            `json:"business_lane"`
+	WorkflowLane string                            `json:"workflow_lane"`
 	CategoryCode string                            `json:"category_code"`
 	SKUCodeType  string                            `json:"sku_code_type"`
 	Count        int                               `json:"count"`
@@ -805,6 +809,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 
 	params := service.CreateTaskParams{
 		SourceMode:              domain.TaskSourceMode(sourceMode),
+		BusinessLane:            domain.TaskBusinessLane(firstNonEmptyTrimmed(req.BusinessLane, req.WorkflowLane)),
 		ProductID:               req.ProductID.LocalID(),
 		SKUCode:                 skuCode,
 		ProductNameSnapshot:     productName,
@@ -904,6 +909,7 @@ func (h *TaskHandler) PrepareProductCodes(c *gin.Context) {
 
 	params := service.PrepareTaskProductCodesParams{
 		TaskType:     domain.TaskType(strings.TrimSpace(req.TaskType)),
+		BusinessLane: domain.TaskBusinessLane(firstNonEmptyTrimmed(req.BusinessLane, req.WorkflowLane)),
 		CategoryCode: strings.TrimSpace(req.CategoryCode),
 		SKUCodeType:  domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
 		Count:        req.Count,
