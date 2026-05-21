@@ -119,12 +119,28 @@ const steps = computed((): Step[] => {
   if (isCustomization.value) {
     const ls = legacyStatus ?? ''
     const custStatus = ls
-    const warehouseStatuses = ['PendingWarehouseReceive', 'PendingWarehouseQC', 'PendingProductionTransfer', 'RejectedByWarehouse'] as const
-    const isWarehouseStage = warehouseStatuses.includes(custStatus as typeof warehouseStatuses[number]) ||
-      mainStatus === 'WAREHOUSE_PENDING' ||
-      mainStatus === 'WAREHOUSE_PROCESSING' ||
+    // 定制 lane 的 Legacy status 会映射到 mainStatus=WAREHOUSE_PENDING（含生产/审核），
+    // 流程条必须以 task_status 为准，不能用 mainStatus 判断仓库节点是否进行中。
+    const customizationWarehouseActiveStatuses = [
+      'PendingWarehouseReceive',
+      'PendingWarehouseQC',
+      'PendingProductionTransfer',
+      'RejectedByWarehouse',
+    ] as const
+    const isCustomizationWarehouseActive = customizationWarehouseActiveStatuses.includes(
+      custStatus as (typeof customizationWarehouseActiveStatuses)[number],
+    ) || mainStatus === 'WAREHOUSE_PROCESSING'
+    const isCustomizationWarehouseDone =
+      custStatus === 'PendingClose' ||
+      legacyStatus === 'Completed' ||
+      legacyStatus === 'Archived' ||
       mainStatus === 'READY_TO_CLOSE' ||
       mainStatus === 'CLOSED'
+    const warehouseStepState: StepState = isCustomizationWarehouseDone
+      ? 'done'
+      : isCustomizationWarehouseActive
+        ? 'current'
+        : 'pending'
 
     return [
       {
@@ -141,6 +157,7 @@ const steps = computed((): Step[] => {
       {
         key: 'cust_review',
         label: '定制审核',
+        subLabel: custStatus === 'PendingCustomizationReview' ? '待审核' : undefined,
         state: custStatus === 'PendingCustomizationProduction'
           ? 'pending'
           : custStatus === 'PendingCustomizationReview'
@@ -150,17 +167,17 @@ const steps = computed((): Step[] => {
       {
         key: 'warehouse',
         label: '仓库接收',
-        subLabel: t.warehouseSubStatus ? getWarehouseSubStatusLabel(t.warehouseSubStatus) : undefined,
-        state: isWarehouseStage
-          ? mainStatus === 'READY_TO_CLOSE' || mainStatus === 'CLOSED' || legacyStatus === 'Completed'
-            ? 'done'
-            : 'current'
-          : 'pending',
+        subLabel: customizationWarehouseSubLabel(warehouseStepState, t.warehouseSubStatus),
+        state: warehouseStepState,
       },
       {
         key: 'close',
         label: '结单',
-        state: mainStatus === 'CLOSED' || legacyStatus === 'Completed' ? 'done' : mainStatus === 'READY_TO_CLOSE' ? 'current' : 'pending',
+        state: mainStatus === 'CLOSED' || legacyStatus === 'Completed' || legacyStatus === 'Archived'
+          ? 'done'
+          : mainStatus === 'READY_TO_CLOSE' || custStatus === 'PendingClose'
+            ? 'current'
+            : 'pending',
       },
     ]
   }
@@ -288,6 +305,18 @@ function resolveStepState(
   if (doneStatuses.includes(mainStatus)) return 'done'
   if (activeStatuses.includes(mainStatus)) return 'current'
   return 'pending'
+}
+
+/** 定制任务：仓库未进入流程时不展示 workflow.not_triggered → NOT_REQUIRED 的「无需仓库」。 */
+function customizationWarehouseSubLabel(
+  warehouseStepState: StepState,
+  warehouseSubStatus?: Task['warehouseSubStatus'],
+): string | undefined {
+  if (warehouseStepState === 'pending') return undefined
+  if (!warehouseSubStatus || warehouseSubStatus === 'NOT_REQUIRED') {
+    return warehouseStepState === 'current' ? '待接收' : undefined
+  }
+  return getWarehouseSubStatusLabel(warehouseSubStatus)
 }
 </script>
 
