@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"workflow/domain"
@@ -471,7 +470,7 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 	}
 }
 
-func TestBatchNewProductCreateSyncDefersUntilEverySKUHasCost(t *testing.T) {
+func TestBatchNewProductCreateSyncAllowsMissingCost(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions: []*domain.ERPIIDOption{
 			{IID: "I-1001", Label: "I-1001"},
@@ -518,14 +517,17 @@ func TestBatchNewProductCreateSyncDefersUntilEverySKUHasCost(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusPending {
-		t.Fatalf("filing_status after create = %s, want pending_filing", taskRepo.details[task.ID].FilingStatus)
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after create = %s, want filed", taskRepo.details[task.ID].FilingStatus)
 	}
-	if bridgeStub.upsertCalls != 0 {
-		t.Fatalf("upsert calls after create = %d, want 0", bridgeStub.upsertCalls)
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("upsert calls after create = %d, want 2", bridgeStub.upsertCalls)
 	}
-	if got := taskRepo.details[task.ID].MissingFields; len(got) == 0 || got[len(got)-1] != "sku_items[1].cost_price" {
-		t.Fatalf("missing fields = %v, want sku_items[1].cost_price", got)
+	if got := bridgeStub.upsertPayloads[0].BusinessInfo.CostPrice; got == nil || *got != 5.1 {
+		t.Fatalf("batch upsert[0] business_info.cost_price = %v, want 5.1", got)
+	}
+	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got != nil {
+		t.Fatalf("batch upsert[1] business_info.cost_price = %v, want nil", got)
 	}
 }
 
@@ -756,7 +758,7 @@ func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) 
 	}
 }
 
-func TestNewProductCreateSyncDefersUntilCostAvailable(t *testing.T) {
+func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreateSync(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
 		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
@@ -790,11 +792,20 @@ func TestNewProductCreateSyncDefersUntilCostAvailable(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusPending {
-		t.Fatalf("filing_status after create = %s, want pending_filing", taskRepo.details[task.ID].FilingStatus)
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after create = %s, want filed", taskRepo.details[task.ID].FilingStatus)
 	}
-	if bridgeStub.upsertCalls != 0 {
-		t.Fatalf("upsert calls after create = %d, want 0", bridgeStub.upsertCalls)
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatalf("upsert calls after create = %d, want 1", bridgeStub.upsertCalls)
+	}
+	if got := taskRepo.skuItems[task.ID][0].FilingStatus; got != domain.FilingStatusFiled {
+		t.Fatalf("sku item filing_status after create = %s, want filed", got)
+	}
+	if got := taskRepo.skuItems[task.ID][0].ERPSyncStatus; got != domain.FilingStatusFiled {
+		t.Fatalf("sku item erp_sync_status after create = %s, want filed", got)
+	}
+	if taskRepo.skuItems[task.ID][0].ERPSyncRequired {
+		t.Fatal("sku item erp_sync_required should be false after create filing")
 	}
 
 	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
@@ -813,8 +824,8 @@ func TestNewProductCreateSyncDefersUntilCostAvailable(t *testing.T) {
 	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
 		t.Fatalf("filing_status after business-info patch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
 	}
-	if bridgeStub.upsertCalls != 1 {
-		t.Fatalf("upsert calls = %d, want 1", bridgeStub.upsertCalls)
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
 	}
 	if got := bridgeStub.upsertPayload.CostPrice; got == nil || *got != 5.69 {
 		t.Fatalf("erp cost_price = %v, want 5.69", got)
@@ -824,7 +835,7 @@ func TestNewProductCreateSyncDefersUntilCostAvailable(t *testing.T) {
 	}
 }
 
-func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
+func TestNewProductFilingSucceedsWhenERPCostReadbackDiffers(t *testing.T) {
 	expected := 5.69
 	actual := 0.96
 	bridgeStub := &erpBridgeSelectionBinderStub{
@@ -883,14 +894,14 @@ func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFilingFailed {
-		t.Fatalf("filing_status after cost mismatch = %s, want filing_failed", taskRepo.details[task.ID].FilingStatus)
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after cost mismatch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
 	}
-	if !strings.Contains(taskRepo.details[task.ID].FilingErrorMessage, "ERP成本回查不一致") {
-		t.Fatalf("filing_error_message = %q, want cost readback mismatch", taskRepo.details[task.ID].FilingErrorMessage)
+	if taskRepo.details[task.ID].FilingErrorMessage != "" {
+		t.Fatalf("filing_error_message = %q, want empty warning-only cost readback", taskRepo.details[task.ID].FilingErrorMessage)
 	}
-	if !taskRepo.details[task.ID].ERPSyncRequired {
-		t.Fatal("erp_sync_required should remain true after cost readback mismatch")
+	if taskRepo.details[task.ID].ERPSyncRequired {
+		t.Fatal("erp_sync_required should be false after product filing succeeds despite cost readback mismatch")
 	}
 }
 

@@ -286,11 +286,7 @@ func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID 
 		return nil, callLogID, appErr.Message, nil
 	}
 	if failure := erpBridgeCostVerificationFailureMessage(result); failure != "" {
-		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, result, domain.NewAppError(domain.ErrCodeConflict, failure, map[string]interface{}{
-			"reason":            "erp_cost_verification_failed",
-			"cost_verification": result.CostVerification,
-		}), remark)
-		return result, callLogID, failure, nil
+		log.Printf("task_erp_cost_verification_warning task_id=%d sku_id=%s warning=%s", taskID, strings.TrimSpace(payload.SKUID), failure)
 	}
 	if err := s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusSucceeded, startedAt, result, nil, remark); err != nil {
 		return nil, callLogID, "", infraError("update erp bridge filing call log", err)
@@ -462,7 +458,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(item.Quantity),
-			CostPrice:    cloneFloat64Ptr(firstFloat64Ptr(item.CostPrice, detail.CostPrice)),
+			CostPrice:    cloneFloat64Ptr(item.CostPrice),
 		},
 	}
 	return normalizeERPProductUpsertPayload(payload), nil
@@ -536,11 +532,9 @@ func (s *taskService) persistTaskFilingState(
 		if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
 			return err
 		}
-		if isBatchNewProductTask(task) {
-			if updater, ok := s.taskRepo.(taskSKUItemFilingProjectionUpdater); ok {
-				if err := updater.UpdateSKUItemsFilingProjection(ctx, tx, task.ID, detail.FilingStatus, detail.ERPSyncRequired, detail.ERPSyncVersion, detail.LastFiledAt, detail.FilingErrorMessage); err != nil {
-					return err
-				}
+		if updater, ok := s.taskRepo.(taskSKUItemFilingProjectionUpdater); ok {
+			if err := updater.UpdateSKUItemsFilingProjection(ctx, tx, task.ID, detail.FilingStatus, detail.ERPSyncRequired, detail.ERPSyncVersion, detail.LastFiledAt, detail.FilingErrorMessage); err != nil {
+				return err
 			}
 		}
 		if s.taskEventRepo == nil {
@@ -721,9 +715,6 @@ func computeBatchNewProductFilingMissingFields(task *domain.Task, items []*domai
 		}
 		if taskSKUItemProductIID(item) == "" {
 			add(fieldPrefix+".product_i_id", labelPrefix+"产品i_id")
-		}
-		if item.CostPrice == nil {
-			add(fieldPrefix+".cost_price", labelPrefix+"成本价")
 		}
 	}
 	if len(labels) == 0 {

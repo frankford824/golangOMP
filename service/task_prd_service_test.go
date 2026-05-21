@@ -3713,6 +3713,33 @@ func (r *prdTaskRepo) UpdateSKUItemCostInfo(_ context.Context, _ repo.Tx, item *
 	return nil
 }
 
+func (r *prdTaskRepo) UpdateSKUItemsFilingProjection(_ context.Context, _ repo.Tx, taskID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error {
+	items := r.skuItems[taskID]
+	skuStatus := domain.TaskSKUStatusGenerated
+	switch filingStatus {
+	case domain.FilingStatusFiled:
+		skuStatus = domain.TaskSKUStatusFiled
+	case domain.FilingStatusFilingFailed:
+		skuStatus = domain.TaskSKUStatusFilingFailed
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		item.SKUStatus = skuStatus
+		item.FilingStatus = filingStatus
+		item.ERPSyncStatus = filingStatus
+		item.ERPSyncRequired = syncRequired
+		item.ERPSyncVersion = syncVersion
+		item.LastFiledAt = cloneTimePtr(lastFiledAt)
+		item.FilingErrorMessage = errorMessage
+		if r.skuByCode != nil && item.SKUCode != "" {
+			r.skuByCode[item.SKUCode] = item
+		}
+	}
+	return nil
+}
+
 func (r *prdTaskRepo) List(_ context.Context, filter repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
 	r.lastListFilter = filter
 	r.listCalls++

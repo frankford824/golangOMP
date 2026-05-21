@@ -3069,11 +3069,7 @@ func (s *taskService) performERPBridgeFiling(ctx context.Context, task *domain.T
 		return nil, callLogID, appErr.Message, nil
 	}
 	if failure := erpBridgeCostVerificationFailureMessage(result); failure != "" {
-		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, result, domain.NewAppError(domain.ErrCodeConflict, failure, map[string]interface{}{
-			"reason":            "erp_cost_verification_failed",
-			"cost_verification": result.CostVerification,
-		}), remark)
-		return result, callLogID, failure, nil
+		log.Printf("task_erp_cost_verification_warning task_id=%d sku_id=%s warning=%s", task.ID, strings.TrimSpace(payload.SKUID), failure)
 	}
 	if err := s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusSucceeded, startedAt, result, nil, remark); err != nil {
 		return nil, callLogID, "", infraError("update erp bridge filing call log", err)
