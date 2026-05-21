@@ -174,7 +174,11 @@
             {{ task.productName }}
           </div>
           <div class="card-status-row flex flex-wrap items-center gap-1 mt-1">
-            <TaskMainStatusBadge v-if="task.mainStatus" :status="task.mainStatus" />
+            <TaskMainStatusBadge
+              v-if="task.mainStatus"
+              :status="task.mainStatus"
+              :label-override="getTaskCenterCardStatusLabel(task) ?? undefined"
+            />
             <TaskStatusTag v-else :status="task.status" />
             <FilingStatusBadge
               v-if="task.filing_status || isRetouchTask(task)"
@@ -336,6 +340,7 @@ import {
 import { getTaskOwnershipDisplay } from '@/domain/task-ownership'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
+import { getTaskCenterCardStatusLabel } from '@/domain/task-center-card-status'
 import { PermissionEnum } from '@/types'
 
 const router = useRouter()
