@@ -318,16 +318,16 @@
 	            <section v-if="showSkuCodeTypeCard" class="sku-code-type-card">
 	              <div class="erp-sync-toggle-head">
 	                <label class="field-label erp-sync-title">SKU 编码</label>
-	                <span class="erp-sync-badge">{{ form.skuCodeType === 'customization' ? 'DZ' : 'CG' }}</span>
+	                <span class="erp-sync-badge">{{ showSkuAsCustomization ? 'DZ' : 'CG' }}</span>
 	              </div>
 	              <div class="erp-sync-toggle-row">
 	                <div class="erp-sync-control">
 	                  <span class="erp-sync-main-label">{{ isCustomizationFlow ? '定制任务固定标记' : '常规任务固定标记' }}</span>
-	                  <span class="erp-sync-locked-badge">{{ form.skuCodeType === 'customization' ? 'DZ' : 'CG' }}</span>
+	                  <span class="erp-sync-locked-badge">{{ showSkuAsCustomization ? 'DZ' : 'CG' }}</span>
 	                </div>
-	                <p class="erp-sync-toggle-hint" :class="{ warning: form.skuCodeType === 'customization' }">
+	                <p class="erp-sync-toggle-hint" :class="{ warning: showSkuAsCustomization }">
 	                  {{
-	                    form.skuCodeType === 'customization'
+	                    showSkuAsCustomization
 	                      ? '将使用 DZ + 类目首字母 + 6 位序号，ERP 中可直接识别定制 SKU。'
 	                      : '将使用 CG + 类目首字母 + 6 位序号，适用于常规新品或采购 SKU。'
 	                  }}
@@ -704,6 +704,10 @@ const showSkuCodeTypeCard = computed(() =>
   createType.value === 'new_batch' ||
   createType.value === 'purchase_single'
 )
+/** 右侧 SKU 编码提示：定制分组优先 DZ，避免 form.skuCodeType 与 taskGroup 脱节 */
+const showSkuAsCustomization = computed(
+  () => isCustomizationFlow.value || form.value.skuCodeType === 'customization',
+)
 
 const copyContentModel = computed({
   get: () => form.value.copyContent ?? '',
@@ -750,7 +754,9 @@ function selectTaskGroup(group: TaskGroup) {
 }
 
 function selectCreateType(value: CreateType) {
-  const option = createTypeOptions.find((item) => item.value === value)
+  const option = createTypeOptions.find(
+    (item) => item.value === value && item.group === taskGroup.value,
+  )
   if (option) applyCreateType(option)
 }
 
