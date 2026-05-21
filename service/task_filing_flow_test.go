@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"workflow/domain"
@@ -820,6 +821,76 @@ func TestNewProductCreateSyncDefersUntilCostAvailable(t *testing.T) {
 	}
 	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || *got != 5.69 {
 		t.Fatalf("erp business_info.cost_price = %v, want 5.69", got)
+	}
+}
+
+func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
+	expected := 5.69
+	actual := 0.96
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions: []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
+		upsertResult: &domain.ERPProductUpsertResult{
+			Status:  "succeeded",
+			Message: "ok",
+			CostVerification: &domain.ERPCostVerificationResult{
+				Status:       "mismatched",
+				SKUID:        "NSKT000292",
+				ExpectedCost: float64Ptr(expected),
+				ActualCost:   float64Ptr(actual),
+				Message:      "ERP cost readback mismatch",
+			},
+		},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		ProductNameSnapshot: "成本回查失败测试",
+		ProductIID:          "KT_STANDARD",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		DesignRequirement:   "设计要求",
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             task.ID,
+		OperatorID:         11,
+		ProductName:        "成本回查失败测试",
+		ProductIID:         "KT_STANDARD",
+		Category:           "KT_STANDARD",
+		SpecText:           "20*20",
+		CostPrice:          float64Ptr(expected),
+		ManualCostOverride: true,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFilingFailed {
+		t.Fatalf("filing_status after cost mismatch = %s, want filing_failed", taskRepo.details[task.ID].FilingStatus)
+	}
+	if !strings.Contains(taskRepo.details[task.ID].FilingErrorMessage, "ERP成本回查不一致") {
+		t.Fatalf("filing_error_message = %q, want cost readback mismatch", taskRepo.details[task.ID].FilingErrorMessage)
+	}
+	if !taskRepo.details[task.ID].ERPSyncRequired {
+		t.Fatal("erp_sync_required should remain true after cost readback mismatch")
 	}
 }
 

@@ -1137,6 +1137,10 @@ components:
           type: number
           format: double
           nullable: true
+        cost_price:
+          type: number
+          format: double
+          nullable: true
         wms_co_id:
           type: string
           description: Warehouse dimension code resolved from ERP.
@@ -1310,6 +1314,23 @@ components:
         sync_log_id: { type: string }
         status: { type: string, description: 'e.g. accepted, stored locally, synced' }
         message: { type: string }
+        cost_verification:
+          $ref: '#/components/schemas/ERPCostVerificationResult'
+    ERPCostVerificationResult:
+      type: object
+      description: Post-upsert ERP cost readback evidence. When a filing payload includes cost, MAIN/Bridge reads the SKU back and compares the returned ERP cost to the expected cost before marking task filing as complete.
+      properties:
+        status:
+          type: string
+          enum: [matched, mismatched, unverified, skipped]
+        sku_id: { type: string }
+        expected_cost: { type: number, nullable: true }
+        actual_cost: { type: number, nullable: true }
+        checked_at: { type: string, format: date-time, nullable: true }
+        message: { type: string }
+        observed_product:
+          allOf: [{ $ref: '#/components/schemas/ERPBridgeProduct' }]
+          nullable: true
     ERPItemStyleUpdatePayload:
       type: object
       description: Style-update payload written through `POST /v1/erp/products/style/update`.

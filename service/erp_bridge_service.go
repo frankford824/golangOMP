@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -15,9 +17,10 @@ import (
 )
 
 const (
-	erpBridgeCategoryCacheTTL       = time.Minute
-	erpBridgeRefinementMaxPages     = 20
-	erpBridgeDetailFallbackPageSize = 20
+	erpBridgeCategoryCacheTTL        = time.Minute
+	erpBridgeRefinementMaxPages      = 20
+	erpBridgeDetailFallbackPageSize  = 20
+	erpBridgeCostVerificationEpsilon = 0.0001
 )
 
 type ERPBridgeService interface {
@@ -421,7 +424,54 @@ func (s *erpBridgeService) UpsertProduct(ctx context.Context, payload domain.ERP
 	if strings.TrimSpace(result.Route) == "" {
 		result.Route = "itemskubatchupload"
 	}
+	s.attachERPProductCostVerification(ctx, payload, result)
 	return result, nil
+}
+
+func (s *erpBridgeService) attachERPProductCostVerification(ctx context.Context, payload domain.ERPProductUpsertPayload, result *domain.ERPProductUpsertResult) {
+	if s == nil || s.client == nil || result == nil || payload.CostPrice == nil {
+		return
+	}
+	expected := *payload.CostPrice
+	checkedAt := time.Now().UTC()
+	verification := &domain.ERPCostVerificationResult{
+		Status:       "unverified",
+		SKUID:        strings.TrimSpace(payload.SKUID),
+		ExpectedCost: float64PtrCopy(expected),
+		CheckedAt:    &checkedAt,
+	}
+	result.CostVerification = verification
+
+	product, err := s.client.GetProductByID(ctx, payload.SKUID)
+	if err != nil {
+		verification.Message = fmt.Sprintf("ERP cost readback failed after upsert: %v", err)
+		return
+	}
+	if product == nil {
+		verification.Status = "mismatched"
+		verification.Message = "ERP cost readback did not find the SKU after upsert"
+		return
+	}
+	verification.ObservedProduct = product
+	if product.CostPrice == nil {
+		verification.Status = "mismatched"
+		verification.Message = "ERP cost readback did not return cost_price after upsert"
+		return
+	}
+	actual := *product.CostPrice
+	verification.ActualCost = float64PtrCopy(actual)
+	if math.Abs(actual-expected) <= erpBridgeCostVerificationEpsilon {
+		verification.Status = "matched"
+		verification.Message = "ERP cost readback matched expected cost"
+		return
+	}
+	verification.Status = "mismatched"
+	verification.Message = fmt.Sprintf("ERP cost readback mismatch: expected %.4f, actual %.4f", expected, actual)
+}
+
+func float64PtrCopy(v float64) *float64 {
+	copied := v
+	return &copied
 }
 
 func (s *erpBridgeService) UpdateItemStyle(ctx context.Context, payload domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, *domain.AppError) {

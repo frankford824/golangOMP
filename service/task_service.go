@@ -3068,6 +3068,13 @@ func (s *taskService) performERPBridgeFiling(ctx context.Context, task *domain.T
 		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, nil, appErr, remark)
 		return nil, callLogID, appErr.Message, nil
 	}
+	if failure := erpBridgeCostVerificationFailureMessage(result); failure != "" {
+		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, result, domain.NewAppError(domain.ErrCodeConflict, failure, map[string]interface{}{
+			"reason":            "erp_cost_verification_failed",
+			"cost_verification": result.CostVerification,
+		}), remark)
+		return result, callLogID, failure, nil
+	}
 	if err := s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusSucceeded, startedAt, result, nil, remark); err != nil {
 		return nil, callLogID, "", infraError("update erp bridge filing call log", err)
 	}
@@ -3196,11 +3203,19 @@ func (s *taskService) finishERPBridgeFilingCallLog(ctx context.Context, callLogI
 		responsePayload = raw
 	}
 	if appErr != nil {
-		raw, err := json.Marshal(map[string]interface{}{
+		errorPayload := map[string]interface{}{
 			"code":    appErr.Code,
 			"message": appErr.Message,
 			"details": appErr.Details,
-		})
+		}
+		payload := interface{}(errorPayload)
+		if result != nil {
+			payload = map[string]interface{}{
+				"result": result,
+				"error":  errorPayload,
+			}
+		}
+		raw, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
@@ -3245,6 +3260,30 @@ func attachERPBridgeFilingTrace(appErr *domain.AppError, taskID int64, callLogID
 	return domain.NewAppError(appErr.Code, appErr.Message, details)
 }
 
+func erpBridgeCostVerificationFailureMessage(result *domain.ERPProductUpsertResult) string {
+	if result == nil || result.CostVerification == nil {
+		return ""
+	}
+	verification := result.CostVerification
+	switch strings.ToLower(strings.TrimSpace(verification.Status)) {
+	case "", "matched", "skipped":
+		return ""
+	case "mismatched":
+		if verification.ExpectedCost != nil && verification.ActualCost != nil {
+			return fmt.Sprintf("ERP成本回查不一致：期望 %.4f，聚水潭当前 %.4f", *verification.ExpectedCost, *verification.ActualCost)
+		}
+		if strings.TrimSpace(verification.Message) != "" {
+			return "ERP成本回查不一致：" + strings.TrimSpace(verification.Message)
+		}
+		return "ERP成本回查不一致"
+	default:
+		if strings.TrimSpace(verification.Message) != "" {
+			return "ERP成本回查失败：" + strings.TrimSpace(verification.Message)
+		}
+		return "ERP成本回查失败"
+	}
+}
+
 func buildERPBridgeFilingEventPayload(result *domain.ERPProductUpsertResult, callLogID *int64) map[string]interface{} {
 	if result == nil && callLogID == nil {
 		return nil
@@ -3271,6 +3310,7 @@ func buildERPBridgeFilingEventPayload(result *domain.ERPProductUpsertResult, cal
 		payload["sync_log_id"] = result.SyncLogID
 		payload["upstream_status"] = result.Status
 		payload["message"] = result.Message
+		payload["cost_verification"] = result.CostVerification
 	}
 	return payload
 }

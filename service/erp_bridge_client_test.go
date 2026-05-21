@@ -708,6 +708,64 @@ func TestERPBridgeServiceGetProductByIDFallsBackToSearchReference(t *testing.T) 
 	}
 }
 
+func TestERPBridgeServiceUpsertProductVerifiesCostReadbackMatch(t *testing.T) {
+	expected := 5.28
+	client := &erpBridgeClientStub{
+		getProducts: map[string]*domain.ERPProduct{
+			"NSKT000292": {ProductID: "NSKT000292", SKUID: "NSKT000292", CostPrice: float64Ptr(expected)},
+		},
+	}
+	svc := NewERPBridgeService(client, nil, nil)
+
+	result, appErr := svc.UpsertProduct(context.Background(), domain.ERPProductUpsertPayload{
+		SKUID:     "NSKT000292",
+		CostPrice: float64Ptr(expected),
+	})
+	if appErr != nil {
+		t.Fatalf("UpsertProduct() appErr = %+v", appErr)
+	}
+	if result == nil || result.CostVerification == nil {
+		t.Fatalf("missing cost verification: %+v", result)
+	}
+	if result.CostVerification.Status != "matched" {
+		t.Fatalf("cost verification status = %s, want matched", result.CostVerification.Status)
+	}
+	if result.CostVerification.ActualCost == nil || *result.CostVerification.ActualCost != expected {
+		t.Fatalf("actual cost = %+v, want %.2f", result.CostVerification.ActualCost, expected)
+	}
+}
+
+func TestERPBridgeServiceUpsertProductVerifiesCostReadbackMismatch(t *testing.T) {
+	expected := 5.28
+	actual := 0.96
+	client := &erpBridgeClientStub{
+		getProducts: map[string]*domain.ERPProduct{
+			"NSKT000292": {ProductID: "NSKT000292", SKUID: "NSKT000292", CostPrice: float64Ptr(actual)},
+		},
+	}
+	svc := NewERPBridgeService(client, nil, nil)
+
+	result, appErr := svc.UpsertProduct(context.Background(), domain.ERPProductUpsertPayload{
+		SKUID:     "NSKT000292",
+		CostPrice: float64Ptr(expected),
+	})
+	if appErr != nil {
+		t.Fatalf("UpsertProduct() appErr = %+v", appErr)
+	}
+	if result == nil || result.CostVerification == nil {
+		t.Fatalf("missing cost verification: %+v", result)
+	}
+	if result.CostVerification.Status != "mismatched" {
+		t.Fatalf("cost verification status = %s, want mismatched", result.CostVerification.Status)
+	}
+	if result.CostVerification.ActualCost == nil || *result.CostVerification.ActualCost != actual {
+		t.Fatalf("actual cost = %+v, want %.2f", result.CostVerification.ActualCost, actual)
+	}
+	if result.CostVerification.ExpectedCost == nil || *result.CostVerification.ExpectedCost != expected {
+		t.Fatalf("expected cost = %+v, want %.2f", result.CostVerification.ExpectedCost, expected)
+	}
+}
+
 type erpBridgeTx struct{}
 
 func (erpBridgeTx) IsTx() {}
