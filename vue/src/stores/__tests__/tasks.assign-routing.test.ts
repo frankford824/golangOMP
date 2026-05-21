@@ -140,6 +140,28 @@ describe('useTasksStore assign routing', () => {
     expect(reassignModuleMock).not.toHaveBeenCalled()
   })
 
+  it('customization PendingCustomizationProduction 指派走 tasksApi.assign', async () => {
+    const { useTasksStore } = await import('@/stores/tasks')
+    const store = useTasksStore()
+    mockListWithTask(
+      baseRawTask({
+        id: '206',
+        task_status: 'PendingCustomizationProduction',
+        customization_required: true,
+        business_lane: 'customization',
+      }),
+    )
+    await store.loadTasks()
+
+    await store.assignTask('206', { assigneeId: '301', assigneeName: 'ArtOp' })
+
+    expect(assignMock).toHaveBeenCalledWith(
+      '206',
+      expect.objectContaining({ designer_id: 301, designer_name: 'ArtOp' }),
+    )
+    expect(reassignModuleMock).not.toHaveBeenCalled()
+  })
+
   it('普通 design task 指派逻辑保持为 tasksApi.assign', async () => {
     const { useTasksStore } = await import('@/stores/tasks')
     const store = useTasksStore()

@@ -58,8 +58,30 @@ export function isCustomizationTask(task: Task): boolean {
 
 // ─── 设计流程操作谓词 ──────────────────────────────────────────────────────────
 
-/** 是否可执行「指派设计师」 */
+/** 任务尚无设计/美工负责人（指派/接单前）。 */
+export function taskHasNoDesignHandler(task: Task): boolean {
+  const designerId = task.designerId ?? task.assigneeId
+  const handlerId = task.currentHandlerId
+  return (
+    (designerId == null || String(designerId).trim() === '') &&
+    (handlerId == null || String(handlerId).trim() === '')
+  )
+}
+
+/**
+ * 定制任务「指派美工」：PendingCustomizationProduction + 未分配。
+ * 与 module claim 分工：运营指派走 POST /assign，美工自领走 customization/claim。
+ */
+export function canAssignCustomizationArtOperator(task: Task): boolean {
+  if (!isCustomizationTask(task)) return false
+  if (isPurchaseTask(task)) return false
+  if (task.status !== 'PendingCustomizationProduction') return false
+  return taskHasNoDesignHandler(task)
+}
+
+/** 是否可执行「指派设计师」或定制 lane「指派美工」 */
 export function canAssign(task: Task): boolean {
+  if (canAssignCustomizationArtOperator(task)) return true
   if (isPurchaseTask(task)) return false
   if (task.designSubStatus != null) {
     return task.designSubStatus === DesignSubStatusEnum.PENDING_ASSIGN

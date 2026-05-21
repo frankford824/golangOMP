@@ -1,20 +1,20 @@
 <template>
   <BaseModal
     :model-value="modelValue"
-    title="指派设计师"
+    :title="title"
     :show-confirm="false"
     @update:model-value="$emit('update:modelValue', $event)"
   >
     <template #default>
       <div class="space-y-3">
         <p class="text-sm text-slate-600">
-          请选择本次任务的负责设计师，后续审核与交班将以此为基础。
+          {{ description }}
         </p>
         <div v-if="loading" class="designer-loading text-sm text-slate-500 py-4">
-          加载设计师列表...
+          {{ loadingLabel }}
         </div>
         <div v-else-if="!designers.length" class="designer-empty text-sm text-slate-500 py-4">
-          暂无可指派的设计师，请先在用户管理中配置设计师角色
+          {{ emptyHint }}
         </div>
         <div v-else class="designer-list">
           <label
@@ -30,7 +30,7 @@
             />
             <span class="designer-name">{{ designer.name }}</span>
             <span class="designer-role">
-              {{ designer.role === 'lead' ? '主设计' : '设计师' }}
+              {{ designer.role === 'lead' ? leadRoleLabel : assigneeRoleLabel }}
             </span>
           </label>
         </div>
@@ -47,7 +47,7 @@
           :disabled="!selectedDesigner || loading"
           @click="onConfirm"
         >
-          确认指派
+          {{ confirmLabel }}
         </BaseButton>
       </footer>
     </template>
@@ -66,8 +66,24 @@ const props = withDefaults(
     designers: Designer[]
     loading?: boolean
     currentAssigneeId?: string | null
+    title?: string
+    description?: string
+    loadingLabel?: string
+    emptyHint?: string
+    confirmLabel?: string
+    assigneeRoleLabel?: string
+    leadRoleLabel?: string
   }>(),
-  { loading: false },
+  {
+    loading: false,
+    title: '指派设计师',
+    description: '请选择本次任务的负责设计师，后续审核与交班将以此为基础。',
+    loadingLabel: '加载设计师列表...',
+    emptyHint: '暂无可指派的设计师，请先在用户管理中配置设计师角色',
+    confirmLabel: '确认指派',
+    assigneeRoleLabel: '设计师',
+    leadRoleLabel: '主设计',
+  },
 )
 
 const emit = defineEmits<{

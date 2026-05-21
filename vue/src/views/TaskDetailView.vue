@@ -745,6 +745,12 @@
       v-model="assignDialogVisible"
       :designers="designerOptions"
       :loading="designersLoading"
+      :title="assignDialogTitle"
+      :description="assignDialogDescription"
+      :loading-label="assignDialogLoadingLabel"
+      :empty-hint="assignDialogEmptyHint"
+      :confirm-label="assignDialogConfirmLabel"
+      :assignee-role-label="assignDialogAssigneeRoleLabel"
       :current-assignee-id="
         task?.designerId != null
           ? String(task.designerId)
@@ -815,6 +821,7 @@ import {
 } from '@/domain/task-close-eligibility'
 import {
   canAssign,
+  canAssignCustomizationArtOperator,
   canSubmitAudit,
   canUploadDesignDelivery,
   canReassignDesigner,
@@ -1047,6 +1054,26 @@ const designAssetPreviewAreaLabel = computed(() =>
 )
 const assignDesignerLabel = computed(() => isCustomizationTask.value ? '指派美工' : '指派设计师')
 const reassignDesignerLabel = computed(() => isCustomizationTask.value ? '重新指派美工' : '重新指派设计师')
+const assignDialogTitle = computed(() => assignDesignerLabel.value)
+const assignDialogDescription = computed(() =>
+  isCustomizationTask.value
+    ? '请选择本次任务的负责美工，后续定制审核与交班将以此为基础。'
+    : '请选择本次任务的负责设计师，后续审核与交班将以此为基础。',
+)
+const assignDialogLoadingLabel = computed(() =>
+  isCustomizationTask.value ? '加载美工列表...' : '加载设计师列表...',
+)
+const assignDialogEmptyHint = computed(() =>
+  isCustomizationTask.value
+    ? '暂无可指派的美工，请先在用户管理中配置定制美工角色'
+    : '暂无可指派的设计师，请先在用户管理中配置设计师角色',
+)
+const assignDialogConfirmLabel = computed(() =>
+  isCustomizationTask.value ? '确认指派美工' : '确认指派',
+)
+const assignDialogAssigneeRoleLabel = computed(() =>
+  isCustomizationTask.value ? '美工' : '设计师',
+)
 const assignDesignerTitle = computed(() =>
   isCustomizationTask.value
     ? '任务尚无美工处理人时，在待处理阶段指定美工'
@@ -1753,17 +1780,22 @@ const canAssignPermission = computed(() => {
   })
 })
 
-const showAssignDesignerButton = computed(
-  () => {
-    if (!task.value || isPurchaseTask.value || taskHasAssignee(task.value)) return false
-    if (designModuleAllowsAssign.value) return true
-    return (
-      canAssignPermission.value &&
-      Boolean(actionAvailability.value?.canShowAssign) &&
-      canAssign(task.value)
-    )
-  },
-)
+const showAssignCustomizationArtButton = computed(() => {
+  if (!task.value || !isCustomizationTask.value || isPurchaseTask.value) return false
+  if (!canAssignPermission.value || !canAssignCustomizationArtOperator(task.value)) return false
+  return Boolean(actionAvailability.value?.canShowAssign)
+})
+
+const showAssignDesignerButton = computed(() => {
+  if (showAssignCustomizationArtButton.value) return true
+  if (!task.value || isPurchaseTask.value || taskHasAssignee(task.value)) return false
+  if (designModuleAllowsAssign.value) return true
+  return (
+    canAssignPermission.value &&
+    Boolean(actionAvailability.value?.canShowAssign) &&
+    canAssign(task.value)
+  )
+})
 
 const canReassignPermission = computed(() => {
   if (!task.value || !currentUser.value) return false
@@ -2240,6 +2272,10 @@ watch(taskId, () => {
 watch(auditComment, () => {
   if (auditCommentError.value) auditCommentError.value = ''
 })
+const assignDesignerWorkflowLane = computed(() =>
+  isCustomizationTask.value ? ('customization' as const) : undefined,
+)
+
 const {
   designers: designerOptions,
   loading: designersLoading,
@@ -2256,6 +2292,7 @@ const {
     'task.reassign.department',
     'task.create',
   ],
+  workflowLane: assignDesignerWorkflowLane,
 })
 
 let successClearTimer: ReturnType<typeof setTimeout> | null = null
@@ -2270,11 +2307,11 @@ function flashSuccess(message: string) {
 }
 
 function doAssign() {
-  if (!task.value) return
+  if (!task.value || !showAssignDesignerButton.value) return
   actionError.value = ''
   actionSuccess.value = ''
   assignDialogVisible.value = true
-  if (designerOptions.value.length === 0) loadDesigners()
+  void loadDesigners()
 }
 
 function doReassign() {
@@ -2612,11 +2649,12 @@ function isWarehouseProgressConflictError(err: unknown): boolean {
 }
 
 async function onAssignConfirm(payload: { assigneeId: string; assigneeName: string }) {
-  if (!task.value) return
+  if (!task.value || !showAssignDesignerButton.value) return
   try {
     await tasksStore.assignTask(task.value.id, payload)
     assignDialogVisible.value = false
-    flashSuccess(`已指派给 ${payload.assigneeName}`)
+    const roleNoun = isCustomizationTask.value ? '美工' : '设计师'
+    flashSuccess(`已指派${roleNoun} ${payload.assigneeName}`)
   } catch (e) {
     actionError.value = formatTaskActionDenyMessage(e, '指派失败')
   }

@@ -1,5 +1,10 @@
 import type { Task } from './types/task'
-import { taskHasAssignee, isInDesignerReassignmentPhase, isRetouchTask } from './task-actions'
+import {
+  canAssignCustomizationArtOperator,
+  taskHasAssignee,
+  isInDesignerReassignmentPhase,
+  isRetouchTask,
+} from './task-actions'
 
 /**
  * 前端最小状态显隐（体验优化），不替代后端权限与组织 scope 判定。
@@ -14,8 +19,11 @@ export function getTaskActionAvailability(task: Task) {
   const isPendingProductionTransfer = status === 'PendingProductionTransfer'
   const isPendingClose = status === 'PendingClose'
 
+  const canShowAssignCustomizationArt = canAssignCustomizationArtOperator(task)
+
   return {
-    canShowAssign: isPendingAssign && !taskHasAssignee(task),
+    canShowAssign:
+      (isPendingAssign && !taskHasAssignee(task)) || canShowAssignCustomizationArt,
     canShowReassign: isInDesignerReassignmentPhase(task),
     canShowAuditA: isPendingAuditA,
     canShowAuditB: isPendingAuditB,
