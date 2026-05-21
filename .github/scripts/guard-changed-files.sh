@@ -17,6 +17,8 @@ if [[ -z "$changed_files" ]]; then
 fi
 
 blocked=()
+package_lock_changes=()
+other_changes=()
 
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
@@ -39,10 +41,32 @@ while IFS= read -r path; do
 
   case "$path" in
     package.json|*/package.json|package-lock.json|*/package-lock.json|pnpm-lock.yaml|*/pnpm-lock.yaml|yarn.lock|*/yarn.lock)
-      blocked+=("$path :: package and lockfile changes require owner-controlled dependency review")
+      package_lock_changes+=("$path")
+      ;;
+    *)
+      other_changes+=("$path")
       ;;
   esac
 done <<< "$changed_files"
+
+if (( ${#package_lock_changes[@]} > 0 )); then
+  dependency_review_marker="[deps-review]"
+  commit_messages="$(git log --format=%B "$base_ref..$head_ref" || true)"
+
+  if (( ${#other_changes[@]} > 0 )); then
+    blocked+=("package/lock changes must be isolated in a dependency-only push")
+    for path in "${package_lock_changes[@]}"; do
+      blocked+=("$path :: package and lockfile changes cannot be mixed with application changes")
+    done
+  elif [[ "$commit_messages" != *"$dependency_review_marker"* ]]; then
+    blocked+=("dependency-only package/lock changes require ${dependency_review_marker} in the commit message")
+    for path in "${package_lock_changes[@]}"; do
+      blocked+=("$path :: package and lockfile changes require explicit owner dependency review")
+    done
+  else
+    echo "Dependency-only package/lock change allowed by ${dependency_review_marker} marker."
+  fi
+fi
 
 if (( ${#blocked[@]} > 0 )); then
   echo "::error::Forbidden mock/package/lock changes detected."
