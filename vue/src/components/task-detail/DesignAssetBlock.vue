@@ -15,10 +15,24 @@
       </div>
     </div>
 
-    <!-- 设计师指派（采购任务无设计节点，不展示） -->
+    <!-- 设计师 / 美工处理人（采购任务无设计节点，不展示） -->
     <div v-if="designerLine && !isPurchase" class="info-row-simple">
       <span class="row-label">{{ designerRoleLabel }}</span>
       <span>{{ designerLine }}</span>
+    </div>
+    <div v-else-if="canShowCustomizationClaim && !isPurchase" class="info-row-simple customization-claim-row">
+      <span class="row-label">{{ designerRoleLabel }}</span>
+      <div class="customization-claim-actions">
+        <BaseButton
+          variant="primary"
+          size="sm"
+          :disabled="customizationClaiming"
+          @click="onCustomizationClaim"
+        >
+          {{ customizationClaimButtonLabel }}
+        </BaseButton>
+        <p v-if="customizationClaimError" class="customization-claim-error">{{ customizationClaimError }}</p>
+      </div>
     </div>
     <div v-if="task.needOutsource && !isPurchase" class="outsource-flag">
       已标记外协意图（need_outsource）
@@ -226,7 +240,14 @@ import {
   canUploadDesignDelivery,
 } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
+import { usePermissionsStore } from '@/stores/permissions'
 import { useTasksStore } from '@/stores/tasks'
+import BaseButton from '@/components/base/BaseButton.vue'
+import {
+  canClaimCustomizationOnTaskDetail,
+  taskCenterClaimButtonLabel,
+} from '@/domain/task-center-claim'
+import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { assetsApi } from '@/services/api/assetsApi'
 import DesignAssetPanel from '@/components/business/DesignAssetPanel.vue'
 import DesignAssetResultBlock from '@/components/task-detail/DesignAssetResultBlock.vue'
@@ -267,7 +288,42 @@ const designerLine = computed(() => {
 })
 
 const { can, currentUser, frontendRoles } = usePermission()
+const permissionsStore = usePermissionsStore()
 const tasksStore = useTasksStore()
+
+const customizationClaiming = ref(false)
+const customizationClaimError = ref('')
+
+const canShowCustomizationClaim = computed(() => {
+  if (!isCustomizationTask.value || isPurchase.value) return false
+  return canClaimCustomizationOnTaskDetail(
+    task.value,
+    (roles) => permissionsStore.hasAnyRole(roles),
+    permissionsStore.isCustomizationOperator,
+  )
+})
+
+const customizationClaimButtonLabel = computed(() =>
+  taskCenterClaimButtonLabel(task.value, customizationClaiming.value),
+)
+
+async function onCustomizationClaim() {
+  if (!canShowCustomizationClaim.value || customizationClaiming.value) return
+  customizationClaimError.value = ''
+  customizationClaiming.value = true
+  try {
+    await tasksStore.claimCustomizationModule(task.value.id)
+    await tasksStore.loadTaskById(task.value.id)
+  } catch (e) {
+    customizationClaimError.value = formatTaskActionDenyMessage(
+      e,
+      '任务已被他人接单，请刷新详情后重试',
+    )
+    await tasksStore.loadTaskById(task.value.id)
+  } finally {
+    customizationClaiming.value = false
+  }
+}
 
 const isPurchase = computed(
   () =>
@@ -843,6 +899,20 @@ async function onDeliveryPanelSuccess() {
   text-transform: uppercase;
   color: #64748b;
   min-width: 4rem;
+}
+.customization-claim-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.5rem 1.5rem;
+  font-size: 0.8125rem;
+  margin-bottom: 0.5rem;
+}
+.customization-claim-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
 }
 .outsource-flag {
   display: inline-block;

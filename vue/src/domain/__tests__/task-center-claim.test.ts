@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Task } from '@/domain/types/task'
 import { enrichTaskDomainFields } from '@/domain/mappers/task-mappers'
 import {
+  canClaimCustomizationOnTaskDetail,
   canClaimCustomizationTask,
   canClaimRegularDesignTask,
   canClaimTaskFromCenter,
@@ -93,5 +94,48 @@ describe('task-center-claim', () => {
     expect(canClaimRegularDesignTask(task, designerPoolGate)).toBe(true)
     expect(canClaimCustomizationTask(task, customizationActorGate)).toBe(false)
     expect(canClaimTaskFromCenter(task, designerPoolGate)).toBe(true)
+  })
+})
+
+describe('canClaimCustomizationOnTaskDetail', () => {
+  const hasCustomizationActorRole = (roles: readonly string[]) =>
+    roles.includes('CustomizationOperator')
+
+  it('allows claim for CustomizationOperator on unassigned customization task', () => {
+    const task = makeTask({
+      businessLane: 'customization',
+      customizationRequired: true,
+      status: 'PendingCustomizationProduction',
+    })
+    expect(
+      canClaimCustomizationOnTaskDetail(task, hasCustomizationActorRole, true),
+    ).toBe(true)
+  })
+
+  it('denies claim for pure Designer', () => {
+    const hasDesignerOnly = (roles: readonly string[]) => roles.includes('Designer')
+    const task = makeTask({
+      businessLane: 'customization',
+      status: 'PendingCustomizationProduction',
+    })
+    expect(canClaimCustomizationOnTaskDetail(task, hasDesignerOnly, false)).toBe(false)
+  })
+
+  it('hides claim when designer or handler already set', () => {
+    const task = makeTask({
+      businessLane: 'customization',
+      status: 'PendingCustomizationProduction',
+      currentHandlerId: '42',
+    })
+    expect(
+      canClaimCustomizationOnTaskDetail(task, hasCustomizationActorRole, true),
+    ).toBe(false)
+  })
+
+  it('does not affect regular tasks', () => {
+    const task = makeTask({ status: 'PendingAssign', businessLane: 'normal' })
+    expect(
+      canClaimCustomizationOnTaskDetail(task, hasCustomizationActorRole, true),
+    ).toBe(false)
   })
 })

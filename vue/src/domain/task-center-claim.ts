@@ -51,6 +51,21 @@ export function userIsPureDesignerForCustomizationClaim(
  * 定制任务「美工接单」：PendingCustomizationProduction + 未分配 + 有权限。
  * 不限 pool Tab（全部/定制筛选下可见）。
  */
+export function customizationClaimActorGate(
+  hasAnyRole: (roles: readonly string[]) => boolean,
+  isCustomizationOperator: boolean,
+): Pick<TaskCenterClaimActorGate, 'canActAsCustomizationClaimActor'> {
+  if (userIsPureDesignerForCustomizationClaim(hasAnyRole)) {
+    return { canActAsCustomizationClaimActor: false }
+  }
+  return {
+    canActAsCustomizationClaimActor: userCanActAsCustomizationClaimActor(
+      hasAnyRole,
+      isCustomizationOperator,
+    ),
+  }
+}
+
 export function canClaimCustomizationTask(
   task: Task,
   gate: Pick<TaskCenterClaimActorGate, 'canActAsCustomizationClaimActor'>,
@@ -59,6 +74,18 @@ export function canClaimCustomizationTask(
   if (!isCustomizationTask(task)) return false
   if (task.status !== 'PendingCustomizationProduction') return false
   return taskHasNoClaimHandler(task)
+}
+
+/** 任务详情定制美工区「美工接单」（与任务中心卡片同规则，不要求 pool Tab）。 */
+export function canClaimCustomizationOnTaskDetail(
+  task: Task,
+  hasAnyRole: (roles: readonly string[]) => boolean,
+  isCustomizationOperator: boolean,
+): boolean {
+  return canClaimCustomizationTask(
+    task,
+    customizationClaimActorGate(hasAnyRole, isCustomizationOperator),
+  )
 }
 
 /** 常规任务池内「接单」：仅 pool Tab + PendingAssign + 设计池权限。 */
