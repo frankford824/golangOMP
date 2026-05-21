@@ -1360,7 +1360,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/fin
 ### 简介
 支持方法: POST。
 
-- `POST`: `POST /v1/tasks/{id}/assign` now carries two bounded semantics under the same route: - `PendingAssign`: assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. - `InProgress`: the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`. - `purchase_task` cannot be assigned or reassigned to a designer.
+- `POST`: `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route: - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`. - `PendingCustomizationProduction` (customization lane): Ops/Admin/SuperAdmin (and other existing assign scopes) may assign an active `CustomizationOperator` as `designer_id`. Success writes `designer_id` and `current_handler_id`, keeps `task_status` at `PendingCustomizationProduction`, and syncs the `customization` module to `in_progress` (not the `design` module). Pure `Designer` targets are rejected with `target_assignee_not_customization_operator`. Customization operators self-claim through `POST /v1/tasks/{id}/modules/customization/claim` instead of this route. - `InProgress` (regular lane): the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. Target user must remain an active `Designer`. - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`. - `purchase_task` cannot be assigned or reassigned to a designer.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1378,7 +1378,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `designer_id` | integer | 否 | Designer/assignee user id. Omit or send null on a single-task reassign to clear the assignee and return an InProgress task to PendingAssign. |
+| `designer_id` | integer | 否 | Designer or customization-operator user id (same field for both lanes). Regular tasks expect an active `Designer` target; customization tasks in `PendingCustomizationProduction` expect an active `CustomizationOperator` target. Omit or send null on a single-task reassign to clear the assignee and return an InProgress task to PendingAssign. |
 | `assigned_by` | integer | 否 | Optional override for compatibility. Defaults to the current authenticated actor. |
 | `remark` | string | 否 | - |
 

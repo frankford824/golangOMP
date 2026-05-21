@@ -103,6 +103,180 @@ func TestTaskAssignmentServiceAssignSyncsDesignModule(t *testing.T) {
 	}
 }
 
+func TestTaskAssignmentServiceAssignCustomizationOperatorKeepsProductionStatus(t *testing.T) {
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         9,
+		Roles:      []domain.Role{domain.RoleOps},
+		Department: string(domain.DepartmentOperations),
+	})
+	userRepo := newIdentityUserRepo()
+	seedTaskAssignmentUser(userRepo, 301, domain.DepartmentCustomizationArt, "默认组", domain.UserStatusActive, domain.RoleCustomizationOperator)
+	seedTaskAssignmentUser(userRepo, 302, domain.DepartmentDesignRD, "", domain.UserStatusActive, domain.RoleDesigner)
+
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    1778,
+		TaskNo:                "T-1778",
+		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		CustomizationRequired: true,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+		OwnerDepartment:       string(domain.DepartmentOperations),
+		OwnerOrgTeam:          "ops-team-1",
+		CreatorID:             9,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	moduleRepo := newStep04TaskModuleRepo(
+		&domain.TaskModule{
+			ID:           71,
+			TaskID:       1778,
+			ModuleKey:    domain.ModuleKeyCustomization,
+			State:        domain.ModuleStatePendingClaim,
+			PoolTeamCode: strPtr(domain.TeamCustomizationArt),
+		},
+		&domain.TaskModule{
+			ID:           72,
+			TaskID:       1778,
+			ModuleKey:    domain.ModuleKeyDesign,
+			State:        domain.ModuleStatePendingClaim,
+			PoolTeamCode: strPtr(domain.TeamDesignStandard),
+		},
+	)
+	moduleEventRepo := &step04TaskModuleEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{},
+		WithTaskAssignmentModuleSync(moduleRepo, moduleEventRepo),
+		WithTaskAssignmentScopeUserRepo(userRepo))
+
+	task, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1778,
+		DesignerID: authzInt64Ptr(301),
+		AssignedBy: 9,
+		Remark:     "assign customization operator",
+	})
+	if appErr != nil {
+		t.Fatalf("Assign(customization) unexpected error: %+v", appErr)
+	}
+	if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
+		t.Fatalf("task status = %s, want PendingCustomizationProduction", task.TaskStatus)
+	}
+	if task.DesignerID == nil || *task.DesignerID != 301 {
+		t.Fatalf("designer_id = %+v, want 301", task.DesignerID)
+	}
+	if task.CurrentHandlerID == nil || *task.CurrentHandlerID != 301 {
+		t.Fatalf("current_handler_id = %+v, want 301", task.CurrentHandlerID)
+	}
+	customizationModule := moduleRepo.modules[domain.ModuleKeyCustomization]
+	if customizationModule.State != domain.ModuleStateInProgress {
+		t.Fatalf("customization module state = %s, want in_progress", customizationModule.State)
+	}
+	if customizationModule.ClaimedBy == nil || *customizationModule.ClaimedBy != 301 {
+		t.Fatalf("customization module claimed_by = %+v, want 301", customizationModule.ClaimedBy)
+	}
+	designModule := moduleRepo.modules[domain.ModuleKeyDesign]
+	if designModule.State != domain.ModuleStatePendingClaim {
+		t.Fatalf("design module state = %s, want pending_claim (untouched)", designModule.State)
+	}
+	if designModule.ClaimedBy != nil {
+		t.Fatalf("design module claimed_by = %+v, want nil", designModule.ClaimedBy)
+	}
+	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventAssigned {
+		t.Fatalf("task events = %+v, want assigned", eventRepo.events)
+	}
+}
+
+func TestTaskAssignmentServiceAssignCustomizationRejectsPureDesignerTarget(t *testing.T) {
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         9,
+		Roles:      []domain.Role{domain.RoleOps},
+		Department: string(domain.DepartmentOperations),
+	})
+	userRepo := newIdentityUserRepo()
+	seedTaskAssignmentUser(userRepo, 302, domain.DepartmentDesignRD, "", domain.UserStatusActive, domain.RoleDesigner)
+
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    1779,
+		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		CustomizationRequired: true,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+		OwnerDepartment:       string(domain.DepartmentOperations),
+		OwnerOrgTeam:          "ops-team-1",
+		CreatorID:             9,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+	_, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1779,
+		DesignerID: authzInt64Ptr(302),
+		AssignedBy: 9,
+	})
+	if appErr == nil {
+		t.Fatal("Assign(customization->designer) expected error")
+	}
+	if appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("error code = %s, want %s", appErr.Code, domain.ErrCodeInvalidRequest)
+	}
+	details, ok := appErr.Details.(map[string]interface{})
+	if !ok || details["deny_code"] != "target_assignee_not_customization_operator" {
+		t.Fatalf("deny details = %+v, want target_assignee_not_customization_operator", appErr.Details)
+	}
+}
+
+func TestTaskAssignmentServicePendingAssignStillRequiresDesignerTarget(t *testing.T) {
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         9,
+		Roles:      []domain.Role{domain.RoleOps},
+		Department: string(domain.DepartmentOperations),
+	})
+	userRepo := newIdentityUserRepo()
+	seedTaskAssignmentUser(userRepo, 301, domain.DepartmentCustomizationArt, "默认组", domain.UserStatusActive, domain.RoleCustomizationOperator)
+	seedTaskAssignmentUser(userRepo, 303, domain.DepartmentDesignRD, "", domain.UserStatusActive, domain.RoleDesigner)
+
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:              1780,
+		TaskStatus:      domain.TaskStatusPendingAssign,
+		TaskType:        domain.TaskTypeNewProductDevelopment,
+		OwnerDepartment: string(domain.DepartmentOperations),
+		OwnerOrgTeam:    "ops-team-1",
+		CreatorID:       9,
+	})
+	eventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{}, WithTaskAssignmentScopeUserRepo(userRepo))
+
+	task, appErr := svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1780,
+		DesignerID: authzInt64Ptr(303),
+		AssignedBy: 9,
+	})
+	if appErr != nil {
+		t.Fatalf("Assign(regular designer) unexpected error: %+v", appErr)
+	}
+	if task.TaskStatus != domain.TaskStatusInProgress {
+		t.Fatalf("task status = %s, want InProgress", task.TaskStatus)
+	}
+
+	taskRepo.tasks[1781] = &domain.Task{
+		ID:              1781,
+		TaskStatus:      domain.TaskStatusPendingAssign,
+		TaskType:        domain.TaskTypeNewProductDevelopment,
+		OwnerDepartment: string(domain.DepartmentOperations),
+		OwnerOrgTeam:    "ops-team-1",
+		CreatorID:       9,
+	}
+	_, appErr = svc.Assign(ctx, AssignTaskParams{
+		TaskID:     1781,
+		DesignerID: authzInt64Ptr(301),
+		AssignedBy: 9,
+	})
+	if appErr == nil {
+		t.Fatal("Assign(regular->customization operator) expected error")
+	}
+	details, ok := appErr.Details.(map[string]interface{})
+	if !ok || details["deny_code"] != "target_assignee_not_designer" {
+		t.Fatalf("deny details = %+v, want target_assignee_not_designer", appErr.Details)
+	}
+}
+
 func TestTaskAssignmentServiceAssignSyncsRetouchModule(t *testing.T) {
 	ctx := context.Background()
 	taskRepo := newStep04TaskRepo(&domain.Task{

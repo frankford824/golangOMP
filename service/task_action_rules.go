@@ -112,7 +112,7 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 		return taskActionRule{
 			Action:            action,
 			RequiredRoles:     append([]domain.Role{domain.RoleOps}, managerRoles...),
-			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAssign},
+			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAssign, domain.TaskStatusPendingCustomizationProduction},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeCreator},
 			StatusDenyCode:    "task_status_not_actionable",
 			StatusGateMessage: "task action is not allowed in the current status",
