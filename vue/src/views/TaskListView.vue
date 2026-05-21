@@ -223,7 +223,7 @@
               :disabled="Boolean(claimingTaskId)"
               @click.stop="claimTask(task)"
             >
-              {{ claimingTaskId === task.id ? '接单中...' : '接单' }}
+              {{ taskCenterClaimButtonLabel(task, claimingTaskId === task.id) }}
             </BaseButton>
           </div>
         </div>
@@ -341,6 +341,13 @@ import { getTaskOwnershipDisplay } from '@/domain/task-ownership'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
 import { getTaskCenterCardStatusLabel } from '@/domain/task-center-card-status'
+import {
+  canClaimTaskFromCenter,
+  isCustomizationModuleClaimTask,
+  taskCenterClaimButtonLabel,
+  userCanActAsCustomizationClaimActor,
+  userIsPureDesignerForCustomizationClaim,
+} from '@/domain/task-center-claim'
 import { PermissionEnum } from '@/types'
 
 const router = useRouter()
@@ -811,31 +818,45 @@ function userCanClaimFromDesignerPool(): boolean {
   return permissionsStore.hasAnyRole(['Designer', 'CustomizationOperator'])
 }
 
+function userCanClaimCustomizationFromPool(): boolean {
+  const hasRole = (roles: readonly string[]) => permissionsStore.hasAnyRole(roles)
+  if (userIsPureDesignerForCustomizationClaim(hasRole)) return false
+  return userCanActAsCustomizationClaimActor(hasRole, permissionsStore.isCustomizationOperator)
+}
+
+function taskCenterClaimGate(): {
+  canActAsCustomizationClaimActor: boolean
+  canClaimFromDesignerPool: boolean
+  activeTabIsPool: boolean
+} {
+  return {
+    canActAsCustomizationClaimActor: userCanClaimCustomizationFromPool(),
+    canClaimFromDesignerPool: userCanClaimFromDesignerPool(),
+    activeTabIsPool: activeTab.value === 'pool',
+  }
+}
+
 function canClaimTask(task: Task): boolean {
-  if (activeTab.value !== 'pool') return false
-  // 接单 = 设计师从池认领；仓库/审核等非设计岗位不因「未指派」Tab 而出现按钮
-  if (!userCanClaimFromDesignerPool()) return false
-  const status = String(task.status ?? '').toLowerCase()
-  const isPendingAssignStatus =
-    status === 'pendingassign' ||
-    status === 'pending_assign' ||
-    status === 'pendingclaim' ||
-    status === 'pending_claim'
-  return isPendingAssignStatus && !task.designerId && !task.currentHandlerId
+  return canClaimTaskFromCenter(task, taskCenterClaimGate())
 }
 
 async function claimTask(task: Task) {
   if (!canClaimTask(task) || claimingTaskId.value) return
-  const me = permissionsStore.currentUser
-  if (!me) return
-  const currentUserId = Number.parseInt(String(me.id ?? ''), 10)
-  if (Number.isNaN(currentUserId)) {
-    listActionError.value = '当前账号信息异常，无法接单，请重新登录后重试'
-    return
-  }
   claimingTaskId.value = task.id
   listActionError.value = ''
   try {
+    if (isCustomizationModuleClaimTask(task)) {
+      await tasksStore.claimCustomizationModule(task.id)
+      await refreshList(true)
+      return
+    }
+    const me = permissionsStore.currentUser
+    if (!me) return
+    const currentUserId = Number.parseInt(String(me.id ?? ''), 10)
+    if (Number.isNaN(currentUserId)) {
+      listActionError.value = '当前账号信息异常，无法接单，请重新登录后重试'
+      return
+    }
     await tasksApi.assign(task.id, {
       designer_id: currentUserId,
       designer_name: me.name,

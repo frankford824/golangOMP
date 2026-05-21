@@ -2021,6 +2021,14 @@ export const useTasksStore = defineStore('tasks', () => {
     await loadTaskById(taskId)
   }
 
+  /** 定制美工模块领取：POST /v1/tasks/{id}/modules/customization/claim */
+  async function claimCustomizationModule(taskId: string) {
+    const task = getById(taskId)
+    if (!task) throw new Error('任务不存在')
+    await tasksApi.claimModule(taskId, 'customization')
+    await loadTaskById(taskId)
+  }
+
   /** retouch_task 完成动作：POST /v1/tasks/{id}/modules/retouch/actions/submit */
   async function submitRetouch(taskId: string) {
     const task = getById(taskId)
@@ -2394,6 +2402,7 @@ export const useTasksStore = defineStore('tasks', () => {
     clearDesignerAssignee,
     submitDesign,
     claimRetouchModule,
+    claimCustomizationModule,
     submitRetouch,
     claimAudit,
     passAudit,
