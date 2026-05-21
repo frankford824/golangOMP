@@ -358,7 +358,7 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 		CategoryName:     categoryName,
 		SPrice:           sPrice,
 		Remark:           strings.TrimSpace(remark),
-		CostPrice:        cloneFloat64Ptr(detail.CostPrice),
+		CostPrice:        erpCostPriceOrZero(detail.CostPrice),
 		Operation:        "product_profile_upsert",
 		SKUImmutable:     &skuImmutable,
 		Source:           strings.TrimSpace(source),
@@ -384,7 +384,7 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(detail.Quantity),
-			CostPrice:    cloneFloat64Ptr(detail.CostPrice),
+			CostPrice:    erpCostPriceOrZero(detail.CostPrice),
 		},
 	}
 	if task.TaskType == domain.TaskTypeOriginalProductDevelopment {
@@ -433,6 +433,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		CategoryCode:     strings.TrimSpace(item.CategoryCode),
 		CategoryName:     strings.TrimSpace(detail.CategoryName),
 		SPrice:           sPrice,
+		CostPrice:        erpCostPriceOrZero(item.CostPrice),
 		Remark:           strings.TrimSpace(remark),
 		Operation:        "product_profile_upsert",
 		Source:           strings.TrimSpace(source),
@@ -458,7 +459,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(item.Quantity),
-			CostPrice:    cloneFloat64Ptr(item.CostPrice),
+			CostPrice:    erpCostPriceOrZero(item.CostPrice),
 		},
 	}
 	return normalizeERPProductUpsertPayload(payload), nil
@@ -467,6 +468,13 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 func zeroFloat64Ptr() *float64 {
 	zero := 0.0
 	return &zero
+}
+
+func erpCostPriceOrZero(value *float64) *float64 {
+	if value == nil {
+		return zeroFloat64Ptr()
+	}
+	return cloneFloat64Ptr(value)
 }
 
 func firstFloat64Ptr(values ...*float64) *float64 {
@@ -532,6 +540,9 @@ func (s *taskService) persistTaskFilingState(
 		if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
 			return err
 		}
+		if err := s.syncSingleSKUItemCostProjectionFromDetail(ctx, tx, task, detail); err != nil {
+			return err
+		}
 		if updater, ok := s.taskRepo.(taskSKUItemFilingProjectionUpdater); ok {
 			if err := updater.UpdateSKUItemsFilingProjection(ctx, tx, task.ID, detail.FilingStatus, detail.ERPSyncRequired, detail.ERPSyncVersion, detail.LastFiledAt, detail.FilingErrorMessage); err != nil {
 				return err
@@ -558,6 +569,29 @@ func (s *taskService) persistTaskFilingState(
 		}))
 		return err
 	})
+}
+
+func (s *taskService) syncSingleSKUItemCostProjectionFromDetail(ctx context.Context, tx repo.Tx, task *domain.Task, detail *domain.TaskDetail) error {
+	if s == nil || task == nil || detail == nil {
+		return nil
+	}
+	if task.TaskType != domain.TaskTypeNewProductDevelopment && task.TaskType != domain.TaskTypePurchaseTask {
+		return nil
+	}
+	items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("list task sku items for filing cost projection: %w", err)
+	}
+	if len(items) != 1 || items[0] == nil {
+		return nil
+	}
+	updater, ok := s.taskRepo.(taskSKUItemCostInfoUpdater)
+	if !ok {
+		return fmt.Errorf("task sku item cost updater is not configured")
+	}
+	copied := *items[0]
+	syncSKUItemCostFromTaskDetail(&copied, detail)
+	return updater.UpdateSKUItemCostInfo(ctx, tx, &copied)
 }
 
 func hydrateTaskDetailFilingProjection(task *domain.Task, detail *domain.TaskDetail) {

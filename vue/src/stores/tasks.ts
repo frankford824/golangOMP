@@ -763,6 +763,18 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     const manualOverride = raw.manual_cost_override ?? raw.manualCostOverride ?? costOverrideSummary?.current_override_active
     if (manualOverride === true) costPriceMode = 'manual'
   }
+  const estimatedCostRaw = raw.estimated_cost ?? raw.estimatedCost
+  const estimatedCost =
+    typeof estimatedCostRaw === 'number' && Number.isFinite(estimatedCostRaw) ? estimatedCostRaw : undefined
+  const costRuleIdRaw = raw.cost_rule_id ?? raw.costRuleId
+  const costRuleId =
+    typeof costRuleIdRaw === 'number' && Number.isFinite(costRuleIdRaw) ? costRuleIdRaw : undefined
+  const requiresManualReviewRaw = raw.requires_manual_review ?? raw.requiresManualReview
+  const requiresManualReview =
+    typeof requiresManualReviewRaw === 'boolean' ? requiresManualReviewRaw : undefined
+  const manualCostOverrideRaw = raw.manual_cost_override ?? raw.manualCostOverride
+  const manualCostOverride =
+    typeof manualCostOverrideRaw === 'boolean' ? manualCostOverrideRaw : undefined
 
   const isRetouchType = String(rawTaskType).toLowerCase() === 'retouch_task'
   const designSubStatusFromApi =
@@ -1046,6 +1058,19 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     purchaseInfo,
     basePriceAmount,
     costPriceMode,
+    ...(estimatedCost != null ? { estimatedCost } : {}),
+    ...(costRuleId != null ? { costRuleId } : {}),
+    ...(typeof (raw.cost_rule_name ?? raw.costRuleName) === 'string'
+      ? { costRuleName: String(raw.cost_rule_name ?? raw.costRuleName) }
+      : {}),
+    ...(typeof (raw.cost_rule_source ?? raw.costRuleSource) === 'string'
+      ? { costRuleSource: String(raw.cost_rule_source ?? raw.costRuleSource) }
+      : {}),
+    ...(requiresManualReview != null ? { requiresManualReview } : {}),
+    ...(manualCostOverride != null ? { manualCostOverride } : {}),
+    ...(typeof (raw.manual_cost_override_reason ?? raw.manualCostOverrideReason) === 'string'
+      ? { manualCostOverrideReason: String(raw.manual_cost_override_reason ?? raw.manualCostOverrideReason) }
+      : {}),
     ...(procurementSummary != null ? { procurementSummary } : {}),
     ...(costOverrideSummary != null ? { costOverrideSummary } : {}),
     ...(governanceAuditSummary != null ? { governanceAuditSummary } : {}),

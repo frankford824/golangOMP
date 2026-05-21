@@ -714,6 +714,12 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 	applyTaskProductSelection(detail, selection, task)
 
 	items := buildSingleTaskSKUItems(task, detail)
+	if appErr := s.applyBatchSKUItemCostPrefill(ctx, detail, items); appErr != nil {
+		return nil, appErr
+	}
+	if len(items) == 1 && items[0] != nil && items[0].Item != nil {
+		syncTaskDetailCostFromSKUItem(detail, items[0].Item)
+	}
 	newID, txErr := s.createTaskWithBatchSkuItemsTx(ctx, p, task, detail, items)
 	if txErr != nil {
 		var erpProductID, erpSKUCode string
@@ -839,20 +845,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		return nil, appErr
 	}
 	if len(items) > 0 && items[0] != nil && items[0].Item != nil {
-		primary := items[0].Item
-		detail.CostPrice = cloneFloat64Ptr(primary.CostPrice)
-		detail.EstimatedCost = cloneFloat64Ptr(primary.EstimatedCost)
-		detail.CostRuleID = cloneInt64Ptr(primary.CostRuleID)
-		detail.CostRuleName = primary.CostRuleName
-		detail.CostRuleSource = primary.CostRuleSource
-		detail.MatchedRuleVersion = cloneIntPtr(primary.MatchedRuleVersion)
-		detail.PrefillSource = primary.PrefillSource
-		detail.PrefillAt = cloneTimePtr(primary.PrefillAt)
-		detail.RequiresManualReview = primary.RequiresManualReview
-		detail.ManualCostOverride = primary.ManualCostOverride
-		detail.ManualCostOverrideReason = primary.ManualCostOverrideReason
-		detail.OverrideActor = primary.OverrideActor
-		detail.OverrideAt = cloneTimePtr(primary.OverrideAt)
+		syncTaskDetailCostFromSKUItem(detail, items[0].Item)
 	}
 
 	newID, txErr := s.createTaskWithBatchSkuItemsTx(ctx, p, task, detail, items)
@@ -2017,6 +2010,19 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		detail.CostRuleSource,
 	)
 
+	var singleItemCostProjection *domain.TaskSKUItem
+	if task.TaskType == domain.TaskTypeNewProductDevelopment || task.TaskType == domain.TaskTypePurchaseTask {
+		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
+		if err != nil {
+			return nil, infraError("list task sku items for business info cost projection", err)
+		}
+		if len(items) == 1 && items[0] != nil {
+			copied := *items[0]
+			syncSKUItemCostFromTaskDetail(&copied, detail)
+			singleItemCostProjection = &copied
+		}
+	}
+
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if bindingChanged {
 			if err := s.taskRepo.UpdateProductBinding(ctx, tx, task); err != nil {
@@ -2025,6 +2031,15 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		}
 		if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
 			return err
+		}
+		if singleItemCostProjection != nil {
+			updater, ok := s.taskRepo.(taskSKUItemCostInfoUpdater)
+			if !ok {
+				return fmt.Errorf("task sku item cost updater is not configured")
+			}
+			if err := updater.UpdateSKUItemCostInfo(ctx, tx, singleItemCostProjection); err != nil {
+				return err
+			}
 		}
 		if s.costOverrideEventRepo != nil && overrideAuditEvent != nil {
 			if _, err := s.costOverrideEventRepo.Append(ctx, tx, overrideAuditEvent); err != nil {
@@ -2459,6 +2474,14 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	categoryID := cloneInt64Ptr(detail.CategoryID)
 	categoryCode := firstNonEmptyString(strings.TrimSpace(item.CategoryCode), strings.TrimSpace(detail.CategoryCode))
 	if categoryID == nil && categoryCode == "" {
+		resolvedCategoryID, resolvedCategoryCode, appErr := s.resolveTaskCostRuleCategory(ctx, detail)
+		if appErr != nil {
+			return costPreviewComputation{}, appErr
+		}
+		categoryID = resolvedCategoryID
+		categoryCode = strings.TrimSpace(resolvedCategoryCode)
+	}
+	if categoryID == nil && categoryCode == "" {
 		return costPreviewComputation{}, nil
 	}
 	notes := strings.Join(nonEmptyStrings(
@@ -2490,6 +2513,44 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		Process:      detail.Process,
 		Notes:        notes,
 	}, rules), nil
+}
+
+func syncTaskDetailCostFromSKUItem(detail *domain.TaskDetail, item *domain.TaskSKUItem) {
+	if detail == nil || item == nil {
+		return
+	}
+	detail.CostPrice = cloneFloat64Ptr(item.CostPrice)
+	detail.EstimatedCost = cloneFloat64Ptr(item.EstimatedCost)
+	detail.CostRuleID = cloneInt64Ptr(item.CostRuleID)
+	detail.CostRuleName = item.CostRuleName
+	detail.CostRuleSource = item.CostRuleSource
+	detail.MatchedRuleVersion = cloneIntPtr(item.MatchedRuleVersion)
+	detail.PrefillSource = item.PrefillSource
+	detail.PrefillAt = cloneTimePtr(item.PrefillAt)
+	detail.RequiresManualReview = item.RequiresManualReview
+	detail.ManualCostOverride = item.ManualCostOverride
+	detail.ManualCostOverrideReason = item.ManualCostOverrideReason
+	detail.OverrideActor = item.OverrideActor
+	detail.OverrideAt = cloneTimePtr(item.OverrideAt)
+}
+
+func syncSKUItemCostFromTaskDetail(item *domain.TaskSKUItem, detail *domain.TaskDetail) {
+	if item == nil || detail == nil {
+		return
+	}
+	item.CostPrice = cloneFloat64Ptr(detail.CostPrice)
+	item.EstimatedCost = cloneFloat64Ptr(detail.EstimatedCost)
+	item.CostRuleID = cloneInt64Ptr(detail.CostRuleID)
+	item.CostRuleName = detail.CostRuleName
+	item.CostRuleSource = detail.CostRuleSource
+	item.MatchedRuleVersion = cloneIntPtr(detail.MatchedRuleVersion)
+	item.PrefillSource = detail.PrefillSource
+	item.PrefillAt = cloneTimePtr(detail.PrefillAt)
+	item.RequiresManualReview = detail.RequiresManualReview
+	item.ManualCostOverride = detail.ManualCostOverride
+	item.ManualCostOverrideReason = detail.ManualCostOverrideReason
+	item.OverrideActor = detail.OverrideActor
+	item.OverrideAt = cloneTimePtr(detail.OverrideAt)
 }
 
 func (s *taskService) listActiveCostRulesForText(ctx context.Context, categoryID *int64, categoryCode, notes string) ([]*domain.CostRule, error) {
@@ -3114,7 +3175,7 @@ func buildERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.TaskDe
 		Price:        cloneFloat64Ptr(snapshot.Price),
 		SPrice:       cloneFloat64Ptr(snapshot.SPrice),
 		Remark:       strings.TrimSpace(remark),
-		CostPrice:    cloneFloat64Ptr(detail.CostPrice),
+		CostPrice:    erpCostPriceOrZero(detail.CostPrice),
 		Operation:    "original_product_update",
 		SKUImmutable: &skuImmutable,
 		Currency:     snapshot.Currency,
@@ -3141,7 +3202,7 @@ func buildERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.TaskDe
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(detail.Quantity),
-			CostPrice:    cloneFloat64Ptr(detail.CostPrice),
+			CostPrice:    erpCostPriceOrZero(detail.CostPrice),
 		},
 	}
 	payload.TaskContext.FiledAt = time.Now().UTC().Format(time.RFC3339)

@@ -526,8 +526,11 @@ func TestBatchNewProductCreateSyncAllowsMissingCost(t *testing.T) {
 	if got := bridgeStub.upsertPayloads[0].BusinessInfo.CostPrice; got == nil || *got != 5.1 {
 		t.Fatalf("batch upsert[0] business_info.cost_price = %v, want 5.1", got)
 	}
-	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got != nil {
-		t.Fatalf("batch upsert[1] business_info.cost_price = %v, want nil", got)
+	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got == nil || *got != 0 {
+		t.Fatalf("batch upsert[1] business_info.cost_price = %v, want explicit 0", got)
+	}
+	if got := bridgeStub.upsertPayloads[1].CostPrice; got == nil || *got != 0 {
+		t.Fatalf("batch upsert[1] cost_price = %v, want explicit 0", got)
 	}
 }
 
@@ -758,6 +761,87 @@ func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) 
 	}
 }
 
+func TestRetryFilingSyncsSingleSKUItemCostProjectionFromTaskDetail(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			794: {
+				ID:                  794,
+				TaskNo:              "RW-20260521-A-000791",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				SKUCode:             "CGK000031",
+				PrimarySKUCode:      "CGK000031",
+				ProductNameSnapshot: "真/常规kt板/爱心挂牌/30*34cm",
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			794: {
+				TaskID:                   794,
+				Category:                 "常规kt板",
+				CategoryName:             "常规kt板",
+				SpecText:                 "30*34cm",
+				CostPrice:                float64Ptr(11.98),
+				EstimatedCost:            float64Ptr(11.98),
+				CostRuleID:               int64Ptr(7),
+				CostRuleName:             "常规KT板基础单价",
+				CostRuleSource:           "system_auto",
+				RequiresManualReview:     false,
+				ManualCostOverride:       false,
+				ManualCostOverrideReason: "",
+				FilingStatus:             domain.FilingStatusFiled,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			794: {
+				{
+					ID:                  621,
+					TaskID:              794,
+					SequenceNo:          1,
+					SKUCode:             "CGK000031",
+					ProductNameSnapshot: "真/常规kt板/爱心挂牌/30*34cm",
+				},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	_, appErr := svc.RetryFiling(context.Background(), RetryTaskFilingParams{
+		TaskID:     794,
+		OperatorID: 1,
+		Remark:     "retry cost projection",
+	})
+	if appErr != nil {
+		t.Fatalf("RetryFiling() unexpected error: %+v", appErr)
+	}
+	item := taskRepo.skuItems[794][0]
+	if got := item.CostPrice; got == nil || *got != 11.98 {
+		t.Fatalf("sku item cost_price = %v, want 11.98", got)
+	}
+	if got := item.EstimatedCost; got == nil || *got != 11.98 {
+		t.Fatalf("sku item estimated_cost = %v, want 11.98", got)
+	}
+	if item.CostRuleName != "常规KT板基础单价" {
+		t.Fatalf("sku item cost_rule_name = %q, want synced rule", item.CostRuleName)
+	}
+	if item.RequiresManualReview {
+		t.Fatal("sku item requires_manual_review should be false after synced priced detail")
+	}
+}
+
 func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreateSync(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
@@ -807,6 +891,12 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	if taskRepo.skuItems[task.ID][0].ERPSyncRequired {
 		t.Fatal("sku item erp_sync_required should be false after create filing")
 	}
+	if got := bridgeStub.upsertPayload.CostPrice; got == nil || *got != 0 {
+		t.Fatalf("create erp cost_price = %v, want explicit 0", got)
+	}
+	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || *got != 0 {
+		t.Fatalf("create erp business_info.cost_price = %v, want explicit 0", got)
+	}
 
 	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
 		TaskID:             task.ID,
@@ -832,6 +922,12 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	}
 	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || *got != 5.69 {
 		t.Fatalf("erp business_info.cost_price = %v, want 5.69", got)
+	}
+	if got := taskRepo.skuItems[task.ID][0].CostPrice; got == nil || *got != 5.69 {
+		t.Fatalf("sku item cost_price after business-info patch = %v, want 5.69", got)
+	}
+	if taskRepo.skuItems[task.ID][0].ERPSyncRequired {
+		t.Fatal("sku item erp_sync_required should be false after forced cost refiling")
 	}
 }
 

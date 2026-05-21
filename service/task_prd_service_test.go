@@ -1922,6 +1922,101 @@ func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromExistingRemark(t *test
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoMarksMissingDimensionCostAndMirrorsSingleSKUItem(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规kt板",
+		DisplayName:  "常规kt板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规KT板基础单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(11),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			901: {
+				ID:                  901,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "NSKT-MISSING-SIZE",
+				ProductNameSnapshot: "常规kt板缺尺寸测试",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			901: {TaskID: 901, Category: "常规kt板", CategoryName: "常规kt板"},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			901: {
+				{ID: 1, TaskID: 901, SKUCode: "NSKT-MISSING-SIZE", ProductNameSnapshot: "常规kt板缺尺寸测试"},
+			},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     901,
+		OperatorID: 9,
+		Category:   "常规kt板",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo(missing size) unexpected error: %+v", appErr)
+	}
+	if !detail.RequiresManualReview {
+		t.Fatal("requires_manual_review = false, want true for matched area rule without dimensions")
+	}
+	if detail.EstimatedCost != nil || detail.CostPrice != nil {
+		t.Fatalf("cost state = estimated %+v cost %+v, want nil/nil until size or manual cost is maintained", detail.EstimatedCost, detail.CostPrice)
+	}
+	item := taskRepo.skuItems[901][0]
+	if !item.RequiresManualReview || item.CostPrice != nil || item.CostRuleName != "常规KT板基础单价" {
+		t.Fatalf("sku item cost projection = review %t cost %+v rule %q", item.RequiresManualReview, item.CostPrice, item.CostRuleName)
+	}
+
+	detail, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     901,
+		OperatorID: 9,
+		Category:   "常规kt板",
+		SpecText:   "20*20cm",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo(with size) unexpected error: %+v", appErr)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-0.484) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 0.484", detail.CostPrice)
+	}
+	item = taskRepo.skuItems[901][0]
+	if item.CostPrice == nil || math.Abs(*item.CostPrice-0.484) > 0.000001 {
+		t.Fatalf("sku item cost_price = %+v, want 0.484", item.CostPrice)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoResolvesChineseCategoryNameForCost(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

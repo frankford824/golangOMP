@@ -1222,8 +1222,10 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 		}
 		if payload.CostPrice != nil {
 			item["c_price"] = *payload.CostPrice
+			item["cost_price"] = *payload.CostPrice
 		} else if payload.BusinessInfo != nil && payload.BusinessInfo.CostPrice != nil {
 			item["c_price"] = *payload.BusinessInfo.CostPrice
+			item["cost_price"] = *payload.BusinessInfo.CostPrice
 		}
 		if payload.Remark != "" {
 			item["remark"] = payload.Remark

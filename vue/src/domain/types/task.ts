@@ -326,6 +326,14 @@ export interface Task {
   basePriceAmount?: number
   /** 采购任务：成本单价来源 */
   costPriceMode?: 'manual' | 'template'
+  /** 系统规则估算成本；为空且 requiresManualReview=true 时，需补尺寸或人工维护 */
+  estimatedCost?: number
+  costRuleId?: number
+  costRuleName?: string
+  costRuleSource?: string
+  requiresManualReview?: boolean
+  manualCostOverride?: boolean
+  manualCostOverrideReason?: string
   /** 成本治理读模型：GET /v1/tasks/{id} 的采购摘要，用于详情页展示与仓库/财务判断 */
   procurementSummary?: Record<string, unknown>
   /** 成本人工覆盖摘要：GET /v1/tasks/{id} override_summary */

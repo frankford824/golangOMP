@@ -198,7 +198,7 @@
           </div>
           <p v-if="skuCostError" class="sku-cost-error">{{ skuCostError }}</p>
           <p v-else class="sku-cost-hint">
-            估算 {{ formatCostMoney(currentRow.estimatedCost) }}；保存后该 SKU 将按子项成本同步 ERP。
+            {{ skuCostHint }}
           </p>
         </div>
       </div>
@@ -255,7 +255,7 @@
         </div>
         <p v-if="skuCostError" class="sku-cost-error">{{ skuCostError }}</p>
         <p v-else class="sku-cost-hint">
-          估算 {{ formatCostMoney(currentRow.estimatedCost) }}；保存后该 SKU 将按子项成本同步 ERP。
+          {{ skuCostHint }}
         </p>
       </div>
       <div v-if="currentRow.skuStatus" class="status-pill-row">
@@ -422,9 +422,16 @@ const skuStatusDisplay = computed(() => skuItemStatusLabelCn(currentRow.value.sk
 const showSkuCostPanel = computed(() => (isNewProduct.value || isPurchase.value) && currentRow.value.id != null)
 const skuCostModeLabel = computed(() => {
   if (currentRow.value.manualCostOverride === true || currentRow.value.costPriceMode === 'manual') return '手动维护'
+  if (currentRow.value.requiresManualReview === true && currentRow.value.costPrice == null) return '缺尺寸，成本待维护'
   if (currentRow.value.requiresManualReview === true) return '需人工确认'
   if (currentRow.value.costPrice != null) return '系统计算'
   return '未生成'
+})
+const skuCostHint = computed(() => {
+  if (currentRow.value.requiresManualReview === true && currentRow.value.costPrice == null) {
+    return '缺尺寸，成本待维护；保存成本后该 SKU 会重新同步 ERP c_price。'
+  }
+  return `估算 ${formatCostMoney(currentRow.value.estimatedCost)}；保存后该 SKU 将按子项成本同步 ERP。`
 })
 
 function formatCostMoney(value: number | undefined): string {

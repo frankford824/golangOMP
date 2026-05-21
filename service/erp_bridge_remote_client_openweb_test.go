@@ -58,11 +58,35 @@ func TestBuildERPRemoteOpenWebBizUpsert(t *testing.T) {
 	if item["c_price"] != 12.5 {
 		t.Fatalf("c_price = %#v, want 12.5", item["c_price"])
 	}
-	if _, ok := item["cost_price"]; ok {
-		t.Fatalf("cost_price should not be sent to ERP OpenWeb item: %#v", item["cost_price"])
+	if item["cost_price"] != 12.5 {
+		t.Fatalf("cost_price = %#v, want 12.5", item["cost_price"])
 	}
 	if item["remark"] != "task_business_info_filing" {
 		t.Fatalf("remark = %#v, want task_business_info_filing", item["remark"])
+	}
+}
+
+func TestBuildERPRemoteOpenWebBizUpsertKeepsZeroCost(t *testing.T) {
+	raw := []byte(`{
+		"sku_id":"sku-zero",
+		"product_name":"Zero Cost Product",
+		"cost_price":0,
+		"business_info":{"cost_price":0}
+	}`)
+	biz, err := buildERPRemoteOpenWebBiz("upsert", raw)
+	if err != nil {
+		t.Fatalf("buildERPRemoteOpenWebBiz upsert error: %v", err)
+	}
+	items, ok := biz["items"].([]map[string]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected items: %#v", biz["items"])
+	}
+	item := items[0]
+	if item["c_price"] != float64(0) {
+		t.Fatalf("c_price = %#v, want explicit zero", item["c_price"])
+	}
+	if item["cost_price"] != float64(0) {
+		t.Fatalf("cost_price = %#v, want explicit zero", item["cost_price"])
 	}
 }
 
