@@ -13,7 +13,8 @@ export const WORKFLOW_ROLE_DISPLAY_TO_API: Record<string, string> = {
   设计师: 'Designer',
   定制美工: 'CustomizationOperator',
   普通审核: 'Audit_A',
-  定制审核: 'Audit_B',
+  普通审核B: 'Audit_B',
+  定制审核: 'CustomizationReviewer',
   仓储: 'Warehouse',
 }
 
@@ -32,7 +33,7 @@ export const WORKFLOW_ROLE_API_LABEL_ZH: Record<string, string> = {
   Designer: '设计师',
   CustomizationOperator: '定制美工',
   Audit_A: '普通审核',
-  Audit_B: '定制审核',
+  Audit_B: '普通审核B',
   CustomizationReviewer: '定制审核',
   Warehouse: '仓储',
   Outsource: '外协',
@@ -66,7 +67,7 @@ const ROLE_SLUG_TO_ZH: Record<string, string> = {
   designer: '设计师',
   customization_operator: '定制美工',
   audit_a: '普通审核',
-  audit_b: '定制审核',
+  audit_b: '普通审核B',
   auditor: '普通审核',
   warehouse: '仓储',
   outsource: '外协',
