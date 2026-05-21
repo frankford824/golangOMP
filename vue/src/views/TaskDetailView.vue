@@ -267,22 +267,10 @@
                         empty-text="暂无参考图"
                         size="sm"
                       />
-                      <details
-                        v-if="isBatchTask && topLevelReferenceThumbItems.length > 0"
-                        class="detail-v3-summary-fold"
-                      >
-                        <summary>展开母任务汇总参考图</summary>
-                        <AssetThumbStrip
-                          :items="topLevelReferenceThumbItems"
-                          empty-text="暂无母任务汇总图"
-                          size="sm"
-                        />
-                      </details>
                       <div
                         v-if="
                           canUploadReferenceFromOps ||
-                          opsReferenceThumbItems.length > 0 ||
-                          topLevelReferenceThumbItems.length > 0
+                          opsReferenceThumbItems.length > 0
                         "
                         class="detail-v3-ref-actions"
                       >
@@ -303,7 +291,7 @@
                           上传参考图
                         </button>
                         <button
-                          v-if="opsReferenceThumbItems.length > 0 || topLevelReferenceThumbItems.length > 0"
+                          v-if="opsReferenceThumbItems.length > 0"
                           type="button"
                           class="detail-v3-link-btn"
                           @click="focusReferenceSectionFromDetail"
@@ -875,6 +863,8 @@ import {
   mapTaskEventRowToRecentEvent,
 } from '@/domain/mappers/task-events-from-api'
 import { workflowGateReasonLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
+import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { RecentEvent } from '@/domain/types/dashboard'
 import type { TaskSkuItem } from '@/domain/types/task'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
@@ -1259,32 +1249,56 @@ const detailCostLatestActionLabel = computed(() => {
   const timeLabel = at ? formatMonthDayTimeBeijingOffsetAware(at) : ''
   return [typeLabel, actor, timeLabel].filter(Boolean).join(' · ') || '-'
 })
-const topLevelReferenceThumbItems = computed((): AssetThumbItem[] =>
-  (task.value?.referenceFileRefs ?? [])
+function mergeTaskAndSkuReferenceRefs(detailTask: {
+  referenceFileRefs?: ReferenceFileRef[]
+  skuItems?: Array<{ referenceFileRefs?: ReferenceFileRef[] }>
+}): ReferenceFileRef[] {
+  const rootRefs = detailTask.referenceFileRefs ?? []
+  const skuRefs = detailTask.skuItems?.flatMap((item) => item.referenceFileRefs ?? []) ?? []
+  return [...rootRefs, ...skuRefs]
+}
+
+/** 基础信息区「参考图/母任务汇总」展示用：批量仅 task union；单品 task+sku 去重。 */
+function motherTaskReferenceRefsForOps(detailTask: {
+  referenceFileRefs?: ReferenceFileRef[]
+  skuItems?: Array<{ referenceFileRefs?: ReferenceFileRef[] }>
+} | null | undefined, batch: boolean): ReferenceFileRef[] {
+  if (!detailTask) return []
+  if (batch) {
+    return dedupeReferenceFileRefs(detailTask.referenceFileRefs ?? [])
+  }
+  return dedupeReferenceFileRefs(mergeTaskAndSkuReferenceRefs(detailTask))
+}
+
+function referenceRefsToThumbItems(
+  refs: ReferenceFileRef[],
+  keyPrefix: string,
+  labelFallback: string,
+): AssetThumbItem[] {
+  return refs
     .map((ref, index) => {
       const src = String(ref?.download_url ?? '').trim()
       if (!src) return null
       const filename = String(ref?.filename ?? '').trim()
       return {
-        key: `task-level-ref-${index}-${src}`,
+        key: `${keyPrefix}-${index}-${src}`,
         src,
-        alt: filename || `汇总参考图 ${index + 1}`,
-        label: filename || `汇总参考图 ${index + 1}`,
+        alt: filename || `${labelFallback} ${index + 1}`,
+        label: filename || `${labelFallback} ${index + 1}`,
       }
     })
-    .filter((row) => row != null) as AssetThumbItem[],
+    .filter((row) => row != null) as AssetThumbItem[]
+}
+
+const motherTaskOpsReferenceRefs = computed((): ReferenceFileRef[] =>
+  motherTaskReferenceRefsForOps(task.value, isBatchTask.value),
 )
+
 const detailReferenceLabel = computed(() => {
-  const taskRefs = task.value?.referenceFileRefs?.length ?? 0
-  const skuRefs = task.value?.skuItems?.reduce((sum, item) => sum + (item.referenceFileRefs?.length ?? 0), 0) ?? 0
-  const total = taskRefs + skuRefs
+  const total = motherTaskOpsReferenceRefs.value.length
   return total > 0 ? `${total} 张图片 · 单文件 <= 300MB` : '暂无参考附件'
 })
-const totalReferenceCount = computed(() => {
-  const taskRefs = task.value?.referenceFileRefs?.length ?? 0
-  const skuRefs = task.value?.skuItems?.reduce((sum, item) => sum + (item.referenceFileRefs?.length ?? 0), 0) ?? 0
-  return taskRefs + skuRefs
-})
+const totalReferenceCount = computed(() => motherTaskOpsReferenceRefs.value.length)
 const RETOUCH_MODULE_STATE_LABELS: Record<string, string> = {
   pending_claim: '待领取',
   in_progress: '精修中',
@@ -1428,20 +1442,7 @@ const warehouseProofThumbItems = computed((): AssetThumbItem[] => {
   return []
 })
 const opsReferenceThumbItems = computed((): AssetThumbItem[] =>
-  (isBatchTask.value ? task.value?.referenceFileRefs ?? [] : collectTaskReferenceRefs())
-    .map((ref, index) => {
-      const src = String((ref as { download_url?: string })?.download_url ?? '').trim()
-      if (!src) return null
-      const filename = String((ref as { filename?: string })?.filename ?? '').trim()
-      return {
-        key: `ops-ref-${index}-${src}`,
-        src,
-        alt: filename || `参考图 ${index + 1}`,
-        label: filename || `参考图 ${index + 1}`,
-      }
-    })
-    .filter((item) => item != null)
-    .slice(0, 6) as AssetThumbItem[],
+  referenceRefsToThumbItems(motherTaskOpsReferenceRefs.value, 'ops-ref', '参考图').slice(0, 6),
 )
 const opsReferenceUploadInputRef = ref<HTMLInputElement | null>(null)
 const opsReferenceUploadError = ref('')
@@ -1480,12 +1481,11 @@ watch(
   },
 )
 
-function collectTaskReferenceRefs() {
+/** URL 刷新：覆盖任务级与各 SKU 参考图（去重），不影响母任务区展示计数。 */
+function collectTaskReferenceRefs(): ReferenceFileRef[] {
   const detailTask = task.value
   if (!detailTask) return []
-  const rootRefs = detailTask.referenceFileRefs ?? []
-  const skuRefs = detailTask.skuItems?.flatMap((item) => item.referenceFileRefs ?? []) ?? []
-  return [...rootRefs, ...skuRefs]
+  return dedupeReferenceFileRefs(mergeTaskAndSkuReferenceRefs(detailTask))
 }
 
 watchEffect(() => {
