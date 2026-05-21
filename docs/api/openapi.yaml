@@ -13702,7 +13702,7 @@ paths:
   /v1/tasks/{id}/customization/review:
     post:
       summary: Submit customization review for task
-      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review writes business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`). Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
+      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -13724,10 +13724,10 @@ paths:
                 source_asset_id: { type: integer, nullable: true }
                 customization_level_code:
                   type: string
-                  description: Business-entered review reference level code.
+                  description: Optional business-entered review reference level code. Omitted for lightweight approved reviews.
                 customization_level_name:
                   type: string
-                  description: Business-entered review reference level name.
+                  description: Optional business-entered review reference level name. Omitted for lightweight approved reviews.
                 customization_price:
                   type: number
                   format: double
@@ -13756,7 +13756,7 @@ paths:
                     allOf: [{ $ref: '#/components/schemas/CustomizationJob' }]
                     nullable: true
         '400':
-          description: Invalid decision or missing required review fields
+          description: Invalid customization_review_decision
         '409':
           description: Invalid workflow state transition
         '403':

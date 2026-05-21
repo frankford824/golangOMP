@@ -46,7 +46,7 @@
           <span class="field-label">审核决策</span>
           <select v-model="form.decision" class="reason-textarea">
             <option value="approved">通过</option>
-            <option value="return_to_designer">退回设计</option>
+            <option value="return_to_designer">打回美工处理</option>
             <option value="reviewer_fixed">审核人修正</option>
           </select>
         </label>
@@ -209,7 +209,7 @@ const dialogTitle = computed(() =>
 const hintText = computed(() =>
   props.mode === 'effect'
     ? '本次为效果二次审核，审核结果仅记录意见，不会创建新的定制任务。'
-    : '「退回设计师」属于成功分支，不会创建新的定制任务。',
+    : '打回美工处理后任务回到定制生产阶段，由美工继续改稿；通过后将进入仓库接收。',
 )
 
 function resetForm() {

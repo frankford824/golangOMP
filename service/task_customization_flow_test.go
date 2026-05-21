@@ -139,6 +139,47 @@ func customizationAdminContext() context.Context {
 	})
 }
 
+func TestSubmitCustomizationReviewApprovedWithoutLevelFields(t *testing.T) {
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    120,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired: true,
+		OwnerDepartment:       "运营部",
+		OwnerOrgTeam:          "运营组",
+	})
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:           420,
+		TaskID:       120,
+		DecisionType: domain.CustomizationJobDecisionTypeFinal,
+		Status:       domain.CustomizationJobStatusPendingCustomizationReview,
+	})
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskEventRepo:        &step04TaskEventRepo{},
+		customizationJobRepo: jobRepo,
+		txRunner:             step04TxRunner{},
+	}
+
+	job, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+		TaskID:     120,
+		ReviewerID: 1,
+		Decision:   domain.CustomizationReviewDecisionApproved,
+		CustomizationNote: "审核通过",
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitCustomizationReview(approved, no level) appErr = %+v", appErr)
+	}
+	if job == nil {
+		t.Fatal("SubmitCustomizationReview(approved, no level) job = nil")
+	}
+	if job.CustomizationLevelCode != "" || job.CustomizationLevelName != "" {
+		t.Fatalf("customization level fields = %q / %q, want empty", job.CustomizationLevelCode, job.CustomizationLevelName)
+	}
+	if taskRepo.tasks[120].TaskStatus != domain.TaskStatusPendingWarehouseReceive {
+		t.Fatalf("task status = %s, want PendingWarehouseReceive", taskRepo.tasks[120].TaskStatus)
+	}
+}
+
 func TestSubmitCustomizationReviewReturnToDesignerCommitsWithoutError(t *testing.T) {
 	designerID := int64(22)
 	lastOperatorID := int64(44)

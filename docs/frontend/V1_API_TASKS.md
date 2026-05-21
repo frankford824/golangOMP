@@ -5192,7 +5192,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/complete \
 ### 简介
 支持方法: POST。
 
-- `POST`: Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review writes business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`). Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing.
+- `POST`: Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5212,8 +5212,8 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `reviewer_id` | integer | 否 | - |
 | `source_asset_id` | integer | 否 | - |
-| `customization_level_code` | string | 否 | Business-entered review reference level code. |
-| `customization_level_name` | string | 否 | Business-entered review reference level name. |
+| `customization_level_code` | string | 否 | Optional business-entered review reference level code. Omitted for lightweight approved reviews. |
+| `customization_level_name` | string | 否 | Optional business-entered review reference level name. Omitted for lightweight approved reviews. |
 | `customization_price` | number | 否 | Business-entered review reference unit price. Not the execution freeze snapshot. |
 | `customization_weight_factor` | number | 否 | Business-entered review reference weight factor. Not the execution freeze snapshot. |
 | `customization_note` | string | 否 | Reviewer-entered business note for this review record. |
@@ -5235,7 +5235,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid decision or missing required review fields |
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid customization_review_decision |
 | 409 | 见 `error.code` | 见 `deny_code` | Invalid workflow state transition |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
 | 404 | 见 `error.code` | 见 `deny_code` | Task not found |

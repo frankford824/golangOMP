@@ -575,28 +575,28 @@
                         label="驳回分类"
                         placeholder="打回时请选择"
                         :options="AUDIT_REJECT_REASON_OPTIONS"
-                        :disabled="!showAuditActionButtons || Boolean(actionLoading)"
+                        :disabled="!showActiveAuditActionButtons || Boolean(actionLoading)"
                         clearable
                       />
                       <BaseTextarea
                         v-model="auditComment"
                         :placeholder="auditRejectReasonCategory === AUDIT_REJECT_REASON_OTHER ? '填写其他具体理由...' : '填写通过说明或补充修改建议...'"
                         :rows="4"
-                        :disabled="!showAuditActionButtons || Boolean(actionLoading)"
+                        :disabled="!showActiveAuditActionButtons || Boolean(actionLoading)"
                         :error="auditCommentError"
                       />
                     </article>
                     <article class="detail-v3-info-card detail-v3-info-card--audit">
                       <p class="detail-v3-card-kicker">{{ auditActionCardTitle }}</p>
                       <p class="detail-v3-card-text">{{ auditActionDescription }}</p>
-                      <div v-if="showAuditActionButtons" class="detail-v3-inline-actions">
+                      <div v-if="showActiveAuditActionButtons" class="detail-v3-inline-actions">
                         <button
                           type="button"
                           class="detail-v3-dark-btn"
                           :disabled="actionLoading === 'audit-pass'"
                           @click="passAuditFromDetail"
                         >
-                          {{ actionLoading === 'audit-pass' ? '通过中...' : '通过' }}
+                          {{ actionLoading === 'audit-pass' ? '通过中...' : approveButtonLabel }}
                         </button>
                         <button
                           type="button"
@@ -604,7 +604,7 @@
                           :disabled="actionLoading === 'audit-reject'"
                           @click="rejectAuditFromDetail"
                         >
-                          {{ actionLoading === 'audit-reject' ? '打回中...' : '打回' }}
+                          {{ actionLoading === 'audit-reject' ? '打回中...' : rejectButtonLabel }}
                         </button>
                       </div>
                       <p v-else class="detail-v3-card-muted">当前不在审核处理阶段，仅展示审核结果与稿件。</p>
@@ -809,7 +809,6 @@
       :sku-item="editingSkuItem"
       @saved="onSkuItemEditSaved"
     />
-
     <div v-if="lightboxSrc" class="lightbox-overlay" @click="lightboxSrc = null">
       <img :src="lightboxSrc" alt="预览大图" class="lightbox-img" @click.stop />
     </div>
@@ -1083,6 +1082,12 @@ const auditActionDescription = computed(() =>
   isCustomizationTask.value
     ? '通过后进入仓库接收；打回后回到美工处理。'
     : '通过后进入仓库；打回后回到设计模块。',
+)
+const approveButtonLabel = computed(() =>
+  isCustomizationTask.value ? '审核通过' : '通过',
+)
+const rejectButtonLabel = computed(() =>
+  isCustomizationTask.value ? '打回美工处理' : '打回',
 )
 
 /** 顶栏左列副标题：类型 · 主状态 · 团队（与右侧徽标呼应，避免一行堆满徽标） */
@@ -1574,6 +1579,21 @@ const showAuditActionButtons = computed(
     }
     return Boolean(actionAvailability.value?.canShowAuditActions)
   },
+)
+const showCustomizationReviewActionButtons = computed(() => {
+  if (!task.value || !isCustomizationTask.value) return false
+  if (task.value.status !== 'PendingCustomizationReview') return false
+  return (
+    can('task.customization.review') ||
+    permissionsStore.hasAnyRole([
+      'CustomizationReviewer',
+      'customization_reviewer',
+      'customizationreviewer',
+    ])
+  )
+})
+const showActiveAuditActionButtons = computed(
+  () => showAuditActionButtons.value || showCustomizationReviewActionButtons.value,
 )
 const retouchModuleState = computed(() => retouchModuleSummary.value?.state ?? '')
 
@@ -2313,9 +2333,22 @@ async function claimRetouchFromDetail(): Promise<void> {
 
 async function passAuditFromDetail(): Promise<void> {
   if (!task.value) return
-  if (!showAuditActionButtons.value) return
+  if (!showActiveAuditActionButtons.value) return
   auditCommentError.value = ''
   const comment = auditComment.value.trim() || '审核通过'
+  if (showCustomizationReviewActionButtons.value) {
+    await runDetailAction('audit-pass', '定制审核通过失败', async () => {
+      await tasksStore.submitCustomizationReview(task.value!.id, {
+        customization_review_decision: 'approved',
+        customization_note: comment,
+      })
+      auditRejectReasonCategory.value = ''
+      auditComment.value = ''
+      flashSuccess('定制审核已通过，任务已进入仓库接收')
+      void loadSideEvents()
+    })
+    return
+  }
   await runDetailAction('audit-pass', '审核通过失败', async () => {
     await tasksStore.passAudit(task.value!.id, {
       stage: auditStageForTask(),
@@ -2331,7 +2364,7 @@ async function passAuditFromDetail(): Promise<void> {
 
 async function rejectAuditFromDetail(): Promise<void> {
   if (!task.value) return
-  if (!showAuditActionButtons.value) return
+  if (!showActiveAuditActionButtons.value) return
   const category = auditRejectReasonCategory.value.trim()
   const comment = auditComment.value.trim()
   if (!category) {
@@ -2344,6 +2377,20 @@ async function rejectAuditFromDetail(): Promise<void> {
   }
   const rejectComment = comment ? `${category}：${comment}` : category
   auditCommentError.value = ''
+  if (showCustomizationReviewActionButtons.value) {
+    await runDetailAction('audit-reject', '定制审核打回失败', async () => {
+      await tasksStore.submitCustomizationReview(task.value!.id, {
+        reviewer_id: currentUser.value?.id ?? '',
+        customization_review_decision: 'return_to_designer',
+        customization_note: rejectComment,
+      })
+      auditRejectReasonCategory.value = ''
+      auditComment.value = ''
+      flashSuccess('已打回美工处理')
+      void loadSideEvents()
+    })
+    return
+  }
   await runDetailAction('audit-reject', '审核打回失败', async () => {
     await tasksStore.rejectAudit(task.value!.id, {
       stage: auditStageForTask(),

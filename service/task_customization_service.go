@@ -31,9 +31,6 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 	if levelCode == "" && levelName != "" {
 		levelCode = levelName
 	}
-	if p.Decision != domain.CustomizationReviewDecisionReturnToDesigner && levelCode == "" && levelName == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "customization_level_code or customization_level_name is required for non-return decisions", nil)
-	}
 
 	currentJob, err := s.customizationJobRepo.GetLatestByTaskID(ctx, task.ID)
 	if err != nil {
