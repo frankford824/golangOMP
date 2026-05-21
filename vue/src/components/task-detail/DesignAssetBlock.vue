@@ -7,7 +7,7 @@
     <div class="block-header">
       <div class="flex items-center gap-2">
         <span class="block-icon">D</span>
-        <h3 class="block-title">设计与资产</h3>
+        <h3 class="block-title">{{ designAssetBlockTitle }}</h3>
       </div>
       <div v-if="designAssetStatusRow && !isPurchase" class="status-inline">
         <span class="status-dot" :class="designAssetStatusRow.dotClass" />
@@ -17,7 +17,7 @@
 
     <!-- 设计师指派（采购任务无设计节点，不展示） -->
     <div v-if="designerLine && !isPurchase" class="info-row-simple">
-      <span class="row-label">设计师</span>
+      <span class="row-label">{{ designerRoleLabel }}</span>
       <span>{{ designerLine }}</span>
     </div>
     <div v-if="task.needOutsource && !isPurchase" class="outsource-flag">
@@ -182,18 +182,20 @@
     </div>
     <div v-else class="empty-assets">
       <template v-if="batchUi && scopedAssetVersions.length === 0">
-        当前商品暂无版本记录；可切换商品查看或上传设计稿
+        当前商品暂无版本记录；可切换商品查看或{{ uploadActionLabel }}
       </template>
-      <template v-else>暂无版本，请上传设计稿</template>
+      <template v-else>暂无版本，请{{ uploadActionLabel }}</template>
     </div>
 
     <!-- 交付设计稿上传（与 DesignWorkbench 共用 DesignAssetPanel） -->
     <DesignAssetPanel
-      v-if="!isPurchase && can('design.upload') && (canUploadDesignDelivery(task) || retouchModuleCanUpload)"
+      v-if="!isPurchase && canShowDesignUploadPanel"
       :task-id="task.id"
       :can-upload="true"
       :can-submit-audit="canSubmitFromDesignPanel"
-      :submit-button-label="isRetouchTask ? '提交精修' : undefined"
+      :submit-button-label="submitButtonLabel"
+      :upload-button-label="uploadButtonLabel"
+      :submit-hint-idle="submitHintIdle"
       :upload-context-label="designPanelCaption"
       :delivery-remark-suffix="designRemarkSuffix"
       :active-sku-code="activeSkuCodeForPanel || undefined"
@@ -264,7 +266,7 @@ const designerLine = computed(() => {
   return s === '-' ? '' : s
 })
 
-const { can } = usePermission()
+const { can, currentUser, frontendRoles } = usePermission()
 const tasksStore = useTasksStore()
 
 const isPurchase = computed(
@@ -274,6 +276,12 @@ const isPurchase = computed(
 const isRetouchTask = computed(
   () =>
     task.value.businessType === 'RETOUCH_TASK' || task.value.taskType === 'RETOUCH_TASK',
+)
+const isCustomizationTask = computed(
+  () =>
+    task.value.workflowLane === 'customization' ||
+    task.value.businessLane === 'customization' ||
+    task.value.customizationRequired === true,
 )
 
 const retouchModuleSummary = computed(() =>
@@ -291,6 +299,54 @@ const retouchModuleCanUpload = computed(() => {
 })
 
 const isDesignChainTask = computed(() => !isPurchase.value && !isRetouchTask.value)
+const designAssetBlockTitle = computed(() => isCustomizationTask.value ? '定制稿与资产' : '设计与资产')
+const designerRoleLabel = computed(() => isCustomizationTask.value ? '美工处理人' : '设计师')
+const uploadActionLabel = computed(() => isCustomizationTask.value ? '上传定制设计稿' : '上传设计稿')
+const submitButtonLabel = computed(() => {
+  if (isRetouchTask.value) return '提交精修'
+  if (isCustomizationTask.value) return '提交定制审核'
+  return undefined
+})
+const uploadButtonLabel = computed(() =>
+  isCustomizationTask.value ? '上传本次定制设计稿（可多选）' : '上传本次设计稿（可多选）',
+)
+const submitHintIdle = computed(() =>
+  isCustomizationTask.value
+    ? '提交后定制设计稿将进入定制审核队列，本次文件锁定为新版本'
+    : '',
+)
+const customizationSubmitRoles = [
+  'CustomizationOperator',
+  'customization_operator',
+  'Ops',
+  'ops',
+  'Admin',
+  'admin',
+  'SuperAdmin',
+  'super_admin',
+  'HRAdmin',
+  'hr_admin',
+  'RoleAdmin',
+  'role_admin',
+  'DepartmentAdmin',
+  'department_admin',
+  'TeamLead',
+  'team_lead',
+  'DesignDirector',
+  'design_director',
+] as const
+const canUseCustomizationSubmit = computed(() => {
+  const role = String(currentUser.value?.role ?? '').trim()
+  const roles = frontendRoles.value.map((item) => String(item).trim())
+  const normalized = new Set([role, ...roles].map((item) => item.toLowerCase()).filter(Boolean))
+  return customizationSubmitRoles.some((candidate) => normalized.has(String(candidate).toLowerCase()))
+})
+const canShowDesignUploadPanel = computed(() => {
+  if (!can('design.upload')) return false
+  if (isRetouchTask.value) return retouchModuleCanUpload.value
+  if (isCustomizationTask.value && !canUseCustomizationSubmit.value) return false
+  return canUploadDesignDelivery(task.value)
+})
 
 /** 设计链：已有版本且已离开上传/提交审核操作态 */
 const showDesignResultDisplayState = computed(() => {
@@ -590,7 +646,7 @@ type AssetRootGroup = {
 
 function assetKindLabel(kind: string): string {
   if (kind === 'delivery') return '交付'
-  if (kind === 'source') return '设计原稿'
+  if (kind === 'source') return isCustomizationTask.value ? '定制原稿' : '设计原稿'
   return kind || '其他'
 }
 

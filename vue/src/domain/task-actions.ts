@@ -48,6 +48,14 @@ export function isRetouchTask(task: Task): boolean {
   return task.businessType === TaskTypeEnum.RETOUCH_TASK
 }
 
+export function isCustomizationTask(task: Task): boolean {
+  return (
+    task.workflowLane === 'customization' ||
+    task.businessLane === 'customization' ||
+    task.customizationRequired === true
+  )
+}
+
 // ─── 设计流程操作谓词 ──────────────────────────────────────────────────────────
 
 /** 是否可执行「指派设计师」 */
@@ -182,6 +190,7 @@ export function canReassignDesigner(task: Task): boolean {
 export function canSubmitAudit(task: Task): boolean {
   if (isPurchaseTask(task)) return false
   if (isRetouchTask(task)) return Boolean(task.designerId)
+  if (isCustomizationTask(task)) return task.status === 'PendingCustomizationProduction'
   const s = task.status
   return s === 'InProgress' || s === 'RejectedByAuditA' || s === 'RejectedByAuditB'
 }
@@ -193,6 +202,9 @@ export function canSubmitAudit(task: Task): boolean {
 export function isLegacyTaskStatusInDesignerEditablePhase(task: Task): boolean {
   if (isPurchaseTask(task)) return false
   const s = task.status
+  if (isCustomizationTask(task)) {
+    return s === 'PendingCustomizationProduction'
+  }
   return (
     s === 'PendingAssign' ||
     s === 'InProgress' ||
@@ -207,6 +219,9 @@ export function isLegacyTaskStatusInDesignerEditablePhase(task: Task): boolean {
 export function canUploadDesignDelivery(task: Task): boolean {
   if (isPurchaseTask(task)) return false
   if (isRetouchTask(task)) return Boolean(task.designerId)
+  if (isCustomizationTask(task)) {
+    return task.status === 'PendingCustomizationProduction'
+  }
   if (!isLegacyTaskStatusInDesignerEditablePhase(task)) return false
   return task.designSubStatus === 'IN_PROGRESS' || task.designSubStatus === 'REJECTED'
 }
@@ -228,6 +243,7 @@ export function canUploadAuditAsset(task: Task): boolean {
 /** 是否处于审核节点（可通过/打回/转交/交班） */
 export function canAudit(task: Task): boolean {
   if (isPurchaseTask(task) || isRetouchTask(task)) return false
+  if (isCustomizationTask(task)) return false
   return task.status === 'PendingAuditA' || task.status === 'PendingAuditB'
 }
 
@@ -318,6 +334,7 @@ export function isInAuditQueue(task: Task): boolean {
 /** 是否处于定制流程链路 */
 export function isInCustomizationFlow(task: Task): boolean {
   return (
+    isCustomizationTask(task) ||
     task.status === 'PendingOutsource' ||
     task.status === 'Outsourcing' ||
     task.status === 'PendingOutsourceReview' ||

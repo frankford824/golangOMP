@@ -386,6 +386,8 @@
                   :items="batchSkuItems"
                   :filing-status="task.filing_status ?? null"
                   :can-upload-design="canDirectSkuDesignUpload"
+                  :upload-design-label="skuUploadDesignLabel"
+                  :disabled-upload-title="skuUploadDisabledTitle"
                   @edit="openSkuItemEdit"
                   @upload-design="openSkuDesignUpload"
                 />
@@ -408,19 +410,19 @@
                         v-if="showAssignDesignerButton"
                         variant="secondary"
                         size="sm"
-                        title="任务尚无负责人时，在待指派阶段指定设计师（首次指派）"
+                        :title="assignDesignerTitle"
                         @click="doAssign"
                       >
-                        指派设计师
+                        {{ assignDesignerLabel }}
                       </BaseButton>
                       <BaseButton
                         v-if="showReassignDesignerButton"
                         variant="secondary"
                         size="sm"
-                        title="设计阶段任务调度：在进入审核责任链前更换设计负责人"
+                        :title="reassignDesignerTitle"
                         @click="doReassign"
                       >
-                        重新指派设计师
+                        {{ reassignDesignerLabel }}
                       </BaseButton>
                     </div>
                   </div>
@@ -446,20 +448,20 @@
                     <template v-if="isDesignOrRetouchModuleResultState">
                       <article class="detail-v3-info-card">
                         <p class="detail-v3-card-kicker">
-                          {{ isRetouchTask ? '精修负责人' : '设计负责人' }}
+                          {{ designOwnerLabel }}
                         </p>
                         <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
                         <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
                       </article>
                       <article class="detail-v3-info-card">
                         <p class="detail-v3-card-kicker">
-                          {{ isRetouchTask ? '精修版本' : '设计资产版本' }}
+                          {{ designAssetVersionLabel }}
                         </p>
                         <p class="detail-v3-card-text">
                           {{ isRetouchTask ? retouchVersionSummary : designVersionSummary }}
                         </p>
                         <p class="detail-v3-card-muted">
-                          {{ isRetouchTask ? '切换上方时间线可查看各版本精修稿件' : '切换上方时间线可查看各版本设计稿件' }}
+                          {{ designAssetVersionHint }}
                         </p>
                       </article>
                       <article class="detail-v3-info-card">
@@ -469,7 +471,7 @@
                       <article class="detail-v3-info-card detail-v3-info-card--refs">
                         <p class="detail-v3-card-kicker">资产操作</p>
                         <p class="detail-v3-card-text">
-                          在上方{{ isRetouchTask ? '精修稿件' : '设计稿件' }}区预览或下载当前版本文件。
+                          在上方{{ designAssetPreviewAreaLabel }}区预览或下载当前版本文件。
                         </p>
                         <button
                           type="button"
@@ -482,16 +484,16 @@
                     </template>
                     <template v-else>
                       <article class="detail-v3-info-card">
-                        <p class="detail-v3-card-kicker">设计负责人</p>
+                        <p class="detail-v3-card-kicker">{{ designOwnerLabel }}</p>
                         <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
                         <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
                       </article>
                       <article class="detail-v3-info-card">
-                        <p class="detail-v3-card-kicker">上传设计稿</p>
-                        <p class="detail-v3-card-text">请在上方"设计与资产"区域上传文件</p>
+                        <p class="detail-v3-card-kicker">{{ uploadDesignCardTitle }}</p>
+                        <p class="detail-v3-card-text">请在上方"{{ designAssetPanelName }}"区域上传文件</p>
                       </article>
                       <article class="detail-v3-info-card">
-                        <p class="detail-v3-card-kicker">设计资产版本</p>
+                        <p class="detail-v3-card-kicker">{{ designAssetVersionLabel }}</p>
                         <p class="detail-v3-card-text">{{ designVersionSummary }}</p>
                       </article>
                       <article class="detail-v3-info-card detail-v3-info-card--refs">
@@ -510,16 +512,16 @@
                           </template>
                           <template v-else>
                             <p class="detail-v3-card-text">
-                              请在上方"设计与资产"区域上传精修稿后点击"提交精修"按钮完成任务。
+                              请在上方"{{ designAssetPanelName }}"区域上传精修稿后点击"提交精修"按钮完成任务。
                             </p>
                           </template>
                         </template>
                         <template v-else>
-                          <p class="detail-v3-card-kicker">提交审核</p>
+                          <p class="detail-v3-card-kicker">{{ submitAuditCardTitle }}</p>
                           <p class="detail-v3-card-text">
-                            请在上方“设计与资产”区域选择交付文件后提交审核。
+                            请在上方“{{ designAssetPanelName }}”区域选择交付文件后{{ submitAuditActionText }}。
                           </p>
-                          <p class="detail-v3-card-muted">提交动作统一由设计与资产面板处理。</p>
+                          <p class="detail-v3-card-muted">{{ submitAuditCardHint }}</p>
                         </template>
                       </article>
                     </template>
@@ -533,11 +535,11 @@
                 >
                   <div class="detail-v3-module-head">
                     <div>
-                      <p class="detail-v3-eyebrow">审核侧</p>
-                      <h2 class="detail-v3-module-title">审核模块</h2>
+                      <p class="detail-v3-eyebrow">{{ auditModuleEyebrow }}</p>
+                      <h2 class="detail-v3-module-title">{{ auditModuleTitle }}</h2>
                     </div>
                     <span class="detail-v3-state-pill detail-v3-state-pill--warning">
-                      通过 / 打回 / 审核参考
+                      {{ auditModulePillText }}
                     </span>
                   </div>
                   <div v-if="isBatchTask && batchSkuItems.length > 1" class="batch-sku-switcher">
@@ -557,7 +559,7 @@
                   </div>
                   <div class="detail-v3-workflow-grid detail-v3-workflow-grid--audit">
                     <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">待审核稿件</p>
+                      <p class="detail-v3-card-kicker">{{ auditPendingAssetTitle }}</p>
                       <p class="detail-v3-card-text">{{ designVersionSummary }}</p>
                       <p class="detail-v3-card-muted">点击预览 / 下载 / 对比历史版本</p>
                       <AssetThumbStrip
@@ -585,8 +587,8 @@
                       />
                     </article>
                     <article class="detail-v3-info-card detail-v3-info-card--audit">
-                      <p class="detail-v3-card-kicker">审核动作</p>
-                      <p class="detail-v3-card-text">通过后进入仓库；打回后回到设计模块。</p>
+                      <p class="detail-v3-card-kicker">{{ auditActionCardTitle }}</p>
+                      <p class="detail-v3-card-text">{{ auditActionDescription }}</p>
                       <div v-if="showAuditActionButtons" class="detail-v3-inline-actions">
                         <button
                           type="button"
@@ -829,6 +831,7 @@ import {
   canSubmitAudit,
   canUploadDesignDelivery,
   canReassignDesigner,
+  isCustomizationTask as isCustomizationTaskByDomain,
   isLegacyTaskStatusInDesignerEditablePhase,
   taskHasRecordedDesignOutput,
   taskHasAssignee,
@@ -983,10 +986,10 @@ const isRetouchTask = computed(
 )
 const isCustomizationTask = computed(
   () =>
-    !!task.value &&
-    (task.value.workflowLane === 'customization' ||
-      task.value.customizationRequired === true ||
-      Boolean(task.value.customizationSourceType)),
+    !!task.value && (
+      isCustomizationTaskByDomain(task.value) ||
+      Boolean(task.value.customizationSourceType)
+    ),
 )
 /** 成本同步已经覆盖原品、新品、采购；P 图等任务有成本数据时也展示。 */
 const showCostInDetail = computed(
@@ -1017,16 +1020,70 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 }
 
 const designModuleTitle = computed(() => {
-  if (isCustomizationTask.value) return '定制模块'
+  if (isCustomizationTask.value) return '美工提交设计稿'
   if (isRetouchTask.value) return '精修模块'
   return '设计模块'
 })
 
 const designModuleEyebrow = computed(() => {
-  if (isCustomizationTask.value) return '定制侧'
+  if (isCustomizationTask.value) return '定制美工侧'
   if (isRetouchTask.value) return '精修侧'
   return '设计侧'
 })
+
+const designOwnerLabel = computed(() => {
+  if (isCustomizationTask.value) return '美工处理人'
+  if (isRetouchTask.value) return '精修负责人'
+  return '设计负责人'
+})
+const designAssetPanelName = computed(() => isCustomizationTask.value ? '定制稿与资产' : '设计与资产')
+const uploadDesignCardTitle = computed(() => isCustomizationTask.value ? '上传定制设计稿' : '上传设计稿')
+const submitAuditCardTitle = computed(() => isCustomizationTask.value ? '提交定制审核' : '提交审核')
+const submitAuditActionText = computed(() => isCustomizationTask.value ? '提交定制审核' : '提交审核')
+const submitAuditCardHint = computed(() =>
+  isCustomizationTask.value
+    ? '提交动作统一由定制稿与资产面板处理。'
+    : '提交动作统一由设计与资产面板处理。',
+)
+const designAssetVersionLabel = computed(() => isCustomizationTask.value ? '定制稿版本' : '设计资产版本')
+const designAssetVersionHint = computed(() =>
+  isRetouchTask.value
+    ? '切换上方时间线可查看各版本精修稿件'
+    : isCustomizationTask.value
+      ? '切换上方时间线可查看各版本定制稿件'
+      : '切换上方时间线可查看各版本设计稿件',
+)
+const designAssetPreviewAreaLabel = computed(() =>
+  isRetouchTask.value ? '精修稿件' : isCustomizationTask.value ? '定制稿件' : '设计稿件',
+)
+const assignDesignerLabel = computed(() => isCustomizationTask.value ? '指派美工' : '指派设计师')
+const reassignDesignerLabel = computed(() => isCustomizationTask.value ? '重新指派美工' : '重新指派设计师')
+const assignDesignerTitle = computed(() =>
+  isCustomizationTask.value
+    ? '任务尚无美工处理人时，在待处理阶段指定美工'
+    : '任务尚无负责人时，在待指派阶段指定设计师（首次指派）',
+)
+const reassignDesignerTitle = computed(() =>
+  isCustomizationTask.value
+    ? '定制任务调度：在进入定制审核前更换美工处理人'
+    : '设计阶段任务调度：在进入审核责任链前更换设计负责人',
+)
+const skuUploadDesignLabel = computed(() => isCustomizationTask.value ? '上传定制设计稿' : '上传设计稿')
+const skuUploadDisabledTitle = computed(() =>
+  isCustomizationTask.value ? '当前状态不可上传定制设计稿' : '当前状态不可上传设计稿',
+)
+const auditModuleEyebrow = computed(() => isCustomizationTask.value ? '定制审核侧' : '审核侧')
+const auditModuleTitle = computed(() => isCustomizationTask.value ? '定制审核' : '审核模块')
+const auditModulePillText = computed(() =>
+  isCustomizationTask.value ? '定制审核 / 打回美工处理' : '通过 / 打回 / 审核参考',
+)
+const auditPendingAssetTitle = computed(() => isCustomizationTask.value ? '待审核定制稿' : '待审核稿件')
+const auditActionCardTitle = computed(() => isCustomizationTask.value ? '定制审核动作' : '审核动作')
+const auditActionDescription = computed(() =>
+  isCustomizationTask.value
+    ? '通过后进入仓库接收；打回后回到美工处理。'
+    : '通过后进入仓库；打回后回到设计模块。',
+)
 
 /** 顶栏左列副标题：类型 · 主状态 · 团队（与右侧徽标呼应，避免一行堆满徽标） */
 const headerSubtitle = computed(() => {
@@ -1281,7 +1338,7 @@ const isDesignModuleResultState = computed(() => {
   if (!task.value || isPurchaseTask.value || isRetouchTask.value) return false
   if (detailScopedAssetVersionCount.value === 0) return false
   if (canUploadDesignDelivery(task.value)) return false
-  if (canSubmitAudit(task.value)) return false
+  if (canSubmitAudit(task.value) && !isCustomizationTask.value) return false
   return true
 })
 
@@ -1511,6 +1568,7 @@ const showAuditActionButtons = computed(
     // 跨组发起的任务常被审核账号处理，但若审核员既非责任人又非同组，`canAccessTask` 为 false，
     // 会误藏「通过/打回」；门禁以 RBAC + 模块 allowed_actions / 任务状态兜底为准，与 showReassignDesignerButton 口径一致。
     if (!task.value || !can([...AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS])) return false
+    if (isCustomizationTask.value) return false
     if (hasModuleActionProjection(auditModuleSummary.value)) {
       return hasModuleAction(auditModuleSummary.value, ['approve', 'reject'])
     }
@@ -1613,6 +1671,7 @@ const canDirectSkuDesignUpload = computed(() => {
   if (!task.value || isPurchaseTask.value || !hasTaskScopeAccess.value) return false
   if (!can('design.upload')) return false
   if (isRetouchTask.value) return showRetouchSubmitAction.value
+  if (isCustomizationTask.value && !permissionsStore.isCustomizationOperator) return false
   return canUploadDesignDelivery(task.value)
 })
 
@@ -1633,14 +1692,14 @@ function openSkuItemEdit(payload: { item: TaskSkuItem; index: number }) {
 function openSkuDesignUpload(payload: { item: TaskSkuItem; index: number }) {
   if (!task.value) return
   if (!canDirectSkuDesignUpload.value) {
-    actionError.value = '当前状态不可上传设计稿'
+    actionError.value = isCustomizationTask.value ? '当前状态不可上传定制设计稿' : '当前状态不可上传设计稿'
     return
   }
   actionError.value = ''
   detailProductIndex.value = Math.max(0, payload.index)
   const skuCode = String(payload.item.skuCode ?? '').trim()
   const skuSuffix = skuCode ? `（${skuCode}）` : ''
-  flashSuccess(`已切换到子项 ${payload.index + 1}${skuSuffix}，请在设计模块上传设计稿`)
+  flashSuccess(`已切换到子项 ${payload.index + 1}${skuSuffix}，请在${designModuleTitle.value}上传${isCustomizationTask.value ? '定制设计稿' : '设计稿'}`)
   void nextTick(() => {
     focusReferenceSectionFromDetail()
   })
@@ -1778,7 +1837,7 @@ function findDesignAssetSection(): HTMLElement | null {
 function focusReferenceSectionFromDetail(): void {
   const section = findDesignAssetSection()
   if (!section) {
-    actionError.value = '设计与资产区尚未渲染完成，请稍后重试'
+    actionError.value = `${designAssetPanelName.value}区尚未渲染完成，请稍后重试`
     return
   }
   actionError.value = ''
@@ -2247,7 +2306,7 @@ async function claimRetouchFromDetail(): Promise<void> {
       }
       throw err
     }
-    flashSuccess('已领取精修任务，可以开始上传设计稿并提交')
+    flashSuccess('已领取精修任务，可以开始上传精修稿并提交')
     void loadSideEvents()
   })
 }
@@ -2292,7 +2351,7 @@ async function rejectAuditFromDetail(): Promise<void> {
     })
     auditRejectReasonCategory.value = ''
     auditComment.value = ''
-    flashSuccess('已打回设计')
+    flashSuccess('已打回设计处理')
     void loadSideEvents()
   })
 }

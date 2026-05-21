@@ -332,6 +332,10 @@ func availableActionsForTask(task *domain.Task, detail *domain.TaskDetail, procu
 	switch task.TaskStatus {
 	case domain.TaskStatusPendingAssign:
 		return append(actions, domain.AvailableActionAssign)
+	case domain.TaskStatusPendingCustomizationProduction:
+		if task.CustomizationRequired {
+			return append(actions, domain.AvailableActionSubmitDesign)
+		}
 	case domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB:
 		return append(actions, domain.AvailableActionSubmitDesign)
 	case domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB:

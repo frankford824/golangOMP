@@ -626,7 +626,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 	initialStatus := domain.TaskStatusPendingAssign
 	var initialHandlerID *int64
 	if p.CustomizationRequired {
-		initialStatus = domain.TaskStatusPendingCustomizationReview
+		initialStatus = domain.TaskStatusPendingCustomizationProduction
 		initialHandlerID = nil
 	} else if p.DesignerID != nil && p.TaskType != domain.TaskTypePurchaseTask {
 		initialStatus = domain.TaskStatusInProgress
@@ -763,7 +763,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 	initialStatus := domain.TaskStatusPendingAssign
 	var initialHandlerID *int64
 	if p.CustomizationRequired {
-		initialStatus = domain.TaskStatusPendingCustomizationReview
+		initialStatus = domain.TaskStatusPendingCustomizationProduction
 		initialHandlerID = nil
 	} else if p.DesignerID != nil && p.TaskType != domain.TaskTypePurchaseTask {
 		initialStatus = domain.TaskStatusInProgress

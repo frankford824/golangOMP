@@ -79,36 +79,11 @@ const isPurchase = computed(() => props.task.businessType === 'PURCHASE_TASK')
 const isRetouch = computed(
   () => props.task.businessType === 'RETOUCH_TASK' || props.task.taskType === 'RETOUCH_TASK',
 )
-const isCustomization = computed(() => props.task.workflowLane === 'customization')
-
-const CUSTOMIZATION_STEP_ORDER = [
-  'PendingCustomizationReview',
-  'PendingCustomizationProduction',
-  'PendingEffectReview',
-  'PendingEffectRevision',
-  'PendingProductionTransfer',
-  'PendingWarehouseQC',
-  'RejectedByWarehouse',
-  'PendingWarehouseReceive',
-  'Completed',
-] as const
-
-function resolveCustomizationStepState(
-  activeStatuses: readonly string[],
-  doneStatuses: readonly string[],
-  legacyStatus?: string,
-  mainStatus?: string,
-): StepState {
-  if (mainStatus === 'CLOSED' || legacyStatus === 'Completed') return 'done'
-  if (doneStatuses.includes(legacyStatus ?? '')) return 'done'
-  if (mainStatus && ['READY_TO_CLOSE', 'CLOSED'].includes(mainStatus)) return 'done'
-  if (activeStatuses.includes(legacyStatus ?? '')) return 'current'
-  if (mainStatus && ['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING'].includes(mainStatus)) {
-    if (activeStatuses.some((s) => s.startsWith('PendingWarehouse') || s === 'RejectedByWarehouse')) return 'current'
-    return 'done'
-  }
-  return 'pending'
-}
+const isCustomization = computed(() =>
+  props.task.workflowLane === 'customization' ||
+  props.task.businessLane === 'customization' ||
+  props.task.customizationRequired === true,
+)
 
 const steps = computed((): Step[] => {
   const t = props.task
@@ -144,12 +119,12 @@ const steps = computed((): Step[] => {
   if (isCustomization.value) {
     const ls = legacyStatus ?? ''
     const custStatus = ls
-    const idx = CUSTOMIZATION_STEP_ORDER.indexOf(custStatus as typeof CUSTOMIZATION_STEP_ORDER[number])
-    const pastStep = (stepStatuses: readonly string[]): boolean =>
-      idx >= 0 && stepStatuses.every((s) => {
-        const si = CUSTOMIZATION_STEP_ORDER.indexOf(s as typeof CUSTOMIZATION_STEP_ORDER[number])
-        return si >= 0 && idx > si
-      })
+    const warehouseStatuses = ['PendingWarehouseReceive', 'PendingWarehouseQC', 'PendingProductionTransfer', 'RejectedByWarehouse'] as const
+    const isWarehouseStage = warehouseStatuses.includes(custStatus as typeof warehouseStatuses[number]) ||
+      mainStatus === 'WAREHOUSE_PENDING' ||
+      mainStatus === 'WAREHOUSE_PROCESSING' ||
+      mainStatus === 'READY_TO_CLOSE' ||
+      mainStatus === 'CLOSED'
 
     return [
       {
@@ -158,50 +133,29 @@ const steps = computed((): Step[] => {
         state: mainStatus && mainStatus !== 'DRAFT' ? 'done' : 'current',
       },
       {
+        key: 'customization_submit',
+        label: '美工提交设计稿',
+        subLabel: custStatus === 'PendingCustomizationProduction' ? '待美工提交' : undefined,
+        state: custStatus === 'PendingCustomizationProduction' ? 'current' : 'done',
+      },
+      {
         key: 'cust_review',
         label: '定制审核',
-        state: resolveCustomizationStepState(
-          ['PendingCustomizationReview'],
-          pastStep(['PendingCustomizationReview']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
-      },
-      {
-        key: 'cust_production',
-        label: '定制作图',
-        state: resolveCustomizationStepState(
-          ['PendingCustomizationProduction'],
-          pastStep(['PendingCustomizationProduction']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
-      },
-      {
-        key: 'effect_review',
-        label: '效果审核',
-        state: resolveCustomizationStepState(
-          ['PendingEffectReview', 'PendingEffectRevision'],
-          pastStep(['PendingEffectReview', 'PendingEffectRevision']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
-      },
-      {
-        key: 'production_transfer',
-        label: '转生产',
-        state: resolveCustomizationStepState(
-          ['PendingProductionTransfer'],
-          pastStep(['PendingProductionTransfer']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
+        state: custStatus === 'PendingCustomizationProduction'
+          ? 'pending'
+          : custStatus === 'PendingCustomizationReview'
+            ? 'current'
+            : 'done',
       },
       {
         key: 'warehouse',
-        label: '云仓接收',
+        label: '仓库接收',
         subLabel: t.warehouseSubStatus ? getWarehouseSubStatusLabel(t.warehouseSubStatus) : undefined,
-        state: resolveCustomizationStepState(
-          ['PendingWarehouseQC', 'RejectedByWarehouse', 'PendingWarehouseReceive'],
-          [],
-          custStatus, mainStatus,
-        ),
+        state: isWarehouseStage
+          ? mainStatus === 'READY_TO_CLOSE' || mainStatus === 'CLOSED' || legacyStatus === 'Completed'
+            ? 'done'
+            : 'current'
+          : 'pending',
       },
       {
         key: 'close',

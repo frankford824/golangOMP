@@ -90,7 +90,7 @@
         v-if="multiBucketSubmitStats && !designStore.isSubmitting && !deliverySession"
         class="batch-submit-summary"
       >
-        待提交汇总：{{ multiBucketSubmitStats.products }} 个商品 · {{ multiBucketSubmitStats.files }} 个文件（提交审核时一并上传）
+        待提交汇总：{{ multiBucketSubmitStats.products }} 个商品 · {{ multiBucketSubmitStats.files }} 个文件（{{ submitActionLabel }}时一并上传）
       </p>
       <div v-if="pendingFiles.length > 0" class="staging-area">
         <div class="staging-header">
@@ -174,7 +174,7 @@
           @change="handleFileChange"
         />
         <span class="upload-icon-text">+</span>
-        <span class="upload-hint">上传本次设计稿（可多选）</span>
+        <span class="upload-hint">{{ uploadButtonLabel }}</span>
         <span v-if="readingLocal" class="upload-uploading">{{ DESIGN_UPLOAD_COPY.reading }}</span>
       </div>
       <p v-if="uploadPickError" class="upload-pick-error">{{ uploadPickError }}</p>
@@ -201,7 +201,7 @@
         {{ submitError }}
       </span>
       <span v-else class="submit-hint text-sm text-slate-400">
-        {{ DESIGN_UPLOAD_COPY.submitHintIdle }}
+        {{ submitHintIdle }}
       </span>
     </div>
   </section>
@@ -253,6 +253,8 @@ const props = withDefaults(
     resolveStagingTargetSku?: (bucketKey: string) => string | undefined
     /** 覆盖提交按钮文案（默认使用「提交审核」） */
     submitButtonLabel?: string
+    uploadButtonLabel?: string
+    submitHintIdle?: string
   }>(),
   {
     accept: UPLOAD_ACCEPT_ATTRIBUTE,
@@ -263,6 +265,8 @@ const props = withDefaults(
     getDeliveryRemarkSuffixBySku: undefined,
     resolveStagingTargetSku: undefined,
     submitButtonLabel: '',
+    uploadButtonLabel: '上传本次设计稿（可多选）',
+    submitHintIdle: '',
   },
 )
 
@@ -274,6 +278,8 @@ const designStore = useDesignStore()
 const { session: deliverySession } = storeToRefs(designStore)
 /** 多商品分桶提交：有 stagingBucketKey 即启用（与 activeSkuCode 解耦，避免无 SKU 时串桶） */
 const isMultiSkuBucketMode = computed(() => !!props.stagingBucketKey?.trim())
+const submitActionLabel = computed(() => props.submitButtonLabel || DESIGN_UPLOAD_COPY.submitAudit)
+const submitHintIdle = computed(() => props.submitHintIdle || DESIGN_UPLOAD_COPY.submitHintIdle)
 
 const serverPercentRounded = computed(() => {
   const s = deliverySession.value

@@ -141,14 +141,16 @@ func customizationAdminContext() context.Context {
 
 func TestSubmitCustomizationReviewReturnToDesignerCommitsWithoutError(t *testing.T) {
 	designerID := int64(22)
+	lastOperatorID := int64(44)
 	taskRepo := newStep04TaskRepo(&domain.Task{
-		ID:                    101,
-		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
-		CustomizationRequired: true,
-		DesignerID:            &designerID,
-		OwnerDepartment:       "运营部",
-		OwnerOrgTeam:          "运营组",
-		CurrentHandlerID:      nil,
+		ID:                          101,
+		TaskStatus:                  domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired:       true,
+		DesignerID:                  &designerID,
+		LastCustomizationOperatorID: &lastOperatorID,
+		OwnerDepartment:             "运营部",
+		OwnerOrgTeam:                "运营组",
+		CurrentHandlerID:            nil,
 	})
 	jobRepo := newCustomizationFlowJobRepo()
 	svc := &taskService{
@@ -169,17 +171,53 @@ func TestSubmitCustomizationReviewReturnToDesignerCommitsWithoutError(t *testing
 	if item == nil {
 		t.Fatal("SubmitCustomizationReview(return_to_designer) item = nil")
 	}
-	if taskRepo.tasks[101].TaskStatus != domain.TaskStatusPendingCustomizationReview {
-		t.Fatalf("task status = %s, want PendingCustomizationReview", taskRepo.tasks[101].TaskStatus)
+	if taskRepo.tasks[101].TaskStatus != domain.TaskStatusPendingCustomizationProduction {
+		t.Fatalf("task status = %s, want PendingCustomizationProduction", taskRepo.tasks[101].TaskStatus)
 	}
-	if taskRepo.tasks[101].CurrentHandlerID == nil || *taskRepo.tasks[101].CurrentHandlerID != designerID {
-		t.Fatalf("current_handler_id = %+v, want %d", taskRepo.tasks[101].CurrentHandlerID, designerID)
+	if taskRepo.tasks[101].CurrentHandlerID == nil || *taskRepo.tasks[101].CurrentHandlerID != lastOperatorID {
+		t.Fatalf("current_handler_id = %+v, want %d", taskRepo.tasks[101].CurrentHandlerID, lastOperatorID)
 	}
 	if len(jobRepo.jobs) != 1 {
 		t.Fatalf("customization jobs = %d, want 1", len(jobRepo.jobs))
 	}
-	if item.Status != domain.CustomizationJobStatusPendingCustomizationReview {
-		t.Fatalf("customization job status = %s, want pending_customization_review", item.Status)
+	if item.Status != domain.CustomizationJobStatusPendingCustomizationProduction {
+		t.Fatalf("customization job status = %s, want pending_customization_production", item.Status)
+	}
+}
+
+func TestSubmitCustomizationReviewReturnToDesignerFallsBackToDesigner(t *testing.T) {
+	designerID := int64(22)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    109,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired: true,
+		DesignerID:            &designerID,
+		OwnerDepartment:       "运营部",
+		OwnerOrgTeam:          "运营组",
+	})
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:           409,
+		TaskID:       109,
+		DecisionType: domain.CustomizationJobDecisionTypeFinal,
+		Status:       domain.CustomizationJobStatusPendingCustomizationReview,
+	})
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskEventRepo:        &step04TaskEventRepo{},
+		customizationJobRepo: jobRepo,
+		txRunner:             step04TxRunner{},
+	}
+
+	_, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+		TaskID:     109,
+		ReviewerID: 1,
+		Decision:   domain.CustomizationReviewDecisionReturnToDesigner,
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitCustomizationReview(return_to_designer fallback) appErr = %+v", appErr)
+	}
+	if taskRepo.tasks[109].CurrentHandlerID == nil || *taskRepo.tasks[109].CurrentHandlerID != designerID {
+		t.Fatalf("current_handler_id = %+v, want designer fallback %d", taskRepo.tasks[109].CurrentHandlerID, designerID)
 	}
 }
 
@@ -260,6 +298,16 @@ func TestCustomizationFlowAndPricingSnapshot(t *testing.T) {
 			if job.ReviewReferenceWeightFactor == nil || *job.ReviewReferenceWeightFactor != 1.6 {
 				t.Fatalf("review_reference_weight_factor = %+v, want 1.6", job.ReviewReferenceWeightFactor)
 			}
+			if taskRepo.tasks[102].TaskStatus != domain.TaskStatusPendingWarehouseReceive {
+				t.Fatalf("task status after customization review = %s, want PendingWarehouseReceive", taskRepo.tasks[102].TaskStatus)
+			}
+			if job.Status != domain.CustomizationJobStatusPendingWarehouseQC {
+				t.Fatalf("job status after customization review = %s, want pending_warehouse_qc", job.Status)
+			}
+
+			taskRepo.tasks[102].TaskStatus = domain.TaskStatusPendingCustomizationProduction
+			job.Status = domain.CustomizationJobStatusPendingCustomizationProduction
+			jobRepo.jobs[job.ID].Status = domain.CustomizationJobStatusPendingCustomizationProduction
 
 			job, appErr = svc.SubmitCustomizationEffectPreview(customizationAdminContext(), SubmitCustomizationEffectPreviewParams{
 				JobID:          job.ID,

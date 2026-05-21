@@ -806,6 +806,83 @@ func TestTaskAssetServiceSubmitDesignFromInProgress(t *testing.T) {
 	}
 }
 
+func TestTaskAssetServiceSubmitDesignCustomizationOperatorAdvancesToReview(t *testing.T) {
+	operatorID := int64(701)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    operatorID,
+		Roles: []domain.Role{domain.RoleCustomizationOperator},
+	})
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    27,
+		CustomizationRequired: true,
+		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
+	})
+	assetRepo := newStep04TaskAssetRepo()
+	eventRepo := &step04TaskEventRepo{}
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:           427,
+		TaskID:       27,
+		DecisionType: domain.CustomizationJobDecisionTypeFinal,
+		Status:       domain.CustomizationJobStatusPendingCustomizationProduction,
+	})
+	svc := NewTaskAssetService(taskRepo, assetRepo, eventRepo, newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), step04TxRunner{},
+		WithTaskAssetCustomizationJobRepo(jobRepo))
+
+	asset, appErr := svc.SubmitDesign(ctx, SubmitDesignParams{
+		TaskID:     27,
+		UploadedBy: operatorID,
+		AssetType:  domain.TaskAssetTypeDraft,
+		FileName:   "custom-final.psd",
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitDesign(customization) unexpected error: %+v", appErr)
+	}
+	if asset.SourceModuleKey != domain.ModuleKeyCustomization {
+		t.Fatalf("asset source_module_key = %s, want customization", asset.SourceModuleKey)
+	}
+	if taskRepo.tasks[27].TaskStatus != domain.TaskStatusPendingCustomizationReview {
+		t.Fatalf("task status = %s, want PendingCustomizationReview", taskRepo.tasks[27].TaskStatus)
+	}
+	if taskRepo.tasks[27].LastCustomizationOperatorID == nil || *taskRepo.tasks[27].LastCustomizationOperatorID != operatorID {
+		t.Fatalf("last_customization_operator_id = %+v, want %d", taskRepo.tasks[27].LastCustomizationOperatorID, operatorID)
+	}
+	job, err := jobRepo.GetLatestByTaskID(context.Background(), 27)
+	if err != nil {
+		t.Fatalf("GetLatestByTaskID() err = %v", err)
+	}
+	if job == nil || job.Status != domain.CustomizationJobStatusPendingCustomizationReview {
+		t.Fatalf("customization job = %+v, want pending_customization_review", job)
+	}
+}
+
+func TestTaskAssetServiceSubmitDesignDesignerCannotUseCustomizationLane(t *testing.T) {
+	designerID := int64(702)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    designerID,
+		Roles: []domain.Role{domain.RoleDesigner},
+	})
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    28,
+		CustomizationRequired: true,
+		DesignerID:            &designerID,
+		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
+	})
+	svc := NewTaskAssetService(taskRepo, newStep04TaskAssetRepo(), &step04TaskEventRepo{}, newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), step04TxRunner{})
+
+	_, appErr := svc.SubmitDesign(ctx, SubmitDesignParams{
+		TaskID:     28,
+		UploadedBy: designerID,
+		AssetType:  domain.TaskAssetTypeDraft,
+		FileName:   "custom-final.psd",
+	})
+	if appErr == nil {
+		t.Fatal("SubmitDesign(customization by designer) expected permission error")
+	}
+	if appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("SubmitDesign(customization by designer) code = %s, want %s", appErr.Code, domain.ErrCodePermissionDenied)
+	}
+}
+
 func TestTaskAssetServiceSubmitDesignCompletesRetouchTask(t *testing.T) {
 	ctx := context.Background()
 	designerID := int64(104)

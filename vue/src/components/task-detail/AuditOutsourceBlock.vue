@@ -3,7 +3,7 @@
     <div class="audit-head">
       <div class="audit-title-line">
         <span class="block-icon">A</span>
-        <h3 class="block-title">审核与定制</h3>
+        <h3 class="block-title">{{ blockTitle }}</h3>
         <span v-if="task.auditSubStatus" class="status-inline status-inline--inline">
           <span class="status-dot" :class="auditStatusDotClass" />
           {{ getAuditSubStatusLabel(task.auditSubStatus) }}
@@ -66,7 +66,7 @@
         <div>
           <p class="customization-job-title">当前定制任务</p>
           <p class="customization-job-hint">
-            任务详情侧展示该任务最新 customization job 快照，避免来回切页排查。
+            任务详情侧展示该任务最新 customization job 快照；打回将回到美工处理。
           </p>
         </div>
         <div class="customization-review-actions">
@@ -202,7 +202,7 @@
           <dd>{{ dash(task.customizationSourceType) }}</dd>
         </div>
         <div class="info-pair">
-          <dt>仓库回流操作人</dt>
+          <dt>美工处理人</dt>
           <dd>{{ dash(task.lastCustomizationOperatorId) }}</dd>
         </div>
         <div class="info-pair">
@@ -308,6 +308,13 @@ const { can, currentUser, canAccessTask } = usePermission()
 const tasksStore = useTasksStore()
 
 const isPurchase = computed(() => task.value.businessType === 'PURCHASE_TASK')
+const isCustomizationTask = computed(
+  () =>
+    task.value.workflowLane === 'customization' ||
+    task.value.businessLane === 'customization' ||
+    task.value.customizationRequired === true,
+)
+const blockTitle = computed(() => isCustomizationTask.value ? '定制审核' : '审核与定制')
 const canAuditTask = computed(() => canAudit(task.value))
 const canTransfer = computed(() => canTransferToAuditB(task.value))
 const actionAvailability = computed(() => getTaskActionAvailability(task.value))
@@ -606,7 +613,7 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
       const decision = payload.customization_review_decision
       blockSuccess.value =
         decision === 'return_to_designer'
-          ? '定制审核已提交，任务已回退设计师处理。'
+          ? '定制审核已提交，任务已打回美工处理。'
           : '定制审核已提交，任务快照已刷新。'
       await tasksStore.loadTaskById(task.value.id).catch(() => {})
       await loadLatestCustomizationJob()

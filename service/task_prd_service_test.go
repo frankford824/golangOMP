@@ -164,8 +164,8 @@ func TestTaskServiceCreateOriginalProductWithIsOutsourceAliasPasses(t *testing.T
 	if !task.CustomizationRequired {
 		t.Fatal("Create() customization_required = false, want true for outsource compatibility input")
 	}
-	if task.TaskStatus != domain.TaskStatusPendingCustomizationReview {
-		t.Fatalf("Create() task_status = %s, want PendingCustomizationReview", task.TaskStatus)
+	if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
+		t.Fatalf("Create() task_status = %s, want PendingCustomizationProduction", task.TaskStatus)
 	}
 	if task.CustomizationSourceType != domain.CustomizationSourceTypeExistingProduct {
 		t.Fatalf("Create() customization_source_type = %s, want existing_product", task.CustomizationSourceType)
@@ -252,8 +252,8 @@ func TestTaskServiceCreateCustomizationLaneCreatesImmediateJobForNewAndExistingS
 			if appErr != nil {
 				t.Fatalf("Create() unexpected error: %+v", appErr)
 			}
-			if task.TaskStatus != domain.TaskStatusPendingCustomizationReview {
-				t.Fatalf("task_status = %s, want PendingCustomizationReview", task.TaskStatus)
+			if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
+				t.Fatalf("task_status = %s, want PendingCustomizationProduction", task.TaskStatus)
 			}
 			if !task.CustomizationRequired {
 				t.Fatal("customization_required = false, want true")
@@ -277,8 +277,8 @@ func TestTaskServiceCreateCustomizationLaneCreatesImmediateJobForNewAndExistingS
 			if job.TaskID != task.ID {
 				t.Fatalf("job.task_id = %d, want %d", job.TaskID, task.ID)
 			}
-			if job.Status != domain.CustomizationJobStatusPendingCustomizationReview {
-				t.Fatalf("job.status = %s, want pending_customization_review", job.Status)
+			if job.Status != domain.CustomizationJobStatusPendingCustomizationProduction {
+				t.Fatalf("job.status = %s, want pending_customization_production", job.Status)
 			}
 		})
 	}
@@ -368,8 +368,8 @@ func TestTaskServiceCreateCustomizationLaneHasImmediateCustomizationListVisibili
 	if items[0].TaskID != task.ID {
 		t.Fatalf("ListCustomizationJobs() task_id = %d, want %d", items[0].TaskID, task.ID)
 	}
-	if items[0].Status != domain.CustomizationJobStatusPendingCustomizationReview {
-		t.Fatalf("ListCustomizationJobs() status = %s, want pending_customization_review", items[0].Status)
+	if items[0].Status != domain.CustomizationJobStatusPendingCustomizationProduction {
+		t.Fatalf("ListCustomizationJobs() status = %s, want pending_customization_production", items[0].Status)
 	}
 }
 

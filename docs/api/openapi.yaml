@@ -10013,7 +10013,7 @@ paths:
         - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately.
         - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, does not enter audit, and is completed immediately after the retouch/design worker submits the retouched image.
         - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime.
-        - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationReview` immediately and does not pass through the normal design workbench first.
+        - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationProduction` first as the compatible "waiting for customization operator design submission" state and does not pass through the normal design workbench.
         - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors.
         - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval.
         - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels.
@@ -10933,6 +10933,10 @@ paths:
           normal design task status to `PendingAuditA` when current status is one of `PendingAssign`, `Assigned`, `InProgress`,
           `RejectedByAuditA`, or `RejectedByAuditB`, and for multi-SKU batch tasks the gate waits until required SKU-scoped
           delivery assets are complete.
+          Customization-lane tasks also use this endpoint: `CustomizationOperator` submits the customization design/delivery
+          from `PendingCustomizationProduction`, the backend records/updates `last_customization_operator_id`, and successful
+          delivery submission advances the task to `PendingCustomizationReview`. Customization tasks then continue through
+          `POST /v1/tasks/{id}/customization/review`; they must not be sent through the normal audit endpoints.
           For `retouch_task`, delivery submission completes the task directly (`task_status=Completed`), clears `current_handler_id`,
           marks the `retouch` module completed, and never triggers audit.
           `purchase_task` cannot submit design. This action uses minimum role plus org or handler gating.
@@ -10940,7 +10944,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
@@ -13698,7 +13702,7 @@ paths:
   /v1/tasks/{id}/customization/review:
     post:
       summary: Submit customization review for task
-      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review writes business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`), moves approved tasks into customization production, and keeps `return_to_designer` tasks inside the customization review lane instead of sending them through the normal design workbench. Review does not freeze execution settlement pricing."
+      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review writes business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`). Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:

@@ -67,10 +67,10 @@
                   type="button"
                   class="sku-action-btn sku-action-btn--primary"
                   :disabled="!canUploadDesign"
-                  :title="canUploadDesign ? '' : '当前状态不可上传设计稿'"
+                  :title="canUploadDesign ? '' : disabledUploadTitle"
                   @click="$emit('upload-design', { item, index })"
                 >
-                  上传设计稿
+                  {{ uploadDesignLabel }}
                 </button>
                 <button
                   type="button"
@@ -99,6 +99,8 @@ const props = defineProps<{
   items: TaskSkuItem[]
   filingStatus?: string | null
   canUploadDesign?: boolean
+  uploadDesignLabel?: string
+  disabledUploadTitle?: string
 }>()
 
 defineEmits<{
@@ -107,6 +109,8 @@ defineEmits<{
 }>()
 
 const canUploadDesign = computed(() => props.canUploadDesign !== false)
+const uploadDesignLabel = computed(() => props.uploadDesignLabel || '上传设计稿')
+const disabledUploadTitle = computed(() => props.disabledUploadTitle || '当前状态不可上传设计稿')
 
 const filingStatusLabel = computed(() => {
   const raw = String(props.filingStatus ?? '').trim()

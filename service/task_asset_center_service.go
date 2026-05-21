@@ -99,6 +99,7 @@ type taskAssetCenterService struct {
 	assetStorageRefRepo       repo.AssetStorageRefRepo
 	taskEventRepo             repo.TaskEventRepo
 	taskModuleRepo            repo.TaskModuleRepo
+	customizationJobRepo      repo.CustomizationJobRepo
 	txRunner                  repo.TxRunner
 	uploadClient              UploadServiceClient
 	ossDirectService          *OSSDirectService
@@ -159,6 +160,12 @@ func WithOSSDirectService(ossDirect *OSSDirectService) func(*taskAssetCenterServ
 func WithTaskAssetCenterModuleRepo(moduleRepo repo.TaskModuleRepo) TaskAssetCenterServiceOption {
 	return func(s *taskAssetCenterService) {
 		s.taskModuleRepo = moduleRepo
+	}
+}
+
+func WithTaskAssetCenterCustomizationJobRepo(customizationJobRepo repo.CustomizationJobRepo) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.customizationJobRepo = customizationJobRepo
 	}
 }
 
@@ -658,8 +665,16 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}
 		shouldAppendDesignSubmitted := false
 		if requestAssetType.IsDelivery() {
+			if task.CustomizationRequired && task.TaskStatus == domain.TaskStatusPendingCustomizationProduction &&
+				!submitDesignActorCanUseCustomizationLane(ctx) {
+				return domain.NewAppError(domain.ErrCodePermissionDenied, "customization submit-design requires a customization operator, operation, or management role", map[string]interface{}{
+					"task_id":   task.ID,
+					"deny_code": "missing_customization_submit_role",
+					"action":    string(TaskActionSubmitDesign),
+				})
+			}
 			switch task.TaskStatus {
-			case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB:
+			case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusPendingCustomizationProduction:
 				advance, gateErr := s.shouldAdvanceTaskToPendingAuditA(ctx, task, scopeSKUCode)
 				if gateErr != nil {
 					return fmt.Errorf("check design submit gate: %w", gateErr)
@@ -677,6 +692,9 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					}
 					if err := applyDesignSubmissionWorkflow(ctx, tx, s.workflowRules, task, transition, params.CompletedBy); err != nil {
 						return fmt.Errorf("apply design submission workflow after delivery upload: %w", err)
+					}
+					if err := syncCustomizationDesignSubmission(ctx, tx, s.taskRepo, s.customizationJobRepo, task, params.CompletedBy); err != nil {
+						return fmt.Errorf("sync customization submission after delivery upload: %w", err)
 					}
 					shouldAppendDesignSubmitted = true
 				}
@@ -719,7 +737,8 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		if shouldAppendDesignSubmitted {
 			_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventDesignSubmitted, &params.CompletedBy, map[string]interface{}{
 				"asset_type": string(requestAssetType), "asset_id": assetID, "designer_id": task.DesignerID,
-				"upload_session_id": request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
+				"last_customization_operator_id": submittedCustomizationOperatorID(task, params.CompletedBy),
+				"upload_session_id":              request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
 			})
 			if err != nil {
 				return fmt.Errorf("append design submitted event: %w", err)
