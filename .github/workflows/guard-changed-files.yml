@@ -43,4 +43,4 @@ jobs:
 
       - name: Reject forbidden files
         shell: bash
-        run: ./.github/scripts/guard-changed-files.sh "${{ steps.diff.outputs.base }}" "${{ steps.diff.outputs.head }}"
+        run: bash ./.github/scripts/guard-changed-files.sh "${{ steps.diff.outputs.base }}" "${{ steps.diff.outputs.head }}"
