@@ -118,42 +118,32 @@ function confirm() {
   transform: scale(0.95);
 }
 
-/* Apple Music / iOS liquid glass modal skin. Style-only. */
+/* Light admin modal skin. Style-only. */
 .fixed.inset-0 {
   z-index: 7100 !important;
-  background:
-    radial-gradient(circle at 18% 5%, rgba(255, 45, 141, 0.18), transparent 30rem),
-    radial-gradient(circle at 86% 0%, rgba(100, 210, 255, 0.14), transparent 32rem),
-    rgba(0, 0, 0, 0.82) !important;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.45) !important;
 }
 
 .fixed.inset-0 > div {
-  border-color: var(--yb-music-border-strong) !important;
-  background:
-    radial-gradient(circle at 6% 0%, rgba(255, 45, 141, 0.08), transparent 18rem),
-    radial-gradient(circle at 100% 0%, rgba(100, 210, 255, 0.08), transparent 20rem),
-    linear-gradient(145deg, rgba(17, 24, 39, 0.99), rgba(7, 12, 20, 0.995)) !important;
-  color: var(--yb-music-text-2) !important;
-  box-shadow: 0 34px 90px -38px rgba(0, 0, 0, 0.95) !important;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: 0 20px 40px -12px rgba(15, 23, 42, 0.18) !important;
 }
 
 h2 {
-  color: #fff !important;
+  color: #111827 !important;
 }
 
 .flex-1 {
-  color: var(--yb-music-text-2) !important;
+  color: #374151 !important;
 }
 
 footer {
-  border-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: #e5e7eb !important;
 }
 
 button {
-  color: var(--yb-music-text-2);
+  color: inherit;
 }
 </style>

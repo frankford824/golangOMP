@@ -47,7 +47,7 @@
         <div
           v-if="open"
           ref="panelEl"
-          class="fixed overflow-hidden rounded-2xl border border-stone-200 bg-white/95 shadow-float backdrop-blur-xl"
+          class="fixed overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-md"
           :class="filterable ? 'flex max-h-72 flex-col' : 'py-1'"
           :style="panelStyle"
         >
@@ -291,35 +291,37 @@ watch(filterQuery, () => {
 </script>
 
 <style scoped>
-/* Apple Music / iOS liquid glass select dropdown skin. Style-only. */
+/* Light admin select dropdown skin. Style-only. */
 .fixed {
-  border-color: var(--yb-music-border-strong) !important;
-  background:
-    linear-gradient(145deg, rgba(20, 21, 30, 0.96), rgba(10, 11, 18, 0.92)) !important;
-  color: var(--yb-music-text-2) !important;
-  box-shadow: 0 24px 70px -30px rgba(0, 0, 0, 0.95) !important;
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: 0 10px 24px -8px rgba(15, 23, 42, 0.12) !important;
 }
 
 .fixed :deep(input) {
-  border-color: rgba(255, 255, 255, 0.16) !important;
-  background: rgba(3, 3, 5, 0.36) !important;
-  color: #fff !important;
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
+  color: #111827 !important;
 }
 
 .fixed button {
-  color: var(--yb-music-text-2) !important;
+  color: #374151 !important;
 }
 
 .fixed button:hover,
 .fixed .bg-stone-100 {
-  background: rgba(255, 255, 255, 0.1) !important;
-  color: #fff !important;
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+.fixed .bg-stone-100 {
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
 }
 
 .fixed .border-b {
-  border-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: #e5e7eb !important;
 }
 </style>
 

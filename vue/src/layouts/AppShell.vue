@@ -1,16 +1,16 @@
 <template>
-  <div class="app-shell bg-white font-body text-stone-800 flex overflow-hidden h-screen">
-    <!-- Dark Slim Sidebar -->
+  <div class="app-shell bg-[#f5f6f8] font-body text-gray-900 flex overflow-hidden h-screen">
+    <!-- Light Slim Sidebar -->
     <aside
-      class="sidebar hidden md:flex flex-col h-full w-20 bg-sidebar border-r border-stone-800/40 transition-all duration-300 overflow-hidden group hover:w-64"
+      class="sidebar hidden md:flex flex-col h-full w-20 bg-white border-r border-gray-200 transition-all duration-300 overflow-hidden group hover:w-64"
       @transitionend="onSidebarTransitionEnd"
     >
       <div class="flex items-center gap-3 px-6 h-16 mb-4">
-        <div class="w-8 h-8 rounded-lg bg-stone-600/30 flex items-center justify-center flex-shrink-0">
-          <span class="material-symbols-outlined text-stone-300 text-lg">architecture</span>
+        <div class="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-blue-600 text-lg">architecture</span>
         </div>
         <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">
-          <h2 class="font-headline font-extrabold text-stone-100 text-sm tracking-tight">永箔运营</h2>
+          <h2 class="font-headline font-extrabold text-gray-900 text-sm tracking-tight">永箔运营</h2>
         </div>
       </div>
       <nav class="flex-1 px-4 space-y-4 overflow-y-auto custom-scrollbar">
@@ -22,7 +22,7 @@
             :to="menu.to"
             :active-class="menu.exact ? '' : 'active'"
             :exact-active-class="menu.exact ? 'active' : ''"
-            class="nav-item flex items-center gap-4 p-2 rounded-xl text-stone-400 hover:text-stone-100 hover:bg-stone-700/40 sidebar-item-hover transition-all"
+            class="nav-item flex items-center gap-4 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 sidebar-item-hover transition-all"
           >
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
@@ -38,7 +38,7 @@
             :key="menu.key"
             :to="menu.to"
             active-class="active"
-            class="nav-item flex items-center gap-4 p-2 rounded-xl text-stone-400 hover:text-stone-100 hover:bg-stone-700/40 sidebar-item-hover transition-all"
+            class="nav-item flex items-center gap-4 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 sidebar-item-hover transition-all"
           >
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
@@ -53,7 +53,7 @@
             :key="menu.key"
             :to="menu.to"
             active-class="active"
-            class="nav-item flex items-center gap-4 p-2 rounded-xl text-stone-400 hover:text-stone-100 hover:bg-stone-700/40 sidebar-item-hover transition-all"
+            class="nav-item flex items-center gap-4 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 sidebar-item-hover transition-all"
           >
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
@@ -67,10 +67,10 @@
     </aside>
 
     <main class="app-main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
-      <!-- TopNavBar: Minimal Glass -->
-      <header class="flex justify-between items-center px-8 py-4 bg-white/60 backdrop-blur-xl border-b border-stone-200/60 z-10">
+      <!-- TopNavBar: Light solid bar -->
+      <header class="flex justify-between items-center px-8 py-4 bg-white border-b border-gray-200 z-10">
         <div class="flex items-center gap-12">
-          <span class="text-lg font-headline font-extrabold tracking-tighter text-stone-900 uppercase">永箔运营管理系统</span>
+          <span class="text-lg font-headline font-extrabold tracking-tighter text-gray-900 uppercase">永箔运营管理系统</span>
         </div>
         <div class="flex items-center gap-6">
           <div class="relative hidden sm:block">
@@ -79,7 +79,7 @@
               type="text"
               readonly
               placeholder="Ctrl+K 搜索任务、SKU、产品"
-              class="bg-stone-100/80 border border-stone-200/50 rounded-full pl-10 pr-4 py-1.5 text-xs w-64 focus:ring-1 focus:ring-stone-400 focus:border-stone-300 transition-all placeholder:text-stone-400"
+              class="bg-gray-50 border border-gray-200 rounded-full pl-10 pr-4 py-1.5 text-xs w-64 text-gray-900 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-gray-400"
               @focus="openSearch"
               @click="openSearch"
             />
@@ -277,11 +277,11 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .nav-item.active {
-  @apply bg-stone-600/50 text-stone-100;
+  @apply bg-blue-50 text-blue-700 border border-blue-100;
 }
 
 .nav-badge-p2 {
-  @apply inline-flex items-center ml-1 px-1.5 text-[10px] font-semibold rounded-full border border-stone-500/30 bg-stone-600/40 text-stone-200;
+  @apply inline-flex items-center ml-1 px-1.5 text-[10px] font-semibold rounded-full border border-gray-200 bg-gray-100 text-gray-600;
 }
 
 .sidebar-item-hover:hover .material-symbols-outlined {
@@ -310,7 +310,7 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .role-dropdown {
-  @apply absolute right-0 top-[calc(100%+6px)] min-w-[180px] rounded-2xl border border-stone-200 bg-white/95 backdrop-blur-md shadow-float z-50 py-1.5;
+  @apply absolute right-0 top-[calc(100%+6px)] min-w-[180px] rounded-2xl border border-gray-200 bg-white shadow-md z-50 py-1.5;
 }
 
 .dropdown-item {
@@ -334,15 +334,12 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   @apply flex-1 w-full min-w-0 px-4 py-4;
 }
 
-/* Apple Music / iOS liquid glass shell skin. Style-only: keep drawer behavior and DOM unchanged. */
+/* Light admin shell skin. Style-only: keep drawer behavior and DOM unchanged. */
 .app-shell {
   --sidebar-rail: 4.25rem;
   --sidebar-drawer: 16rem;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(148, 163, 184, 0.14), transparent 28rem),
-    radial-gradient(circle at 88% 0%, rgba(100, 210, 255, 0.1), transparent 34rem),
-    linear-gradient(145deg, #111827 0%, #0b111a 48%, #05070b 100%) !important;
-  color: var(--yb-music-text-2);
+  background: #f5f6f8 !important;
+  color: #111827;
 }
 
 .sidebar {
@@ -383,29 +380,15 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   width: 100%;
   pointer-events: none;
   border-radius: inherit;
-  border: 1px solid var(--yb-music-border-strong);
-  background:
-    linear-gradient(180deg, rgba(22, 28, 40, 0.9), rgba(13, 18, 29, 0.94));
-  box-shadow:
-    inset 1px 0 0 rgba(255, 255, 255, 0.08),
-    var(--yb-glass-shadow);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
   background-clip: padding-box;
   z-index: 0;
 }
 
 .sidebar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  pointer-events: none;
-  border-radius: inherit;
-  background:
-    linear-gradient(160deg, rgba(255, 255, 255, 0.11), transparent 34%),
-    radial-gradient(circle at 30% 0%, rgba(255, 45, 85, 0.16), transparent 14rem);
-  z-index: 0;
+  display: none;
 }
 
 .sidebar > div:first-child {
@@ -444,12 +427,12 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   width: 2rem !important;
   height: 2rem !important;
   border-radius: 0.75rem !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: #eff6ff !important;
+  box-shadow: none;
 }
 
 .sidebar h2 {
-  color: rgba(255, 255, 255, 0.92) !important;
+  color: #111827 !important;
   font-size: 0.82rem !important;
   font-weight: 750 !important;
 }
@@ -463,40 +446,42 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .sidebar :deep(.material-symbols-outlined) {
-  color: rgba(255, 255, 255, 0.76);
+  color: #6b7280;
 }
 
 .nav-section-label {
-  color: rgba(220, 230, 255, 0.52);
+  color: #9ca3af;
 }
 
 .nav-item {
-  color: rgba(220, 230, 255, 0.66) !important;
+  color: #6b7280 !important;
   overflow: hidden;
   border-radius: 0.85rem !important;
   background-clip: padding-box;
+  border: 1px solid transparent;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #fff !important;
+  background: #f3f4f6 !important;
+  color: #111827 !important;
 }
 
 .nav-item.active {
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background:
-    linear-gradient(105deg, rgba(255, 45, 85, 0.86), rgba(175, 82, 222, 0.82) 56%, rgba(100, 210, 255, 0.76)) !important;
-  color: #fff !important;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.38);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 12px 28px -18px rgba(255, 45, 141, 0.72);
+  border: 1px solid #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  text-shadow: none;
+  box-shadow: none;
+}
+
+.nav-item.active :deep(.material-symbols-outlined) {
+  color: #2563eb;
 }
 
 .nav-badge-p2 {
-  border-color: rgba(255, 255, 255, 0.24);
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  border-color: #e5e7eb;
+  background: #f3f4f6;
+  color: #6b7280;
 }
 
 main > header {
@@ -505,29 +490,22 @@ main > header {
   margin: 0.75rem 0.75rem 0;
   min-height: 3.85rem;
   padding-block: 0.65rem !important;
-  border: 1px solid var(--yb-music-border) !important;
+  border: 1px solid #e5e7eb !important;
   border-radius: 1rem;
-  background:
-    radial-gradient(120% 160% at 0% 0%, rgba(148, 163, 184, 0.12), transparent 44%),
-    radial-gradient(120% 140% at 100% 0%, rgba(100, 210, 255, 0.09), transparent 52%),
-    linear-gradient(145deg, rgba(21, 27, 38, 0.96), rgba(11, 16, 25, 0.98)) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 16px 42px -32px rgba(0, 0, 0, 0.72);
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
   overflow: visible;
   background-clip: padding-box;
   clip-path: none;
   contain: none;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 
 main > header span {
-  color: #fff !important;
+  color: #111827 !important;
 }
 
 main > header > div:first-child > span {
-  color: rgba(255, 255, 255, 0.92) !important;
+  color: #111827 !important;
   font-size: 1rem !important;
   font-weight: 800 !important;
   letter-spacing: 0 !important;
@@ -535,20 +513,17 @@ main > header > div:first-child > span {
 }
 
 main > header input {
-  background: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(255, 255, 255, 0.14) !important;
-  color: #fff !important;
+  background: #f9fafb !important;
+  border-color: #e5e7eb !important;
+  color: #111827 !important;
 }
 
 main > header input::placeholder {
-  color: rgba(220, 230, 255, 0.46) !important;
+  color: #9ca3af !important;
 }
 
 .content {
   padding: 0.75rem;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(148, 163, 184, 0.12), transparent 28rem),
-    radial-gradient(circle at 100% 0%, rgba(100, 210, 255, 0.08), transparent 30rem),
-    linear-gradient(145deg, #111827 0%, #0b111a 52%, #05070b 100%);
+  background: #f5f6f8;
 }
 </style>
