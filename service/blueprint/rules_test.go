@@ -99,6 +99,130 @@ func poolTeamCodeFromEventPayload(raw json.RawMessage) string {
 	return v
 }
 
+func TestRuleEngine_InitTask_HybridCustomizationIncludesCustomizationModule(t *testing.T) {
+	ctx := context.Background()
+	modules := &rulesTestModuleRepo{modules: map[string]*domain.TaskModule{}}
+	events := &rulesTestEventRepo{}
+	engine := NewRuleEngine(NewRegistry(), modules, events)
+
+	task := &domain.Task{
+		ID:                    807,
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		CustomizationRequired: true,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+	}
+	if err := engine.InitTask(ctx, nil, task); err != nil {
+		t.Fatalf("InitTask() err = %v", err)
+	}
+
+	custom, err := modules.GetByTaskAndKey(ctx, task.ID, domain.ModuleKeyCustomization)
+	if err != nil {
+		t.Fatalf("GetByTaskAndKey(customization) err = %v", err)
+	}
+	if custom == nil {
+		t.Fatal("expected customization module after InitTask for hybrid task")
+	}
+	if custom.State != domain.ModuleStatePendingClaim {
+		t.Fatalf("customization state = %s, want %s", custom.State, domain.ModuleStatePendingClaim)
+	}
+	if got := poolTeamCodeFromModule(custom); got != domain.TeamCustomizationArt {
+		t.Fatalf("customization pool_team_code = %q, want %q", got, domain.TeamCustomizationArt)
+	}
+
+	design, err := modules.GetByTaskAndKey(ctx, task.ID, domain.ModuleKeyDesign)
+	if err != nil {
+		t.Fatalf("GetByTaskAndKey(design) err = %v", err)
+	}
+	if design == nil {
+		t.Fatal("expected design module to remain for hybrid new_product_development task")
+	}
+}
+
+func TestRuleEngine_InitTask_RegularNewProductDevelopmentOmitsCustomizationModule(t *testing.T) {
+	ctx := context.Background()
+	modules := &rulesTestModuleRepo{modules: map[string]*domain.TaskModule{}}
+	events := &rulesTestEventRepo{}
+	engine := NewRuleEngine(NewRegistry(), modules, events)
+
+	task := &domain.Task{
+		ID:                    808,
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		CustomizationRequired: false,
+		BusinessLane:          domain.TaskBusinessLaneNormal,
+	}
+	if err := engine.InitTask(ctx, nil, task); err != nil {
+		t.Fatalf("InitTask() err = %v", err)
+	}
+
+	if custom, _ := modules.GetByTaskAndKey(ctx, task.ID, domain.ModuleKeyCustomization); custom != nil {
+		t.Fatal("regular new_product_development must not instantiate customization module")
+	}
+
+	wantKeys := []string{
+		domain.ModuleKeyBasicInfo,
+		domain.ModuleKeyDesign,
+		domain.ModuleKeyAudit,
+		domain.ModuleKeyWarehouse,
+	}
+	list, err := modules.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask() err = %v", err)
+	}
+	gotKeys := make(map[string]struct{}, len(list))
+	for _, m := range list {
+		gotKeys[m.ModuleKey] = struct{}{}
+	}
+	if len(gotKeys) != len(wantKeys) {
+		t.Fatalf("module keys = %v, want %v", gotKeys, wantKeys)
+	}
+	for _, key := range wantKeys {
+		if _, ok := gotKeys[key]; !ok {
+			t.Fatalf("missing module key %s", key)
+		}
+	}
+
+	design, err := modules.GetByTaskAndKey(ctx, task.ID, domain.ModuleKeyDesign)
+	if err != nil {
+		t.Fatalf("GetByTaskAndKey(design) err = %v", err)
+	}
+	if design.State != domain.ModuleStatePendingClaim {
+		t.Fatalf("design state = %s, want %s", design.State, domain.ModuleStatePendingClaim)
+	}
+	if got := poolTeamCodeFromModule(design); got != domain.TeamDesignStandard {
+		t.Fatalf("design pool_team_code = %q, want %q", got, domain.TeamDesignStandard)
+	}
+}
+
+func TestRequiresHybridCustomizationModule_CustomizationRequiredAlone(t *testing.T) {
+	task := &domain.Task{
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		CustomizationRequired: true,
+		BusinessLane:          domain.TaskBusinessLaneNormal,
+	}
+	if !RequiresHybridCustomizationModule(task) {
+		t.Fatal("expected hybrid customization module requirement when customization_required=true")
+	}
+}
+
+func TestRuleEngine_InitTask_HybridCustomizationCustomizationOnlyRequired(t *testing.T) {
+	ctx := context.Background()
+	modules := &rulesTestModuleRepo{modules: map[string]*domain.TaskModule{}}
+	engine := NewRuleEngine(NewRegistry(), modules, &rulesTestEventRepo{})
+
+	task := &domain.Task{
+		ID:                    809,
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		CustomizationRequired: true,
+		BusinessLane:          domain.TaskBusinessLaneNormal,
+	}
+	if err := engine.InitTask(ctx, nil, task); err != nil {
+		t.Fatalf("InitTask() err = %v", err)
+	}
+	if custom, _ := modules.GetByTaskAndKey(ctx, task.ID, domain.ModuleKeyCustomization); custom == nil {
+		t.Fatal("expected customization module when customization_required=true")
+	}
+}
+
 func TestRuleEngine_EnterAuditPoolForHybridCustomizationTask(t *testing.T) {
 	ctx := context.Background()
 	modules := &rulesTestModuleRepo{modules: map[string]*domain.TaskModule{}}

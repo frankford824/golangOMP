@@ -94,4 +94,56 @@ func basicInfo() ModuleSpec {
 	return ModuleSpec{Key: domain.ModuleKeyBasicInfo, InitialState: domain.ModuleStateActive}
 }
 
+func customizationModuleSpec() ModuleSpec {
+	return ModuleSpec{
+		Key:          domain.ModuleKeyCustomization,
+		InitialState: domain.ModuleStatePendingClaim,
+		PoolTeamCode: strPtr(domain.TeamCustomizationArt),
+	}
+}
+
+// RequiresHybridCustomizationModule is true when a product-development blueprint must
+// also instantiate the customization module (e.g. new_product_development + customization lane).
+func RequiresHybridCustomizationModule(task *domain.Task) bool {
+	if task == nil {
+		return false
+	}
+	switch task.TaskType {
+	case domain.TaskTypeOriginalProductDevelopment, domain.TaskTypeNewProductDevelopment:
+	default:
+		return false
+	}
+	return isCustomizationTask(task)
+}
+
+// ModulesForTask returns blueprint modules, augmenting product-development blueprints with
+// customization when RequiresHybridCustomizationModule is true.
+func ModulesForTask(task *domain.Task, bp Blueprint) []ModuleSpec {
+	if !RequiresHybridCustomizationModule(task) {
+		return bp.Modules
+	}
+	return injectCustomizationModuleAfterDesign(bp.Modules)
+}
+
+func injectCustomizationModuleAfterDesign(modules []ModuleSpec) []ModuleSpec {
+	for _, spec := range modules {
+		if spec.Key == domain.ModuleKeyCustomization {
+			return modules
+		}
+	}
+	out := make([]ModuleSpec, 0, len(modules)+1)
+	inserted := false
+	for _, spec := range modules {
+		out = append(out, spec)
+		if !inserted && spec.Key == domain.ModuleKeyDesign {
+			out = append(out, customizationModuleSpec())
+			inserted = true
+		}
+	}
+	if !inserted {
+		out = append(out, customizationModuleSpec())
+	}
+	return out
+}
+
 func strPtr(value string) *string { return &value }

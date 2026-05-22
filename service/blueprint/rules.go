@@ -47,7 +47,8 @@ func (e *RuleEngine) InitTask(ctx context.Context, tx repo.Tx, task *domain.Task
 	if err != nil {
 		return err
 	}
-	for i, spec := range bp.Modules {
+	moduleSpecs := ModulesForTask(task, bp)
+	for i, spec := range moduleSpecs {
 		state := spec.InitialState
 		pool := spec.PoolTeamCode
 		if i > 1 {
@@ -125,7 +126,7 @@ func (e *RuleEngine) completeRetouchTask(ctx context.Context, tx repo.Tx, task *
 }
 
 func (e *RuleEngine) enterModule(ctx context.Context, tx repo.Tx, task *domain.Task, moduleKey string, actorID *int64, triggerEventID int64) error {
-	spec, ok := e.specFor(task.TaskType, moduleKey)
+	spec, ok := e.specFor(task, moduleKey)
 	if !ok {
 		return fmt.Errorf("module %s not in blueprint for task_type %s", moduleKey, task.TaskType)
 	}
@@ -204,12 +205,15 @@ func (e *RuleEngine) reopenModule(ctx context.Context, tx repo.Tx, taskID int64,
 	return err
 }
 
-func (e *RuleEngine) specFor(taskType domain.TaskType, moduleKey string) (ModuleSpec, bool) {
-	bp, ok := e.registry.Get(taskType)
+func (e *RuleEngine) specFor(task *domain.Task, moduleKey string) (ModuleSpec, bool) {
+	if task == nil {
+		return ModuleSpec{}, false
+	}
+	bp, ok := e.registry.Get(task.TaskType)
 	if !ok {
 		return ModuleSpec{}, false
 	}
-	for _, spec := range bp.Modules {
+	for _, spec := range ModulesForTask(task, bp) {
 		if spec.Key == moduleKey {
 			return spec, true
 		}
