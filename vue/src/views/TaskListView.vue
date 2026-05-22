@@ -1424,25 +1424,20 @@ watch(totalPages, (value) => {
   width: 5rem;
 }
 
-/* Apple Music / iOS liquid glass task list skin. Style-only. */
+/* Light admin task list skin. Style-only. */
 .task-list-view {
-  color: var(--yb-music-text-2);
-  background:
-    radial-gradient(circle at 12% 0%, rgba(255, 45, 141, 0.18), transparent 28rem),
-    radial-gradient(circle at 86% 10%, rgba(100, 210, 255, 0.16), transparent 30rem);
+  color: #374151;
+  background: transparent;
 }
 
 .header-card,
 .batch-action-bar,
 .task-card,
 .footer-card {
-  border: 1px solid var(--yb-music-border) !important;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.06)) !important;
-  color: var(--yb-music-text-2) !important;
-  box-shadow: var(--yb-glass-shadow) !important;
-  backdrop-filter: blur(var(--yb-glass-blur));
-  -webkit-backdrop-filter: blur(var(--yb-glass-blur));
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
 }
 
 .header-card {
@@ -1451,19 +1446,12 @@ watch(totalPages, (value) => {
 }
 
 .header-card::before {
-  content: '';
-  position: absolute;
-  inset: -5rem auto auto -4rem;
-  width: 22rem;
-  height: 16rem;
-  border-radius: 999px;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(255, 45, 141, 0.26), transparent 68%);
+  display: none;
 }
 
 .page-title {
   position: relative;
-  color: #fff !important;
+  color: #111827 !important;
   font-size: clamp(1.8rem, 2.6vw, 3rem);
   font-weight: 900;
 }
@@ -1471,7 +1459,7 @@ watch(totalPages, (value) => {
 .filter-bar-wrap,
 .task-category-switch,
 .card-no-row {
-  border-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: #e5e7eb !important;
 }
 
 .task-tabs,
@@ -1484,10 +1472,10 @@ watch(totalPages, (value) => {
 
 .task-tab-active,
 .task-category-active {
-  background: linear-gradient(105deg, rgba(255, 45, 85, 0.88), rgba(175, 82, 222, 0.88), rgba(100, 210, 255, 0.78)) !important;
-  border-color: rgba(255, 255, 255, 0.24) !important;
-  color: #fff !important;
-  box-shadow: 0 14px 28px -20px rgba(255, 45, 141, 0.95);
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
 }
 
 .task-card {
@@ -1495,17 +1483,15 @@ watch(totalPages, (value) => {
 }
 
 .task-card:hover {
-  border-color: rgba(255, 255, 255, 0.32) !important;
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255, 45, 141, 0.15), transparent 12rem),
-    rgba(255, 255, 255, 0.12) !important;
-  box-shadow: 0 28px 58px -34px rgba(0, 0, 0, 0.95) !important;
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
 }
 
 .card-no,
 .card-product,
 .batch-count {
-  color: #fff !important;
+  color: #111827 !important;
 }
 
 .card-meta-value,
@@ -1514,62 +1500,56 @@ watch(totalPages, (value) => {
 .pager-info,
 .footer-card,
 .page-jump {
-  color: var(--yb-music-muted) !important;
+  color: #6b7280 !important;
 }
 
 .card-meta-key {
-  color: var(--yb-music-cyan) !important;
+  color: #6b7280 !important;
 }
 
 .task-category-pill-normal,
 .task-category-pill-custom {
-  background: rgba(255, 255, 255, 0.1) !important;
-  border-color: rgba(255, 255, 255, 0.2) !important;
-  color: var(--yb-music-text-2) !important;
+  background: #f3f4f6 !important;
+  border-color: #e5e7eb !important;
+  color: #374151 !important;
 }
 
 .checkbox {
-  accent-color: var(--yb-music-pink);
+  accent-color: #2563eb;
 }
 
 .list-action-error {
-  background: rgba(255, 69, 58, 0.16);
-  border-color: rgba(255, 69, 58, 0.34);
-  color: #ffd5d2;
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
 }
 
-/* Task center final skin: A visual language + B information hierarchy. */
+/* Task center tokens: light admin system. */
 .task-list-view {
-  --tc-page: #0a0e18;
-  --tc-panel: rgba(22, 30, 44, 0.78);
-  --tc-panel-strong: rgba(27, 38, 56, 0.9);
-  --tc-card: rgba(23, 33, 50, 0.9);
-  --tc-card-soft: rgba(18, 26, 40, 0.76);
-  --tc-border: rgba(190, 209, 240, 0.24);
-  --tc-border-strong: rgba(210, 229, 255, 0.38);
-  --tc-text: #f6f9ff;
-  --tc-muted: #b6c4da;
-  --tc-faint: #8392aa;
-  --tc-cyan: #64d2ff;
-  --tc-blue: #7dd3fc;
-  --tc-green: #86efac;
-  --tc-amber: #ffd166;
-  --tc-pink: #ff2d8d;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(255, 45, 141, 0.14), transparent 28rem),
-    radial-gradient(circle at 92% 7%, rgba(100, 210, 255, 0.14), transparent 30rem),
-    linear-gradient(145deg, #0a0e18 0%, #101827 52%, #0b121d 100%);
+  --tc-page: #f5f6f8;
+  --tc-panel: #ffffff;
+  --tc-panel-strong: #ffffff;
+  --tc-card: #ffffff;
+  --tc-card-soft: #f9fafb;
+  --tc-border: #e5e7eb;
+  --tc-border-strong: #d1d5db;
+  --tc-text: #111827;
+  --tc-muted: #6b7280;
+  --tc-faint: #9ca3af;
+  --tc-cyan: #2563eb;
+  --tc-blue: #2563eb;
+  --tc-green: #15803d;
+  --tc-amber: #b45309;
+  --tc-pink: #db2777;
+  background: #f5f6f8;
 }
 
 .header-card,
 .batch-action-bar,
 .footer-card {
-  border-color: var(--tc-border-strong) !important;
-  background:
-    linear-gradient(145deg, rgba(38, 50, 70, 0.82), rgba(20, 28, 42, 0.86)) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 22px 48px -36px rgba(0, 0, 0, 0.72) !important;
+  border-color: var(--tc-border) !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
 }
 
 .header-card {
@@ -1600,22 +1580,22 @@ watch(totalPages, (value) => {
 .toolbar :deep(button),
 .batch-action-bar :deep(button),
 .footer-card :deep(button) {
-  border-color: rgba(210, 229, 255, 0.18) !important;
-  background: rgba(20, 30, 46, 0.68) !important;
-  color: #dce8ff !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
 }
 
 .task-tab-active,
 .task-category-active {
-  background:
-    linear-gradient(115deg, rgba(255, 45, 141, 0.78), rgba(175, 82, 222, 0.74) 56%, rgba(100, 210, 255, 0.62)) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 16px 30px -24px rgba(100, 210, 255, 0.82) !important;
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
 }
 
 .filter-bar-wrap {
-  border-color: rgba(210, 229, 255, 0.14) !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
 }
 
 .filter-bar-wrap :deep(.filter-bar) {
@@ -1648,12 +1628,8 @@ watch(totalPages, (value) => {
   border-color: var(--tc-border) !important;
   border-radius: 0.95rem;
   padding: 0.95rem;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.12), transparent 12rem),
-    linear-gradient(145deg, rgba(31, 42, 60, 0.92), rgba(18, 26, 40, 0.94)) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 16px 34px -28px rgba(0, 0, 0, 0.72) !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
 }
 
 .task-card::before {
@@ -1661,44 +1637,36 @@ watch(totalPages, (value) => {
   position: absolute;
   inset: 0 auto 0 0;
   width: 3px;
-  background: linear-gradient(180deg, rgba(100, 210, 255, 0.9), rgba(255, 45, 141, 0.45));
-  opacity: 0.62;
+  background: #2563eb;
+  opacity: 1;
 }
 
 .task-card:hover {
-  border-color: rgba(100, 210, 255, 0.5) !important;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.16), transparent 12rem),
-    linear-gradient(145deg, rgba(38, 52, 74, 0.96), rgba(22, 31, 47, 0.96)) !important;
-  transform: translateY(-2px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 24px 48px -30px rgba(0, 0, 0, 0.82) !important;
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
 }
 
 .task-card--selected {
-  border-color: rgba(100, 210, 255, 0.72) !important;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(100, 210, 255, 0.2), transparent 13rem),
-    linear-gradient(145deg, rgba(35, 51, 76, 0.98), rgba(24, 37, 57, 0.98)) !important;
-  box-shadow:
-    inset 0 0 0 1px rgba(100, 210, 255, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 26px 52px -34px rgba(100, 210, 255, 0.55) !important;
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  box-shadow: 0 0 0 1px #bfdbfe, 0 4px 12px rgba(37, 99, 235, 0.12) !important;
 }
 
 .task-card--selected::before {
   width: 4px;
+  background: #2563eb;
   opacity: 1;
 }
 
 .task-card--overdue {
-  border-color: rgba(255, 159, 10, 0.62) !important;
+  border-color: #fcd34d !important;
 }
 
 .task-card--overdue::before {
-  background: linear-gradient(180deg, #ff9f0a, rgba(255, 45, 85, 0.72));
-  opacity: 0.96;
+  background: #f59e0b;
+  opacity: 1;
 }
 
 .card-row-top {
@@ -1730,20 +1698,20 @@ watch(totalPages, (value) => {
 .task-category-pill,
 .card-tags :deep(.task-type-badge),
 .card-tags :deep(.workflow-lane-tag) {
-  border: 1px solid rgba(210, 229, 255, 0.18) !important;
-  background: rgba(255, 255, 255, 0.1) !important;
-  color: #e9f2ff !important;
+  border: 1px solid #e5e7eb !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
   font-weight: 850 !important;
 }
 
 .task-category-pill-normal {
-  background: rgba(100, 210, 255, 0.14) !important;
-  color: #bfefff !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
 }
 
 .task-category-pill-custom {
-  background: rgba(255, 209, 102, 0.16) !important;
-  color: #ffe7a3 !important;
+  background: #fffbeb !important;
+  color: #b45309 !important;
 }
 
 .card-no-row {
@@ -1754,7 +1722,7 @@ watch(totalPages, (value) => {
 }
 
 .card-no {
-  color: #edf5ff !important;
+  color: #6b7280 !important;
   font-family: var(--yb-font-data);
   font-size: 0.78rem;
   font-weight: 850;
@@ -1765,7 +1733,7 @@ watch(totalPages, (value) => {
   position: relative;
   z-index: 1;
   min-height: calc(1.38em * 2);
-  color: #ffffff !important;
+  color: #111827 !important;
   font-size: 0.96rem;
   font-weight: 850;
   line-height: 1.38;
@@ -1776,10 +1744,10 @@ watch(totalPages, (value) => {
   z-index: 1;
   margin-top: 0.2rem;
   gap: 0.25rem;
-  border: 1px solid rgba(210, 229, 255, 0.1);
+  border: 1px solid #e5e7eb;
   border-radius: 0.75rem;
   padding: 0.55rem 0.62rem;
-  background: rgba(10, 16, 26, 0.34);
+  background: #f9fafb;
 }
 
 .card-meta-line {
@@ -1789,12 +1757,12 @@ watch(totalPages, (value) => {
 }
 
 .card-meta-key {
-  color: var(--tc-cyan) !important;
+  color: #6b7280 !important;
   font-weight: 850;
 }
 
 .card-meta-value {
-  color: #d7e3f4 !important;
+  color: #374151 !important;
   font-weight: 650;
 }
 
@@ -1815,15 +1783,15 @@ watch(totalPages, (value) => {
 }
 
 .card-due-overdue {
-  color: #ffd166 !important;
+  color: #b45309 !important;
   font-weight: 850;
 }
 
 .card-row-bottom :deep(button) {
   min-height: 1.9rem;
-  border-color: rgba(100, 210, 255, 0.28) !important;
-  background: rgba(100, 210, 255, 0.12) !important;
-  color: #dff6ff !important;
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
 }
 
 .footer-card {
@@ -1865,7 +1833,7 @@ watch(totalPages, (value) => {
 
 .page-header {
   min-height: 3.1rem;
-  border-bottom: 1px solid rgba(210, 229, 255, 0.14);
+  border-bottom: 1px solid #e5e7eb;
   padding-bottom: 0.7rem;
 }
 
@@ -1883,7 +1851,7 @@ watch(totalPages, (value) => {
 }
 
 .task-tabs {
-  border-bottom: 1px solid rgba(210, 229, 255, 0.11);
+  border-bottom: 1px solid #e5e7eb;
   padding-bottom: 0.55rem;
 }
 
@@ -1958,13 +1926,11 @@ watch(totalPages, (value) => {
   gap: 0.52rem;
   border-radius: 1rem;
   padding: 1rem;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.1), transparent 11rem),
-    linear-gradient(145deg, rgba(29, 41, 59, 0.94), rgba(16, 24, 38, 0.96)) !important;
+  background: #ffffff !important;
 }
 
 .task-card--claimable:not(.task-card--overdue)::before {
-  background: linear-gradient(180deg, rgba(100, 210, 255, 0.95), rgba(52, 199, 89, 0.56));
+  background: #2563eb;
 }
 
 .card-row-top {
@@ -1979,7 +1945,7 @@ watch(totalPages, (value) => {
 
 .card-no {
   font-size: 0.76rem;
-  color: #dbeafe !important;
+  color: #6b7280 !important;
 }
 
 .card-product {
@@ -1990,9 +1956,9 @@ watch(totalPages, (value) => {
 
 .card-meta-block {
   margin-top: 0.12rem;
-  border-color: rgba(210, 229, 255, 0.13);
+  border-color: #e5e7eb;
   padding: 0.58rem 0.66rem;
-  background: rgba(8, 15, 26, 0.38);
+  background: #f9fafb;
 }
 
 .card-meta-line {
@@ -2019,20 +1985,21 @@ watch(totalPages, (value) => {
 
 .advanced-filter-toggle {
   min-width: 6.25rem;
-  border-color: rgba(148, 163, 184, 0.28) !important;
-  background: rgba(15, 23, 42, 0.6) !important;
-  color: #cbd5e1 !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
 }
 
 .advanced-filter-toggle--active {
-  border-color: rgba(100, 210, 255, 0.45) !important;
-  background: rgba(14, 116, 144, 0.2) !important;
-  color: #e0f7ff !important;
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
 }
 
 .filter-bar-wrap {
-  border-top: 1px solid rgba(148, 163, 184, 0.16) !important;
+  border-top: 1px solid #e5e7eb !important;
   padding-top: 0.72rem !important;
+  background: #ffffff !important;
 }
 
 .filter-bar-wrap :deep(.filter-bar) {
@@ -2060,23 +2027,19 @@ watch(totalPages, (value) => {
 .task-card {
   min-height: 12.9rem;
   gap: 0.4rem;
-  border-color: rgba(148, 163, 184, 0.26) !important;
+  border-color: #e5e7eb !important;
   border-radius: 0.86rem;
   padding: 0.82rem;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.08), transparent 8.5rem),
-    linear-gradient(145deg, rgba(25, 36, 53, 0.94), rgba(13, 21, 34, 0.98)) !important;
+  background: #ffffff !important;
 }
 
 .task-card:hover {
-  border-color: rgba(100, 210, 255, 0.38) !important;
+  border-color: #d1d5db !important;
 }
 
 .task-card--selected {
-  border-color: rgba(100, 210, 255, 0.66) !important;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(100, 210, 255, 0.16), transparent 10rem),
-    linear-gradient(145deg, rgba(28, 44, 65, 0.98), rgba(16, 27, 43, 0.98)) !important;
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
 }
 
 .card-tags {
@@ -2090,11 +2053,11 @@ watch(totalPages, (value) => {
   display: inline-flex !important;
   height: 1.25rem;
   align-items: center;
-  border-color: rgba(148, 163, 184, 0.22) !important;
+  border-color: #e5e7eb !important;
   border-radius: 999px;
   padding: 0 0.45rem !important;
-  background: rgba(30, 41, 59, 0.78) !important;
-  color: #dbeafe !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
   font-size: 0.66rem !important;
   font-weight: 750 !important;
   line-height: 1 !important;
@@ -2108,15 +2071,15 @@ watch(totalPages, (value) => {
 .card-tags :deep(.badge-retouch),
 .card-tags :deep(.is-normal),
 .card-tags :deep(.is-customization) {
-  background: rgba(30, 41, 59, 0.78) !important;
-  color: #dbeafe !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
 }
 
 .task-category-pill-custom,
 .card-tags :deep(.badge-new),
 .card-tags :deep(.is-customization) {
-  border-color: rgba(52, 211, 153, 0.32) !important;
-  color: #bbf7d0 !important;
+  border-color: #bbf7d0 !important;
+  color: #15803d !important;
 }
 
 .card-status-row {
@@ -2127,11 +2090,11 @@ watch(totalPages, (value) => {
 .card-status-row :deep(.inline-flex),
 .card-status-row :deep(.filing-status-badge) {
   min-height: 1.28rem;
-  border-color: rgba(100, 210, 255, 0.26) !important;
+  border-color: #e5e7eb !important;
   border-radius: 999px;
   padding: 0.1rem 0.48rem !important;
-  background: rgba(8, 47, 73, 0.44) !important;
-  color: #bae6fd !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
   font-size: 0.68rem !important;
   font-weight: 780 !important;
   line-height: 1 !important;
@@ -2140,33 +2103,33 @@ watch(totalPages, (value) => {
 .card-status-row :deep(.bg-emerald-100),
 .card-status-row :deep(.text-emerald-800),
 .card-status-row :deep(.border-emerald-200) {
-  border-color: rgba(52, 211, 153, 0.3) !important;
-  background: rgba(6, 78, 59, 0.42) !important;
-  color: #bbf7d0 !important;
+  border-color: #bbf7d0 !important;
+  background: #ecfdf5 !important;
+  color: #15803d !important;
 }
 
 .card-status-row :deep(.bg-blue-100),
 .card-status-row :deep(.text-blue-800),
 .card-status-row :deep(.border-blue-200) {
-  border-color: rgba(96, 165, 250, 0.3) !important;
-  background: rgba(30, 64, 175, 0.34) !important;
-  color: #bfdbfe !important;
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
 }
 
 .card-status-row :deep(.bg-amber-100),
 .card-status-row :deep(.text-amber-800),
 .card-status-row :deep(.border-amber-200) {
-  border-color: rgba(251, 191, 36, 0.32) !important;
-  background: rgba(120, 53, 15, 0.36) !important;
-  color: #fde68a !important;
+  border-color: #fde68a !important;
+  background: #fffbeb !important;
+  color: #b45309 !important;
 }
 
 .card-status-row :deep(.bg-red-100),
 .card-status-row :deep(.text-red-800),
 .card-status-row :deep(.border-red-200) {
-  border-color: rgba(248, 113, 113, 0.34) !important;
-  background: rgba(127, 29, 29, 0.38) !important;
-  color: #fecaca !important;
+  border-color: #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
 }
 
 .card-no-row {
@@ -2187,10 +2150,10 @@ watch(totalPages, (value) => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.28rem 0.58rem;
-  border-color: rgba(148, 163, 184, 0.14);
+  border-color: #e5e7eb;
   border-radius: 0.66rem;
   padding: 0.48rem 0.56rem;
-  background: rgba(2, 6, 23, 0.26);
+  background: #f9fafb;
 }
 
 .card-meta-line {
@@ -2216,18 +2179,19 @@ watch(totalPages, (value) => {
 .card-row-bottom :deep(button),
 .footer-card :deep(button) {
   border-radius: 0.62rem !important;
-  border-color: rgba(148, 163, 184, 0.26) !important;
-  background: rgba(15, 23, 42, 0.68) !important;
-  color: #dbeafe !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: none !important;
 }
 
 .page-header-actions :deep(button:hover),
 .toolbar :deep(button:hover),
 .card-row-bottom :deep(button:hover),
 .footer-card :deep(button:hover) {
-  border-color: rgba(100, 210, 255, 0.4) !important;
-  background: rgba(30, 41, 59, 0.9) !important;
+  border-color: #d1d5db !important;
+  background: #f3f4f6 !important;
+  color: #111827 !important;
 }
 
 .page-header-actions :deep(button svg),
@@ -2235,7 +2199,7 @@ watch(totalPages, (value) => {
 .footer-card :deep(button svg) {
   width: 1rem;
   height: 1rem;
-  color: #93c5fd;
+  color: #6b7280;
   stroke-width: 2;
 }
 
@@ -2432,15 +2396,12 @@ watch(totalPages, (value) => {
   clip-path: inset(0 round 1rem);
 }
 
-/* Remove the dark-corner artifact by making the rounded panels self-painted instead of relying on the page backdrop. */
+/* Legacy dark-corner patches neutralized for light shell. */
 .header-card,
 .batch-action-bar,
 .footer-card {
-  border-color: rgba(190, 209, 240, 0.3) !important;
-  background:
-    radial-gradient(120% 140% at 0% 0%, rgba(255, 45, 141, 0.2), transparent 42%),
-    radial-gradient(120% 120% at 100% 0%, rgba(100, 210, 255, 0.12), transparent 48%),
-    linear-gradient(145deg, rgba(38, 47, 70, 0.96), rgba(18, 27, 43, 0.98)) !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
 }
 
 .header-card::before {
@@ -2448,38 +2409,121 @@ watch(totalPages, (value) => {
 }
 
 .task-card {
-  background:
-    radial-gradient(115% 120% at 0% 0%, rgba(255, 45, 141, 0.13), transparent 36%),
-    radial-gradient(110% 120% at 100% 0%, rgba(100, 210, 255, 0.08), transparent 52%),
-    linear-gradient(145deg, rgba(25, 36, 54, 0.98), rgba(13, 21, 34, 0.99)) !important;
+  background: #ffffff !important;
 }
 
 .task-card:hover {
-  background:
-    radial-gradient(115% 120% at 0% 0%, rgba(255, 45, 141, 0.17), transparent 36%),
-    radial-gradient(110% 120% at 100% 0%, rgba(100, 210, 255, 0.11), transparent 52%),
-    linear-gradient(145deg, rgba(31, 45, 66, 0.99), rgba(17, 28, 45, 0.99)) !important;
+  background: #ffffff !important;
 }
 
-/* Final corner fix: cover the parent gutter so rounded cards no longer expose a black rectangular page layer. */
+/* Phase 2: align task center with light shell — final overrides win over legacy dark patches. */
 .task-list-view {
-  margin: -0.75rem !important;
-  min-height: calc(100dvh - 3.85rem);
-  padding: 0.75rem !important;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(148, 163, 184, 0.12), transparent 30rem),
-    radial-gradient(circle at 100% 0%, rgba(100, 210, 255, 0.08), transparent 32rem),
-    linear-gradient(145deg, #111827 0%, #0b111a 52%, #05070b 100%) !important;
-}
-
-.header-card {
   margin: 0 !important;
+  min-height: auto;
+  padding: 0 !important;
+  background: transparent !important;
 }
 
-@media (max-width: 720px) {
-  .task-list-view {
-    margin: -0.75rem !important;
-    padding: 0.75rem !important;
-  }
+.header-card,
+.batch-action-bar,
+.footer-card,
+.task-card {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.header-card::before {
+  display: none !important;
+}
+
+.page-header {
+  border-bottom-color: #e5e7eb !important;
+}
+
+.filter-bar-wrap {
+  background: #ffffff !important;
+}
+
+.advanced-filter-toggle {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+}
+
+.advanced-filter-toggle--active {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.task-card,
+.task-card:hover,
+.task-card--selected {
+  background: #ffffff !important;
+}
+
+.card-no {
+  color: #6b7280 !important;
+}
+
+.card-product {
+  color: #111827 !important;
+}
+
+.card-meta-block {
+  background: #f9fafb !important;
+  border-color: #e5e7eb !important;
+}
+
+.card-status-row :deep(.inline-flex),
+.card-status-row :deep(.filing-status-badge),
+.card-status-row :deep(.bg-emerald-100),
+.card-status-row :deep(.bg-blue-100),
+.card-status-row :deep(.bg-amber-100),
+.card-status-row :deep(.bg-red-100) {
+  border-color: #e5e7eb !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.card-status-row :deep(.text-emerald-800) {
+  color: #15803d !important;
+}
+
+.card-status-row :deep(.text-blue-800) {
+  color: #1d4ed8 !important;
+}
+
+.card-status-row :deep(.text-amber-800) {
+  color: #b45309 !important;
+}
+
+.card-status-row :deep(.text-red-800) {
+  color: #b91c1c !important;
+}
+
+.page-header-actions :deep(button),
+.toolbar :deep(button),
+.card-row-bottom :deep(button),
+.footer-card :deep(button) {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: none !important;
+}
+
+.page-header-actions :deep(button:hover),
+.toolbar :deep(button:hover),
+.card-row-bottom :deep(button:hover),
+.footer-card :deep(button:hover) {
+  border-color: #d1d5db !important;
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+.page-header-actions :deep(button svg),
+.toolbar :deep(button svg),
+.footer-card :deep(button svg) {
+  color: #6b7280;
 }
 </style>
