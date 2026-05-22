@@ -448,43 +448,40 @@ onMounted(() => {
   font-weight: 600;
 }
 
-/* Apple Music / iOS liquid glass asset detail skin. Style-only. */
+/* Phase 6: light admin asset detail skin. Style-only. */
 .asset-detail-view {
-  background:
-    radial-gradient(circle at 14% 0%, rgba(255, 45, 141, 0.16), transparent 30rem),
-    radial-gradient(circle at 86% 6%, rgba(100, 210, 255, 0.15), transparent 32rem) !important;
-  color: var(--yb-music-text-2);
+  background: transparent !important;
+  color: #111827;
 }
 
 .detail-card,
 .version-card,
 .preview-media-shell {
-  border-color: var(--yb-music-border) !important;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.055)) !important;
-  color: var(--yb-music-text-2) !important;
-  box-shadow: var(--yb-glass-shadow) !important;
-  backdrop-filter: blur(var(--yb-glass-blur));
-  -webkit-backdrop-filter: blur(var(--yb-glass-blur));
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .page-title,
 .section-title,
 .version-title,
 .detail-row dd {
-  color: #fff !important;
+  color: #111827 !important;
 }
 
 .page-subtitle,
 .section-meta,
 .detail-row dt,
 .state-text {
-  color: var(--yb-music-muted) !important;
+  color: #6b7280 !important;
 }
 
 .version-pill {
-  background: rgba(100, 210, 255, 0.15) !important;
-  border: 1px solid rgba(100, 210, 255, 0.28);
-  color: var(--yb-music-cyan) !important;
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important;
 }
 </style>

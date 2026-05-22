@@ -158,47 +158,46 @@ const costPriceModeOptions = [
   resize: vertical;
 }
 
-/* Apple Music / iOS liquid glass create-task embedded form skin. Style-only. */
+/* Phase 6: light embedded form skin (parent modal already light). Style-only. */
 .form-card,
 .card-hint {
-  border-color: rgba(148, 163, 184, 0.20);
-  background:
-    linear-gradient(145deg, rgba(22, 31, 47, 0.92), rgba(9, 14, 23, 0.96));
-  color: #dce7f7;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-color: #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .field-label {
-  color: #cbd8ec;
+  color: #374151;
 }
 
 .form-hint,
 .optional-text {
-  color: #8fa0b8;
+  color: #6b7280;
 }
 
 .form-hint.danger,
 .required {
-  color: #ffb4ad;
+  color: #b91c1c;
 }
 
 .form-card :deep(input),
 .form-card :deep(.relative > div),
 .form-card :deep(textarea) {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: rgba(7, 12, 20, 0.82);
-  color: #f8fbff;
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #111827;
 }
 
 .form-card :deep(input::placeholder),
 .form-card :deep(textarea::placeholder) {
-  color: #64748b;
+  color: #9ca3af;
 }
 
 .form-card :deep(input:focus),
 .form-card :deep(textarea:focus) {
-  border-color: rgba(125, 211, 252, 0.62);
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 @media (max-width: 760px) {
   .type-section {

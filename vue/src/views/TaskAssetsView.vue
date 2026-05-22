@@ -544,24 +544,21 @@ onMounted(() => {
   font-weight: 600;
 }
 
-/* Apple Music / iOS liquid glass task assets skin. Style-only. */
+/* Phase 6: light admin task assets skin. Style-only. */
 .task-assets-view {
-  background:
-    radial-gradient(circle at 14% 0%, rgba(255, 45, 141, 0.16), transparent 30rem),
-    radial-gradient(circle at 86% 6%, rgba(100, 210, 255, 0.15), transparent 32rem) !important;
-  color: var(--yb-music-text-2);
+  background: transparent !important;
+  color: #111827;
 }
 
 .content-card,
 .detail-card,
 .version-card {
-  border-color: var(--yb-music-border) !important;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.055)) !important;
-  color: var(--yb-music-text-2) !important;
-  box-shadow: var(--yb-glass-shadow) !important;
-  backdrop-filter: blur(var(--yb-glass-blur));
-  -webkit-backdrop-filter: blur(var(--yb-glass-blur));
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .page-title,
@@ -569,7 +566,7 @@ onMounted(() => {
 .subsection-title,
 .version-title,
 .detail-row dd {
-  color: #fff !important;
+  color: #111827 !important;
 }
 
 .page-subtitle,
@@ -577,25 +574,25 @@ onMounted(() => {
 .detail-row dt,
 .state-text,
 .action-muted {
-  color: var(--yb-music-muted) !important;
+  color: #6b7280 !important;
 }
 
 .data-table th {
-  background: rgba(255, 255, 255, 0.08) !important;
-  color: rgba(220, 230, 255, 0.72) !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
 }
 
 .data-table td {
-  color: var(--yb-music-text-2);
+  color: #111827;
 }
 
 .row-active {
-  background: rgba(100, 210, 255, 0.12) !important;
+  background: #eff6ff !important;
 }
 
 .version-pill {
-  background: rgba(100, 210, 255, 0.15) !important;
-  border: 1px solid rgba(100, 210, 255, 0.28);
-  color: var(--yb-music-cyan) !important;
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important;
 }
 </style>

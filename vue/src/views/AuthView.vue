@@ -12,7 +12,7 @@
       <!-- 居中卡片 -->
       <div
         class="relative z-10 my-8 rounded-[2rem] p-6 sm:p-12"
-        style="width: min(100%, 480px); max-width: min(480px, calc(100vw - 4rem)); background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 12px 48px -12px rgba(28, 25, 23, 0.08);"
+        style="width: min(100%, 480px); max-width: min(480px, calc(100vw - 4rem)); background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08);"
       >
       <!-- 顶部 Header -->
       <div class="text-center mb-10">
@@ -408,101 +408,95 @@ select.auth-input {
   height: 0;
 }
 
-/* Apple Music / iOS liquid glass auth skin. Style-only. */
+/* Phase 6: light auth page — white card, blue primary. Style-only. */
 .flex.flex-col.min-h-screen {
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255, 45, 141, 0.32), transparent 28rem),
-    radial-gradient(circle at 88% 8%, rgba(100, 210, 255, 0.22), transparent 30rem),
-    radial-gradient(circle at 50% 100%, rgba(255, 149, 0, 0.16), transparent 26rem),
-    linear-gradient(145deg, #2a0e3c 0%, #08090f 45%, #030305 100%) !important;
-  color: var(--yb-music-text-2);
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 48%, #eef2ff 100%) !important;
+  color: #111827;
 }
 
 .fixed span {
-  color: rgba(255, 255, 255, 0.035) !important;
+  color: rgba(148, 163, 184, 0.25) !important;
 }
 
 .relative.z-10.my-8 {
-  border: 1px solid var(--yb-music-border-strong) !important;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.07)) !important;
-  box-shadow: 0 34px 90px -38px rgba(0, 0, 0, 0.95) !important;
-  backdrop-filter: blur(24px) !important;
-  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .inline-flex.items-center.justify-center.w-12 {
-  background: linear-gradient(135deg, rgba(255, 45, 85, 0.75), rgba(175, 82, 222, 0.75), rgba(100, 210, 255, 0.68)) !important;
-  color: #fff !important;
-  box-shadow: 0 16px 34px -20px rgba(255, 45, 141, 0.95);
+  background: #eff6ff !important;
+  color: #2563eb !important;
+  box-shadow: none;
 }
 
 h1 {
-  color: #fff !important;
+  color: #111827 !important;
 }
 
 p,
 label {
-  color: var(--yb-music-muted) !important;
+  color: #6b7280 !important;
 }
 
 .mb-6.p-3 {
-  border-color: rgba(255, 69, 58, 0.34) !important;
-  background: rgba(255, 69, 58, 0.14) !important;
-  color: #ffd5d2 !important;
+  border-color: #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
 }
 
 .mb-8 > div {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(3, 3, 5, 0.34) !important;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb !important;
 }
 
 .mb-8 button {
-  color: var(--yb-music-muted) !important;
+  color: #6b7280 !important;
 }
 
 .mb-8 button.bg-white {
-  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan)) !important;
+  background: #2563eb !important;
   color: #fff !important;
-  box-shadow: 0 12px 26px -18px rgba(255, 45, 141, 0.9) !important;
+  box-shadow: none !important;
 }
 
 .auth-input {
-  border: 1px solid rgba(255, 255, 255, 0.16) !important;
-  background: rgba(3, 3, 5, 0.34) !important;
-  color: #fff !important;
+  border: 1px solid #d1d5db !important;
+  background: #ffffff !important;
+  color: #111827 !important;
 }
 
 .auth-input::placeholder {
-  color: rgba(220, 230, 255, 0.48) !important;
+  color: #9ca3af !important;
 }
 
 .auth-input:focus {
-  background: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    0 0 0 1px rgba(100, 210, 255, 0.26),
-    0 0 0 5px rgba(100, 210, 255, 0.08) !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
 }
 
 select.auth-input {
-  background-image: linear-gradient(45deg, transparent 50%, rgba(220, 230, 255, 0.8) 50%),
-    linear-gradient(135deg, rgba(220, 230, 255, 0.8) 50%, transparent 50%) !important;
+  background-color: #ffffff !important;
+  background-image: linear-gradient(45deg, transparent 50%, #6b7280 50%),
+    linear-gradient(135deg, #6b7280 50%, transparent 50%) !important;
   background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50% !important;
   background-size: 6px 6px, 6px 6px !important;
 }
 
 form > button[type='submit'] {
-  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan)) !important;
+  background: #2563eb !important;
   color: #fff !important;
-  box-shadow: 0 16px 34px -20px rgba(255, 45, 141, 0.95);
+  box-shadow: none;
 }
 
 .app-footer,
 .app-footer a {
-  color: rgba(220, 230, 255, 0.58) !important;
+  color: #6b7280 !important;
 }
 
 .app-footer a:hover {
-  color: #fff !important;
+  color: #111827 !important;
 }
 </style>
