@@ -280,12 +280,12 @@ func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID 
 	if appErr != nil {
 		return nil, nil, "", appErr
 	}
-	result, appErr := s.erpBridgeSvc.UpsertProduct(ctx, payload)
+	result, upsertAttempts, appErr := erpBridgeUpsertProductWithCostRetry(ctx, s.erpBridgeSvc.UpsertProduct, payload)
 	if appErr != nil {
 		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, nil, appErr, remark)
 		return nil, callLogID, appErr.Message, nil
 	}
-	if failure := erpBridgeCostVerificationFailureMessage(result); failure != "" {
+	if failure := erpBridgeCostVerificationFailureMessage(result, upsertAttempts); failure != "" {
 		appErr := domain.NewAppError(domain.ErrCodeConflict, failure, map[string]interface{}{
 			"task_id": taskID,
 			"sku_id":  strings.TrimSpace(payload.SKUID),

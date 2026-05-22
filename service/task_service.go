@@ -3141,12 +3141,12 @@ func (s *taskService) performERPBridgeFiling(ctx context.Context, task *domain.T
 		return nil, nil, "", appErr
 	}
 
-	result, appErr := s.erpBridgeSvc.UpsertProduct(ctx, payload)
+	result, upsertAttempts, appErr := erpBridgeUpsertProductWithCostRetry(ctx, s.erpBridgeSvc.UpsertProduct, payload)
 	if appErr != nil {
 		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, nil, appErr, remark)
 		return nil, callLogID, appErr.Message, nil
 	}
-	if failure := erpBridgeCostVerificationFailureMessage(result); failure != "" {
+	if failure := erpBridgeCostVerificationFailureMessage(result, upsertAttempts); failure != "" {
 		appErr := domain.NewAppError(domain.ErrCodeConflict, failure, map[string]interface{}{
 			"task_id": task.ID,
 			"sku_id":  strings.TrimSpace(payload.SKUID),
@@ -3339,7 +3339,45 @@ func attachERPBridgeFilingTrace(appErr *domain.AppError, taskID int64, callLogID
 	return domain.NewAppError(appErr.Code, appErr.Message, details)
 }
 
-func erpBridgeCostVerificationFailureMessage(result *domain.ERPProductUpsertResult) string {
+var erpBridgeCostVerificationRetryDelays = []time.Duration{
+	200 * time.Millisecond,
+	500 * time.Millisecond,
+	1000 * time.Millisecond,
+}
+
+// erpBridgeCostVerificationSleep is invoked between cost-mismatch retries; tests may replace it with a no-op.
+var erpBridgeCostVerificationSleep = time.Sleep
+
+type erpBridgeUpsertFunc func(context.Context, domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError)
+
+func erpBridgeCostVerificationIsRetryableMismatch(result *domain.ERPProductUpsertResult) bool {
+	if result == nil || result.CostVerification == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(result.CostVerification.Status), "mismatched")
+}
+
+func erpBridgeUpsertProductWithCostRetry(ctx context.Context, upsert erpBridgeUpsertFunc, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, int, *domain.AppError) {
+	maxAttempts := 1 + len(erpBridgeCostVerificationRetryDelays)
+	var lastResult *domain.ERPProductUpsertResult
+	for attempts := 1; attempts <= maxAttempts; attempts++ {
+		result, appErr := upsert(ctx, payload)
+		if appErr != nil {
+			return lastResult, attempts, appErr
+		}
+		lastResult = result
+		if !erpBridgeCostVerificationIsRetryableMismatch(result) {
+			return result, attempts, nil
+		}
+		if attempts >= maxAttempts {
+			break
+		}
+		erpBridgeCostVerificationSleep(erpBridgeCostVerificationRetryDelays[attempts-1])
+	}
+	return lastResult, maxAttempts, nil
+}
+
+func erpBridgeCostVerificationFailureMessage(result *domain.ERPProductUpsertResult, upsertAttempts int) string {
 	if result == nil || result.CostVerification == nil {
 		return ""
 	}
@@ -3348,13 +3386,19 @@ func erpBridgeCostVerificationFailureMessage(result *domain.ERPProductUpsertResu
 	case "", "matched", "skipped":
 		return ""
 	case "mismatched":
+		var base string
 		if verification.ExpectedCost != nil && verification.ActualCost != nil {
-			return fmt.Sprintf("ERP成本回查不一致：期望 %.4f，聚水潭当前 %.4f", *verification.ExpectedCost, *verification.ActualCost)
+			base = fmt.Sprintf("ERP成本回查不一致：期望 %.4f，聚水潭当前 %.4f", *verification.ExpectedCost, *verification.ActualCost)
+		} else if strings.TrimSpace(verification.Message) != "" {
+			base = "ERP成本回查不一致：" + strings.TrimSpace(verification.Message)
+		} else {
+			base = "ERP成本回查不一致"
 		}
-		if strings.TrimSpace(verification.Message) != "" {
-			return "ERP成本回查不一致：" + strings.TrimSpace(verification.Message)
+		retries := upsertAttempts - 1
+		if retries > 0 {
+			base += fmt.Sprintf("（系统成本覆盖重试 %d 次后仍不一致）", retries)
 		}
-		return "ERP成本回查不一致"
+		return base
 	default:
 		if strings.TrimSpace(verification.Message) != "" {
 			return "ERP成本回查失败：" + strings.TrimSpace(verification.Message)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"workflow/domain"
 )
@@ -935,18 +936,23 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
 	expected := 5.69
 	actual := 0.96
+	erpBridgeCostVerificationSleep = func(time.Duration) {}
+	t.Cleanup(func() { erpBridgeCostVerificationSleep = time.Sleep })
+
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions: []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
-		upsertResult: &domain.ERPProductUpsertResult{
-			Status:  "succeeded",
-			Message: "ok",
-			CostVerification: &domain.ERPCostVerificationResult{
-				Status:       "mismatched",
-				SKUID:        "NSKT000292",
-				ExpectedCost: float64Ptr(expected),
-				ActualCost:   float64Ptr(actual),
-				Message:      "ERP cost readback mismatch",
-			},
+		upsertResultFn: func(int) *domain.ERPProductUpsertResult {
+			return &domain.ERPProductUpsertResult{
+				Status:  "succeeded",
+				Message: "ok",
+				CostVerification: &domain.ERPCostVerificationResult{
+					Status:       "mismatched",
+					SKUID:        "NSKT000292",
+					ExpectedCost: float64Ptr(expected),
+					ActualCost:   float64Ptr(actual),
+					Message:      "ERP cost readback mismatch",
+				},
+			}
 		},
 	}
 	taskRepo := &prdTaskRepo{}
@@ -978,6 +984,7 @@ func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
 
+	upsertsBefore := bridgeStub.upsertCalls
 	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
 		TaskID:             task.ID,
 		OperatorID:         11,
@@ -997,8 +1004,174 @@ func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
 	if !strings.Contains(taskRepo.details[task.ID].FilingErrorMessage, "ERP成本回查不一致") {
 		t.Fatalf("filing_error_message = %q, want ERP cost mismatch", taskRepo.details[task.ID].FilingErrorMessage)
 	}
+	if !strings.Contains(taskRepo.details[task.ID].FilingErrorMessage, "系统成本覆盖重试") {
+		t.Fatalf("filing_error_message = %q, want retry exhaustion detail", taskRepo.details[task.ID].FilingErrorMessage)
+	}
+	maxUpserts := 1 + len(erpBridgeCostVerificationRetryDelays)
+	if delta := bridgeStub.upsertCalls - upsertsBefore; delta != maxUpserts {
+		t.Fatalf("upsert calls delta = %d, want %d after cost retry exhaustion", delta, maxUpserts)
+	}
 	if !taskRepo.details[task.ID].ERPSyncRequired {
 		t.Fatal("erp_sync_required should stay true after cost readback mismatch")
+	}
+}
+
+func TestNewProductFilingSucceedsWhenERPCostReadbackMatchesAfterRetry(t *testing.T) {
+	expected := 3.3
+	actual := 1.06
+	erpBridgeCostVerificationSleep = func(time.Duration) {}
+	t.Cleanup(func() { erpBridgeCostVerificationSleep = time.Sleep })
+
+	mismatchRemaining := 1
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions: []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
+	}
+	bridgeStub.upsertResultFn = func(int) *domain.ERPProductUpsertResult {
+		if bridgeStub.upsertPayload == nil || bridgeStub.upsertPayload.CostPrice == nil || *bridgeStub.upsertPayload.CostPrice != expected {
+			return &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"}
+		}
+		if mismatchRemaining > 0 {
+			mismatchRemaining--
+			return &domain.ERPProductUpsertResult{
+				Status:  "succeeded",
+				Message: "ok",
+				CostVerification: &domain.ERPCostVerificationResult{
+					Status:       "mismatched",
+					ExpectedCost: float64Ptr(expected),
+					ActualCost:   float64Ptr(actual),
+				},
+			}
+		}
+		return &domain.ERPProductUpsertResult{
+			Status:  "succeeded",
+			Message: "ok",
+			CostVerification: &domain.ERPCostVerificationResult{
+				Status:       "matched",
+				ExpectedCost: float64Ptr(expected),
+				ActualCost:   float64Ptr(expected),
+			},
+		}
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		ProductNameSnapshot: "成本回查重试成功测试",
+		ProductIID:          "KT_STANDARD",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		DesignRequirement:   "设计要求",
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+
+	upsertsBefore := bridgeStub.upsertCalls
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             task.ID,
+		OperatorID:         11,
+		ProductName:        "成本回查重试成功测试",
+		ProductIID:         "KT_STANDARD",
+		Category:           "KT_STANDARD",
+		SpecText:           "20*20",
+		CostPrice:          float64Ptr(expected),
+		ManualCostOverride: true,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status after cost retry match = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	}
+	if delta := bridgeStub.upsertCalls - upsertsBefore; delta != 2 {
+		t.Fatalf("upsert calls delta = %d, want 2 (mismatch then matched)", delta)
+	}
+	if taskRepo.details[task.ID].ERPSyncRequired {
+		t.Fatal("erp_sync_required should be false after successful cost readback")
+	}
+}
+
+func TestNewProductFilingFailsWhenERPCostReadbackUnverified(t *testing.T) {
+	erpBridgeCostVerificationSleep = func(time.Duration) {}
+	t.Cleanup(func() { erpBridgeCostVerificationSleep = time.Sleep })
+
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions: []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
+		upsertResult: &domain.ERPProductUpsertResult{
+			Status:  "succeeded",
+			Message: "ok",
+			CostVerification: &domain.ERPCostVerificationResult{
+				Status:  "unverified",
+				Message: "ERP cost readback failed after upsert: upstream timeout",
+			},
+		},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		ProductNameSnapshot: "成本回查未验证失败测试",
+		ProductIID:          "KT_STANDARD",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		DesignRequirement:   "设计要求",
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+
+	upsertsBefore := bridgeStub.upsertCalls
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             task.ID,
+		OperatorID:         11,
+		ProductName:        "成本回查未验证失败测试",
+		ProductIID:         "KT_STANDARD",
+		Category:           "KT_STANDARD",
+		SpecText:           "20*20",
+		CostPrice:          float64Ptr(3.3),
+		ManualCostOverride: true,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFilingFailed {
+		t.Fatalf("filing_status = %s, want filing_failed", taskRepo.details[task.ID].FilingStatus)
+	}
+	if !strings.Contains(taskRepo.details[task.ID].FilingErrorMessage, "ERP成本回查失败") {
+		t.Fatalf("filing_error_message = %q, want unverified failure", taskRepo.details[task.ID].FilingErrorMessage)
+	}
+	if delta := bridgeStub.upsertCalls - upsertsBefore; delta != 1 {
+		t.Fatalf("upsert calls delta = %d, want 1 without mismatch retry", delta)
 	}
 }
 

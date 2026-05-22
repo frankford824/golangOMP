@@ -359,6 +359,7 @@ type erpBridgeSelectionBinderStub struct {
 	upsertPayload  *domain.ERPProductUpsertPayload
 	upsertPayloads []domain.ERPProductUpsertPayload
 	upsertResult   *domain.ERPProductUpsertResult
+	upsertResultFn func(call int) *domain.ERPProductUpsertResult
 	upsertAppErr   *domain.AppError
 	upsertCalls    int
 }
@@ -405,11 +406,18 @@ func (s *erpBridgeSelectionBinderStub) EnsureLocalProduct(context.Context, repo.
 }
 
 func (s *erpBridgeSelectionBinderStub) UpsertProduct(_ context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError) {
+	callIndex := s.upsertCalls
 	s.upsertCalls++
 	copyPayload := payload
 	s.upsertPayload = &copyPayload
 	s.upsertPayloads = append(s.upsertPayloads, copyPayload)
-	return s.upsertResult, s.upsertAppErr
+	if s.upsertAppErr != nil {
+		return nil, s.upsertAppErr
+	}
+	if s.upsertResultFn != nil {
+		return s.upsertResultFn(callIndex), nil
+	}
+	return s.upsertResult, nil
 }
 
 func (s *erpBridgeSelectionBinderStub) UpdateItemStyle(context.Context, domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, *domain.AppError) {
