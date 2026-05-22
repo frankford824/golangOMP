@@ -825,6 +825,8 @@ import {
   canSubmitAudit,
   canUploadDesignDelivery,
   canReassignDesigner,
+  isInCustomizationArtReassignmentPhase,
+  isInDesignerReassignmentPhase,
   isCustomizationTask as isCustomizationTaskByDomain,
   isLegacyTaskStatusInDesignerEditablePhase,
   taskHasRecordedDesignOutput,
@@ -967,6 +969,9 @@ const auditModuleSummary = computed(() =>
 )
 const warehouseModuleSummary = computed(() =>
   task.value?.moduleSummaries?.find((module) => module.module_key === 'warehouse'),
+)
+const customizationModuleSummary = computed(() =>
+  task.value?.moduleSummaries?.find((module) => module.module_key === 'customization'),
 )
 const isBatchTask = computed(() => task.value?.isBatchTask === true)
 const batchSkuItems = computed(() => task.value?.skuItems ?? [])
@@ -1829,6 +1834,15 @@ const retouchModuleAllowsReassign = computed(() =>
     'task.reassign.department',
   ]),
 )
+const customizationModuleAllowsReassign = computed(() =>
+  hasModuleAction(customizationModuleSummary.value, [
+    'reassign',
+    'pool_reassign',
+    'task.reassign',
+    'task.reassign.team',
+    'task.reassign.department',
+  ]),
+)
 
 /** 换人：设计阶段可调度，但进入审核责任链及之后阶段不可重派（见 canReassignDesigner） */
 const showReassignDesignerButton = computed(
@@ -1837,8 +1851,22 @@ const showReassignDesignerButton = computed(
     // 这里不再强依赖 hasTaskScopeAccess（owner_department 口径），
     // 改由 canReassignPermission + 状态门禁 + 后端 allowed_actions 共同控制。
     if (!task.value || isPurchaseTask.value) return false
-    if (!taskHasAssignee(task.value)) return false
+    if (
+      !taskHasAssignee(task.value) &&
+      !isInCustomizationArtReassignmentPhase(task.value)
+    ) {
+      return false
+    }
+    // design/retouch 模块 reassign 投影：与历史逻辑一致，模块有动作即展示。
     if (designModuleAllowsReassign.value || retouchModuleAllowsReassign.value) return true
+    // customization 模块仅加速展示；缺模块时走下方权限+状态兜底（历史任务 807 等）。
+    if (
+      customizationModuleAllowsReassign.value &&
+      (isInCustomizationArtReassignmentPhase(task.value) ||
+        isInDesignerReassignmentPhase(task.value))
+    ) {
+      return true
+    }
     return (
       canReassignPermission.value &&
       Boolean(actionAvailability.value?.canShowReassign) &&

@@ -161,6 +161,17 @@ function isAuditSubStatusBlockingReassignment(task: Task): boolean {
 }
 
 /**
+ * 定制任务「美工已指派、可重新指派」阶段：
+ * PendingCustomizationProduction + 已有设计侧负责人（designer/assignee/current_handler）。
+ * 与首次「指派美工」互斥；仍走 POST /v1/tasks/{id}/assign。
+ */
+export function isInCustomizationArtReassignmentPhase(task: Task): boolean {
+  if (!isCustomizationTask(task)) return false
+  if (task.status !== 'PendingCustomizationProduction') return false
+  return !taskHasNoDesignHandler(task)
+}
+
+/**
  * 是否仍处于「设计责任人可调整」阶段：
  * 已指派，且仍在设计池（PendingAssign/InProgress），但尚未进入审核责任链。
  */
@@ -188,19 +199,25 @@ export function isInDesignerReassignmentPhase(task: Task): boolean {
  * 仍复用 `POST /v1/tasks/{id}/assign`；若后端状态机与此前提不一致可能 409。
  */
 export function canReassignDesigner(task: Task): boolean {
-  if (!taskHasAssignee(task)) return false
+  const customizationReassign = isInCustomizationArtReassignmentPhase(task)
+  if (!customizationReassign && !taskHasAssignee(task)) return false
   if (isPurchaseTask(task)) return false
   if (isDoneStatus(task)) return false
-  if (isMainStatusBlockingReassignment(task)) return false
-  if (hasWarehousePipelineEntered(task)) return false
-  if (!isRetouchTask(task)) {
-    if (isLegacyAfterDesignerReassignmentPhase(task)) return false
-    if (isDesignSubStatusAfterReassignmentPhase(task)) return false
-  } else {
-    const d = task.designSubStatus
-    if (d === DesignSubStatusEnum.APPROVED || d === DesignSubStatusEnum.FINALIZED) return false
+  // 定制 PendingCustomizationProduction 的 main/design/audit 子状态由读模型推导，
+  // 与常规设计重派阶段不同；仅对定制美工重派跳过这些常规门禁。
+  if (!customizationReassign) {
+    if (isMainStatusBlockingReassignment(task)) return false
+    if (hasWarehousePipelineEntered(task)) return false
+    if (!isRetouchTask(task)) {
+      if (isLegacyAfterDesignerReassignmentPhase(task)) return false
+      if (isDesignSubStatusAfterReassignmentPhase(task)) return false
+    } else {
+      const d = task.designSubStatus
+      if (d === DesignSubStatusEnum.APPROVED || d === DesignSubStatusEnum.FINALIZED) return false
+    }
+    if (isAuditSubStatusBlockingReassignment(task)) return false
   }
-  if (isAuditSubStatusBlockingReassignment(task)) return false
+  if (customizationReassign) return true
   return isInDesignerReassignmentPhase(task)
 }
 

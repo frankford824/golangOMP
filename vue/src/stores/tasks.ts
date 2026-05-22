@@ -139,9 +139,13 @@ function backendAllowsDesignerReassignment(task: Task): boolean {
   ] as const
   const designModule = task.moduleSummaries?.find((module) => module.module_key === 'design')
   const retouchModule = task.moduleSummaries?.find((module) => module.module_key === 'retouch')
+  const customizationModule = task.moduleSummaries?.find(
+    (module) => module.module_key === 'customization',
+  )
   return (
     hasModuleAction(designModule, [...keys]) ||
-    hasModuleAction(retouchModule, [...keys])
+    hasModuleAction(retouchModule, [...keys]) ||
+    hasModuleAction(customizationModule, [...keys])
   )
 }
 

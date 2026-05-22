@@ -4,6 +4,8 @@ import { enrichTaskDomainFields } from '@/domain/mappers/task-mappers'
 import {
   canAssign,
   canAssignCustomizationArtOperator,
+  canReassignDesigner,
+  isInCustomizationArtReassignmentPhase,
 } from '@/domain/task-actions'
 import { getTaskActionAvailability } from '@/domain/task-action-availability'
 
@@ -76,5 +78,42 @@ describe('canAssignCustomizationArtOperator', () => {
     })
     expect(canAssign(customizationOnly)).toBe(true)
     expect(canAssign(task)).toBe(true)
+  })
+})
+
+describe('customization art reassignment phase', () => {
+  it('allows reassign when PendingCustomizationProduction and handler assigned', () => {
+    const task = makeTask({
+      businessLane: 'customization',
+      customizationRequired: true,
+      status: 'PendingCustomizationProduction',
+      designerId: '228',
+      assigneeId: '228',
+      currentHandlerId: '228',
+    })
+    expect(isInCustomizationArtReassignmentPhase(task)).toBe(true)
+    expect(canReassignDesigner(task)).toBe(true)
+    expect(getTaskActionAvailability(task).canShowReassign).toBe(true)
+  })
+
+  it('hides reassign when customization production is unassigned', () => {
+    const task = makeTask({
+      businessLane: 'customization',
+      status: 'PendingCustomizationProduction',
+    })
+    expect(isInCustomizationArtReassignmentPhase(task)).toBe(false)
+    expect(canReassignDesigner(task)).toBe(false)
+    expect(getTaskActionAvailability(task).canShowReassign).toBe(false)
+  })
+
+  it('keeps regular InProgress reassign unchanged', () => {
+    const task = makeTask({
+      status: 'InProgress',
+      designerId: '10',
+      assigneeId: '10',
+    })
+    expect(isInCustomizationArtReassignmentPhase(task)).toBe(false)
+    expect(canReassignDesigner(task)).toBe(true)
+    expect(getTaskActionAvailability(task).canShowReassign).toBe(true)
   })
 })

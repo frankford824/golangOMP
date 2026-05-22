@@ -3,6 +3,7 @@ import {
   canAssignCustomizationArtOperator,
   taskHasAssignee,
   isInDesignerReassignmentPhase,
+  isInCustomizationArtReassignmentPhase,
   isRetouchTask,
 } from './task-actions'
 
@@ -24,7 +25,8 @@ export function getTaskActionAvailability(task: Task) {
   return {
     canShowAssign:
       (isPendingAssign && !taskHasAssignee(task)) || canShowAssignCustomizationArt,
-    canShowReassign: isInDesignerReassignmentPhase(task),
+    canShowReassign:
+      isInDesignerReassignmentPhase(task) || isInCustomizationArtReassignmentPhase(task),
     canShowAuditA: isPendingAuditA,
     canShowAuditB: isPendingAuditB,
     canShowAuditActions: isPendingAuditA || isPendingAuditB,
