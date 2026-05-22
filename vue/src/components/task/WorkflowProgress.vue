@@ -221,6 +221,9 @@ const steps = computed((): Step[] => {
     ]
   }
 
+  const designStepState = resolveNormalDesignStepState(t, mainStatus, legacyStatus)
+  const auditStepState = resolveNormalAuditStepState(t, mainStatus, legacyStatus)
+
   return [
     {
       key: 'created',
@@ -230,8 +233,8 @@ const steps = computed((): Step[] => {
     {
       key: 'design',
       label: '设计',
-      subLabel: t.designSubStatus ? getDesignSubStatusLabel(t.designSubStatus) : undefined,
-      state: resolveStepState(['INFO_PENDING'], ['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'], mainStatus),
+      subLabel: normalDesignProgressSubLabel(t, designStepState),
+      state: designStepState,
     },
     {
       key: 'audit',
@@ -240,7 +243,7 @@ const steps = computed((): Step[] => {
       state:
         t.auditSubStatus === 'NOT_REQUIRED'
           ? 'skipped'
-          : resolveStepState(['INFO_PENDING'], ['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'], mainStatus),
+          : auditStepState,
     },
     {
       key: 'warehouse',
@@ -305,6 +308,82 @@ function resolveStepState(
   if (doneStatuses.includes(mainStatus)) return 'done'
   if (activeStatuses.includes(mainStatus)) return 'current'
   return 'pending'
+}
+
+function resolveNormalDesignStepState(
+  task: Task,
+  mainStatus?: string,
+  legacyStatus?: string,
+): StepState {
+  if (['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'].includes(mainStatus ?? '')) {
+    return 'done'
+  }
+  if (legacyStatus === 'PendingAuditA' || legacyStatus === 'PendingAuditB') {
+    return 'done'
+  }
+  switch (task.designSubStatus) {
+    case 'PENDING_AUDIT':
+    case 'APPROVED':
+    case 'FINALIZED':
+      return 'done'
+    case 'PENDING_ASSIGN':
+    case 'IN_PROGRESS':
+    case 'REJECTED':
+      return 'current'
+    case 'NOT_REQUIRED':
+      return 'skipped'
+    default:
+      return mainStatus === 'INFO_PENDING' ? 'current' : 'pending'
+  }
+}
+
+function resolveNormalAuditStepState(
+  task: Task,
+  mainStatus?: string,
+  legacyStatus?: string,
+): StepState {
+  if (['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'].includes(mainStatus ?? '')) {
+    return 'done'
+  }
+  if (legacyStatus === 'PendingAuditA' || legacyStatus === 'PendingAuditB') {
+    return 'current'
+  }
+  switch (task.auditSubStatus) {
+    case 'PENDING':
+    case 'IN_PROGRESS':
+      return 'current'
+    case 'PASSED':
+    case 'TRANSFERRED':
+    case 'HANDED_OVER':
+      return 'done'
+    case 'REJECTED':
+      return 'pending'
+    case 'NOT_REQUIRED':
+      return 'skipped'
+    default:
+      return 'pending'
+  }
+}
+
+function normalDesignProgressSubLabel(task: Task, state: StepState): string | undefined {
+  switch (task.designSubStatus) {
+    case 'PENDING_ASSIGN':
+      return '待指派'
+    case 'IN_PROGRESS':
+      return '设计中'
+    case 'REJECTED':
+      return '需修改'
+    case 'PENDING_AUDIT':
+      return '已提交'
+    case 'APPROVED':
+      return '已通过'
+    case 'FINALIZED':
+      return '已定稿'
+    case 'NOT_REQUIRED':
+      return state === 'skipped' ? '无需设计' : undefined
+    default:
+      return task.designSubStatus ? getDesignSubStatusLabel(task.designSubStatus) : undefined
+  }
 }
 
 /** 定制任务：仓库未进入流程时不展示 workflow.not_triggered → NOT_REQUIRED 的「无需仓库」。 */
