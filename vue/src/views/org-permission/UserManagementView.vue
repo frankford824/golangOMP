@@ -1038,7 +1038,7 @@ onMounted(() => {
   min-width: 4.75rem;
 }
 
-/* —— 弹窗可读性层：覆盖全局 dark glass，仅作用于新增用户 / 角色管理 —— */
+/* —— 弹窗可读性层：浅色后台风格，仅作用于新增用户 / 角色管理 —— */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -1047,9 +1047,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(4, 6, 12, 0.68);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, 0.45);
 }
 
 .modal-panel {
@@ -1063,31 +1061,25 @@ onMounted(() => {
 .modal-panel.um-modal {
   padding: 1.35rem 1.5rem 1.2rem;
   border-radius: 0.875rem;
-  border: 1px solid rgba(100, 210, 255, 0.28) !important;
-  background:
-    radial-gradient(circle at 8% 0%, rgba(255, 45, 141, 0.1), transparent 16rem),
-    radial-gradient(circle at 100% 8%, rgba(100, 210, 255, 0.12), transparent 18rem),
-    linear-gradient(145deg, rgba(20, 28, 41, 0.98), rgba(8, 12, 20, 0.99)) !important;
-  color: #dce7f7 !important;
-  box-shadow:
-    0 24px 48px -16px rgba(0, 0, 0, 0.65),
-    0 0 0 1px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12) !important;
 }
 
 .um-modal .section-title {
   margin: 0 0 1.1rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  border-bottom: 1px solid #e5e7eb;
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #f8fbff !important;
+  color: #111827 !important;
   line-height: 1.3;
 }
 
 .um-modal :where(.text-slate-600) {
-  color: #9dadc4 !important;
+  color: #6b7280 !important;
 }
 
 .um-modal .form-grid {
@@ -1102,9 +1094,9 @@ onMounted(() => {
   gap: 0.5rem;
   padding: 0.75rem;
   border-radius: 0.75rem;
-  border: 1px solid rgba(148, 163, 184, 0.2) !important;
-  background: linear-gradient(145deg, rgba(11, 17, 28, 0.95), rgba(7, 12, 20, 0.98)) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border: 1px solid #e5e7eb !important;
+  background: #f9fafb !important;
+  box-shadow: none;
 }
 
 .um-modal .roles-grid-readonly {
@@ -1113,13 +1105,13 @@ onMounted(() => {
 
 .um-modal .roles-grid-readonly .role-check {
   cursor: not-allowed;
-  background: rgba(7, 12, 20, 0.45) !important;
-  border-color: rgba(148, 163, 184, 0.12) !important;
+  background: #f3f4f6 !important;
+  border-color: #e5e7eb !important;
 }
 
 .um-modal .roles-grid-readonly .role-check:hover {
-  border-color: rgba(148, 163, 184, 0.12) !important;
-  background: rgba(7, 12, 20, 0.45) !important;
+  border-color: #e5e7eb !important;
+  background: #f3f4f6 !important;
 }
 
 .um-modal .roles-grid-readonly .role-check input {
@@ -1134,9 +1126,9 @@ onMounted(() => {
   padding: 0.45rem 0.65rem;
   margin: 0;
   border-radius: 0.5rem;
-  border: 1px solid rgba(148, 163, 184, 0.16) !important;
-  background: rgba(7, 12, 20, 0.72) !important;
-  color: #d6e6fb !important;
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
   font-size: 0.8125rem;
   font-weight: 500;
   line-height: 1.35;
@@ -1148,14 +1140,14 @@ onMounted(() => {
 }
 
 .um-modal .role-check:hover {
-  border-color: rgba(100, 210, 255, 0.38) !important;
-  background: rgba(15, 23, 36, 0.92) !important;
+  border-color: #93c5fd !important;
+  background: #f9fafb !important;
 }
 
 .um-modal .role-check:has(input:checked) {
-  border-color: rgba(100, 210, 255, 0.52) !important;
-  background: rgba(100, 210, 255, 0.1) !important;
-  box-shadow: 0 0 0 1px rgba(100, 210, 255, 0.14);
+  border-color: #2563eb !important;
+  background: #eff6ff !important;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12);
 }
 
 .um-modal .role-check:has(input:disabled) {
@@ -1168,20 +1160,20 @@ onMounted(() => {
   height: 1rem;
   flex-shrink: 0;
   margin: 0;
-  accent-color: #64d2ff;
+  accent-color: #2563eb;
   cursor: pointer;
 }
 
 .um-modal .input {
   width: 100%;
   min-height: 2.5rem;
-  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  border: 1px solid #d1d5db !important;
   border-radius: 0.625rem;
   padding: 0.45rem 0.7rem;
   font-size: 0.8125rem;
-  color: #f8fbff !important;
-  background: rgba(7, 12, 20, 0.82) !important;
-  color-scheme: dark;
+  color: #111827 !important;
+  background: #ffffff !important;
+  color-scheme: light;
   box-shadow: none !important;
   transition:
     border-color 0.15s ease,
@@ -1189,22 +1181,22 @@ onMounted(() => {
 }
 
 .um-modal .input::placeholder {
-  color: #64748b !important;
+  color: #9ca3af !important;
 }
 
 .um-modal .input:focus {
   outline: none;
-  border-color: rgba(125, 211, 252, 0.62) !important;
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
 }
 
 .um-modal select.input {
   cursor: pointer;
   appearance: none;
-  background-color: rgba(7, 12, 20, 0.82) !important;
+  background-color: #ffffff !important;
   background-image:
-    linear-gradient(45deg, transparent 50%, #9dadc4 50%),
-    linear-gradient(135deg, #9dadc4 50%, transparent 50%);
+    linear-gradient(45deg, transparent 50%, #6b7280 50%),
+    linear-gradient(135deg, #6b7280 50%, transparent 50%);
   background-position:
     calc(100% - 1.1rem) calc(50% + 0.12rem),
     calc(100% - 0.75rem) calc(50% + 0.12rem);
@@ -1222,13 +1214,13 @@ onMounted(() => {
   align-items: center;
   margin-top: 0.35rem;
   padding-top: 0.85rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  border-top: 1px solid #e5e7eb;
 }
 
 .um-modal .modal-actions {
   margin-top: 1.15rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  border-top: 1px solid #e5e7eb;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1237,32 +1229,29 @@ onMounted(() => {
 }
 
 .um-modal .um-btn--ghost {
-  color: #d6e6fb !important;
-  background: rgba(15, 23, 36, 0.88) !important;
-  border-color: rgba(148, 163, 184, 0.28) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: #374151 !important;
+  background: #ffffff !important;
+  border-color: #d1d5db !important;
+  box-shadow: none;
 }
 
 .um-modal .um-btn--ghost:hover:not(:disabled) {
-  color: #f8fbff !important;
-  background: rgba(23, 32, 47, 0.95) !important;
-  border-color: rgba(100, 210, 255, 0.38) !important;
+  color: #111827 !important;
+  background: #f9fafb !important;
+  border-color: #9ca3af !important;
 }
 
 .um-modal .um-btn--primary {
-  background: linear-gradient(120deg, #ff2d55 0%, #ff2d8d 48%, #af52de 100%) !important;
-  border-color: rgba(255, 255, 255, 0.16) !important;
+  background: #2563eb !important;
+  border-color: #2563eb !important;
   color: #fff !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 10px 24px -18px rgba(255, 45, 141, 0.85) !important;
+  box-shadow: none !important;
 }
 
 .um-modal .um-btn--primary:hover:not(:disabled) {
-  filter: brightness(1.06);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    0 12px 28px -16px rgba(255, 45, 141, 0.9) !important;
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  box-shadow: none !important;
 }
 
 .um-modal .password-row {
@@ -1273,16 +1262,16 @@ onMounted(() => {
   margin-top: 0.35rem;
   padding: 0.75rem;
   border-radius: 0.625rem;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(8, 12, 20, 0.55);
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
 
 .um-modal .membership-row {
   margin-top: 0.5rem;
   padding: 0.75rem;
   border-radius: 0.625rem;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(8, 12, 20, 0.55);
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
 
 .um-modal .membership-grid {
@@ -1294,7 +1283,7 @@ onMounted(() => {
 
 .um-modal .role-readonly-hint {
   font-size: 0.75rem;
-  color: #9dadc4 !important;
+  color: #6b7280 !important;
   margin: 0;
 }
 
@@ -1303,10 +1292,10 @@ onMounted(() => {
   padding: 0.45rem 0.65rem;
   font-size: 0.75rem;
   font-weight: 500;
-  color: #7dd3fc !important;
+  color: #1d4ed8 !important;
   border-radius: 0.5rem;
-  border: 1px solid rgba(100, 210, 255, 0.18);
-  background: rgba(100, 210, 255, 0.08);
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
 }
 
 @media (max-width: 1024px) {

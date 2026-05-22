@@ -40,45 +40,64 @@ defineEmits<{ save: []; discard: []; cancel: [] }>()
 </script>
 
 <style scoped>
+/* Phase 4: light confirm dialog — align with BaseModal overlay/panel. Style-only. */
 .fixed.inset-0 {
-  background:
-    radial-gradient(circle at 18% 5%, rgba(255, 45, 141, 0.22), transparent 28rem),
-    radial-gradient(circle at 86% 0%, rgba(100, 210, 255, 0.16), transparent 30rem),
-    rgba(0, 0, 0, 0.66) !important;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, 0.45) !important;
 }
 
 .fixed.inset-0 > div {
-  border-color: rgba(148, 163, 184, 0.24) !important;
-  background:
-    linear-gradient(145deg, rgba(22, 31, 47, 0.96), rgba(9, 14, 23, 0.98)) !important;
-  color: #dce7f7;
-  box-shadow: 0 30px 70px -38px rgba(0, 0, 0, 0.95);
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
 }
 
 h3 {
-  color: #f8fbff !important;
+  color: #111827 !important;
 }
 
 p {
-  color: #b8c4d8 !important;
+  color: #6b7280 !important;
 }
 
-button {
-  border-color: rgba(148, 163, 184, 0.24) !important;
-  background: rgba(12, 18, 29, 0.74);
-  color: #dce7f7 !important;
+.fixed.inset-0 > div .flex button {
+  border: 1px solid #d1d5db !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  border-radius: 0.375rem;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
-button:hover {
-  border-color: rgba(125, 211, 252, 0.44) !important;
-  background: rgba(24, 35, 52, 0.94);
+.fixed.inset-0 > div .flex button:hover {
+  border-color: #9ca3af !important;
+  background: #f9fafb !important;
+  color: #111827 !important;
 }
 
-button:last-child {
-  border-color: rgba(255, 255, 255, 0.24) !important;
-  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan));
-  color: #fff !important;
+.fixed.inset-0 > div .flex button.text-red-600 {
+  border-color: #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+}
+
+.fixed.inset-0 > div .flex button.text-red-600:hover {
+  border-color: #fca5a5 !important;
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+}
+
+.fixed.inset-0 > div .flex button:last-child {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.fixed.inset-0 > div .flex button:last-child:hover {
+  border-color: #1d4ed8 !important;
+  background: #1d4ed8 !important;
+  color: #ffffff !important;
 }
 </style>

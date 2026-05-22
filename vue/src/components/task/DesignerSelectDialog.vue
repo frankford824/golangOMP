@@ -130,19 +130,20 @@ function onConfirm() {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .designer-item:hover {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: #f9fafb;
+  border-color: #d1d5db;
 }
 
 .designer-item:has(.designer-radio:checked) {
-  border-color: rgba(96, 165, 250, 0.9);
-  background-color: rgba(59, 130, 246, 0.18);
+  border-color: #2563eb;
+  background-color: #eff6ff;
 }
 
 .designer-item:has(.designer-radio:disabled) {
@@ -152,26 +153,27 @@ function onConfirm() {
 
 .designer-radio {
   margin: 0;
+  accent-color: #2563eb;
 }
 
 .designer-name {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #f8fafc;
+  color: #111827;
 }
 
 .designer-role {
   margin-left: auto;
   font-size: 0.75rem;
-  color: #cbd5e1;
+  color: #6b7280;
 }
 
 .designer-item:has(.designer-radio:checked) .designer-name {
-  color: #ffffff;
+  color: #1d4ed8;
 }
 
 .designer-item:has(.designer-radio:checked) .designer-role {
-  color: #dbeafe;
+  color: #2563eb;
 }
 </style>
 

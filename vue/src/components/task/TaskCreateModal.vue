@@ -2141,23 +2141,21 @@ async function submit() {
   color: #fff;
 }
 
-/* Apple Music / iOS liquid glass create-task modal skin. Style-only except parent visibility fix. */
+/* Phase 4: light admin create-task modal skin. Style-only except parent visibility fix. */
 :global(.create-task-modal-panel) {
-  border-color: rgba(100, 210, 255, 0.28) !important;
-  background:
-    radial-gradient(circle at 8% 0%, rgba(255, 45, 141, 0.12), transparent 18rem),
-    radial-gradient(circle at 100% 10%, rgba(100, 210, 255, 0.14), transparent 20rem),
-    linear-gradient(145deg, rgba(20, 28, 41, 0.98), rgba(8, 12, 20, 0.99)) !important;
-  color: #dce7f7 !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12) !important;
 }
 
 :global(.create-task-modal-panel > header) {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(8, 12, 20, 0.22);
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
 }
 
 :global(.create-task-modal-panel > div.flex-1) {
-  color: #dce7f7 !important;
+  color: #111827 !important;
 }
 
 .create-type-panel,
@@ -2175,17 +2173,14 @@ async function submit() {
 .submit-check-section,
 .create-context-panel,
 .context-card {
-  border-color: rgba(148, 163, 184, 0.20) !important;
-  background:
-    linear-gradient(145deg, rgba(23, 32, 47, 0.92), rgba(11, 17, 28, 0.96)) !important;
-  color: #dce7f7 !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .create-type-panel {
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.10), transparent 14rem),
-    linear-gradient(145deg, rgba(24, 35, 52, 0.92), rgba(11, 17, 28, 0.96)) !important;
+  background: #f9fafb !important;
 }
 
 .eyebrow,
@@ -2194,7 +2189,7 @@ async function submit() {
 .submit-check-hint,
 .context-card-body,
 .erp-sync-toggle-hint {
-  color: #9dadc4 !important;
+  color: #6b7280 !important;
 }
 
 /*
@@ -2206,7 +2201,7 @@ async function submit() {
  */
 .form-fields :deep(label.field-label),
 .form-fields :deep(label.text-sm.font-medium.text-slate-600) {
-  color: #d6e6fb !important;
+  color: #374151 !important;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -2216,31 +2211,31 @@ async function submit() {
 .context-panel-header h4,
 .context-card-title,
 .erp-sync-title {
-  color: #f8fbff !important;
+  color: #111827 !important;
 }
 
 .task-kind-switch,
 .mode-switch {
-  border-color: rgba(148, 163, 184, 0.20) !important;
-  background: rgba(8, 13, 22, 0.68) !important;
+  border-color: #e5e7eb !important;
+  background: #f3f4f6 !important;
 }
 
 .task-kind-button {
   border: 1px solid transparent;
-  color: #aab8cf !important;
+  color: #6b7280 !important;
 }
 
 .task-kind-button.is-inactive:hover {
-  border-color: rgba(125, 211, 252, 0.24);
-  background: rgba(24, 35, 52, 0.8) !important;
-  color: #f8fbff !important;
+  border-color: #d1d5db;
+  background: #ffffff !important;
+  color: #111827 !important;
 }
 
 .task-kind-button.is-active {
-  border-color: rgba(255, 255, 255, 0.24) !important;
-  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan)) !important;
+  border-color: #2563eb !important;
+  background: #2563eb !important;
   color: #fff !important;
-  box-shadow: 0 14px 28px -20px rgba(255, 45, 141, 0.8) !important;
+  box-shadow: none !important;
 }
 
 .native-input,
@@ -2262,9 +2257,9 @@ async function submit() {
 .batch-public :deep(textarea),
 .batch-field-card :deep(textarea),
 .meta-card-grid :deep(textarea) {
-  border-color: rgba(148, 163, 184, 0.22) !important;
-  background: rgba(7, 12, 20, 0.82) !important;
-  color: #f8fbff !important;
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  color: #111827 !important;
 }
 
 .native-input::placeholder,
@@ -2278,7 +2273,7 @@ async function submit() {
 .batch-public :deep(textarea::placeholder),
 .batch-field-card :deep(textarea::placeholder),
 .meta-card-grid :deep(textarea::placeholder) {
-  color: #64748b !important;
+  color: #9ca3af !important;
 }
 
 .native-input:focus,
@@ -2292,108 +2287,111 @@ async function submit() {
 .batch-public :deep(textarea:focus),
 .batch-field-card :deep(textarea:focus),
 .meta-card-grid :deep(textarea:focus) {
-  border-color: rgba(125, 211, 252, 0.62) !important;
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
 }
 
 .erp-sync-toggle-card,
 .sku-code-type-card {
-  border-color: rgba(148, 163, 184, 0.20) !important;
-  background: rgba(12, 18, 29, 0.76) !important;
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
 }
 
-/* 深色玻璃皮肤：ERP「立即同步」行作为主配置项，提亮主文案并承托整行（仅样式） */
 .erp-sync-toggle-card .erp-sync-control,
 .sku-code-type-card .erp-sync-control {
   margin-top: 0.12rem;
   padding: 0.55rem 0.72rem;
   border-radius: 0.65rem;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.065) 0%,
-    rgba(255, 255, 255, 0.028) 100%
-  );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: none;
   gap: 0.85rem;
 }
 .erp-sync-toggle-card .erp-sync-main-label,
 .sku-code-type-card .erp-sync-main-label {
-  color: #f2f7ff !important;
+  color: #111827 !important;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.35;
 }
 .erp-sync-toggle-card .erp-sync-toggle-hint:not(.warning),
 .sku-code-type-card .erp-sync-toggle-hint:not(.warning) {
-  color: #7c8eaa !important;
+  color: #6b7280 !important;
   font-weight: 400;
 }
 .erp-sync-toggle-card :deep(.erp-switch[aria-pressed='false']),
 .sku-code-type-card :deep(.erp-switch[aria-pressed='false']) {
-  background: rgba(30, 41, 59, 0.88) !important;
-  color: #d5e0f2 !important;
-  border-color: rgba(148, 163, 184, 0.38) !important;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+  border-color: #d1d5db !important;
+  box-shadow: none;
 }
 
 .erp-sync-badge,
 .erp-sync-locked-badge,
 .batch-ref-thumb-file,
 .batch-bridge-hint {
-  border-color: rgba(100, 210, 255, 0.20) !important;
-  background: rgba(34, 48, 71, 0.78) !important;
-  color: #aee9ff !important;
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
 }
 
 .batch-preview-table th {
-  background: rgba(34, 48, 71, 0.86) !important;
-  color: #cbd8ec !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
 }
 
 .batch-preview-table th,
 .batch-preview-table td {
-  border-top-color: rgba(148, 163, 184, 0.16) !important;
+  border-top-color: #e5e7eb !important;
 }
 
 .batch-preview-table tr.has-error,
 .submit-error-banner {
-  border-color: rgba(255, 69, 58, 0.32) !important;
-  background: rgba(255, 69, 58, 0.12) !important;
-  color: #ffb4ad !important;
+  border-color: #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
 }
 
 .issue-list,
 .field-hint-error {
-  color: #ffb4ad !important;
+  color: #b91c1c !important;
 }
 
 .issue-ok {
-  color: #86efac !important;
+  color: #15803d !important;
 }
 
 .issue-warn,
 .erp-sync-toggle-hint.warning {
-  color: #ffd18a !important;
+  color: #b45309 !important;
 }
 
 .summary-footer {
-  border-top-color: rgba(148, 163, 184, 0.18) !important;
-  background: rgba(8, 12, 20, 0.74) !important;
+  border-top-color: #e5e7eb !important;
+  background: #f9fafb !important;
 }
 
 .context-dot {
-  background: #64d2ff;
-  box-shadow: 0 0 0 4px rgba(100, 210, 255, 0.12), 0 0 20px rgba(100, 210, 255, 0.28);
+  background: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
 }
 
 .create-context-panel.is-customization,
 .create-context-panel.is-retouch {
-  background:
-    radial-gradient(circle at 0% 0%, rgba(148, 113, 255, 0.12), transparent 13rem),
-    linear-gradient(145deg, rgba(23, 32, 47, 0.92), rgba(11, 17, 28, 0.96)) !important;
+  background: #f9fafb !important;
+}
+
+.create-context-panel.is-customization .context-card-title,
+.create-context-panel.is-customization .context-card-body,
+.create-context-panel.is-retouch .context-card-title,
+.create-context-panel.is-retouch .context-card-body {
+  color: #111827 !important;
+}
+
+.create-context-panel.is-retouch .context-card {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
 }
 
 @media (max-width: 900px) {
