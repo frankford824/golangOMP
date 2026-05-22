@@ -3758,4 +3758,161 @@ onBeforeUnmount(() => {
   font-size: 0.72rem !important;
   font-weight: 820 !important;
 }
+
+/* Phase 5: light admin asset center — final override wins over dark glass skin. Style-only. */
+.assets-index-view {
+  margin: 0 !important;
+  min-height: auto !important;
+  padding: 0 0 3.75rem !important;
+  --ac-bg: transparent;
+  --ac-card: #ffffff;
+  --ac-text: #111827;
+  --ac-sec: #6b7280;
+  --ac-accent: #2563eb;
+  --ac-card-border: #e5e7eb;
+  --ac-card-border-hover: #d1d5db;
+  --ac-card-subpanel: #f9fafb;
+  --ac-field-label: #6b7280;
+  --ac-field-value: #111827;
+  background: transparent !important;
+  color: #111827 !important;
+}
+
+.assets-index-view .ac-header {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-bottom-color: #e5e7eb !important;
+}
+
+.ac-header,
+.ac-status-bar,
+.ac-batch-bar,
+.ac-excel-package-bar,
+.ac-pagination,
+.ac-selected-item,
+.ac-filters-panel {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.ac-status-bar {
+  background: #f9fafb !important;
+  color: #6b7280 !important;
+}
+
+.ac-brand,
+.ac-card-title,
+.ac-footer-stat,
+.ac-selected-title,
+.ac-title-row .ac-card-title {
+  color: #111827 !important;
+}
+
+.ac-card {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.ac-card:hover,
+.ac-card--active,
+.ac-card--selected {
+  border-color: #93c5fd !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06) !important;
+}
+
+.ac-card--selected {
+  border-color: #2563eb !important;
+}
+
+.ac-card-check {
+  background: #ffffff !important;
+  border-color: #d1d5db !important;
+  box-shadow: none !important;
+}
+
+.ac-card--selected .ac-card-check {
+  background: #2563eb !important;
+  border-color: #93c5fd !important;
+}
+
+.ac-mono,
+.ac-card-spec,
+.ac-card-footer > div,
+.ac-footer-right {
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
+  color: #111827 !important;
+}
+
+.ac-mono::before,
+.ac-card-spec::before {
+  color: #6b7280 !important;
+}
+
+.ac-copy-tag,
+.ac-card-link-btn,
+.ac-icon-btn,
+.ac-batch-btn,
+.ac-pg-btn,
+.ac-selected-remove,
+.ac-page-size-select,
+.ac-page-jump-input {
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: none !important;
+}
+
+.ac-copy-tag:hover,
+.ac-card-link-btn:hover {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.ac-icon-btn--primary,
+.ac-batch-btn--primary {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.ac-footer-label {
+  color: #6b7280 !important;
+}
+
+.ac-footer-tag,
+.ac-format-pill {
+  border: 1px solid #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.ac-card-footer .ac-footer-tag {
+  color: #6b7280 !important;
+}
+
+.ac-card-meta,
+.ac-card-spec,
+.state-text,
+.preview-state-hint,
+.ac-selected-meta {
+  color: #6b7280 !important;
+}
+
+.ac-card-link-btn {
+  background: #eff6ff !important;
+  border-color: #bfdbfe !important;
+  color: #2563eb !important;
+}
+
+.preview-lightbox {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 </style>

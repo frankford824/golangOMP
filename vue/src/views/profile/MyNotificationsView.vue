@@ -924,39 +924,26 @@ onMounted(() => {
   }
 }
 
-/* Apple Music / iOS liquid glass notification page skin. Style-only. */
+/* Phase 5: light admin notification page skin. Style-only. */
 .notif-page {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 8% 2%, rgba(255, 45, 141, 0.16), transparent 25rem),
-    radial-gradient(circle at 92% 4%, rgba(100, 210, 255, 0.14), transparent 30rem),
-    linear-gradient(145deg, #101722 0%, #0b1019 46%, #06080d 100%);
-  color: #eaf1ff;
+  background: transparent;
+  color: #111827;
 }
 
 .notif-page::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.045), transparent 32%),
-    radial-gradient(circle at 62% 16%, rgba(148, 113, 255, 0.10), transparent 24rem);
+  display: none;
 }
 
 .notif-hero,
 .notif-broadcast,
 .notif-list-panel,
 .notif-summary {
-  border-color: rgba(100, 210, 255, 0.22);
-  background:
-    linear-gradient(145deg, rgba(22, 30, 44, 0.94), rgba(11, 16, 26, 0.97));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 22px 60px -42px rgba(0, 0, 0, 0.86);
+  border-color: #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .notif-hero,
@@ -970,13 +957,13 @@ onMounted(() => {
 }
 
 .notif-eyebrow {
-  color: #9be8ff;
+  color: #6b7280;
 }
 
 .notif-hero h1,
 .notif-section-head h2,
 .notif-row h3 {
-  color: #f8fbff;
+  color: #111827;
   letter-spacing: 0;
 }
 
@@ -984,14 +971,14 @@ onMounted(() => {
 .notif-section-head p,
 .notif-broadcast-footer p,
 .notif-row p {
-  color: #b8c4d8;
+  color: #6b7280;
 }
 
 .notif-field span,
 .notif-summary span,
 .notif-row time,
 .notif-user-option small {
-  color: #8fa0b8;
+  color: #6b7280;
 }
 
 .notif-segment,
@@ -999,18 +986,18 @@ onMounted(() => {
 .notif-recipient-panel,
 .notif-empty,
 .notif-empty-inline {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: rgba(10, 15, 24, 0.68);
+  border-color: #e5e7eb;
+  background: #f9fafb;
 }
 
 .notif-segment,
 .notif-choice {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: none;
 }
 
 .notif-segment button,
 .notif-choice button {
-  color: #aab8cf;
+  color: #6b7280;
   transition:
     background-color 0.16s ease,
     color 0.16s ease,
@@ -1020,24 +1007,24 @@ onMounted(() => {
 .notif-segment button.is-active,
 .notif-choice button.is-active,
 .notif-btn--primary {
-  border-color: rgba(255, 255, 255, 0.24);
-  background: linear-gradient(105deg, var(--yb-music-pink), var(--yb-music-purple), var(--yb-music-cyan));
+  border-color: #2563eb;
+  background: #2563eb;
   color: #fff;
-  box-shadow: 0 14px 28px -20px rgba(255, 45, 141, 0.82);
+  box-shadow: none;
 }
 
 .notif-btn--ghost,
 .notif-mini-btn {
-  border-color: rgba(148, 163, 184, 0.26);
-  background: rgba(12, 18, 29, 0.72);
-  color: #dce7f7;
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #374151;
 }
 
 .notif-btn--ghost:hover:not(:disabled),
 .notif-mini-btn:hover {
-  border-color: rgba(125, 211, 252, 0.42);
-  background: rgba(24, 35, 52, 0.92);
-  color: #f8fbff;
+  border-color: #93c5fd;
+  background: #f9fafb;
+  color: #111827;
 }
 
 .notif-btn:disabled {
@@ -1047,106 +1034,100 @@ onMounted(() => {
 .notif-field input,
 .notif-field textarea,
 .notif-recipient-search input {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: rgba(7, 12, 20, 0.82);
-  color: #f8fbff;
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #111827;
 }
 
 .notif-field input::placeholder,
 .notif-field textarea::placeholder,
 .notif-recipient-search input::placeholder {
-  color: #64748b;
+  color: #9ca3af;
 }
 
 .notif-field input:focus,
 .notif-field textarea:focus,
 .notif-recipient-search input:focus {
-  border-color: rgba(125, 211, 252, 0.62);
-  background: rgba(10, 18, 29, 0.94);
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12);
+  border-color: #2563eb;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .notif-recipient-search svg {
-  color: #7dd3fc;
+  color: #6b7280;
 }
 
 .notif-selected-users button {
-  border-color: rgba(125, 211, 252, 0.28);
-  background: rgba(8, 145, 178, 0.16);
-  color: #aee9ff;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .notif-user-option {
-  border-color: rgba(148, 163, 184, 0.18);
-  background: rgba(12, 18, 29, 0.72);
+  border-color: #e5e7eb;
+  background: #ffffff;
 }
 
 .notif-user-option:hover {
-  border-color: rgba(125, 211, 252, 0.32);
-  background: rgba(24, 35, 52, 0.82);
+  border-color: #93c5fd;
+  background: #f9fafb;
 }
 
 .notif-user-option strong {
-  color: #eef6ff;
+  color: #111827;
 }
 
 .notif-broadcast-footer p.is-error {
-  color: #ffb4ad;
+  color: #b91c1c;
 }
 
 .notif-row {
-  border-color: rgba(100, 210, 255, 0.26);
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 45, 141, 0.16), transparent 13rem),
-    linear-gradient(135deg, rgba(23, 37, 58, 0.92), rgba(13, 20, 32, 0.96));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-color: #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   transition:
     border-color 0.16s ease,
     background-color 0.16s ease,
-    transform 0.16s ease,
     box-shadow 0.16s ease;
 }
 
 .notif-row:hover {
-  border-color: rgba(125, 211, 252, 0.42);
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 18px 38px -30px rgba(100, 210, 255, 0.72);
+  border-color: #93c5fd;
+  transform: none;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
 .notif-row.is-read {
-  border-color: rgba(148, 163, 184, 0.16);
-  background: rgba(10, 15, 24, 0.70);
+  border-color: #e5e7eb;
+  background: #f9fafb;
 }
 
 .notif-row-icon {
-  color: #64d2ff;
+  color: #2563eb;
 }
 
 .notif-row.is-read .notif-row-icon {
-  color: #64748b;
+  color: #9ca3af;
 }
 
 .notif-row span {
-  background: rgba(34, 48, 71, 0.78);
-  color: #aee9ff;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .notif-summary div {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background:
-    linear-gradient(135deg, rgba(24, 35, 52, 0.86), rgba(10, 15, 24, 0.82));
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
 
 .notif-summary strong {
-  color: #f8fbff;
+  color: #111827;
   font-family: 'SF Mono', 'IBM Plex Mono', Consolas, monospace;
 }
 
 .notif-empty,
 .notif-empty-inline {
-  color: #9badc6;
+  color: #6b7280;
 }
 
 @media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce) {
