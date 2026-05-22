@@ -596,12 +596,12 @@ watch(
 }
 
 .form-card {
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid #e5e7eb;
   border-radius: 0.875rem;
-  background: linear-gradient(145deg, rgba(23, 32, 47, 0.92), rgba(11, 17, 28, 0.96));
+  background: #ffffff;
   padding: 0.875rem 1rem;
-  color: #dce7f7;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .section-eyebrow {
@@ -610,13 +610,13 @@ watch(
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #9dadc4;
+  color: #6b7280;
 }
 
 .section-hint {
   margin: 0.35rem 0 0.65rem;
   font-size: 0.75rem;
-  color: #7c8eaa;
+  color: #6b7280;
   line-height: 1.45;
 }
 
@@ -642,7 +642,7 @@ watch(
   margin-bottom: 0.35rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #d6e6fb;
+  color: #374151;
   letter-spacing: 0.01em;
 }
 
@@ -652,46 +652,46 @@ watch(
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8125rem;
-  color: #d6e6fb;
+  color: #374151;
   line-height: 1.4;
 }
 
 .native-input {
   width: 100%;
   min-height: 2.75rem;
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  border: 1px solid #d1d5db;
   border-radius: 0.75rem;
-  background: rgba(7, 12, 20, 0.82);
-  color: #f8fbff;
+  background: #ffffff;
+  color: #111827;
   font-size: 0.875rem;
   padding: 0.45rem 0.65rem;
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
 }
 
 .native-input::placeholder {
-  color: #64748b;
+  color: #9ca3af;
 }
 
 .native-input:focus {
-  border-color: rgba(125, 211, 252, 0.62);
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .native-input:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-  background: rgba(7, 12, 20, 0.5);
+  background: #f9fafb;
 }
 
 select.native-input {
   cursor: pointer;
   appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, #9dadc4 50%),
-    linear-gradient(135deg, #9dadc4 50%, transparent 50%);
+  background-image: linear-gradient(45deg, transparent 50%, #6b7280 50%),
+    linear-gradient(135deg, #6b7280 50%, transparent 50%);
   background-position:
     calc(100% - 1.1rem) calc(50% + 0.12rem),
     calc(100% - 0.75rem) calc(50% + 0.12rem);
@@ -705,7 +705,6 @@ select.native-input {
 input.native-input[type='date']::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.75;
-  filter: invert(0.85);
 }
 
 .native-checkbox {
@@ -714,18 +713,18 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
   flex-shrink: 0;
   margin: 0;
   border-radius: 0.25rem;
-  accent-color: #64d2ff;
+  accent-color: #2563eb;
   cursor: pointer;
 }
 
 .edit-error-banner {
   margin-bottom: 0.65rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid rgba(255, 69, 58, 0.32);
+  border: 1px solid #fecaca;
   border-radius: 0.5rem;
-  background: rgba(255, 69, 58, 0.12);
+  background: #fef2f2;
   font-size: 0.875rem;
-  color: #ffb4ad;
+  color: #b91c1c;
   line-height: 1.45;
 }
 
@@ -733,7 +732,7 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
   padding: 2rem 0;
   text-align: center;
   font-size: 0.875rem;
-  color: #9dadc4;
+  color: #6b7280;
 }
 
 .edit-modal-footer {
@@ -743,14 +742,14 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
   gap: 0.5rem;
   width: 100%;
   padding: 1rem 1.25rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(8, 12, 20, 0.74);
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
 
-/* BaseInput / BaseTextarea / IIdSelector（BaseSelect）局部深色覆写 */
+/* BaseInput / BaseTextarea / IIdSelector（BaseSelect）局部浅色覆写 */
 .edit-workspace :deep(label.text-sm.font-medium.text-slate-600),
 .edit-workspace :deep(label.field-label) {
-  color: #d6e6fb !important;
+  color: #374151 !important;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -761,9 +760,9 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
 
 .form-card :deep(input),
 .form-card :deep(textarea) {
-  border-color: rgba(148, 163, 184, 0.22) !important;
-  background: rgba(7, 12, 20, 0.82) !important;
-  color: #f8fbff !important;
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  color: #111827 !important;
   box-shadow: none !important;
 }
 
@@ -779,76 +778,74 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
 
 .form-card :deep(input::placeholder),
 .form-card :deep(textarea::placeholder) {
-  color: #64748b !important;
+  color: #9ca3af !important;
 }
 
 .form-card :deep(input:focus),
 .form-card :deep(textarea:focus) {
-  border-color: rgba(125, 211, 252, 0.62) !important;
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
 }
 
 .form-card :deep(input:disabled),
 .form-card :deep(textarea:disabled) {
   cursor: not-allowed;
   opacity: 0.55;
-  background: rgba(7, 12, 20, 0.5) !important;
+  background: #f9fafb !important;
 }
 
 .form-card :deep(.relative > div) {
   min-height: 2.75rem;
-  border-color: rgba(148, 163, 184, 0.22) !important;
+  border-color: #d1d5db !important;
   border-radius: 0.75rem !important;
-  background: rgba(7, 12, 20, 0.82) !important;
-  color: #f8fbff !important;
+  background: #ffffff !important;
+  color: #111827 !important;
   box-shadow: none !important;
 }
 
 .form-card :deep(.relative > div:focus-within) {
-  border-color: rgba(125, 211, 252, 0.62) !important;
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12) !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
 }
 
 .form-card :deep(.relative button) {
-  color: #f8fbff !important;
+  color: #111827 !important;
 }
 
 .form-card :deep(.relative .text-slate-500) {
-  color: #64748b !important;
+  color: #6b7280 !important;
 }
 
 .form-card :deep(.text-xs.text-slate-400) {
-  color: #7c8eaa !important;
+  color: #6b7280 !important;
 }
 
-/* 深色玻璃态弹窗外壳（对齐创建任务弹窗） */
+/* 浅色弹窗外壳（对齐 BaseModal / 阶段一全局壳） */
 :global(.task-info-edit-modal-panel) {
-  border-color: rgba(100, 210, 255, 0.28) !important;
-  background:
-    radial-gradient(circle at 8% 0%, rgba(255, 45, 141, 0.12), transparent 18rem),
-    radial-gradient(circle at 100% 10%, rgba(100, 210, 255, 0.14), transparent 20rem),
-    linear-gradient(145deg, rgba(20, 28, 41, 0.98), rgba(8, 12, 20, 0.99)) !important;
-  color: #dce7f7 !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12) !important;
 }
 
 :global(.task-info-edit-modal-panel > header) {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(8, 12, 20, 0.22);
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
 }
 
 :global(.task-info-edit-modal-panel > header h2) {
-  color: #f8fbff !important;
+  color: #111827 !important;
 }
 
 :global(.task-info-edit-modal-panel > header button) {
-  color: #9dadc4 !important;
+  color: #6b7280 !important;
 }
 
 :global(.task-info-edit-modal-panel > header button:hover) {
-  color: #f8fbff !important;
+  color: #111827 !important;
 }
 
 :global(.task-info-edit-modal-panel > div.flex-1) {
-  color: #dce7f7 !important;
+  color: #111827 !important;
 }
 </style>
