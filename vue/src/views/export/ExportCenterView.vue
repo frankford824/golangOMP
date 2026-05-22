@@ -574,14 +574,15 @@ onMounted(() => {
   color: #475569;
 }
 .tab-btn.active {
-  background: #fff;
-  color: #0f172a;
+  background: #2563eb;
+  color: #ffffff;
 }
 .content-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 0.75rem;
   padding: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 .section-title {
   margin: 0 0 0.75rem;
@@ -599,10 +600,19 @@ onMounted(() => {
   border-collapse: collapse;
   font-size: 0.75rem;
 }
+.simple-table th {
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 600;
+}
 .simple-table th,
 .simple-table td {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e5e7eb;
   padding: 0.25rem 0.5rem;
   text-align: left;
+  color: #111827;
+}
+.simple-table tbody tr:hover td {
+  background: #f9fafb;
 }
 </style>

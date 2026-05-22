@@ -280,23 +280,23 @@ const stepThemeOverrides = {
   indicatorIconSizeSmall: '13px',
   indicatorIndexFontSizeSmall: '11px',
   indicatorColorFinish: '#22c55e',
-  indicatorColorProcess: '#64d2ff',
-  indicatorColorWait: 'rgba(15, 23, 42, 0.95)',
+  indicatorColorProcess: '#2563eb',
+  indicatorColorWait: '#e5e7eb',
   indicatorBorderColorFinish: '#86efac',
-  indicatorBorderColorProcess: '#bae6fd',
-  indicatorBorderColorWait: 'rgba(100, 116, 139, 0.65)',
-  indicatorTextColorFinish: '#03120b',
-  indicatorTextColorProcess: '#031420',
-  indicatorTextColorWait: '#64748b',
-  headerTextColorFinish: '#eafbf0',
-  headerTextColorProcess: '#e0f7ff',
-  headerTextColorWait: '#94a3b8',
-  descriptionTextColorFinish: '#86efac',
-  descriptionTextColorProcess: '#7dd3fc',
-  descriptionTextColorWait: '#64748b',
-  splitorColorFinish: 'rgba(100, 210, 255, 0.62)',
-  splitorColorProcess: 'rgba(100, 210, 255, 0.46)',
-  splitorColorWait: 'rgba(71, 85, 105, 0.6)',
+  indicatorBorderColorProcess: '#93c5fd',
+  indicatorBorderColorWait: '#d1d5db',
+  indicatorTextColorFinish: '#ffffff',
+  indicatorTextColorProcess: '#ffffff',
+  indicatorTextColorWait: '#6b7280',
+  headerTextColorFinish: '#15803d',
+  headerTextColorProcess: '#2563eb',
+  headerTextColorWait: '#6b7280',
+  descriptionTextColorFinish: '#16a34a',
+  descriptionTextColorProcess: '#1d4ed8',
+  descriptionTextColorWait: '#9ca3af',
+  splitorColorFinish: '#93c5fd',
+  splitorColorProcess: '#bfdbfe',
+  splitorColorWait: '#d1d5db',
 }
 
 function resolveStepState(
@@ -442,11 +442,10 @@ function customizationWarehouseSubLabel(
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12), 0 8px 18px -14px rgba(34, 197, 94, 0.9);
 }
 .step-current .step-dot {
-  border-color: #64d2ff;
-  background: #64d2ff;
-  color: #031420;
-  box-shadow: 0 0 0 5px rgba(100, 210, 255, 0.15), 0 0 22px rgba(100, 210, 255, 0.32);
-  animation: workflow-current-breath 2.8s ease-in-out infinite;
+  border-color: #93c5fd;
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .step-skipped .step-dot {
   border-color: #e5e7eb;
@@ -462,7 +461,7 @@ function customizationWarehouseSubLabel(
 }
 .step-done .step-line,
 .step-done + .step-row .step-line {
-  background: linear-gradient(180deg, #22c55e 0%, #64d2ff 100%);
+  background: #93c5fd;
 }
 .step-content {
   padding: 0 0 0.875rem 0;
@@ -473,15 +472,15 @@ function customizationWarehouseSubLabel(
 .step-label {
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #b8c4d9;
+  color: #6b7280;
   line-height: 1.25rem;
 }
-.step-done .step-label { color: #a7fbc1; }
-.step-current .step-label { color: #e0f7ff; font-weight: 800; }
-.step-skipped .step-label { color: #64748b; text-decoration: line-through; }
+.step-done .step-label { color: #15803d; }
+.step-current .step-label { color: #2563eb; font-weight: 800; }
+.step-skipped .step-label { color: #9ca3af; text-decoration: line-through; }
 .step-sublabel {
   font-size: 0.6875rem;
-  color: #92a0b8;
+  color: #9ca3af;
 }
 
 .workflow-progress--horizontal {
@@ -501,15 +500,10 @@ function customizationWarehouseSubLabel(
   justify-content: center;
   gap: 0.28rem;
   padding: 0.44rem 0.62rem;
-  border: 1px solid rgba(148, 113, 255, 0.28);
+  border: 1px solid #e5e7eb;
   border-radius: 999px;
-  background:
-    linear-gradient(135deg, rgba(35, 47, 69, 0.78), rgba(20, 28, 44, 0.82)),
-    radial-gradient(circle at 18% 35%, rgba(255, 45, 146, 0.16), transparent 34%),
-    radial-gradient(circle at 86% 45%, rgba(100, 210, 255, 0.18), transparent 34%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.10),
-    0 10px 28px -26px rgba(125, 211, 252, 0.58);
+  background: #f9fafb;
+  box-shadow: none;
 }
 
 .workflow-progress--naive :deep(.n-step) {
@@ -523,11 +517,11 @@ function customizationWarehouseSubLabel(
   position: relative;
   z-index: 1;
   flex: 0 0 auto;
-  filter: drop-shadow(0 0 10px rgba(100, 210, 255, 0.16));
+  filter: none;
 }
 
 .workflow-progress--naive :deep(.n-step--process-status .n-step-indicator) {
-  filter: drop-shadow(0 0 14px rgba(100, 210, 255, 0.34));
+  filter: none;
 }
 
 .workflow-progress--naive :deep(.n-step-content) {
@@ -565,26 +559,22 @@ function customizationWarehouseSubLabel(
 
 .workflow-progress--naive :deep(.n-step--process-status) {
   padding: 0.22rem 0.72rem 0.22rem 0.32rem;
-  border: 1px solid rgba(125, 211, 252, 0.42);
+  border: 1px solid #93c5fd;
   border-radius: 999px;
-  background:
-    linear-gradient(135deg, rgba(47, 83, 130, 0.48), rgba(38, 45, 76, 0.62));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 0 0 1px rgba(148, 113, 255, 0.10),
-    0 0 24px rgba(100, 210, 255, 0.18);
+  background: #eff6ff;
+  box-shadow: none;
 }
 
 .workflow-progress--naive :deep(.n-step--finish-status .n-step-content-header__title) {
-  color: #bfffd2;
+  color: #15803d;
 }
 
 .workflow-progress--naive :deep(.n-step--wait-status) {
-  opacity: 0.72;
+  opacity: 0.85;
 }
 
 .workflow-progress--naive :deep(.n-step--wait-status .n-step-content-header__title) {
-  color: #8fa0b8;
+  color: #6b7280;
 }
 
 .workflow-progress--naive :deep(.n-step-splitor) {
@@ -604,13 +594,7 @@ function customizationWarehouseSubLabel(
 }
 
 .workflow-progress--naive :deep(.n-step--process-status .n-step-splitor)::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 45%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
-  animation: workflow-line-sweep 3.8s ease-out infinite;
+  display: none;
 }
 
 @media (max-width: 900px) {
@@ -691,12 +675,11 @@ function customizationWarehouseSubLabel(
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12), 0 8px 18px -14px rgba(34, 197, 94, 0.9);
 }
 .step-current .step-dot--sm {
-  border-color: #64d2ff;
-  background: #64d2ff;
-  color: #031420;
-  transform: scale(1.08);
-  box-shadow: 0 0 0 5px rgba(100, 210, 255, 0.15), 0 0 22px rgba(100, 210, 255, 0.32);
-  animation: workflow-current-breath 2.8s ease-in-out infinite;
+  border-color: #93c5fd;
+  background: #2563eb;
+  color: #ffffff;
+  transform: scale(1.05);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .step-skipped .step-dot--sm {
   border-color: rgba(100, 116, 139, 0.34);
@@ -715,22 +698,22 @@ function customizationWarehouseSubLabel(
   font-weight: 750;
   padding: 0;
   line-height: 1.2;
-  color: #cbd5e1;
+  color: #6b7280;
 }
 .workflow-progress--horizontal .step-chip.step-done .step-label {
-  color: #eafbf0;
+  color: #15803d;
 }
 .workflow-progress--horizontal .step-chip.step-current .step-label {
-  color: #e0f7ff;
+  color: #2563eb;
   font-weight: 900;
 }
 .workflow-progress--horizontal .step-chip.step-skipped .step-label {
-  color: #64748b;
+  color: #9ca3af;
   text-decoration: line-through;
 }
 .step-sublabel-inline {
   font-size: 0.625rem;
-  color: #92a0b8;
+  color: #9ca3af;
   font-weight: 500;
 }
 .step-sep {
@@ -740,29 +723,16 @@ function customizationWarehouseSubLabel(
   overflow: hidden;
   border-radius: 999px;
   color: transparent;
-  background: rgba(30, 41, 59, 0.92);
+  background: #d1d5db;
   user-select: none;
   padding: 0;
 }
 .step-chip.step-done + .step-sep {
-  background: linear-gradient(90deg, #22c55e 0%, #64d2ff 100%);
+  background: #93c5fd;
 }
 .step-chip.step-done + .step-sep::after,
 .step-chip.step-current + .step-sep::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 45%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
-  opacity: 0;
-  transform: translateX(-120%);
-  animation: workflow-line-sweep 3.4s ease-out 0.6s 1 both;
-}
-.step-chip.step-current + .step-sep::after {
-  opacity: 0.55;
-  animation-iteration-count: infinite;
-  animation-duration: 3.8s;
+  display: none;
 }
 
 @keyframes workflow-current-breath {
