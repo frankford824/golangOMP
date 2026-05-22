@@ -57,7 +57,15 @@ func designAssetSourceModuleKeyForTask(task *domain.Task, assetType domain.TaskA
 }
 
 func applyDesignSubmissionWorkflow(ctx context.Context, tx repo.Tx, rules designSubmissionWorkflowEngine, task *domain.Task, transition designSubmissionTransition, actorID int64) error {
-	if rules == nil || task == nil || transition.TaskStatus != domain.TaskStatusPendingAuditA {
+	if rules == nil || task == nil || transition.ModuleKey == "" {
+		return nil
+	}
+	switch transition.TaskStatus {
+	case domain.TaskStatusPendingAuditA:
+		// design.submit -> audit (audit_standard pool)
+	case domain.TaskStatusPendingCustomizationReview:
+		// customization.submit -> audit (audit_customization pool)
+	default:
 		return nil
 	}
 	return rules.ApplyAfterAction(ctx, tx, task, transition.ModuleKey, domain.ModuleActionSubmit, &actorID, 0)

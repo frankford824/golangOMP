@@ -999,8 +999,10 @@ func TestTaskAssetServiceSubmitDesignCustomizationOperatorAdvancesToReview(t *te
 		DecisionType: domain.CustomizationJobDecisionTypeFinal,
 		Status:       domain.CustomizationJobStatusPendingCustomizationProduction,
 	})
+	workflow := &step04DesignSubmissionWorkflow{}
 	svc := NewTaskAssetService(taskRepo, assetRepo, eventRepo, newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), step04TxRunner{},
-		WithTaskAssetCustomizationJobRepo(jobRepo))
+		WithTaskAssetCustomizationJobRepo(jobRepo),
+		WithTaskAssetBlueprintRuleEngine(workflow))
 
 	asset, appErr := svc.SubmitDesign(ctx, SubmitDesignParams{
 		TaskID:     27,
@@ -1026,6 +1028,12 @@ func TestTaskAssetServiceSubmitDesignCustomizationOperatorAdvancesToReview(t *te
 	}
 	if job == nil || job.Status != domain.CustomizationJobStatusPendingCustomizationReview {
 		t.Fatalf("customization job = %+v, want pending_customization_review", job)
+	}
+	if len(workflow.calls) != 1 {
+		t.Fatalf("SubmitDesign(customization) workflow calls = %+v, want one customization submit", workflow.calls)
+	}
+	if got := workflow.calls[0]; got.taskID != 27 || got.moduleKey != domain.ModuleKeyCustomization || got.action != domain.ModuleActionSubmit || got.actorID == nil || *got.actorID != operatorID {
+		t.Fatalf("SubmitDesign(customization) workflow call = %+v", got)
 	}
 }
 
