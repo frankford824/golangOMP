@@ -896,6 +896,7 @@ import {
   getMainTaskStatusLabel,
   getWarehouseSubStatusLabel,
 } from '@/domain/enums/task-status'
+import { getCustomizationDetailStatusLabel } from '@/domain/task-center-card-status'
 
 // ── 子区块（通过 provide/inject 访问 task，无 prop drilling）──────────────
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
@@ -1352,6 +1353,10 @@ const effectiveRetouchLabel = computed(() => {
 })
 const designStatusText = computed(() => {
   if (isRetouchTask.value) return effectiveRetouchLabel.value
+  const customizationLabel = task.value
+    ? getCustomizationDetailStatusLabel(task.value)
+    : null
+  if (customizationLabel) return customizationLabel
   const status = task.value?.designSubStatus
   if (status) return getDesignSubStatusLabel(status)
   if (isCustomizationTask.value) return '定制待处理'

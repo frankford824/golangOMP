@@ -234,6 +234,7 @@ import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import { TASK_DETAIL_PRODUCT_INDEX_KEY } from '@/composables/task-detail-product-index'
 import { getDesignSubStatusLabel } from '@/domain/enums/task-status'
+import { getCustomizationDetailStatusLabel } from '@/domain/task-center-card-status'
 import { retouchDesignAssetStatusDisplay } from '@/domain/retouch-display'
 import {
   canSubmitAudit,
@@ -846,13 +847,25 @@ function onActiveVersionThumbSelect(key: string) {
 }
 
 const canSubmitDesign = computed(() => canSubmitAudit(task.value))
-const canSubmitFromDesignPanel = computed(
-  () => can('design.submit') && canSubmitDesign.value,
-)
+const canSubmitFromDesignPanel = computed(() => {
+  if (!canSubmitDesign.value) return false
+  if (isCustomizationTask.value) {
+    return (
+      can('task.customization.submit') ||
+      can('customization.submit') ||
+      can('design.submit')
+    )
+  }
+  return can('design.submit')
+})
 
 const designAssetStatusRow = computed(() => {
   const rt = retouchDesignAssetStatusDisplay(task.value)
   if (rt) return rt
+  const customizationLabel = getCustomizationDetailStatusLabel(task.value)
+  if (customizationLabel) {
+    return { text: customizationLabel, dotClass: 'dot-blue' }
+  }
   if (!task.value.designSubStatus) return null
   const s = task.value.designSubStatus
   if (s === 'FINALIZED' || s === 'APPROVED') return { text: getDesignSubStatusLabel(s), dotClass: 'dot-green' }
