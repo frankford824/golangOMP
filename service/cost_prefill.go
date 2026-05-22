@@ -96,7 +96,9 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				explanations = append(explanations, fmt.Sprintf("%s requires width/height/area input before threshold surcharge can be evaluated", rule.RuleName))
 			case area < *rule.AreaThreshold:
 				extra := (*rule.SurchargeAmount) * area * float64(quantity)
-				if hasFixedUnitPrice {
+				if rule.TaxMultiplier != nil && *rule.TaxMultiplier > 0 {
+					extra = extra * (*rule.TaxMultiplier)
+				} else if hasFixedUnitPrice {
 					extra = extra * fixedUnitTaxMultiplier
 				}
 				estimated += extra

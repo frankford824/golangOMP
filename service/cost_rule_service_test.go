@@ -118,6 +118,58 @@ func TestCostRulePreviewAppliesFixedThresholdAndProcessSurcharge(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewAppliesSurchargeTaxMultiplier(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   11,
+		CategoryCode: "PHOTO_CLOTH_STANDARD",
+		CategoryName: "常规写真布",
+		DisplayName:  "常规写真布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       11,
+			RuleVersion:  1,
+			RuleName:     "常规写真布基础单价",
+			CategoryCode: "PHOTO_CLOTH_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    costRuleFloat64Ptr(5),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "test",
+		},
+		{
+			RuleID:          12,
+			RuleVersion:     1,
+			RuleName:        "常规写真布小面积附加",
+			CategoryCode:    "PHOTO_CLOTH_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			TaxMultiplier:   costRuleFloat64Ptr(1.1),
+			AreaThreshold:   costRuleFloat64Ptr(0.15),
+			SurchargeAmount: costRuleFloat64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "test",
+		},
+	}
+
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "PHOTO_CLOTH_STANDARD",
+		Area:         costRuleFloat64Ptr(0.1),
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.83) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.83", result.EstimatedCost)
+	}
+}
+
 func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()
@@ -277,6 +329,18 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			categoryCode: "PP_STICKY",
 			notes:        "PP纸无背胶 20*30cm",
 			want:         []string{"PP_PLAIN"},
+		},
+		{
+			name:         "regular poster maps to photo cloth rule",
+			categoryCode: "GENERAL",
+			notes:        "常规海报 30*40cm",
+			want:         []string{"PHOTO_CLOTH_STANDARD"},
+		},
+		{
+			name:         "pp poster is not mistaken for photo cloth",
+			categoryCode: "GENERAL",
+			notes:        "PP海报背胶 30*40cm",
+			want:         []string{"PP_STICKY"},
 		},
 	}
 	for _, tt := range tests {

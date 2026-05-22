@@ -286,7 +286,12 @@ func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID 
 		return nil, callLogID, appErr.Message, nil
 	}
 	if failure := erpBridgeCostVerificationFailureMessage(result); failure != "" {
-		log.Printf("task_erp_cost_verification_warning task_id=%d sku_id=%s warning=%s", taskID, strings.TrimSpace(payload.SKUID), failure)
+		appErr := domain.NewAppError(domain.ErrCodeConflict, failure, map[string]interface{}{
+			"task_id": taskID,
+			"sku_id":  strings.TrimSpace(payload.SKUID),
+		})
+		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, result, appErr, remark)
+		return result, callLogID, failure, nil
 	}
 	if err := s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusSucceeded, startedAt, result, nil, remark); err != nil {
 		return nil, callLogID, "", infraError("update erp bridge filing call log", err)

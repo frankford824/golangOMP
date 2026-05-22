@@ -2097,6 +2097,132 @@ func TestTaskServiceUpdateBusinessInfoResolvesChineseCategoryNameForCost(t *test
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "PHOTO_CLOTH_STANDARD",
+		CategoryName: "常规写真布",
+		DisplayName:  "常规写真布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规写真布基础单价",
+			CategoryCode:  "PHOTO_CLOTH_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			133: {ID: 133, TaskType: domain.TaskTypeNewProductDevelopment, ProductNameSnapshot: "常规海报"},
+		},
+		details: map[int64]*domain.TaskDetail{
+			133: {TaskID: 133, Category: "常规海报", CategoryName: "常规海报"},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     133,
+		OperatorID: 9,
+		Category:   "常规海报",
+		SpecText:   "210*110cm",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-12.705) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 12.705", detail.CostPrice)
+	}
+	if detail.CostRuleName != "常规写真布基础单价" {
+		t.Fatalf("cost_rule_name = %q, want 常规写真布基础单价", detail.CostRuleName)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromTaskProductName(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "PHOTO_CLOTH_STANDARD",
+		CategoryName: "常规写真布",
+		DisplayName:  "常规写真布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规写真布基础单价",
+			CategoryCode:  "PHOTO_CLOTH_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			134: {ID: 134, TaskType: domain.TaskTypeNewProductDevelopment, ProductNameSnapshot: "露岩常规海报/儿童节挂布/彩色快乐儿童节100*180cm"},
+		},
+		details: map[int64]*domain.TaskDetail{
+			134: {TaskID: 134, Category: "常规海报", CategoryName: "常规海报"},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     134,
+		OperatorID: 9,
+		Category:   "常规海报",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-9.9) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 9.9", detail.CostPrice)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoAppliesSmallAreaSurchargeAsUnitPriceIncrease(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"workflow/domain"
@@ -931,7 +932,7 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	}
 }
 
-func TestNewProductFilingSucceedsWhenERPCostReadbackDiffers(t *testing.T) {
+func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
 	expected := 5.69
 	actual := 0.96
 	bridgeStub := &erpBridgeSelectionBinderStub{
@@ -990,14 +991,14 @@ func TestNewProductFilingSucceedsWhenERPCostReadbackDiffers(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
-		t.Fatalf("filing_status after cost mismatch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFilingFailed {
+		t.Fatalf("filing_status after cost mismatch = %s, want filing_failed", taskRepo.details[task.ID].FilingStatus)
 	}
-	if taskRepo.details[task.ID].FilingErrorMessage != "" {
-		t.Fatalf("filing_error_message = %q, want empty warning-only cost readback", taskRepo.details[task.ID].FilingErrorMessage)
+	if !strings.Contains(taskRepo.details[task.ID].FilingErrorMessage, "ERP成本回查不一致") {
+		t.Fatalf("filing_error_message = %q, want ERP cost mismatch", taskRepo.details[task.ID].FilingErrorMessage)
 	}
-	if taskRepo.details[task.ID].ERPSyncRequired {
-		t.Fatal("erp_sync_required should be false after product filing succeeds despite cost readback mismatch")
+	if !taskRepo.details[task.ID].ERPSyncRequired {
+		t.Fatal("erp_sync_required should stay true after cost readback mismatch")
 	}
 }
 

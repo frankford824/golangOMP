@@ -1885,7 +1885,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "cost_rule_id does not match the selected category_code", nil)
 	}
 
-	prefill, appErr := s.previewTaskCost(ctx, detail)
+	prefill, appErr := s.previewTaskCost(ctx, task, detail)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -2189,7 +2189,7 @@ func applyTaskDetailDemandTextEdit(task *domain.Task, detail *domain.TaskDetail,
 	}
 }
 
-func (s *taskService) previewTaskCost(ctx context.Context, detail *domain.TaskDetail) (costPreviewComputation, *domain.AppError) {
+func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, detail *domain.TaskDetail) (costPreviewComputation, *domain.AppError) {
 	if s.costRuleRepo == nil || detail == nil {
 		return costPreviewComputation{}, nil
 	}
@@ -2200,7 +2200,7 @@ func (s *taskService) previewTaskCost(ctx context.Context, detail *domain.TaskDe
 	if categoryID == nil && strings.TrimSpace(ruleCategoryCode) == "" {
 		return costPreviewComputation{}, nil
 	}
-	notes := taskCostPreviewText(detail)
+	notes := taskCostPreviewTextWithTask(task, detail)
 	rules, err := s.listActiveCostRulesForText(ctx, categoryID, ruleCategoryCode, notes)
 	if err != nil {
 		return costPreviewComputation{}, infraError("list active cost rules for task business info", err)
@@ -2623,7 +2623,13 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 			return add("KT_STANDARD")
 		}
 	}
-	if strings.Contains(combined, "写真布") {
+	looksLikePhotoCloth := strings.Contains(combined, "写真布") ||
+		((strings.Contains(combined, "海报") || strings.Contains(combined, "条幅") || strings.Contains(combined, "挂布")) &&
+			!strings.Contains(combined, "pp") &&
+			!strings.Contains(combined, "背胶") &&
+			!strings.Contains(combined, "铜版纸") &&
+			!strings.Contains(combined, "白卡纸"))
+	if looksLikePhotoCloth {
 		if strings.Contains(combined, "定制") {
 			return add("PHOTO_CLOTH_CUSTOM")
 		}
@@ -2675,7 +2681,7 @@ func (s *taskService) resolveTaskCostRuleCategory(ctx context.Context, detail *d
 		return nil, "", infraError("resolve cost rule category from task category", err)
 	}
 	if category == nil {
-		return nil, "", nil
+		return nil, categoryKey, nil
 	}
 	return &category.CategoryID, category.CategoryCode, nil
 }
@@ -2730,6 +2736,17 @@ func taskCostPreviewText(detail *domain.TaskDetail) string {
 		detail.Note,
 		detail.Remark,
 		detail.DemandText,
+	), " ")
+}
+
+func taskCostPreviewTextWithTask(task *domain.Task, detail *domain.TaskDetail) string {
+	if task == nil {
+		return taskCostPreviewText(detail)
+	}
+	return strings.Join(nonEmptyStrings(
+		taskCostPreviewText(detail),
+		task.ProductNameSnapshot,
+		task.SKUCode,
 	), " ")
 }
 
@@ -3130,7 +3147,12 @@ func (s *taskService) performERPBridgeFiling(ctx context.Context, task *domain.T
 		return nil, callLogID, appErr.Message, nil
 	}
 	if failure := erpBridgeCostVerificationFailureMessage(result); failure != "" {
-		log.Printf("task_erp_cost_verification_warning task_id=%d sku_id=%s warning=%s", task.ID, strings.TrimSpace(payload.SKUID), failure)
+		appErr := domain.NewAppError(domain.ErrCodeConflict, failure, map[string]interface{}{
+			"task_id": task.ID,
+			"sku_id":  strings.TrimSpace(payload.SKUID),
+		})
+		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, result, appErr, remark)
+		return result, callLogID, failure, nil
 	}
 	if err := s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusSucceeded, startedAt, result, nil, remark); err != nil {
 		return nil, callLogID, "", infraError("update erp bridge filing call log", err)
