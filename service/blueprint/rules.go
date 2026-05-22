@@ -131,8 +131,13 @@ func (e *RuleEngine) enterModule(ctx context.Context, tx repo.Tx, task *domain.T
 	}
 	state := domain.ModuleStatePendingClaim
 	pool := spec.PoolTeamCode
-	if moduleKey == domain.ModuleKeyWarehouse {
+	switch moduleKey {
+	case domain.ModuleKeyWarehouse:
 		pool = strPtr(domain.TeamWarehouseMain)
+	case domain.ModuleKeyAudit:
+		if isCustomizationTask(task) {
+			pool = strPtr(domain.TeamAuditCustomization)
+		}
 	}
 	m, err := e.modules.Enter(ctx, tx, task.ID, moduleKey, state, pool, json.RawMessage(`{}`))
 	if err != nil {
@@ -213,7 +218,16 @@ func (e *RuleEngine) specFor(taskType domain.TaskType, moduleKey string) (Module
 }
 
 func isCustomizationTask(task *domain.Task) bool {
-	return task != nil && (task.TaskType == domain.TaskTypeCustomerCustomization || task.TaskType == domain.TaskTypeRegularCustomization || task.CustomizationRequired)
+	if task == nil {
+		return false
+	}
+	if task.TaskType == domain.TaskTypeCustomerCustomization || task.TaskType == domain.TaskTypeRegularCustomization {
+		return true
+	}
+	if task.CustomizationRequired {
+		return true
+	}
+	return domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired) == domain.TaskBusinessLaneCustomization
 }
 
 func payload(v interface{}) json.RawMessage {
