@@ -308,8 +308,20 @@ function submitConfirm() {
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
   border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #111827;
   resize: vertical;
   font-family: inherit;
+}
+
+.reason-textarea::placeholder {
+  color: #9ca3af;
+}
+
+.reason-textarea:disabled {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #6b7280;
 }
 .reason-textarea:focus {
   outline: none;
@@ -323,44 +335,54 @@ function submitConfirm() {
 }
 
 .intro-copy {
-  color: rgba(226, 232, 240, 0.92);
+  color: #374151;
 }
 
 .intro-copy-strong {
-  color: #ffffff;
+  color: #111827;
 }
 
 .confirm-copy-primary {
-  color: rgba(248, 250, 252, 0.96);
+  color: #111827;
 }
 
 .confirm-copy-secondary {
-  color: rgba(203, 213, 225, 0.96);
+  color: #4b5563;
 }
 
 .confirm-reason-label {
-  color: #ffffff;
+  color: #111827;
 }
 
 .reassign-select :deep(label) {
-  color: rgba(203, 213, 225, 0.96);
+  color: #6b7280;
 }
 
 .reassign-select :deep(.h-11) {
-  border-color: rgba(148, 163, 184, 0.35);
-  background: rgba(15, 23, 42, 0.65);
-  color: rgba(248, 250, 252, 0.96);
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #111827;
 }
 
 .reassign-select :deep(.h-11 > button) {
   color: inherit;
 }
 
+.reassign-select :deep(.h-11 > button:disabled) {
+  color: #6b7280 !important;
+}
+
 .reassign-select :deep(.h-11 .text-slate-500) {
-  color: rgba(148, 163, 184, 0.95) !important;
+  color: #6b7280 !important;
 }
 
 .reassign-select :deep(.h-11 .text-slate-400) {
-  color: rgba(148, 163, 184, 0.95) !important;
+  color: #9ca3af !important;
+}
+
+.reassign-select :deep(.cursor-not-allowed) {
+  background: #f3f4f6 !important;
+  color: #6b7280 !important;
+  opacity: 1 !important;
 }
 </style>

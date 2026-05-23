@@ -328,59 +328,61 @@ onUnmounted(() => {
 <style scoped>
 .fixed.inset-0 {
   z-index: 7000 !important;
-  background:
-    radial-gradient(circle at 16% 4%, rgba(255, 45, 141, 0.18), transparent 30rem),
-    radial-gradient(circle at 88% 2%, rgba(100, 210, 255, 0.14), transparent 32rem),
-    rgba(0, 0, 0, 0.86) !important;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(15, 23, 42, 0.16) !important;
 }
 
 .mx-auto.max-w-4xl {
-  border-color: var(--yb-music-border-strong) !important;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(255, 45, 141, 0.08), transparent 18rem),
-    radial-gradient(circle at 100% 0%, rgba(100, 210, 255, 0.08), transparent 20rem),
-    linear-gradient(145deg, rgba(17, 24, 39, 0.99), rgba(7, 12, 20, 0.995)) !important;
-  box-shadow: 0 34px 90px -38px rgba(0, 0, 0, 0.95) !important;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  box-shadow: 0 24px 48px -18px rgba(15, 23, 42, 0.18) !important;
 }
 
 input {
-  border-color: rgba(255, 255, 255, 0.2) !important;
-  background: rgba(3, 7, 14, 0.92) !important;
-  color: #fff !important;
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
+  color: #111827 !important;
+}
+
+input::placeholder {
+  color: #9ca3af !important;
 }
 
 button {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--yb-music-text-2) !important;
+  border: 1px solid #e5e7eb;
+  color: #374151 !important;
 }
 
 section {
-  border-color: rgba(255, 255, 255, 0.14) !important;
-  background: rgba(5, 10, 18, 0.92) !important;
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
 }
 
 p,
 div,
 span {
-  color: var(--yb-music-text-2);
+  color: #374151;
 }
 
 .bg-white,
 .hover\:bg-white\/70:hover {
-  background: rgba(34, 48, 71, 0.92) !important;
+  background: #ffffff !important;
 }
 
 .shadow-sm {
-  box-shadow: inset 0 0 0 1px rgba(100, 210, 255, 0.22) !important;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12) !important;
+}
+
+.bg-\[var\(--v1-bg-primary\)\] {
+  border-color: #2563eb !important;
+}
+
+.bg-\[var\(--v1-bg-surface-soft\)\] {
+  border-color: #e5e7eb !important;
 }
 
 :deep(mark) {
   border-radius: 0.25rem;
-  background: rgba(100, 210, 255, 0.22) !important;
-  color: #f8fbff !important;
+  background: #dbeafe !important;
+  color: #1e3a8a !important;
 }
 </style>

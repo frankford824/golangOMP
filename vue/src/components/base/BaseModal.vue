@@ -121,7 +121,7 @@ function confirm() {
 /* Light admin modal skin. Style-only. */
 .fixed.inset-0 {
   z-index: 7100 !important;
-  background: rgba(0, 0, 0, 0.45) !important;
+  background: rgba(15, 23, 42, 0.18) !important;
 }
 
 .fixed.inset-0 > div {

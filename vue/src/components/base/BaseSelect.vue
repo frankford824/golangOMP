@@ -9,11 +9,11 @@
       <div
         ref="triggerEl"
         class="flex h-11 w-full items-center gap-1 rounded-xl border border-stone-200 bg-stone-50/80 px-2 text-sm text-stone-800 transition focus-within:border-stone-400 focus-within:ring-1 focus-within:ring-stone-300 hover:bg-stone-50"
-        :class="{ 'cursor-not-allowed bg-stone-100 opacity-60': disabled }"
+        :class="{ 'cursor-not-allowed bg-stone-100 text-stone-500': disabled }"
       >
         <button
           type="button"
-          class="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-stone-400"
+          class="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-stone-500"
           :disabled="disabled"
           @click="toggleOpen"
         >
@@ -305,6 +305,10 @@ watch(filterQuery, () => {
   color: #111827 !important;
 }
 
+.fixed :deep(input::placeholder) {
+  color: #9ca3af !important;
+}
+
 .fixed button {
   color: #374151 !important;
 }
@@ -322,6 +326,10 @@ watch(filterQuery, () => {
 
 .fixed .border-b {
   border-color: #e5e7eb !important;
+}
+
+.cursor-not-allowed {
+  opacity: 1 !important;
 }
 </style>
 
