@@ -128,6 +128,18 @@
                   事件日志
                 </BaseButton>
                 <BaseButton
+                  v-if="showErpFilingRetryButton"
+                  type="button"
+                  class="detail-top-chip"
+                  variant="secondary"
+                  size="sm"
+                  :loading="erpFilingRetrying"
+                  :disabled="erpFilingRetrying"
+                  @click="onErpFilingRetry"
+                >
+                  重试同步
+                </BaseButton>
+                <BaseButton
                   v-if="canAccessPage('task_assets')"
                   type="button"
                   class="detail-top-chip"
@@ -361,7 +373,26 @@
                           <dt>最新操作</dt>
                           <dd>{{ detailCostLatestActionLabel }}</dd>
                         </div>
+                        <div v-if="detailErpSyncStatusLabel">
+                          <dt>ERP 同步</dt>
+                          <dd :class="detailErpSyncStatusToneClass">{{ detailErpSyncStatusLabel }}</dd>
+                        </div>
+                        <div v-if="task.filing_error_message">
+                          <dt>同步失败原因</dt>
+                          <dd class="detail-erp-sync-error">{{ task.filing_error_message }}</dd>
+                        </div>
                       </dl>
+                      <div v-if="showErpFilingRetryButton" class="detail-v3-erp-retry-row">
+                        <BaseButton
+                          variant="secondary"
+                          size="sm"
+                          :loading="erpFilingRetrying"
+                          :disabled="erpFilingRetrying"
+                          @click="onErpFilingRetry"
+                        >
+                          重试同步
+                        </BaseButton>
+                      </div>
                     </article>
                   </div>
                   <p class="detail-v3-module-note">
@@ -873,6 +904,11 @@ import {
   mapTaskEventRowToRecentEvent,
 } from '@/domain/mappers/task-events-from-api'
 import { workflowGateReasonLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { canUserRetryErpFiling, taskNeedsErpFilingRetry } from '@/domain/erp-filing-retry'
+import {
+  getTaskFilingStatusLabel,
+  getTaskFilingStatusTone,
+} from '@/utils/filing-status'
 import {
   dedupeReferenceFileRefs,
   referenceFileRefsFromBackendReferenceAssets,
@@ -1748,6 +1784,49 @@ const showWarehouseCompleteActionButton = computed(
     return Boolean(actionAvailability.value?.canShowWarehouseComplete)
   },
 )
+
+const showErpFilingRetryButton = computed(() => {
+  if (!task.value || !hasTaskScopeAccess.value) return false
+  if (!canUserRetryErpFiling((roles) => permissionsStore.hasAnyRole(roles))) return false
+  return taskNeedsErpFilingRetry(task.value)
+})
+
+const erpFilingRetrying = ref(false)
+
+const detailErpSyncStatusLabel = computed(() => {
+  const t = task.value
+  if (!t?.filing_status && !t?.erp_sync_required && !t?.filing_error_message) return ''
+  return getTaskFilingStatusLabel(t.filing_status, t.businessType ?? t.taskType)
+})
+
+const detailErpSyncStatusToneClass = computed(() => {
+  const tone = getTaskFilingStatusTone(
+    task.value?.filing_status,
+    task.value?.businessType ?? task.value?.taskType,
+  )
+  if (tone === 'error') return 'detail-erp-sync-status--error'
+  if (tone === 'warning') return 'detail-erp-sync-status--warning'
+  if (tone === 'success') return 'detail-erp-sync-status--success'
+  return ''
+})
+
+async function onErpFilingRetry() {
+  const id = taskId.value
+  if (!id || isTempId.value || erpFilingRetrying.value) return
+  erpFilingRetrying.value = true
+  actionError.value = ''
+  try {
+    await tasksApi.retryFiling(id)
+    await tasksStore.loadTaskById(id)
+    flashSuccess('已发起 ERP 同步重试')
+  } catch (err) {
+    actionError.value = resolveApiUserMessage(err, {
+      fallback: 'ERP 同步重试失败，请稍后重试',
+    })
+  } finally {
+    erpFilingRetrying.value = false
+  }
+}
 
 const canEditBasicInfo = computed(
   () => {
@@ -3329,6 +3408,26 @@ watch(taskId, (id) => {
 .detail-v3-info-card--cost {
   background: #fffaf0;
   border-color: #ffedd4;
+}
+.detail-v3-erp-retry-row {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #ffedd4;
+}
+.detail-erp-sync-error {
+  color: #b42318;
+}
+.detail-erp-sync-status--error {
+  color: #b42318;
+  font-weight: 600;
+}
+.detail-erp-sync-status--warning {
+  color: #b54708;
+  font-weight: 600;
+}
+.detail-erp-sync-status--success {
+  color: #027a48;
+  font-weight: 600;
 }
 .detail-v3-info-card--audit,
 .detail-v3-info-card--warehouse {

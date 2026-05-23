@@ -50,6 +50,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Task } from '@/domain/types/task'
+import { taskNeedsErpFilingRetry } from '@/domain/erp-filing-retry'
 import { tasksApi } from '@/services/api/tasksApi'
 import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
@@ -70,7 +71,7 @@ const hasFilingInfo = computed(() => {
   )
 })
 
-const showRetryButton = computed(() => props.task?.filing_status === 'filing_failed')
+const showRetryButton = computed(() => taskNeedsErpFilingRetry(props.task))
 
 const retrying = ref(false)
 const emit = defineEmits<{ refreshed: [] }>()
