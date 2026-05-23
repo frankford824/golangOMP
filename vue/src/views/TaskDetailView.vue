@@ -846,7 +846,8 @@ import { useTaskCancel } from '@/composables/useTaskCancel'
 import { isReferenceUrlExpiringSoon } from '@/utils/referenceUrl'
 import { tasksApi } from '@/services/api/tasksApi'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
-import type { AssetKind } from '@/services/api/assetsApi'
+import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
+import type { BackendAsset } from '@/services/apiTypes'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -872,7 +873,10 @@ import {
   mapTaskEventRowToRecentEvent,
 } from '@/domain/mappers/task-events-from-api'
 import { workflowGateReasonLabelCn } from '@/domain/mappers/read-model-labels-cn'
-import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
+import {
+  dedupeReferenceFileRefs,
+  referenceFileRefsFromBackendReferenceAssets,
+} from '@/domain/mappers/reference-file-refs'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { RecentEvent } from '@/domain/types/dashboard'
 import type { TaskSkuItem } from '@/domain/types/task'
@@ -1323,9 +1327,45 @@ function referenceRefsToThumbItems(
     .filter((row) => row != null) as AssetThumbItem[]
 }
 
-const motherTaskOpsReferenceRefs = computed((): ReferenceFileRef[] =>
-  motherTaskReferenceRefsForOps(task.value, isBatchTask.value),
-)
+/** 任务详情 GET /v1/tasks/{id}/assets 中的 reference，用于合并运营侧顶部参考图展示 */
+const opsReferenceBackendAssets = ref<BackendAsset[]>([])
+
+function unwrapOpsReferenceBackendAssetList(data: unknown): BackendAsset[] {
+  if (Array.isArray(data)) return data as BackendAsset[]
+  if (data && typeof data === 'object') {
+    const root = data as Record<string, unknown>
+    const inner = root.data ?? root.items
+    if (Array.isArray(inner)) return inner as BackendAsset[]
+    if (inner && typeof inner === 'object') {
+      const mid = inner as Record<string, unknown>
+      if (Array.isArray(mid.items)) return mid.items as BackendAsset[]
+      if (Array.isArray(mid.data)) return mid.data as BackendAsset[]
+    }
+  }
+  return []
+}
+
+async function loadOpsReferenceBackendAssets(): Promise<void> {
+  const id = taskId.value
+  if (!id || isTempId.value) {
+    opsReferenceBackendAssets.value = []
+    return
+  }
+  try {
+    const res = await assetsApi.list(id)
+    opsReferenceBackendAssets.value = unwrapOpsReferenceBackendAssetList(res?.data)
+  } catch {
+    opsReferenceBackendAssets.value = []
+  }
+}
+
+const motherTaskOpsReferenceRefs = computed((): ReferenceFileRef[] => {
+  const detailTask = task.value
+  if (!detailTask) return []
+  const legacyRefs = motherTaskReferenceRefsForOps(detailTask, isBatchTask.value)
+  const assetRefs = referenceFileRefsFromBackendReferenceAssets(opsReferenceBackendAssets.value)
+  return dedupeReferenceFileRefs([...legacyRefs, ...assetRefs])
+})
 
 const detailReferenceLabel = computed(() => {
   const total = motherTaskOpsReferenceRefs.value.length
@@ -1981,6 +2021,7 @@ async function handleOpsReferenceUpload(e: Event) {
     }
     opsReferenceUploadStatus.value = '上传完成'
     await tasksStore.loadTaskById(currentTask.id)
+    await loadOpsReferenceBackendAssets()
   } catch (err) {
     opsReferenceUploadError.value = formatUploadFailureMessage('reference_upload', err)
     opsReferenceUploadStatus.value = ''
@@ -2184,6 +2225,11 @@ async function loadTask() {
   }
 
   detailLoading.value = false
+  if (taskId.value && !isTempId.value) {
+    void loadOpsReferenceBackendAssets()
+  } else {
+    opsReferenceBackendAssets.value = []
+  }
 }
 
 async function refreshDetail() {

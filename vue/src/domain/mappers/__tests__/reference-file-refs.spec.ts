@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
+import {
+  dedupeReferenceFileRefs,
+  referenceFileRefsFromBackendReferenceAssets,
+} from '@/domain/mappers/reference-file-refs'
+import type { BackendAsset } from '@/services/apiTypes'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 
 describe('dedupeReferenceFileRefs', () => {
@@ -53,5 +57,38 @@ describe('dedupeReferenceFileRefs', () => {
       },
     ])
     expect(merged).toHaveLength(2)
+  })
+})
+
+describe('referenceFileRefsFromBackendReferenceAssets', () => {
+  it('maps reference assets and dedupes against legacy refs by asset_id', () => {
+    const assets: BackendAsset[] = [
+      {
+        id: '10',
+        file_role: 'reference',
+        asset_kind: 'reference',
+        versions: [
+          {
+            id: 'v1',
+            file_role: 'reference',
+            asset_id: 'asset-new',
+            ref_id: 'asset-new',
+            download_url: 'https://cdn.example/new.png',
+            file_name: 'new.png',
+          },
+        ],
+      } as BackendAsset,
+    ]
+    const fromAssets = referenceFileRefsFromBackendReferenceAssets(assets)
+    expect(fromAssets).toHaveLength(1)
+    expect(fromAssets[0]?.asset_id).toBe('asset-new')
+    const legacy: ReferenceFileRef = {
+      asset_id: 'asset-new',
+      ref_id: 'asset-new',
+      download_url: 'https://cdn.example/new-signed.png',
+      filename: 'new.png',
+    }
+    const merged = dedupeReferenceFileRefs([legacy, ...fromAssets])
+    expect(merged).toHaveLength(1)
   })
 })

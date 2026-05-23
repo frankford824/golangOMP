@@ -1,4 +1,5 @@
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
+import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { toRelativeAssetUrl } from '@/utils/url'
 
 /**
@@ -46,6 +47,77 @@ export function dedupeReferenceFileRefs(refs: ReferenceFileRef[]): ReferenceFile
     seen.add(key)
     out.push(ref)
   })
+  return out
+}
+
+function backendReferenceAssetKind(asset: BackendAsset): string {
+  const rec = asset as Record<string, unknown>
+  return String(
+    rec.asset_kind ?? rec.assetKind ?? rec.asset_type ?? rec.assetType ?? rec.file_role ?? '',
+  ).toLowerCase()
+}
+
+function backendReferenceAssetVersions(asset: BackendAsset): BackendAssetVersion[] {
+  const rec = asset as Record<string, unknown>
+  const list = rec.versions
+  if (Array.isArray(list)) return list as BackendAssetVersion[]
+  const current = rec.current_version ?? rec.currentVersion
+  return current && typeof current === 'object' ? [current as BackendAssetVersion] : []
+}
+
+function pickReferenceVersionDisplayUrl(version: BackendAssetVersion): string {
+  const rec = version as Record<string, unknown>
+  const d1 = typeof rec.download_url === 'string' ? rec.download_url.trim() : ''
+  const d2 = typeof rec.downloadUrl === 'string' ? rec.downloadUrl.trim() : ''
+  const dlRaw = d1 || d2
+  const dl = dlRaw ? (toRelativeAssetUrl(dlRaw) ?? dlRaw) : ''
+  if (dl) return dl
+  const publicUrl = toRelativeAssetUrl(version.public_url) ?? version.public_url
+  return publicUrl ?? ''
+}
+
+/**
+ * Map GET /v1/tasks/{id}/assets reference rows into ReferenceFileRef for ops detail display.
+ */
+export function referenceFileRefsFromBackendReferenceAssets(assets: BackendAsset[]): ReferenceFileRef[] {
+  if (!assets.length) return []
+  const out: ReferenceFileRef[] = []
+  for (const asset of assets) {
+    if (backendReferenceAssetKind(asset) !== 'reference') continue
+    const assetRec = asset as Record<string, unknown>
+    const rootAssetId = trimRefField(assetRec.asset_id ?? assetRec.assetId ?? asset.id)
+    for (const version of backendReferenceAssetVersions(asset)) {
+      const downloadUrl = pickReferenceVersionDisplayUrl(version)
+      if (!downloadUrl) continue
+      const verRec = version as Record<string, unknown>
+      const versionAssetId = trimRefField(verRec.asset_id ?? verRec.assetId)
+      const ref: ReferenceFileRef = { download_url: downloadUrl }
+      const assetId = versionAssetId || rootAssetId
+      if (assetId) ref.asset_id = assetId
+      const refId = trimRefField(verRec.ref_id ?? verRec.storage_ref_id ?? verRec.storageRefId)
+      if (refId) ref.ref_id = refId
+      const uploadRequestId = trimRefField(verRec.upload_request_id ?? verRec.uploadRequestId)
+      if (uploadRequestId) ref.upload_request_id = uploadRequestId
+      const storageKey = trimRefField(verRec.storage_key ?? verRec.storageKey)
+      if (storageKey) ref.storage_key = storageKey
+      const filename = trimRefField(
+        verRec.file_name ?? verRec.original_filename ?? verRec.originalFilename,
+      )
+      if (filename) ref.filename = filename
+      const mimeType = trimRefField(verRec.mime_type ?? verRec.mimeType)
+      if (mimeType) ref.mime_type = mimeType
+      const expiresAt = trimRefField(verRec.download_url_expires_at ?? verRec.downloadUrlExpiresAt)
+      if (expiresAt) ref.download_url_expires_at = expiresAt
+      const fileSizeRaw = verRec.file_size ?? verRec.fileSize
+      if (typeof fileSizeRaw === 'number' && !Number.isNaN(fileSizeRaw)) {
+        ref.file_size = fileSizeRaw
+      } else if (fileSizeRaw != null && trimRefField(fileSizeRaw)) {
+        const parsed = Number(fileSizeRaw)
+        if (!Number.isNaN(parsed)) ref.file_size = parsed
+      }
+      out.push(ref)
+    }
+  }
   return out
 }
 

@@ -71,6 +71,24 @@ func TestApplyDesignSubmissionWorkflow(t *testing.T) {
 	})
 }
 
+func TestDesignAssetSourceModuleKeyForTask(t *testing.T) {
+	regular := &domain.Task{CustomizationRequired: false}
+	if got := designAssetSourceModuleKeyForTask(regular, domain.TaskAssetTypeReference); got != domain.ModuleKeyBasicInfo {
+		t.Fatalf("reference source_module_key = %q, want %q", got, domain.ModuleKeyBasicInfo)
+	}
+	if got := designAssetSourceModuleKeyForTask(regular, domain.TaskAssetTypeDelivery); got != domain.ModuleKeyDesign {
+		t.Fatalf("delivery source_module_key = %q, want %q", got, domain.ModuleKeyDesign)
+	}
+	custom := &domain.Task{CustomizationRequired: true}
+	if got := designAssetSourceModuleKeyForTask(custom, domain.TaskAssetTypeSource); got != domain.ModuleKeyCustomization {
+		t.Fatalf("customization source source_module_key = %q, want %q", got, domain.ModuleKeyCustomization)
+	}
+	retouch := &domain.Task{TaskType: domain.TaskTypeRetouchTask}
+	if got := designAssetSourceModuleKeyForTask(retouch, domain.TaskAssetTypeSource); got != domain.ModuleKeyRetouch {
+		t.Fatalf("retouch source source_module_key = %q, want %q", got, domain.ModuleKeyRetouch)
+	}
+}
+
 func TestDesignSubmissionTransitionForTask(t *testing.T) {
 	regular := designSubmissionTransitionForTask(&domain.Task{CustomizationRequired: false})
 	if regular.TaskStatus != domain.TaskStatusPendingAuditA || regular.ModuleKey != domain.ModuleKeyDesign {

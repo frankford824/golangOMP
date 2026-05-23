@@ -45,6 +45,9 @@ func designSubmissionTransitionForTask(task *domain.Task) designSubmissionTransi
 
 func designAssetSourceModuleKeyForTask(task *domain.Task, assetType domain.TaskAssetType) string {
 	assetType = domain.NormalizeTaskAssetType(assetType)
+	if assetType.IsReference() {
+		return domain.ModuleKeyBasicInfo
+	}
 	if task != nil && task.TaskType == domain.TaskTypeRetouchTask &&
 		(assetType.IsSource() || assetType.IsDelivery() || assetType.IsPreview() || assetType.IsDesignThumb()) {
 		return domain.ModuleKeyRetouch
