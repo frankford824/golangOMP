@@ -3386,6 +3386,8 @@ func erpBridgeCostVerificationFailureMessage(result *domain.ERPProductUpsertResu
 	switch strings.ToLower(strings.TrimSpace(verification.Status)) {
 	case "", "matched", "skipped":
 		return ""
+	case "readback_not_found":
+		return "ERP成本已提交，但多次回查仍未找到商品，等待 ERP/Bridge 确认"
 	case "mismatched":
 		var base string
 		if verification.ExpectedCost != nil && verification.ActualCost != nil {

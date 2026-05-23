@@ -21,7 +21,23 @@ const (
 	erpBridgeRefinementMaxPages      = 20
 	erpBridgeDetailFallbackPageSize  = 20
 	erpBridgeCostVerificationEpsilon = 0.0001
+
+	erpBridgeCostVerificationStatusMatched          = "matched"
+	erpBridgeCostVerificationStatusMismatched       = "mismatched"
+	erpBridgeCostVerificationStatusUnverified       = "unverified"
+	erpBridgeCostVerificationStatusReadbackNotFound = "readback_not_found"
+
+	erpBridgeCostReadbackNotFoundExhaustedMessage = "ERP cost readback not found after upsert: product still unavailable after readback retries"
 )
+
+var erpBridgeCostReadbackRetryDelays = []time.Duration{
+	200 * time.Millisecond,
+	500 * time.Millisecond,
+	1000 * time.Millisecond,
+}
+
+// erpBridgeCostReadbackSleep is invoked between cost readback not-found retries; tests may replace it with a no-op.
+var erpBridgeCostReadbackSleep = time.Sleep
 
 type ERPBridgeService interface {
 	// Query behavior stays Bridge-owned even when MAIN exposes a facade route.
@@ -435,37 +451,69 @@ func (s *erpBridgeService) attachERPProductCostVerification(ctx context.Context,
 	expected := *payload.CostPrice
 	checkedAt := time.Now().UTC()
 	verification := &domain.ERPCostVerificationResult{
-		Status:       "unverified",
+		Status:       erpBridgeCostVerificationStatusUnverified,
 		SKUID:        strings.TrimSpace(payload.SKUID),
 		ExpectedCost: float64PtrCopy(expected),
 		CheckedAt:    &checkedAt,
 	}
 	result.CostVerification = verification
 
-	product, err := s.client.GetProductByID(ctx, payload.SKUID)
-	if err != nil {
-		verification.Message = fmt.Sprintf("ERP cost readback failed after upsert: %v", err)
+	skuID := strings.TrimSpace(payload.SKUID)
+	maxAttempts := 1 + len(erpBridgeCostReadbackRetryDelays)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		product, appErr := s.lookupERPProductForCostVerification(ctx, skuID)
+		if appErr != nil {
+			verification.Message = fmt.Sprintf("ERP cost readback failed after upsert: %s", appErr.Message)
+			return
+		}
+		if product == nil {
+			if attempt >= maxAttempts {
+				verification.Status = erpBridgeCostVerificationStatusReadbackNotFound
+				verification.Message = erpBridgeCostReadbackNotFoundExhaustedMessage
+				return
+			}
+			erpBridgeCostReadbackSleep(erpBridgeCostReadbackRetryDelays[attempt-1])
+			continue
+		}
+		applyERPProductCostVerificationFromProduct(verification, product, expected)
 		return
 	}
-	if product == nil {
-		verification.Status = "mismatched"
-		verification.Message = "ERP cost readback did not find the SKU after upsert"
+}
+
+// lookupERPProductForCostVerification uses the service-layer GetProductByID (search fallback) for readback.
+func (s *erpBridgeService) lookupERPProductForCostVerification(ctx context.Context, skuID string) (*domain.ERPProduct, *domain.AppError) {
+	skuID = strings.TrimSpace(skuID)
+	if skuID == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "sku_id is required for cost readback", nil)
+	}
+	product, appErr := s.GetProductByID(ctx, skuID)
+	if appErr != nil {
+		if appErr.Code == domain.ErrCodeNotFound {
+			return nil, nil
+		}
+		return nil, appErr
+	}
+	return product, nil
+}
+
+func applyERPProductCostVerificationFromProduct(verification *domain.ERPCostVerificationResult, product *domain.ERPProduct, expected float64) {
+	if verification == nil || product == nil {
 		return
 	}
 	verification.ObservedProduct = product
 	if product.CostPrice == nil {
-		verification.Status = "mismatched"
+		verification.Status = erpBridgeCostVerificationStatusMismatched
 		verification.Message = "ERP cost readback did not return cost_price after upsert"
 		return
 	}
 	actual := *product.CostPrice
 	verification.ActualCost = float64PtrCopy(actual)
 	if math.Abs(actual-expected) <= erpBridgeCostVerificationEpsilon {
-		verification.Status = "matched"
+		verification.Status = erpBridgeCostVerificationStatusMatched
 		verification.Message = "ERP cost readback matched expected cost"
 		return
 	}
-	verification.Status = "mismatched"
+	verification.Status = erpBridgeCostVerificationStatusMismatched
 	verification.Message = fmt.Sprintf("ERP cost readback mismatch: expected %.4f, actual %.4f", expected, actual)
 }
 

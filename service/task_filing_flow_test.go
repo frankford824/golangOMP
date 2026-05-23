@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -1103,6 +1104,181 @@ func TestNewProductFilingSucceedsWhenERPCostReadbackMatchesAfterRetry(t *testing
 	}
 	if taskRepo.details[task.ID].ERPSyncRequired {
 		t.Fatal("erp_sync_required should be false after successful cost readback")
+	}
+}
+
+func TestNewProductFilingSucceedsWhenERPCostReadback404ThenMatched(t *testing.T) {
+	erpBridgeCostReadbackSleep = func(time.Duration) {}
+	erpBridgeCostVerificationSleep = func(time.Duration) {}
+	t.Cleanup(func() {
+		erpBridgeCostReadbackSleep = time.Sleep
+		erpBridgeCostVerificationSleep = time.Sleep
+	})
+
+	const skuID = "CGK000000"
+	expected := 9.9
+	zero := 0.0
+	readbackClient := &erpBridgeReadbackSequenceClient{
+		getSteps: map[string][]erpBridgeReadbackStep{
+			skuID: {
+				{err: &erpBridgeHTTPError{StatusCode: http.StatusNotFound}},
+				{err: &erpBridgeHTTPError{StatusCode: http.StatusNotFound}},
+				{product: &domain.ERPProduct{ProductID: skuID, SKUID: skuID, CostPrice: &zero}},
+				{err: &erpBridgeHTTPError{StatusCode: http.StatusNotFound}},
+				{product: &domain.ERPProduct{ProductID: skuID, SKUID: skuID, CostPrice: float64Ptr(expected)}},
+			},
+		},
+	}
+	productRepo := &erpBridgeProductRepoStub{
+		products: map[string]*domain.Product{
+			"KT_STD": {
+				ERPProductID: "KT_STD",
+				ProductName:  "KT_STANDARD",
+				SpecJSON:     `{"i_id":"KT_STANDARD"}`,
+			},
+		},
+	}
+	bridgeSvc := NewERPBridgeService(readbackClient, productRepo, nil)
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeSvc),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		CategoryCode:        "KT_STANDARD",
+		ProductNameSnapshot: "成本回查404后成功测试",
+		ProductIID:          "KT_STANDARD",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		DesignRequirement:   "设计要求",
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.SKUCode != skuID {
+		t.Fatalf("sku_code = %s, want %s", task.SKUCode, skuID)
+	}
+
+	upsertsBefore := readbackClient.upsertCalls
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             task.ID,
+		OperatorID:         11,
+		ProductName:        "成本回查404后成功测试",
+		ProductIID:         "KT_STANDARD",
+		Category:           "KT_STANDARD",
+		SpecText:           "20*20",
+		CostPrice:          float64Ptr(expected),
+		ManualCostOverride: true,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status = %s, want filed (sku=%s err=%q)", taskRepo.details[task.ID].FilingStatus, task.SKUCode, taskRepo.details[task.ID].FilingErrorMessage)
+	}
+	if delta := readbackClient.upsertCalls - upsertsBefore; delta < 1 {
+		t.Fatalf("upsert calls delta = %d, want at least 1", delta)
+	}
+}
+
+func TestNewProductFilingFailsWhenERPCostReadback404Exhausted(t *testing.T) {
+	erpBridgeCostReadbackSleep = func(time.Duration) {}
+	erpBridgeCostVerificationSleep = func(time.Duration) {}
+	t.Cleanup(func() {
+		erpBridgeCostReadbackSleep = time.Sleep
+		erpBridgeCostVerificationSleep = time.Sleep
+	})
+
+	const skuID = "CGK000000"
+	readbackClient := &erpBridgeReadbackSequenceClient{
+		getSteps: map[string][]erpBridgeReadbackStep{
+			skuID: {
+				{err: &erpBridgeHTTPError{StatusCode: http.StatusNotFound}},
+				{err: &erpBridgeHTTPError{StatusCode: http.StatusNotFound}},
+				{err: &erpBridgeHTTPError{StatusCode: http.StatusNotFound}},
+				{err: &erpBridgeHTTPError{StatusCode: http.StatusNotFound}},
+			},
+		},
+	}
+	productRepo := &erpBridgeProductRepoStub{
+		products: map[string]*domain.Product{
+			"KT_STD": {
+				ERPProductID: "KT_STD",
+				ProductName:  "KT_STANDARD",
+				SpecJSON:     `{"i_id":"KT_STANDARD"}`,
+			},
+		},
+	}
+	bridgeSvc := NewERPBridgeService(readbackClient, productRepo, nil)
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeSvc),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		CategoryCode:        "KT_STANDARD",
+		ProductNameSnapshot: "成本回查404耗尽测试",
+		ProductIID:          "KT_STANDARD",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		DesignRequirement:   "设计要求",
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.SKUCode != skuID {
+		t.Fatalf("sku_code = %s, want %s", task.SKUCode, skuID)
+	}
+
+	upsertsBefore := readbackClient.upsertCalls
+	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             task.ID,
+		OperatorID:         11,
+		ProductName:        "成本回查404耗尽测试",
+		ProductIID:         "KT_STANDARD",
+		Category:           "KT_STANDARD",
+		SpecText:           "20*20",
+		CostPrice:          float64Ptr(9.9),
+		ManualCostOverride: true,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFilingFailed {
+		t.Fatalf("filing_status = %s, want filing_failed", taskRepo.details[task.ID].FilingStatus)
+	}
+	wantMsg := "ERP成本已提交，但多次回查仍未找到商品，等待 ERP/Bridge 确认"
+	if taskRepo.details[task.ID].FilingErrorMessage != wantMsg {
+		t.Fatalf("filing_error_message = %q, want %q", taskRepo.details[task.ID].FilingErrorMessage, wantMsg)
+	}
+	if delta := readbackClient.upsertCalls - upsertsBefore; delta != 1 {
+		t.Fatalf("upsert calls delta = %d, want 1", delta)
 	}
 }
 

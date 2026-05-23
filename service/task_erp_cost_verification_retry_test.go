@@ -141,6 +141,20 @@ func TestERPBridgeUpsertProductWithCostRetryUnverifiedDoesNotRetry(t *testing.T)
 	}
 }
 
+func TestERPBridgeCostVerificationFailureMessageReadbackNotFound(t *testing.T) {
+	result := &domain.ERPProductUpsertResult{
+		CostVerification: &domain.ERPCostVerificationResult{
+			Status:  "readback_not_found",
+			Message: erpBridgeCostReadbackNotFoundExhaustedMessage,
+		},
+	}
+	failure := erpBridgeCostVerificationFailureMessage(result, 1)
+	want := "ERP成本已提交，但多次回查仍未找到商品，等待 ERP/Bridge 确认"
+	if failure != want {
+		t.Fatalf("failure = %q, want %q", failure, want)
+	}
+}
+
 func TestERPBridgeUpsertProductWithCostRetryZeroCostMatched(t *testing.T) {
 	attempts := 0
 	result, upsertAttempts, appErr := erpBridgeUpsertProductWithCostRetry(context.Background(), func(_ context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError) {
