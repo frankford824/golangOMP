@@ -1479,6 +1479,7 @@ onBeforeUnmount(() => {
   --ac-text: #1d1d1f;
   --ac-sec: #86868b;
   --ac-accent: #0071e3;
+  --ac-page-pad: clamp(1rem, 2vw, 1.5rem);
   /** 资产页铺满主内容区，列数由视口宽度控制，卡片按比例伸缩 */
   --ac-content-max: 100%;
   --ac-grid-columns: 5;
@@ -1491,16 +1492,17 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(245, 245, 247, 0.8);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 14px 0;
+  background: transparent;
+  backdrop-filter: none;
+  border-bottom: 0;
+  padding: 0.65rem 0 0.35rem;
+  box-shadow: none;
 }
 
 .ac-nav-box {
   max-width: var(--ac-content-max);
   margin: 0 auto;
-  padding: 0 clamp(30px, 3vw, 50px);
+  padding: 0 var(--ac-page-pad);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1533,19 +1535,20 @@ onBeforeUnmount(() => {
 
 .ac-search-input {
   width: 100%;
-  padding: 10px 16px 10px 40px;
-  border: none;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.05);
-  font-size: 16px;
+  padding: 9px 14px 9px 38px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 14px;
   outline: none;
-  transition: background 0.3s, box-shadow 0.3s;
+  transition: border-color 0.2s, box-shadow 0.2s;
   color: var(--ac-text);
+  box-shadow: none;
 }
 
 .ac-search-input:focus {
-  background: #fff;
-  box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .ac-header-actions {
@@ -1594,9 +1597,9 @@ onBeforeUnmount(() => {
 
 .ac-filters-panel {
   max-width: var(--ac-content-max);
-  margin: 12px auto 0;
-  padding: 0 clamp(30px, 3vw, 50px) 16px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  margin: 8px auto 0;
+  padding: 0 var(--ac-page-pad) 12px;
+  border-top: 0;
 }
 
 .ac-filters-grid {
@@ -1614,21 +1617,22 @@ onBeforeUnmount(() => {
 
 .ac-status-bar {
   max-width: var(--ac-content-max);
-  margin: 20px auto 0;
-  padding: 0 clamp(30px, 3vw, 50px);
-  font-size: 13px;
-  color: var(--ac-sec);
+  margin: 0.25rem auto 0;
+  padding: 0 var(--ac-page-pad);
+  font-size: 11px;
+  color: #9ca3af;
+  line-height: 1.4;
 }
 
 .ac-status-bar b {
-  color: var(--ac-text);
-  font-weight: 600;
+  color: #6b7280;
+  font-weight: 500;
 }
 
 .ac-batch-bar {
   max-width: var(--ac-content-max);
-  margin: 10px auto 0;
-  padding: 0 clamp(30px, 3vw, 50px);
+  margin: 8px auto 0;
+  padding: 0 var(--ac-page-pad);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1680,8 +1684,8 @@ onBeforeUnmount(() => {
 .ac-grid {
   width: 100%;
   max-width: var(--ac-content-max);
-  margin: 24px auto;
-  padding: 0 clamp(30px, 3vw, 50px);
+  margin: 0.5rem auto 0;
+  padding: 0 var(--ac-page-pad);
   display: grid;
   grid-template-columns: repeat(var(--ac-grid-columns), minmax(0, 1fr));
   gap: clamp(16px, 2vw, 22px);
@@ -2433,29 +2437,61 @@ onBeforeUnmount(() => {
   color: #111827 !important;
 }
 
-.assets-index-view .ac-header {
-  background: rgba(255, 255, 255, 0.95) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border-bottom-color: #e5e7eb !important;
+.assets-index-view {
+  --ac-page-pad: clamp(1rem, 2vw, 1.5rem);
 }
 
-.ac-header,
-.ac-status-bar,
+.assets-index-view .ac-header {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+  padding-top: 0.65rem !important;
+  padding-bottom: 0.35rem !important;
+}
+
 .ac-batch-bar,
 .ac-excel-package-bar,
 .ac-pagination,
-.ac-selected-item,
-.ac-filters-panel {
+.ac-selected-item {
   border-color: #e5e7eb !important;
   background: #ffffff !important;
   color: #111827 !important;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
 }
 
+.ac-filters-panel {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.ac-search-input {
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.ac-search-input:focus {
+  border-color: rgba(37, 99, 235, 0.45) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08) !important;
+}
+
 .ac-status-bar {
-  background: #f9fafb !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: #9ca3af !important;
+  font-size: 11px !important;
+  margin-top: 0.65rem !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.ac-status-bar b {
   color: #6b7280 !important;
+  font-weight: 500 !important;
 }
 
 .ac-brand,

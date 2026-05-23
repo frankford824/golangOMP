@@ -20,7 +20,7 @@
         >
           <div class="board-header-content">
             <p class="board-header-kicker">运营工作台</p>
-            <h1 class="m-0 text-[1.25rem] font-semibold leading-tight text-[#0F172A] sm:text-[1.5rem] md:text-[1.625rem]">
+            <h1 class="board-header-title">
               任务运营主页总览
             </h1>
             <p class="board-header-subtitle">
@@ -913,9 +913,9 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
-  min-height: clamp(8rem, 13vh, 9.25rem);
-  padding: clamp(1rem, 1.8vw, 1.65rem) clamp(1.1rem, 2.2vw, 2rem) !important;
+  gap: 1.25rem;
+  min-height: clamp(5.25rem, 9vh, 6.5rem);
+  padding: clamp(0.85rem, 1.4vw, 1.25rem) clamp(1.1rem, 2vw, 1.75rem) !important;
   border: 1px solid #e5e7eb !important;
   border-radius: 1.125rem !important;
   background: #ffffff !important;
@@ -938,31 +938,33 @@ onMounted(load)
 }
 
 .board-header-kicker {
-  margin: 0 0 0.55rem;
-  color: #2563eb;
-  font-size: 0.74rem;
-  font-weight: 850;
-  letter-spacing: 0.06em;
+  margin: 0 0 0.3rem;
+  color: #6b7280;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
+.board-header-title,
 .board-header h1 {
   position: relative;
   z-index: 1;
   max-width: min(58rem, 100%);
+  margin: 0;
   color: #111827 !important;
-  font-size: clamp(2.15rem, 3vw, 3.8rem) !important;
-  font-weight: 900 !important;
-  line-height: 1.04 !important;
+  font-size: clamp(1.5rem, 2.1vw, 2rem) !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
   text-shadow: none;
 }
 
 .board-header-subtitle {
   max-width: 46rem;
-  margin: 0.7rem 0 0;
-  color: #6b7280;
-  font-size: 0.9rem;
-  font-weight: 650;
-  line-height: 1.6;
+  margin: 0.4rem 0 0;
+  color: #9ca3af;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .board-header-aside {
@@ -1567,7 +1569,7 @@ onMounted(load)
   }
 
   .board-header {
-    min-height: 10rem;
+    min-height: 6.5rem;
   }
 
   .dashboard-health-strip {
