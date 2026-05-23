@@ -2530,4 +2530,39 @@ watch(totalPages, (value) => {
 .footer-card :deep(button svg) {
   color: #6b7280;
 }
+
+/* Task center filter tabs: explicit default / hover / active (beats generic :deep(button) resets). */
+.task-category-switch :deep(button:not(.task-category-active)),
+.task-tabs :deep(button:not(.task-tab-active)) {
+  border: 1px solid #dbe3ef !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+}
+
+.task-category-switch :deep(button:not(.task-category-active):hover),
+.task-tabs :deep(button:not(.task-tab-active):hover) {
+  border-color: #93c5fd !important;
+  background: #f8fafc !important;
+  color: #1e293b !important;
+  box-shadow: none !important;
+}
+
+.task-category-switch :deep(button.task-category-active),
+.task-tabs :deep(button.task-tab-active) {
+  border: 1px solid #2563eb !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.16) !important;
+}
+
+.task-category-switch :deep(button.task-category-active:hover),
+.task-tabs :deep(button.task-tab-active:hover) {
+  border-color: #1d4ed8 !important;
+  background: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.22) !important;
+}
 </style>
