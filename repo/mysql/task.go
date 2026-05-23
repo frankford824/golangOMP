@@ -1369,6 +1369,9 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 		where = append(where, "t.designer_id = ?")
 		args = append(args, *filter.DesignerID)
 	}
+	if filter.DesignerEmpty != nil && *filter.DesignerEmpty {
+		where = append(where, "(t.designer_id IS NULL OR t.designer_id = 0)")
+	}
 	if filter.NeedOutsource != nil {
 		where = append(where, "t.need_outsource = ?")
 		args = append(args, *filter.NeedOutsource)

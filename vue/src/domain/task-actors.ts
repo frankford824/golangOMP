@@ -23,6 +23,11 @@ export function taskDesignerIdString(task: Task): string | null {
   return s === '' ? null : s
 }
 
+/** 列表/筛选：设计师（美工）未指派，对应 GET /v1/tasks?designer_empty=true */
+export function taskDesignerIsEmpty(task: Task): boolean {
+  return taskDesignerIdString(task) == null
+}
+
 export function taskCreatorDisplayName(task: Task): string {
   return dashDisplay(task.creatorName)
 }

@@ -629,7 +629,11 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
   if (kw) params.keyword = kw
   if (activeTab.value === 'mine') params.filter = 'mine'
   if (activeTab.value === 'pool') {
-    params.status = 'PendingAssign'
+    if (f.taskCategory === 'customization') {
+      params.designer_empty = true
+    } else {
+      params.status = 'PendingAssign'
+    }
   }
   if (activeTab.value === 'archived' && !f.status.length) {
     params.status = ARCHIVED_TAB_DEFAULT_STATUSES.join(',')

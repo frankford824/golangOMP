@@ -157,6 +157,8 @@ export interface TaskListParams {
   assignee_id?: string
   /** v0.9：按设计师筛选列表（与 designer_* 读模型一致） */
   designer_id?: string
+  /** 定制泳道「未指派美工」：仅 designer_id 为空（勿与 status=PendingAssign 混用） */
+  designer_empty?: boolean
   group_id?: string
   department?: string
   /** 规范归属：部门筛选 */

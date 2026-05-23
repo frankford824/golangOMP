@@ -67,6 +67,7 @@ func taskFilterToRepoTaskListFilter(filter TaskFilter, page, pageSize int, scope
 		TaskQueryFilterDefinition: filter.TaskQueryFilterDefinition,
 		CreatorID:                 filter.CreatorID,
 		DesignerID:                filter.DesignerID,
+		DesignerEmpty:             filter.DesignerEmpty,
 		NeedOutsource:             filter.NeedOutsource,
 		Overdue:                   filter.Overdue,
 		Keyword:                   filter.Keyword,
@@ -138,6 +139,11 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 	}
 	if len(filter.OwnerOrgTeams) > 0 && !containsStringValue(filter.OwnerOrgTeams, item.OwnerOrgTeam) {
 		return false
+	}
+	if filter.DesignerEmpty != nil && *filter.DesignerEmpty {
+		if item.DesignerID != nil && *item.DesignerID > 0 {
+			return false
+		}
 	}
 	if filter.WarehousePrepareReady != nil {
 		if item.Workflow.CanPrepareWarehouse != *filter.WarehousePrepareReady {

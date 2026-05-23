@@ -54,6 +54,13 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		}
 		filter.DesignerID = &id
 	}
+	if raw := c.Query("designer_empty"); raw != "" {
+		value, err := parseBool(raw)
+		if err != nil {
+			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "designer_empty must be true/false/1/0", nil)
+		}
+		filter.DesignerEmpty = &value
+	}
 	if raw := c.Query("need_outsource"); raw != "" {
 		value, err := parseBool(raw)
 		if err != nil {

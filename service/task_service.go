@@ -228,6 +228,7 @@ type TaskFilter struct {
 	domain.TaskQueryFilterDefinition
 	CreatorID     *int64
 	DesignerID    *int64
+	DesignerEmpty *bool
 	NeedOutsource *bool
 	Overdue       *bool
 	Keyword       string

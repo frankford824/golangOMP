@@ -10179,6 +10179,10 @@ paths:
           name: designer_id
           schema: { type: integer }
         - in: query
+          name: designer_empty
+          description: When `true`, returns only tasks with no designer assignment (`designer_id` IS NULL or `0`). Use with `workflow_lane=customization` for customization-lane unassigned-artwork filtering; do not combine with `status=PendingAssign` for that case.
+          schema: { type: boolean }
+        - in: query
           name: need_outsource
           schema: { type: boolean }
         - in: query

@@ -277,6 +277,18 @@ func TestAppendTaskDataScopeWhereIncludesManagedTeamUserTies(t *testing.T) {
 	}
 }
 
+func TestBuildTaskListQuerySpecDesignerEmpty(t *testing.T) {
+	designerEmpty := true
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{DesignerEmpty: &designerEmpty}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	want := "(t.designer_id IS NULL OR t.designer_id = 0)"
+	if !strings.Contains(spec.whereSQL, want) {
+		t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
+	}
+}
+
 func TestAppendTaskDataScopeWhereKeepsPlainDepartmentScopeNarrow(t *testing.T) {
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
 		ScopeDepartmentCodes: []string{"设计研发部"},
