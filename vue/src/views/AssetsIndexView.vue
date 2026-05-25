@@ -2198,29 +2198,38 @@ onBeforeUnmount(() => {
 .bulk-search-label {
   display: block;
   margin-bottom: 0.5rem;
-  color: #dbeafe;
+  color: var(--ac-text, #1d1d1f);
   font-size: 0.86rem;
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .bulk-search-textarea {
   width: 100%;
   min-height: 11rem;
   resize: vertical;
-  border: 1px solid rgba(100, 116, 139, 0.55);
+  border: 1px solid #e5e7eb;
   border-radius: 14px;
-  background: rgba(3, 7, 18, 0.78);
-  color: #f8fafc;
+  background: #fff;
+  color: var(--ac-text, #1d1d1f);
   padding: 0.85rem 0.95rem;
   font-family: var(--yb-font-mono, "SF Mono", Consolas, monospace);
   font-size: 0.88rem;
   line-height: 1.7;
   outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.bulk-search-textarea::placeholder {
+  color: #9ca3af;
+}
+
+.bulk-search-textarea:hover {
+  border-color: #d1d5db;
 }
 
 .bulk-search-textarea:focus {
-  border-color: rgba(96, 165, 250, 0.95);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .bulk-search-actions,
@@ -2234,7 +2243,7 @@ onBeforeUnmount(() => {
 
 .bulk-search-hint {
   margin: 0.75rem 0 0;
-  color: #b8c2d6;
+  color: var(--ac-sec, #86868b);
   font-size: 0.78rem;
   line-height: 1.6;
 }
@@ -2244,13 +2253,13 @@ onBeforeUnmount(() => {
 }
 
 .bulk-search-summary span {
-  border: 1px solid rgba(96, 165, 250, 0.25);
+  border: 1px solid #e5e7eb;
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.14);
-  color: #dbeafe;
+  background: #f3f4f6;
+  color: #374151;
   padding: 0.35rem 0.7rem;
   font-size: 0.78rem;
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .bulk-result-list {
@@ -2266,23 +2275,25 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 8rem minmax(0, 1fr);
   gap: 0.85rem;
-  border: 1px solid rgba(70, 81, 100, 0.9);
+  border: 1px solid #e5e7eb;
   border-radius: 18px;
-  background: #111827;
+  background: #fff;
   padding: 0.8rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .bulk-result-card--failed {
   grid-template-columns: 5.8rem minmax(0, 1fr);
-  background: rgba(127, 29, 29, 0.18);
-  border-color: rgba(248, 113, 113, 0.36);
+  background: #fef2f2;
+  border-color: #fecaca;
 }
 
 .bulk-result-preview {
   min-height: 7.2rem;
   border-radius: 14px;
   overflow: hidden;
-  background: rgba(15, 23, 42, 0.85);
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2300,9 +2311,9 @@ onBeforeUnmount(() => {
 }
 
 .bulk-result-empty {
-  color: #fecaca;
+  color: #b91c1c;
   font-size: 0.8rem;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .bulk-result-main {
@@ -2317,31 +2328,31 @@ onBeforeUnmount(() => {
 }
 
 .bulk-result-term {
-  color: #93c5fd;
+  color: #111827;
   font-size: 0.86rem;
-  font-weight: 950;
+  font-weight: 700;
 }
 
 .bulk-result-pill {
   border-radius: 999px;
-  background: rgba(34, 48, 71, 0.92);
-  color: #aeebff;
+  background: #f3f4f6;
+  color: #374151;
   padding: 0.25rem 0.55rem;
   font-size: 0.72rem;
-  font-weight: 900;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .bulk-result-card--failed .bulk-result-pill {
-  background: rgba(127, 29, 29, 0.5);
-  color: #fecaca;
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .bulk-result-title {
   margin: 0.45rem 0 0;
-  color: #f8fafc;
+  color: #111827;
   font-size: 0.96rem;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2357,28 +2368,28 @@ onBeforeUnmount(() => {
 }
 
 .bulk-result-meta div {
-  border: 1px solid rgba(70, 81, 100, 0.76);
+  border: 1px solid #e5e7eb;
   border-radius: 10px;
-  background: rgba(3, 7, 18, 0.36);
+  background: #f9fafb;
   padding: 0.45rem 0.55rem;
 }
 
 .bulk-result-meta dt {
-  color: #8fa0b8;
+  color: #6b7280;
   font-size: 0.7rem;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .bulk-result-meta dd {
   margin: 0.15rem 0 0;
-  color: #f8fafc;
+  color: #111827;
   font-size: 0.78rem;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .bulk-result-message {
   margin: 0.55rem 0 0;
-  color: #b8c2d6;
+  color: var(--ac-sec, #86868b);
   font-size: 0.78rem;
   line-height: 1.55;
 }
