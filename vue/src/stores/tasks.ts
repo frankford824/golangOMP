@@ -1327,6 +1327,8 @@ export const useTasksStore = defineStore('tasks', () => {
   const fullListReplaceGeneration = ref(0)
   /** 服务端分页：当前查询条件下的总条数（来自 pagination.total） */
   const listTotal = ref(0)
+  /** 任务中心最近一次列表请求参数（含 page/page_size），供导出中心等复用筛选条件 */
+  const lastListQueryParams = ref<TaskListParams | null>(null)
   const getById = (id: string) => items.value.find((t) => t.id === id)
 
   const mainStatusOf = (id: string) => getById(id)?.mainStatus
@@ -1369,6 +1371,7 @@ export const useTasksStore = defineStore('tasks', () => {
     loadError.value = null
     try {
       const { items: tasks, total } = await loadTaskList(params)
+      lastListQueryParams.value = { ...params }
       listTotal.value = total
       if (isAppend) {
         const ids = new Set(items.value.map((t) => t.id))
@@ -2401,6 +2404,8 @@ export const useTasksStore = defineStore('tasks', () => {
     items.value = []
     initialized.value = false
     loadError.value = null
+    lastListQueryParams.value = null
+    listTotal.value = 0
   }
 
   return {
@@ -2408,6 +2413,7 @@ export const useTasksStore = defineStore('tasks', () => {
     loadTaskListSnapshot: loadTaskList,
     fullListReplaceGeneration,
     listTotal,
+    lastListQueryParams,
     loading,
     loadError,
     getById,
