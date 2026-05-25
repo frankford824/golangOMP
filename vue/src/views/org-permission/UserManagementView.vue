@@ -8,13 +8,23 @@
           <h2 class="page-title">用户与角色管理</h2>
           <p class="page-sub">维护账号、组织归属与工作流角色</p>
         </div>
-        <BaseButton
-          v-if="canCreateUser"
-          type="button"
-          @click="showCreateModal = true"
-        >
-          新增用户
-        </BaseButton>
+        <div class="page-header-actions">
+          <BaseButton
+            v-if="canManageOrg"
+            type="button"
+            variant="secondary"
+            @click="goOrgPermission"
+          >
+            组织主数据管理
+          </BaseButton>
+          <BaseButton
+            v-if="canCreateUser"
+            type="button"
+            @click="showCreateModal = true"
+          >
+            新增用户
+          </BaseButton>
+        </div>
       </header>
     <div v-if="!canManage" class="mt-6">
       <BaseEmptyState title="无管理权限" description="需要组织管理权限才能访问本页。" />
@@ -259,6 +269,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { usersApi } from '@/services/api/usersApi'
 import {
   departmentsAndGroupsFromOrgOptions,
@@ -278,12 +289,15 @@ import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
 
+const router = useRouter()
 const permissionsStore = usePermissionsStore()
 const { can } = usePermission()
 
 // v1.8 对齐：用户与角色页面同时向 HRAdmin / SuperAdmin 与 DepartmentAdmin 开放。
 // 以下 gate 全部走 action key，不再使用 `|| isDeptAdmin` 之类角色名兜底。
 const canManage = computed(() => can('user.manage') || can('department.manage'))
+// 与 OrgPermissionView 一致：仅持有 org.manage 的用户可进入组织主数据页。
+const canManageOrg = computed(() => can('org.manage'))
 const canCreateUser = computed(() => can('user.manage') || can('department.users.create'))
 const canMoveTeam = computed(() => can('user.manage') || can('department.users.move_team'))
 const canDisableUser = computed(() => can('user.manage') || can('department.users.disable'))
@@ -309,6 +323,10 @@ const canClearMembership = computed(() => can('user.manage'))
 // 只读视图——复选框保留展示当前归属，但被 `:disabled` 并通过 `.roles-grid-readonly` 调灰，
 // 避免"能勾但无处提交"的误导。
 const canAssignRoles = computed(() => can('role.assign'))
+
+function goOrgPermission() {
+  void router.push({ name: 'OrgPermission' })
+}
 
 interface UserRow {
   id: string
@@ -742,6 +760,13 @@ onMounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .page-title {
