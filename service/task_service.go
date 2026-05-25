@@ -131,6 +131,7 @@ type UpdateTaskBusinessInfoParams struct {
 	CraftText                string
 	CostPrice                *float64
 	CostRuleID               *int64
+	CostRuleIDExplicit       bool
 	CostRuleName             string
 	CostRuleSource           string
 	ManualCostOverride       bool
@@ -1882,8 +1883,15 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	if appErr != nil {
 		return nil, appErr
 	}
+	ignoredStaleCostRule := false
 	if costRule != nil && detail.CategoryCode != "" && costRule.CategoryCode != "" && costRule.CategoryCode != detail.CategoryCode {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "cost_rule_id does not match the selected category_code", nil)
+		if p.CostRuleIDExplicit {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "cost_rule_id does not match the selected category_code", nil)
+		}
+		// Product-info edits may carry stale persisted rule ids from older category mapping;
+		// treat them as "recompute required" instead of hard-blocking i_id/product_name updates.
+		costRule = nil
+		ignoredStaleCostRule = true
 	}
 
 	prefill, appErr := s.previewTaskCost(ctx, task, detail)
@@ -1931,8 +1939,13 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		}
 	} else {
 		detail.CostRuleID = nil
-		detail.CostRuleName = strings.TrimSpace(p.CostRuleName)
-		detail.CostRuleSource = strings.TrimSpace(p.CostRuleSource)
+		if ignoredStaleCostRule {
+			detail.CostRuleName = ""
+			detail.CostRuleSource = ""
+		} else {
+			detail.CostRuleName = strings.TrimSpace(p.CostRuleName)
+			detail.CostRuleSource = strings.TrimSpace(p.CostRuleSource)
+		}
 	}
 
 	if detail.ManualCostOverride {

@@ -845,6 +845,131 @@ func TestRetryFilingSyncsSingleSKUItemCostProjectionFromTaskDetail(t *testing.T)
 	}
 }
 
+func TestRetryFilingBatchMultiSKUDoesNotReportTopLevelIIDMissingOnReadbackNotFound(t *testing.T) {
+	erpBridgeCostVerificationSleep = func(time.Duration) {}
+	t.Cleanup(func() { erpBridgeCostVerificationSleep = time.Sleep })
+
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		upsertResult: &domain.ERPProductUpsertResult{
+			Status:  "succeeded",
+			Message: "ok",
+			CostVerification: &domain.ERPCostVerificationResult{
+				Status: "readback_not_found",
+			},
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			970: {
+				ID:                  970,
+				TaskNo:              "RW-970",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				TaskStatus:          domain.TaskStatusInProgress,
+				IsBatchTask:         true,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+				SKUCode:             "CGG000007",
+				PrimarySKUCode:      "CGG000007",
+				ProductNameSnapshot: "batch task",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			970: {
+				TaskID:       970,
+				FilingStatus: domain.FilingStatusFilingFailed,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			970: {
+				{TaskID: 970, SequenceNo: 1, SKUCode: "CGG000007", ProductNameSnapshot: "A", ProductIID: "常规写真布"},
+				{TaskID: 970, SequenceNo: 2, SKUCode: "CGG000008", ProductNameSnapshot: "B", VariantJSON: json.RawMessage(`{"i_id":"常规写真布"}`)},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	view, appErr := svc.RetryFiling(context.Background(), RetryTaskFilingParams{TaskID: 970, OperatorID: 1})
+	if appErr != nil {
+		t.Fatalf("RetryFiling() unexpected error: %+v", appErr)
+	}
+	if view.FilingStatus != domain.FilingStatusFilingFailed {
+		t.Fatalf("filing_status = %s, want filing_failed", view.FilingStatus)
+	}
+	if strings.Contains(strings.Join(view.MissingFields, ","), "i_id") {
+		t.Fatalf("missing_fields = %+v, should not contain top-level i_id for batch", view.MissingFields)
+	}
+	if got := strings.TrimSpace(view.FilingErrorMessage); got == "" || !strings.Contains(got, "回查") {
+		t.Fatalf("filing_error_message = %q, want readback failure message", got)
+	}
+}
+
+func TestRetryFilingBatchMultiSKUReportsSKUScopedIIDMissing(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			971: {
+				ID:                  971,
+				TaskNo:              "RW-971",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				TaskStatus:          domain.TaskStatusInProgress,
+				IsBatchTask:         true,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+				SKUCode:             "CGG000009",
+				PrimarySKUCode:      "CGG000009",
+				ProductNameSnapshot: "batch task missing iid",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			971: {TaskID: 971},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			971: {
+				{TaskID: 971, SequenceNo: 1, SKUCode: "CGG000009", ProductNameSnapshot: "A", ProductIID: "常规写真布"},
+				{TaskID: 971, SequenceNo: 2, SKUCode: "CGG000010", ProductNameSnapshot: "B"},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{}),
+	).(*taskService)
+
+	view, appErr := svc.RetryFiling(context.Background(), RetryTaskFilingParams{TaskID: 971, OperatorID: 1})
+	if appErr != nil {
+		t.Fatalf("RetryFiling() unexpected error: %+v", appErr)
+	}
+	if view.FilingStatus != domain.FilingStatusPending {
+		t.Fatalf("filing_status = %s, want pending", view.FilingStatus)
+	}
+	found := false
+	for _, field := range view.MissingFields {
+		if strings.Contains(field, "sku_items[1].product_i_id") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("missing_fields = %+v, want sku-scoped product_i_id missing", view.MissingFields)
+	}
+}
+
 func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreateSync(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},

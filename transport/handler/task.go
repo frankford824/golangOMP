@@ -1027,6 +1027,7 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		ReferenceLink:            base.ReferenceLink,
 		CostPrice:                req.CostPrice,
 		CostRuleID:               req.CostRuleID,
+		CostRuleIDExplicit:       req.CostRuleID != nil,
 		CostRuleName:             req.CostRuleName,
 		CostRuleSource:           req.CostRuleSource,
 		ManualCostOverride:       req.ManualCostOverride,
@@ -1491,6 +1492,7 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 		return
 	}
 	params := buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
+	params.CostRuleIDExplicit = false
 	if req.ProductName != nil || req.ProductNameSnapshot != nil {
 		params.ProductName = firstNonEmptyTrimmed(valueFromStringPtr(req.ProductName), valueFromStringPtr(req.ProductNameSnapshot))
 	}
@@ -1609,6 +1611,7 @@ func (h *TaskHandler) PatchCostInfo(c *gin.Context) {
 	}
 	if req.CostRuleID != nil {
 		params.CostRuleID = req.CostRuleID
+		params.CostRuleIDExplicit = true
 	}
 	if req.CostRuleName != nil {
 		params.CostRuleName = strings.TrimSpace(*req.CostRuleName)

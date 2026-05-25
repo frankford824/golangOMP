@@ -37,8 +37,7 @@ func (s *taskService) GetFilingStatus(ctx context.Context, taskID int64) (*domai
 	if appErr != nil {
 		return nil, appErr
 	}
-	hydrateTaskDetailFilingProjection(task, detail)
-	return buildTaskFilingStatusView(task, detail), nil
+	return s.buildTaskFilingStatusView(ctx, task, detail)
 }
 
 func (s *taskService) RetryFiling(ctx context.Context, p RetryTaskFilingParams) (*domain.TaskFilingStatusView, *domain.AppError) {
@@ -73,7 +72,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "policy_not_triggered"); err != nil {
 			return nil, infraError("persist filing policy state", err)
 		}
-		return buildTaskFilingStatusView(task, detail), nil
+		return s.buildTaskFilingStatusView(ctx, task, detail)
 	}
 
 	selection := buildTaskProductSelectionContext(task, detail)
@@ -90,7 +89,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "payload_build_failed"); err != nil {
 			return nil, infraError("persist filing build failure", err)
 		}
-		return buildTaskFilingStatusView(task, detail), nil
+		return s.buildTaskFilingStatusView(ctx, task, detail)
 	}
 	if len(missingFields) > 0 {
 		detail.FilingTriggerSource = string(p.Source)
@@ -107,7 +106,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "missing_required_fields"); err != nil {
 			return nil, infraError("persist pending filing state", err)
 		}
-		return buildTaskFilingStatusView(task, detail), nil
+		return s.buildTaskFilingStatusView(ctx, task, detail)
 	}
 
 	payloadJSON, err := json.Marshal(taskFilingPayloadJSONValue(payloads))
@@ -134,7 +133,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "seed_payload_hash_from_legacy_filed"); err != nil {
 			return nil, infraError("persist legacy hash seed", err)
 		}
-		return buildTaskFilingStatusView(task, detail), nil
+		return s.buildTaskFilingStatusView(ctx, task, detail)
 	}
 
 	if !p.Force && detail.FilingStatus == domain.FilingStatusFiled && previousHash == payloadHash {
@@ -143,7 +142,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "idempotent_skip_same_payload"); err != nil {
 			return nil, infraError("persist idempotent skip", err)
 		}
-		return buildTaskFilingStatusView(task, detail), nil
+		return s.buildTaskFilingStatusView(ctx, task, detail)
 	}
 
 	payloadChanged := previousHash != "" && previousHash != payloadHash
@@ -176,7 +175,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 	if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, result, callLogID, attempted, ""); err != nil {
 		return nil, infraError("persist filing attempt result", err)
 	}
-	return buildTaskFilingStatusView(task, detail), nil
+	return s.buildTaskFilingStatusView(ctx, task, detail)
 }
 
 func (s *taskService) triggerFilingBestEffort(ctx context.Context, p TriggerTaskFilingParams, reason string) {
@@ -649,11 +648,20 @@ func normalizeTaskDetailFilingState(detail *domain.TaskDetail) {
 	}
 }
 
-func buildTaskFilingStatusView(task *domain.Task, detail *domain.TaskDetail) *domain.TaskFilingStatusView {
+func (s *taskService) buildTaskFilingStatusView(ctx context.Context, task *domain.Task, detail *domain.TaskDetail) (*domain.TaskFilingStatusView, *domain.AppError) {
 	if task == nil || detail == nil {
-		return nil
+		return nil, nil
 	}
 	hydrateTaskDetailFilingProjection(task, detail)
+	if isBatchNewProductTask(task) {
+		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID)
+		if err != nil {
+			return nil, infraError("list batch sku items for filing status view", err)
+		}
+		missingFields, missingSummary := computeBatchNewProductFilingMissingFields(task, items)
+		detail.MissingFields = missingFields
+		detail.MissingFieldsSummaryCN = missingSummary
+	}
 	canRetry := detail.FilingStatus == domain.FilingStatusFilingFailed || (detail.FilingStatus == domain.FilingStatusPending && len(detail.MissingFields) == 0)
 	return &domain.TaskFilingStatusView{
 		TaskID:                  task.ID,
@@ -672,7 +680,7 @@ func buildTaskFilingStatusView(task *domain.Task, detail *domain.TaskDetail) *do
 		CanRetry:                canRetry,
 		LastFilingPayloadHash:   detail.LastFilingPayloadHash,
 		LastFilingPayloadSample: detail.LastFilingPayloadJSON,
-	}
+	}, nil
 }
 
 func sha256Hex(payload []byte) string {

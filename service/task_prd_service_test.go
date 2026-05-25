@@ -2162,6 +2162,131 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testi
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoIgnoresStaleImplicitCostRuleIDMismatch(t *testing.T) {
+	costRuleRepo := newCostRuleRepoStub()
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       14,
+			RuleVersion:  1,
+			RuleName:     "常规写真布基础单价",
+			CategoryCode: "PHOTO_CLOTH_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			Priority:     10,
+			IsActive:     true,
+			Source:       "phase_020_sample",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			860: {
+				ID:                  860,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				ProductNameSnapshot: "test-860",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			860: {
+				TaskID:         860,
+				Category:       "常规写真布",
+				CategoryName:   "常规写真布",
+				CategoryCode:   "GENERAL",
+				CostRuleID:     int64Ptr(14),
+				CostRuleName:   "常规写真布基础单价",
+				CostRuleSource: "phase_020_sample",
+			},
+		},
+	}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             860,
+		OperatorID:         9,
+		ProductName:        "test-860",
+		ProductIID:         "常规写真布",
+		CategoryCode:       "GENERAL",
+		TriggerFiling:      true,
+		ManualCostOverride: true,
+		CostPrice:          float64Ptr(0.59),
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.CostRuleID != nil && *detail.CostRuleID == 14 {
+		t.Fatalf("cost_rule_id = %v, want stale rule cleared/recomputed", *detail.CostRuleID)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoRejectsExplicitMismatchedCostRuleID(t *testing.T) {
+	costRuleRepo := newCostRuleRepoStub()
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       14,
+			RuleVersion:  1,
+			RuleName:     "常规写真布基础单价",
+			CategoryCode: "PHOTO_CLOTH_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			Priority:     10,
+			IsActive:     true,
+			Source:       "phase_020_sample",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			861: {
+				ID:                  861,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				ProductNameSnapshot: "test-861",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			861: {
+				TaskID:       861,
+				Category:     "常规写真布",
+				CategoryName: "常规写真布",
+				CategoryCode: "GENERAL",
+			},
+		},
+	}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	_, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:             861,
+		OperatorID:         9,
+		ProductName:        "test-861",
+		ProductIID:         "常规写真布",
+		CategoryCode:       "GENERAL",
+		CostRuleID:         int64Ptr(14),
+		CostRuleIDExplicit: true,
+	})
+	if appErr == nil || appErr.Message != "cost_rule_id does not match the selected category_code" {
+		t.Fatalf("appErr = %+v, want explicit mismatch error", appErr)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromTaskProductName(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()
