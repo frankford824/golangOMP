@@ -30,7 +30,7 @@
           <div class="board-header-aside" aria-hidden="true">
             <span>实时</span>
             <strong>{{ summary.todayPendingCount }}</strong>
-            <small>待处理</small>
+            <small>设计待办</small>
           </div>
         </header>
 
@@ -92,9 +92,9 @@
             hint="已完成任务平均耗时"
           />
           <DashboardKpiCard
-            title="待处理任务数"
+            title="我可见的进行中任务"
             :value="kpiStats.pendingCount"
-            hint="按当前角色数据范围"
+            hint="按当前角色数据范围，未完成/未关单任务"
             route="/tasks"
           />
         </section>
@@ -108,9 +108,9 @@
           class="kpi kpi--queues grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 lg:grid-cols-4 lg:gap-4"
         >
           <DashboardKpiCard
-            title="今日待处理"
+            title="设计待办"
             :value="summary.todayPendingCount"
-            hint="需您处理的任务"
+            hint="待指派、设计中、审核打回等任务"
             route="/tasks"
           />
           <DashboardKpiCard
@@ -391,7 +391,7 @@ const summary = computed<DashboardSummary>(() => {
   }
 })
 
-const PIE_NAMES = ['待处理', '待审核', '定制协同', '待仓库', '已完成/关单'] as const
+const PIE_NAMES = ['设计/运营待推进', '待审核', '定制协同', '待仓库', '已完成/关单'] as const
 
 function statusPieSlice(t: Task): 0 | 1 | 2 | 3 | 4 {
   if (isCompletedOrArchived(t)) return 4
@@ -443,9 +443,9 @@ const statusDistribution = computed(() => {
   const items = [
     {
       key: 'pending',
-      name: '待处理',
-      value: valueOf('待处理'),
-      hint: '设计 / 运营下一步动作',
+      name: '设计/运营待推进',
+      value: valueOf('设计/运营待推进'),
+      hint: '非审核、非定制协同、非待仓库的进行中任务',
     },
     {
       key: 'audit',
@@ -476,7 +476,7 @@ const statusDistribution = computed(() => {
     caption:
       total > 0
         ? withPercent.map((item) => `${item.name} ${item.percent}%`).join(' · ')
-        : '待处理 0% · 待审核 0% · 待仓库 0%',
+        : '设计/运营待推进 0% · 待审核 0% · 待仓库 0%',
   }
 })
 
