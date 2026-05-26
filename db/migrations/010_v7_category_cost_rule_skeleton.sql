@@ -121,6 +121,8 @@ INSERT IGNORE INTO cost_rules (
   ('定制写真布小面积附加', 'PHOTO_CLOTH_CUSTOM', 'cloth', 'area_threshold_surcharge', NULL, 1.1000, NULL, 0.1500, 3.00, '', NULL, '', 20, 1, 'phase_020_sample', '面积低于阈值加价'),
   ('常规旗帜布基础单价', 'FLAG_CLOTH_STANDARD', 'cloth', 'fixed_unit_price', 4.00, 1.1000, NULL, NULL, NULL, '', NULL, '', 10, 1, 'phase_020_sample', '固定单价样例'),
   ('车缝旗帜布基础单价', 'FLAG_CLOTH_SEWED', 'cloth', 'fixed_unit_price', 6.00, 1.1000, NULL, NULL, NULL, '', NULL, '', 10, 1, 'phase_020_sample', '固定单价样例'),
+  ('常规喷绘布基础单价', 'SPRAY_CLOTH_STANDARD', 'cloth', 'fixed_unit_price', 4.00, 1.1000, NULL, NULL, NULL, '', NULL, '', 10, 1, 'phase_020_sample', '喷绘布按面积计价'),
+  ('定制喷绘布基础单价', 'SPRAY_CLOTH_CUSTOM', 'cloth', 'fixed_unit_price', 4.00, 1.1000, NULL, NULL, NULL, '', NULL, '', 10, 1, 'phase_020_sample', '喷绘布按面积计价'),
   ('A3打印单双面规则', 'A3_PRINT', 'paper', 'size_based_formula', NULL, NULL, NULL, NULL, NULL, '', NULL, 'print_side:single=0.5,double=0.6', 10, 1, 'phase_020_sample', '窄范围公式样例'),
   ('A4打印单双面规则', 'A4_PRINT', 'paper', 'size_based_formula', NULL, NULL, NULL, NULL, NULL, '', NULL, 'print_side:single=0.3,double=0.4', 10, 1, 'phase_020_sample', '窄范围公式样例'),
   ('铜版纸尺寸规则骨架', 'COPPER_PAPER', 'paper', 'size_based_formula', NULL, NULL, NULL, NULL, NULL, '', NULL, 'size_lookup_required', 10, 1, 'phase_020_sample', '尺寸判定骨架，当前仍需人工补充'),
