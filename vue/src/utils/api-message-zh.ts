@@ -84,6 +84,8 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   'request failed with status code 404': '请求的资源不存在',
   'request failed with status code 409': '与已有数据冲突，请更换后重试',
   'request failed with status code 500': '服务暂时不可用，请稍后重试',
+  'erp product name length validation failed': '产品名称不能超过 50 个字符，请精简后再提交，避免同步聚水潭失败',
+  'erp product name exceeds length limit': '产品名称不能超过 50 个字符，请精简后再提交，避免同步聚水潭失败',
   /** GET /v1/assets/{id}/preview 等：409 + INVALID_STATE_TRANSITION 常见英文文案 */
   'asset preview is not available': '资产预览不可用',
   'asset preview is not available.': '资产预览不可用',

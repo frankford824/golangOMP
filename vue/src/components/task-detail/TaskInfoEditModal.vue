@@ -18,7 +18,13 @@
       <section v-if="!isBatchTask" class="form-card">
         <p class="section-eyebrow">商品信息</p>
         <div class="form-grid">
-          <BaseInput v-model="form.product_name" label="产品名称" placeholder="与创建侧一致" />
+          <BaseInput
+            v-model="form.product_name"
+            label="产品名称"
+            placeholder="与创建侧一致"
+            :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
+            :hint="erpProductNameHint(form.product_name)"
+          />
           <IIdSelector
             v-if="showField.i_id"
             v-model="iIdModel"
@@ -180,6 +186,7 @@ import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import { normalizePriorityForApi } from '@/domain/task-priority'
+import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameHint, isErpProductNameTooLong } from '@/domain/erp-product-name'
 import { taskBeijingDateKey, toBeijingEndOfDayISO } from '@/utils/date'
 
 const props = defineProps<{
@@ -523,6 +530,11 @@ async function submit() {
   const b = baseline.value
   const c = form.value
   const errors: string[] = []
+  if (!isBatchTask.value && isErpProductNameTooLong(c.product_name)) {
+    submitError.value = `产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交，避免同步聚水潭失败`
+    saving.value = false
+    return
+  }
   try {
     const productPatch = buildProductPatch(b, c)
     const businessPatch = buildBusinessPatch(b, c)

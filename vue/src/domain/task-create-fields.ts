@@ -291,6 +291,7 @@ export function humanizeTaskCreateFields(fields: readonly string[]): string[] {
  * 未识别的 code 返回空字符串，由调用方走通用 fallback。
  */
 export function humanizeViolationCode(code: string, field: string): string {
+  if (code === 'erp_product_name_too_long') return '产品名称不能超过 50 个字符，请精简后再提交，避免同步聚水潭失败'
   if (code === 'insufficient_batch_items') return '批量 SKU 模式下至少需要 2 个商品'
   if (code === 'missing_required_field') {
     const leaf = field.replace(/^.*[\].]\s*/, '') || field

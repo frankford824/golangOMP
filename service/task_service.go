@@ -1062,7 +1062,15 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 	p.PurchaseSKU = strings.TrimSpace(p.PurchaseSKU)
 	p.ProductChannel = strings.TrimSpace(p.ProductChannel)
 	for i := range p.BatchItems {
+		p.BatchItems[i].ProductName = strings.TrimSpace(p.BatchItems[i].ProductName)
+		p.BatchItems[i].ProductShortName = strings.TrimSpace(p.BatchItems[i].ProductShortName)
 		p.BatchItems[i].CategoryCode = strings.TrimSpace(p.BatchItems[i].CategoryCode)
+		p.BatchItems[i].ProductIID = strings.TrimSpace(p.BatchItems[i].ProductIID)
+		p.BatchItems[i].MaterialMode = strings.TrimSpace(p.BatchItems[i].MaterialMode)
+		p.BatchItems[i].DesignRequirement = strings.TrimSpace(p.BatchItems[i].DesignRequirement)
+		p.BatchItems[i].NewSKU = strings.TrimSpace(p.BatchItems[i].NewSKU)
+		p.BatchItems[i].PurchaseSKU = strings.TrimSpace(p.BatchItems[i].PurchaseSKU)
+		p.BatchItems[i].CostPriceMode = strings.TrimSpace(p.BatchItems[i].CostPriceMode)
 	}
 	p.ReferenceFileRefs = domain.NormalizeReferenceFileRefs(p.ReferenceFileRefs)
 	if p.IsOutsource {
@@ -1225,6 +1233,9 @@ func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.Ap
 		return appErr
 	}
 	if appErr := validateBatchTaskCreateRequest(p); appErr != nil {
+		return appErr
+	}
+	if appErr := validateCreateTaskERPProductNameLength(p); appErr != nil {
 		return appErr
 	}
 	if isMultipleBatchTaskRequest(p) {
@@ -1769,6 +1780,15 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		if appErr != nil {
 			return nil, appErr
 		}
+		if erpProductNameTooLong(productNameSnapshot) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
+				"field":      "product_name",
+				"code":       "erp_product_name_too_long",
+				"max_length": ERPProductNameMaxRunes,
+				"length":     erpProductNameLength(productNameSnapshot),
+				"message":    erpProductNameLimitMessage(),
+			})
+		}
 		bindingChanged = !sameInt64Ptr(task.ProductID, productID) ||
 			strings.TrimSpace(task.SKUCode) != strings.TrimSpace(skuCode) ||
 			strings.TrimSpace(task.ProductNameSnapshot) != strings.TrimSpace(productNameSnapshot)
@@ -1780,6 +1800,15 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		attachTaskProductSelection(detail, task)
 	}
 	if productName := strings.TrimSpace(p.ProductName); productName != "" && strings.TrimSpace(task.ProductNameSnapshot) != productName {
+		if erpProductNameTooLong(productName) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
+				"field":      "product_name",
+				"code":       "erp_product_name_too_long",
+				"max_length": ERPProductNameMaxRunes,
+				"length":     erpProductNameLength(productName),
+				"message":    erpProductNameLimitMessage(),
+			})
+		}
 		task.ProductNameSnapshot = productName
 		bindingChanged = true
 	}

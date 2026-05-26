@@ -388,6 +388,9 @@ func (s *erpBridgeService) UpsertProduct(ctx context.Context, payload domain.ERP
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
 	}
 	payload = normalizeERPProductUpsertPayload(payload)
+	if appErr := validateERPProductUpsertNameLength(payload); appErr != nil {
+		return nil, appErr
+	}
 	if strings.TrimSpace(payload.SKUID) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "sku_id is required", nil)
 	}

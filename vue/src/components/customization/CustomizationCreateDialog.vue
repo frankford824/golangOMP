@@ -215,10 +215,14 @@
                     type="text"
                     class="field-input"
                     placeholder="请输入目标产品名称"
+                    :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
                     :disabled="submitting"
                   />
                   <p v-if="showValidationError && !form.productName.trim()" class="field-hint field-hint-error">
                     请填写产品名称
+                  </p>
+                  <p class="field-hint" :class="{ 'field-hint-error': isErpProductNameTooLong(form.productName) }">
+                    {{ erpProductNameHint(form.productName) }}
                   </p>
                 </div>
 
@@ -334,8 +338,13 @@ import { createCustomizationTask, type CustomizationTaskCreatePayload } from '@/
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import { usePermissionsStore } from '@/stores/permissions'
-import { humanizeTaskCreateFields, pickFieldWhitelistViolations } from '@/domain/task-create-fields'
+import { humanizeTaskCreateFields, humanizeViolationCode, pickFieldWhitelistViolations } from '@/domain/task-create-fields'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
+import {
+  ERP_PRODUCT_NAME_MAX_LENGTH,
+  erpProductNameHint,
+  isErpProductNameTooLong,
+} from '@/domain/erp-product-name'
 import { getBeijingDateString, toBeijingEndOfDayISO } from '@/utils/date'
 
 type CreateTaskType = 'ORIGINAL_PRODUCT_DEV' | 'NEW_PRODUCT_DEV'
@@ -518,6 +527,7 @@ const canSubmit = computed(() => {
   return Boolean(
     form.newCategoryCode.trim() &&
       form.productName.trim() &&
+      !isErpProductNameTooLong(form.productName) &&
       form.productShortName.trim(),
   )
 })
@@ -754,9 +764,14 @@ async function submit() {
     const violations = Array.isArray(details.violations)
       ? (details.violations as Array<Record<string, unknown>>)
       : []
+    const humanizedMessages = violations
+      .map((v) => humanizeViolationCode(String(v.code ?? ''), String(v.field ?? '')))
+      .filter((message) => message.length > 0)
     const forbiddenFields = pickFieldWhitelistViolations(violations)
     const denyCode = String((err.deny_code ?? err.code ?? details.deny_code) ?? '')
-    if (forbiddenFields.length > 0) {
+    if (humanizedMessages.length > 0) {
+      submitError.value = humanizedMessages.slice(0, 3).join('；')
+    } else if (forbiddenFields.length > 0) {
       const cn = humanizeTaskCreateFields(forbiddenFields).join('、')
       // eslint-disable-next-line no-console
       console.error('[POST /v1/tasks · customization · field_not_allowed_for_task_type]', {
