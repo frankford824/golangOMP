@@ -206,11 +206,14 @@ function goNextPage() {
 .table-scroll {
   max-height: 360px;
   overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
 }
 .thumb {
   width: 56px;
   height: 56px;
   border-radius: 6px;
+  border: 1px solid #e5e7eb;
   background: #f1f5f9;
   display: flex;
   align-items: center;
@@ -237,6 +240,9 @@ function goNextPage() {
   text-align: left;
   border-bottom: 1px solid #e2e8f0;
 }
+.data-table td {
+  color: #374151;
+}
 .data-table th {
   background: #f8fafc;
   font-weight: 600;
@@ -248,6 +254,9 @@ function goNextPage() {
 .row-click:hover,
 .row-click.selected {
   background: #f0fdf4;
+}
+.row-click.selected {
+  box-shadow: inset 3px 0 0 #10b981;
 }
 .ellipsis {
   max-width: 140px;
@@ -275,71 +284,5 @@ function goNextPage() {
   margin: 0;
   font-size: 0.875rem;
   color: #94a3b8;
-}
-
-/* Apple Music / iOS liquid glass product picker skin. Style-only. */
-.picker-body {
-  color: #dce7f7;
-}
-
-.picker-body :deep(input),
-.picker-body :deep(.relative > div) {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: rgba(7, 12, 20, 0.82);
-  color: #f8fbff;
-}
-
-.picker-body :deep(input::placeholder) {
-  color: #64748b;
-}
-
-.picker-body :deep(input:focus) {
-  border-color: rgba(125, 211, 252, 0.62);
-  box-shadow: 0 0 0 3px rgba(100, 210, 255, 0.12);
-}
-
-.table-scroll {
-  border: 1px solid rgba(148, 163, 184, 0.20);
-  border-radius: 0.875rem;
-  background: rgba(8, 13, 22, 0.70);
-}
-
-.data-table th {
-  background: rgba(34, 48, 71, 0.86);
-  color: #cbd8ec;
-}
-
-.data-table td {
-  color: #dce7f7;
-}
-
-.data-table th,
-.data-table td {
-  border-bottom-color: rgba(148, 163, 184, 0.16);
-}
-
-.row-click:hover,
-.row-click.selected {
-  background: rgba(34, 48, 71, 0.88);
-}
-
-.row-click.selected {
-  box-shadow: inset 3px 0 0 #64d2ff;
-}
-
-.thumb {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(7, 12, 20, 0.82);
-}
-
-.thumb-placeholder,
-.loading-hint,
-.pagination-row,
-.empty-text {
-  color: #8fa0b8;
-}
-
-.search-error {
-  color: #ffb4ad;
 }
 </style>
