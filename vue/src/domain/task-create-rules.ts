@@ -1,4 +1,5 @@
 import type { TaskCreateFormModel, TaskKind } from './types'
+import { hasValidRetouchRequirementDrafts } from '@/domain/retouch-requirements'
 import { endOfBeijingDayMs, taskInstantMs } from '@/utils/date'
 import { ERP_PRODUCT_NAME_MAX_LENGTH, isErpProductNameTooLong } from '@/domain/erp-product-name'
 
@@ -75,11 +76,7 @@ export function canSubmitTask(kind: TaskKind, form: TaskCreateFormModel, now: Da
       if (form.costPriceAmount == null || Number.isNaN(form.costPriceAmount)) return false
     }
   } else if (kind === 'RETOUCH_TASK') {
-    base = !!(
-      form.referenceFileRefs.length > 0 &&
-      form.designRequirement.trim() &&
-      form.dueAt
-    )
+    base = !!(form.referenceFileRefs.length > 0 && hasValidRetouchRequirementDrafts(form) && form.dueAt)
   }
 
   if (!base) return false
@@ -130,7 +127,7 @@ export function getTaskCreateCompletionHint(
   } else if (kind === 'PURCHASE_TASK') {
     base = !!(form.productName && form.category)
   } else if (kind === 'RETOUCH_TASK') {
-    base = !!(form.referenceFileRefs.length > 0 && form.designRequirement.trim())
+    base = !!(form.referenceFileRefs.length > 0 && hasValidRetouchRequirementDrafts(form))
   }
 
   if (base && form.dueAt) {
@@ -172,8 +169,8 @@ export function getTaskCreateCompletionHint(
   }
 
   if (kind === 'RETOUCH_TASK') {
-    if (form.referenceFileRefs.length === 0) return '请上传图片/附件'
-    if (!form.designRequirement.trim()) return '请填写修改要求'
+    if (form.referenceFileRefs.length === 0) return '请上传任务级参考图/附件'
+    if (!hasValidRetouchRequirementDrafts(form)) return '请至少填写 1 条需求描述'
     if (!form.dueAt) return '请填写截止时间'
     return '请完善 P 图任务必填信息'
   }

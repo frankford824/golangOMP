@@ -1,5 +1,6 @@
 import type { PurchaseInfo } from './purchase'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
+import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import type { ModuleSummary } from '@/services/apiTypes'
 import type { TaskPriorityApi } from '@/domain/task-priority'
 
@@ -290,6 +291,8 @@ export interface Task {
   sourceDepartment?: string
 
   // ── 需求描述 ───────────────────────────────────────────────────────────────
+  /** retouch_task structured demand lines (Phase 1A text only). */
+  retouchRequirements?: RetouchRequirement[]
   designRequirement?: string
   copyContent?: string
   styleKeywords?: string

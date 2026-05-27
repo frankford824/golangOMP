@@ -164,6 +164,7 @@ export const TASK_TYPE_FIELD_WHITELIST = {
       'requester_name',
       'product_name',
       'product_name_snapshot',
+      'retouch_requirements',
     ] as readonly string[],
     forbidden: [
       'material_mode',

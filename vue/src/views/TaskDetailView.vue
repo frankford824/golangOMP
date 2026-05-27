@@ -259,9 +259,15 @@
                     </article>
 
                     <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">需求说明</p>
+                      <p class="detail-v3-card-kicker">{{ detailRequirementKicker }}</p>
                       <p class="detail-v3-card-text">{{ detailRequirementLabel }}</p>
                     </article>
+
+                    <RetouchRequirementsBlock
+                      v-if="showRetouchRequirementsBlock"
+                      :requirements="task!.retouchRequirements ?? []"
+                      class="detail-v3-retouch-requirements"
+                    />
 
                     <article class="detail-v3-info-card">
                       <p class="detail-v3-card-kicker">运营备注</p>
@@ -942,6 +948,7 @@ import { getCustomizationDetailStatusLabel } from '@/domain/task-center-card-sta
 
 // ── 子区块（通过 provide/inject 访问 task，无 prop drilling）──────────────
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
+import RetouchRequirementsBlock from '@/components/task-detail/RetouchRequirementsBlock.vue'
 import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue'
 import EventLogDrawer from '@/components/logs/EventLogDrawer.vue'
 import CancelReasonModal from '@/components/task-detail/CancelReasonModal.vue'
@@ -1240,6 +1247,17 @@ const detailCategoryLabel = computed(() => {
   const name = t?.categoryName ?? t?.category ?? t?.erpCategoryName
   return dash(formatCategoryNameWithCode(name, code))
 })
+const showRetouchRequirementsBlock = computed(
+  () =>
+    isRetouchTask.value &&
+    Array.isArray(task.value?.retouchRequirements) &&
+    task.value.retouchRequirements.length > 0,
+)
+
+const detailRequirementKicker = computed(() =>
+  showRetouchRequirementsBlock.value ? '任务总述' : '需求说明',
+)
+
 /** 设计/修改需求与文案，不含运营 note（见 detailNoteLabel） */
 const detailRequirementLabel = computed(() => {
   // 非批量任务优先使用任务级 designRequirement（编辑弹窗写入目标），
@@ -3389,6 +3407,9 @@ watch(taskId, (id) => {
   gap: 0.75rem;
   min-width: 0;
   align-items: stretch;
+}
+.detail-v3-retouch-requirements {
+  grid-column: 1 / -1;
 }
 .detail-v3-info-card {
   min-width: 0;

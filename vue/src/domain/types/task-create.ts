@@ -1,4 +1,5 @@
 import type { TaskPriorityApi } from '@/domain/task-priority'
+import type { RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
 
 export type TaskKind = 'ORIGINAL_PRODUCT_DEV' | 'NEW_PRODUCT_DEV' | 'PURCHASE_TASK' | 'RETOUCH_TASK'
 export type TaskCreateSkuMode = 'single' | 'multiple'
@@ -77,9 +78,11 @@ export interface TaskCreateFormModel {
   /** 订单号（定制管理创建入口） */
   orderNumber?: string
   /**
-   * 设计需求 / 修改说明（原品：修改要求；新品：设计需求说明）
+   * 设计需求 / 修改说明（原品：修改要求；新品：设计需求说明；P 图：可选任务总述）
    */
   designRequirement: string
+  /** P 图任务结构化需求明细（仅 RETOUCH_TASK 创建时使用） */
+  retouchRequirements?: RetouchRequirementDraft[]
   /** 文案内容（仅当业务需要时保留，文档 3-in-1 未展示则可不提交） */
   copyContent?: string
   /** 风格关键词（文档 3-in-1 未展示则可不提交） */

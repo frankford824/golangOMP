@@ -38,6 +38,8 @@ export function mergeDetailEnvelopeIntoTaskRaw(
     'skuItems',
     'asset_versions',
     'assetVersions',
+    'retouch_requirements',
+    'retouchRequirements',
     'procurement_summary',
     'procurementSummary',
     'matched_rule_governance',

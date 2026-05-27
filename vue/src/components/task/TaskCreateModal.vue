@@ -175,20 +175,10 @@
                 v-if="usesOriginalProductForm"
                 v-model:form="form"
               />
-              <section v-else-if="taskKind === 'RETOUCH_TASK'" class="type-section retouch-form">
-                <div class="form-card upload-card">
-                  <label class="field-label">图片/附件 <span class="required">*</span></label>
-                  <ReferenceUploadPanel v-model="referenceRefsModel" compact />
-                </div>
-                <div class="form-card">
-                  <BaseTextarea
-                    v-model="form.designRequirement"
-                    label="修改要求"
-                    :rows="4"
-                    placeholder="请填写 P 图修改要求，例如去背景、补光、替换文字"
-                  />
-                </div>
-              </section>
+              <TaskCreateRetouchForm
+                v-else-if="taskKind === 'RETOUCH_TASK'"
+                v-model:form="form"
+              />
               <TaskCreateNewProductForm
                 v-else-if="taskKind === 'NEW_PRODUCT_DEV'"
                 v-model:form="form"
@@ -418,7 +408,9 @@ import BaseSwitch from '@/components/base/BaseSwitch.vue'
 import TaskCreateOriginalForm from '@/components/task/TaskCreateOriginalForm.vue'
 import TaskCreateNewProductForm from '@/components/task/TaskCreateNewProductForm.vue'
 import TaskCreatePurchaseForm from '@/components/task/TaskCreatePurchaseForm.vue'
-import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
+import TaskCreateRetouchForm from '@/components/task/TaskCreateRetouchForm.vue'
+import { createEmptyRetouchRequirementDraft } from '@/domain/types/retouch-requirement'
+import { hasValidRetouchRequirementDrafts } from '@/domain/retouch-requirements'
 import ExcelBatchSkuPanel from '@/components/task-create/ExcelBatchSkuPanel.vue'
 import CloseDraftConfirmModal from '@/components/task-create/CloseDraftConfirmModal.vue'
 import DesignSourcePicker from '@/components/task-create/DesignSourcePicker.vue'
@@ -821,6 +813,13 @@ watch(taskKind, (mode) => {
     form.value.designRequirement = ''
     form.value.costPriceMode = form.value.costPriceMode || 'template'
   }
+  if (mode === 'RETOUCH_TASK') {
+    if (!Array.isArray(form.value.retouchRequirements) || form.value.retouchRequirements.length === 0) {
+      form.value.retouchRequirements = [createEmptyRetouchRequirementDraft(1)]
+    }
+  } else {
+    form.value.retouchRequirements = undefined
+  }
 })
 
 watch(
@@ -884,13 +883,6 @@ const urgentModel = computed({
   },
 })
 
-const referenceRefsModel = computed({
-  get: () => form.value.referenceFileRefs,
-  set: (value: (string | Record<string, unknown>)[]) => {
-    form.value.referenceFileRefs = value
-  },
-})
-
 const isDraftDirty = computed(() => JSON.stringify(buildDraftPayload()) !== savedDraftSnapshot.value)
 
 function previewRowErrors(row: number): BatchViolation[] {
@@ -931,8 +923,8 @@ const validationIssues = computed<string[]>(() => {
         issues.push('成本计价方式为手动录入时未填写成本')
       }
     } else if (taskKind.value === 'RETOUCH_TASK') {
-      if ((f.referenceFileRefs ?? []).length === 0) issues.push('请上传图片/附件')
-      if (!f.designRequirement?.trim()) issues.push('未填写修改要求')
+      if ((f.referenceFileRefs ?? []).length === 0) issues.push('请上传任务级参考图/附件')
+      if (!hasValidRetouchRequirementDrafts(f)) issues.push('请至少填写 1 条需求描述')
     } else if (taskKind.value === 'ORIGINAL_PRODUCT_DEV') {
       if (!f.sku) issues.push('未绑定原品 SKU')
       if (!f.productId) issues.push('未选择 ERP 产品')
@@ -1321,6 +1313,9 @@ async function submit() {
     ownerOrgTeam: hideOwnerFields.value ? undefined : (form.value.groupId || undefined),
     designRequirement:
       businessType === 'PURCHASE_TASK' ? undefined : form.value.designRequirement || undefined,
+    ...(businessType === 'RETOUCH_TASK'
+      ? { retouchRequirements: form.value.retouchRequirements ?? [] }
+      : {}),
     referenceFileRefs,
     dueAt: form.value.dueAt,
     priority: normalizedPriority,

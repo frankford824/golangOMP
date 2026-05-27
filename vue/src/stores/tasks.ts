@@ -35,6 +35,12 @@ import {
 import { canCloseTaskForArchive } from '@/domain/task-close-eligibility'
 import { checkTaskCompletion } from '@/domain/task-completion'
 import { sanitizeCreateTaskPayload } from '@/domain/task-create-fields'
+import { mapRetouchRequirementsFromApi } from '@/domain/mappers/retouch-requirements-from-api'
+import {
+  buildRetouchRequirementsPayload,
+  resolveRetouchTaskDesignRequirementText,
+} from '@/domain/retouch-requirements'
+import type { RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
 import { buildClearDesignerAssigneePayload } from '@/domain/task-assignment-payload'
 import type { PurchaseInfo } from '@/domain/types/purchase'
 import { DesignSubStatusEnum } from '@/domain/enums/task-status'
@@ -984,6 +990,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     // 保证原品/新品两路数据都能映射到同一个展示字段。
     // 使用 || 而非 ?? —— 后端可能同时返回 design_requirement="" 和 change_request="有值"，
     // ?? 不穿透空字符串，导致读到空值。
+    retouchRequirements: mapRetouchRequirementsFromApi(raw.retouch_requirements ?? raw.retouchRequirements),
     designRequirement:
       (raw.design_requirement as string | undefined)?.trim() ||
       (raw.designRequirement as string | undefined)?.trim() ||
@@ -1670,11 +1677,19 @@ export const useTasksStore = defineStore('tasks', () => {
         : undefined)
 
     if (isRetouch) {
-      const retouchRequirement = t.designRequirement ?? task.designRequirement ?? ''
+      const retouchDrafts = (t.retouchRequirements ?? task.retouchRequirements ?? []) as RetouchRequirementDraft[]
+      const retouchSummary = resolveRetouchTaskDesignRequirementText({
+        designRequirement: String(t.designRequirement ?? task.designRequirement ?? ''),
+        retouchRequirements: retouchDrafts,
+      })
       payload.product_name = productName || '修图任务名称'
       payload.product_name_snapshot = productNameSnapshot || '修图任务名称'
-      payload.demand_text = retouchRequirement
-      payload.design_requirement = retouchRequirement
+      payload.demand_text = retouchSummary
+      payload.design_requirement = retouchSummary
+      const retouchRequirements = buildRetouchRequirementsPayload(retouchDrafts)
+      if (retouchRequirements.length > 0) {
+        payload.retouch_requirements = retouchRequirements
+      }
     } else if (isOriginal) {
       const productIdRaw = t.productId ?? task.productId
       const productIdNum =
