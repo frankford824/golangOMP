@@ -118,6 +118,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `warehouse_blocking_reason_code` | query | array<string> | 否 | Filters tasks that currently contain any of the given `workflow.warehouse_blocking_reasons.code` values. Supports comma-separated multi-value queries. |
 | `creator_id` | query | integer | 否 | - |
 | `designer_id` | query | integer | 否 | - |
+| `designer_empty` | query | boolean | 否 | When `true`, returns only tasks with no designer assignment (`designer_id` IS NULL or `0`). Use with `workflow_lane=customization` for customization-lane unassigned-artwork filtering; do not combine with `status=PendingAssign` for that case. |
 | `need_outsource` | query | boolean | 否 | - |
 | `overdue` | query | boolean | 否 | When `true`, filters `deadline_at < now` and excludes `Completed`/`Archived`/`Cancelled`; when `false`, returns the complement set. |
 | `keyword` | query | string | 否 | Matches `task_no`, `sku_code`, or `product_name_snapshot`. |
@@ -218,6 +219,7 @@ Content-Type: `application/json`
 | `product_name` | string | 否 | - |
 | `product_short_name` | string | 否 | - |
 | `design_requirement` | string | 否 | - |
+| `retouch_requirements` | array<CreateTaskRetouchRequirementItem> | 否 | Structured demand lines for `retouch_task` only. Other task types must omit this field or receive `400 INVALID_REQUEST` with violation code `field_not_allowed_for_task_type`. |
 | `cost_price_mode` | enum(manual/template) | 否 | - |
 | `cost_price` | number | 否 | - |
 | `quantity` | integer | 否 | - |

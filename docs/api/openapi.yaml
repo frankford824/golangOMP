@@ -1971,6 +1971,32 @@ components:
           type: string
           nullable: true
         attached_at: { type: string, format: date-time }
+    TaskRetouchRequirement:
+      type: object
+      description: One structured demand line for `task_type=retouch_task`. Phase 1A exposes text fields only; asset binding is out of scope.
+      properties:
+        id: { type: integer, format: int64 }
+        task_id: { type: integer, format: int64 }
+        description: { type: string }
+        sku_code: { type: string, nullable: true }
+        spec: { type: string, nullable: true }
+        remark: { type: string, nullable: true }
+        sort_order: { type: integer }
+        created_by: { type: integer, format: int64, nullable: true }
+        updated_by: { type: integer, format: int64, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, task_id, description, sort_order, created_at, updated_at]
+    CreateTaskRetouchRequirementItem:
+      type: object
+      description: Create-time input for one retouch demand line. Only accepted when `task_type=retouch_task`.
+      required: [description]
+      properties:
+        description: { type: string }
+        sku_code: { type: string }
+        spec: { type: string }
+        remark: { type: string }
+        sort_order: { type: integer }
     TaskAggregateDetailV2:
       type: object
       description: V1.1-A1 fast-path task aggregate detail. Batch tasks include `sku_items`; design uploads include `asset_versions` with `scope_sku_code` for per-SKU grouping.
@@ -2013,6 +2039,11 @@ components:
         designer_name: { type: string }
         assignee_name: { type: string }
         current_handler_name: { type: string }
+        retouch_requirements:
+          type: array
+          description: Structured retouch demand lines for `retouch_task`. Always present for retouch tasks and may be empty for legacy rows.
+          items:
+            $ref: '#/components/schemas/TaskRetouchRequirement'
     ProcurementStatus:
       type: string
       enum: [draft, prepared, in_progress, completed]
@@ -3879,6 +3910,11 @@ components:
               description: Flattened design asset versions ordered by asset root and version order. Batch-task SKU scope is exposed by `scope_sku_code`.
               items:
                 $ref: '#/components/schemas/DesignAssetVersion'
+            retouch_requirements:
+              type: array
+              description: Structured retouch demand lines for `retouch_task`. Always present and may be empty for legacy tasks without rows in `task_retouch_requirements`.
+              items:
+                $ref: '#/components/schemas/TaskRetouchRequirement'
     TaskSKUItem:
       type: object
       properties:
@@ -4135,6 +4171,11 @@ components:
           type: string
         design_requirement:
           type: string
+        retouch_requirements:
+          type: array
+          description: Structured demand lines for `retouch_task` only. Other task types must omit this field or receive `400 INVALID_REQUEST` with violation code `field_not_allowed_for_task_type`.
+          items:
+            $ref: '#/components/schemas/CreateTaskRetouchRequirementItem'
         cost_price_mode:
           type: string
           enum: [manual, template]

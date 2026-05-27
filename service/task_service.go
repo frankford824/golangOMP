@@ -95,6 +95,9 @@ type CreateTaskParams struct {
 	TopLevelPurchaseSKU string
 	SyncERPOnCreate     bool
 
+	// retouch_task structured requirement lines (Phase 1A text only).
+	RetouchRequirements []domain.CreateRetouchRequirementItem
+
 	// Debug-only raw values captured before alias normalization.
 	rawChangeRequest        string
 	rawDesignRequirement    string
@@ -289,6 +292,7 @@ type taskService struct {
 	uploadRequestRepo            repo.UploadRequestRepo
 	assetStorageRefRepo          repo.AssetStorageRefRepo
 	referenceFileRefFlatRepo     repo.ReferenceFileRefFlatRepo
+	retouchRequirementRepo       repo.TaskRetouchRequirementRepo
 	taskReferenceAssetFormalizer TaskReferenceAssetFormalizer
 	productCodeSeqRepo           repo.ProductCodeSequenceRepo
 	erpBridgeSvc                 ERPBridgeService
@@ -341,6 +345,12 @@ func WithTaskReferenceFileRefValidation(uploadRequestRepo repo.UploadRequestRepo
 func WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo repo.ReferenceFileRefFlatRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.referenceFileRefFlatRepo = referenceFileRefFlatRepo
+	}
+}
+
+func WithTaskRetouchRequirementRepo(retouchRequirementRepo repo.TaskRetouchRequirementRepo) TaskServiceOption {
+	return func(s *taskService) {
+		s.retouchRequirementRepo = retouchRequirementRepo
 	}
 }
 
@@ -1229,6 +1239,9 @@ func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.Ap
 	if appErr := validateProductSelectionByTaskType(p); appErr != nil {
 		return appErr
 	}
+	if appErr := validateRetouchRequirements(p); appErr != nil {
+		return appErr
+	}
 	if appErr := validateTaskTypeFieldWhitelist(ctx, p); appErr != nil {
 		return appErr
 	}
@@ -1718,6 +1731,7 @@ func (s *taskService) loadTaskReadModel(ctx context.Context, id int64) (*domain.
 	}
 	enrichTaskSKUItemReferenceFileRefs(readModel.SKUItems, s.referenceFileRefsEnricher)
 	enrichTaskReadModelDetail(ctx, s.userDisplayNameResolver, s.referenceFileRefsEnricher, readModel, task, detail)
+	readModel.RetouchRequirements = s.listTaskRetouchRequirements(ctx, task)
 	domain.HydrateTaskReadModelPolicy(readModel)
 	return readModel, nil
 }

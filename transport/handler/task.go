@@ -41,32 +41,33 @@ func (h *TaskHandler) SetR3Services(poolQuery *task_pool.PoolQueryService, claim
 
 type createTaskReq struct {
 	// Common fields
-	TaskType                string                    `json:"task_type"             binding:"required"`
-	SourceMode              string                    `json:"source_mode"`
-	OwnerTeam               string                    `json:"owner_team"`
-	OwnerDepartment         string                    `json:"owner_department"`
-	OwnerOrgTeam            string                    `json:"owner_org_team"`
-	CreatorID               *int64                    `json:"creator_id"`
-	OperatorGroupID         *int64                    `json:"operator_group_id"`
-	DesignerID              *int64                    `json:"designer_id"`
-	AssigneeID              *int64                    `json:"assignee_id"` // alias for designer_id
-	RequesterID             *int64                    `json:"requester_id"`
-	Priority                string                    `json:"priority"`
-	DeadlineAt              *string                   `json:"deadline_at"`
-	DueAt                   *string                   `json:"due_at"`
-	IsOutsource             *bool                     `json:"is_outsource"`
-	NeedOutsource           *bool                     `json:"need_outsource"`
-	BusinessLane            string                    `json:"business_lane"`
-	WorkflowLane            string                    `json:"workflow_lane"`
-	CustomizationRequired   *bool                     `json:"customization_required"`
-	CustomizationSourceType string                    `json:"customization_source_type"`
-	ReferenceImages         []string                  `json:"reference_images"`
-	ReferenceFileRefs       []domain.ReferenceFileRef `json:"reference_file_refs"`
-	Remark                  string                    `json:"remark"`
-	Note                    string                    `json:"note"`
-	BatchSKUMode            string                    `json:"batch_sku_mode"`
-	BatchItems              []createTaskBatchItemReq  `json:"batch_items"`
-	SKUCodeType             string                    `json:"sku_code_type"`
+	TaskType                string                            `json:"task_type"             binding:"required"`
+	SourceMode              string                            `json:"source_mode"`
+	OwnerTeam               string                            `json:"owner_team"`
+	OwnerDepartment         string                            `json:"owner_department"`
+	OwnerOrgTeam            string                            `json:"owner_org_team"`
+	CreatorID               *int64                            `json:"creator_id"`
+	OperatorGroupID         *int64                            `json:"operator_group_id"`
+	DesignerID              *int64                            `json:"designer_id"`
+	AssigneeID              *int64                            `json:"assignee_id"` // alias for designer_id
+	RequesterID             *int64                            `json:"requester_id"`
+	Priority                string                            `json:"priority"`
+	DeadlineAt              *string                           `json:"deadline_at"`
+	DueAt                   *string                           `json:"due_at"`
+	IsOutsource             *bool                             `json:"is_outsource"`
+	NeedOutsource           *bool                             `json:"need_outsource"`
+	BusinessLane            string                            `json:"business_lane"`
+	WorkflowLane            string                            `json:"workflow_lane"`
+	CustomizationRequired   *bool                             `json:"customization_required"`
+	CustomizationSourceType string                            `json:"customization_source_type"`
+	ReferenceImages         []string                          `json:"reference_images"`
+	ReferenceFileRefs       []domain.ReferenceFileRef         `json:"reference_file_refs"`
+	Remark                  string                            `json:"remark"`
+	Note                    string                            `json:"note"`
+	BatchSKUMode            string                            `json:"batch_sku_mode"`
+	BatchItems              []createTaskBatchItemReq          `json:"batch_items"`
+	RetouchRequirements     []createTaskRetouchRequirementReq `json:"retouch_requirements"`
+	SKUCodeType             string                            `json:"sku_code_type"`
 
 	// Original product development fields
 	ProductID           createTaskProductID      `json:"product_id"`
@@ -106,6 +107,14 @@ type createTaskReq struct {
 	productSelectionFieldPresent bool
 	productSelectionFieldNonNull bool
 	referenceImagesFieldPresent  bool
+}
+
+type createTaskRetouchRequirementReq struct {
+	Description string `json:"description"`
+	SKUCode     string `json:"sku_code"`
+	Spec        string `json:"spec"`
+	Remark      string `json:"remark"`
+	SortOrder   int    `json:"sort_order"`
 }
 
 type createTaskBatchItemReq struct {
@@ -856,6 +865,18 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		TopLevelNewSKU:      req.NewSKU,
 		TopLevelPurchaseSKU: req.PurchaseSKU,
 		SyncERPOnCreate:     req.SyncERPOnCreate,
+	}
+	if len(req.RetouchRequirements) > 0 {
+		params.RetouchRequirements = make([]domain.CreateRetouchRequirementItem, 0, len(req.RetouchRequirements))
+		for _, item := range req.RetouchRequirements {
+			params.RetouchRequirements = append(params.RetouchRequirements, domain.CreateRetouchRequirementItem{
+				Description: item.Description,
+				SKUCode:     item.SKUCode,
+				Spec:        item.Spec,
+				Remark:      item.Remark,
+				SortOrder:   item.SortOrder,
+			})
+		}
 	}
 	if len(req.BatchItems) > 0 {
 		params.BatchItems = make([]service.CreateTaskBatchSKUItemParams, 0, len(req.BatchItems))

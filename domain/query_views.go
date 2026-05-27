@@ -252,7 +252,9 @@ type TaskReadModel struct {
 	SKUCodeType        TaskSKUCodeType `json:"sku_code_type,omitempty"`
 	// Always JSON-encode as an array (including empty) so detail clients do not confuse omission with missing data.
 	ReferenceFileRefs []ReferenceFileRef `json:"reference_file_refs"`
-	CreatorName       string             `json:"creator_name,omitempty"`
+	// Always present for retouch_task reads; empty array for other task types and legacy retouch rows.
+	RetouchRequirements []TaskRetouchRequirement `json:"retouch_requirements"`
+	CreatorName         string                   `json:"creator_name,omitempty"`
 }
 
 // TaskListItem is the frontend-oriented task list projection for STEP_05.

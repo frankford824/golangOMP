@@ -376,6 +376,9 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 		if err := s.insertTaskReferenceFileRefFlatRows(ctx, tx, newID, p.ReferenceFileRefs); err != nil {
 			return err
 		}
+		if err := s.insertTaskRetouchRequirements(ctx, tx, newID, p); err != nil {
+			return err
+		}
 
 		var procurementRecord *domain.ProcurementRecord
 		if p.TaskType == domain.TaskTypePurchaseTask {

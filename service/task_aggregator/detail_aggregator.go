@@ -10,36 +10,38 @@ import (
 )
 
 type DetailService struct {
-	tasks        repo.TaskRepo
-	taskAssets   repo.TaskAssetRepo
-	modules      repo.TaskModuleRepo
-	events       repo.TaskModuleEventRepo
-	refs         repo.ReferenceFileRefFlatRepo
-	refEnricher  referenceFileRefEnricher
-	nameResolver userDisplayNameResolver
-	statusAgg    *StatusAggregator
+	tasks                  repo.TaskRepo
+	taskAssets             repo.TaskAssetRepo
+	modules                repo.TaskModuleRepo
+	events                 repo.TaskModuleEventRepo
+	refs                   repo.ReferenceFileRefFlatRepo
+	retouchRequirementRepo repo.TaskRetouchRequirementRepo
+	refEnricher            referenceFileRefEnricher
+	nameResolver           userDisplayNameResolver
+	statusAgg              *StatusAggregator
 }
 
 type Detail struct {
-	Task               *domain.Task                 `json:"task"`
-	TaskDetail         *domain.TaskDetail           `json:"task_detail,omitempty"`
-	Modules            []ModuleDetail               `json:"modules"`
-	Events             []*domain.TaskModuleEvent    `json:"events"`
-	References         []domain.ReferenceFileRef    `json:"reference_file_refs"`
-	SKUItems           []*domain.TaskSKUItem        `json:"sku_items"`
-	AssetVersions      []*domain.DesignAssetVersion `json:"asset_versions"`
-	Workflow           domain.TaskWorkflowSnapshot  `json:"workflow"`
-	DesignSubStatus    string                       `json:"design_sub_status,omitempty"`
-	CreatorID          *int64                       `json:"creator_id,omitempty"`
-	RequesterID        *int64                       `json:"requester_id,omitempty"`
-	DesignerID         *int64                       `json:"designer_id,omitempty"`
-	AssigneeID         *int64                       `json:"assignee_id,omitempty"`
-	CurrentHandlerID   *int64                       `json:"current_handler_id,omitempty"`
-	CreatorName        string                       `json:"creator_name,omitempty"`
-	RequesterName      string                       `json:"requester_name,omitempty"`
-	DesignerName       string                       `json:"designer_name,omitempty"`
-	AssigneeName       string                       `json:"assignee_name,omitempty"`
-	CurrentHandlerName string                       `json:"current_handler_name,omitempty"`
+	Task                *domain.Task                    `json:"task"`
+	TaskDetail          *domain.TaskDetail              `json:"task_detail,omitempty"`
+	Modules             []ModuleDetail                  `json:"modules"`
+	Events              []*domain.TaskModuleEvent       `json:"events"`
+	References          []domain.ReferenceFileRef       `json:"reference_file_refs"`
+	SKUItems            []*domain.TaskSKUItem           `json:"sku_items"`
+	AssetVersions       []*domain.DesignAssetVersion    `json:"asset_versions"`
+	Workflow            domain.TaskWorkflowSnapshot     `json:"workflow"`
+	DesignSubStatus     string                          `json:"design_sub_status,omitempty"`
+	CreatorID           *int64                          `json:"creator_id,omitempty"`
+	RequesterID         *int64                          `json:"requester_id,omitempty"`
+	DesignerID          *int64                          `json:"designer_id,omitempty"`
+	AssigneeID          *int64                          `json:"assignee_id,omitempty"`
+	CurrentHandlerID    *int64                          `json:"current_handler_id,omitempty"`
+	CreatorName         string                          `json:"creator_name,omitempty"`
+	RequesterName       string                          `json:"requester_name,omitempty"`
+	DesignerName        string                          `json:"designer_name,omitempty"`
+	AssigneeName        string                          `json:"assignee_name,omitempty"`
+	CurrentHandlerName  string                          `json:"current_handler_name,omitempty"`
+	RetouchRequirements []domain.TaskRetouchRequirement `json:"retouch_requirements"`
 }
 
 type ModuleDetail struct {
@@ -78,6 +80,12 @@ func WithUserDisplayNameResolver(resolver userDisplayNameResolver) DetailService
 func WithTaskAssetRepo(taskAssets repo.TaskAssetRepo) DetailServiceOption {
 	return func(s *DetailService) {
 		s.taskAssets = taskAssets
+	}
+}
+
+func WithTaskRetouchRequirementRepo(retouchRequirementRepo repo.TaskRetouchRequirementRepo) DetailServiceOption {
+	return func(s *DetailService) {
+		s.retouchRequirementRepo = retouchRequirementRepo
 	}
 }
 
@@ -177,8 +185,27 @@ func (s *DetailService) hydrateBatchAndAssetFields(ctx context.Context, out *Det
 	}
 	out.SKUItems = skuItems
 	out.AssetVersions = assetVersions
+	out.RetouchRequirements = loadDetailRetouchRequirements(ctx, s.retouchRequirementRepo, task)
 	out.Workflow = normalizeDetailTerminalWorkflow(task, out.Workflow)
 	return nil
+}
+
+func loadDetailRetouchRequirements(ctx context.Context, retouchRepo repo.TaskRetouchRequirementRepo, task *domain.Task) []domain.TaskRetouchRequirement {
+	if retouchRepo == nil || task == nil || task.TaskType != domain.TaskTypeRetouchTask {
+		return []domain.TaskRetouchRequirement{}
+	}
+	rows, err := retouchRepo.ListByTaskID(ctx, task.ID)
+	if err != nil || len(rows) == 0 {
+		return []domain.TaskRetouchRequirement{}
+	}
+	out := make([]domain.TaskRetouchRequirement, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out = append(out, *row)
+	}
+	return out
 }
 
 func (s *DetailService) loadSKUItems(ctx context.Context, task *domain.Task) ([]*domain.TaskSKUItem, error) {
