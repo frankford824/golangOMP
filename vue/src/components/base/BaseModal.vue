@@ -146,4 +146,36 @@ footer {
 button {
   color: inherit;
 }
+
+/* Teleport 到 body 后在 #app 外，需局部复用 main.css 蓝色主按钮皮肤 */
+footer :deep(button.bg-stone-600) {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
+}
+
+footer :deep(button.bg-stone-600:not(:disabled):hover) {
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+
+footer :deep(button.bg-stone-600:not(:disabled):active) {
+  background: #1e40af !important;
+  border-color: #1e40af !important;
+  color: #ffffff !important;
+}
+
+footer :deep(button.bg-stone-600:focus-visible) {
+  outline: none;
+  box-shadow:
+    0 1px 2px rgba(37, 99, 235, 0.2),
+    0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+}
+
+footer :deep(button.bg-stone-600:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 </style>
