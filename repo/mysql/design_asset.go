@@ -15,18 +15,19 @@ type designAssetRepo struct{ db *DB }
 func NewDesignAssetRepo(db *DB) repo.DesignAssetRepo { return &designAssetRepo{db: db} }
 
 const designAssetSelectCols = `
-	id, task_id, asset_no, source_asset_id, scope_sku_code, asset_type, current_version_id, created_by, created_at, updated_at`
+	id, task_id, asset_no, source_asset_id, scope_sku_code, retouch_requirement_id, asset_type, current_version_id, created_by, created_at, updated_at`
 
 func (r *designAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.DesignAsset) (int64, error) {
 	sqlTx := Unwrap(tx)
 	res, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO design_assets
-		  (task_id, asset_no, source_asset_id, scope_sku_code, asset_type, current_version_id, created_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		  (task_id, asset_no, source_asset_id, scope_sku_code, retouch_requirement_id, asset_type, current_version_id, created_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		asset.TaskID,
 		asset.AssetNo,
 		toNullInt64(asset.SourceAssetID),
 		asset.ScopeSKUCode,
+		toNullInt64(asset.RetouchRequirementID),
 		string(asset.AssetType),
 		toNullInt64(asset.CurrentVersionID),
 		asset.CreatedBy,
@@ -129,6 +130,7 @@ func scanDesignAsset(scanner interface {
 	asset := &domain.DesignAsset{}
 	var sourceAssetID sql.NullInt64
 	var scopeSKUCode sql.NullString
+	var retouchRequirementID sql.NullInt64
 	var currentVersionID sql.NullInt64
 	if err := scanner.Scan(
 		&asset.ID,
@@ -136,6 +138,7 @@ func scanDesignAsset(scanner interface {
 		&asset.AssetNo,
 		&sourceAssetID,
 		&scopeSKUCode,
+		&retouchRequirementID,
 		&asset.AssetType,
 		&currentVersionID,
 		&asset.CreatedBy,
@@ -150,6 +153,7 @@ func scanDesignAsset(scanner interface {
 	if scopeSKUCode.Valid {
 		asset.ScopeSKUCode = scopeSKUCode.String
 	}
+	asset.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 	asset.SourceAssetID = fromNullInt64(sourceAssetID)
 	asset.AssetType = domain.NormalizeTaskAssetType(asset.AssetType)
 	asset.CurrentVersionID = fromNullInt64(currentVersionID)

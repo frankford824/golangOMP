@@ -305,7 +305,9 @@ func main() {
 		service.WithTaskAssetCenterBlueprintRuleEngine(blueprintRules),
 		service.WithTaskAssetCenterDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetCenterScopeUserRepo(userRepo),
-		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
+		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
+		service.WithTaskAssetCenterRetouchRequirementRepo(taskRetouchRequirementRepo),
+		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo))
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient)
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)

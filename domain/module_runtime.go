@@ -62,10 +62,11 @@ type TaskModuleEvent struct {
 }
 
 type ReferenceFileRefFlat struct {
-	ID             int64     `json:"id"`
-	TaskID         int64     `json:"task_id"`
-	SKUItemID      *int64    `json:"sku_item_id,omitempty"`
-	RefID          string    `json:"ref_id"`
+	ID                   int64     `json:"id"`
+	TaskID               int64     `json:"task_id"`
+	SKUItemID            *int64    `json:"sku_item_id,omitempty"`
+	RetouchRequirementID *int64    `json:"retouch_requirement_id,omitempty"`
+	RefID                string    `json:"ref_id"`
 	OwnerModuleKey string    `json:"owner_module_key"`
 	Context        *string   `json:"context,omitempty"`
 	AttachedAt     time.Time `json:"attached_at"`

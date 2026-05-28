@@ -17,6 +17,15 @@ func (s *retouchRequirementRepoStub) CreateBatch(context.Context, repo.Tx, int64
 	return nil
 }
 
+func (s *retouchRequirementRepoStub) GetByID(_ context.Context, id int64) (*domain.TaskRetouchRequirement, error) {
+	for _, row := range s.rows {
+		if row != nil && row.ID == id {
+			return row, nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *retouchRequirementRepoStub) ListByTaskID(context.Context, int64) ([]*domain.TaskRetouchRequirement, error) {
 	if len(s.rows) == 0 {
 		return []*domain.TaskRetouchRequirement{}, nil

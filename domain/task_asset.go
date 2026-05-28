@@ -71,8 +71,9 @@ type TaskAsset struct {
 	ID                 int64            `db:"id"                json:"id"`
 	TaskID             int64            `db:"task_id"           json:"task_id"`
 	AssetID            *int64           `db:"asset_id"          json:"asset_id,omitempty"`
-	ScopeSKUCode       *string          `db:"scope_sku_code"    json:"scope_sku_code,omitempty"`
-	AssetType          TaskAssetType    `db:"asset_type"        json:"asset_type"`
+	ScopeSKUCode           *string `db:"scope_sku_code"            json:"scope_sku_code,omitempty"`
+	RetouchRequirementID   *int64  `db:"retouch_requirement_id"    json:"retouch_requirement_id,omitempty"`
+	AssetType              TaskAssetType `db:"asset_type" json:"asset_type"`
 	VersionNo          int              `db:"version_no"        json:"version_no"`
 	AssetVersionNo     *int             `db:"asset_version_no"  json:"asset_version_no,omitempty"`
 	UploadMode         *string          `db:"upload_mode"       json:"upload_mode,omitempty"`

@@ -27,7 +27,8 @@ type CreateTaskAssetUploadSessionParams struct {
 	MimeType      string
 	FileHash      string
 	Remark        string
-	TargetSKUCode string
+	TargetSKUCode          string
+	RetouchRequirementID   *int64
 }
 
 type CompleteTaskAssetUploadSessionParams struct {
@@ -106,10 +107,12 @@ type taskAssetCenterService struct {
 	nowFn                     func() time.Time
 	runAsyncFn                func(func())
 	derivedPreviewGracePeriod time.Duration
-	dataScopeResolver         DataScopeResolver
-	scopeUserRepo             repo.UserRepo
-	userDisplayNameResolver   UserDisplayNameResolver
-	workflowRules             designSubmissionWorkflowEngine
+	dataScopeResolver          DataScopeResolver
+	scopeUserRepo              repo.UserRepo
+	userDisplayNameResolver    UserDisplayNameResolver
+	workflowRules              designSubmissionWorkflowEngine
+	retouchRequirementRepo     repo.TaskRetouchRequirementRepo
+	referenceFileRefFlatRepo   repo.ReferenceFileRefFlatRepo
 }
 
 const (
@@ -190,6 +193,18 @@ func WithTaskAssetCenterUserDisplayNameResolver(resolver UserDisplayNameResolver
 func WithTaskAssetCenterBlueprintRuleEngine(rules designSubmissionWorkflowEngine) TaskAssetCenterServiceOption {
 	return func(s *taskAssetCenterService) {
 		s.workflowRules = rules
+	}
+}
+
+func WithTaskAssetCenterRetouchRequirementRepo(retouchRequirementRepo repo.TaskRetouchRequirementRepo) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.retouchRequirementRepo = retouchRequirementRepo
+	}
+}
+
+func WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo repo.ReferenceFileRefFlatRepo) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.referenceFileRefFlatRepo = referenceFileRefFlatRepo
 	}
 }
 
@@ -506,6 +521,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	}
 	requestAssetType := domain.NormalizeTaskAssetType(*request.TaskAssetType)
 	scopeSKUCode := strings.TrimSpace(request.TargetSKUCode)
+	retouchRequirementID := domain.CloneInt64Ptr(request.RetouchRequirementID)
 
 	checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
 	var err error
@@ -562,6 +578,14 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					"upload_session_id": request.RequestID,
 				})
 			}
+			if !retouchRequirementIDsEqual(existingAsset.RetouchRequirementID, retouchRequirementID) {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "retouch_requirement_id does not match existing asset scope", map[string]interface{}{
+					"retouch_requirement_id": retouchRequirementID,
+					"asset_retouch_requirement_id": existingAsset.RetouchRequirementID,
+					"asset_id":                     existingAsset.ID,
+					"upload_session_id":            request.RequestID,
+				})
+			}
 			asset = existingAsset
 			assetID = existingAsset.ID
 		} else {
@@ -570,12 +594,13 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 				return fmt.Errorf("next design asset no: %w", err)
 			}
 			asset = &domain.DesignAsset{
-				TaskID:        params.TaskID,
-				AssetNo:       assetNo,
-				SourceAssetID: request.SourceAssetID,
-				ScopeSKUCode:  scopeSKUCode,
-				AssetType:     requestAssetType,
-				CreatedBy:     params.CompletedBy,
+				TaskID:               params.TaskID,
+				AssetNo:              assetNo,
+				SourceAssetID:        request.SourceAssetID,
+				ScopeSKUCode:         scopeSKUCode,
+				RetouchRequirementID: retouchRequirementID,
+				AssetType:            requestAssetType,
+				CreatedBy:            params.CompletedBy,
 			}
 			id, err := s.designAssetRepo.Create(ctx, tx, asset)
 			if err != nil {
@@ -598,10 +623,11 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
 		previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
 		taskAsset := &domain.TaskAsset{
-			TaskID:          params.TaskID,
-			AssetID:         &assetID,
-			ScopeSKUCode:    optionalStringPtr(scopeSKUCode),
-			AssetType:       requestAssetType,
+			TaskID:               params.TaskID,
+			AssetID:              &assetID,
+			ScopeSKUCode:         optionalStringPtr(scopeSKUCode),
+			RetouchRequirementID: retouchRequirementID,
+			AssetType:            requestAssetType,
 			VersionNo:       timelineVersionNo,
 			AssetVersionNo:  &assetVersionNo,
 			UploadMode:      optionalStringPtr(string(request.UploadMode)),
@@ -645,6 +671,11 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}
 		if _, err := s.assetStorageRefRepo.Create(ctx, tx, ref); err != nil {
 			return fmt.Errorf("create asset storage ref: %w", err)
+		}
+		if requestAssetType.IsReference() {
+			if err := s.insertRetouchRequirementReferenceFlat(ctx, tx, params.TaskID, retouchRequirementID, storageRefID); err != nil {
+				return err
+			}
 		}
 		if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
 			return fmt.Errorf("update design asset current version: %w", err)
@@ -983,6 +1014,12 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr := rejectConflictingRetouchAssetScopes(params.TargetSKUCode, params.RetouchRequirementID); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := validateRetouchRequirementAssetScope(ctx, task, params.RetouchRequirementID, s.retouchRequirementRepo); appErr != nil {
+		return nil, appErr
+	}
 	if appErr := s.requireScopedBatchAsset(ctx, params.TaskID, normalizedAssetType, params.TargetSKUCode); appErr != nil {
 		return nil, appErr
 	}
@@ -1001,7 +1038,7 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		return nil, appErr
 	}
 	taskRef := strings.TrimSpace(task.TaskNo)
-	identity, appErr := s.freezeUploadAssetIdentity(ctx, params.TaskID, params.AssetID, params.SourceAssetID, params.TargetSKUCode, params.AssetType, params.CreatedBy)
+	identity, appErr := s.freezeUploadAssetIdentity(ctx, params.TaskID, params.AssetID, params.SourceAssetID, params.TargetSKUCode, params.RetouchRequirementID, params.AssetType, params.CreatedBy)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -1059,8 +1096,9 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		TaskID:          params.TaskID,
 		AssetID:         params.AssetID,
 		SourceAssetID:   params.SourceAssetID,
-		TargetSKUCode:   params.TargetSKUCode,
-		TaskAssetType:   &params.AssetType,
+		TargetSKUCode:          params.TargetSKUCode,
+		RetouchRequirementID:   domain.CloneInt64Ptr(params.RetouchRequirementID),
+		TaskAssetType:          &params.AssetType,
 		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
 		UploadMode:      mode,
 		RefType:         domain.AssetStorageRefTypeTaskAssetObject,
@@ -1092,8 +1130,9 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 			"upload_session_id": request.RequestID,
 			"asset_id":          params.AssetID,
 			"asset_type":        string(params.AssetType),
-			"target_sku_code":   params.TargetSKUCode,
-			"filename":          request.FileName,
+			"target_sku_code":          params.TargetSKUCode,
+			"retouch_requirement_id":   params.RetouchRequirementID,
+			"filename":                 request.FileName,
 			"expected_size":     request.ExpectedSize,
 			"mime_type":         request.MimeType,
 			"upload_mode":       string(mode),
@@ -1657,12 +1696,39 @@ type frozenUploadAssetIdentity struct {
 	AssetNo string
 }
 
+func (s *taskAssetCenterService) insertRetouchRequirementReferenceFlat(
+	ctx context.Context,
+	tx repo.Tx,
+	taskID int64,
+	retouchRequirementID *int64,
+	refID string,
+) error {
+	if s.referenceFileRefFlatRepo == nil || retouchRequirementID == nil || *retouchRequirementID <= 0 {
+		return nil
+	}
+	refID = strings.TrimSpace(refID)
+	if refID == "" {
+		return nil
+	}
+	if _, err := s.referenceFileRefFlatRepo.InsertFlat(ctx, tx, &domain.ReferenceFileRefFlat{
+		TaskID:               taskID,
+		RetouchRequirementID: retouchRequirementID,
+		RefID:                refID,
+		OwnerModuleKey:       string(domain.ModuleKeyBasicInfo),
+		Context:              stringPtr("retouch_requirement_reference"),
+	}); err != nil {
+		return fmt.Errorf("insert retouch requirement reference_file_ref flat row: %w", err)
+	}
+	return nil
+}
+
 func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 	ctx context.Context,
 	taskID int64,
 	requestedAssetID *int64,
 	sourceAssetID *int64,
 	targetSKUCode string,
+	retouchRequirementID *int64,
 	assetType domain.TaskAssetType,
 	createdBy int64,
 ) (*frozenUploadAssetIdentity, *domain.AppError) {
@@ -1691,6 +1757,13 @@ func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 				"asset_id":        asset.ID,
 			})
 		}
+		if !retouchRequirementIDsEqual(asset.RetouchRequirementID, retouchRequirementID) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "retouch_requirement_id does not match existing asset scope", map[string]interface{}{
+				"retouch_requirement_id":       retouchRequirementID,
+				"asset_retouch_requirement_id": asset.RetouchRequirementID,
+				"asset_id":                     asset.ID,
+			})
+		}
 		return &frozenUploadAssetIdentity{
 			AssetID: asset.ID,
 			AssetNo: strings.TrimSpace(asset.AssetNo),
@@ -1704,12 +1777,13 @@ func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 			return err
 		}
 		asset := &domain.DesignAsset{
-			TaskID:        taskID,
-			AssetNo:       assetNo,
-			SourceAssetID: sourceAssetID,
-			ScopeSKUCode:  strings.TrimSpace(targetSKUCode),
-			AssetType:     assetType,
-			CreatedBy:     createdBy,
+			TaskID:               taskID,
+			AssetNo:              assetNo,
+			SourceAssetID:        sourceAssetID,
+			ScopeSKUCode:         strings.TrimSpace(targetSKUCode),
+			RetouchRequirementID: domain.CloneInt64Ptr(retouchRequirementID),
+			AssetType:            assetType,
+			CreatedBy:            createdBy,
 		}
 		assetID, err := s.designAssetRepo.Create(ctx, tx, asset)
 		if err != nil {

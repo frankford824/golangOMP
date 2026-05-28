@@ -7,6 +7,7 @@ import (
 
 	"workflow/domain"
 	"workflow/repo"
+	parentservice "workflow/service"
 )
 
 type DetailService struct {
@@ -145,7 +146,7 @@ func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, deta
 	for _, m := range modules {
 		moduleDetails = append(moduleDetails, ModuleDetail{TaskModule: m, Visibility: "visible", Projection: json.RawMessage(`{}`)})
 	}
-	references := buildDetailReferenceFileRefs(detail, refs)
+	references := parentservice.BuildTaskLevelDetailReferenceFileRefs(detail, refs)
 	if s != nil && s.refEnricher != nil {
 		references = s.refEnricher.EnrichAll(references)
 	}
@@ -185,7 +186,16 @@ func (s *DetailService) hydrateBatchAndAssetFields(ctx context.Context, out *Det
 	}
 	out.SKUItems = skuItems
 	out.AssetVersions = assetVersions
-	out.RetouchRequirements = loadDetailRetouchRequirements(ctx, s.retouchRequirementRepo, task)
+	requirements := loadDetailRetouchRequirements(ctx, s.retouchRequirementRepo, task)
+	flatRefs := []*domain.ReferenceFileRefFlat(nil)
+	if s.refs != nil {
+		if loaded, listErr := s.refs.ListByTask(ctx, task.ID); listErr == nil {
+			flatRefs = loaded
+		}
+	}
+	designAssets := buildDetailDesignAssetsFromVersions(out.AssetVersions)
+	out.RetouchRequirements = parentservice.EnrichRetouchRequirementsReadModel(ctx, requirements, flatRefs, designAssets, s.refEnricher)
+	_, out.AssetVersions = parentservice.FilterTaskLevelDesignAssetReadModel(nil, out.AssetVersions)
 	out.Workflow = normalizeDetailTerminalWorkflow(task, out.Workflow)
 	return nil
 }
@@ -535,27 +545,43 @@ func cloneInt64Ptr(value *int64) *int64 {
 	return &cloned
 }
 
-func buildDetailReferenceFileRefs(detail *domain.TaskDetail, flatRefs []*domain.ReferenceFileRefFlat) []domain.ReferenceFileRef {
-	if detail != nil {
-		if refs := domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON); len(refs) > 0 {
-			return refs
-		}
-		if refs := domain.ParseReferenceFileRefsJSON(detail.ReferenceImagesJSON); len(refs) > 0 {
-			return refs
-		}
+func buildDetailDesignAssetsFromVersions(versions []*domain.DesignAssetVersion) []*domain.DesignAsset {
+	if len(versions) == 0 {
+		return []*domain.DesignAsset{}
 	}
-	if len(flatRefs) == 0 {
-		return nil
-	}
-	refs := make([]domain.ReferenceFileRef, 0, len(flatRefs))
-	for _, flat := range flatRefs {
-		if flat == nil || flat.RefID == "" {
+	orderedAssetIDs := make([]int64, 0)
+	assetsByID := make(map[int64]*domain.DesignAsset)
+	for _, version := range versions {
+		if version == nil || version.AssetID <= 0 {
 			continue
 		}
-		refs = append(refs, domain.ReferenceFileRef{
-			AssetID: flat.RefID,
-			RefID:   flat.RefID,
-		})
+		asset, exists := assetsByID[version.AssetID]
+		if !exists {
+			orderedAssetIDs = append(orderedAssetIDs, version.AssetID)
+			asset = &domain.DesignAsset{
+				ID:                   version.AssetID,
+				TaskID:               version.TaskID,
+				AssetNo:              version.AssetNo,
+				SourceAssetID:        version.SourceAssetID,
+				ScopeSKUCode:         version.ScopeSKUCode,
+				RetouchRequirementID: domain.CloneInt64Ptr(version.RetouchRequirementID),
+				AssetType:            version.AssetType,
+				CreatedBy:            version.UploadedBy,
+			}
+			assetsByID[version.AssetID] = asset
+		}
+		if asset.CurrentVersion == nil {
+			current := *version
+			asset.CurrentVersion = &current
+			currentID := version.ID
+			asset.CurrentVersionID = &currentID
+		}
 	}
-	return domain.NormalizeReferenceFileRefs(refs)
+	out := make([]*domain.DesignAsset, 0, len(orderedAssetIDs))
+	for _, assetID := range orderedAssetIDs {
+		if asset := assetsByID[assetID]; asset != nil {
+			out = append(out, asset)
+		}
+	}
+	return out
 }

@@ -6,6 +6,7 @@ import (
 
 	"workflow/domain"
 	"workflow/repo"
+	parentservice "workflow/service"
 )
 
 func TestBuildDetailReferenceFileRefsPrefersTaskDetailJSON(t *testing.T) {
@@ -13,7 +14,7 @@ func TestBuildDetailReferenceFileRefsPrefersTaskDetailJSON(t *testing.T) {
 		ReferenceFileRefsJSON: `[{"asset_id":"ref-1","ref_id":"ref-1","storage_key":"tasks/ref-1.png","download_url":"/v1/assets/files/tasks/ref-1.png"}]`,
 	}
 
-	refs := buildDetailReferenceFileRefs(detail, []*domain.ReferenceFileRefFlat{{RefID: "flat-ref"}})
+	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(detail, []*domain.ReferenceFileRefFlat{{RefID: "flat-ref"}})
 	if len(refs) != 1 {
 		t.Fatalf("refs len = %d, want 1", len(refs))
 	}
@@ -23,7 +24,7 @@ func TestBuildDetailReferenceFileRefsPrefersTaskDetailJSON(t *testing.T) {
 }
 
 func TestBuildDetailReferenceFileRefsFallsBackToFlatRefs(t *testing.T) {
-	refs := buildDetailReferenceFileRefs(&domain.TaskDetail{ReferenceFileRefsJSON: "[]"}, []*domain.ReferenceFileRefFlat{{RefID: "flat-ref"}})
+	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(&domain.TaskDetail{ReferenceFileRefsJSON: "[]"}, []*domain.ReferenceFileRefFlat{{RefID: "flat-ref"}})
 	if len(refs) != 1 {
 		t.Fatalf("refs len = %d, want 1", len(refs))
 	}

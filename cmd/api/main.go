@@ -118,6 +118,7 @@ func main() {
 	taskModuleRepo := mysqlrepo.NewTaskModuleRepo(mdb)
 	taskModuleEventRepo := mysqlrepo.NewTaskModuleEventRepo(mdb)
 	referenceFileRefFlatRepo := mysqlrepo.NewReferenceFileRefFlatRepo(mdb)
+	taskRetouchRequirementRepo := mysqlrepo.NewTaskRetouchRequirementRepo(mdb)
 	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
@@ -203,7 +204,8 @@ func main() {
 		service.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskScopeUserRepo(userRepo),
-		service.WithTaskBlueprintRuleEngine(blueprintRules))
+		service.WithTaskBlueprintRuleEngine(blueprintRules),
+		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo))
 	taskBoardSvc := service.NewTaskBoardService(taskSvc)
 	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
 	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
@@ -240,7 +242,9 @@ func main() {
 		service.WithTaskAssetCenterBlueprintRuleEngine(blueprintRules),
 		service.WithTaskAssetCenterDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetCenterScopeUserRepo(userRepo),
-		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
+		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
+		service.WithTaskAssetCenterRetouchRequirementRepo(taskRetouchRequirementRepo),
+		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo))
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient)
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)

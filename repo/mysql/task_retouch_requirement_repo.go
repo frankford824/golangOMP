@@ -54,6 +54,50 @@ func (r *taskRetouchRequirementRepo) CreateBatch(ctx context.Context, tx repo.Tx
 	return nil
 }
 
+func (r *taskRetouchRequirementRepo) GetByID(ctx context.Context, id int64) (*domain.TaskRetouchRequirement, error) {
+	if id <= 0 {
+		return nil, nil
+	}
+	var req domain.TaskRetouchRequirement
+	var skuCode, spec, remark sql.NullString
+	var createdBy, updatedBy sql.NullInt64
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT id, task_id, description, sku_code, spec, remark, sort_order,
+		       created_by, updated_by, created_at, updated_at
+		FROM task_retouch_requirements
+		WHERE id = ? AND deleted_at IS NULL`, id).Scan(
+		&req.ID,
+		&req.TaskID,
+		&req.Description,
+		&skuCode,
+		&spec,
+		&remark,
+		&req.SortOrder,
+		&createdBy,
+		&updatedBy,
+		&req.CreatedAt,
+		&req.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get task_retouch_requirement: %w", err)
+	}
+	if skuCode.Valid {
+		req.SKUCode = skuCode.String
+	}
+	if spec.Valid {
+		req.Spec = spec.String
+	}
+	if remark.Valid {
+		req.Remark = remark.String
+	}
+	req.CreatedBy = fromNullInt64(createdBy)
+	req.UpdatedBy = fromNullInt64(updatedBy)
+	return &req, nil
+}
+
 func (r *taskRetouchRequirementRepo) ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskRetouchRequirement, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT id, task_id, description, sku_code, spec, remark, sort_order,

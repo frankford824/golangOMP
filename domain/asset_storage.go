@@ -118,8 +118,9 @@ type UploadRequest struct {
 	TaskID             int64                      `json:"task_id,omitempty"`
 	AssetID            *int64                     `json:"asset_id,omitempty"`
 	SourceAssetID      *int64                     `json:"source_asset_id,omitempty"`
-	TargetSKUCode      string                     `json:"target_sku_code,omitempty"`
-	TaskAssetType      *TaskAssetType             `json:"task_asset_type,omitempty"`
+	TargetSKUCode          string                     `json:"target_sku_code,omitempty"`
+	RetouchRequirementID   *int64                     `json:"retouch_requirement_id,omitempty"`
+	TaskAssetType          *TaskAssetType             `json:"task_asset_type,omitempty"`
 	StorageAdapter     AssetStorageAdapter        `json:"storage_adapter"`
 	UploadMode         DesignAssetUploadMode      `json:"upload_mode,omitempty"`
 	RefType            AssetStorageRefType        `json:"ref_type"`

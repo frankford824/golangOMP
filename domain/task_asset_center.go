@@ -141,8 +141,9 @@ type DesignAsset struct {
 	TaskID                  int64                   `db:"task_id"            json:"task_id"`
 	AssetNo                 string                  `db:"asset_no"           json:"asset_no"`
 	SourceAssetID           *int64                  `db:"source_asset_id"    json:"source_asset_id,omitempty"`
-	ScopeSKUCode            string                  `db:"scope_sku_code"     json:"scope_sku_code,omitempty"`
-	AssetType               TaskAssetType           `db:"asset_type"         json:"asset_type"`
+	ScopeSKUCode          string        `db:"scope_sku_code"           json:"scope_sku_code,omitempty"`
+	RetouchRequirementID  *int64        `db:"retouch_requirement_id"   json:"retouch_requirement_id,omitempty"`
+	AssetType             TaskAssetType `db:"asset_type"               json:"asset_type"`
 	CurrentVersionID        *int64                  `db:"current_version_id" json:"current_version_id,omitempty"`
 	ApprovedVersionID       *int64                  `json:"approved_version_id,omitempty"`
 	WarehouseReadyVersionID *int64                  `json:"warehouse_ready_version_id,omitempty"`
@@ -165,8 +166,9 @@ type DesignAssetVersion struct {
 	AssetID               int64                       `json:"asset_id"`
 	AssetNo               string                      `json:"asset_no,omitempty"`
 	SourceAssetID         *int64                      `json:"source_asset_id,omitempty"`
-	ScopeSKUCode          string                      `json:"scope_sku_code,omitempty"`
-	AssetType             TaskAssetType               `json:"asset_type"`
+	ScopeSKUCode            string        `json:"scope_sku_code,omitempty"`
+	RetouchRequirementID    *int64        `json:"retouch_requirement_id,omitempty"`
+	AssetType               TaskAssetType `json:"asset_type"`
 	VersionNo             int                         `json:"version_no"`
 	TimelineVersionNo     int                         `json:"timeline_version_no"`
 	UploadMode            DesignAssetUploadMode       `json:"upload_mode"`
@@ -206,8 +208,9 @@ type UploadSession struct {
 	TaskID           int64                      `json:"task_id"`
 	AssetID          *int64                     `json:"asset_id,omitempty"`
 	AssetType        *TaskAssetType             `json:"asset_type,omitempty"`
-	TargetSKUCode    string                     `json:"target_sku_code,omitempty"`
-	UploadMode       DesignAssetUploadMode      `json:"upload_mode"`
+	TargetSKUCode          string                     `json:"target_sku_code,omitempty"`
+	RetouchRequirementID   *int64                     `json:"retouch_requirement_id,omitempty"`
+	UploadMode             DesignAssetUploadMode      `json:"upload_mode"`
 	Filename         string                     `json:"filename"`
 	ExpectedSize     *int64                     `json:"expected_size,omitempty"`
 	MimeType         string                     `json:"mime_type,omitempty"`
@@ -265,8 +268,9 @@ func BuildDesignAssetVersion(taskAsset *TaskAsset) *DesignAssetVersion {
 		ID:                taskAsset.ID,
 		TaskID:            taskAsset.TaskID,
 		AssetID:           *taskAsset.AssetID,
-		ScopeSKUCode:      optionalTrimmedString(taskAsset.ScopeSKUCode),
-		AssetType:         assetType,
+		ScopeSKUCode:           optionalTrimmedString(taskAsset.ScopeSKUCode),
+		RetouchRequirementID:   cloneInt64Ptr(taskAsset.RetouchRequirementID),
+		AssetType:              assetType,
 		VersionNo:         *taskAsset.AssetVersionNo,
 		TimelineVersionNo: taskAsset.VersionNo,
 		UploadMode:        uploadMode,
@@ -315,8 +319,9 @@ func BuildUploadSession(request *UploadRequest) *UploadSession {
 		TaskID:           taskID,
 		AssetID:          request.AssetID,
 		AssetType:        normalizeTaskAssetTypePtr(request.TaskAssetType),
-		TargetSKUCode:    strings.TrimSpace(request.TargetSKUCode),
-		UploadMode:       uploadMode,
+		TargetSKUCode:          strings.TrimSpace(request.TargetSKUCode),
+		RetouchRequirementID:   cloneInt64Ptr(request.RetouchRequirementID),
+		UploadMode:             uploadMode,
 		Filename:         request.FileName,
 		ExpectedSize:     expectedSize,
 		MimeType:         request.MimeType,

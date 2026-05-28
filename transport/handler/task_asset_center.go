@@ -44,7 +44,8 @@ type createTaskAssetUploadSessionReq struct {
 	MimeType      string `json:"mime_type"`
 	FileHash      string `json:"file_hash"`
 	Remark        string `json:"remark"`
-	TargetSKUCode string `json:"target_sku_code"`
+	TargetSKUCode        string `json:"target_sku_code"`
+	RetouchRequirementID *int64 `json:"retouch_requirement_id"`
 }
 
 type completeTaskAssetUploadSessionReq struct {
@@ -645,7 +646,8 @@ func (h *TaskAssetCenterHandler) createUploadSessionWithRequest(c *gin.Context, 
 		MimeType:      strings.TrimSpace(req.MimeType),
 		FileHash:      strings.TrimSpace(req.FileHash),
 		Remark:        strings.TrimSpace(req.Remark),
-		TargetSKUCode: strings.TrimSpace(req.TargetSKUCode),
+		TargetSKUCode:        strings.TrimSpace(req.TargetSKUCode),
+		RetouchRequirementID: parseOptionalPositiveInt64(req.RetouchRequirementID, c.Query("retouch_requirement_id")),
 	}
 	resolvedMode := mode
 	if resolvedMode == "" {
@@ -776,4 +778,19 @@ func firstNonEmptyTrimmed(values ...string) string {
 
 func int64ToString(value int64) string {
 	return strconv.FormatInt(value, 10)
+}
+
+func parseOptionalPositiveInt64(bodyValue *int64, queryValue string) *int64 {
+	if bodyValue != nil && *bodyValue > 0 {
+		return bodyValue
+	}
+	queryValue = strings.TrimSpace(queryValue)
+	if queryValue == "" {
+		return nil
+	}
+	parsed, err := parseInt64(queryValue)
+	if err != nil || parsed <= 0 {
+		return nil
+	}
+	return &parsed
 }

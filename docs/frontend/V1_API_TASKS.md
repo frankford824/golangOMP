@@ -2025,6 +2025,7 @@ Content-Type: `application/json`
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
+| `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
 ### 响应体 schema
 成功响应: `201 application/json`
@@ -2332,6 +2333,7 @@ Content-Type: `application/json`
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
+| `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
 ### 响应体 schema
 成功响应: `201 application/json`

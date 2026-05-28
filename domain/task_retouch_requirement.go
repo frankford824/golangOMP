@@ -15,6 +15,18 @@ type TaskRetouchRequirement struct {
 	UpdatedBy   *int64    `json:"updated_by,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// Read-model only (GET task / detail); not persisted on this struct's table row.
+	ReferenceFileRefs []ReferenceFileRef `json:"reference_file_refs,omitempty"`
+	SourceAssets      []*DesignAsset     `json:"source_assets,omitempty"`
+}
+
+// CloneInt64Ptr returns a shallow copy of value, or nil when value is nil.
+func CloneInt64Ptr(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
 }
 
 // CreateRetouchRequirementItem is the service-layer input for one requirement line at task create.

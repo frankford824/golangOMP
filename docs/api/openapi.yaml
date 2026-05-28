@@ -1965,6 +1965,11 @@ components:
         sku_item_id:
           type: integer
           nullable: true
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: When set, this reference index row belongs to one `task_retouch_requirements` line. NULL means task-level or legacy scope.
         ref_id: { type: string }
         owner_module_key: { type: string }
         context:
@@ -1973,7 +1978,7 @@ components:
         attached_at: { type: string, format: date-time }
     TaskRetouchRequirement:
       type: object
-      description: One structured demand line for `task_type=retouch_task`. Phase 1A exposes text fields only; asset binding is out of scope.
+      description: One structured demand line for `task_type=retouch_task`. Phase 1B adds per-requirement `reference_file_refs` and `source_assets` on read models.
       properties:
         id: { type: integer, format: int64 }
         task_id: { type: integer, format: int64 }
@@ -1986,6 +1991,16 @@ components:
         updated_by: { type: integer, format: int64, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        reference_file_refs:
+          type: array
+          description: Requirement-scoped reference images for this line. Always present on read models and may be empty.
+          items:
+            $ref: '#/components/schemas/ReferenceFileRef'
+        source_assets:
+          type: array
+          description: Requirement-scoped source/material files (`asset_type=source`) for this line. Always present on read models and may be empty.
+          items:
+            $ref: '#/components/schemas/DesignAsset'
       required: [id, task_id, description, sort_order, created_at, updated_at]
     CreateTaskRetouchRequirementItem:
       type: object
@@ -2827,6 +2842,11 @@ components:
         scope_sku_code:
           type: string
           nullable: true
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy timeline row.
         source_module_key:
           type: string
           nullable: true
@@ -2894,6 +2914,11 @@ components:
           type: string
           nullable: true
           description: Optional batch-SKU scope. When present, this version belongs to exactly one `sku_items[].sku_code`.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy asset scope.
         asset_type:
           type: string
           enum: [reference, source, delivery, preview, design_thumb]
@@ -2983,6 +3008,11 @@ components:
           type: string
           nullable: true
           description: Optional batch-SKU scope for the asset root. Empty/null means task-level asset shared across the task.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy asset scope.
         asset_type:
           type: string
           enum: [reference, source, delivery, preview, design_thumb]
@@ -3040,6 +3070,11 @@ components:
           type: string
           nullable: true
           description: Optional target SKU captured on the upload-session business view for batch-task uploads. The completed asset root and asset version later expose the persisted SKU scope on `scope_sku_code`.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task` uploads. Only valid when the task is `retouch_task` and the requirement belongs to the task.
         upload_mode:
           $ref: '#/components/schemas/DesignAssetUploadMode'
           description: Compatibility-only persisted upload mode. New frontend integration must rely on `upload_strategy`.
@@ -3284,6 +3319,11 @@ components:
         target_sku_code:
           type: string
           nullable: true
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope captured when the upload request was created.
         asset_id:
           type: integer
           nullable: true
@@ -3469,6 +3509,11 @@ components:
         target_sku_code:
           type: string
           description: Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`.
     CreateTaskAssetUploadSessionResponseData:
       type: object
       properties:

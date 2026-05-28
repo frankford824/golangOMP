@@ -14,7 +14,7 @@ type taskAssetRepo struct{ db *DB }
 func NewTaskAssetRepo(db *DB) repo.TaskAssetRepo { return &taskAssetRepo{db: db} }
 
 const taskAssetSelectCols = `
-	ta.id, ta.task_id, ta.asset_id, ta.scope_sku_code, ta.asset_type, ta.version_no, ta.asset_version_no, ta.upload_mode, ta.upload_request_id, ta.storage_ref_id,
+	ta.id, ta.task_id, ta.asset_id, ta.scope_sku_code, ta.retouch_requirement_id, ta.asset_type, ta.version_no, ta.asset_version_no, ta.upload_mode, ta.upload_request_id, ta.storage_ref_id,
 	ta.file_name, ta.original_filename, ta.remote_file_id, ta.mime_type, ta.file_size, ta.file_path, ta.storage_key, ta.whole_hash, ta.upload_status, ta.preview_status, ta.uploaded_by, ta.uploaded_at, ta.remark, ta.created_at,
 	asr.ref_id, asr.asset_id, asr.owner_type, asr.owner_id, asr.upload_request_id, asr.storage_adapter,
 	asr.ref_type, asr.ref_key, asr.file_name, asr.mime_type, asr.file_size, asr.is_placeholder, asr.checksum_hint,
@@ -24,11 +24,12 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 	sqlTx := Unwrap(tx)
 	res, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO task_assets
-		  (task_id, asset_id, scope_sku_code, asset_type, version_no, asset_version_no, upload_mode, upload_request_id, storage_ref_id, file_name, original_filename, remote_file_id, mime_type, file_size, file_path, storage_key, whole_hash, upload_status, preview_status, uploaded_by, uploaded_at, remark, source_module_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  (task_id, asset_id, scope_sku_code, retouch_requirement_id, asset_type, version_no, asset_version_no, upload_mode, upload_request_id, storage_ref_id, file_name, original_filename, remote_file_id, mime_type, file_size, file_path, storage_key, whole_hash, upload_status, preview_status, uploaded_by, uploaded_at, remark, source_module_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		asset.TaskID,
 		toNullInt64(asset.AssetID),
 		toNullString(asset.ScopeSKUCode),
+		toNullInt64(asset.RetouchRequirementID),
 		string(domain.NormalizeTaskAssetType(asset.AssetType)),
 		asset.VersionNo,
 		toNullInt(asset.AssetVersionNo),
@@ -155,6 +156,7 @@ func scanTaskAsset(row *sql.Row) (*domain.TaskAsset, error) {
 	var asset domain.TaskAsset
 	var assetID sql.NullInt64
 	var scopeSKUCode sql.NullString
+	var retouchRequirementID sql.NullInt64
 	var assetVersionNo sql.NullInt64
 	var uploadMode, uploadRequestID, storageRefID sql.NullString
 	var originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus sql.NullString
@@ -166,7 +168,7 @@ func scanTaskAsset(row *sql.Row) (*domain.TaskAsset, error) {
 	var refIsPlaceholder sql.NullBool
 	var refCreatedAt sql.NullTime
 	err := row.Scan(
-		&asset.ID, &asset.TaskID, &assetID, &scopeSKUCode, &asset.AssetType, &asset.VersionNo, &assetVersionNo, &uploadMode, &uploadRequestID, &storageRefID,
+		&asset.ID, &asset.TaskID, &assetID, &scopeSKUCode, &retouchRequirementID, &asset.AssetType, &asset.VersionNo, &assetVersionNo, &uploadMode, &uploadRequestID, &storageRefID,
 		&asset.FileName, &originalFilename, &remoteFileID, &mimeType, &fileSize, &filePath, &storageKey, &wholeHash, &uploadStatus, &previewStatus, &asset.UploadedBy, &uploadedAt, &asset.Remark, &asset.CreatedAt,
 		&refID, &refAssetID, &refOwnerType, &refOwnerID, &refUploadRequestID, &refStorageAdapter,
 		&refType, &refKey, &refFileName, &refMimeType, &refFileSize, &refIsPlaceholder, &refChecksumHint,
@@ -180,6 +182,7 @@ func scanTaskAsset(row *sql.Row) (*domain.TaskAsset, error) {
 	}
 	asset.AssetID = fromNullInt64(assetID)
 	asset.ScopeSKUCode = fromNullString(scopeSKUCode)
+	asset.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 	asset.AssetType = domain.NormalizeTaskAssetType(asset.AssetType)
 	asset.AssetVersionNo = fromNullInt(assetVersionNo)
 	asset.UploadMode = fromNullString(uploadMode)
@@ -219,6 +222,7 @@ func scanTaskAssetRow(rows *sql.Rows) (*domain.TaskAsset, error) {
 	var asset domain.TaskAsset
 	var assetID sql.NullInt64
 	var scopeSKUCode sql.NullString
+	var retouchRequirementID sql.NullInt64
 	var assetVersionNo sql.NullInt64
 	var uploadMode, uploadRequestID, storageRefID sql.NullString
 	var originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus sql.NullString
@@ -230,7 +234,7 @@ func scanTaskAssetRow(rows *sql.Rows) (*domain.TaskAsset, error) {
 	var refIsPlaceholder sql.NullBool
 	var refCreatedAt sql.NullTime
 	if err := rows.Scan(
-		&asset.ID, &asset.TaskID, &assetID, &scopeSKUCode, &asset.AssetType, &asset.VersionNo, &assetVersionNo, &uploadMode, &uploadRequestID, &storageRefID,
+		&asset.ID, &asset.TaskID, &assetID, &scopeSKUCode, &retouchRequirementID, &asset.AssetType, &asset.VersionNo, &assetVersionNo, &uploadMode, &uploadRequestID, &storageRefID,
 		&asset.FileName, &originalFilename, &remoteFileID, &mimeType, &fileSize, &filePath, &storageKey, &wholeHash, &uploadStatus, &previewStatus, &asset.UploadedBy, &uploadedAt, &asset.Remark, &asset.CreatedAt,
 		&refID, &refAssetID, &refOwnerType, &refOwnerID, &refUploadRequestID, &refStorageAdapter,
 		&refType, &refKey, &refFileName, &refMimeType, &refFileSize, &refIsPlaceholder, &refChecksumHint,
@@ -240,6 +244,7 @@ func scanTaskAssetRow(rows *sql.Rows) (*domain.TaskAsset, error) {
 	}
 	asset.AssetID = fromNullInt64(assetID)
 	asset.ScopeSKUCode = fromNullString(scopeSKUCode)
+	asset.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 	asset.AssetType = domain.NormalizeTaskAssetType(asset.AssetType)
 	asset.AssetVersionNo = fromNullInt(assetVersionNo)
 	asset.UploadMode = fromNullString(uploadMode)
