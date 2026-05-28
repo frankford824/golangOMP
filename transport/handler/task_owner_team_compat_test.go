@@ -198,6 +198,10 @@ func (s *ownerTeamCompatTaskServiceProxy) UpdateBusinessInfo(context.Context, se
 	return nil, nil
 }
 
+func (s *ownerTeamCompatTaskServiceProxy) UpdateSKUItemInfo(context.Context, service.UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError) {
+	return nil, nil
+}
+
 func (s *ownerTeamCompatTaskServiceProxy) UpdateProcurement(context.Context, service.UpdateTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError) {
 	return nil, nil
 }

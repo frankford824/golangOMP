@@ -250,6 +250,19 @@ type UpdateTaskSKUItemCostInfoParams struct {
 	Remark                   string
 }
 
+type UpdateTaskSKUItemInfoParams struct {
+	TaskID               int64
+	SKUItemID            int64
+	OperatorID           int64
+	ProductName          *string
+	ProductIID           *string
+	DesignRequirement    *string
+	ReferenceFileRefs    []domain.ReferenceFileRef
+	ReferenceFileRefsSet bool
+	TriggerFiling        bool
+	Remark               string
+}
+
 // TaskService defines all Task-domain operations (V7 §9).
 type TaskService interface {
 	Create(ctx context.Context, p CreateTaskParams) (*domain.Task, *domain.AppError)
@@ -260,6 +273,7 @@ type TaskService interface {
 	RetryFiling(ctx context.Context, p RetryTaskFilingParams) (*domain.TaskFilingStatusView, *domain.AppError)
 	TriggerFiling(ctx context.Context, p TriggerTaskFilingParams) (*domain.TaskFilingStatusView, *domain.AppError)
 	UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusinessInfoParams) (*domain.TaskDetail, *domain.AppError)
+	UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError)
 	UpdateProcurement(ctx context.Context, p UpdateTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError)
 	AdvanceProcurement(ctx context.Context, p AdvanceTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError)
 	PrepareWarehouse(ctx context.Context, p PrepareTaskForWarehouseParams) (*domain.Task, *domain.AppError)
@@ -289,6 +303,7 @@ type taskService struct {
 	categoryRepo                 repo.CategoryRepo
 	costRuleRepo                 repo.CostRuleRepo
 	integrationCallLogRepo       repo.IntegrationCallLogRepo
+	skuTraceRepo                 repo.SKUTraceRepo
 	uploadRequestRepo            repo.UploadRequestRepo
 	assetStorageRefRepo          repo.AssetStorageRefRepo
 	referenceFileRefFlatRepo     repo.ReferenceFileRefFlatRepo
@@ -332,6 +347,12 @@ func WithERPBridgeSelectionBinding(erpBridgeSvc ERPBridgeService) TaskServiceOpt
 func WithTaskERPBridgeFilingTrace(callLogRepo repo.IntegrationCallLogRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.integrationCallLogRepo = callLogRepo
+	}
+}
+
+func WithTaskSKUTraceRepo(skuTraceRepo repo.SKUTraceRepo) TaskServiceOption {
+	return func(s *taskService) {
+		s.skuTraceRepo = skuTraceRepo
 	}
 }
 
@@ -2292,6 +2313,121 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 
 type taskSKUItemCostInfoUpdater interface {
 	UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error
+}
+
+type taskSKUItemBusinessInfoUpdater interface {
+	UpdateSKUItemBusinessInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error
+}
+
+func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError) {
+	if p.TaskID <= 0 || p.SKUItemID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_id and sku_item_id are required", nil)
+	}
+	task, err := s.taskRepo.GetByID(ctx, p.TaskID)
+	if err != nil {
+		return nil, infraError("get task for sku item update", err)
+	}
+	if task == nil {
+		return nil, domain.ErrNotFound
+	}
+	if !isBatchNewProductTask(task) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "sku item edit is only supported for batch new-product tasks", nil)
+	}
+	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
+		return nil, appErr
+	}
+	items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
+	if err != nil {
+		return nil, infraError("list task sku items for sku item update", err)
+	}
+	var item *domain.TaskSKUItem
+	for _, candidate := range items {
+		if candidate != nil && candidate.ID == p.SKUItemID {
+			copied := *candidate
+			item = &copied
+			break
+		}
+	}
+	if item == nil {
+		return nil, domain.ErrNotFound
+	}
+
+	previousProductName := item.ProductNameSnapshot
+	previousProductIID := taskSKUItemProductIID(item)
+	previousDesignRequirement := item.DesignRequirement
+	if p.ProductName != nil {
+		item.ProductNameSnapshot = strings.TrimSpace(*p.ProductName)
+	}
+	productIIDChanged := false
+	if p.ProductIID != nil {
+		productIID := strings.TrimSpace(*p.ProductIID)
+		variantJSON, appErr := setTaskSKUItemProductIIDInVariantJSON(item.VariantJSON, productIID)
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.ProductIID = productIID
+		item.VariantJSON = variantJSON
+		productIIDChanged = previousProductIID != productIID
+	}
+	if p.DesignRequirement != nil {
+		item.DesignRequirement = strings.TrimSpace(*p.DesignRequirement)
+	}
+	if p.ReferenceFileRefsSet {
+		item.ReferenceFileRefs = domain.NormalizeReferenceFileRefs(p.ReferenceFileRefs)
+	}
+
+	updater, ok := s.taskRepo.(taskSKUItemBusinessInfoUpdater)
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "task sku item updater is not configured", nil)
+	}
+	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := updater.UpdateSKUItemBusinessInfo(ctx, tx, item); err != nil {
+			return err
+		}
+		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventSKUItemUpdated, &p.OperatorID,
+			mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
+				"sku_item_id":                 item.ID,
+				"sequence_no":                 item.SequenceNo,
+				"sku_code":                    item.SKUCode,
+				"previous_product_name":       previousProductName,
+				"product_name":                item.ProductNameSnapshot,
+				"previous_product_i_id":       previousProductIID,
+				"product_i_id":                taskSKUItemProductIID(item),
+				"previous_design_requirement": previousDesignRequirement,
+				"design_requirement":          item.DesignRequirement,
+				"reference_file_refs":         item.ReferenceFileRefs,
+				"erp_sync_requested":          true,
+				"trigger_filing":              p.TriggerFiling || productIIDChanged,
+				"remark":                      strings.TrimSpace(p.Remark),
+			}),
+		)
+		return err
+	})
+	if txErr != nil {
+		return nil, infraError("update sku item info tx", txErr)
+	}
+	if p.TriggerFiling || productIIDChanged {
+		_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
+			TaskID:     p.TaskID,
+			OperatorID: p.OperatorID,
+			Remark:     p.Remark,
+			Source:     TaskFilingTriggerSourceBusinessInfoPatch,
+			Force:      true,
+		})
+		if filingErr != nil {
+			return nil, filingErr
+		}
+	}
+	updatedItems, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
+	if err != nil {
+		return nil, infraError("re-read task sku items after sku item update", err)
+	}
+	for _, updated := range updatedItems {
+		if updated != nil && updated.ID == p.SKUItemID {
+			return updated, nil
+		}
+	}
+	return item, nil
 }
 
 func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKUItemCostInfoParams) (*domain.TaskSKUItem, *domain.AppError) {

@@ -10547,6 +10547,55 @@ paths:
                     $ref: '#/components/schemas/TaskDetail'
         '403':
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
+  /v1/tasks/{id}/sku-items/{sku_item_id}:
+    patch:
+      summary: Patch one batch SKU item
+      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: sku_item_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operator_id: { type: integer, nullable: true }
+                product_name: { type: string, nullable: true }
+                i_id: { type: string, nullable: true }
+                product_i_id: { type: string, nullable: true }
+                design_requirement: { type: string, nullable: true }
+                reference_file_refs:
+                  type: array
+                  nullable: true
+                  items:
+                    $ref: '#/components/schemas/ReferenceFileRef'
+                trigger_filing: { type: boolean, nullable: true }
+                remark: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Updated SKU item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskSKUItem'
+        '403':
+          description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
   /v1/tasks/{id}/sku-items/{sku_item_id}/cost-info:
     patch:
       summary: Patch per-SKU cost information for a batch task item

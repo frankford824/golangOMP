@@ -1978,6 +1978,9 @@ func TestTaskServiceUpdateBusinessInfoMarksMissingDimensionCostAndMirrorsSingleS
 		costRuleRepo,
 		prdCodeRuleService{},
 		step04TxRunner{},
+		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
+			upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+		}),
 	)
 
 	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
@@ -4082,6 +4085,34 @@ func (r *prdTaskRepo) UpdateSKUItemsFilingProjection(_ context.Context, _ repo.T
 		if r.skuByCode != nil && item.SKUCode != "" {
 			r.skuByCode[item.SKUCode] = item
 		}
+	}
+	return nil
+}
+
+func (r *prdTaskRepo) UpdateSKUItemFilingProjection(_ context.Context, _ repo.Tx, taskID, skuItemID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error {
+	items := r.skuItems[taskID]
+	skuStatus := domain.TaskSKUStatusGenerated
+	switch filingStatus {
+	case domain.FilingStatusFiled:
+		skuStatus = domain.TaskSKUStatusFiled
+	case domain.FilingStatusFilingFailed:
+		skuStatus = domain.TaskSKUStatusFilingFailed
+	}
+	for _, item := range items {
+		if item == nil || item.ID != skuItemID {
+			continue
+		}
+		item.SKUStatus = skuStatus
+		item.FilingStatus = filingStatus
+		item.ERPSyncStatus = filingStatus
+		item.ERPSyncRequired = syncRequired
+		item.ERPSyncVersion = syncVersion
+		item.LastFiledAt = cloneTimePtr(lastFiledAt)
+		item.FilingErrorMessage = errorMessage
+		if r.skuByCode != nil && item.SKUCode != "" {
+			r.skuByCode[item.SKUCode] = item
+		}
+		return nil
 	}
 	return nil
 }

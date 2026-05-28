@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -30,6 +31,33 @@ type RetryTaskFilingParams struct {
 
 type taskSKUItemFilingProjectionUpdater interface {
 	UpdateSKUItemsFilingProjection(ctx context.Context, tx repo.Tx, taskID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error
+}
+
+type taskSKUItemSingleFilingProjectionUpdater interface {
+	UpdateSKUItemFilingProjection(ctx context.Context, tx repo.Tx, taskID, skuItemID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error
+}
+
+type taskFilingPayload struct {
+	Payload   domain.ERPProductUpsertPayload
+	SKUItemID int64
+	SKUCode   string
+}
+
+type taskFilingItemResult struct {
+	SKUItemID   int64
+	SKUCode     string
+	Result      *domain.ERPProductUpsertResult
+	CallLogID   *int64
+	Failure     string
+	Succeeded   bool
+	LastFiledAt *time.Time
+}
+
+type taskFilingAttemptSummary struct {
+	LastResult  *domain.ERPProductUpsertResult
+	LastCallLog *int64
+	ItemResults []taskFilingItemResult
+	Failure     string
 }
 
 func (s *taskService) GetFilingStatus(ctx context.Context, taskID int64) (*domain.TaskFilingStatusView, *domain.AppError) {
@@ -69,7 +97,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 			detail.FilingStatus = domain.FilingStatusNotFiled
 		}
 		hydrateTaskDetailFilingProjection(task, detail)
-		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "policy_not_triggered"); err != nil {
+		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, nil, false, "policy_not_triggered"); err != nil {
 			return nil, infraError("persist filing policy state", err)
 		}
 		return s.buildTaskFilingStatusView(ctx, task, detail)
@@ -86,7 +114,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		detail.FilingTriggerSource = string(p.Source)
 		detail.ERPSyncRequired = true
 		hydrateTaskDetailFilingProjection(task, detail)
-		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "payload_build_failed"); err != nil {
+		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, nil, false, "payload_build_failed"); err != nil {
 			return nil, infraError("persist filing build failure", err)
 		}
 		return s.buildTaskFilingStatusView(ctx, task, detail)
@@ -103,7 +131,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		hydrateTaskDetailFilingProjection(task, detail)
 		detail.MissingFields = missingFields
 		detail.MissingFieldsSummaryCN = missingSummary
-		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "missing_required_fields"); err != nil {
+		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, nil, false, "missing_required_fields"); err != nil {
 			return nil, infraError("persist pending filing state", err)
 		}
 		return s.buildTaskFilingStatusView(ctx, task, detail)
@@ -130,7 +158,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		}
 		detail.ERPSyncRequired = false
 		hydrateTaskDetailFilingProjection(task, detail)
-		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "seed_payload_hash_from_legacy_filed"); err != nil {
+		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, nil, false, "seed_payload_hash_from_legacy_filed"); err != nil {
 			return nil, infraError("persist legacy hash seed", err)
 		}
 		return s.buildTaskFilingStatusView(ctx, task, detail)
@@ -139,7 +167,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 	if !p.Force && detail.FilingStatus == domain.FilingStatusFiled && previousHash == payloadHash {
 		detail.ERPSyncRequired = false
 		hydrateTaskDetailFilingProjection(task, detail)
-		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, false, "idempotent_skip_same_payload"); err != nil {
+		if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, nil, nil, nil, false, "idempotent_skip_same_payload"); err != nil {
 			return nil, infraError("persist idempotent skip", err)
 		}
 		return s.buildTaskFilingStatusView(ctx, task, detail)
@@ -157,11 +185,14 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 	detail.FilingErrorMessage = ""
 	detail.ERPSyncRequired = true
 
-	result, callLogID, failure, appErr := s.performERPBridgeFilingPayloads(ctx, task.ID, payloads, p.Remark)
+	summary, appErr := s.performERPBridgeFilingPayloads(ctx, task.ID, payloads, p.Remark)
 	attempted := true
-	if failure != "" {
+	if appErr != nil {
+		return nil, appErr
+	}
+	if summary.Failure != "" {
 		detail.FilingStatus = domain.FilingStatusFilingFailed
-		detail.FilingErrorMessage = failure
+		detail.FilingErrorMessage = summary.Failure
 		detail.ERPSyncRequired = true
 	} else {
 		successAt := time.Now().UTC()
@@ -172,7 +203,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		detail.FiledAt = &successAt
 	}
 	hydrateTaskDetailFilingProjection(task, detail)
-	if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, result, callLogID, attempted, ""); err != nil {
+	if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, summary.LastResult, summary.LastCallLog, summary.ItemResults, attempted, ""); err != nil {
 		return nil, infraError("persist filing attempt result", err)
 	}
 	return s.buildTaskFilingStatusView(ctx, task, detail)
@@ -187,23 +218,27 @@ func (s *taskService) triggerFilingBestEffort(ctx context.Context, p TriggerTask
 	}
 }
 
-func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, operatorID int64, remark, source string, force bool) ([]domain.ERPProductUpsertPayload, []string, string, *domain.AppError) {
+func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, operatorID int64, remark, source string, force bool) ([]taskFilingPayload, []string, string, *domain.AppError) {
 	if isBatchNewProductTask(task) {
 		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID)
 		if err != nil {
 			return nil, nil, "", infraError("list batch sku items for filing", err)
 		}
-		missingFields, missingSummary := computeBatchNewProductFilingMissingFields(task, items)
+		targetItems := batchSKUItemsNeedingERPFile(items)
+		if len(targetItems) == 0 {
+			return []taskFilingPayload{}, nil, "", nil
+		}
+		missingFields, missingSummary := computeBatchNewProductFilingMissingFields(task, targetItems)
 		if len(missingFields) > 0 {
 			return nil, missingFields, missingSummary, nil
 		}
-		payloads := make([]domain.ERPProductUpsertPayload, 0, len(items))
-		for _, item := range items {
+		payloads := make([]taskFilingPayload, 0, len(targetItems))
+		for _, item := range targetItems {
 			payload, appErr := buildBatchSKUItemERPBridgeProductUpsertPayload(task, detail, item, operatorID, remark, source)
 			if appErr != nil {
 				return nil, nil, "", appErr
 			}
-			payloads = append(payloads, payload)
+			payloads = append(payloads, taskFilingPayload{Payload: payload, SKUItemID: item.ID, SKUCode: item.SKUCode})
 		}
 		return payloads, nil, "", nil
 	}
@@ -247,23 +282,47 @@ func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task
 	if appErr != nil {
 		return nil, nil, "", appErr
 	}
-	return []domain.ERPProductUpsertPayload{payload}, nil, "", nil
+	return []taskFilingPayload{{Payload: payload}}, nil, "", nil
 }
 
-func (s *taskService) performERPBridgeFilingPayloads(ctx context.Context, taskID int64, payloads []domain.ERPProductUpsertPayload, remark string) (*domain.ERPProductUpsertResult, *int64, string, *domain.AppError) {
-	var lastResult *domain.ERPProductUpsertResult
-	var lastCallLogID *int64
+func (s *taskService) performERPBridgeFilingPayloads(ctx context.Context, taskID int64, payloads []taskFilingPayload, remark string) (taskFilingAttemptSummary, *domain.AppError) {
+	summary := taskFilingAttemptSummary{ItemResults: make([]taskFilingItemResult, 0, len(payloads))}
+	failures := make([]string, 0)
 	for _, payload := range payloads {
-		result, callLogID, failure, appErr := s.performERPBridgeFilingPayload(ctx, taskID, payload, remark)
+		result, callLogID, failure, appErr := s.performERPBridgeFilingPayload(ctx, taskID, payload.Payload, remark)
 		if callLogID != nil {
-			lastCallLogID = callLogID
+			summary.LastCallLog = callLogID
 		}
-		if appErr != nil || failure != "" {
-			return result, lastCallLogID, failure, appErr
+		if result != nil {
+			summary.LastResult = result
 		}
-		lastResult = result
+		if appErr != nil {
+			return summary, appErr
+		}
+		itemResult := taskFilingItemResult{
+			SKUItemID: payload.SKUItemID,
+			SKUCode:   firstNonEmptyString(strings.TrimSpace(payload.SKUCode), strings.TrimSpace(payload.Payload.SKUID), strings.TrimSpace(payload.Payload.SKUCode)),
+			Result:    result,
+			CallLogID: callLogID,
+			Failure:   failure,
+			Succeeded: failure == "",
+		}
+		if itemResult.Succeeded {
+			successAt := time.Now().UTC()
+			itemResult.LastFiledAt = &successAt
+		} else {
+			failures = append(failures, fmt.Sprintf("%s：%s", firstNonEmptyString(itemResult.SKUCode, "SKU"), failure))
+		}
+		summary.ItemResults = append(summary.ItemResults, itemResult)
 	}
-	return lastResult, lastCallLogID, "", nil
+	if len(failures) > 0 {
+		if len(payloads) == 1 && payloads[0].SKUItemID == 0 {
+			summary.Failure = summary.ItemResults[0].Failure
+		} else {
+			summary.Failure = "部分SKU同步失败：" + strings.Join(failures, "；")
+		}
+	}
+	return summary, nil
 }
 
 func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID int64, payload domain.ERPProductUpsertPayload, remark string) (*domain.ERPProductUpsertResult, *int64, string, *domain.AppError) {
@@ -469,6 +528,19 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 	return normalizeERPProductUpsertPayload(payload), nil
 }
 
+func batchSKUItemsNeedingERPFile(items []*domain.TaskSKUItem) []*domain.TaskSKUItem {
+	targets := make([]*domain.TaskSKUItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if item.ERPSyncRequired || item.FilingStatus != domain.FilingStatusFiled || item.ERPSyncStatus != domain.FilingStatusFiled {
+			targets = append(targets, item)
+		}
+	}
+	return targets
+}
+
 func zeroFloat64Ptr() *float64 {
 	zero := 0.0
 	return &zero
@@ -537,6 +609,7 @@ func (s *taskService) persistTaskFilingState(
 	source TaskFilingTriggerSource,
 	result *domain.ERPProductUpsertResult,
 	callLogID *int64,
+	itemResults []taskFilingItemResult,
 	attempted bool,
 	skippedReason string,
 ) error {
@@ -547,7 +620,29 @@ func (s *taskService) persistTaskFilingState(
 		if err := s.syncSingleSKUItemCostProjectionFromDetail(ctx, tx, task, detail); err != nil {
 			return err
 		}
-		if updater, ok := s.taskRepo.(taskSKUItemFilingProjectionUpdater); ok {
+		if len(itemResults) > 0 && isBatchNewProductTask(task) {
+			if updater, ok := s.taskRepo.(taskSKUItemSingleFilingProjectionUpdater); ok {
+				for _, itemResult := range itemResults {
+					status := domain.FilingStatusFilingFailed
+					syncRequired := true
+					lastFiledAt := (*time.Time)(nil)
+					errorMessage := itemResult.Failure
+					if itemResult.Succeeded {
+						status = domain.FilingStatusFiled
+						syncRequired = false
+						lastFiledAt = itemResult.LastFiledAt
+						errorMessage = ""
+					}
+					if err := updater.UpdateSKUItemFilingProjection(ctx, tx, task.ID, itemResult.SKUItemID, status, syncRequired, detail.ERPSyncVersion, lastFiledAt, errorMessage); err != nil {
+						return err
+					}
+				}
+			} else if updater, ok := s.taskRepo.(taskSKUItemFilingProjectionUpdater); ok {
+				if err := updater.UpdateSKUItemsFilingProjection(ctx, tx, task.ID, detail.FilingStatus, detail.ERPSyncRequired, detail.ERPSyncVersion, detail.LastFiledAt, detail.FilingErrorMessage); err != nil {
+					return err
+				}
+			}
+		} else if updater, ok := s.taskRepo.(taskSKUItemFilingProjectionUpdater); ok {
 			if err := updater.UpdateSKUItemsFilingProjection(ctx, tx, task.ID, detail.FilingStatus, detail.ERPSyncRequired, detail.ERPSyncVersion, detail.LastFiledAt, detail.FilingErrorMessage); err != nil {
 				return err
 			}
@@ -570,6 +665,7 @@ func (s *taskService) persistTaskFilingState(
 			"missing_fields":            detail.MissingFields,
 			"missing_fields_summary_cn": detail.MissingFieldsSummaryCN,
 			"erp_filing":                buildERPBridgeFilingEventPayload(result, callLogID),
+			"erp_filing_items":          buildERPBridgeFilingItemEventPayload(itemResults),
 		}))
 		return err
 	})
@@ -688,8 +784,8 @@ func sha256Hex(payload []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func normalizeTaskFilingPayloadForHash(payload domain.ERPProductUpsertPayload) domain.ERPProductUpsertPayload {
-	normalized := payload
+func normalizeTaskFilingPayloadForHash(payload taskFilingPayload) domain.ERPProductUpsertPayload {
+	normalized := payload.Payload
 	normalized.Source = ""
 	normalized.Remark = ""
 	if normalized.TaskContext != nil {
@@ -702,7 +798,7 @@ func normalizeTaskFilingPayloadForHash(payload domain.ERPProductUpsertPayload) d
 	return normalized
 }
 
-func normalizeTaskFilingPayloadsForHash(payloads []domain.ERPProductUpsertPayload) interface{} {
+func normalizeTaskFilingPayloadsForHash(payloads []taskFilingPayload) interface{} {
 	if len(payloads) == 1 {
 		return normalizeTaskFilingPayloadForHash(payloads[0])
 	}
@@ -713,11 +809,40 @@ func normalizeTaskFilingPayloadsForHash(payloads []domain.ERPProductUpsertPayloa
 	return map[string]interface{}{"items": items}
 }
 
-func taskFilingPayloadJSONValue(payloads []domain.ERPProductUpsertPayload) interface{} {
+func taskFilingPayloadJSONValue(payloads []taskFilingPayload) interface{} {
 	if len(payloads) == 1 {
-		return payloads[0]
+		return payloads[0].Payload
 	}
-	return map[string]interface{}{"items": payloads}
+	items := make([]domain.ERPProductUpsertPayload, 0, len(payloads))
+	for _, payload := range payloads {
+		items = append(items, payload.Payload)
+	}
+	return map[string]interface{}{"items": items}
+}
+
+func buildERPBridgeFilingItemEventPayload(results []taskFilingItemResult) []map[string]interface{} {
+	if len(results) == 0 {
+		return nil
+	}
+	items := make([]map[string]interface{}, 0, len(results))
+	for _, result := range results {
+		item := map[string]interface{}{
+			"sku_item_id": result.SKUItemID,
+			"sku_code":    result.SKUCode,
+			"succeeded":   result.Succeeded,
+		}
+		if result.CallLogID != nil {
+			item["integration_call_log_id"] = *result.CallLogID
+		}
+		if result.Failure != "" {
+			item["failure"] = result.Failure
+		}
+		if result.LastFiledAt != nil {
+			item["last_filed_at"] = result.LastFiledAt
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func snapshotIID(snapshot *domain.ERPProductSelectionSnapshot) string {
@@ -792,4 +917,33 @@ func taskSKUItemProductIID(item *domain.TaskSKUItem) string {
 		}
 	}
 	return ""
+}
+
+func setTaskSKUItemProductIIDInVariantJSON(raw json.RawMessage, productIID string) (json.RawMessage, *domain.AppError) {
+	normalized, appErr := normalizeVariantJSONForTaskBatchItem(raw)
+	if appErr != nil {
+		return nil, appErr
+	}
+	productIID = strings.TrimSpace(productIID)
+	obj := map[string]interface{}{}
+	if len(bytes.TrimSpace(normalized)) > 0 {
+		if err := json.Unmarshal(normalized, &obj); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "variant_json must be a JSON object when product_i_id is supplied", nil)
+		}
+	}
+	if productIID == "" {
+		delete(obj, "i_id")
+		delete(obj, "product_i_id")
+	} else {
+		obj["i_id"] = productIID
+		obj["product_i_id"] = productIID
+	}
+	if len(obj) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(obj)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "variant_json must be valid JSON", nil)
+	}
+	return json.RawMessage(encoded), nil
 }

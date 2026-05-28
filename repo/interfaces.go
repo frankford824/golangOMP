@@ -175,6 +175,13 @@ type TaskCostFinanceFlagRepo interface {
 	ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskCostFinanceFlag, error)
 }
 
+type SKUTraceRepo interface {
+	UpsertSKURecord(ctx context.Context, tx Tx, record *domain.OMPSKURecord) error
+	AppendCostSnapshot(ctx context.Context, tx Tx, snapshot *domain.OMPSKUCostSnapshot) (int64, error)
+	AppendERPTraceLog(ctx context.Context, tx Tx, log *domain.OMPSKUERPTraceLog) (int64, error)
+	UpsertComboRelation(ctx context.Context, tx Tx, relation *domain.OMPSKUComboRelation) error
+}
+
 // ERPSyncRunRepo stores ERP sync execution history.
 type ERPSyncRunRepo interface {
 	Create(ctx context.Context, tx Tx, run *domain.ERPSyncRun) (int64, error)

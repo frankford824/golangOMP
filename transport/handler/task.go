@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,6 +135,17 @@ type createTaskBatchItemReq struct {
 	BaseSalePrice     *float64                  `json:"base_sale_price"`
 	VariantJSON       json.RawMessage           `json:"variant_json"`
 	ReferenceFileRefs []domain.ReferenceFileRef `json:"reference_file_refs"`
+}
+
+type patchTaskSKUItemInfoReq struct {
+	ProductName       *string                   `json:"product_name"`
+	IID               *string                   `json:"i_id"`
+	ProductIID        *string                   `json:"product_i_id"`
+	DesignRequirement *string                   `json:"design_requirement"`
+	ReferenceFileRefs []domain.ReferenceFileRef `json:"reference_file_refs"`
+	TriggerFiling     *bool                     `json:"trigger_filing"`
+	OperatorID        *int64                    `json:"operator_id"`
+	Remark            *string                   `json:"remark"`
 }
 
 type prepareTaskProductCodesReq struct {
@@ -1650,6 +1662,63 @@ func (h *TaskHandler) PatchCostInfo(c *gin.Context) {
 		params.Remark = strings.TrimSpace(*req.Remark)
 	}
 	updated, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), params)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, updated)
+}
+
+// PatchSKUItemInfo handles PATCH /v1/tasks/:id/sku-items/:sku_item_id
+func (h *TaskHandler) PatchSKUItemInfo(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	skuItemID, err := strconv.ParseInt(strings.TrimSpace(c.Param("sku_item_id")), 10, 64)
+	if err != nil || skuItemID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid sku item id", nil))
+		return
+	}
+	var req patchTaskSKUItemInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	updater, ok := h.svc.(interface {
+		UpdateSKUItemInfo(context.Context, service.UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError)
+	})
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "task sku item service not configured", nil))
+		return
+	}
+	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID, "operator_id")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	productIID := req.ProductIID
+	if productIID == nil {
+		productIID = req.IID
+	}
+	triggerFiling := req.TriggerFiling != nil && *req.TriggerFiling
+	remark := ""
+	if req.Remark != nil {
+		remark = strings.TrimSpace(*req.Remark)
+	}
+	updated, appErr := updater.UpdateSKUItemInfo(c.Request.Context(), service.UpdateTaskSKUItemInfoParams{
+		TaskID:               taskID,
+		SKUItemID:            skuItemID,
+		OperatorID:           operatorID,
+		ProductName:          req.ProductName,
+		ProductIID:           productIID,
+		DesignRequirement:    req.DesignRequirement,
+		ReferenceFileRefs:    req.ReferenceFileRefs,
+		ReferenceFileRefsSet: req.ReferenceFileRefs != nil,
+		TriggerFiling:        triggerFiling,
+		Remark:               remark,
+	})
 	if appErr != nil {
 		respondError(c, appErr)
 		return

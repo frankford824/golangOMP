@@ -970,6 +970,180 @@ func TestRetryFilingBatchMultiSKUReportsSKUScopedIIDMissing(t *testing.T) {
 	}
 }
 
+func TestRetryFilingBatchMultiSKUOnlyRetriesRowsNeedingSync(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		upsertResult: &domain.ERPProductUpsertResult{
+			Status:  "succeeded",
+			Message: "ok",
+			CostVerification: &domain.ERPCostVerificationResult{
+				Status: "matched",
+			},
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			972: {
+				ID:                  972,
+				TaskNo:              "RW-972",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				TaskStatus:          domain.TaskStatusInProgress,
+				IsBatchTask:         true,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+				SKUCode:             "CGG000011",
+				PrimarySKUCode:      "CGG000011",
+				ProductNameSnapshot: "batch retry only failed row",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			972: {
+				TaskID:          972,
+				FilingStatus:    domain.FilingStatusFilingFailed,
+				ERPSyncRequired: true,
+				ERPSyncVersion:  1,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			972: {
+				{ID: 1, TaskID: 972, SequenceNo: 1, SKUCode: "CGG000011", ProductNameSnapshot: "A", ProductIID: "常规kt板", FilingStatus: domain.FilingStatusFiled, ERPSyncStatus: domain.FilingStatusFiled, ERPSyncRequired: false},
+				{ID: 2, TaskID: 972, SequenceNo: 2, SKUCode: "CGG000012", ProductNameSnapshot: "B", ProductIID: "常规kt板", FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true},
+				{ID: 3, TaskID: 972, SequenceNo: 3, SKUCode: "CGG000013", ProductNameSnapshot: "C", ProductIID: "常规kt板", FilingStatus: domain.FilingStatusFiled, ERPSyncStatus: domain.FilingStatusFiled, ERPSyncRequired: false},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	view, appErr := svc.RetryFiling(context.Background(), RetryTaskFilingParams{TaskID: 972, OperatorID: 1})
+	if appErr != nil {
+		t.Fatalf("RetryFiling() unexpected error: %+v", appErr)
+	}
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatalf("upsert calls = %d, want only failed row retried", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayload.SKUID; got != "CGG000012" {
+		t.Fatalf("retried sku = %s, want CGG000012", got)
+	}
+	if view.FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status = %s, want filed", view.FilingStatus)
+	}
+	for _, item := range taskRepo.skuItems[972] {
+		if item.FilingStatus != domain.FilingStatusFiled || item.ERPSyncRequired {
+			t.Fatalf("item %s filing = %s required=%t, want filed false", item.SKUCode, item.FilingStatus, item.ERPSyncRequired)
+		}
+	}
+}
+
+func TestRetryFilingBatchMultiSKURecordsPerSKUResultAndContinuesAfterFailure(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{}
+	bridgeStub.upsertResultFn = func(call int) *domain.ERPProductUpsertResult {
+		skuID := ""
+		if bridgeStub.upsertPayload != nil {
+			skuID = bridgeStub.upsertPayload.SKUID
+		}
+		if call == 1 {
+			return &domain.ERPProductUpsertResult{
+				Status:  "succeeded",
+				Message: "ok",
+				SKUID:   skuID,
+				CostVerification: &domain.ERPCostVerificationResult{
+					Status:  "unverified",
+					Message: "upstream timeout",
+				},
+			}
+		}
+		return &domain.ERPProductUpsertResult{
+			Status:  "succeeded",
+			Message: "ok",
+			SKUID:   skuID,
+			CostVerification: &domain.ERPCostVerificationResult{
+				Status: "matched",
+			},
+		}
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			973: {
+				ID:                  973,
+				TaskNo:              "RW-973",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				TaskStatus:          domain.TaskStatusInProgress,
+				IsBatchTask:         true,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+				SKUCode:             "CGG000014",
+				PrimarySKUCode:      "CGG000014",
+				ProductNameSnapshot: "batch partial failure",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			973: {
+				TaskID:          973,
+				FilingStatus:    domain.FilingStatusFilingFailed,
+				ERPSyncRequired: true,
+				ERPSyncVersion:  1,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			973: {
+				{ID: 11, TaskID: 973, SequenceNo: 1, SKUCode: "CGG000014", ProductNameSnapshot: "A", ProductIID: "常规kt板", FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true},
+				{ID: 12, TaskID: 973, SequenceNo: 2, SKUCode: "CGG000015", ProductNameSnapshot: "B", ProductIID: "常规kt板", FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true},
+				{ID: 13, TaskID: 973, SequenceNo: 3, SKUCode: "CGG000016", ProductNameSnapshot: "C", ProductIID: "常规kt板", FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	view, appErr := svc.RetryFiling(context.Background(), RetryTaskFilingParams{TaskID: 973, OperatorID: 1})
+	if appErr != nil {
+		t.Fatalf("RetryFiling() unexpected error: %+v", appErr)
+	}
+	if bridgeStub.upsertCalls != 3 {
+		t.Fatalf("upsert calls = %d, want all target rows attempted", bridgeStub.upsertCalls)
+	}
+	if view.FilingStatus != domain.FilingStatusFilingFailed {
+		t.Fatalf("filing_status = %s, want filing_failed", view.FilingStatus)
+	}
+	if !strings.Contains(view.FilingErrorMessage, "CGG000015") {
+		t.Fatalf("filing_error_message = %q, want failed sku code", view.FilingErrorMessage)
+	}
+	want := map[string]domain.FilingStatus{
+		"CGG000014": domain.FilingStatusFiled,
+		"CGG000015": domain.FilingStatusFilingFailed,
+		"CGG000016": domain.FilingStatusFiled,
+	}
+	for _, item := range taskRepo.skuItems[973] {
+		if item.FilingStatus != want[item.SKUCode] {
+			t.Fatalf("item %s filing_status = %s, want %s", item.SKUCode, item.FilingStatus, want[item.SKUCode])
+		}
+		if item.SKUCode == "CGG000015" && !item.ERPSyncRequired {
+			t.Fatalf("failed item %s should remain erp_sync_required", item.SKUCode)
+		}
+		if item.SKUCode != "CGG000015" && item.ERPSyncRequired {
+			t.Fatalf("successful item %s should not require erp sync", item.SKUCode)
+		}
+	}
+}
+
 func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreateSync(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},

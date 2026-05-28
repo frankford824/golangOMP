@@ -161,6 +161,7 @@ else
     if [ "$MAIN_ENV_CREATED" = "true" ] || [ "$BRIDGE_ENV_CREATED" = "true" ]; then
       RESULT_STATUS="deployed_waiting_for_env"
     else
+      "$RELEASE_DIR/deploy/run-pending-migrations.sh" --base-dir "$REMOTE_BASE_DIR"
       "$REMOTE_BASE_DIR/scripts/stop-main.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
       "$REMOTE_BASE_DIR/scripts/stop-bridge.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
       "$REMOTE_BASE_DIR/scripts/start-main.sh" --base-dir "$REMOTE_BASE_DIR" --env-file "$RUNTIME_ENV_PATH" >/dev/null

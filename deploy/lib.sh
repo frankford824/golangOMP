@@ -497,7 +497,7 @@ package_release() {
   cp "$root/deploy/DEPLOYMENT_WORKFLOW.md" "$stage_root/README_DEPLOY.md"
 
   local helpe
-  for helper in lib.sh remote-deploy.sh run-with-env.sh run-migrations-v05.sh run-org-master-convergence.sh verify-v05-acceptance.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh; do
+  for helper in lib.sh remote-deploy.sh run-with-env.sh run-pending-migrations.sh run-migrations-v05.sh run-org-master-convergence.sh verify-v05-acceptance.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh; do
     cp "$root/deploy/$helper" "$deploy_root/$helper"
   done
   # Normalize packaged shell helpers to LF to avoid CRLF parse failures on Linux.

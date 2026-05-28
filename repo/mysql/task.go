@@ -408,6 +408,42 @@ func (r *taskRepo) UpdateSKUItemsFilingProjection(ctx context.Context, tx repo.T
 	return nil
 }
 
+func (r *taskRepo) UpdateSKUItemFilingProjection(ctx context.Context, tx repo.Tx, taskID, skuItemID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error {
+	sqlTx := Unwrap(tx)
+	skuStatus := domain.TaskSKUStatusGenerated
+	switch filingStatus {
+	case domain.FilingStatusFiled:
+		skuStatus = domain.TaskSKUStatusFiled
+	case domain.FilingStatusFilingFailed:
+		skuStatus = domain.TaskSKUStatusFilingFailed
+	}
+	_, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_sku_items
+		SET sku_status = ?,
+		    filing_status = ?,
+		    erp_sync_status = ?,
+		    erp_sync_required = ?,
+		    erp_sync_version = ?,
+		    last_filed_at = ?,
+		    filing_error_message = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE task_id = ? AND id = ?`,
+		string(skuStatus),
+		string(filingStatus),
+		string(filingStatus),
+		syncRequired,
+		syncVersion,
+		toNullTime(lastFiledAt),
+		errorMessage,
+		taskID,
+		skuItemID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task_sku_item filing projection: %w", err)
+	}
+	return nil
+}
+
 func (r *taskRepo) UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error {
 	if item == nil {
 		return fmt.Errorf("update task_sku_item cost info: item is nil")
@@ -590,6 +626,34 @@ func (r *taskRepo) UpdateStatus(ctx context.Context, tx repo.Tx, id int64, statu
 	}
 	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (r *taskRepo) UpdateSKUItemBusinessInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error {
+	if item == nil {
+		return fmt.Errorf("update task_sku_item business info: item is nil")
+	}
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_sku_items
+		SET product_name_snapshot = ?,
+		    design_requirement = ?,
+		    variant_json = ?,
+		    reference_file_refs_json = ?,
+		    erp_sync_required = 1,
+		    erp_sync_version = erp_sync_version + 1,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND task_id = ?`,
+		item.ProductNameSnapshot,
+		item.DesignRequirement,
+		toNullJSONString(item.VariantJSON),
+		marshalReferenceFileRefs(item.ReferenceFileRefs),
+		item.ID,
+		item.TaskID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task_sku_item business info: %w", err)
 	}
 	return nil
 }

@@ -17,6 +17,7 @@ const (
 	TaskEventAssigned                    = "task.assigned"
 	TaskEventReassigned                  = "task.reassigned"
 	TaskEventBusinessInfoUpdated         = "task.business_info.updated"
+	TaskEventSKUItemUpdated              = "task.sku_item.updated"
 	TaskEventCostUpdated                 = "task.cost.updated"
 	TaskEventDesignSubmitted             = "task.design.submitted"
 	TaskEventAssetMockUploaded           = "task.asset.mock_uploaded"

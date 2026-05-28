@@ -13,10 +13,11 @@ type extractedCostDimensions struct {
 }
 
 var (
-	costAreaPattern        = regexp.MustCompile(`(?i)(?:面积|area)?\s*([0-9]+(?:\.[0-9]+)?)\s*(平方米|平方|平米|㎡|m2|m²|平方厘米|cm2|cm²|平方毫米|mm2|mm²)`)
-	costSizePairPattern    = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
-	costNamedSizePattern   = regexp.MustCompile(`(?i)(?:宽|w|width)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?[\s,，;；/]*(?:高|长|h|height|l|length)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
-	costLongestSidePattern = regexp.MustCompile(`(?i)(?:最长边|长边|最大边|直径)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
+	costAreaPattern           = regexp.MustCompile(`(?i)(?:面积|area)?\s*([0-9]+(?:\.[0-9]+)?)\s*(平方米|平方|平米|㎡|m2|m²|平方厘米|cm2|cm²|平方毫米|mm2|mm²)`)
+	costSizeMultiplierPattern = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:面|片|p|P)?`)
+	costSizePairPattern       = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
+	costNamedSizePattern      = regexp.MustCompile(`(?i)(?:宽|w|width)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?[\s,，;；/]*(?:高|长|h|height|l|length)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
+	costLongestSidePattern    = regexp.MustCompile(`(?i)(?:最长边|长边|最大边|直径)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
 )
 
 func extractCostDimensionsFromText(text string) extractedCostDimensions {
@@ -28,6 +29,9 @@ func extractCostDimensionsFromText(text string) extractedCostDimensions {
 		return extractedCostDimensions{AreaM2: area}
 	}
 	if dims := extractCostSizePairM(normalized, costNamedSizePattern); dims.AreaM2 != nil {
+		return dims
+	}
+	if dims := extractCostSizeWithAreaMultiplierM(normalized); dims.AreaM2 != nil {
 		return dims
 	}
 	if dims := extractCostSizePairM(normalized, costSizePairPattern); dims.AreaM2 != nil {
@@ -61,17 +65,36 @@ func extractCostSizePairM(text string, pattern *regexp.Regexp) extractedCostDime
 	if len(matches) < 5 {
 		return extractedCostDimensions{}
 	}
-	width, errW := strconv.ParseFloat(matches[1], 64)
-	height, errH := strconv.ParseFloat(matches[3], 64)
+	return buildCostSizeDimensions(matches[1], matches[2], matches[3], matches[4], 1)
+}
+
+func extractCostSizeWithAreaMultiplierM(text string) extractedCostDimensions {
+	matches := costSizeMultiplierPattern.FindStringSubmatch(text)
+	if len(matches) < 6 {
+		return extractedCostDimensions{}
+	}
+	multiplier, err := strconv.ParseFloat(matches[5], 64)
+	if err != nil || multiplier <= 0 {
+		return extractedCostDimensions{}
+	}
+	return buildCostSizeDimensions(matches[1], matches[2], matches[3], matches[4], multiplier)
+}
+
+func buildCostSizeDimensions(widthText, widthUnit, heightText, heightUnit string, areaMultiplier float64) extractedCostDimensions {
+	width, errW := strconv.ParseFloat(widthText, 64)
+	height, errH := strconv.ParseFloat(heightText, 64)
 	if errW != nil || errH != nil || width <= 0 || height <= 0 {
 		return extractedCostDimensions{}
 	}
-	unitW := normalizeDimensionUnit(matches[2], width, height)
-	unitH := normalizeDimensionUnit(matches[4], width, height)
-	if strings.TrimSpace(matches[2]) == "" && strings.TrimSpace(matches[4]) != "" {
+	if areaMultiplier <= 0 {
+		areaMultiplier = 1
+	}
+	unitW := normalizeDimensionUnit(widthUnit, width, height)
+	unitH := normalizeDimensionUnit(heightUnit, width, height)
+	if strings.TrimSpace(widthUnit) == "" && strings.TrimSpace(heightUnit) != "" {
 		unitW = unitH
 	}
-	if strings.TrimSpace(matches[4]) == "" && strings.TrimSpace(matches[2]) != "" {
+	if strings.TrimSpace(heightUnit) == "" && strings.TrimSpace(widthUnit) != "" {
 		unitH = unitW
 	}
 	widthM := dimensionToMeters(width, unitW)
@@ -79,7 +102,7 @@ func extractCostSizePairM(text string, pattern *regexp.Regexp) extractedCostDime
 	if widthM <= 0 || heightM <= 0 {
 		return extractedCostDimensions{}
 	}
-	area := widthM * heightM
+	area := widthM * heightM * areaMultiplier
 	return extractedCostDimensions{WidthM: &widthM, HeightM: &heightM, AreaM2: &area}
 }
 

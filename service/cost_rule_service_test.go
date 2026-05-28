@@ -224,6 +224,61 @@ func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewTreatsTrailingMultiplierAsBoxFaces(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   21,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规KT板",
+		DisplayName:  "常规KT板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        21,
+			RuleVersion:   1,
+			RuleName:      "KT板面积单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     costRuleFloat64Ptr(11),
+			TaxMultiplier: costRuleFloat64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "test",
+		},
+		{
+			RuleID:          22,
+			RuleVersion:     1,
+			RuleName:        "小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   costRuleFloat64Ptr(0.15),
+			SurchargeAmount: costRuleFloat64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "CPT-常规kt板/中高考抽奖箱/高考顺利/30*30cm*6",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-6.534) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 6.534", result.EstimatedCost)
+	}
+	if len(result.AppliedRules) != 1 {
+		t.Fatalf("applied rules = %d, want only base rule without small-area surcharge", len(result.AppliedRules))
+	}
+}
+
 func TestCostRulePreviewExtractsLongestSideFromNotes(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

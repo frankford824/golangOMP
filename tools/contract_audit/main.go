@@ -135,6 +135,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/tasks/pool"):                                                "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/ws/v1"):                                                        "legitimate-reserved-placeholder-route",
 	knownGapKey("PATCH", "/v1/me"):                                                      "legitimate-reserved-placeholder-route",
+	knownGapKey("PATCH", "/v1/tasks/:id/sku-items/:sku_item_id"):                        "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("PATCH", "/v1/tasks/:id/sku-items/:sku_item_id/cost-info"):              "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("PATCH", "/v1/users/:id"):                                               "tool-deref-limit-inline-route",
 	knownGapKey("POST", "/v1/assets/batch-download"):                                    "tool-deref-limit-dynamic-payload-documented",
