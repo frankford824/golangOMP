@@ -271,8 +271,8 @@ func TestCostRulePreviewTreatsTrailingMultiplierAsBoxFaces(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Preview() unexpected error: %+v", appErr)
 	}
-	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-6.534) > 0.000001 {
-		t.Fatalf("estimated_cost = %+v, want 6.534", result.EstimatedCost)
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-13.068) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 13.068", result.EstimatedCost)
 	}
 	if len(result.AppliedRules) != 1 {
 		t.Fatalf("applied rules = %d, want only base rule without small-area surcharge", len(result.AppliedRules))
@@ -313,8 +313,8 @@ func TestCostRulePreviewExtractsLongestSideFromNotes(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Preview() unexpected error: %+v", appErr)
 	}
-	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.6875) > 0.000001 {
-		t.Fatalf("estimated_cost = %+v, want 0.6875", result.EstimatedCost)
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.688) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.688", result.EstimatedCost)
 	}
 }
 

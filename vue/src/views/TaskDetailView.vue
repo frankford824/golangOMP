@@ -1286,7 +1286,7 @@ const detailCostLabel = computed(() => {
   const t = task.value
   const amount = t?.costPrice?.amount ?? t?.newProductCostUnitPrice
   if (amount == null) return '-'
-  return `${amount} ${t?.costPrice?.currency ?? 'CNY'}`
+  return `${Number(amount).toFixed(3)} ${t?.costPrice?.currency ?? 'CNY'}`
 })
 const detailCostModeLabel = computed(() => {
   const mode = String(task.value?.costPriceMode ?? '').trim().toLowerCase()

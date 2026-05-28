@@ -29,7 +29,7 @@
               v-model.number="form.procurementPrice"
               type="number"
               min="0"
-              step="0.01"
+              step="0.001"
               :disabled="readonly || saving"
               placeholder="请输入采购价"
             />

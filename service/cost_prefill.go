@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -85,7 +86,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			hasFixedUnitPrice = true
 			fixedUnitTaxMultiplier = taxMultiplierOrOne(rule.TaxMultiplier)
 			applied = append(applied, match)
-			explanations = append(explanations, fmt.Sprintf("%s applied fixed price %.2f", rule.RuleName, *baseCharge))
+			explanations = append(explanations, fmt.Sprintf("%s applied fixed price %.3f", rule.RuleName, *baseCharge))
 		case domain.CostRuleTypeAreaThresholdSurcharge:
 			switch {
 			case rule.AreaThreshold == nil || rule.SurchargeAmount == nil:
@@ -103,14 +104,14 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				}
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.2f and applied %.2f because area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, area, *rule.AreaThreshold))
+				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.3f and applied %.3f because area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, area, *rule.AreaThreshold))
 			}
 		case domain.CostRuleTypeSpecialProcessPrice:
 			if rule.SpecialProcessPrice != nil && containsProcessKeyword(req.Process, req.Notes, rule.SpecialProcessKeyword) {
 				extra := (*rule.SpecialProcessPrice) * float64(quantity)
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s added process surcharge %.2f", rule.RuleName, extra))
+				explanations = append(explanations, fmt.Sprintf("%s added process surcharge %.3f", rule.RuleName, extra))
 			}
 		case domain.CostRuleTypeSizeBasedFormula:
 			calculated, explanation, ok := applySizeBasedFormula(rule, quantity, req.Process, req.Notes)
@@ -132,7 +133,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 
 	var estimatedPtr *float64
 	if len(applied) > 0 && (!manualReview || estimated > 0) {
-		estimatedCopy := estimated
+		estimatedCopy := roundCostAmount(estimated)
 		estimatedPtr = &estimatedCopy
 	}
 	if len(applied) == 0 {
@@ -154,6 +155,10 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 		},
 		MatchedRule: matchedRule,
 	}
+}
+
+func roundCostAmount(value float64) float64 {
+	return math.Round(value*1000) / 1000
 }
 
 func taxMultiplierOrOne(value *float64) float64 {

@@ -153,12 +153,12 @@ const costDisplay = computed(() => {
 
 function formatMoney(n: number | undefined | null): string {
   if (n == null || Number.isNaN(Number(n))) return '—'
-  return `${Number(n)} CNY`
+  return `${Number(n).toFixed(3)} CNY`
 }
 
 function formatMoneyShort(n: number | undefined | null): string {
   if (n == null || Number.isNaN(Number(n))) return '—'
-  return `${Number(n)}`
+  return `${Number(n).toFixed(3)}`
 }
 </script>
 

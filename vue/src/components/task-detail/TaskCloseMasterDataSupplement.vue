@@ -23,7 +23,7 @@
         v-model.number="costPriceInput"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         label="成本价（CNY）"
         placeholder="请输入产品成本价"
       />

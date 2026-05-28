@@ -2095,8 +2095,8 @@ func TestTaskServiceUpdateBusinessInfoResolvesChineseCategoryNameForCost(t *test
 	if detail.Area == nil || math.Abs(*detail.Area-0.022) > 0.000001 {
 		t.Fatalf("area = %+v, want 0.022", detail.Area)
 	}
-	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-0.3388) > 0.000001 {
-		t.Fatalf("cost_price = %+v, want 0.3388", detail.CostPrice)
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-0.339) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 0.339", detail.CostPrice)
 	}
 }
 
@@ -2423,8 +2423,8 @@ func TestTaskServiceUpdateBusinessInfoAppliesSmallAreaSurchargeAsUnitPriceIncrea
 	if detail.Area == nil || math.Abs(*detail.Area-0.126) > 0.000001 {
 		t.Fatalf("area = %+v, want 0.126", detail.Area)
 	}
-	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-1.9404) > 0.000001 {
-		t.Fatalf("cost_price = %+v, want 1.9404", detail.CostPrice)
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-1.94) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 1.940", detail.CostPrice)
 	}
 }
 

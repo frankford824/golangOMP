@@ -188,7 +188,7 @@
               v-model.number="skuCostDraft"
               type="number"
               min="0"
-              step="0.01"
+              step="0.001"
               class="sku-cost-input"
               placeholder="维护成本"
             />
@@ -245,7 +245,7 @@
             v-model.number="skuCostDraft"
             type="number"
             min="0"
-            step="0.01"
+            step="0.001"
             class="sku-cost-input"
             placeholder="维护成本"
           />
@@ -436,7 +436,7 @@ const skuCostHint = computed(() => {
 
 function formatCostMoney(value: number | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-  return `${value.toFixed(2)} CNY`
+  return `${value.toFixed(3)} CNY`
 }
 
 async function saveSkuCost() {

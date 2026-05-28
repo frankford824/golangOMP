@@ -36,7 +36,7 @@
         <div>
           <p class="text-[11px] text-slate-500">单价（元/㎡，写死）</p>
           <p class="mt-1 text-sm font-medium text-slate-900">
-            {{ unitPrice.toFixed(2) }}
+            {{ unitPrice.toFixed(3) }}
           </p>
         </div>
       </div>
@@ -45,7 +45,7 @@
         <div>
           <p class="text-[11px] text-slate-500">预估成本（自动）</p>
           <p class="mt-1 text-sm font-medium text-slate-900">
-            {{ autoAmount.toFixed(2) }}
+            {{ autoAmount.toFixed(3) }}
           </p>
         </div>
         <div>
@@ -54,7 +54,7 @@
             v-model="manualInput"
             type="number"
             min="0"
-            step="0.01"
+            step="0.001"
             placeholder="留空则使用预估值"
           />
         </div>
@@ -69,7 +69,7 @@
         <div class="text-right">
           <p class="text-[11px] text-slate-500">最终成本（元）</p>
           <p class="mt-1 text-sm font-semibold text-emerald-700">
-            {{ finalAmount.toFixed(2) }}
+            {{ finalAmount.toFixed(3) }}
           </p>
         </div>
       </div>
@@ -81,7 +81,7 @@
     <div v-else class="mt-2">
       <p class="text-[11px] text-slate-500">最终成本（元）</p>
       <p class="mt-1 text-sm font-semibold text-slate-700">
-        {{ finalAmount.toFixed(2) }}
+        {{ finalAmount.toFixed(3) }}
       </p>
       <p class="mt-2 text-[11px] text-slate-400">无编辑权限，仅可查看。</p>
     </div>
@@ -134,4 +134,3 @@ const finalAmount = computed(() => (isManual.value ? manualAmount.value : autoAm
   @apply p-4 bg-white border border-slate-200 rounded-lg;
 }
 </style>
-

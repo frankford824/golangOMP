@@ -162,7 +162,7 @@ function moneyDisplay(raw: unknown): string {
   if (raw == null || raw === '') return '—'
   const n = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(n)) return String(raw)
-  return `${n.toFixed(2)} 元`
+  return `${n.toFixed(3)} 元`
 }
 
 function formatActorSegment(raw: Record<string, unknown>, payload: Record<string, unknown>): string {

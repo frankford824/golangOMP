@@ -447,7 +447,7 @@ func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes
 			price = 0.6
 		}
 		total := price * float64(quantity)
-		return total, fmt.Sprintf("%s applied copper-paper %s print price %.2f", rule.RuleName, side, total), true
+		return total, fmt.Sprintf("%s applied copper-paper %s print price %.3f", rule.RuleName, side, total), true
 	}
 	if strings.HasPrefix(expr, "print_side:") {
 		side := detectPrintSide(process, notes)
@@ -463,7 +463,7 @@ func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes
 			return 0, "", false
 		}
 		total := price * float64(quantity)
-		return total, fmt.Sprintf("%s applied %s print-side price %.2f", rule.RuleName, side, total), true
+		return total, fmt.Sprintf("%s applied %s print-side price %.3f", rule.RuleName, side, total), true
 	}
 	return 0, "", false
 }

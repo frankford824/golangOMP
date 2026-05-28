@@ -50,7 +50,7 @@
         v-model.number="localForm.costPriceAmount"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         placeholder="请输入成本"
       />
     </section>

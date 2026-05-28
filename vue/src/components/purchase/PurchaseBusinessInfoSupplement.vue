@@ -15,7 +15,7 @@
         v-model.number="costPriceInput"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         label="成本单价（CNY）"
         placeholder="结单条件「成本价已录入」看此项"
       />
@@ -28,7 +28,7 @@
         v-model.number="procurementPriceInput"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         label="采购单价（CNY）"
         placeholder="可与成本单价相同，用于仓库准入"
       />

@@ -94,7 +94,7 @@
             v-model.number="form.cost_price"
             type="number"
             min="0"
-            step="0.01"
+            step="0.001"
             label="成本单价（CNY）"
             placeholder="请输入成本单价，可不填"
           />
@@ -131,7 +131,7 @@
             v-model.number="form.procurement_price"
             type="number"
             min="0"
-            step="0.01"
+            step="0.001"
             label="采购单价"
             placeholder="可选"
           />

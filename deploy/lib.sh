@@ -436,8 +436,11 @@ wait_for_file() {
   local path="$1"
   local label="$2"
   local attempt
-  for attempt in $(seq 1 20); do
-    [ -f "$path" ] && return 0
+  # Windows go.exe can return before WSL/DrvFS has made the cross-compiled
+  # binary visible to subsequent bash checks. Give the filesystem enough time
+  # to settle instead of failing a valid package build.
+  for attempt in $(seq 1 120); do
+    [ -s "$path" ] && return 0
     sleep 0.25
   done
   fail "Linux build output missing: $path ($label)"
