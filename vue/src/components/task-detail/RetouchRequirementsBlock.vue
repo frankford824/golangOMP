@@ -1,11 +1,23 @@
 <template>
   <section class="retouch-requirements-block">
     <header class="block-head">
-      <p class="block-kicker">P 图需求明细</p>
-      <p v-if="requirements.length > 1" class="block-summary">
-        共 {{ requirements.length }} 条需求
-      </p>
+      <div class="block-head-text">
+        <p class="block-kicker">P 图需求明细</p>
+        <p v-if="requirements.length > 1" class="block-summary">
+          共 {{ requirements.length }} 条需求
+        </p>
+      </div>
+      <button
+        v-if="totalDownloadableCount > 0"
+        type="button"
+        class="batch-link-btn"
+        :disabled="Boolean(batchLoadingKey)"
+        @click="handleBatchAllAttachments"
+      >
+        {{ batchLoadingKey === 'block-all' ? '打包中…' : '下载全部附件' }}
+      </button>
     </header>
+    <p v-if="blockBatchError" class="block-batch-error">{{ blockBatchError }}</p>
 
     <article
       v-for="(item, index) in requirements"
@@ -13,10 +25,21 @@
       class="requirement-card"
     >
       <header class="requirement-card-head">
-        <span class="requirement-no">需求 {{ index + 1 }}</span>
-        <span class="requirement-counts">
-          参考图 {{ referenceItems(item).length }} · 素材 {{ sourceItems(item).length }}
-        </span>
+        <div class="requirement-card-head-main">
+          <span class="requirement-no">需求 {{ index + 1 }}</span>
+          <span class="requirement-counts">
+            参考图 {{ referenceItems(item).length }} · 素材 {{ sourceItems(item).length }}
+          </span>
+        </div>
+        <button
+          v-if="requirementDownloadableCount(item) > 0"
+          type="button"
+          class="batch-link-btn"
+          :disabled="Boolean(batchLoadingKey)"
+          @click="handleBatchRequirementAll(item, index)"
+        >
+          {{ batchLoadingKey === batchScopeKey(item, 'all') ? '打包中…' : '下载本需求全部' }}
+        </button>
       </header>
 
       <p class="requirement-desc">{{ item.description }}</p>
@@ -40,6 +63,19 @@
         <div class="asset-section">
           <div class="asset-section-head">
             <p class="asset-section-label">本条参考图（{{ referenceItems(item).length }}）</p>
+            <button
+              v-if="referenceItems(item).length > 0"
+              type="button"
+              class="batch-link-btn"
+              :disabled="Boolean(batchLoadingKey)"
+              @click="handleBatchRequirementReferences(item, index)"
+            >
+              {{
+                batchLoadingKey === batchScopeKey(item, 'references')
+                  ? '打包中…'
+                  : '下载全部参考图'
+              }}
+            </button>
           </div>
 
           <div v-if="referenceItems(item).length > 0" class="reference-grid" role="list">
@@ -84,6 +120,17 @@
         <div class="asset-section">
           <div class="asset-section-head">
             <p class="asset-section-label">本条素材文件（{{ sourceItems(item).length }}）</p>
+            <button
+              v-if="sourceItems(item).length > 0"
+              type="button"
+              class="batch-link-btn"
+              :disabled="Boolean(batchLoadingKey)"
+              @click="handleBatchRequirementSources(item, index)"
+            >
+              {{
+                batchLoadingKey === batchScopeKey(item, 'sources') ? '打包中…' : '下载全部素材'
+              }}
+            </button>
           </div>
 
           <ul v-if="sourceItems(item).length > 0" class="source-file-list">
@@ -134,6 +181,13 @@
 import { computed, inject, ref } from 'vue'
 import FileIconFallback from '@/components/base/FileIconFallback.vue'
 import {
+  buildRetouchBatchDownloadPlan,
+  countRetouchDownloadableAttachments,
+  runRetouchBatchDownload,
+  validateRetouchBatchDownloadPlan,
+  type RetouchBatchDownloadScope,
+} from '@/domain/retouch-requirement-batch-download'
+import {
   retouchRequirementReferenceRefsToDisplayItems,
   retouchSourceAssetsToDisplayItems,
   type RetouchReferenceDisplayItem,
@@ -152,6 +206,10 @@ const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
 
 const downloadingKeys = ref(new Set<string>())
 const downloadErrorByRequirement = ref(new Map<number, string>())
+const batchLoadingKey = ref<string | null>(null)
+const blockBatchError = ref('')
+
+const totalDownloadableCount = computed(() => countRetouchDownloadableAttachments(props.requirements))
 
 const referenceCache = computed(() => {
   const map = new Map<number, RetouchReferenceDisplayItem[]>()
@@ -259,6 +317,99 @@ function handleDownloadSource(file: RetouchSourceFileDisplayItem) {
 function openReferencePreview(file: RetouchReferenceDisplayItem) {
   if (file.previewSrc) openLightbox(file.previewSrc)
 }
+
+function requirementDownloadableCount(item: RetouchRequirement): number {
+  return buildRetouchBatchDownloadPlan(props.requirements, 'requirement_all', requirementIndex(item))
+    .entries.length
+}
+
+function requirementIndex(item: RetouchRequirement): number {
+  const key = cacheKey(item)
+  const index = props.requirements.findIndex((row) => cacheKey(row) === key)
+  return index >= 0 ? index : 0
+}
+
+function batchScopeKey(
+  item: RetouchRequirement,
+  kind: 'all' | 'references' | 'sources',
+): string {
+  return `req-${cacheKey(item)}-${kind}`
+}
+
+function setBlockBatchError(message: string) {
+  blockBatchError.value = message
+}
+
+async function runBatchDownload(
+  loadingKey: string,
+  scope: RetouchBatchDownloadScope,
+  requirementIndexArg: number | undefined,
+  zipPrefix: string,
+  errorTarget: RetouchRequirement | 'block',
+) {
+  if (batchLoadingKey.value) return
+  batchLoadingKey.value = loadingKey
+  if (errorTarget === 'block') setBlockBatchError('')
+  else setRequirementError(errorTarget, '')
+
+  const plan = buildRetouchBatchDownloadPlan(props.requirements, scope, requirementIndexArg)
+  const validation = validateRetouchBatchDownloadPlan(plan)
+  if (!validation.ok) {
+    const msg = validation.message ?? '无法批量下载'
+    if (errorTarget === 'block') setBlockBatchError(msg)
+    else if (errorTarget) setRequirementError(errorTarget, msg)
+    batchLoadingKey.value = null
+    return
+  }
+
+  const result = await runRetouchBatchDownload(plan, zipPrefix)
+  batchLoadingKey.value = null
+
+  if (!result.ok) {
+    const msg = result.message ?? '批量下载失败，请稍后重试'
+    if (errorTarget === 'block') setBlockBatchError(msg)
+    else if (errorTarget) setRequirementError(errorTarget, msg)
+    return
+  }
+  if (result.message) {
+    if (errorTarget === 'block') setBlockBatchError(result.message)
+    else if (errorTarget) setRequirementError(errorTarget, result.message)
+  }
+}
+
+function handleBatchAllAttachments() {
+  void runBatchDownload('block-all', 'all_attachments', undefined, 'retouch-requirements-all', 'block')
+}
+
+function handleBatchRequirementAll(item: RetouchRequirement, index: number) {
+  void runBatchDownload(
+    batchScopeKey(item, 'all'),
+    'requirement_all',
+    index,
+    `retouch-requirement-${index + 1}-all`,
+    item,
+  )
+}
+
+function handleBatchRequirementReferences(item: RetouchRequirement, index: number) {
+  void runBatchDownload(
+    batchScopeKey(item, 'references'),
+    'requirement_references',
+    index,
+    `retouch-requirement-${index + 1}-references`,
+    item,
+  )
+}
+
+function handleBatchRequirementSources(item: RetouchRequirement, index: number) {
+  void runBatchDownload(
+    batchScopeKey(item, 'sources'),
+    'requirement_sources',
+    index,
+    `retouch-requirement-${index + 1}-sources`,
+    item,
+  )
+}
 </script>
 
 <style scoped>
@@ -271,9 +422,22 @@ function openReferencePreview(file: RetouchReferenceDisplayItem) {
 .block-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.block-head-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.block-batch-error {
+  margin: 0;
+  font-size: 12px;
+  color: #b91c1c;
 }
 
 .block-kicker {
@@ -302,10 +466,39 @@ function openReferencePreview(file: RetouchReferenceDisplayItem) {
 .requirement-card-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.requirement-card-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-link-btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #2563eb;
+  background: transparent;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.batch-link-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.batch-link-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .requirement-no {
