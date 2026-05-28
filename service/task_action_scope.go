@@ -164,6 +164,26 @@ func buildTaskActionStageVisibilities(actor *taskActionActor) []StageVisibility 
 	return stageVisibilities
 }
 
+func taskActionScopeEvalHasCreatorOrRequester(scopeEval taskActionScopeEvaluation, actor *taskActionActor, task *domain.Task) bool {
+	if scopeEval.Has(TaskActionScopeCreator) || scopeEval.Has(TaskActionScopeRequester) {
+		return true
+	}
+	return taskActionActorIsCreatorOrRequester(actor, task)
+}
+
+func taskActionActorIsCreatorOrRequester(actor *taskActionActor, task *domain.Task) bool {
+	if actor == nil || task == nil || actor.ID <= 0 {
+		return false
+	}
+	if task.CreatorID == actor.ID {
+		return true
+	}
+	if task.RequesterID != nil && *task.RequesterID == actor.ID {
+		return true
+	}
+	return false
+}
+
 func appendIfMissingScope(scopes []TaskActionScopeSource, source TaskActionScopeSource) []TaskActionScopeSource {
 	for _, candidate := range scopes {
 		if candidate == source {

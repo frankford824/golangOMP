@@ -228,11 +228,13 @@ func (a *taskActionAuthorizer) EvaluateTaskActionPolicyWithAttributes(
 		}
 	}
 	if resolvedAction == TaskActionReassign && actor != nil && task != nil && !taskActionActorHasManagementScopeRole(actor) {
-		matchedScope := TaskActionScopeSource(decision.ScopeSource)
-		if matchedScope != TaskActionScopeRequester && matchedScope != TaskActionScopeCreator {
-			decision.DenyCode = "task_reassign_requires_requester_or_manager"
-			decision.DenyReason = "operation reassignment requires requester/initiator ownership or management scope"
-			return decision
+		if !taskActionScopeEvalHasCreatorOrRequester(scopeEval, actor, task) {
+			matchedScope := TaskActionScopeSource(decision.ScopeSource)
+			if matchedScope != TaskActionScopeRequester && matchedScope != TaskActionScopeCreator {
+				decision.DenyCode = "task_reassign_requires_requester_or_manager"
+				decision.DenyReason = "operation reassignment requires requester/initiator ownership or management scope"
+				return decision
+			}
 		}
 	}
 

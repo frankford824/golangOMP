@@ -154,7 +154,7 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		decision.MatchedRule = "pending_assign_self_claim"
 	}
 	authz.logDecision(operation.Action, decision)
-	if isActorTakingTaskAlreadyClaimedByOther(task, p, actorID) {
+	if isActorTakingTaskAlreadyClaimedByOther(ctx, task, p, actorID, operation) {
 		denied := decision
 		denied.Allowed = false
 		denied.DenyCode = domain.DenyTaskAlreadyClaimed
@@ -177,7 +177,7 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	}
 	if task.TaskStatus != domain.TaskStatusPendingAssign &&
 		!isCustomizationProductionAssignmentTask(task) &&
-		!taskActionDecisionHasElevatedScope(decision) {
+		!taskAssignmentAllowsInProgressReassign(ctx, task, operation, decision) {
 		denied := decision
 		denied.Allowed = false
 		denied.DenyCode = "task_reassign_requires_manager_scope"
@@ -860,11 +860,31 @@ func taskAlreadyClaimedByOther(task *domain.Task, actorID int64) bool {
 	return false
 }
 
-func isActorTakingTaskAlreadyClaimedByOther(task *domain.Task, p AssignTaskParams, actorID int64) bool {
+func isActorTakingTaskAlreadyClaimedByOther(ctx context.Context, task *domain.Task, p AssignTaskParams, actorID int64, operation taskAssignmentOperation) bool {
 	if p.DesignerID == nil || actorID <= 0 || *p.DesignerID != actorID {
 		return false
 	}
+	// Management reassign-to-self is scheduled handoff, not unassigned-pool self-claim.
+	if operation.Action == TaskActionReassign {
+		if actor, ok := resolveTaskActionActor(ctx); ok && taskActionActorHasManagementScopeRole(actor) {
+			return false
+		}
+	}
 	return taskAlreadyClaimedByOther(task, actorID)
+}
+
+func taskAssignmentAllowsInProgressReassign(ctx context.Context, task *domain.Task, operation taskAssignmentOperation, decision TaskActionDecision) bool {
+	if task == nil || operation.Action != TaskActionReassign {
+		return taskActionDecisionHasElevatedScope(decision)
+	}
+	if taskActionDecisionHasElevatedScope(decision) {
+		return true
+	}
+	actor, ok := resolveTaskActionActor(ctx)
+	if !ok {
+		return false
+	}
+	return taskActionActorIsCreatorOrRequester(actor, task)
 }
 
 func (s *taskAssignmentService) BatchAssign(ctx context.Context, p BatchAssignTasksParams) (*BatchTaskActionResult, *domain.AppError) {
