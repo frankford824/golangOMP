@@ -1388,8 +1388,17 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 	}
 	if filter.Keyword != "" {
 		like := "%" + filter.Keyword + "%"
-		where = append(where, "(t.task_no LIKE ? OR t.sku_code LIKE ? OR t.product_name_snapshot LIKE ? OR t.owner_team LIKE ? OR COALESCE(t.owner_department, '') LIKE ? OR COALESCE(t.owner_org_team, '') LIKE ? OR CAST(t.id AS CHAR) = ?)")
-		args = append(args, like, like, like, like, like, like, filter.Keyword)
+		where = append(where, `(
+			t.task_no LIKE ? OR t.sku_code LIKE ? OR t.product_name_snapshot LIKE ? OR t.owner_team LIKE ?
+			OR COALESCE(t.owner_department, '') LIKE ? OR COALESCE(t.owner_org_team, '') LIKE ? OR CAST(t.id AS CHAR) = ?
+			OR EXISTS (
+				SELECT 1
+				  FROM task_sku_items tsi
+				 WHERE tsi.task_id = t.id
+				   AND tsi.sku_code LIKE ?
+			)
+		)`)
+		args = append(args, like, like, like, like, like, like, filter.Keyword, like)
 	}
 	appendTaskDataScopeWhere(&where, &args, filter)
 
