@@ -20,8 +20,17 @@ export interface RetouchRequirementDraft {
   spec?: string
   remark?: string
   sortOrder?: number
+  /** 创建前本地暂存，POST /v1/tasks 后不发送；创建成功后按 retouch_requirement_id 上传。 */
+  pendingReferenceFiles?: File[]
+  /** 创建前本地暂存，创建成功后以 asset_kind=source 上传。 */
+  pendingSourceFiles?: File[]
 }
 
 export function createEmptyRetouchRequirementDraft(sortOrder = 1): RetouchRequirementDraft {
-  return { description: '', sortOrder }
+  return {
+    description: '',
+    sortOrder,
+    pendingReferenceFiles: [],
+    pendingSourceFiles: [],
+  }
 }

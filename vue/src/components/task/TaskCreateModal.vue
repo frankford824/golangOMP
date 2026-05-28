@@ -10,6 +10,9 @@
     <div v-if="submitError" class="submit-error-banner">
       {{ submitError }}
     </div>
+    <div v-if="submitStatusMessage" class="submit-status-banner">
+      {{ submitStatusMessage }}
+    </div>
     <div class="modal-grid" :class="{ 'is-batch': isBatchLayout }">
       <div class="form-section">
         <section class="create-type-panel">
@@ -410,7 +413,15 @@ import TaskCreateNewProductForm from '@/components/task/TaskCreateNewProductForm
 import TaskCreatePurchaseForm from '@/components/task/TaskCreatePurchaseForm.vue'
 import TaskCreateRetouchForm from '@/components/task/TaskCreateRetouchForm.vue'
 import { createEmptyRetouchRequirementDraft } from '@/domain/types/retouch-requirement'
-import { hasValidRetouchRequirementDrafts } from '@/domain/retouch-requirements'
+import {
+  hasValidRetouchRequirementDrafts,
+  normalizeRetouchRequirementDraftsWithPending,
+} from '@/domain/retouch-requirements'
+import {
+  hasRetouchRequirementPendingUploads,
+  RETOUCH_REQUIREMENT_UPLOAD_PARTIAL_FAILURE_MESSAGE,
+  uploadRetouchRequirementPendingAssets,
+} from '@/services/upload/retouchRequirementUpload'
 import ExcelBatchSkuPanel from '@/components/task-create/ExcelBatchSkuPanel.vue'
 import CloseDraftConfirmModal from '@/components/task-create/CloseDraftConfirmModal.vue'
 import DesignSourcePicker from '@/components/task-create/DesignSourcePicker.vue'
@@ -456,6 +467,7 @@ const { assigneeOptions, loadDesigners } = useDesignerOptions({
 })
 
 const submitError = ref('')
+const submitStatusMessage = ref('')
 const batchItemsError = ref('')
 const fieldErrors = ref<Record<string, string>>({})
 const preparingSku = ref(false)
@@ -1249,6 +1261,7 @@ function getPrefillBusinessPatchPayload(): Record<string, unknown> {
 async function submit() {
   if (!canSubmit.value || submitting.value) return
   submitError.value = ''
+  submitStatusMessage.value = ''
   batchItemsError.value = ''
   fieldErrors.value = {}
   submitting.value = true
@@ -1270,6 +1283,10 @@ async function submit() {
   const now = nowISO()
   const businessType = taskKind.value
   const isBatch = form.value.skuMode === 'multiple' && businessType !== 'ORIGINAL_PRODUCT_DEV'
+  const retouchDraftsForUpload =
+    businessType === 'RETOUCH_TASK'
+      ? normalizeRetouchRequirementDraftsWithPending(form.value.retouchRequirements)
+      : []
 
   const referenceFileRefs = (
     isBatch
@@ -1446,6 +1463,39 @@ async function submit() {
     }
     // 只刷新当前任务，避免整表刷新覆盖详情页所需字段
     await tasksStore.loadTaskById(created.id)
+
+    let retouchRequirementUploadFailed = false
+    if (businessType === 'RETOUCH_TASK' && hasRetouchRequirementPendingUploads(retouchDraftsForUpload)) {
+      submitStatusMessage.value = '正在上传 P 图需求附件...'
+      const loadedTask = tasksStore.getById(created.id) ?? created
+      const uploadResult = await uploadRetouchRequirementPendingAssets(
+        created.id,
+        loadedTask.retouchRequirements ?? [],
+        retouchDraftsForUpload,
+        {
+          onStatusMessage: (message) => {
+            submitStatusMessage.value = message
+          },
+        },
+      )
+      if (uploadResult.failures.length > 0) {
+        retouchRequirementUploadFailed = true
+        const failurePreview = uploadResult.failures
+          .slice(0, 3)
+          .map((item) => item.fileName ? `${item.fileName}：${item.message}` : item.message)
+          .join('\n')
+        window.alert(
+          `${RETOUCH_REQUIREMENT_UPLOAD_PARTIAL_FAILURE_MESSAGE}${failurePreview ? `\n\n${failurePreview}` : ''}`,
+        )
+      } else if (uploadResult.referenceUploaded + uploadResult.sourceUploaded > 0) {
+        try {
+          await tasksStore.loadTaskById(created.id)
+        } catch {
+          /* 上传已成功，详情页挂载会再拉 */
+        }
+      }
+    }
+
     emit('update:modelValue', false)
     emit('created', created.id)
     void router.push({
@@ -1454,6 +1504,7 @@ async function submit() {
         fromCreate: '1',
         ...(prefillSyncFailed ? { prefillSyncFailed: '1' } : {}),
         ...(procurementSyncFailed ? { procurementSyncFailed: '1' } : {}),
+        ...(retouchRequirementUploadFailed ? { retouchRequirementUploadFailed: '1' } : {}),
       },
     })
   } catch (e) {
@@ -1521,11 +1572,22 @@ async function submit() {
     }
   } finally {
     submitting.value = false
+    submitStatusMessage.value = ''
   }
 }
 </script>
 
 <style scoped>
+.submit-status-banner {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .modal-grid {
   display: flex;
   flex-direction: column;
