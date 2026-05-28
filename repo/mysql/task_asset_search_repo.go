@@ -29,13 +29,22 @@ const taskAssetSearchSelect = `
 	       t.warehouse_reject_category, t.is_batch_task, t.batch_item_count, t.batch_mode, t.primary_sku_code,
 	       t.sku_generation_status, t.created_at, t.updated_at,
 	       da.asset_no, da.created_by, da.created_at, da.updated_at,
-	       COALESCE(tm.claimed_team_code, tm.pool_team_code, '') AS owner_team_code`
+	       COALESCE(tm.claimed_team_code, tm.pool_team_code, '') AS owner_team_code,
+	       COALESCE(NULLIF(task_creator.username, ''), '') AS task_creator_username,
+	       COALESCE(NULLIF(task_creator.display_name, ''), '') AS task_creator_name,
+	       COALESCE(NULLIF(asset_creator.username, ''), '') AS asset_creator_username,
+	       COALESCE(NULLIF(asset_creator.display_name, ''), '') AS asset_creator_name,
+	       COALESCE(NULLIF(uploaded_user.username, ''), '') AS uploaded_by_username,
+	       COALESCE(NULLIF(uploaded_user.display_name, ''), '') AS uploaded_by_name`
 
 const taskAssetSearchFrom = `
 	  FROM task_assets ta
 	  JOIN design_assets da ON da.id = ta.asset_id
 	  JOIN tasks t ON t.id = ta.task_id
-	  LEFT JOIN task_modules tm ON tm.id = ta.source_task_module_id`
+	  LEFT JOIN task_modules tm ON tm.id = ta.source_task_module_id
+	  LEFT JOIN users task_creator ON task_creator.id = t.creator_id
+	  LEFT JOIN users asset_creator ON asset_creator.id = da.created_by
+	  LEFT JOIN users uploaded_user ON uploaded_user.id = ta.uploaded_by`
 
 func (r *taskAssetSearchRepo) Search(ctx context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
 	query = query.Normalized()
@@ -189,6 +198,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	var designCreatedBy int64
 	var designCreatedAt, designUpdatedAt time.Time
 	var ownerTeamCode string
+	var taskCreatorUsername, taskCreatorName, assetCreatorUsername, assetCreatorName, uploadedByUsername, uploadedByName string
 	if err := s.Scan(
 		&a.ID, &a.TaskID, &assetID, &scopeSKUCode, &a.AssetType, &a.VersionNo, &assetVersionNo,
 		&uploadMode, &uploadRequestID, &storageRefID, &a.FileName, &originalFilename, &remoteFileID,
@@ -203,6 +213,9 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 		&t.SKUGenerationStatus, &t.CreatedAt, &t.UpdatedAt,
 		&assetNo, &designCreatedBy, &designCreatedAt, &designUpdatedAt,
 		&ownerTeamCode,
+		&taskCreatorUsername, &taskCreatorName,
+		&assetCreatorUsername, &assetCreatorName,
+		&uploadedByUsername, &uploadedByName,
 	); err != nil {
 		return nil, fmt.Errorf("scan task asset search row: %w", err)
 	}
@@ -254,13 +267,19 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	}
 	t.IsBatchTask = isBatchTask.Valid && isBatchTask.Bool
 	return &repo.TaskAssetSearchRow{
-		Asset:           &a,
-		Task:            &t,
-		AssetNo:         assetNo,
-		DesignCreatedBy: designCreatedBy,
-		DesignCreatedAt: designCreatedAt,
-		DesignUpdatedAt: designUpdatedAt,
-		OwnerTeamCode:   ownerTeamCode,
+		Asset:                &a,
+		Task:                 &t,
+		AssetNo:              assetNo,
+		DesignCreatedBy:      designCreatedBy,
+		DesignCreatedAt:      designCreatedAt,
+		DesignUpdatedAt:      designUpdatedAt,
+		OwnerTeamCode:        ownerTeamCode,
+		TaskCreatorUsername:  taskCreatorUsername,
+		TaskCreatorName:      taskCreatorName,
+		AssetCreatorUsername: assetCreatorUsername,
+		AssetCreatorName:     assetCreatorName,
+		UploadedByUsername:   uploadedByUsername,
+		UploadedByName:       uploadedByName,
 	}, nil
 }
 

@@ -8,13 +8,19 @@ import (
 )
 
 type TaskAssetSearchRow struct {
-	Asset           *domain.TaskAsset
-	Task            *domain.Task
-	AssetNo         string
-	DesignCreatedBy int64
-	DesignCreatedAt time.Time
-	DesignUpdatedAt time.Time
-	OwnerTeamCode   string
+	Asset                *domain.TaskAsset
+	Task                 *domain.Task
+	AssetNo              string
+	DesignCreatedBy      int64
+	DesignCreatedAt      time.Time
+	DesignUpdatedAt      time.Time
+	OwnerTeamCode        string
+	TaskCreatorUsername  string
+	TaskCreatorName      string
+	AssetCreatorUsername string
+	AssetCreatorName     string
+	UploadedByUsername   string
+	UploadedByName       string
 }
 
 type TaskAssetSearchRepo interface {

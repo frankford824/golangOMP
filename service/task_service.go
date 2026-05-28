@@ -2136,6 +2136,11 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				return err
 			}
 		}
+		if costChanged {
+			if err := s.traceTaskCostUpdate(ctx, tx, task, detail, singleItemCostProjection, p.OperatorID, skuTraceEventSourceBusinessInfo, "business_info_cost_changed"); err != nil {
+				return err
+			}
+		}
 		productSelectionPayload := buildTaskProductSelectionContext(task, detail)
 		productIID := taskBusinessInfoEventProductIID(detail, p.ProductIID)
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventBusinessInfoUpdated, &p.OperatorID,
@@ -2562,6 +2567,9 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 			if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
 				return err
 			}
+		}
+		if err := s.traceTaskCostUpdate(ctx, tx, task, detail, item, p.OperatorID, skuTraceEventSourceSKUItemCost, "sku_item_cost_changed"); err != nil {
+			return err
 		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventCostUpdated, &p.OperatorID,
 			mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{

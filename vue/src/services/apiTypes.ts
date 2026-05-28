@@ -350,6 +350,11 @@ export interface BackendAssetVersion {
   preview_available?: boolean
   /** canonical 下载方式；旧 `public/private_network` 仅作兼容读取 */
   download_mode?: AssetDownloadMode
+  created_by?: {
+    user_id?: string | number
+    username?: string
+    name?: string
+  }
   [key: string]: unknown
 }
 
@@ -363,6 +368,21 @@ export interface BackendAsset {
   replacement_actor_id?: string | number | null
   workflow_lane?: 'normal' | 'customization' | string
   source_department?: string | null
+  task_no?: string
+  sku_code?: string
+  primary_sku_code?: string
+  scope_sku_code?: string
+  product_name?: string
+  task_creator_id?: string | number
+  task_creator_username?: string
+  task_creator_name?: string
+  created_by_username?: string
+  created_by_name?: string
+  mime_type?: string
+  file_name?: string
+  original_filename?: string
+  asset_type?: string
+  asset_kind?: string
   versions?: BackendAssetVersion[]
   approved_version?: number
   warehouse_ready_version?: number

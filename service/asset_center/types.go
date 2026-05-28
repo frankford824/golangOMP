@@ -9,8 +9,9 @@ import (
 const ErrCodeAssetGone = "ASSET_GONE"
 
 type Actor struct {
-	UserID int64  `json:"user_id"`
-	Name   string `json:"name,omitempty"`
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username,omitempty"`
+	Name     string `json:"name,omitempty"`
 }
 
 type AssetVersion struct {
@@ -24,32 +25,40 @@ type AssetVersion struct {
 }
 
 type AssetDetail struct {
-	ID                int64                          `json:"id"`
-	TaskID            int64                          `json:"task_id"`
-	AssetNo           string                         `json:"asset_no,omitempty"`
-	ScopeSKUCode      string                         `json:"scope_sku_code,omitempty"`
-	AssetType         domain.TaskAssetType           `json:"asset_type"`
-	CurrentVersionID  *int64                         `json:"current_version_id,omitempty"`
-	SourceModuleKey   string                         `json:"source_module_key"`
-	LifecycleState    domain.AssetLifecycleState     `json:"lifecycle_state"`
-	ArchiveStatus     domain.AssetArchiveStatus      `json:"archive_status,omitempty"`
-	UploadStatus      domain.DesignAssetUploadStatus `json:"upload_status,omitempty"`
-	CurrentStorageKey *string                        `json:"storage_key,omitempty"`
-	FileName          string                         `json:"file_name,omitempty"`
-	OriginalFilename  string                         `json:"original_filename,omitempty"`
-	FileSize          *int64                         `json:"file_size,omitempty"`
-	MimeType          string                         `json:"mime_type,omitempty"`
-	TaskNo            string                         `json:"task_no,omitempty"`
-	TaskStatus        domain.TaskStatus              `json:"task_status,omitempty"`
-	OwnerTeamCode     string                         `json:"owner_team_code,omitempty"`
-	CreatedBy         int64                          `json:"created_by,omitempty"`
-	CreatedAt         time.Time                      `json:"created_at"`
-	UpdatedAt         time.Time                      `json:"updated_at"`
-	Versions          []AssetVersion                 `json:"versions,omitempty"`
-	ArchivedAt        *time.Time                     `json:"archived_at,omitempty"`
-	ArchivedBy        *Actor                         `json:"archived_by,omitempty"`
-	CleanedAt         *time.Time                     `json:"cleaned_at,omitempty"`
-	DeletedAt         *time.Time                     `json:"deleted_at,omitempty"`
+	ID                  int64                          `json:"id"`
+	TaskID              int64                          `json:"task_id"`
+	AssetNo             string                         `json:"asset_no,omitempty"`
+	ScopeSKUCode        string                         `json:"scope_sku_code,omitempty"`
+	AssetType           domain.TaskAssetType           `json:"asset_type"`
+	CurrentVersionID    *int64                         `json:"current_version_id,omitempty"`
+	SourceModuleKey     string                         `json:"source_module_key"`
+	LifecycleState      domain.AssetLifecycleState     `json:"lifecycle_state"`
+	ArchiveStatus       domain.AssetArchiveStatus      `json:"archive_status,omitempty"`
+	UploadStatus        domain.DesignAssetUploadStatus `json:"upload_status,omitempty"`
+	CurrentStorageKey   *string                        `json:"storage_key,omitempty"`
+	FileName            string                         `json:"file_name,omitempty"`
+	OriginalFilename    string                         `json:"original_filename,omitempty"`
+	FileSize            *int64                         `json:"file_size,omitempty"`
+	MimeType            string                         `json:"mime_type,omitempty"`
+	TaskNo              string                         `json:"task_no,omitempty"`
+	SKUCode             string                         `json:"sku_code,omitempty"`
+	PrimarySKUCode      string                         `json:"primary_sku_code,omitempty"`
+	ProductName         string                         `json:"product_name,omitempty"`
+	TaskStatus          domain.TaskStatus              `json:"task_status,omitempty"`
+	OwnerTeamCode       string                         `json:"owner_team_code,omitempty"`
+	CreatedBy           int64                          `json:"created_by,omitempty"`
+	CreatedByUsername   string                         `json:"created_by_username,omitempty"`
+	CreatedByName       string                         `json:"created_by_name,omitempty"`
+	TaskCreatorID       int64                          `json:"task_creator_id,omitempty"`
+	TaskCreatorUsername string                         `json:"task_creator_username,omitempty"`
+	TaskCreatorName     string                         `json:"task_creator_name,omitempty"`
+	CreatedAt           time.Time                      `json:"created_at"`
+	UpdatedAt           time.Time                      `json:"updated_at"`
+	Versions            []AssetVersion                 `json:"versions,omitempty"`
+	ArchivedAt          *time.Time                     `json:"archived_at,omitempty"`
+	ArchivedBy          *Actor                         `json:"archived_by,omitempty"`
+	CleanedAt           *time.Time                     `json:"cleaned_at,omitempty"`
+	DeletedAt           *time.Time                     `json:"deleted_at,omitempty"`
 }
 
 type SearchResult struct {

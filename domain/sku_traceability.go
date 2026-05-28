@@ -14,34 +14,34 @@ const (
 )
 
 type OMPSKURecord struct {
-	SKUCode                string     `db:"sku_code" json:"sku_code"`
-	SKUKind                OMPSKUKind `db:"sku_kind" json:"sku_kind"`
-	FirstTaskID            *int64     `db:"first_task_id" json:"first_task_id,omitempty"`
-	LastTaskID             *int64     `db:"last_task_id" json:"last_task_id,omitempty"`
-	FirstTaskSKUItemID     *int64     `db:"first_task_sku_item_id" json:"first_task_sku_item_id,omitempty"`
-	LastTaskSKUItemID      *int64     `db:"last_task_sku_item_id" json:"last_task_sku_item_id,omitempty"`
-	SourceMode             string     `db:"source_mode" json:"source_mode"`
-	TaskType               string     `db:"task_type" json:"task_type"`
-	ProductName            string     `db:"product_name" json:"product_name"`
-	ProductIID             string     `db:"product_i_id" json:"product_i_id"`
-	CategoryCode           string     `db:"category_code" json:"category_code"`
-	CategoryName           string     `db:"category_name" json:"category_name"`
-	CostPrice              *float64   `db:"cost_price" json:"cost_price,omitempty"`
-	EstimatedCost          *float64   `db:"estimated_cost" json:"estimated_cost,omitempty"`
-	CostRuleID             *int64     `db:"cost_rule_id" json:"cost_rule_id,omitempty"`
-	CostRuleName           string     `db:"cost_rule_name" json:"cost_rule_name"`
-	CostRuleSource         string     `db:"cost_rule_source" json:"cost_rule_source"`
-	ManualCostOverride     bool       `db:"manual_cost_override" json:"manual_cost_override"`
-	RequiresManualReview   bool       `db:"requires_manual_review" json:"requires_manual_review"`
-	LastERPSyncStatus      string     `db:"last_erp_sync_status" json:"last_erp_sync_status"`
-	LastERPCallLogID       *int64     `db:"last_erp_call_log_id" json:"last_erp_call_log_id,omitempty"`
-	CreatedBy             *int64     `db:"created_by" json:"created_by,omitempty"`
-	LastOperatorID         *int64     `db:"last_operator_id" json:"last_operator_id,omitempty"`
-	FirstSeenAt           time.Time  `db:"first_seen_at" json:"first_seen_at"`
-	LastSeenAt            time.Time  `db:"last_seen_at" json:"last_seen_at"`
-	TraceVersion          int64      `db:"trace_version" json:"trace_version"`
-	CreatedAt             time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt             time.Time  `db:"updated_at" json:"updated_at"`
+	SKUCode              string     `db:"sku_code" json:"sku_code"`
+	SKUKind              OMPSKUKind `db:"sku_kind" json:"sku_kind"`
+	FirstTaskID          *int64     `db:"first_task_id" json:"first_task_id,omitempty"`
+	LastTaskID           *int64     `db:"last_task_id" json:"last_task_id,omitempty"`
+	FirstTaskSKUItemID   *int64     `db:"first_task_sku_item_id" json:"first_task_sku_item_id,omitempty"`
+	LastTaskSKUItemID    *int64     `db:"last_task_sku_item_id" json:"last_task_sku_item_id,omitempty"`
+	SourceMode           string     `db:"source_mode" json:"source_mode"`
+	TaskType             string     `db:"task_type" json:"task_type"`
+	ProductName          string     `db:"product_name" json:"product_name"`
+	ProductIID           string     `db:"product_i_id" json:"product_i_id"`
+	CategoryCode         string     `db:"category_code" json:"category_code"`
+	CategoryName         string     `db:"category_name" json:"category_name"`
+	CostPrice            *float64   `db:"cost_price" json:"cost_price,omitempty"`
+	EstimatedCost        *float64   `db:"estimated_cost" json:"estimated_cost,omitempty"`
+	CostRuleID           *int64     `db:"cost_rule_id" json:"cost_rule_id,omitempty"`
+	CostRuleName         string     `db:"cost_rule_name" json:"cost_rule_name"`
+	CostRuleSource       string     `db:"cost_rule_source" json:"cost_rule_source"`
+	ManualCostOverride   bool       `db:"manual_cost_override" json:"manual_cost_override"`
+	RequiresManualReview bool       `db:"requires_manual_review" json:"requires_manual_review"`
+	LastERPSyncStatus    string     `db:"last_erp_sync_status" json:"last_erp_sync_status"`
+	LastERPCallLogID     *int64     `db:"last_erp_call_log_id" json:"last_erp_call_log_id,omitempty"`
+	CreatedBy            *int64     `db:"created_by" json:"created_by,omitempty"`
+	LastOperatorID       *int64     `db:"last_operator_id" json:"last_operator_id,omitempty"`
+	FirstSeenAt          time.Time  `db:"first_seen_at" json:"first_seen_at"`
+	LastSeenAt           time.Time  `db:"last_seen_at" json:"last_seen_at"`
+	TraceVersion         int64      `db:"trace_version" json:"trace_version"`
+	CreatedAt            time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt            time.Time  `db:"updated_at" json:"updated_at"`
 }
 
 type OMPSKUCostSnapshot struct {

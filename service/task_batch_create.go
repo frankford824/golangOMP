@@ -373,6 +373,9 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 		if err := s.taskRepo.CreateSKUItems(ctx, tx, persistedItems); err != nil {
 			return fmt.Errorf("create task sku items: %w", err)
 		}
+		if err := s.traceTaskSKUsOnCreate(ctx, tx, p, task, detail, persistedItems); err != nil {
+			return err
+		}
 		if err := s.insertTaskReferenceFileRefFlatRows(ctx, tx, newID, p.ReferenceFileRefs); err != nil {
 			return err
 		}

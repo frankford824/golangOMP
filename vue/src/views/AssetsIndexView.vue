@@ -157,37 +157,51 @@
           </div>
           <div class="ac-card-info">
             <div class="ac-title-row">
-              <h2 class="ac-card-title" :title="cardTitle(asset)">{{ cardTitle(asset) }}</h2>
-              <span class="ac-format-pill">{{ fileFormatLabel(asset) }}</span>
+              <h2 class="ac-card-title" :title="businessSku(asset)">{{ businessSku(asset) }}</h2>
+              <span class="ac-format-pill">{{ imageBusinessTypeLabel(asset) }}</span>
             </div>
             <div class="ac-card-meta">
-              <span class="ac-mono">ID: {{ asset.id }}</span>
+              <div class="ac-business-row">
+                <span class="ac-business-key">任务</span>
+                <span class="ac-business-value ac-mono">{{ businessTaskNo(asset) }}</span>
+              </div>
+              <div class="ac-business-row">
+                <span class="ac-business-key">文件</span>
+                <span class="ac-business-value">{{ assetFileName(asset) }}</span>
+              </div>
               <button
                 type="button"
                 class="ac-copy-tag"
-                @click.stop="copyAssetId(String(asset.id))"
+                @click.stop="copyBusinessSku(asset)"
               >
-                复制
+                复制 SKU
               </button>
-              <div class="ac-card-spec">{{ cardSpecLine(asset) }}</div>
             </div>
           </div>
           <div class="ac-card-footer">
             <div>
-              <div class="ac-footer-label">版本</div>
-              <div class="ac-footer-stat">{{ versionCount(asset) }}</div>
+              <div class="ac-footer-label">创建运营</div>
+              <div class="ac-footer-stat ac-footer-stat--operator">{{ taskCreatorLabel(asset) }}</div>
             </div>
             <div class="ac-footer-right">
-              <span class="ac-footer-tag">{{ assetKind(asset) }}</span>
+              <span class="ac-footer-tag">{{ assetProductLabel(asset) }}</span>
             </div>
           </div>
           <div class="ac-card-actions">
             <button
               type="button"
+              class="ac-card-link-btn ac-card-link-btn--task"
+              :disabled="!assetTaskId(asset)"
+              @click.stop="openRelatedTask(asset)"
+            >
+              打开任务
+            </button>
+            <button
+              type="button"
               class="ac-card-link-btn"
               @click.stop="openAssetDetail(String(asset.id))"
             >
-              打开详情
+              资产详情
             </button>
           </div>
         </article>
@@ -255,7 +269,9 @@
           <div class="ac-selected-main">
             <h4 class="ac-selected-title" :title="asset.title">{{ asset.title }}</h4>
             <p class="ac-selected-meta">
-              任务 ID：<span class="cell-mono">{{ asset.taskId }}</span>
+              任务号：<span class="cell-mono">{{ asset.taskNo }}</span>
+              <span class="ac-selected-divider">|</span>
+              SKU：<span class="cell-mono">{{ asset.sku }}</span>
               <span class="ac-selected-divider">|</span>
               类型：{{ asset.kind }}
             </p>
@@ -341,20 +357,20 @@
                 <h4 class="bulk-result-title" :title="cardTitle(result.asset)">{{ cardTitle(result.asset) }}</h4>
                 <dl class="bulk-result-meta">
                   <div>
-                    <dt>资产 ID</dt>
-                    <dd class="cell-mono">{{ result.asset.id }}</dd>
+                    <dt>SKU</dt>
+                    <dd class="cell-mono">{{ businessSku(result.asset) }}</dd>
                   </div>
                   <div>
-                    <dt>任务 ID</dt>
-                    <dd class="cell-mono">{{ displayText(result.asset.task_id) }}</dd>
+                    <dt>任务号</dt>
+                    <dd class="cell-mono">{{ businessTaskNo(result.asset) }}</dd>
                   </div>
                   <div>
-                    <dt>类型</dt>
-                    <dd>{{ assetKind(result.asset) }}</dd>
+                    <dt>图片类型</dt>
+                    <dd>{{ imageBusinessTypeLabel(result.asset) }}</dd>
                   </div>
                   <div>
-                    <dt>格式</dt>
-                    <dd>{{ fileFormatLabel(result.asset) }}</dd>
+                    <dt>创建运营</dt>
+                    <dd>{{ taskCreatorLabel(result.asset) }}</dd>
                   </div>
                 </dl>
               </template>
@@ -410,20 +426,24 @@
 
         <dl class="detail-grid">
           <div class="detail-row">
-            <dt>资产 ID</dt>
-            <dd class="cell-mono">{{ selectedAsset.id }}</dd>
+            <dt>SKU</dt>
+            <dd class="cell-mono">{{ businessSku(selectedAsset) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>任务 ID</dt>
-            <dd class="cell-mono">{{ displayText(selectedAsset.task_id) }}</dd>
+            <dt>所属任务号</dt>
+            <dd class="cell-mono">{{ businessTaskNo(selectedAsset) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>类型</dt>
-            <dd>{{ assetKind(selectedAsset) }}</dd>
+            <dt>任务创建运营</dt>
+            <dd>{{ taskCreatorLabel(selectedAsset) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>SKU 作用域</dt>
-            <dd class="cell-mono">{{ displayText(selectedAsset.scope_sku_code) }}</dd>
+            <dt>图片类型</dt>
+            <dd>{{ imageBusinessTypeLabel(selectedAsset) }}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>文件名</dt>
+            <dd>{{ assetFileName(selectedAsset) }}</dd>
           </div>
           <div class="detail-row">
             <dt>上传状态</dt>
@@ -434,12 +454,8 @@
             <dd>{{ assetArchiveStatus(selectedAsset.archive_status) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>来源源稿</dt>
-            <dd class="cell-mono">{{ displayText(selectedAsset.source_asset_id) }}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>最后访问</dt>
-            <dd>{{ displayText(selectedAsset.last_access_at) }}</dd>
+            <dt>系统资产号</dt>
+            <dd class="cell-mono">{{ displayText(selectedAsset.id) }}</dd>
           </div>
           <div class="detail-row">
             <dt>下载模式</dt>
@@ -450,6 +466,16 @@
             <dd>{{ previewStateLabel }}</dd>
           </div>
         </dl>
+        <div class="detail-business-actions">
+          <button
+            type="button"
+            class="ac-card-link-btn ac-card-link-btn--task"
+            :disabled="!assetTaskId(selectedAsset)"
+            @click="openRelatedTask(selectedAsset)"
+          >
+            打开对应任务
+          </button>
+        </div>
 
         <div class="versions-section">
           <h4 class="subsection-title">版本记录</h4>
@@ -532,6 +558,7 @@ import {
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import { userAccountDisplay } from '@/domain/user-display'
 import {
   buildTimestampedZipFilename,
   downloadBatchAsZip,
@@ -617,6 +644,8 @@ const selectedVersions = computed<BackendAssetVersion[]>(() => selectedAsset.val
 interface SelectedAssetSummary {
   id: string
   taskId: string
+  taskNo: string
+  sku: string
   title: string
   kind: string
 }
@@ -718,8 +747,63 @@ function cardTitle(asset: BackendAsset): string {
   return `${assetKind(asset)} #${asset.id}`
 }
 
+function assetFileName(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  for (const key of ['file_name', 'original_filename', 'filename'] as const) {
+    const value = r[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return cardTitle(asset)
+}
+
+function businessSku(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  for (const key of ['scope_sku_code', 'sku_code', 'primary_sku_code', 'target_sku_code'] as const) {
+    const value = r[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return '未绑定 SKU'
+}
+
+function businessTaskNo(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  for (const key of ['task_no', 'taskNo'] as const) {
+    const value = r[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return asset.task_id != null && String(asset.task_id).trim() ? `任务 ${asset.task_id}` : '未绑定任务'
+}
+
+function assetTaskId(asset: BackendAsset | null | undefined): string {
+  const id = String(asset?.task_id ?? '').trim()
+  return id
+}
+
+function taskCreatorLabel(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  return userAccountDisplay(
+    r.task_creator_username,
+    r.task_creator_name,
+    r.creator_username,
+    r.creator_name,
+    r.created_by_username,
+    r.created_by_name,
+  )
+}
+
+function assetProductLabel(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  const product = String(r.product_name ?? r.product_name_snapshot ?? '').trim()
+  if (product) return product
+  return assetKind(asset)
+}
+
+function imageBusinessTypeLabel(asset: BackendAsset): string {
+  return `${assetKind(asset)} / ${fileFormatLabel(asset)}`
+}
+
 function fileFormatLabel(asset: BackendAsset): string {
-  const title = cardTitle(asset)
+  const title = assetFileName(asset)
   const match = /\.([a-z0-9]{2,8})(?:$|[?#])/i.exec(title)
   if (match?.[1]) return match[1].toUpperCase()
 
@@ -736,8 +820,10 @@ function toSelectedAssetSummary(asset: BackendAsset): SelectedAssetSummary {
   return {
     id: String(asset.id),
     taskId: displayText(asset.task_id),
-    title: cardTitle(asset),
-    kind: assetKind(asset),
+    taskNo: businessTaskNo(asset),
+    sku: businessSku(asset),
+    title: `${businessSku(asset)} · ${assetFileName(asset)}`,
+    kind: imageBusinessTypeLabel(asset),
   }
 }
 
@@ -1299,19 +1385,10 @@ function listCardResolvedPreviewUrl(asset: BackendAsset): string | undefined {
   return undefined
 }
 
-function cardSpecLine(asset: BackendAsset): string {
-  const r = asset as Record<string, unknown>
-  const sku = r.scope_sku_code
-  if (typeof sku === 'string' && sku.trim()) return sku.trim()
-  const task = asset.task_id
-  if (task != null && String(task).trim()) return `任务 ${task}`
-  return assetKind(asset)
-}
-
-async function copyAssetId(id: string) {
+async function copyText(text: string, successMessage: string) {
   try {
-    await navigator.clipboard.writeText(id)
-    copyHint.value = '已复制资产 ID'
+    await navigator.clipboard.writeText(text)
+    copyHint.value = successMessage
     window.setTimeout(() => {
       copyHint.value = ''
     }, 1200)
@@ -1321,6 +1398,18 @@ async function copyAssetId(id: string) {
       copyHint.value = ''
     }, 1200)
   }
+}
+
+async function copyBusinessSku(asset: BackendAsset) {
+  const sku = businessSku(asset)
+  if (sku === '未绑定 SKU') {
+    copyHint.value = '当前资产未绑定 SKU'
+    window.setTimeout(() => {
+      copyHint.value = ''
+    }, 1200)
+    return
+  }
+  await copyText(sku, '已复制 SKU')
 }
 
 function displayText(value: unknown): string {
@@ -1352,10 +1441,6 @@ function assetArchiveStatus(value: unknown): string {
 
 function assetDownloadMode(value: unknown): string {
   return assetDownloadModeLabelCn(typeof value === 'string' ? value : String(value ?? ''))
-}
-
-function versionCount(asset: BackendAsset): number {
-  return Array.isArray(asset.versions) ? asset.versions.length : 0
 }
 
 function goListPage(next: number) {
@@ -1394,6 +1479,12 @@ function openAssetDetail(assetId: string) {
   const query: Record<string, string> = {}
   if (filters.taskId.trim()) query.task_id = filters.taskId.trim()
   void router.push({ name: 'AssetDetail', params: { id: assetId }, query })
+}
+
+function openRelatedTask(asset: BackendAsset | null | undefined) {
+  const id = assetTaskId(asset)
+  if (!id) return
+  void router.push({ name: 'TaskDetail', params: { id } })
 }
 
 async function reload() {
@@ -2538,17 +2629,17 @@ onBeforeUnmount(() => {
 }
 
 .ac-card {
-  min-height: 11rem !important;
+  min-height: 12.25rem !important;
   display: grid !important;
-  grid-template-columns: 9rem minmax(0, 1fr) !important;
-  grid-template-rows: auto auto 1fr !important;
+  grid-template-columns: 9.25rem minmax(0, 1fr) !important;
+  grid-template-rows: auto auto minmax(2.6rem, auto) !important;
   grid-template-areas:
     "preview info"
     "preview footer"
     "preview actions" !important;
-  gap: 0.72rem 1rem !important;
-  padding: 0.85rem !important;
-  border-radius: 1rem !important;
+  gap: 0.78rem 1.05rem !important;
+  padding: 0.9rem !important;
+  border-radius: 1.05rem !important;
 }
 
 .ac-card:hover,
@@ -2576,11 +2667,13 @@ onBeforeUnmount(() => {
 
 .ac-card-img-box {
   grid-area: preview;
-  width: 9rem !important;
-  min-height: 9rem !important;
+  width: 9.25rem !important;
+  min-height: 9.25rem !important;
   margin: 0 !important;
   align-self: stretch !important;
   border-radius: 0.82rem !important;
+  background: #f3f6fb !important;
+  border: 1px solid #e5eaf2 !important;
 }
 
 .ac-card-img-box :deep(.ac-card-apm),
@@ -2615,16 +2708,38 @@ onBeforeUnmount(() => {
   grid-area: info;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem !important;
+  gap: 0.52rem !important;
+  min-width: 0;
+}
+
+.ac-title-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: start !important;
+  gap: 0.6rem !important;
+  min-width: 0 !important;
+}
+
+.ac-title-row .ac-card-title {
+  margin: 0 !important;
+  color: #0f172a !important;
+  font-size: 1rem !important;
+  font-weight: 850 !important;
+  line-height: 1.3 !important;
+  letter-spacing: 0 !important;
+  max-height: 2.6rem !important;
+  overflow: hidden !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
 }
 
 .ac-card-footer {
   grid-area: footer;
-  display: flex !important;
-  flex-wrap: wrap;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 0.42rem !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr) !important;
+  align-items: stretch !important;
+  gap: 0.5rem !important;
   margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
@@ -2639,7 +2754,8 @@ onBeforeUnmount(() => {
 }
 
 .ac-footer-right {
-  max-width: min(100%, 12rem) !important;
+  max-width: none !important;
+  min-width: 0 !important;
   text-align: left !important;
 }
 
@@ -2691,13 +2807,35 @@ onBeforeUnmount(() => {
 
 .ac-footer-tag,
 .ac-format-pill {
-  border: 1px solid #bfdbfe !important;
-  background: #eff6ff !important;
+  border: 1px solid #dbeafe !important;
+  background: #f1f7ff !important;
   color: #1d4ed8 !important;
 }
 
 .ac-card-footer .ac-footer-tag {
-  color: #6b7280 !important;
+  display: -webkit-box !important;
+  width: 100%;
+  overflow: hidden;
+  color: #334155 !important;
+  font-size: 0.78rem !important;
+  font-weight: 650 !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ac-format-pill {
+  align-self: start !important;
+  max-width: 7.8rem;
+  padding: 0.24rem 0.48rem !important;
+  border-radius: 999px !important;
+  font-size: 0.72rem !important;
+  font-weight: 800 !important;
+  line-height: 1.1 !important;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .ac-card-meta,
@@ -2708,39 +2846,128 @@ onBeforeUnmount(() => {
   color: #6b7280 !important;
 }
 
+.ac-business-row {
+  display: grid;
+  grid-template-columns: 2.45rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.62rem;
+  padding: 0.22rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ac-business-key {
+  color: #64748b;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ac-business-value {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ac-footer-stat--operator {
+  max-width: 100%;
+  overflow: hidden;
+  color: #111827 !important;
+  font-size: 0.9rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.25 !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ac-card-link-btn {
   background: #eff6ff !important;
   border-color: #bfdbfe !important;
   color: #2563eb !important;
+  flex: 1 1 0;
+  min-width: 6.6rem;
+  min-height: 2.3rem;
+  border-radius: 0.78rem !important;
+  font-weight: 800 !important;
+}
+
+.detail-business-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.9rem;
+}
+
+.ac-card-actions {
+  gap: 0.5rem !important;
+}
+
+.ac-card-link-btn--task {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.ac-card-link-btn:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.5 !important;
 }
 
 @media (max-width: 1280px) {
   .ac-card {
-    grid-template-columns: 8rem minmax(0, 1fr) !important;
+    grid-template-columns: 8.25rem minmax(0, 1fr) !important;
   }
 
   .ac-card-img-box {
-    width: 8rem !important;
-    min-height: 8rem !important;
+    width: 8.25rem !important;
+    min-height: 8.25rem !important;
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 980px) {
   .ac-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)) !important;
   }
 
   .ac-card {
-    grid-template-columns: 7.25rem minmax(0, 1fr) !important;
+    min-height: 0 !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
-      "preview info"
-      "footer footer"
-      "actions actions" !important;
+      "preview"
+      "info"
+      "footer"
+      "actions" !important;
   }
 
   .ac-card-img-box {
-    width: 7.25rem !important;
-    min-height: 7.25rem !important;
+    width: 100% !important;
+    min-height: 9.5rem !important;
+    aspect-ratio: 16 / 10 !important;
+  }
+
+  .ac-card-footer {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .ac-title-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ac-format-pill {
+    justify-self: start;
+  }
+
+  .ac-card-actions {
+    flex-direction: column;
+    align-items: stretch !important;
   }
 }
 

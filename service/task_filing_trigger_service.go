@@ -289,7 +289,7 @@ func (s *taskService) performERPBridgeFilingPayloads(ctx context.Context, taskID
 	summary := taskFilingAttemptSummary{ItemResults: make([]taskFilingItemResult, 0, len(payloads))}
 	failures := make([]string, 0)
 	for _, payload := range payloads {
-		result, callLogID, failure, appErr := s.performERPBridgeFilingPayload(ctx, taskID, payload.Payload, remark)
+		result, callLogID, failure, appErr := s.performERPBridgeFilingPayload(ctx, taskID, payload.SKUItemID, payload.Payload, remark)
 		if callLogID != nil {
 			summary.LastCallLog = callLogID
 		}
@@ -325,7 +325,7 @@ func (s *taskService) performERPBridgeFilingPayloads(ctx context.Context, taskID
 	return summary, nil
 }
 
-func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID int64, payload domain.ERPProductUpsertPayload, remark string) (*domain.ERPProductUpsertResult, *int64, string, *domain.AppError) {
+func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID, skuItemID int64, payload domain.ERPProductUpsertPayload, remark string) (*domain.ERPProductUpsertResult, *int64, string, *domain.AppError) {
 	if s.erpBridgeSvc == nil {
 		return nil, nil, "", domain.NewAppError(domain.ErrCodeInternalError, "erp bridge filing is not configured", nil)
 	}
@@ -341,6 +341,7 @@ func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID 
 	result, upsertAttempts, appErr := erpBridgeUpsertProductWithCostRetry(ctx, s.erpBridgeSvc.UpsertProduct, payload)
 	if appErr != nil {
 		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, nil, appErr, remark)
+		s.traceERPProductUpsertBestEffort(ctx, taskID, skuItemID, payload, callLogID, nil, domain.IntegrationCallStatusFailed, appErr.Message)
 		return nil, callLogID, appErr.Message, nil
 	}
 	if failure := erpBridgeCostVerificationFailureMessage(result, upsertAttempts); failure != "" {
@@ -349,11 +350,13 @@ func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID 
 			"sku_id":  strings.TrimSpace(payload.SKUID),
 		})
 		_ = s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusFailed, startedAt, result, appErr, remark)
+		s.traceERPProductUpsertBestEffort(ctx, taskID, skuItemID, payload, callLogID, result, domain.IntegrationCallStatusFailed, failure)
 		return result, callLogID, failure, nil
 	}
 	if err := s.finishERPBridgeFilingCallLog(ctx, callLogID, domain.IntegrationCallStatusSucceeded, startedAt, result, nil, remark); err != nil {
 		return nil, callLogID, "", infraError("update erp bridge filing call log", err)
 	}
+	s.traceERPProductUpsertBestEffort(ctx, taskID, skuItemID, payload, callLogID, result, domain.IntegrationCallStatusSucceeded, "")
 	return result, callLogID, "", nil
 }
 

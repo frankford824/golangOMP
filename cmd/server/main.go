@@ -100,6 +100,7 @@ func main() {
 	costRuleRepo := mysqlrepo.NewCostRuleRepo(mdb)
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
+	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
 	procurementRepo := mysqlrepo.NewProcurementRepo(mdb)
 	taskCostOverrideEventRepo := mysqlrepo.NewTaskCostOverrideEventRepo(mdb)
 	taskCostOverrideReviewRepo := mysqlrepo.NewTaskCostOverrideReviewRepo(mdb)
@@ -255,6 +256,7 @@ func main() {
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
 		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
+		service.WithTaskSKUTraceRepo(skuTraceRepo),
 		service.WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
 		service.WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
 		service.WithTaskReferenceAssetFormalizer(taskReferenceAssetFormalizer),

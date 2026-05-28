@@ -4,10 +4,19 @@
       <div>
         <h2 class="page-title">资产详情</h2>
         <p class="page-subtitle">
-          资产 ID：<span class="cell-mono">{{ assetId }}</span>
+          所属任务：<span class="cell-mono">{{ asset ? businessTaskNo(asset) : '加载中' }}</span>
+          <span v-if="asset"> · SKU：<span class="cell-mono">{{ businessSku(asset) }}</span></span>
         </p>
       </div>
       <div class="page-actions">
+        <BaseButton
+          v-if="assetTaskId"
+          variant="primary"
+          size="sm"
+          @click="goTaskDetail"
+        >
+          打开对应任务
+        </BaseButton>
         <BaseButton
           v-if="taskId && canAccessPage('task_assets')"
           variant="secondary"
@@ -41,20 +50,28 @@
       <template v-else>
         <dl class="detail-grid">
           <div class="detail-row">
-            <dt>资产 ID</dt>
-            <dd class="cell-mono">{{ displayText(asset.id) }}</dd>
+            <dt>SKU</dt>
+            <dd class="cell-mono">{{ businessSku(asset) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>任务 ID</dt>
-            <dd class="cell-mono">{{ displayText(asset.task_id) }}</dd>
+            <dt>所属任务号</dt>
+            <dd class="cell-mono">{{ businessTaskNo(asset) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>类型</dt>
-            <dd>{{ assetKind(asset) }}</dd>
+            <dt>任务创建运营</dt>
+            <dd>{{ taskCreatorLabel(asset) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>SKU 作用域</dt>
-            <dd class="cell-mono">{{ displayText(asset.scope_sku_code) }}</dd>
+            <dt>图片类型</dt>
+            <dd>{{ imageBusinessTypeLabel(asset) }}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>文件名</dt>
+            <dd>{{ assetFileName(asset) }}</dd>
+          </div>
+          <div class="detail-row">
+            <dt>产品名称</dt>
+            <dd>{{ assetProductLabel(asset) }}</dd>
           </div>
           <div class="detail-row">
             <dt>上传状态</dt>
@@ -65,20 +82,12 @@
             <dd>{{ assetArchiveStatus(asset.archive_status) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>来源源稿</dt>
-            <dd class="cell-mono">{{ displayText(asset.source_asset_id) }}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>替换前稿件</dt>
-            <dd class="cell-mono">{{ displayText(asset.previous_asset_id) }}</dd>
+            <dt>系统资产号</dt>
+            <dd class="cell-mono">{{ displayText(asset.id) }}</dd>
           </div>
           <div class="detail-row">
             <dt>当前有效稿件</dt>
             <dd class="cell-mono">{{ displayText(asset.current_asset_id ?? asset.id) }}</dd>
-          </div>
-          <div class="detail-row">
-            <dt>替换人</dt>
-            <dd>{{ replacementActorText(asset) }}</dd>
           </div>
           <div class="detail-row">
             <dt>业务线 / 来源部门</dt>
@@ -135,6 +144,10 @@
                   <dt>创建时间</dt>
                   <dd>{{ displayTime(version.created_at) }}</dd>
                 </div>
+                <div class="detail-row">
+                  <dt>上传人</dt>
+                  <dd>{{ versionCreatorLabel(version) }}</dd>
+                </div>
               </dl>
             </article>
           </div>
@@ -187,6 +200,7 @@ const previewUnavailable = ref(false)
 const previewNotFound = ref(false)
 
 const versions = computed<BackendAssetVersion[]>(() => asset.value?.versions ?? [])
+const assetTaskId = computed(() => String(asset.value?.task_id ?? taskId.value ?? '').trim())
 
 const previewStateLabel = computed(() => {
   if (previewUnavailable.value) return '当前不可预览（仅可下载，非不存在）'
@@ -209,8 +223,74 @@ function displayTime(value: unknown): string {
   return formatDateTimeBeijing(text) || text
 }
 
-function replacementActorText(row: BackendAsset): string {
-  return userAccountDisplay(row.replacement_actor_name, row.replacement_actor_username)
+function businessSku(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  for (const key of ['scope_sku_code', 'sku_code', 'primary_sku_code', 'target_sku_code'] as const) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return '未绑定 SKU'
+}
+
+function businessTaskNo(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  for (const key of ['task_no', 'taskNo'] as const) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return row.task_id != null && String(row.task_id).trim() ? `任务 ${row.task_id}` : '未绑定任务'
+}
+
+function taskCreatorLabel(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  return userAccountDisplay(
+    record.task_creator_username,
+    record.task_creator_name,
+    record.creator_username,
+    record.creator_name,
+    record.created_by_username,
+    record.created_by_name,
+  )
+}
+
+function assetFileName(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  for (const key of ['file_name', 'original_filename', 'filename'] as const) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return `${assetKind(row)} #${row.id}`
+}
+
+function fileFormatLabel(row: BackendAsset): string {
+  const filename = assetFileName(row)
+  const match = /\.([a-z0-9]{2,8})(?:$|[?#])/i.exec(filename)
+  if (match?.[1]) return match[1].toUpperCase()
+  const record = row as Record<string, unknown>
+  const mime = String(record.mime_type ?? '').trim()
+  if (mime.includes('/')) {
+    const subtype = mime.split('/').pop()?.split(/[;+]/)[0]?.trim()
+    if (subtype) return subtype.toUpperCase().replace('JPEG', 'JPG')
+  }
+  return '文件'
+}
+
+function imageBusinessTypeLabel(row: BackendAsset): string {
+  return `${assetKind(row)} / ${fileFormatLabel(row)}`
+}
+
+function assetProductLabel(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  const product = String(record.product_name ?? record.product_name_snapshot ?? '').trim()
+  return product || '—'
+}
+
+function versionCreatorLabel(version: BackendAssetVersion): string {
+  const record = version as Record<string, unknown>
+  const actor = record.created_by && typeof record.created_by === 'object'
+    ? record.created_by as Record<string, unknown>
+    : {}
+  return userAccountDisplay(actor.username, actor.name, record.created_by_username, record.created_by_name)
 }
 
 function assetKind(input: BackendAsset | string | null | undefined): string {
@@ -248,6 +328,11 @@ function goAssetsIndex() {
   if (!canAccessPage('assets_index')) return
   const query = taskId.value ? { task_id: taskId.value, asset_id: assetId.value } : { asset_id: assetId.value }
   void router.push({ name: 'AssetsIndex', query })
+}
+
+function goTaskDetail() {
+  if (!assetTaskId.value) return
+  void router.push({ name: 'TaskDetail', params: { id: assetTaskId.value } })
 }
 
 async function loadAsset() {
