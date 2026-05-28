@@ -1,7 +1,7 @@
 <template>
   <section class="type-section retouch-form">
     <p class="form-intro">
-      请按需求逐条填写 P 图说明。每条需求可单独上传「本条参考图」与「本条素材文件」；创建任务后系统会自动绑定到对应需求。
+      请按需求逐条填写 P 图说明：直接描述本条修改要求，额外说明可写在备注；每条需求可单独上传参考图与素材文件，创建任务后自动绑定到该需求。
     </p>
 
     <p v-if="pickError" class="pick-error">{{ pickError }}</p>
@@ -10,7 +10,7 @@
       <div class="requirements-header">
         <div>
           <h4 class="requirements-title">P 图需求明细</h4>
-          <p class="field-hint">至少填写 1 条需求描述（必填）；SKU / 规格 / 备注为可选项。</p>
+          <p class="field-hint">至少填写 1 条需求描述（必填）；备注与本条附件为可选项。</p>
         </div>
         <button type="button" class="add-req-btn" @click="addRequirement">添加需求</button>
       </div>
@@ -35,13 +35,13 @@
           v-model="item.description"
           label="需求描述"
           :rows="3"
-          placeholder="请描述本条 P 图修改要求"
+          placeholder="直接描述本条 P 图修改要求"
         />
-        <div class="optional-grid">
-          <BaseInput v-model="item.skuCode" label="SKU / 款号（可选）" placeholder="例如 SKU-001" />
-          <BaseInput v-model="item.spec" label="规格（可选）" placeholder="例如 60×40cm" />
-        </div>
-        <BaseInput v-model="item.remark" label="备注（可选）" placeholder="补充说明" />
+        <BaseInput
+          v-model="item.remark"
+          label="备注（可选）"
+          placeholder="如有款号、尺寸等额外说明可写在这里"
+        />
 
         <div class="req-upload-block">
           <div class="req-upload-head">
@@ -337,12 +337,6 @@ function prettyFileSize(size: number): string {
   color: var(--text-primary, #0f172a);
 }
 
-.optional-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
 .pick-error {
   margin: 0;
   font-size: 12px;
@@ -412,11 +406,5 @@ function prettyFileSize(size: number): string {
 .pending-file-meta {
   color: var(--text-secondary, #64748b);
   flex-shrink: 0;
-}
-
-@media (max-width: 720px) {
-  .optional-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

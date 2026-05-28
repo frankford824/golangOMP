@@ -149,6 +149,7 @@ export const TASK_TYPE_FIELD_WHITELIST = {
   retouch_task: {
     // 前端门禁：至少 1 条 retouch_requirements[].description + due_at（见 task-create-rules.ts）。
     // demand_text / design_requirement 由首条需求描述兜底写入，reference_file_refs 可为空。
+    // 创建页不收集每条需求的 sku_code/spec（可写在 remark）；POST 仍兼容后端可选字段。
     required: ['retouch_requirements', 'due_at'] as readonly string[],
     optional: [
       'demand_text',

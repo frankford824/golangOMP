@@ -178,6 +178,15 @@ describe('buildRetouchRequirementsPayload', () => {
     expect(payload[0]).not.toHaveProperty('pendingReferenceFiles')
     expect(payload[0]).not.toHaveProperty('pendingSourceFiles')
   })
+
+  it('omits sku_code and spec when not provided on draft', () => {
+    const payload = buildRetouchRequirementsPayload([
+      { description: '仅描述', sortOrder: 1, remark: '备注说明' },
+    ])
+    expect(payload[0]).toEqual({ description: '仅描述', remark: '备注说明', sort_order: 1 })
+    expect(payload[0]).not.toHaveProperty('sku_code')
+    expect(payload[0]).not.toHaveProperty('spec')
+  })
 })
 
 describe('canSubmitTask — other kinds unchanged', () => {

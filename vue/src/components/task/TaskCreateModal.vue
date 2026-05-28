@@ -669,7 +669,10 @@ const contextPanelItems = computed(() => {
   }
   if (taskKind.value === 'RETOUCH_TASK') {
     return [
-      { title: '最小字段', body: '按需求逐条填写 P 图说明即可，无需 SKU、成本或分类。' },
+      {
+        title: '填写方式',
+        body: '每条需求写清修改说明即可；款号、尺寸等额外信息请写在备注，不必单独填 SKU 或规格字段。',
+      },
       {
         title: '本条附件',
         body: '每条需求可单独上传参考图与素材文件（PSD / AI / ZIP 等），创建后自动绑定到该需求；单文件大小上限见上传提示。',
