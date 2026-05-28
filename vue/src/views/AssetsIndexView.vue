@@ -168,7 +168,13 @@
           <div class="ac-card-info">
             <div class="ac-title-row">
               <h2 class="ac-card-title" :title="businessSku(asset)">{{ businessSku(asset) }}</h2>
-              <span class="ac-format-pill" :title="imageBusinessTypeLabel(asset)">{{ compactImageBusinessTypeLabel(asset) }}</span>
+              <span
+                class="ac-format-pill"
+                :class="assetTypeToneClass(asset)"
+                :title="imageBusinessTypeLabel(asset)"
+              >
+                {{ compactImageBusinessTypeLabel(asset) }}
+              </span>
             </div>
             <div class="ac-card-meta">
               <div class="ac-business-row">
@@ -826,6 +832,16 @@ function compactImageBusinessTypeLabel(asset: BackendAsset): string {
       ? '预览图'
       : assetKind(asset)
   return `${kind} / ${fileFormatLabel(asset)}`
+}
+
+function assetTypeToneClass(asset: BackendAsset): string {
+  const record = asset as Record<string, unknown>
+  const rawKind = String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? '').trim().toLowerCase()
+  if (rawKind === 'delivery') return 'ac-format-pill--delivery'
+  if (rawKind === 'source') return 'ac-format-pill--source'
+  if (rawKind === 'reference') return 'ac-format-pill--reference'
+  if (rawKind === 'preview' || rawKind === 'design_thumb') return 'ac-format-pill--preview'
+  return 'ac-format-pill--other'
 }
 
 function fileFormatLabel(asset: BackendAsset): string {
@@ -2917,6 +2933,36 @@ onBeforeUnmount(() => {
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ac-format-pill--delivery {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.ac-format-pill--source {
+  border-color: #ddd6fe !important;
+  background: #f5f3ff !important;
+  color: #6d28d9 !important;
+}
+
+.ac-format-pill--reference {
+  border-color: #fed7aa !important;
+  background: #fff7ed !important;
+  color: #c2410c !important;
+}
+
+.ac-format-pill--preview {
+  border-color: #bae6fd !important;
+  background: #ecfeff !important;
+  color: #0e7490 !important;
+}
+
+.ac-format-pill--other {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #475569 !important;
 }
 
 .ac-card-meta,
