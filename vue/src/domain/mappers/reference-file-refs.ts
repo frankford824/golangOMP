@@ -76,13 +76,30 @@ function pickReferenceVersionDisplayUrl(version: BackendAssetVersion): string {
   return publicUrl ?? ''
 }
 
+function readRetouchRequirementId(asset: BackendAsset): number | undefined {
+  const rec = asset as Record<string, unknown>
+  const raw = rec.retouch_requirement_id ?? rec.retouchRequirementId
+  if (raw == null || raw === '') return undefined
+  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  return n
+}
+
+/**
+ * Exclude P 图需求级资产，避免与 retouch_requirements[].reference_file_refs / source_assets 重复展示在任务级参考图区。
+ */
+export function filterTaskLevelBackendReferenceAssets(assets: BackendAsset[]): BackendAsset[] {
+  if (!assets.length) return []
+  return assets.filter((asset) => readRetouchRequirementId(asset) == null)
+}
+
 /**
  * Map GET /v1/tasks/{id}/assets reference rows into ReferenceFileRef for ops detail display.
  */
 export function referenceFileRefsFromBackendReferenceAssets(assets: BackendAsset[]): ReferenceFileRef[] {
   if (!assets.length) return []
   const out: ReferenceFileRef[] = []
-  for (const asset of assets) {
+  for (const asset of filterTaskLevelBackendReferenceAssets(assets)) {
     if (backendReferenceAssetKind(asset) !== 'reference') continue
     const assetRec = asset as Record<string, unknown>
     const rootAssetId = trimRefField(assetRec.asset_id ?? assetRec.assetId ?? asset.id)

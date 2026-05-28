@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   dedupeReferenceFileRefs,
+  filterTaskLevelBackendReferenceAssets,
   referenceFileRefsFromBackendReferenceAssets,
 } from '@/domain/mappers/reference-file-refs'
 import type { BackendAsset } from '@/services/apiTypes'
@@ -60,6 +61,18 @@ describe('dedupeReferenceFileRefs', () => {
   })
 })
 
+describe('filterTaskLevelBackendReferenceAssets', () => {
+  it('drops assets scoped to a retouch requirement', () => {
+    const assets: BackendAsset[] = [
+      { id: '1', file_role: 'reference', retouch_requirement_id: 9 } as BackendAsset,
+      { id: '2', file_role: 'reference' } as BackendAsset,
+    ]
+    const filtered = filterTaskLevelBackendReferenceAssets(assets)
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.id).toBe('2')
+  })
+})
+
 describe('referenceFileRefsFromBackendReferenceAssets', () => {
   it('maps reference assets and dedupes against legacy refs by asset_id', () => {
     const assets: BackendAsset[] = [
@@ -90,5 +103,40 @@ describe('referenceFileRefsFromBackendReferenceAssets', () => {
     }
     const merged = dedupeReferenceFileRefs([legacy, ...fromAssets])
     expect(merged).toHaveLength(1)
+  })
+
+  it('ignores requirement-scoped reference assets', () => {
+    const assets: BackendAsset[] = [
+      {
+        id: 'req-ref',
+        file_role: 'reference',
+        asset_kind: 'reference',
+        retouch_requirement_id: 12,
+        versions: [
+          {
+            id: 'v-req',
+            file_role: 'reference',
+            download_url: 'https://cdn.example/req.png',
+            file_name: 'req.png',
+          },
+        ],
+      } as BackendAsset,
+      {
+        id: 'task-ref',
+        file_role: 'reference',
+        asset_kind: 'reference',
+        versions: [
+          {
+            id: 'v-task',
+            file_role: 'reference',
+            download_url: 'https://cdn.example/task.png',
+            file_name: 'task.png',
+          },
+        ],
+      } as BackendAsset,
+    ]
+    const fromAssets = referenceFileRefsFromBackendReferenceAssets(assets)
+    expect(fromAssets).toHaveLength(1)
+    expect(fromAssets[0]?.filename).toBe('task.png')
   })
 })

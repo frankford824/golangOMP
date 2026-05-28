@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"workflow/domain"
 )
@@ -108,7 +110,7 @@ func EnrichRetouchRequirementsReadModel(
 	if len(requirements) == 0 {
 		return []domain.TaskRetouchRequirement{}
 	}
-	refsByRequirement := groupRequirementReferenceFileRefs(flatRefs)
+	refsByRequirement := groupRequirementReferenceFileRefs(flatRefs, designAssets)
 	sourcesByRequirement := groupRequirementSourceAssets(designAssets)
 	out := make([]domain.TaskRetouchRequirement, 0, len(requirements))
 	for _, item := range requirements {
@@ -131,13 +133,33 @@ func EnrichRetouchRequirementsReadModel(
 	return out
 }
 
-func groupRequirementReferenceFileRefs(flatRefs []*domain.ReferenceFileRefFlat) map[int64][]domain.ReferenceFileRef {
+func groupRequirementReferenceFileRefs(
+	flatRefs []*domain.ReferenceFileRefFlat,
+	designAssets []*domain.DesignAsset,
+) map[int64][]domain.ReferenceFileRef {
 	out := make(map[int64][]domain.ReferenceFileRef)
+	for _, asset := range designAssets {
+		ref, ok := referenceFileRefFromRequirementReferenceAsset(asset)
+		if !ok {
+			continue
+		}
+		reqID := *asset.RetouchRequirementID
+		out[reqID] = append(out[reqID], ref)
+	}
+	hasDesignRefs := make(map[int64]struct{}, len(out))
+	for reqID, refs := range out {
+		if len(refs) > 0 {
+			hasDesignRefs[reqID] = struct{}{}
+		}
+	}
 	for _, flat := range flatRefs {
 		if flat == nil || flat.RetouchRequirementID == nil || *flat.RetouchRequirementID <= 0 || flat.RefID == "" {
 			continue
 		}
 		reqID := *flat.RetouchRequirementID
+		if _, ok := hasDesignRefs[reqID]; ok {
+			continue
+		}
 		out[reqID] = append(out[reqID], domain.ReferenceFileRef{
 			AssetID: flat.RefID,
 			RefID:   flat.RefID,
@@ -147,6 +169,38 @@ func groupRequirementReferenceFileRefs(flatRefs []*domain.ReferenceFileRefFlat) 
 		out[reqID] = domain.NormalizeReferenceFileRefs(refs)
 	}
 	return out
+}
+
+func referenceFileRefFromRequirementReferenceAsset(asset *domain.DesignAsset) (domain.ReferenceFileRef, bool) {
+	if asset == nil || asset.RetouchRequirementID == nil || *asset.RetouchRequirementID <= 0 {
+		return domain.ReferenceFileRef{}, false
+	}
+	if !asset.AssetType.IsReference() {
+		return domain.ReferenceFileRef{}, false
+	}
+	version := asset.CurrentVersion
+	if version == nil || strings.TrimSpace(version.StorageKey) == "" {
+		return domain.ReferenceFileRef{}, false
+	}
+	assetID := strconv.FormatInt(asset.ID, 10)
+	ref := domain.ReferenceFileRef{
+		AssetID:    assetID,
+		RefID:      assetID,
+		Filename:   strings.TrimSpace(version.OriginalFilename),
+		MimeType:   strings.TrimSpace(version.MimeType),
+		StorageKey: strings.TrimSpace(version.StorageKey),
+		Source:     domain.ReferenceFileRefSourceTaskCreateAssetCenter,
+		Status:     domain.ReferenceFileRefStatusUploaded,
+	}
+	if version.FileSize != nil {
+		ref.FileSize = domain.CloneInt64Ptr(version.FileSize)
+	}
+	if version.DownloadURL != nil {
+		if downloadURL := strings.TrimSpace(*version.DownloadURL); downloadURL != "" {
+			ref.DownloadURL = &downloadURL
+		}
+	}
+	return ref, true
 }
 
 func groupRequirementSourceAssets(designAssets []*domain.DesignAsset) map[int64][]*domain.DesignAsset {
