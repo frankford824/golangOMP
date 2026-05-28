@@ -154,6 +154,16 @@
               inner-img-class="ac-card-preview-img"
               @open-full="(u) => (previewLightboxSrc = u)"
             />
+            <AssetDownloadLink
+              class="ac-card-download-fab"
+              variant="button"
+              :asset-id="String(asset.id)"
+              :href="listCardResolvedPreviewUrl(asset)"
+              :aria-label="`下载 ${businessSku(asset)} 资产文件`"
+              @click.stop
+            >
+              下载
+            </AssetDownloadLink>
           </div>
           <div class="ac-card-info">
             <div class="ac-title-row">
@@ -2690,6 +2700,7 @@ onBeforeUnmount(() => {
   border-radius: 0.82rem !important;
   background: #f3f6fb !important;
   border: 1px solid #e5eaf2 !important;
+  position: relative !important;
 }
 
 .ac-card-img-box :deep(.ac-card-apm),
@@ -2718,6 +2729,54 @@ onBeforeUnmount(() => {
 .ac-card-img-box :deep(.apm-placeholder-img) {
   max-width: 82% !important;
   max-height: 82% !important;
+}
+
+.ac-card-download-fab {
+  position: absolute !important;
+  right: 0.5rem !important;
+  bottom: 0.5rem !important;
+  z-index: 3 !important;
+  min-height: 1.95rem !important;
+  padding: 0.38rem 0.66rem !important;
+  border-radius: 999px !important;
+  border-color: rgba(37, 99, 235, 0.58) !important;
+  background: rgba(37, 99, 235, 0.92) !important;
+  color: #ffffff !important;
+  font-size: 0.74rem !important;
+  font-weight: 850 !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
+  box-shadow: 0 0.45rem 1.05rem rgba(37, 99, 235, 0.24) !important;
+  opacity: 0;
+  transform: translateY(0.2rem);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease !important;
+}
+
+.ac-card:hover .ac-card-download-fab,
+.ac-card:focus-within .ac-card-download-fab,
+.ac-card-download-fab:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ac-card-download-fab:hover {
+  border-color: rgba(191, 219, 254, 0.95) !important;
+  background: #1d4ed8 !important;
+  box-shadow: 0 0.55rem 1.25rem rgba(37, 99, 235, 0.34) !important;
+}
+
+.ac-card-download-fab :deep(.asset-dl-icon) {
+  width: 0.82rem !important;
+  height: 0.82rem !important;
+}
+
+.ac-card-download-fab :deep(.asset-dl-text) {
+  line-height: 1 !important;
 }
 
 .ac-card-info {
@@ -2975,6 +3034,11 @@ onBeforeUnmount(() => {
 
   .ac-card-footer {
     grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ac-card-download-fab {
+    opacity: 1;
+    transform: none;
   }
 }
 
