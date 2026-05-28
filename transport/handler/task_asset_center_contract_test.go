@@ -186,5 +186,8 @@ func (s *taskAssetCenterServiceStub) CancelUploadSession(context.Context, servic
 func (s *taskAssetCenterServiceStub) BuildTaskReferenceBatchDownloadManifest(context.Context, int64, int64) (*service.TaskReferenceBatchDownloadManifest, *domain.AppError) {
 	return &service.TaskReferenceBatchDownloadManifest{}, nil
 }
+func (s *taskAssetCenterServiceStub) EnsureDerivedPreviewAssets(context.Context, int64, int64, int64) *domain.AppError {
+	return nil
+}
 
 var _ service.TaskAssetCenterService = (*taskAssetCenterServiceStub)(nil)

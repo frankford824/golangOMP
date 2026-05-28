@@ -17,18 +17,18 @@ import (
 )
 
 type CreateTaskAssetUploadSessionParams struct {
-	TaskID        int64
-	AssetID       *int64
-	SourceAssetID *int64
-	CreatedBy     int64
-	AssetType     domain.TaskAssetType
-	Filename      string
-	ExpectedSize  *int64
-	MimeType      string
-	FileHash      string
-	Remark        string
-	TargetSKUCode          string
-	RetouchRequirementID   *int64
+	TaskID               int64
+	AssetID              *int64
+	SourceAssetID        *int64
+	CreatedBy            int64
+	AssetType            domain.TaskAssetType
+	Filename             string
+	ExpectedSize         *int64
+	MimeType             string
+	FileHash             string
+	Remark               string
+	TargetSKUCode        string
+	RetouchRequirementID *int64
 }
 
 type CompleteTaskAssetUploadSessionParams struct {
@@ -90,6 +90,7 @@ type TaskAssetCenterService interface {
 	CancelUploadSessionByID(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
 	CancelUploadSession(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
 	BuildTaskReferenceBatchDownloadManifest(ctx context.Context, taskID int64, actorID int64) (*TaskReferenceBatchDownloadManifest, *domain.AppError)
+	EnsureDerivedPreviewAssets(ctx context.Context, taskID, sourceAssetID, actorID int64) *domain.AppError
 }
 
 type taskAssetCenterService struct {
@@ -107,12 +108,13 @@ type taskAssetCenterService struct {
 	nowFn                     func() time.Time
 	runAsyncFn                func(func())
 	derivedPreviewGracePeriod time.Duration
-	dataScopeResolver          DataScopeResolver
-	scopeUserRepo              repo.UserRepo
-	userDisplayNameResolver    UserDisplayNameResolver
-	workflowRules              designSubmissionWorkflowEngine
-	retouchRequirementRepo     repo.TaskRetouchRequirementRepo
-	referenceFileRefFlatRepo   repo.ReferenceFileRefFlatRepo
+	previewRenderer           AssetPreviewRenderer
+	dataScopeResolver         DataScopeResolver
+	scopeUserRepo             repo.UserRepo
+	userDisplayNameResolver   UserDisplayNameResolver
+	workflowRules             designSubmissionWorkflowEngine
+	retouchRequirementRepo    repo.TaskRetouchRequirementRepo
+	referenceFileRefFlatRepo  repo.ReferenceFileRefFlatRepo
 }
 
 const (
@@ -147,11 +149,18 @@ func NewTaskAssetCenterService(
 			go fn()
 		},
 		derivedPreviewGracePeriod: 3 * time.Second,
+		previewRenderer:           NewExternalAssetPreviewRenderer(),
 	}
 	for _, opt := range options {
 		opt(svc)
 	}
 	return svc
+}
+
+func WithTaskAssetCenterPreviewRenderer(renderer AssetPreviewRenderer) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.previewRenderer = renderer
+	}
 }
 
 func WithOSSDirectService(ossDirect *OSSDirectService) func(*taskAssetCenterService) {
@@ -580,7 +589,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			}
 			if !retouchRequirementIDsEqual(existingAsset.RetouchRequirementID, retouchRequirementID) {
 				return domain.NewAppError(domain.ErrCodeInvalidRequest, "retouch_requirement_id does not match existing asset scope", map[string]interface{}{
-					"retouch_requirement_id": retouchRequirementID,
+					"retouch_requirement_id":       retouchRequirementID,
 					"asset_retouch_requirement_id": existingAsset.RetouchRequirementID,
 					"asset_id":                     existingAsset.ID,
 					"upload_session_id":            request.RequestID,
@@ -628,24 +637,24 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			ScopeSKUCode:         optionalStringPtr(scopeSKUCode),
 			RetouchRequirementID: retouchRequirementID,
 			AssetType:            requestAssetType,
-			VersionNo:       timelineVersionNo,
-			AssetVersionNo:  &assetVersionNo,
-			UploadMode:      optionalStringPtr(string(request.UploadMode)),
-			UploadRequestID: &request.RequestID,
-			StorageRefID:    &storageRefID,
-			FileName:        request.FileName,
-			OriginalName:    optionalStringPtr(request.FileName),
-			RemoteFileID:    meta.FileID,
-			MimeType:        optionalStringPtr(firstNonEmpty(meta.MimeType, request.MimeType)),
-			FileSize:        firstNonNilInt64(meta.FileSize, request.ExpectedSize, request.FileSize),
-			StorageKey:      optionalStringPtr(resolvedStorageKey),
-			WholeHash:       meta.FileHash,
-			UploadStatus:    &uploadStatus,
-			PreviewStatus:   &previewStatus,
-			UploadedBy:      params.CompletedBy,
-			UploadedAt:      &now,
-			Remark:          firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
-			SourceModuleKey: designAssetSourceModuleKeyForTask(task, requestAssetType),
+			VersionNo:            timelineVersionNo,
+			AssetVersionNo:       &assetVersionNo,
+			UploadMode:           optionalStringPtr(string(request.UploadMode)),
+			UploadRequestID:      &request.RequestID,
+			StorageRefID:         &storageRefID,
+			FileName:             request.FileName,
+			OriginalName:         optionalStringPtr(request.FileName),
+			RemoteFileID:         meta.FileID,
+			MimeType:             optionalStringPtr(firstNonEmpty(meta.MimeType, request.MimeType)),
+			FileSize:             firstNonNilInt64(meta.FileSize, request.ExpectedSize, request.FileSize),
+			StorageKey:           optionalStringPtr(resolvedStorageKey),
+			WholeHash:            meta.FileHash,
+			UploadStatus:         &uploadStatus,
+			PreviewStatus:        &previewStatus,
+			UploadedBy:           params.CompletedBy,
+			UploadedAt:           &now,
+			Remark:               firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
+			SourceModuleKey:      designAssetSourceModuleKeyForTask(task, requestAssetType),
 		}
 		id, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
 		if err != nil {
@@ -1091,34 +1100,34 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	now := s.nowFn().UTC()
 	requiredContentType := normalizeRequiredUploadContentType(params.MimeType)
 	request := &domain.UploadRequest{
-		OwnerType:       domain.AssetOwnerTypeTask,
-		OwnerID:         params.TaskID,
-		TaskID:          params.TaskID,
-		AssetID:         params.AssetID,
-		SourceAssetID:   params.SourceAssetID,
-		TargetSKUCode:          params.TargetSKUCode,
-		RetouchRequirementID:   domain.CloneInt64Ptr(params.RetouchRequirementID),
-		TaskAssetType:          &params.AssetType,
-		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
-		UploadMode:      mode,
-		RefType:         domain.AssetStorageRefTypeTaskAssetObject,
-		FileName:        strings.TrimSpace(params.Filename),
-		MimeType:        requiredContentType,
-		FileSize:        params.ExpectedSize,
-		ExpectedSize:    params.ExpectedSize,
-		ChecksumHint:    strings.TrimSpace(params.FileHash),
-		Status:          domain.UploadRequestStatusRequested,
-		StorageProvider: domain.DesignAssetStorageProviderOSS,
-		SessionStatus:   domain.DesignAssetSessionStatusCreated,
-		RemoteUploadID:  remote.UploadID,
-		RemoteFileID:    valueOrEmpty(remote.FileID),
-		IsPlaceholder:   remote.IsStub,
-		CreatedBy:       params.CreatedBy,
-		ExpiresAt:       remote.ExpiresAt,
-		LastSyncedAt:    firstNonNilTime(remote.LastSyncedAt, &now),
-		Remark:          strings.TrimSpace(params.Remark),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		OwnerType:            domain.AssetOwnerTypeTask,
+		OwnerID:              params.TaskID,
+		TaskID:               params.TaskID,
+		AssetID:              params.AssetID,
+		SourceAssetID:        params.SourceAssetID,
+		TargetSKUCode:        params.TargetSKUCode,
+		RetouchRequirementID: domain.CloneInt64Ptr(params.RetouchRequirementID),
+		TaskAssetType:        &params.AssetType,
+		StorageAdapter:       domain.AssetStorageAdapterOSSUploadService,
+		UploadMode:           mode,
+		RefType:              domain.AssetStorageRefTypeTaskAssetObject,
+		FileName:             strings.TrimSpace(params.Filename),
+		MimeType:             requiredContentType,
+		FileSize:             params.ExpectedSize,
+		ExpectedSize:         params.ExpectedSize,
+		ChecksumHint:         strings.TrimSpace(params.FileHash),
+		Status:               domain.UploadRequestStatusRequested,
+		StorageProvider:      domain.DesignAssetStorageProviderOSS,
+		SessionStatus:        domain.DesignAssetSessionStatusCreated,
+		RemoteUploadID:       remote.UploadID,
+		RemoteFileID:         valueOrEmpty(remote.FileID),
+		IsPlaceholder:        remote.IsStub,
+		CreatedBy:            params.CreatedBy,
+		ExpiresAt:            remote.ExpiresAt,
+		LastSyncedAt:         firstNonNilTime(remote.LastSyncedAt, &now),
+		Remark:               strings.TrimSpace(params.Remark),
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		created, err := s.uploadRequestRepo.Create(ctx, tx, request)
@@ -1127,18 +1136,18 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		}
 		request = created
 		_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCreated, &params.CreatedBy, map[string]interface{}{
-			"upload_session_id": request.RequestID,
-			"asset_id":          params.AssetID,
-			"asset_type":        string(params.AssetType),
-			"target_sku_code":          params.TargetSKUCode,
-			"retouch_requirement_id":   params.RetouchRequirementID,
-			"filename":                 request.FileName,
-			"expected_size":     request.ExpectedSize,
-			"mime_type":         request.MimeType,
-			"upload_mode":       string(mode),
-			"storage_provider":  string(request.StorageProvider),
-			"remote_upload_id":  request.RemoteUploadID,
-			"expires_at":        request.ExpiresAt,
+			"upload_session_id":      request.RequestID,
+			"asset_id":               params.AssetID,
+			"asset_type":             string(params.AssetType),
+			"target_sku_code":        params.TargetSKUCode,
+			"retouch_requirement_id": params.RetouchRequirementID,
+			"filename":               request.FileName,
+			"expected_size":          request.ExpectedSize,
+			"mime_type":              request.MimeType,
+			"upload_mode":            string(mode),
+			"storage_provider":       string(request.StorageProvider),
+			"remote_upload_id":       request.RemoteUploadID,
+			"expires_at":             request.ExpiresAt,
 		})
 		return err
 	})

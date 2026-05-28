@@ -459,6 +459,7 @@ package_release() {
   local go_tool
   local main_output
   local bridge_output
+  local asset_preview_output
 
   dist_root="$(resolve_path "$root" "$output_root")"
   artifact_dir_name="${artifact_prefix}-${version}-linux-amd64"
@@ -469,6 +470,7 @@ package_release() {
   go_tool="$(go_cmd)"
   main_output="$stage_root/ecommerce-api"
   bridge_output="$stage_root/erp_bridge"
+  asset_preview_output="$stage_root/generate_asset_previews"
 
   rm -rf "$stage_root" "$artifact_path"
   mkdir -p "$stage_root" "$stage_root/config" "$stage_root/db" "$stage_root/docs" "$deploy_root"
@@ -480,10 +482,16 @@ package_release() {
     fi
     go_build_linux_amd64 "$root" "$go_tool" "$main_output" "$entrypoint"
     go_build_linux_amd64 "$root" "$go_tool" "$bridge_output" "$entrypoint"
+    if [ -f "$root/cmd/tools/generate-asset-previews/main.go" ]; then
+      go_build_linux_amd64 "$root" "$go_tool" "$asset_preview_output" "./cmd/tools/generate-asset-previews"
+    fi
   )
 
   wait_for_file "$stage_root/ecommerce-api" "main"
   wait_for_file "$stage_root/erp_bridge" "bridge"
+  if [ -f "$root/cmd/tools/generate-asset-previews/main.go" ]; then
+    wait_for_file "$stage_root/generate_asset_previews" "asset preview generator"
+  fi
 
   cp "$root"/config/*.json "$stage_root/config/"
   cp -R "$root/db/migrations" "$stage_root/db/"
@@ -510,6 +518,9 @@ package_release() {
     mv "$normalized_script" "$deploy_script"
   done
   chmod +x "$stage_root/ecommerce-api" "$stage_root/erp_bridge" "$deploy_root/"*.sh
+  if [ -f "$stage_root/generate_asset_previews" ]; then
+    chmod +x "$stage_root/generate_asset_previews"
+  fi
 
   cat >"$stage_root/PACKAGE_INFO.json" <<EOF
 {
@@ -518,9 +529,11 @@ package_release() {
   "artifact_archive": "$(json_escape "$(basename "$artifact_path")")",
   "main_binary": "ecommerce-api",
   "bridge_binary": "erp_bridge",
+  "asset_preview_generator_binary": "generate_asset_previews",
   "resolved_entrypoint": "$(json_escape "$entrypoint")",
   "main_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ecommerce-api $(json_escape "$entrypoint")",
   "bridge_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o erp_bridge $(json_escape "$entrypoint")",
+  "asset_preview_generator_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o generate_asset_previews ./cmd/tools/generate-asset-previews",
   "runtime_bridge_base_url": "$(json_escape "$bridge_base_url")",
   "suggested_remote_base_dir": "/root/ecommerce_ai",
   "runtime_env_example": ".env.example",

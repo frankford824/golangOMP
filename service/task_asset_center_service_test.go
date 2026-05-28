@@ -291,6 +291,7 @@ func TestTaskAssetCenterServiceCompleteOSSDirectMultipartWithoutRemoteSync(t *te
 		step04TxRunner{},
 		uploadClient,
 		WithOSSDirectService(ossDirect),
+		WithTaskAssetCenterPreviewRenderer(testPreviewRenderer{}),
 	).(*taskAssetCenterService)
 
 	body := []byte("canonical oss direct payload")
@@ -421,6 +422,7 @@ func TestTaskAssetCenterServiceCreateOSSDirectMultipartUsesASCIIObjectKeyAndPres
 		step04TxRunner{},
 		uploadClient,
 		WithOSSDirectService(ossDirect),
+		WithTaskAssetCenterPreviewRenderer(testPreviewRenderer{}),
 	).(*taskAssetCenterService)
 
 	originalFilename := "手淘_SKU_13_蒙的都对【送12色涂鸦笔+木架】.jpg"
@@ -1669,11 +1671,12 @@ func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets
 		step04TxRunner{},
 		uploadClient,
 		WithOSSDirectService(ossDirect),
+		WithTaskAssetCenterPreviewRenderer(testPreviewRenderer{}),
 	).(*taskAssetCenterService)
 	svc.runAsyncFn = func(fn func()) { fn() }
 	svc.derivedPreviewGracePeriod = 0
 
-	body := []byte("source-psd-binary")
+	body := bytes.Repeat([]byte("source-psd-binary"), 80)
 	createResult, appErr := svc.CreateMultipartUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
 		TaskID:       2052,
 		CreatedBy:    652,
@@ -1811,6 +1814,7 @@ func TestTaskAssetCenterServiceCompleteSourceThenDeliverySeriallyWithout500(t *t
 		step04TxRunner{},
 		uploadClient,
 		WithOSSDirectService(ossDirect),
+		WithTaskAssetCenterPreviewRenderer(testPreviewRenderer{}),
 	).(*taskAssetCenterService)
 
 	var derivedJobs []func()
@@ -1818,7 +1822,7 @@ func TestTaskAssetCenterServiceCompleteSourceThenDeliverySeriallyWithout500(t *t
 		derivedJobs = append(derivedJobs, fn)
 	}
 
-	sourceBody := []byte("serial-source-psd")
+	sourceBody := bytes.Repeat([]byte("serial-source-psd"), 80)
 	sourceSession, appErr := svc.CreateMultipartUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
 		TaskID:       2053,
 		CreatedBy:    653,
@@ -2215,11 +2219,19 @@ type fakeOSSDirectServer struct {
 	lastCopyAuth  string
 	lastCopySrc   string
 	completeCalls int
+	uploadKeys    map[string]string
+	parts         map[string]map[string][]byte
+	objects       map[string][]byte
 }
 
 func newFakeOSSDirectServer(t *testing.T) *fakeOSSDirectServer {
 	t.Helper()
-	fake := &fakeOSSDirectServer{t: t}
+	fake := &fakeOSSDirectServer{
+		t:          t,
+		uploadKeys: map[string]string{},
+		parts:      map[string]map[string][]byte{},
+		objects:    map[string][]byte{},
+	}
 	fake.server = httptest.NewTLSServer(http.HandlerFunc(fake.handle))
 	baseURL, err := url.Parse(fake.server.URL)
 	if err != nil {
@@ -2262,6 +2274,8 @@ func (f *fakeOSSDirectServer) handle(w http.ResponseWriter, r *http.Request) {
 		f.nextUploadID++
 		f.initiateCalls++
 		uploadID := fmt.Sprintf("oss-upload-%d", f.nextUploadID)
+		f.uploadKeys[uploadID] = objectKey
+		f.parts[uploadID] = map[string][]byte{}
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/xml")
 		fmt.Fprintf(w, "<InitiateMultipartUploadResult><Bucket>test-bucket</Bucket><Key>%s</Key><UploadId>%s</UploadId></InitiateMultipartUploadResult>", objectKey, uploadID)
@@ -2276,19 +2290,49 @@ func (f *fakeOSSDirectServer) handle(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "<CopyObjectResult></CopyObjectResult>")
 	case r.Method == http.MethodPut && query.Get("uploadId") != "" && query.Get("partNumber") != "":
 		partNumber := strings.TrimSpace(query.Get("partNumber"))
-		_, _ = io.ReadAll(r.Body)
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		if f.parts[query.Get("uploadId")] == nil {
+			f.parts[query.Get("uploadId")] = map[string][]byte{}
+		}
+		f.parts[query.Get("uploadId")][partNumber] = append([]byte(nil), body...)
+		f.mu.Unlock()
 		w.Header().Set("ETag", fmt.Sprintf("\"etag-%s-%s\"", query.Get("uploadId"), partNumber))
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodPut && query.Get("uploadId") == "" && query.Get("partNumber") == "":
-		_, _ = io.ReadAll(r.Body)
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.objects[objectKey] = append([]byte(nil), body...)
+		f.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodPost && query.Get("uploadId") != "":
 		f.mu.Lock()
 		f.completeCalls++
+		uploadID := query.Get("uploadId")
+		if key := f.uploadKeys[uploadID]; key != "" {
+			var assembled []byte
+			for i := 1; ; i++ {
+				part := f.parts[uploadID][fmt.Sprintf("%d", i)]
+				if len(part) == 0 {
+					break
+				}
+				assembled = append(assembled, part...)
+			}
+			f.objects[key] = assembled
+		}
 		f.mu.Unlock()
 		_, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/xml")
 		fmt.Fprint(w, "<CompleteMultipartUploadResult></CompleteMultipartUploadResult>")
+	case r.Method == http.MethodGet:
+		f.mu.Lock()
+		body, ok := f.objects[objectKey]
+		f.mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(body)
 	default:
 		http.NotFound(w, r)
 	}
@@ -2320,4 +2364,10 @@ func rawQueryHasFlag(rawQuery, key string) bool {
 		return true
 	}
 	return strings.HasPrefix(rawQuery, key+"&") || strings.Contains(rawQuery, "&"+key+"&") || strings.HasSuffix(rawQuery, "&"+key) || strings.Contains(rawQuery, "&"+key+"=")
+}
+
+type testPreviewRenderer struct{}
+
+func (testPreviewRenderer) Render(ctx context.Context, sourcePath string, source AssetPreviewSourceMeta, spec AssetPreviewRenderSpec) ([]byte, error) {
+	return []byte(fmt.Sprintf("webp-preview:%s:%dx%d", source.Filename, spec.MaxWidth, spec.MaxHeight)), nil
 }
