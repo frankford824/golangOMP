@@ -22,6 +22,8 @@ export interface CreateAssetUploadSessionPayload {
   file_hash?: string
   remark?: string
   source_asset_id?: string | number
+  /** P 图需求明细 ID；非空表示资产绑定到该条 retouch requirement */
+  retouch_requirement_id?: number
   target_sku_code?: string
   owner_module_key?: string
   upload_policy?: 'append_only' | 'replace' | string

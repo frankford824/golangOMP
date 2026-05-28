@@ -26,11 +26,15 @@ export interface TaskAssetUploadFlowOptions {
   onProgress?: (p: AssetUploadProgress) => void
   /** 追加在 remark 末尾（如多 SKU 后缀） */
   remarkSuffix?: string
+  /** P 图需求明细 ID；写入 create upload-session 的 retouch_requirement_id */
+  retouchRequirementId?: number
 }
 
 export interface ReferenceUploadFlowOptions {
   taskId?: string | null
   targetSkuCode?: string
+  /** P 图需求明细 ID；仅在有 taskId 的 upload-session 路径下生效 */
+  retouchRequirementId?: number
   ownerModuleKey?: string
   uploadPolicy?: 'append_only' | 'replace' | string
   signal?: AbortSignal
@@ -104,6 +108,21 @@ function taskIdForSessionBody(taskId: string): string | number {
   return taskId
 }
 
+/** 仅接受有效正整数，供 retouch_requirement_id 写入 create-session。 */
+export function normalizeRetouchRequirementId(value: number | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value)) return undefined
+  const n = Math.trunc(value)
+  if (n <= 0) return undefined
+  return n
+}
+
+function resolveRetouchRequirementIdForPayload(
+  intent: Pick<CreateAssetUploadSessionPayload, 'retouch_requirement_id'>,
+  retouchRequirementId?: number,
+): number | undefined {
+  return normalizeRetouchRequirementId(intent.retouch_requirement_id ?? retouchRequirementId)
+}
+
 function isMultipartOssPlan(mode: string | null | undefined, strategy: string | null | undefined): boolean {
   return mode?.trim().toLowerCase() === 'multipart' || strategy?.trim().toLowerCase() === 'multipart'
 }
@@ -122,6 +141,7 @@ async function uploadFileViaAssetSession(
   const prepared = await prepareTaskAssetUploadSession(taskId, file, intent, {
     signal: options?.signal,
     remarkSuffix: options?.remarkSuffix,
+    retouchRequirementId: options?.retouchRequirementId,
   })
   return completePreparedTaskAssetUploadSession(prepared, file, {
     signal: options?.signal,
@@ -135,7 +155,7 @@ export async function prepareTaskAssetUploadSession(
   intent: Omit<CreateAssetUploadSessionPayload, 'task_id' | 'file_name'> & {
     file_name?: string
   },
-  options?: { signal?: AbortSignal; remarkSuffix?: string },
+  options?: Pick<TaskAssetUploadFlowOptions, 'signal' | 'remarkSuffix' | 'retouchRequirementId'>,
 ): Promise<PreparedTaskAssetUploadSession> {
   const remarkBase = intent.remark ?? file.name
   const remark = remarkBase + (options?.remarkSuffix ?? '')
@@ -149,6 +169,10 @@ export async function prepareTaskAssetUploadSession(
     remark,
     source_asset_id: intent.source_asset_id,
     target_sku_code: intent.target_sku_code,
+  }
+  const retouchRequirementId = resolveRetouchRequirementIdForPayload(intent, options?.retouchRequirementId)
+  if (retouchRequirementId != null) {
+    payload.retouch_requirement_id = retouchRequirementId
   }
   const sessionTaskId = taskId?.trim()
   if (sessionTaskId) {
@@ -306,10 +330,10 @@ export async function completeWithAssetVersionRaceRetry(
   intent: Omit<CreateAssetUploadSessionPayload, 'task_id' | 'file_name'> & {
     file_name?: string
   },
-  options?: {
-    signal?: AbortSignal
-    onProgress?: (p: AssetUploadProgress) => void
-    remarkSuffix?: string
+  options?: Pick<
+    TaskAssetUploadFlowOptions,
+    'signal' | 'onProgress' | 'remarkSuffix' | 'retouchRequirementId'
+  > & {
     /** 新一轮 prepare 完成后回调，常用于把新 sessionId 接续到取消集 */
     onRetryPrepared?: (next: PreparedTaskAssetUploadSession) => void
   },
@@ -331,6 +355,7 @@ export async function completeWithAssetVersionRaceRetry(
     const retryPrepared = await prepareTaskAssetUploadSession(taskId, file, intent, {
       signal: options?.signal,
       remarkSuffix: options?.remarkSuffix,
+      retouchRequirementId: options?.retouchRequirementId,
     })
     options?.onRetryPrepared?.(retryPrepared)
     try {
@@ -426,7 +451,10 @@ export async function uploadReferenceFileRef(
       upload_policy: options?.uploadPolicy,
       remark: file.name,
     },
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      retouchRequirementId: options?.retouchRequirementId,
+    },
   )
   return toReferenceFileRef(uploaded, file)
 }

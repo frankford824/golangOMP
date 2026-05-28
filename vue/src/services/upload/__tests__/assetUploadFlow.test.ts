@@ -99,10 +99,21 @@ vi.mock('@/utils/upload-errors', () => ({
 }))
 
 import {
+  normalizeRetouchRequirementId,
   prepareTaskAssetUploadSession,
   completePreparedTaskAssetUploadSession,
 } from '../assetUploadFlow'
 import { assetsApi } from '@/services/api/assetsApi'
+
+describe('normalizeRetouchRequirementId', () => {
+  it('accepts positive integers only', () => {
+    expect(normalizeRetouchRequirementId(42)).toBe(42)
+    expect(normalizeRetouchRequirementId(42.9)).toBe(42)
+    expect(normalizeRetouchRequirementId(0)).toBeUndefined()
+    expect(normalizeRetouchRequirementId(-1)).toBeUndefined()
+    expect(normalizeRetouchRequirementId(undefined)).toBeUndefined()
+  })
+})
 
 function fakeFile(name = 'test.png', size = 1024): File {
   const blob = new Blob([new ArrayBuffer(size)], { type: 'image/png' })
@@ -169,6 +180,66 @@ describe('prepareTaskAssetUploadSession — transport fallback', () => {
       expect.objectContaining({ session_id: 'sess-remote' }),
     )
     warnSpy.mockRestore()
+  })
+
+  it('writes retouch_requirement_id when retouchRequirementId option is set', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(assetsApi.createAssetUploadSession).mockResolvedValue({
+      data: {
+        data: {
+          session: { id: 'sess-retouch' },
+          oss_direct: {
+            upload_strategy: 'single_part',
+            upload_url: 'https://oss.example.com/upload',
+          },
+        },
+      },
+    } as never)
+
+    await prepareTaskAssetUploadSession(
+      '905',
+      fakeFile(),
+      { asset_kind: 'source', remark: 'material' },
+      { retouchRequirementId: 12 },
+    )
+
+    expect(assetsApi.createAssetUploadSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retouch_requirement_id: 12,
+        asset_kind: 'source',
+      }),
+      undefined,
+    )
+  })
+
+  it('keeps target_sku_code when retouchRequirementId is also set', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(assetsApi.createAssetUploadSession).mockResolvedValue({
+      data: {
+        data: {
+          session: { id: 'sess-batch' },
+          oss_direct: {
+            upload_strategy: 'single_part',
+            upload_url: 'https://oss.example.com/upload',
+          },
+        },
+      },
+    } as never)
+
+    await prepareTaskAssetUploadSession(
+      '100',
+      fakeFile(),
+      { asset_kind: 'delivery', remark: 'batch', target_sku_code: 'SKU-001' },
+      { retouchRequirementId: 7 },
+    )
+
+    expect(assetsApi.createAssetUploadSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retouch_requirement_id: 7,
+        target_sku_code: 'SKU-001',
+      }),
+      undefined,
+    )
   })
 
   it('fx3: both absent -> throws user-friendly error with upload_transport_unavailable', async () => {
