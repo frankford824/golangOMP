@@ -147,16 +147,16 @@ export const TASK_TYPE_FIELD_WHITELIST = {
     ] as readonly string[],
   },
   retouch_task: {
-    required: [
+    // 前端门禁：至少 1 条 retouch_requirements[].description + due_at（见 task-create-rules.ts）。
+    // demand_text / design_requirement 由首条需求描述兜底写入，reference_file_refs 可为空。
+    required: ['retouch_requirements', 'due_at'] as readonly string[],
+    optional: [
       'demand_text',
       'design_requirement',
       'reference_file_refs',
-    ] as readonly string[],
-    optional: [
       'remark',
       'priority',
       'deadline_at',
-      'due_at',
       'owner_department',
       'owner_org_team',
       'owner_team',
@@ -164,7 +164,6 @@ export const TASK_TYPE_FIELD_WHITELIST = {
       'requester_name',
       'product_name',
       'product_name_snapshot',
-      'retouch_requirements',
     ] as readonly string[],
     forbidden: [
       'material_mode',

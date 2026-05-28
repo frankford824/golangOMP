@@ -76,7 +76,7 @@ export function canSubmitTask(kind: TaskKind, form: TaskCreateFormModel, now: Da
       if (form.costPriceAmount == null || Number.isNaN(form.costPriceAmount)) return false
     }
   } else if (kind === 'RETOUCH_TASK') {
-    base = !!(form.referenceFileRefs.length > 0 && hasValidRetouchRequirementDrafts(form) && form.dueAt)
+    base = !!(hasValidRetouchRequirementDrafts(form) && form.dueAt)
   }
 
   if (!base) return false
@@ -127,7 +127,7 @@ export function getTaskCreateCompletionHint(
   } else if (kind === 'PURCHASE_TASK') {
     base = !!(form.productName && form.category)
   } else if (kind === 'RETOUCH_TASK') {
-    base = !!(form.referenceFileRefs.length > 0 && hasValidRetouchRequirementDrafts(form))
+    base = hasValidRetouchRequirementDrafts(form)
   }
 
   if (base && form.dueAt) {
@@ -169,8 +169,7 @@ export function getTaskCreateCompletionHint(
   }
 
   if (kind === 'RETOUCH_TASK') {
-    if (form.referenceFileRefs.length === 0) return '请上传任务级参考图/附件'
-    if (!hasValidRetouchRequirementDrafts(form)) return '请至少填写 1 条需求描述'
+    if (!hasValidRetouchRequirementDrafts(form)) return '请至少填写 1 条 P 图需求描述'
     if (!form.dueAt) return '请填写截止时间'
     return '请完善 P 图任务必填信息'
   }

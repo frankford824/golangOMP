@@ -669,8 +669,11 @@ const contextPanelItems = computed(() => {
   }
   if (taskKind.value === 'RETOUCH_TASK') {
     return [
-      { title: '最小字段', body: '只需要上传图片/附件并填写修改要求，无需 SKU、成本或分类。' },
-      { title: '上传提示', body: '上传文件会以小缩略图横向展示，单文件不超过 300MB。' },
+      { title: '最小字段', body: '按需求逐条填写 P 图说明即可，无需 SKU、成本或分类。' },
+      {
+        title: '本条附件',
+        body: '每条需求可单独上传参考图与素材文件（PSD / AI / ZIP 等），创建后自动绑定到该需求；单文件大小上限见上传提示。',
+      },
     ]
   }
   if (taskKind.value === 'PURCHASE_TASK') {
@@ -935,8 +938,7 @@ const validationIssues = computed<string[]>(() => {
         issues.push('成本计价方式为手动录入时未填写成本')
       }
     } else if (taskKind.value === 'RETOUCH_TASK') {
-      if ((f.referenceFileRefs ?? []).length === 0) issues.push('请上传任务级参考图/附件')
-      if (!hasValidRetouchRequirementDrafts(f)) issues.push('请至少填写 1 条需求描述')
+      if (!hasValidRetouchRequirementDrafts(f)) issues.push('请至少填写 1 条 P 图需求描述')
     } else if (taskKind.value === 'ORIGINAL_PRODUCT_DEV') {
       if (!f.sku) issues.push('未绑定原品 SKU')
       if (!f.productId) issues.push('未选择 ERP 产品')

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { canSubmitTask, getTaskCreateCompletionHint } from '../src/domain/task-create-rules'
+import { buildRetouchRequirementsPayload } from '../src/domain/retouch-requirements'
+import { createEmptyRetouchRequirementDraft } from '../src/domain/types/retouch-requirement'
 import type { TaskCreateFormModel, TaskBatchItem } from '../src/domain/types/task-create'
 
 function baseForm(overrides: Partial<TaskCreateFormModel> = {}): TaskCreateFormModel {
@@ -117,5 +119,81 @@ describe('getTaskCreateCompletionHint — new product without material', () => {
   it('does not require material in new product', () => {
     const form = newProductSingleForm({ material: undefined })
     expect(getTaskCreateCompletionHint('NEW_PRODUCT_DEV', form)).toBe('可提交')
+  })
+})
+
+function retouchForm(overrides: Partial<TaskCreateFormModel> = {}): TaskCreateFormModel {
+  const dueAt = new Date(Date.now() + 86400000).toISOString()
+  return baseForm({
+    referenceFileRefs: [],
+    designRequirement: '',
+    dueAt,
+    retouchRequirements: [
+      {
+        ...createEmptyRetouchRequirementDraft(1),
+        description: '精修背景',
+      },
+    ],
+    ...overrides,
+  })
+}
+
+describe('canSubmitTask — RETOUCH_TASK', () => {
+  it('allows submit without task-level referenceFileRefs when requirement + dueAt present', () => {
+    const form = retouchForm({ referenceFileRefs: [] })
+    expect(canSubmitTask('RETOUCH_TASK', form)).toBe(true)
+  })
+
+  it('rejects when no valid requirement description', () => {
+    const form = retouchForm({
+      retouchRequirements: [{ ...createEmptyRetouchRequirementDraft(1), description: '   ' }],
+    })
+    expect(canSubmitTask('RETOUCH_TASK', form)).toBe(false)
+    expect(getTaskCreateCompletionHint('RETOUCH_TASK', form)).toBe('请至少填写 1 条 P 图需求描述')
+  })
+
+  it('rejects when dueAt is missing', () => {
+    const form = retouchForm({ dueAt: null })
+    expect(canSubmitTask('RETOUCH_TASK', form)).toBe(false)
+    expect(getTaskCreateCompletionHint('RETOUCH_TASK', form)).toBe('请填写截止时间')
+  })
+})
+
+describe('buildRetouchRequirementsPayload', () => {
+  it('omits pending upload files from POST payload', () => {
+    const file = new File(['x'], 'ref.png', { type: 'image/png' })
+    const payload = buildRetouchRequirementsPayload([
+      {
+        description: '需求一',
+        sortOrder: 1,
+        pendingReferenceFiles: [file],
+        pendingSourceFiles: [file],
+      },
+    ])
+    expect(payload).toHaveLength(1)
+    expect(payload[0]).toEqual({
+      description: '需求一',
+      sort_order: 1,
+    })
+    expect(payload[0]).not.toHaveProperty('pendingReferenceFiles')
+    expect(payload[0]).not.toHaveProperty('pendingSourceFiles')
+  })
+})
+
+describe('canSubmitTask — other kinds unchanged', () => {
+  it('ORIGINAL_PRODUCT_DEV still requires designRequirement', () => {
+    const form = baseForm({
+      sku: 'SKU-1',
+      productId: '1',
+      productName: 'Product',
+      designRequirement: '',
+      dueAt: new Date(Date.now() + 86400000).toISOString(),
+    })
+    expect(canSubmitTask('ORIGINAL_PRODUCT_DEV', form)).toBe(false)
+  })
+
+  it('NEW_PRODUCT_DEV still requires designRequirement for single mode', () => {
+    const form = newProductSingleForm({ designRequirement: '' })
+    expect(canSubmitTask('NEW_PRODUCT_DEV', form)).toBe(false)
   })
 })

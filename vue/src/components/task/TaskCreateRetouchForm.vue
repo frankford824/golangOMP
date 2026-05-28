@@ -1,21 +1,8 @@
 <template>
   <section class="type-section retouch-form">
-    <div class="form-card upload-card">
-      <label class="field-label">任务级参考图 / 附件 <span class="required">*</span></label>
-      <p class="field-hint">
-        任务级参考图用于整单补充说明；每条需求可单独选择「本条参考图」与「本条素材文件」，创建任务后系统会自动绑定到对应需求。
-      </p>
-      <ReferenceUploadPanel v-model="referenceRefsModel" compact />
-    </div>
-
-    <div class="form-card">
-      <BaseTextarea
-        v-model="localForm.designRequirement"
-        label="任务总述（可选）"
-        :rows="3"
-        placeholder="可填写对整个任务的总体说明；若不填，将使用首条需求描述作为任务总述"
-      />
-    </div>
+    <p class="form-intro">
+      请按需求逐条填写 P 图说明。每条需求可单独上传「本条参考图」与「本条素材文件」；创建任务后系统会自动绑定到对应需求。
+    </p>
 
     <p v-if="pickError" class="pick-error">{{ pickError }}</p>
 
@@ -23,7 +10,7 @@
       <div class="requirements-header">
         <div>
           <h4 class="requirements-title">P 图需求明细</h4>
-          <p class="field-hint">至少填写 1 条需求描述；SKU / 规格 / 备注为可选项。</p>
+          <p class="field-hint">至少填写 1 条需求描述（必填）；SKU / 规格 / 备注为可选项。</p>
         </div>
         <button type="button" class="add-req-btn" @click="addRequirement">添加需求</button>
       </div>
@@ -120,7 +107,6 @@ import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants
 import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES } from '@/domain/copy/design-upload'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
-import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
 
 const pickError = ref('')
 
@@ -135,13 +121,6 @@ const emit = defineEmits<{
 const localForm = computed({
   get: () => props.form,
   set: (value: TaskCreateFormModel) => emit('update:form', value),
-})
-
-const referenceRefsModel = computed({
-  get: () => localForm.value.referenceFileRefs,
-  set: (value: (string | Record<string, unknown>)[]) => {
-    localForm.value = { ...localForm.value, referenceFileRefs: value }
-  },
 })
 
 const retouchRequirements = computed(() => localForm.value.retouchRequirements ?? [])
@@ -290,6 +269,13 @@ function prettyFileSize(size: number): string {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.form-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary, #64748b);
 }
 
 .field-hint {
