@@ -49,18 +49,15 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 	}
 	defer f.Close()
 
-	rows, err := f.GetRows(itemsSheet)
-	if err != nil {
-		return nil, excelAppError("read Items sheet", err)
-	}
-	if len(rows) == 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing header row", nil)
+	dataSheet, rows, appErr := resolveDataSheet(f)
+	if appErr != nil {
+		return nil, appErr
 	}
 	columnIndex, appErr := parseHeader(rows[0], fields)
 	if appErr != nil {
 		return nil, appErr
 	}
-	imagesByRow, appErr := extractEmbeddedReferenceImages(f)
+	imagesByRow, appErr := extractEmbeddedReferenceImages(f, dataSheet)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -156,12 +153,12 @@ func parseHeader(header []string, fields []FieldSpec) (map[string]int, *domain.A
 	for _, field := range fields {
 		if field.Required {
 			if _, ok := index[field.Key]; !ok {
-				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel header is missing required column", map[string]interface{}{
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, errMsgExcelHeaderMismatch, map[string]interface{}{
 					"violations": []ParseViolation{{
 						Row:     1,
 						Column:  field.Column,
-						Code:    "missing_required_field",
-						Message: "missing required column " + field.Column,
+						Code:    "invalid_header",
+						Message: errMsgExcelHeaderMismatch,
 					}},
 				})
 			}
@@ -271,8 +268,8 @@ type embeddedReferenceImage struct {
 	MimeType  string
 }
 
-func extractEmbeddedReferenceImages(f *excelize.File) (map[int][]embeddedReferenceImage, *domain.AppError) {
-	cells, err := f.GetPictureCells(itemsSheet)
+func extractEmbeddedReferenceImages(f *excelize.File, dataSheet string) (map[int][]embeddedReferenceImage, *domain.AppError) {
+	cells, err := f.GetPictureCells(dataSheet)
 	if err != nil {
 		return nil, excelAppError("read embedded reference images", err)
 	}
@@ -285,7 +282,7 @@ func extractEmbeddedReferenceImages(f *excelize.File) (map[int][]embeddedReferen
 		if row <= 1 {
 			continue
 		}
-		pictures, err := f.GetPictures(itemsSheet, cell)
+		pictures, err := f.GetPictures(dataSheet, cell)
 		if err != nil {
 			return nil, excelAppError("read embedded reference image bytes", err)
 		}
