@@ -158,7 +158,7 @@
           <div class="ac-card-info">
             <div class="ac-title-row">
               <h2 class="ac-card-title" :title="businessSku(asset)">{{ businessSku(asset) }}</h2>
-              <span class="ac-format-pill">{{ imageBusinessTypeLabel(asset) }}</span>
+              <span class="ac-format-pill" :title="imageBusinessTypeLabel(asset)">{{ compactImageBusinessTypeLabel(asset) }}</span>
             </div>
             <div class="ac-card-meta">
               <div class="ac-business-row">
@@ -800,6 +800,22 @@ function assetProductLabel(asset: BackendAsset): string {
 
 function imageBusinessTypeLabel(asset: BackendAsset): string {
   return `${assetKind(asset)} / ${fileFormatLabel(asset)}`
+}
+
+function compactImageBusinessTypeLabel(asset: BackendAsset): string {
+  const record = asset as Record<string, unknown>
+  const rawKind = String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? '').trim().toLowerCase()
+  const kind =
+    rawKind === 'source'
+      ? '源文件'
+      : rawKind === 'delivery'
+      ? '成品图'
+      : rawKind === 'reference'
+      ? '参考图'
+      : rawKind === 'preview' || rawKind === 'design_thumb'
+      ? '预览图'
+      : assetKind(asset)
+  return `${kind} / ${fileFormatLabel(asset)}`
 }
 
 function fileFormatLabel(asset: BackendAsset): string {
@@ -2713,14 +2729,16 @@ onBeforeUnmount(() => {
 }
 
 .ac-title-row {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) auto !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
   align-items: start !important;
   gap: 0.6rem !important;
   min-width: 0 !important;
 }
 
 .ac-title-row .ac-card-title {
+  flex: 1 1 9rem !important;
+  min-width: 0 !important;
   margin: 0 !important;
   color: #0f172a !important;
   font-size: 1rem !important;
@@ -2828,13 +2846,17 @@ onBeforeUnmount(() => {
 
 .ac-format-pill {
   align-self: start !important;
-  max-width: 7.8rem;
+  flex: 0 1 auto;
+  max-width: min(8rem, 100%);
+  min-width: 0;
+  overflow: hidden;
   padding: 0.24rem 0.48rem !important;
   border-radius: 999px !important;
   font-size: 0.72rem !important;
   font-weight: 800 !important;
   line-height: 1.1 !important;
   text-align: center;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2958,7 +2980,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 420px) {
   .ac-title-row {
-    grid-template-columns: minmax(0, 1fr) !important;
+    display: flex !important;
   }
 
   .ac-format-pill {
