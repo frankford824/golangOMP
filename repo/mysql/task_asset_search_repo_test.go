@@ -76,6 +76,20 @@ func TestBuildTaskAssetSearchWhereKeywordWithTaskStatusKeepsArgsAligned(t *testi
 	}
 }
 
+func TestBuildTaskAssetSearchWhereExcludesSystemDerivedPreviewAssets(t *testing.T) {
+	where, _ := buildTaskAssetSearchWhere(domain.AssetSearchQuery{})
+
+	for _, expected := range []string{
+		"da.source_asset_id IS NOT NULL",
+		"da.asset_type IN ('preview', 'design_thumb')",
+		"async-derived-preview:webp",
+	} {
+		if !strings.Contains(where, expected) {
+			t.Fatalf("where clause missing %q: %s", expected, where)
+		}
+	}
+}
+
 func TestBuildListCurrentByAssetIDsQueryBuildsParameterizedINClause(t *testing.T) {
 	query, args := buildListCurrentByAssetIDsQuery([]int64{101, 202, 303})
 	if query == "" {

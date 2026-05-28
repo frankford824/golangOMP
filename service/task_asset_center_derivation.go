@@ -46,8 +46,8 @@ var sourceDerivedPreviewSpecs = []derivedPreviewSpec{
 	},
 }
 
-func (s *taskAssetCenterService) resolveSourceDerivedPreviewInfo(ctx context.Context, sourceAsset *domain.DesignAsset) (*domain.AssetDownloadInfo, *domain.AppError) {
-	if sourceAsset == nil || !sourceAsset.AssetType.IsSource() {
+func (s *taskAssetCenterService) resolveDerivedPreviewInfo(ctx context.Context, sourceAsset *domain.DesignAsset) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if sourceAsset == nil || sourceAsset.AssetType.IsPreview() || sourceAsset.AssetType.IsDesignThumb() {
 		return nil, nil
 	}
 	for _, assetType := range []domain.TaskAssetType{domain.TaskAssetTypePreview, domain.TaskAssetTypeDesignThumb} {
@@ -79,10 +79,10 @@ func (s *taskAssetCenterService) resolveSourceDerivedPreviewInfo(ctx context.Con
 }
 
 func (s *taskAssetCenterService) scheduleDerivedPreviewGeneration(taskID, sourceAssetID, completedBy int64, sourceVersion *domain.DesignAssetVersion) {
-	if sourceVersion == nil || !sourceVersion.IsSourceFile {
+	if sourceVersion == nil || !isDerivedPreviewGenerationCandidate(sourceVersion) {
 		return
 	}
-	if isOSSIMGDirectPreviewSupportedSourceVersion(sourceVersion) {
+	if isOSSIMGDirectPreviewSupported(sourceVersion.OriginalFilename, sourceVersion.MimeType) {
 		return
 	}
 	if s.ossDirectService == nil || !s.ossDirectService.Enabled() {
@@ -135,7 +135,9 @@ func (s *taskAssetCenterService) ensureDerivedPreviewAssets(ctx context.Context,
 		return appErr
 	}
 	if !sourceAsset.AssetType.IsSource() {
-		return nil
+		if sourceAsset.AssetType.IsPreview() || sourceAsset.AssetType.IsDesignThumb() {
+			return nil
+		}
 	}
 	if sourceAsset.CurrentVersion == nil {
 		return nil
@@ -150,6 +152,32 @@ func (s *taskAssetCenterService) ensureDerivedPreviewAssets(ctx context.Context,
 	}
 	log.Printf("source_preview_derive_done task_id=%d source_asset_id=%d", taskID, sourceAssetID)
 	return nil
+}
+
+func isDerivedPreviewGenerationCandidate(version *domain.DesignAssetVersion) bool {
+	if version == nil {
+		return false
+	}
+	if version.IsPreviewFile || version.IsDesignThumb {
+		return false
+	}
+	if strings.TrimSpace(version.StorageKey) == "" {
+		return false
+	}
+	if !isExternalRendererPreviewSupported(version.OriginalFilename, version.MimeType) {
+		return false
+	}
+	return version.IsSourceFile || version.IsDeliveryFile || version.AssetType.IsReference()
+}
+
+func isExternalRendererPreviewSupported(filename, mimeType string) bool {
+	ext := sourceAssetFormatExtension(filename, mimeType)
+	switch ext {
+	case ".psd", ".psb", ".pdf", ".ai", ".eps", ".ps":
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldSkipDerivedPreviewGeneration(sourceVersion *domain.DesignAssetVersion) bool {

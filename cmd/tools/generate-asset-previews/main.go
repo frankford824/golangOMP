@@ -136,13 +136,17 @@ func main() {
 
 func listAsyncPreviewJobs(ctx context.Context, db *sql.DB, limit int, onlyAssetID int64) ([]sourceAssetJob, error) {
 	where := []string{
-		"da.asset_type = 'source'",
+		"da.asset_type NOT IN ('preview', 'design_thumb')",
 		"COALESCE(ta.storage_key, '') <> ''",
 		"COALESCE(ta.upload_status, '') = 'uploaded'",
 		"COALESCE(ta.file_size, 0) >= 1024",
 		"ta.cleaned_at IS NULL",
 		"ta.deleted_at IS NULL",
 		`LOWER(COALESCE(ta.original_filename, ta.file_name, '')) NOT REGEXP '[.](jpe?g|png|bmp|gif|webp|tiff?|heic|heif|avif)$'`,
+		`(
+			LOWER(COALESCE(ta.original_filename, ta.file_name, '')) REGEXP '[.](psd|psb|pdf|ai|eps|ps)$'
+			OR LOWER(COALESCE(ta.mime_type, '')) IN ('image/vnd.adobe.photoshop', 'application/pdf', 'application/postscript', 'application/illustrator', 'application/vnd.adobe.illustrator')
+		)`,
 		`(
 			NOT EXISTS (
 				SELECT 1

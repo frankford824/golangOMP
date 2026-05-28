@@ -33,10 +33,10 @@ func isOSSIMGDirectPreviewSupportedSourceVersion(version *domain.DesignAssetVers
 	if version == nil || !version.IsSourceFile {
 		return false
 	}
-	return isOSSIMGDirectPreviewSupportedSource(version.OriginalFilename, version.MimeType)
+	return isOSSIMGDirectPreviewSupported(version.OriginalFilename, version.MimeType)
 }
 
-func isOSSIMGDirectPreviewSupportedSource(filename, mimeType string) bool {
+func isOSSIMGDirectPreviewSupported(filename, mimeType string) bool {
 	ext := sourceAssetFormatExtension(filename, mimeType)
 	_, ok := ossIMGDirectSourceExtensions[ext]
 	return ok

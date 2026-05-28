@@ -108,7 +108,11 @@ func (r *taskAssetSearchRepo) GetVersion(ctx context.Context, assetID, versionID
 func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interface{}) {
 	clauses := []string{`ta.id = COALESCE(da.current_version_id, (
 		SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
-	))`, `ta.deleted_at IS NULL`}
+	))`, `ta.deleted_at IS NULL`, `NOT (
+		da.source_asset_id IS NOT NULL
+		AND da.asset_type IN ('preview', 'design_thumb')
+		AND COALESCE(ta.remark, '') IN ('async-derived-preview', 'async-derived-preview:webp')
+	)`}
 	var args []interface{}
 	if query.Keyword != "" {
 		like := "%" + strings.TrimSpace(query.Keyword) + "%"

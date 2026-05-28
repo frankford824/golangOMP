@@ -353,14 +353,12 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 		return nil, domain.ErrNotFound
 	}
 	if !asset.CurrentVersion.PreviewAvailable {
-		if asset.AssetType.IsSource() {
-			info, resolveErr := s.resolveSourceDerivedPreviewInfo(ctx, asset)
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			if info != nil {
-				return info, nil
-			}
+		info, resolveErr := s.resolveDerivedPreviewInfo(ctx, asset)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if info != nil {
+			return info, nil
 		}
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "asset preview is not available", map[string]interface{}{
 			"asset_id": asset.ID,
@@ -807,7 +805,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	if appErr != nil {
 		return nil, appErr
 	}
-	if requestAssetType.IsSource() && result != nil {
+	if result != nil {
 		s.scheduleDerivedPreviewGeneration(params.TaskID, assetID, params.CompletedBy, result.Version)
 	}
 	return result, nil
