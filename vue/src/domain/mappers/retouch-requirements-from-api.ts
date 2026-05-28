@@ -1,3 +1,7 @@
+import {
+  mapRetouchRequirementSourceAssetsFromApi,
+  parseRetouchRequirementReferenceFileRefs,
+} from '@/domain/retouch-requirement-assets'
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 
 function readString(raw: Record<string, unknown>, ...keys: string[]): string {
@@ -28,6 +32,12 @@ function mapRetouchRequirementRow(raw: unknown): RetouchRequirement | null {
   const id = readInt(row, 'id')
   const taskId = readInt(row, 'task_id', 'taskId')
   const sortOrder = readInt(row, 'sort_order', 'sortOrder') ?? 1
+  const referenceFileRefs = parseRetouchRequirementReferenceFileRefs(
+    row.reference_file_refs ?? row.referenceFileRefs,
+  )
+  const sourceAssets = mapRetouchRequirementSourceAssetsFromApi(
+    row.source_assets ?? row.sourceAssets,
+  )
   return {
     id: id ?? 0,
     taskId: taskId ?? 0,
@@ -40,6 +50,8 @@ function mapRetouchRequirementRow(raw: unknown): RetouchRequirement | null {
     updatedBy: readInt(row, 'updated_by', 'updatedBy') ?? null,
     createdAt: readString(row, 'created_at', 'createdAt') || undefined,
     updatedAt: readString(row, 'updated_at', 'updatedAt') || undefined,
+    referenceFileRefs,
+    sourceAssets,
   }
 }
 

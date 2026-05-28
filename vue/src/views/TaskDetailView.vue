@@ -52,6 +52,13 @@
           <span>{{ createProcurementSyncWarningMessage }}</span>
           <button type="button" class="banner-dismiss" @click="dismissCreateBanner">×</button>
         </div>
+        <div
+          v-if="createRetouchRequirementUploadWarningVisible"
+          class="create-success-banner banner-warning"
+        >
+          <span>{{ createRetouchRequirementUploadWarningMessage }}</span>
+          <button type="button" class="banner-dismiss" @click="dismissCreateBanner">×</button>
+        </div>
         <!-- V4：圆角卡片 + 模块内就地操作；右侧仅动态与评论 -->
         <div class="detail-v6-surface">
         <!-- Pencil 对齐：任务身份 + 流程 + 全局动作 -->
@@ -1649,6 +1656,11 @@ const createPrefillSyncWarningMessage =
 const createProcurementSyncWarningVisible = computed(() => route.query.procurementSyncFailed === '1')
 const createProcurementSyncWarningMessage =
   '任务已创建，但采购记录同步失败，请先补齐采购价、数量和供应商并完成采购流程，再执行交仓。'
+const createRetouchRequirementUploadWarningVisible = computed(
+  () => route.query.retouchRequirementUploadFailed === '1',
+)
+const createRetouchRequirementUploadWarningMessage =
+  '任务已创建，但部分 P 图需求附件上传失败，请检查需求明细并补传。'
 
 const createSuccessMessage = computed(() => {
   const t = task.value
