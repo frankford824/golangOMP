@@ -1,11 +1,26 @@
 <template>
   <section class="retouch-requirements-block">
-    <p class="block-kicker">P 图需求明细</p>
-    <article v-for="(item, index) in requirements" :key="item.id || index" class="requirement-card">
+    <header class="block-head">
+      <p class="block-kicker">P 图需求明细</p>
+      <p v-if="requirements.length > 1" class="block-summary">
+        共 {{ requirements.length }} 条需求
+      </p>
+    </header>
+
+    <article
+      v-for="(item, index) in requirements"
+      :key="item.id || index"
+      class="requirement-card"
+    >
       <header class="requirement-card-head">
         <span class="requirement-no">需求 {{ index + 1 }}</span>
+        <span class="requirement-counts">
+          参考图 {{ referenceItems(item).length }} · 素材 {{ sourceItems(item).length }}
+        </span>
       </header>
+
       <p class="requirement-desc">{{ item.description }}</p>
+
       <dl v-if="hasOptionalFields(item)" class="requirement-meta">
         <div v-if="item.skuCode">
           <dt>SKU / 款号</dt>
@@ -23,20 +38,56 @@
 
       <div class="requirement-assets">
         <div class="asset-section">
-          <p class="asset-section-label">本条参考图</p>
-          <AssetThumbStrip
-            v-if="referenceThumbItems(item).length > 0"
-            :items="referenceThumbItems(item)"
-            empty-text="暂无本条参考图"
-            size="sm"
-          />
+          <div class="asset-section-head">
+            <p class="asset-section-label">本条参考图（{{ referenceItems(item).length }}）</p>
+          </div>
+
+          <div v-if="referenceItems(item).length > 0" class="reference-grid" role="list">
+            <div
+              v-for="file in referenceItems(item)"
+              :key="file.key"
+              class="reference-card"
+              role="listitem"
+            >
+              <button
+                type="button"
+                class="reference-thumb-btn"
+                :title="file.fileName"
+                @click="openReferencePreview(file)"
+              >
+                <img
+                  :src="file.previewSrc"
+                  :alt="file.fileName"
+                  class="reference-thumb-img"
+                  loading="lazy"
+                />
+              </button>
+              <div class="reference-card-meta">
+                <span class="reference-file-name" :title="file.fileName">{{ file.fileName }}</span>
+                <span v-if="file.sizeText || file.mimeType" class="reference-file-sub">
+                  {{ [file.mimeType, file.sizeText].filter(Boolean).join(' · ') }}
+                </span>
+                <button
+                  type="button"
+                  class="asset-download-btn"
+                  :disabled="isDownloading(file.key)"
+                  @click="handleDownloadReference(file)"
+                >
+                  {{ isDownloading(file.key) ? '下载中…' : '下载' }}
+                </button>
+              </div>
+            </div>
+          </div>
           <p v-else class="asset-empty">暂无本条参考图</p>
         </div>
 
         <div class="asset-section">
-          <p class="asset-section-label">本条素材文件</p>
-          <ul v-if="sourceFileItems(item).length > 0" class="source-file-list">
-            <li v-for="file in sourceFileItems(item)" :key="file.key" class="source-file-item">
+          <div class="asset-section-head">
+            <p class="asset-section-label">本条素材文件（{{ sourceItems(item).length }}）</p>
+          </div>
+
+          <ul v-if="sourceItems(item).length > 0" class="source-file-list">
+            <li v-for="file in sourceItems(item)" :key="file.key" class="source-file-item">
               <div class="source-file-thumb">
                 <img
                   v-if="file.imagePreviewUrl"
@@ -57,47 +108,61 @@
                 <span v-if="file.sizeText || file.mimeType" class="source-file-sub">
                   {{ [file.mimeType, file.sizeText].filter(Boolean).join(' · ') }}
                 </span>
-                <a
-                  v-if="file.downloadUrl"
-                  class="source-download-link"
-                  :href="file.downloadUrl"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  class="asset-download-btn"
+                  :disabled="isDownloading(file.key)"
+                  @click="handleDownloadSource(file)"
                 >
-                  下载
-                </a>
+                  {{ isDownloading(file.key) ? '下载中…' : '下载' }}
+                </button>
               </div>
             </li>
           </ul>
           <p v-else class="asset-empty">暂无本条素材文件</p>
         </div>
       </div>
+
+      <p v-if="downloadErrorByRequirement.get(cacheKey(item))" class="requirement-download-error">
+        {{ downloadErrorByRequirement.get(cacheKey(item)) }}
+      </p>
     </article>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject, ref } from 'vue'
 import FileIconFallback from '@/components/base/FileIconFallback.vue'
-import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
 import {
-  retouchRequirementReferenceRefsToThumbItems,
+  retouchRequirementReferenceRefsToDisplayItems,
   retouchSourceAssetsToDisplayItems,
+  type RetouchReferenceDisplayItem,
   type RetouchSourceFileDisplayItem,
 } from '@/domain/retouch-requirement-assets'
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
+import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
+
+const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
 const props = defineProps<{
   requirements: RetouchRequirement[]
 }>()
 
-const thumbCache = computed(() => {
-  const map = new Map<number, AssetThumbItem[]>()
+const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
+
+const downloadingKeys = ref(new Set<string>())
+const downloadErrorByRequirement = ref(new Map<number, string>())
+
+const referenceCache = computed(() => {
+  const map = new Map<number, RetouchReferenceDisplayItem[]>()
   for (const item of props.requirements) {
-    const key = item.id || item.sortOrder
+    const key = cacheKey(item)
     map.set(
       key,
-      retouchRequirementReferenceRefsToThumbItems(item.referenceFileRefs ?? [], `req-ref-${key}`),
+      retouchRequirementReferenceRefsToDisplayItems(
+        item.referenceFileRefs ?? [],
+        `req-ref-${key}`,
+      ),
     )
   }
   return map
@@ -106,7 +171,7 @@ const thumbCache = computed(() => {
 const sourceCache = computed(() => {
   const map = new Map<number, RetouchSourceFileDisplayItem[]>()
   for (const item of props.requirements) {
-    const key = item.id || item.sortOrder
+    const key = cacheKey(item)
     map.set(key, retouchSourceAssetsToDisplayItems(item.sourceAssets ?? []))
   }
   return map
@@ -116,16 +181,83 @@ function cacheKey(item: RetouchRequirement): number {
   return item.id || item.sortOrder
 }
 
-function referenceThumbItems(item: RetouchRequirement): AssetThumbItem[] {
-  return thumbCache.value.get(cacheKey(item)) ?? []
+function referenceItems(item: RetouchRequirement): RetouchReferenceDisplayItem[] {
+  return referenceCache.value.get(cacheKey(item)) ?? []
 }
 
-function sourceFileItems(item: RetouchRequirement): RetouchSourceFileDisplayItem[] {
+function sourceItems(item: RetouchRequirement): RetouchSourceFileDisplayItem[] {
   return sourceCache.value.get(cacheKey(item)) ?? []
 }
 
 function hasOptionalFields(item: RetouchRequirement): boolean {
   return Boolean(item.skuCode?.trim() || item.spec?.trim() || item.remark?.trim())
+}
+
+function isDownloading(key: string): boolean {
+  return downloadingKeys.value.has(key)
+}
+
+function setRequirementError(item: RetouchRequirement, message: string) {
+  const next = new Map(downloadErrorByRequirement.value)
+  if (message) next.set(cacheKey(item), message)
+  else next.delete(cacheKey(item))
+  downloadErrorByRequirement.value = next
+}
+
+function findRequirementForKey(fileKey: string): RetouchRequirement | undefined {
+  return props.requirements.find(
+    (item) =>
+      referenceItems(item).some((row) => row.key === fileKey) ||
+      sourceItems(item).some((row) => row.key === fileKey),
+  )
+}
+
+async function runDownload(
+  fileKey: string,
+  item: RetouchRequirement | undefined,
+  options: { assetId?: string; downloadUrl?: string; preferredFilename: string },
+) {
+  if (downloadingKeys.value.has(fileKey)) return
+  const next = new Set(downloadingKeys.value)
+  next.add(fileKey)
+  downloadingKeys.value = next
+  if (item) setRequirementError(item, '')
+
+  const result = await downloadAssetFileWithOriginalFilename({
+    assetId: options.assetId,
+    downloadUrl: options.downloadUrl,
+    preferredFilename: options.preferredFilename,
+  })
+
+  const done = new Set(downloadingKeys.value)
+  done.delete(fileKey)
+  downloadingKeys.value = done
+
+  if (!result.ok && item) {
+    setRequirementError(item, result.message ?? '下载失败，请稍后重试')
+  }
+}
+
+function handleDownloadReference(file: RetouchReferenceDisplayItem) {
+  const item = findRequirementForKey(file.key)
+  void runDownload(file.key, item, {
+    assetId: file.assetId,
+    downloadUrl: file.downloadUrl,
+    preferredFilename: file.fileName,
+  })
+}
+
+function handleDownloadSource(file: RetouchSourceFileDisplayItem) {
+  const item = findRequirementForKey(file.key)
+  void runDownload(file.key, item, {
+    assetId: file.assetId,
+    downloadUrl: file.downloadUrl,
+    preferredFilename: file.fileName,
+  })
+}
+
+function openReferencePreview(file: RetouchReferenceDisplayItem) {
+  if (file.previewSrc) openLightbox(file.previewSrc)
 }
 </script>
 
@@ -133,7 +265,15 @@ function hasOptionalFields(item: RetouchRequirement): boolean {
 .retouch-requirements-block {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+
+.block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .block-kicker {
@@ -145,21 +285,38 @@ function hasOptionalFields(item: RetouchRequirement): boolean {
   color: var(--text-secondary, #64748b);
 }
 
+.block-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
 .requirement-card {
-  padding: 12px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--border-color, #e2e8f0);
+  border-left: 3px solid #3b82f6;
   border-radius: 10px;
   background: #f8fafc;
 }
 
 .requirement-card-head {
-  margin-bottom: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .requirement-no {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary, #0f172a);
+}
+
+.requirement-counts {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
 }
 
 .requirement-desc {
@@ -194,23 +351,31 @@ function hasOptionalFields(item: RetouchRequirement): boolean {
 }
 
 .requirement-assets {
-  margin-top: 12px;
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 10px;
+  gap: 16px;
+  padding-top: 12px;
   border-top: 1px dashed var(--border-color, #e2e8f0);
 }
 
 .asset-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+}
+
+.asset-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .asset-section-label {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary, #0f172a);
 }
@@ -221,19 +386,80 @@ function hasOptionalFields(item: RetouchRequirement): boolean {
   color: var(--text-secondary, #94a3b8);
 }
 
+.reference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.reference-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-color, #dbe3ef);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.reference-thumb-btn {
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #f1f5f9;
+  aspect-ratio: 1;
+}
+
+.reference-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.reference-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reference-file-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary, #0f172a);
+  word-break: break-all;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.reference-file-sub {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+}
+
 .source-file-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .source-file-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #dbe3ef);
+  border-radius: 8px;
+  background: #fff;
 }
 
 .source-file-thumb {
@@ -243,7 +469,7 @@ function hasOptionalFields(item: RetouchRequirement): boolean {
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border-color, #dbe3ef);
-  background: #fff;
+  background: #f8fafc;
 }
 
 .source-thumb-img {
@@ -258,7 +484,7 @@ function hasOptionalFields(item: RetouchRequirement): boolean {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
 }
 
@@ -272,13 +498,30 @@ function hasOptionalFields(item: RetouchRequirement): boolean {
   color: var(--text-secondary, #64748b);
 }
 
-.source-download-link {
-  color: #2563eb;
-  text-decoration: none;
-  width: fit-content;
+.asset-download-btn {
+  align-self: flex-start;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: #2563eb;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
 }
 
-.source-download-link:hover {
-  text-decoration: underline;
+.asset-download-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.asset-download-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.requirement-download-error {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #b91c1c;
 }
 </style>

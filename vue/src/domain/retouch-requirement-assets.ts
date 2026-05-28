@@ -6,6 +6,7 @@ import {
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { canPreviewUploadInline } from '@/domain/constants/upload-types'
+import { parseNumericAssetId } from '@/utils/assetFileDownload'
 import { toRelativeAssetUrl } from '@/utils/url'
 
 function trimField(value: unknown): string {
@@ -71,14 +72,51 @@ export function mapRetouchRequirementSourceAssetsFromApi(raw: unknown): BackendA
   return out
 }
 
+export interface RetouchReferenceDisplayItem {
+  key: string
+  assetId?: string
+  fileName: string
+  previewSrc: string
+  downloadUrl?: string
+  mimeType?: string
+  sizeText?: string
+}
+
 export interface RetouchSourceFileDisplayItem {
   key: string
+  assetId?: string
   fileName: string
   downloadUrl?: string
   sizeText?: string
   mimeType?: string
   imagePreviewUrl?: string
   previewAssetId?: string
+}
+
+/** Future batch download: collect numeric asset root ids from one requirement row. */
+export interface RetouchRequirementBatchAssetIds {
+  referenceAssetIds: number[]
+  sourceAssetIds: number[]
+}
+
+export function collectRetouchRequirementBatchAssetIds(
+  referenceFileRefs: ReferenceFileRef[] | undefined,
+  sourceAssets: BackendAsset[] | undefined,
+): RetouchRequirementBatchAssetIds {
+  const referenceAssetIds: number[] = []
+  const sourceAssetIds: number[] = []
+  for (const ref of referenceFileRefs ?? []) {
+    const id = parseNumericAssetId(ref.asset_id ?? ref.ref_id)
+    if (id) referenceAssetIds.push(Number.parseInt(id, 10))
+  }
+  for (const asset of sourceAssets ?? []) {
+    const id = parseNumericAssetId(asset.id)
+    if (id) sourceAssetIds.push(Number.parseInt(id, 10))
+  }
+  return {
+    referenceAssetIds: Array.from(new Set(referenceAssetIds)),
+    sourceAssetIds: Array.from(new Set(sourceAssetIds)),
+  }
 }
 
 export function formatRetouchAssetFileSize(bytes: number | undefined): string | undefined {
@@ -114,6 +152,7 @@ export function retouchSourceAssetsToDisplayItems(assets: BackendAsset[]): Retou
         : undefined
     out.push({
       key: `source-${asset.id}`,
+      assetId: parseNumericAssetId(asset.id),
       fileName,
       downloadUrl: downloadUrl || undefined,
       sizeText: formatRetouchAssetFileSize(
@@ -121,28 +160,46 @@ export function retouchSourceAssetsToDisplayItems(assets: BackendAsset[]): Retou
       ),
       mimeType: mimeType || undefined,
       imagePreviewUrl,
-      previewAssetId: imagePreviewUrl ? String(asset.id) : undefined,
+      previewAssetId: imagePreviewUrl ? parseNumericAssetId(asset.id) : undefined,
     })
   }
   return out
 }
 
+export function retouchRequirementReferenceRefsToDisplayItems(
+  refs: ReferenceFileRef[],
+  keyPrefix: string,
+): RetouchReferenceDisplayItem[] {
+  const out: RetouchReferenceDisplayItem[] = []
+  refs.forEach((ref, index) => {
+    const previewSrc = trimField(ref.download_url)
+    if (!previewSrc) return
+    const fileName = trimField(ref.filename) || `参考图 ${index + 1}`
+    const fileSize =
+      typeof ref.file_size === 'number' && Number.isFinite(ref.file_size) ? ref.file_size : undefined
+    out.push({
+      key: `${keyPrefix}-${index}-${previewSrc}`,
+      assetId: parseNumericAssetId(ref.asset_id ?? ref.ref_id),
+      fileName,
+      previewSrc,
+      downloadUrl: previewSrc,
+      mimeType: trimField(ref.mime_type) || undefined,
+      sizeText: formatRetouchAssetFileSize(fileSize),
+    })
+  })
+  return out
+}
+
+/** @deprecated Use retouchRequirementReferenceRefsToDisplayItems for detail cards. */
 export function retouchRequirementReferenceRefsToThumbItems(
   refs: ReferenceFileRef[],
   keyPrefix: string,
 ): AssetThumbItem[] {
-  return refs
-    .map((ref, index) => {
-      const src = trimField(ref.download_url)
-      if (!src) return null
-      const filename = trimField(ref.filename)
-      return {
-        key: `${keyPrefix}-${index}-${src}`,
-        src,
-        alt: filename || `参考图 ${index + 1}`,
-        label: filename || `参考图 ${index + 1}`,
-        downloadUrl: src,
-      }
-    })
-    .filter((row) => row != null) as AssetThumbItem[]
+  return retouchRequirementReferenceRefsToDisplayItems(refs, keyPrefix).map((item) => ({
+    key: item.key,
+    src: item.previewSrc,
+    alt: item.fileName,
+    label: item.fileName,
+    downloadUrl: item.downloadUrl,
+  }))
 }

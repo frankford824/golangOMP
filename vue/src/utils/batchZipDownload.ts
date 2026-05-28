@@ -1,6 +1,8 @@
 export interface BatchZipDownloadSource {
   key: string
   filename?: string
+  /** Optional path inside ZIP, e.g. `需求1/参考图/foo.png`. Slashes sanitized when set. */
+  zipPath?: string
   downloadURL?: string
   fallbackName?: string
   failureHint?: string
@@ -99,8 +101,17 @@ export async function downloadBatchAsZip(options: BatchZipDownloadOptions): Prom
     const key = String(item.key ?? '').trim() || 'item'
     const downloadURL = String(item.downloadURL ?? '').trim()
     const fallback = String(item.fallbackName ?? '').trim() || key
+    const baseName = sanitizeZipEntryName(item.filename ?? '', fallback)
+    const zipPathRaw = String(item.zipPath ?? '').trim()
+    const entryPath = zipPathRaw
+      ? zipPathRaw
+          .split(/[/\\]+/)
+          .filter(Boolean)
+          .map((segment) => sanitizeZipEntryName(segment, 'file'))
+          .join('/')
+      : ''
     const filename = ensureUniqueZipEntryName(
-      sanitizeZipEntryName(item.filename ?? '', fallback),
+      entryPath ? `${entryPath}/${baseName}` : baseName,
       usedNames,
     )
     if (!downloadURL) {
