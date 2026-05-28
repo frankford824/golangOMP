@@ -1,19 +1,24 @@
 <template>
   <section class="type-section retouch-form">
-    <p class="form-intro">
-      请按需求逐条填写 P 图说明：直接描述本条修改要求，额外说明可写在备注；每条需求可单独上传参考图与素材文件，创建任务后自动绑定到该需求。
-    </p>
+    <div class="form-notice" role="note">
+      <p class="form-notice-title">填写说明</p>
+      <ul class="form-notice-list">
+        <li>请逐条填写 P 图需求，每条需求独立描述修改要求。</li>
+        <li>补充说明可写在需求描述中，整单说明可写到底部备注。</li>
+        <li>每条需求可单独上传参考图与素材文件，创建后自动绑定到该需求。</li>
+      </ul>
+    </div>
 
     <p v-if="pickError" class="pick-error">{{ pickError }}</p>
 
     <section class="requirements-section">
-      <div class="requirements-header">
-        <div>
+      <header class="requirements-header">
+        <div class="requirements-header-text">
           <h4 class="requirements-title">P 图需求明细</h4>
-          <p class="field-hint">至少填写 1 条需求描述（必填）；备注与本条附件为可选项。</p>
+          <p class="requirements-subtitle">至少 1 条需求描述（必填）；参考图与素材文件可选</p>
         </div>
         <button type="button" class="add-req-btn" @click="addRequirement">添加需求</button>
-      </div>
+      </header>
 
       <article
         v-for="(item, index) in retouchRequirements"
@@ -28,64 +33,93 @@
             class="remove-req-btn"
             @click="removeRequirement(index)"
           >
-            删除
+            删除本条
           </button>
         </div>
-        <BaseTextarea
-          v-model="item.description"
-          label="需求描述"
-          :rows="3"
-          placeholder="直接描述本条 P 图修改要求"
-        />
-        <BaseInput
-          v-model="item.remark"
-          label="备注（可选）"
-          placeholder="如有款号、尺寸等额外说明可写在这里"
-        />
 
-        <div class="req-upload-block">
-          <div class="req-upload-head">
-            <span class="req-upload-label">本条参考图（可选）</span>
-            <button type="button" class="req-pick-btn" @click="triggerReferencePick(index)">选择文件</button>
+        <div class="requirement-card-body">
+          <div class="requirement-col requirement-col--main">
+            <div class="requirement-desc-input">
+              <BaseTextarea
+                v-model="item.description"
+                label="需求描述"
+                :rows="7"
+                placeholder="请直接描述本条 P 图修改要求"
+              />
+              <p class="requirement-desc-hint">
+                补充说明可写在需求描述中，整单说明可写到底部备注。
+              </p>
+            </div>
           </div>
-          <p class="field-hint">支持多文件；创建任务后按本条需求绑定。</p>
-          <input
-            :ref="(el) => setReferenceInputRef(index, el)"
-            type="file"
-            class="hidden-input"
-            multiple
-            @change="onReferenceFileChange(index, $event)"
-          />
-          <ul v-if="pendingReferenceList(item).length" class="pending-file-list">
-            <li v-for="(file, fi) in pendingReferenceList(item)" :key="`${index}-ref-${fi}-${file.name}`" class="pending-file-item">
-              <span class="pending-file-name" :title="file.name">{{ file.name }}</span>
-              <span class="pending-file-meta">{{ prettyFileSize(file.size) }}</span>
-              <button type="button" class="pending-remove-btn" @click="removeReferenceFile(index, fi)">删除</button>
-            </li>
-          </ul>
-        </div>
 
-        <div class="req-upload-block">
-          <div class="req-upload-head">
-            <span class="req-upload-label">本条素材文件（可选）</span>
-            <button type="button" class="req-pick-btn" @click="triggerSourcePick(index)">选择文件</button>
+          <div class="requirement-col requirement-col--files">
+            <div class="req-upload-panel">
+              <div class="req-upload-toolbar">
+                <div class="req-upload-title-wrap">
+                  <span class="req-upload-label">本条参考图</span>
+                  <span class="req-upload-optional">可选</span>
+                </div>
+                <button type="button" class="req-pick-btn" @click="triggerReferencePick(index)">
+                  选择文件
+                </button>
+              </div>
+              <input
+                :ref="(el) => setReferenceInputRef(index, el)"
+                type="file"
+                class="hidden-input"
+                multiple
+                @change="onReferenceFileChange(index, $event)"
+              />
+              <ul v-if="pendingReferenceList(item).length" class="pending-file-list">
+                <li
+                  v-for="(file, fi) in pendingReferenceList(item)"
+                  :key="`${index}-ref-${fi}-${file.name}`"
+                  class="pending-file-item"
+                >
+                  <span class="pending-file-name" :title="file.name">{{ file.name }}</span>
+                  <span class="pending-file-meta">{{ prettyFileSize(file.size) }}</span>
+                  <button type="button" class="pending-remove-btn" @click="removeReferenceFile(index, fi)">
+                    移除
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="req-upload-empty">暂未选择参考图</p>
+            </div>
+
+            <div class="req-upload-panel">
+              <div class="req-upload-toolbar">
+                <div class="req-upload-title-wrap">
+                  <span class="req-upload-label">本条素材文件</span>
+                  <span class="req-upload-optional">可选</span>
+                </div>
+                <button type="button" class="req-pick-btn" @click="triggerSourcePick(index)">
+                  选择文件
+                </button>
+              </div>
+              <input
+                :ref="(el) => setSourceInputRef(index, el)"
+                type="file"
+                class="hidden-input"
+                :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                multiple
+                @change="onSourceFileChange(index, $event)"
+              />
+              <ul v-if="pendingSourceList(item).length" class="pending-file-list">
+                <li
+                  v-for="(file, fi) in pendingSourceList(item)"
+                  :key="`${index}-src-${fi}-${file.name}`"
+                  class="pending-file-item"
+                >
+                  <span class="pending-file-name" :title="file.name">{{ file.name }}</span>
+                  <span class="pending-file-meta">{{ prettyFileSize(file.size) }}</span>
+                  <button type="button" class="pending-remove-btn" @click="removeSourceFile(index, fi)">
+                    移除
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="req-upload-empty">暂未选择素材文件</p>
+            </div>
           </div>
-          <p class="field-hint">支持 PSD / AI / EPS / ZIP / 图片等；创建任务后按 source 资产绑定到本条需求。</p>
-          <input
-            :ref="(el) => setSourceInputRef(index, el)"
-            type="file"
-            class="hidden-input"
-            :accept="UPLOAD_ACCEPT_ATTRIBUTE"
-            multiple
-            @change="onSourceFileChange(index, $event)"
-          />
-          <ul v-if="pendingSourceList(item).length" class="pending-file-list">
-            <li v-for="(file, fi) in pendingSourceList(item)" :key="`${index}-src-${fi}-${file.name}`" class="pending-file-item">
-              <span class="pending-file-name" :title="file.name">{{ file.name }}</span>
-              <span class="pending-file-meta">{{ prettyFileSize(file.size) }}</span>
-              <button type="button" class="pending-remove-btn" @click="removeSourceFile(index, fi)">删除</button>
-            </li>
-          </ul>
         </div>
       </article>
     </section>
@@ -105,7 +139,6 @@ import {
 } from '@/domain/constants/reference-upload'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
 import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES } from '@/domain/copy/design-upload'
-import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 
 const pickError = ref('')
@@ -268,73 +301,223 @@ function prettyFileSize(size: number): string {
 .retouch-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
 }
 
-.form-intro {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--text-secondary, #64748b);
+.form-notice {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #dbeafe;
+  background: #f0f7ff;
 }
 
-.field-hint {
-  margin: 0 0 8px;
+.form-notice-title {
+  margin: 0 0 6px;
   font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary, #64748b);
+  font-weight: 600;
+  color: #1e40af;
+}
+
+.form-notice-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.form-notice-list li + li {
+  margin-top: 2px;
 }
 
 .requirements-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
 }
 
 .requirements-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.requirements-header-text {
+  min-width: 0;
 }
 
 .requirements-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
+  color: #0f172a;
+}
+
+.requirements-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #64748b;
 }
 
 .add-req-btn,
-.remove-req-btn {
-  border: 1px solid var(--border-color, #dbe3ef);
+.remove-req-btn,
+.req-pick-btn,
+.pending-remove-btn {
+  flex-shrink: 0;
+  border: 1px solid #cbd5e1;
   background: #fff;
-  color: var(--text-primary, #0f172a);
+  color: #0f172a;
   border-radius: 6px;
-  padding: 4px 10px;
   font-size: 12px;
   cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.add-req-btn {
+  padding: 6px 14px;
+  font-weight: 500;
+}
+
+.add-req-btn:hover,
+.req-pick-btn:hover,
+.remove-req-btn:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
 }
 
 .requirement-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 10px;
-  background: #f8fafc;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
 }
 
 .requirement-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .requirement-index {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: #0f172a;
+}
+
+.remove-req-btn {
+  padding: 4px 10px;
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fff;
+}
+
+.remove-req-btn:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.requirement-card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 0;
+  min-width: 0;
+}
+
+.requirement-col {
+  min-width: 0;
+  padding: 14px;
+}
+
+.requirement-col--main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-right: 1px solid #e2e8f0;
+  background: #fcfdff;
+}
+
+.requirement-col--files {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fafbfc;
+}
+
+.requirement-desc-input :deep(textarea) {
+  min-height: 10rem;
+}
+
+.requirement-desc-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.req-upload-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.req-upload-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.req-upload-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.req-upload-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.req-upload-optional {
+  font-size: 11px;
+  color: #64748b;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+}
+
+.req-pick-btn {
+  padding: 4px 10px;
+}
+
+.req-upload-empty {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #94a3b8;
 }
 
 .pick-error {
@@ -347,38 +530,6 @@ function prettyFileSize(size: number): string {
   display: none;
 }
 
-.req-upload-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
-  border-top: 1px dashed var(--border-color, #e2e8f0);
-}
-
-.req-upload-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.req-upload-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary, #0f172a);
-}
-
-.req-pick-btn,
-.pending-remove-btn {
-  border: 1px solid var(--border-color, #dbe3ef);
-  background: #fff;
-  color: var(--text-primary, #0f172a);
-  border-radius: 6px;
-  padding: 3px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
 .pending-file-list {
   margin: 0;
   padding: 0;
@@ -386,13 +537,18 @@ function prettyFileSize(size: number): string {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .pending-file-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #f8fafc;
 }
 
 .pending-file-name {
@@ -404,7 +560,23 @@ function prettyFileSize(size: number): string {
 }
 
 .pending-file-meta {
-  color: var(--text-secondary, #64748b);
+  color: #64748b;
   flex-shrink: 0;
+}
+
+.pending-remove-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .requirement-card-body {
+    grid-template-columns: 1fr;
+  }
+
+  .requirement-col--main {
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+  }
 }
 </style>

@@ -671,7 +671,7 @@ const contextPanelItems = computed(() => {
     return [
       {
         title: '填写方式',
-        body: '每条需求写清修改说明即可；款号、尺寸等额外信息请写在备注，不必单独填 SKU 或规格字段。',
+        body: '每条需求写清修改说明即可；补充说明写在需求描述中，整单说明可写到底部备注。',
       },
       {
         title: '本条附件',
@@ -1979,13 +1979,12 @@ async function submit() {
 .erp-sync-toggle-card :deep(.erp-switch[aria-pressed='true'] span.inline-block) {
   background: #22c55e;
 }
+/* P 图表单由 TaskCreateRetouchForm 内部布局；勿在此拆成两列 grid */
 .retouch-form {
-  display: grid;
-  grid-template-columns: 0.95fr 1.05fr;
-  gap: 0.75rem;
-}
-.retouch-form .upload-card {
-  background: #eef5ff;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
 }
 .batch-section-title {
   margin: 0;
@@ -2472,7 +2471,6 @@ async function submit() {
   }
   .customization-card-grid,
   .meta-card-grid,
-  .retouch-form,
   .batch-meta-compact,
   .batch-two-col {
     grid-template-columns: 1fr;
