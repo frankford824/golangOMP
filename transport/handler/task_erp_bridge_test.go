@@ -749,7 +749,7 @@ func testHandlerReferenceImageDataURI(sizeBytes int) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte(raw))
 }
 
-func TestTaskHandlerListAppliesMineFilterToCurrentActorCreatorID(t *testing.T) {
+func TestTaskHandlerListAppliesMineFilterToCurrentActorOwnership(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	taskSvc := &taskServiceCaptureStub{
@@ -776,10 +776,13 @@ func TestTaskHandlerListAppliesMineFilterToCurrentActorCreatorID(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /v1/tasks?filter=mine code = %d, want 200 body=%s", rec.Code, rec.Body.String())
 	}
-	if taskSvc.listFilter.CreatorID == nil {
-		t.Fatalf("captured list filter creator_id is nil, want actor id")
+	if taskSvc.listFilter.CreatorID != nil {
+		t.Fatalf("captured list filter creator_id = %v, want nil (mine uses MineActorID)", taskSvc.listFilter.CreatorID)
 	}
-	if got, want := *taskSvc.listFilter.CreatorID, int64(88); got != want {
-		t.Fatalf("captured list filter creator_id = %d, want %d", got, want)
+	if taskSvc.listFilter.MineActorID == nil {
+		t.Fatalf("captured list filter mine_actor_id is nil, want actor id")
+	}
+	if got, want := *taskSvc.listFilter.MineActorID, int64(88); got != want {
+		t.Fatalf("captured list filter mine_actor_id = %d, want %d", got, want)
 	}
 }

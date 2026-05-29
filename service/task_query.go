@@ -66,6 +66,7 @@ func taskFilterToRepoTaskListFilter(filter TaskFilter, page, pageSize int, scope
 	repoFilter := repo.TaskListFilter{
 		TaskQueryFilterDefinition: filter.TaskQueryFilterDefinition,
 		CreatorID:                 filter.CreatorID,
+		MineActorID:               filter.MineActorID,
 		DesignerID:                filter.DesignerID,
 		DesignerEmpty:             filter.DesignerEmpty,
 		NeedOutsource:             filter.NeedOutsource,

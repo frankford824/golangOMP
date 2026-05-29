@@ -301,6 +301,7 @@ type CostRuleListFilter struct {
 type TaskListFilter struct {
 	domain.TaskQueryFilterDefinition
 	CreatorID                   *int64
+	MineActorID                 *int64
 	DesignerID                  *int64
 	DesignerEmpty               *bool
 	NeedOutsource               *bool

@@ -278,6 +278,26 @@ func TestAppendTaskDataScopeWhereIncludesManagedTeamUserTies(t *testing.T) {
 	}
 }
 
+func TestBuildTaskListQuerySpecMineActorOwnership(t *testing.T) {
+	actorID := int64(88)
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{MineActorID: &actorID}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	want := "(t.creator_id = ? OR t.designer_id = ? OR t.current_handler_id = ?)"
+	if !strings.Contains(spec.whereSQL, want) {
+		t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
+	}
+	if len(spec.args) < 3 {
+		t.Fatalf("args len = %d, want at least 3 mine actor placeholders", len(spec.args))
+	}
+	for i := len(spec.args) - 3; i < len(spec.args); i++ {
+		if spec.args[i] != actorID {
+			t.Fatalf("mine actor arg[%d] = %v, want %d", i, spec.args[i], actorID)
+		}
+	}
+}
+
 func TestBuildTaskListQuerySpecDesignerEmpty(t *testing.T) {
 	designerEmpty := true
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{DesignerEmpty: &designerEmpty}, nil)

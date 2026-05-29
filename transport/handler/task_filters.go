@@ -44,8 +44,8 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		if appErr != nil {
 			return service.TaskFilter{}, appErr
 		}
-		// "mine" is an actor-scoped view; always narrow to current actor's creator_id.
-		filter.CreatorID = &actorID
+		// "mine" includes tasks where the actor is creator, assigned designer, or current handler.
+		filter.MineActorID = &actorID
 	}
 	if raw := c.Query("designer_id"); raw != "" {
 		id, err := parseInt64(raw)

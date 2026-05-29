@@ -1425,7 +1425,11 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 		args = append(args, clauseArgs...)
 	}
 
-	if filter.CreatorID != nil {
+	if filter.MineActorID != nil {
+		actorID := *filter.MineActorID
+		where = append(where, "(t.creator_id = ? OR t.designer_id = ? OR t.current_handler_id = ?)")
+		args = append(args, actorID, actorID, actorID)
+	} else if filter.CreatorID != nil {
 		where = append(where, "t.creator_id = ?")
 		args = append(args, *filter.CreatorID)
 	}

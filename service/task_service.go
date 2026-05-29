@@ -231,6 +231,8 @@ type CustomizationJobFilter struct {
 type TaskFilter struct {
 	domain.TaskQueryFilterDefinition
 	CreatorID     *int64
+	// MineActorID scopes GET /v1/tasks?filter=mine to tasks owned by the actor as creator, designer, or current handler.
+	MineActorID   *int64
 	DesignerID    *int64
 	DesignerEmpty *bool
 	NeedOutsource *bool
