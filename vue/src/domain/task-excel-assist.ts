@@ -7,7 +7,7 @@ export type { SingleTaskExcelDraft, ExcelAssistViolation }
 
 export type ExcelAssistTaskType = 'new_product_development' | 'purchase_task'
 
-export type ExcelAssistFlow = 'new_batch' | 'new_single' | 'purchase_single'
+export type ExcelAssistFlow = 'new_batch' | 'new_single' | 'purchase_single' | 'original_single'
 
 export interface ExcelAssistSingleSubmitForm {
   draft: SingleTaskExcelDraft | null
@@ -22,6 +22,11 @@ export interface MapExcelSingleTaskInput {
 }
 
 export interface MapExcelPurchaseSingleTaskInput {
+  draft: SingleTaskExcelDraft
+  pageNote?: string
+}
+
+export interface MapExcelOriginalSingleTaskInput {
   draft: SingleTaskExcelDraft
   pageNote?: string
 }
@@ -134,7 +139,31 @@ export function excelAssistTaskTypeLabel(taskType: ExcelAssistTaskType): string 
 export function excelAssistFlowLabel(flow: ExcelAssistFlow): string {
   if (flow === 'purchase_single') return '采购单 SKU'
   if (flow === 'new_single') return '新款单 SKU'
+  if (flow === 'original_single') return '原款开发'
   return '新款批量 SKU'
+}
+
+function buildErpProductSnapshotFromDraft(draft: SingleTaskExcelDraft): Record<string, unknown> {
+  const erp = draft.erp_product
+  const productName = draft.product_name?.trim() ?? erp?.product_name?.trim() ?? erp?.name?.trim() ?? ''
+  const skuCode = draft.sku_code?.trim() ?? erp?.sku_code?.trim() ?? ''
+  const productId = draft.product_id?.trim() ?? erp?.product_id?.trim() ?? ''
+  return {
+    product_id: productId,
+    sku_code: skuCode,
+    name: productName,
+    product_name: productName,
+    category_code: draft.category_code?.trim() ?? erp?.category_code?.trim() ?? '',
+    category_name: draft.category_name?.trim() ?? erp?.category_name?.trim() ?? '',
+    image_url: draft.image_url?.trim() ?? erp?.image_url?.trim() ?? '',
+  }
+}
+
+function parseNumericProductId(productId: string | undefined): string | undefined {
+  if (!productId?.trim()) return undefined
+  const n = Number.parseInt(productId.trim(), 10)
+  if (!Number.isFinite(n) || Number.isNaN(n)) return undefined
+  return String(n)
 }
 
 export function mapExcelPreviewToSingleTask(input: MapExcelSingleTaskInput): Record<string, unknown> {
@@ -196,6 +225,46 @@ export function canSubmitExcelAssistSingle(form: ExcelAssistSingleSubmitForm): b
   if (!draft.product_i_id?.trim()) return false
   if (!draft.product_name?.trim()) return false
   if (!draft.design_requirement?.trim()) return false
+  if (isErpProductNameTooLong(draft.product_name)) return false
+  return true
+}
+
+export function mapExcelPreviewToOriginalSingleTask(
+  input: MapExcelOriginalSingleTaskInput,
+): Record<string, unknown> {
+  const { draft, pageNote } = input
+  const remarkParts = [pageNote?.trim(), draft.remark?.trim()].filter(Boolean)
+  const productName = draft.product_name?.trim() ?? draft.product_name_snapshot?.trim() ?? ''
+  const skuCode = draft.sku_code?.trim() ?? ''
+  const numericProductId = parseNumericProductId(draft.product_id)
+  const payload: Record<string, unknown> = {
+    taskType: 'ORIGINAL_PRODUCT_DEV',
+    skuMode: 'single',
+    productSource: 'existing',
+    sku: skuCode,
+    productName,
+    designRequirement: draft.change_request?.trim() ?? '',
+    prefillSpecText: draft.spec_text?.trim() || undefined,
+    erpProductSnapshot: buildErpProductSnapshotFromDraft(draft),
+    businessType: 'ORIGINAL_PRODUCT_DEV',
+    requiresAssetVersions: true,
+    note: remarkParts.length > 0 ? remarkParts.join('\n') : undefined,
+  }
+  if (numericProductId != null) {
+    payload.productId = numericProductId
+  }
+  return payload
+}
+
+export function canSubmitExcelAssistOriginalSingle(form: ExcelAssistSingleSubmitForm): boolean {
+  if (!form.groupId.trim()) return false
+  if (!form.dueAt) return false
+  if (form.violations.length > 0) return false
+  const draft = form.draft
+  if (!draft) return false
+  if (!draft.sku_code?.trim()) return false
+  if (!draft.change_request?.trim()) return false
+  if (!draft.product_name?.trim()) return false
   if (isErpProductNameTooLong(draft.product_name)) return false
   return true
 }

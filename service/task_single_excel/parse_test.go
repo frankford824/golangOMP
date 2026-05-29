@@ -12,18 +12,40 @@ import (
 	"workflow/domain"
 )
 
-type mockIIDLookup struct {
-	valid map[string]bool
+type mockERPLookup struct {
+	validIIDs   map[string]bool
+	skuProducts map[string][]*domain.ERPProduct
+	searchErr   *domain.AppError
 }
 
-func (m *mockIIDLookup) ListIIDs(ctx context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+func (m *mockERPLookup) ListIIDs(ctx context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
 	_ = ctx
-	if m.valid[strings.TrimSpace(filter.Q)] {
+	if m != nil && m.validIIDs[strings.TrimSpace(filter.Q)] {
 		return &domain.ERPIIDListResponse{
 			Items: []*domain.ERPIIDOption{{IID: filter.Q}},
 		}, nil
 	}
 	return &domain.ERPIIDListResponse{Items: nil}, nil
+}
+
+func (m *mockERPLookup) SearchProducts(ctx context.Context, filter domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError) {
+	_ = ctx
+	if m == nil {
+		return &domain.ERPProductListResponse{Items: nil}, nil
+	}
+	if m.searchErr != nil {
+		return nil, m.searchErr
+	}
+	sku := strings.TrimSpace(filter.SKUCode)
+	if sku == "" {
+		sku = strings.TrimSpace(filter.Q)
+	}
+	if m.skuProducts != nil {
+		if items, ok := m.skuProducts[sku]; ok {
+			return &domain.ERPProductListResponse{Items: items}, nil
+		}
+	}
+	return &domain.ERPProductListResponse{Items: nil}, nil
 }
 
 func TestTemplateGenerate_NPD_Single(t *testing.T) {
@@ -64,7 +86,7 @@ func TestParse_HappyPath_OneRow(t *testing.T) {
 		"material_other":      "备注材质",
 		"remark":              "行备注",
 	})
-	lookup := &mockIIDLookup{valid: map[string]bool{"IID-001": true}}
+	lookup := &mockERPLookup{validIIDs: map[string]bool{"IID-001": true}}
 	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
 		t.Context(),
 		domain.TaskTypeNewProductDevelopment,
@@ -131,7 +153,7 @@ func TestParse_InvalidIID(t *testing.T) {
 		"product_name":       "产品",
 		"design_requirement": "要求",
 	})
-	lookup := &mockIIDLookup{valid: map[string]bool{}}
+	lookup := &mockERPLookup{validIIDs: map[string]bool{}}
 	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
 		t.Context(),
 		domain.TaskTypeNewProductDevelopment,
@@ -190,7 +212,7 @@ func TestParse_Purchase_HappyPath_OneRow(t *testing.T) {
 		"spec_text":    "20x30cm",
 		"remark":       "行备注",
 	})
-	lookup := &mockIIDLookup{valid: map[string]bool{"IID-P001": true}}
+	lookup := &mockERPLookup{validIIDs: map[string]bool{"IID-P001": true}}
 	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
 		t.Context(),
 		domain.TaskTypePurchaseTask,
@@ -305,7 +327,7 @@ func TestParse_Purchase_InvalidIID(t *testing.T) {
 		"quantity":     "5",
 		"spec_text":    "20x30cm",
 	})
-	lookup := &mockIIDLookup{valid: map[string]bool{}}
+	lookup := &mockERPLookup{validIIDs: map[string]bool{}}
 	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
 		t.Context(),
 		domain.TaskTypePurchaseTask,
@@ -377,4 +399,183 @@ func fieldIndex(fields []FieldSpec, key string) int {
 		}
 	}
 	return 0
+}
+
+func TestTemplateGenerate_Original_Single(t *testing.T) {
+	content, appErr := NewTemplateService().Generate(t.Context(), domain.TaskTypeOriginalProductDevelopment, AssistModeSingle)
+	if appErr != nil {
+		t.Fatalf("Generate appErr = %v", appErr)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("open template: %v", err)
+	}
+	defer f.Close()
+	rows, err := f.GetRows(itemsSheet)
+	if err != nil || len(rows) < 1 {
+		t.Fatalf("Items rows = %#v err=%v", rows, err)
+	}
+	wantHeaders := []string{"SKU编码", "修改要求", "规格尺寸", "备注"}
+	for i, want := range wantHeaders {
+		if rows[0][i] != want {
+			t.Fatalf("header[%d] = %q, want %q", i, rows[0][i], want)
+		}
+	}
+}
+
+func TestParse_Original_HappyPath_EnrichesERP(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypeOriginalProductDevelopment, map[string]string{
+		"sku_code":        "SKU-ORIG-001",
+		"change_request":  "改款要求文案",
+		"spec_text":       "10x10cm",
+		"remark":          "行备注",
+	})
+	lookup := &mockERPLookup{
+		skuProducts: map[string][]*domain.ERPProduct{
+			"SKU-ORIG-001": {{
+				ProductID:    "ERP-9001",
+				SKUID:        "SKU-ORIG-001",
+				SKUCode:      "SKU-ORIG-001",
+				ProductName:  "原款商品A",
+				CategoryCode: "CAT-01",
+				CategoryName: "分类A",
+				ImageURL:     "https://example.com/a.jpg",
+			}},
+		},
+	}
+	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
+		t.Context(),
+		domain.TaskTypeOriginalProductDevelopment,
+		AssistModeSingle,
+		bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+	if result.Draft == nil {
+		t.Fatal("draft is nil")
+	}
+	if result.Draft.SKUCode != "SKU-ORIG-001" || result.Draft.ChangeRequest != "改款要求文案" {
+		t.Fatalf("draft = %+v", result.Draft)
+	}
+	if result.Draft.ProductID != "ERP-9001" || result.Draft.ProductName != "原款商品A" {
+		t.Fatalf("enriched draft = %+v", result.Draft)
+	}
+	if result.Draft.ERPProduct == nil || result.Draft.ERPProduct.SKUCode != "SKU-ORIG-001" {
+		t.Fatalf("erp_product = %+v", result.Draft.ERPProduct)
+	}
+	if hasViolationCode(result.Violations, "invalid_i_id") {
+		t.Fatal("original parse must not emit invalid_i_id")
+	}
+}
+
+func TestParse_Original_MissingSKU(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypeOriginalProductDevelopment, map[string]string{
+		"sku_code":       "",
+		"change_request": "要求",
+	})
+	result, appErr := NewParseServiceWithDependencies(&mockERPLookup{}).Parse(
+		t.Context(), domain.TaskTypeOriginalProductDevelopment, AssistModeSingle, bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "missing_required_field") {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+}
+
+func TestParse_Original_MissingChangeRequest(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypeOriginalProductDevelopment, map[string]string{
+		"sku_code":       "SKU-ORIG-001",
+		"change_request": "",
+	})
+	result, appErr := NewParseServiceWithDependencies(&mockERPLookup{}).Parse(
+		t.Context(), domain.TaskTypeOriginalProductDevelopment, AssistModeSingle, bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "missing_required_field") {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+}
+
+func TestParse_Original_MultipleRows_NotAllowed(t *testing.T) {
+	content := testSingleWorkbookRowsForTaskType(t, domain.TaskTypeOriginalProductDevelopment,
+		map[string]string{"sku_code": "SKU-A", "change_request": "要求A"},
+		map[string]string{"sku_code": "SKU-B", "change_request": "要求B"},
+	)
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeOriginalProductDevelopment, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "multiple_rows_not_allowed") {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+}
+
+func TestParse_Original_ProductNotFound(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypeOriginalProductDevelopment, map[string]string{
+		"sku_code":       "MISSING-SKU",
+		"change_request": "要求",
+	})
+	result, appErr := NewParseServiceWithDependencies(&mockERPLookup{}).Parse(
+		t.Context(), domain.TaskTypeOriginalProductDevelopment, AssistModeSingle, bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "product_not_found") {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+	if hasViolationCode(result.Violations, "invalid_i_id") {
+		t.Fatal("must not use invalid_i_id for original")
+	}
+}
+
+func TestParse_Original_AmbiguousProduct(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypeOriginalProductDevelopment, map[string]string{
+		"sku_code":       "DUP-SKU",
+		"change_request": "要求",
+	})
+	lookup := &mockERPLookup{
+		skuProducts: map[string][]*domain.ERPProduct{
+			"DUP-SKU": {
+				{ProductID: "ERP-1", SKUCode: "DUP-SKU", ProductName: "A"},
+				{ProductID: "ERP-2", SKUCode: "DUP-SKU", ProductName: "B"},
+			},
+		},
+	}
+	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
+		t.Context(), domain.TaskTypeOriginalProductDevelopment, AssistModeSingle, bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "ambiguous_product") {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+}
+
+func TestParse_Original_ERPLookupFailed(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypeOriginalProductDevelopment, map[string]string{
+		"sku_code":       "SKU-ERR",
+		"change_request": "要求",
+	})
+	lookup := &mockERPLookup{
+		searchErr: domain.NewAppError("erp_unavailable", "erp bridge down", nil),
+	}
+	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
+		t.Context(), domain.TaskTypeOriginalProductDevelopment, AssistModeSingle, bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "erp_lookup_failed") {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
 }
