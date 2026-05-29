@@ -58,7 +58,14 @@
         {{ selectedFileName }}
       </p>
       <p v-if="templateName" class="template-line">模板：{{ templateName }}</p>
-      <p v-if="isPurchase" class="rule-line">
+      <p v-if="isOriginal" class="rule-line">
+        每次上传仅创建 <strong>1 个</strong> 原款开发任务。<br />
+        必填：SKU 编码、修改要求。<br />
+        商品名称、类目等由 ERP 查询回填。<br />
+        可选：规格尺寸、备注。<br />
+        参考图请创建后在任务详情页上传（本版 Excel 不支持嵌入图）。
+      </p>
+      <p v-else-if="isPurchase" class="rule-line">
         每次上传仅创建 <strong>1 个</strong> 采购任务。<br />
         必填：产品款式编码、产品名称、数量、规格尺寸。<br />
         可选：备注。<br />
@@ -127,6 +134,7 @@ const activeStep = computed(() => {
 const selectedFileName = computed(() => selectedFile.value?.name ?? '未选择任何文件')
 
 const isPurchase = computed(() => props.taskType === 'purchase_task')
+const isOriginal = computed(() => props.taskType === 'original_product_development')
 
 function openFilePicker(): void {
   fileInput.value?.click()
@@ -177,7 +185,13 @@ async function parseFile(): Promise<void> {
     draft.value = normalizeSingleTaskDraft(data.draft)
     violations.value = data.violations ?? []
     emit('parsed', { draft: draft.value, violations: violations.value })
-    if (!draft.value.product_name && violations.value.length === 0) {
+    const emptyDraft =
+      isOriginal.value
+        ? !draft.value.sku_code && !draft.value.change_request
+        : isPurchase.value
+          ? !draft.value.product_i_id && draft.value.quantity == null
+          : !draft.value.product_name && !draft.value.product_i_id
+    if (emptyDraft && violations.value.length === 0) {
       errorText.value = '解析结果为空，请检查文件内容。'
     }
   } catch (err) {

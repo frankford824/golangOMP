@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -175,6 +176,70 @@ func TestExcelAssist_ParseUpload_PurchaseHappyPath(t *testing.T) {
 	}
 }
 
+func TestExcelAssist_DownloadTemplate_OriginalSuccess(t *testing.T) {
+	router := excelAssistRouter(true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/excel-assist/template.xlsx?task_type=original_product_development&mode=single", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open workbook: %v", err)
+	}
+	defer f.Close()
+	rows, err := f.GetRows("Items")
+	if err != nil || len(rows) < 1 || rows[0][0] != "SKU编码" {
+		t.Fatalf("rows=%v err=%v", rows, err)
+	}
+}
+
+func TestExcelAssist_ParseUpload_OriginalHappyPath(t *testing.T) {
+	content, appErr := tasksingleexcel.NewTemplateService().Generate(t.Context(), domain.TaskTypeOriginalProductDevelopment, tasksingleexcel.AssistModeSingle)
+	if appErr != nil {
+		t.Fatalf("Generate appErr = %v", appErr)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("open template: %v", err)
+	}
+	defer f.Close()
+	_ = f.SetCellValue("Items", "A2", "SKU-ORIG-H")
+	_ = f.SetCellValue("Items", "B2", "修改要求文案")
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+
+	lookup := &excelAssistMockERPLookup{
+		skuProducts: map[string][]*domain.ERPProduct{
+			"SKU-ORIG-H": {{
+				ProductID:   "ERP-H-1",
+				SKUCode:     "SKU-ORIG-H",
+				ProductName: "原款测试商品",
+			}},
+		},
+	}
+	router := excelAssistRouterWithParse(true, tasksingleexcel.NewParseServiceWithDependencies(lookup))
+	body, contentType := excelAssistMultipart(t, "original_product_development", "single", buf.Bytes())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/excel-assist/parse-excel", body)
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"sku_code":"SKU-ORIG-H"`) && !strings.Contains(rec.Body.String(), `"sku_code": "SKU-ORIG-H"`) {
+		t.Fatalf("body=%s, want sku_code in draft", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "原款测试商品") {
+		t.Fatalf("body=%s, want enriched product name", rec.Body.String())
+	}
+}
+
 func TestExcelAssist_ParseUpload_UnsupportedTaskType(t *testing.T) {
 	router := excelAssistRouter(true)
 	body, contentType := excelAssistMultipart(t, "retouch_task", "single", []byte("x"))
@@ -191,7 +256,29 @@ func TestExcelAssist_ParseUpload_UnsupportedTaskType(t *testing.T) {
 	}
 }
 
+type excelAssistMockERPLookup struct {
+	skuProducts map[string][]*domain.ERPProduct
+}
+
+func (m *excelAssistMockERPLookup) ListIIDs(context.Context, domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+	return &domain.ERPIIDListResponse{Items: nil}, nil
+}
+
+func (m *excelAssistMockERPLookup) SearchProducts(_ context.Context, filter domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError) {
+	sku := strings.TrimSpace(filter.SKUCode)
+	if m != nil && m.skuProducts != nil {
+		if items, ok := m.skuProducts[sku]; ok {
+			return &domain.ERPProductListResponse{Items: items}, nil
+		}
+	}
+	return &domain.ERPProductListResponse{Items: nil}, nil
+}
+
 func excelAssistRouter(authRequired bool) *gin.Engine {
+	return excelAssistRouterWithParse(authRequired, tasksingleexcel.NewParseService())
+}
+
+func excelAssistRouterWithParse(authRequired bool, parseSvc tasksingleexcel.ParseService) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	if authRequired {
@@ -208,7 +295,6 @@ func excelAssistRouter(authRequired bool) *gin.Engine {
 		})
 	}
 	templateSvc := tasksingleexcel.NewTemplateService()
-	parseSvc := tasksingleexcel.NewParseService()
 	h := NewTaskSingleExcelHandler(templateSvc, parseSvc)
 	router.GET("/v1/tasks/excel-assist/template.xlsx", h.DownloadTemplate)
 	router.POST("/v1/tasks/excel-assist/parse-excel", h.ParseUpload)

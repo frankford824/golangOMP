@@ -5,7 +5,7 @@
         <div>
           <h2 class="page-title">Excel 辅助创建任务</h2>
           <p class="page-subtitle">
-            支持新款批量 SKU、新款单 SKU 与采购单 SKU 的 Excel 辅助创建。每次上传 Excel 仅创建 1 个任务。
+            支持新款批量 SKU、新款单 SKU、采购单 SKU 与原款开发的 Excel 辅助创建。每次上传 Excel 仅创建 1 个任务。
           </p>
         </div>
         <BaseButton variant="secondary" size="sm" @click="goBack">返回任务中心</BaseButton>
@@ -43,10 +43,16 @@
             @reset="onSingleExcelReset"
           />
           <ExcelSingleSkuPanel
-            v-else
+            v-else-if="flow === 'purchase_single'"
             task-type="purchase_task"
             @parsed="onPurchaseExcelParsed"
             @reset="onPurchaseExcelReset"
+          />
+          <ExcelSingleSkuPanel
+            v-else
+            task-type="original_product_development"
+            @parsed="onOriginalExcelParsed"
+            @reset="onOriginalExcelReset"
           />
 
           <section v-if="flow === 'new_batch' && previewRows.length > 0" class="preview-section">
@@ -142,6 +148,51 @@
             </dl>
             <ul v-if="purchaseViolations.length > 0" class="single-violation-list">
               <li v-for="(err, idx) in purchaseViolations" :key="`${err.code}-${idx}`">
+                <span v-if="err.row">第 {{ err.row }} 行 · </span>
+                {{ err.column ? `${err.column} · ` : '' }}{{ err.message || err.code }}
+              </li>
+            </ul>
+          </section>
+
+          <section v-if="flow === 'original_single' && originalDraft" class="preview-section">
+            <div class="preview-header">
+              <h3 class="section-title">解析预览</h3>
+              <span class="preview-meta">单任务 · 错误 {{ originalViolations.length }} 条</span>
+            </div>
+            <dl class="single-draft-grid">
+              <div class="draft-row">
+                <dt>SKU编码</dt>
+                <dd>{{ originalDraft.sku_code || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>ERP商品名称</dt>
+                <dd>{{ originalDraft.product_name || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>修改要求</dt>
+                <dd>{{ originalDraft.change_request || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>规格尺寸</dt>
+                <dd>{{ originalDraft.spec_text || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>类目</dt>
+                <dd>
+                  {{
+                    originalDraft.category_name ||
+                    originalDraft.category_code ||
+                    '—'
+                  }}
+                </dd>
+              </div>
+              <div class="draft-row">
+                <dt>Excel 备注</dt>
+                <dd>{{ originalDraft.remark || '—' }}</dd>
+              </div>
+            </dl>
+            <ul v-if="originalViolations.length > 0" class="single-violation-list">
+              <li v-for="(err, idx) in originalViolations" :key="`${err.code}-${idx}`">
                 <span v-if="err.row">第 {{ err.row }} 行 · </span>
                 {{ err.column ? `${err.column} · ` : '' }}{{ err.message || err.code }}
               </li>
@@ -275,10 +326,12 @@ import type { Task } from '@/domain/types/task'
 import type { TaskBatchItem } from '@/domain/types'
 import {
   canSubmitExcelAssistBatch,
+  canSubmitExcelAssistOriginalSingle,
   canSubmitExcelAssistPurchaseSingle,
   canSubmitExcelAssistSingle,
   excelAssistFlowLabel,
   mapExcelPreviewToBatchItems,
+  mapExcelPreviewToOriginalSingleTask,
   mapExcelPreviewToPurchaseSingleTask,
   mapExcelPreviewToSingleTask,
   type ExcelAssistFlow,
@@ -307,6 +360,7 @@ const flowOptions: { value: ExcelAssistFlow; label: string }[] = [
   { value: 'new_batch', label: '新款批量 SKU' },
   { value: 'new_single', label: '新款单 SKU' },
   { value: 'purchase_single', label: '采购单 SKU' },
+  { value: 'original_single', label: '原款开发' },
 ]
 
 const flow = ref<ExcelAssistFlow>('new_batch')
@@ -320,6 +374,9 @@ const singleViolations = ref<ExcelAssistViolation[]>([])
 
 const purchaseDraft = ref<SingleTaskExcelDraft | null>(null)
 const purchaseViolations = ref<ExcelAssistViolation[]>([])
+
+const originalDraft = ref<SingleTaskExcelDraft | null>(null)
+const originalViolations = ref<ExcelAssistViolation[]>([])
 
 const groupId = ref('')
 const dueAt = ref<string | null>(null)
@@ -400,6 +457,14 @@ const canSubmit = computed(() => {
       dueAt: dueAt.value,
     })
   }
+  if (flow.value === 'original_single') {
+    return canSubmitExcelAssistOriginalSingle({
+      draft: originalDraft.value,
+      violations: originalViolations.value,
+      groupId: groupId.value,
+      dueAt: dueAt.value,
+    })
+  }
   return canSubmitExcelAssistSingle({
     draft: singleDraft.value,
     violations: singleViolations.value,
@@ -419,6 +484,11 @@ const submitBlockReason = computed(() => {
   if (flow.value === 'purchase_single') {
     if (!purchaseDraft.value) return '请先上传并解析 Excel'
     if (purchaseViolations.value.length > 0) return 'Excel 存在错误，请修正后重新上传'
+    return ''
+  }
+  if (flow.value === 'original_single') {
+    if (!originalDraft.value) return '请先上传并解析 Excel'
+    if (originalViolations.value.length > 0) return 'Excel 存在错误，请修正后重新上传'
     return ''
   }
   if (!singleDraft.value) return '请先上传并解析 Excel'
@@ -465,10 +535,16 @@ function resetPurchaseExcelState() {
   purchaseViolations.value = []
 }
 
+function resetOriginalExcelState() {
+  originalDraft.value = null
+  originalViolations.value = []
+}
+
 function resetAllExcelState() {
   resetBatchExcelState()
   resetSingleExcelState()
   resetPurchaseExcelState()
+  resetOriginalExcelState()
   submitError.value = ''
 }
 
@@ -514,6 +590,20 @@ function onPurchaseExcelReset() {
   submitError.value = ''
 }
 
+function onOriginalExcelParsed(payload: {
+  draft: SingleTaskExcelDraft
+  violations: ExcelAssistViolation[]
+}) {
+  originalDraft.value = payload.draft
+  originalViolations.value = payload.violations
+  submitError.value = ''
+}
+
+function onOriginalExcelReset() {
+  resetOriginalExcelState()
+  submitError.value = ''
+}
+
 function previewRowErrors(row: number): BatchViolation[] {
   return violations.value.filter((v) => v.row === row)
 }
@@ -544,6 +634,12 @@ function buildCommonTaskFields(forFlow: ExcelAssistFlow) {
   const now = nowISO()
   const preflightOwnerDepartment = resolveOwnerDepartmentForSubmit()
   const isPurchase = forFlow === 'purchase_single'
+  const isOriginal = forFlow === 'original_single'
+  const businessType = isPurchase
+    ? ('PURCHASE_TASK' as const)
+    : isOriginal
+      ? ('ORIGINAL_PRODUCT_DEV' as const)
+      : ('NEW_PRODUCT_DEV' as const)
   return {
     businessLane: 'normal' as const,
     workflowLane: 'normal' as const,
@@ -558,9 +654,9 @@ function buildCommonTaskFields(forFlow: ExcelAssistFlow) {
     creatorName: currentUser?.name ?? null,
     dueAt: dueAt.value,
     priority: normalizePriorityForApi(priority.value),
-    syncErpOnCreate: true,
+    syncErpOnCreate: !isOriginal && !isPurchase ? true : isPurchase ? true : undefined,
     assetVersions: [] as unknown[],
-    businessType: isPurchase ? ('PURCHASE_TASK' as const) : ('NEW_PRODUCT_DEV' as const),
+    businessType,
     requiresAssetVersions: !isPurchase,
     createdAt: now,
     updatedAt: now,
@@ -609,6 +705,17 @@ async function submit() {
       ...mapped,
     }
     delete payload.preflightOwnerDepartment
+  } else if (flow.value === 'original_single') {
+    const mapped = mapExcelPreviewToOriginalSingleTask({
+      draft: originalDraft.value!,
+      pageNote: note.value,
+    })
+    payload = {
+      ...common,
+      ...mapped,
+    }
+    delete payload.preflightOwnerDepartment
+    delete payload.syncErpOnCreate
   } else {
     const mapped = mapExcelPreviewToSingleTask({
       draft: singleDraft.value!,

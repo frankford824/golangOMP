@@ -7304,7 +7304,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 ### 简介
 支持方法: GET。
 
-- `GET`: Downloads the Excel assist workbook for creating one task at a time with `mode=single`. `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required); optional `规格尺寸`, `材质`, `材质备注`, `备注`. `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`. The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
+- `GET`: Downloads the Excel assist workbook for creating one task at a time with `mode=single`. `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required); optional `规格尺寸`, `材质`, `材质备注`, `备注`. `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`. `task_type=original_product_development` columns: `SKU编码`, `修改要求` (required); optional `规格尺寸`, `备注`. Product name and category are enriched from ERP during `parse-excel`, not collected in the template. The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -7316,7 +7316,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `task_type` | query | enum(new_product_development/purchase_task) | 是 | - |
+| `task_type` | query | enum(new_product_development/purchase_task/original_product_development) | 是 | - |
 | `mode` | query | enum(single) | 是 | - |
 
 请求体: 无请求体。
@@ -7359,7 +7359,7 @@ curl -X GET https://api.example.com/v1/tasks/excel-assist/template.xlsx \
 ### 简介
 支持方法: POST。
 
-- `POST`: Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`. For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`. More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`. Parsed `product_i_id` values are validated against ERP i_id options when configured.
+- `POST`: Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`. For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`. For `original_product_development`, required: `SKU编码`, `修改要求`; optional `规格尺寸`, `备注`. Parsed `sku_code` values are resolved through ERP product search; unknown SKU returns `product_not_found`. More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`. Parsed `product_i_id` values (new/purchase only) are validated against ERP i_id options when configured.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -7375,7 +7375,7 @@ Content-Type: `multipart/form-data`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `task_type` | enum(new_product_development/purchase_task) | 是 | - |
+| `task_type` | enum(new_product_development/purchase_task/original_product_development) | 是 | - |
 | `mode` | enum(single) | 是 | - |
 | `file` | string | 是 | - |
 
@@ -7391,7 +7391,7 @@ Content-Type: `multipart/form-data`
       "product_i_id": "...",
       "product_name": "...",
       "design_requirement": "...",
-      "spec_text": "..."
+      "sku_code": "..."
     },
     "violations": [
       "..."

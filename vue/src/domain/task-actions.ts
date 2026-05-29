@@ -56,6 +56,13 @@ export function isCustomizationTask(task: Task): boolean {
   )
 }
 
+/** 任务中心卡片 meta：是否展示「设计」行（设计师姓名）。 */
+export function shouldShowDesignerMetaOnTaskCenterCard(task: Task): boolean {
+  if (isPurchaseTask(task)) return false
+  if (task.designSubStatus === DesignSubStatusEnum.NOT_REQUIRED) return false
+  return true
+}
+
 // ─── 设计流程操作谓词 ──────────────────────────────────────────────────────────
 
 /** 任务尚无设计/美工负责人（指派/接单前）。 */

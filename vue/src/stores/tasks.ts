@@ -393,6 +393,45 @@ function parseOptionalWarehouseSubStatus(raw: unknown): WarehouseSubStatus | und
   return WAREHOUSE_SUB_STATUS_SET.has(v) ? (v as WarehouseSubStatus) : undefined
 }
 
+function mapWarehouseFieldsFromWorkflow(
+  raw: Record<string, unknown>,
+): Partial<Pick<Task, 'warehouseReceiveStatus' | 'warehouseSubStatus'>> {
+  const workflow = raw.workflow as Record<string, unknown> | undefined
+  const subStatus = workflow?.sub_status as Record<string, unknown> | undefined
+  const wh = subStatus?.warehouse as Record<string, unknown> | undefined
+  const codeRaw = wh?.code
+  if (typeof codeRaw !== 'string' || !codeRaw.trim()) return {}
+  const code = codeRaw.trim().toLowerCase().replace(/-/g, '_')
+
+  const terminalWarehouseCodes = new Set(['done', 'complete', 'completed', 'warehouse_complete'])
+  if (terminalWarehouseCodes.has(code)) {
+    return {
+      warehouseSubStatus: 'DONE',
+      warehouseReceiveStatus: 'archived',
+    }
+  }
+
+  const workflowMap: Record<
+    string,
+    { warehouseSubStatus: WarehouseSubStatus; warehouseReceiveStatus?: Task['warehouseReceiveStatus'] }
+  > = {
+    pending_receive: { warehouseSubStatus: 'PENDING_RECEIVE', warehouseReceiveStatus: 'pending' },
+    received: { warehouseSubStatus: 'RECEIVED', warehouseReceiveStatus: 'received' },
+    returned: { warehouseSubStatus: 'RETURNED', warehouseReceiveStatus: 'returned' },
+    packing: { warehouseSubStatus: 'PACKING' },
+    done: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    completed: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    warehouse_complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    not_required: { warehouseSubStatus: 'NOT_REQUIRED' },
+    not_triggered: { warehouseSubStatus: 'NOT_REQUIRED' },
+  }
+
+  const mapped = workflowMap[code]
+  if (mapped) return mapped
+  return {}
+}
+
 /**
  * 从扁平字段或 workflow.sub_status.warehouse.code 解析仓库维度（读模型常见为后者）。
  * 见后端 task read model：workflow.sub_status.warehouse.code = pending_receive 等。
@@ -400,6 +439,12 @@ function parseOptionalWarehouseSubStatus(raw: unknown): WarehouseSubStatus | und
 function parseWarehouseFieldsFromApi(raw: Record<string, unknown>): Partial<
   Pick<Task, 'warehouseReceiveStatus' | 'warehouseSubStatus'>
 > {
+  const fromWorkflow = mapWarehouseFieldsFromWorkflow(raw)
+  const workflowWarehouseTerminal = fromWorkflow.warehouseReceiveStatus === 'archived'
+  if (workflowWarehouseTerminal) {
+    return fromWorkflow
+  }
+
   const flatSub = parseOptionalWarehouseSubStatus(
     raw.warehouse_sub_status ?? raw.warehouseSubStatus,
   )
@@ -411,6 +456,9 @@ function parseWarehouseFieldsFromApi(raw: Record<string, unknown>): Partial<
       fromFlat.warehouseReceiveStatus = 'pending'
       fromFlat.warehouseSubStatus = flatSub ?? 'PENDING_RECEIVE'
     } else if (fr === 'received') {
+      if (fromWorkflow.warehouseReceiveStatus === 'archived') {
+        return fromWorkflow
+      }
       fromFlat.warehouseReceiveStatus = 'received'
       fromFlat.warehouseSubStatus = flatSub ?? 'RECEIVED'
     } else if (fr === 'returned') {
@@ -428,34 +476,13 @@ function parseWarehouseFieldsFromApi(raw: Record<string, unknown>): Partial<
     }
   }
   if (flatSub != null) {
+    if (fromWorkflow.warehouseReceiveStatus === 'archived') {
+      return fromWorkflow
+    }
     return { warehouseSubStatus: flatSub }
   }
 
-  const workflow = raw.workflow as Record<string, unknown> | undefined
-  const subStatus = workflow?.sub_status as Record<string, unknown> | undefined
-  const wh = subStatus?.warehouse as Record<string, unknown> | undefined
-  const codeRaw = wh?.code
-  if (typeof codeRaw !== 'string' || !codeRaw.trim()) return {}
-  const code = codeRaw.trim().toLowerCase().replace(/-/g, '_')
-
-  const workflowMap: Record<
-    string,
-    { warehouseSubStatus: WarehouseSubStatus; warehouseReceiveStatus?: Task['warehouseReceiveStatus'] }
-  > = {
-    pending_receive: { warehouseSubStatus: 'PENDING_RECEIVE', warehouseReceiveStatus: 'pending' },
-    received: { warehouseSubStatus: 'RECEIVED', warehouseReceiveStatus: 'received' },
-    returned: { warehouseSubStatus: 'RETURNED', warehouseReceiveStatus: 'returned' },
-    packing: { warehouseSubStatus: 'PACKING' },
-    done: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    warehouse_complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    not_required: { warehouseSubStatus: 'NOT_REQUIRED' },
-    not_triggered: { warehouseSubStatus: 'NOT_REQUIRED' },
-  }
-
-  const mapped = workflowMap[code]
-  if (mapped) return mapped
-  return {}
+  return fromWorkflow
 }
 
 function parseWorkflowCloseFields(raw: Record<string, unknown>): Partial<
@@ -2298,9 +2325,23 @@ export const useTasksStore = defineStore('tasks', () => {
     if (task) {
       if (!task.sku) throw new Error('任务无 SKU，无法仓库接收')
       if (task.warehouseReceiveStatus === 'returned') throw new Error('该任务已退回，无法再次接收')
-      if (task.warehouseReceiveStatus === 'received') return
+      const alreadyReceived =
+        task.warehouseReceiveStatus === 'received' ||
+        task.warehouseReceiveStatus === 'archived' ||
+        task.warehouseSubStatus === 'RECEIVED' ||
+        task.warehouseSubStatus === 'DONE'
+      if (alreadyReceived) {
+        await loadTaskById(taskId)
+        return
+      }
     }
     await tasksApi.warehouseReceive(taskId)
+    await loadTaskById(taskId)
+  }
+
+  /** 仓库完成（推进到 PendingClose），成功后刷新任务详情 */
+  async function completeWarehouseFlow(taskId: string) {
+    await tasksApi.warehouseComplete(taskId)
     await loadTaskById(taskId)
   }
 
@@ -2348,8 +2389,7 @@ export const useTasksStore = defineStore('tasks', () => {
     if (task.status !== 'PendingProductionTransfer') {
       throw new Error('当前状态不可结单')
     }
-    await tasksApi.warehouseComplete(taskId)
-    await loadTaskById(taskId)
+    await completeWarehouseFlow(taskId)
     const refreshed = getById(taskId)
     if (refreshed?.status !== 'PendingClose') {
       throw new Error('仓库流转已完成，但任务尚未进入待结单状态，请刷新后重试')
@@ -2468,6 +2508,7 @@ export const useTasksStore = defineStore('tasks', () => {
     rejectAfterOutsourceReview,
     resubmitAuditB,
     receiveInWarehouse,
+    completeWarehouseFlow,
     rejectInWarehouse,
     markCompleted,
     archiveTask,

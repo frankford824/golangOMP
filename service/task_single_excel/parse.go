@@ -12,7 +12,7 @@ import (
 )
 
 type parseService struct {
-	iidLookup ERPIIDLookup
+	erpLookup ExcelAssistERPLookup
 }
 
 func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, mode string, file io.Reader, opts ...ParseOption) (*ParseResult, *domain.AppError) {
@@ -23,7 +23,7 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, mode
 	if !ok {
 		return nil, unsupportedTaskTypeError(taskType)
 	}
-	options := ParseOptions{IIDLookup: s.iidLookup}
+	options := ParseOptions{ERPLookup: s.erpLookup}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&options)
@@ -83,10 +83,21 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, mode
 		return base, nil
 	}
 
-	if iidViolations, appErr := s.validateProductIID(ctx, draft.ProductIID, dr.rowNumber, fields, options.IIDLookup); appErr != nil {
-		return nil, appErr
-	} else if len(iidViolations) > 0 {
-		base.Violations = append(base.Violations, iidViolations...)
+	switch taskType {
+	case domain.TaskTypeOriginalProductDevelopment:
+		erpViolations, appErr := s.enrichOriginalDraftFromERP(ctx, &draft, dr.rowNumber, fields, options.ERPLookup)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if len(erpViolations) > 0 {
+			base.Violations = append(base.Violations, erpViolations...)
+		}
+	default:
+		if iidViolations, appErr := s.validateProductIID(ctx, draft.ProductIID, dr.rowNumber, fields, options.ERPLookup); appErr != nil {
+			return nil, appErr
+		} else if len(iidViolations) > 0 {
+			base.Violations = append(base.Violations, iidViolations...)
+		}
 	}
 	return base, nil
 }
@@ -168,6 +179,10 @@ func parseDataRow(row []string, fields []FieldSpec, columnIndex map[string]int, 
 			draft.MaterialOther = value
 		case "remark":
 			draft.Remark = value
+		case "sku_code":
+			draft.SKUCode = value
+		case "change_request":
+			draft.ChangeRequest = value
 		default:
 			_ = byKey
 		}

@@ -34,6 +34,8 @@ func FieldsForTaskType(taskType domain.TaskType, mode string) ([]FieldSpec, bool
 		return append([]FieldSpec(nil), npdSingleFields...), true
 	case domain.TaskTypePurchaseTask:
 		return append([]FieldSpec(nil), purchaseSingleFields...), true
+	case domain.TaskTypeOriginalProductDevelopment:
+		return append([]FieldSpec(nil), originalSingleFields...), true
 	default:
 		return nil, false
 	}
@@ -96,6 +98,42 @@ var npdSingleFields = []FieldSpec{
 		Key:      "material_other",
 		Format:   FieldFormatString,
 		HelpText: "可选",
+	},
+	{
+		Column:   "备注",
+		Key:      "remark",
+		Format:   FieldFormatString,
+		HelpText: "可选",
+	},
+}
+
+var originalSingleFields = []FieldSpec{
+	{
+		Column:   "SKU编码",
+		Key:      "sku_code",
+		Required: true,
+		Format:   FieldFormatString,
+		HelpText: "必填；须为 ERP 已有商品 SKU 编码",
+		ViolationCodes: ViolationCodeSet{
+			Missing: "missing_required_field",
+			Invalid: "invalid_sku_code",
+		},
+	},
+	{
+		Column:   "修改要求",
+		Key:      "change_request",
+		Required: true,
+		Format:   FieldFormatString,
+		HelpText: "必填",
+		ViolationCodes: ViolationCodeSet{
+			Missing: "missing_required_field",
+		},
+	},
+	{
+		Column:   "规格尺寸",
+		Key:      "spec_text",
+		Format:   FieldFormatString,
+		HelpText: "可选；未填写时创建后可在详情查看 ERP 规格",
 	},
 	{
 		Column:   "备注",

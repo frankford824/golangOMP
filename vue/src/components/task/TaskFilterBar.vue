@@ -7,9 +7,6 @@
         :options="statusOptions"
         @update:model-value="patchFilters({ status: $event })"
       />
-      <p class="status-filter-hint">
-        按系统主状态筛选，可能与详情模块文案略有差异；P 图「精修中」可试选任务类型「P 图任务」+「进行中」。
-      </p>
     </div>
     <div class="filter-field">
       <span class="field-label">任务类型</span>
@@ -254,12 +251,6 @@ function reset() {
 }
 .filter-field--status {
   width: 12.5rem;
-}
-.status-filter-hint {
-  margin: 0;
-  font-size: 0.6875rem;
-  line-height: 1.35;
-  color: rgb(100 116 139);
 }
 .field-label {
   font-size: 0.75rem;

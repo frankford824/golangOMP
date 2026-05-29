@@ -213,7 +213,10 @@
                 taskCreatorDisplayName(task)
               }}</span>
             </div>
-            <div class="card-meta-line card-meta-line--design">
+            <div
+              v-if="shouldShowDesignerMetaOnTaskCenterCard(task)"
+              class="card-meta-line card-meta-line--design"
+            >
               <span class="card-meta-key">设计</span>
               <span class="card-meta-value" :title="taskDesignerDisplayName(task)">{{
                 taskDesignerDisplayName(task)
@@ -325,7 +328,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
 import type { Task, LegacyTaskStatus } from '@/domain/types/task'
-import { isDoneStatus } from '@/domain/task-actions'
+import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterBar.vue'
 import TaskFilterBar from '@/components/task/TaskFilterBar.vue'
