@@ -77,6 +77,9 @@
       <div v-show="advancedFilterOpen" class="filter-bar-wrap">
         <TaskFilterBar v-model:filters="filters" @update:filters="page = 1" />
       </div>
+      <p v-if="tabStatusScopeHint" class="tab-status-scope-hint" role="status">
+        {{ tabStatusScopeHint }}
+      </p>
     </div>
 
     <!-- 批量操作条（有选中时滑出） -->
@@ -626,7 +629,32 @@ if (typeof route.query.sort === 'string') {
 
 function setTaskTab(tab: TaskListTab) {
   if (activeTab.value === tab) return
+  if (filters.value.status.length > 0) {
+    filters.value = { ...filters.value, status: [] }
+  }
   activeTab.value = tab
+}
+
+const tabStatusScopeHint = computed(() => {
+  if (!filters.value.status.length) return ''
+  if (activeTab.value === 'pool') {
+    return '当前处于未指派任务页签，手动选择任务状态可能会替换页签默认范围。'
+  }
+  if (activeTab.value === 'archived' || activeTab.value === 'terminated') {
+    return '当前页签默认限定特定状态范围，手动选择任务状态后将按所选状态筛选。'
+  }
+  return ''
+})
+
+function queryHasNonEmptyParam(query: Record<string, unknown>, key: string): boolean {
+  if (!(key in query) || query[key] == null) return false
+  return queryString(query[key]).trim() !== ''
+}
+
+function parseOverdueQuery(query: Record<string, unknown>): boolean {
+  if (!queryHasNonEmptyParam(query, 'overdue')) return false
+  const raw = queryString(query.overdue).trim().toLowerCase()
+  return raw === 'true' || raw === '1'
 }
 
 function setTaskCategory(category: string) {
@@ -1095,9 +1123,13 @@ watch(
       warehouseStatus: queryString(query.warehouse_status),
       taskType: queryString(query.task_type),
       creatorId: queryString(query.creator_id),
+      assigneeId: queryHasNonEmptyParam(query, 'designer_id')
+        ? queryString(query.designer_id)
+        : '',
       priority: queryString(query.priority),
       dateFrom: queryString(query.date_from),
       dateTo: queryString(query.date_to),
+      overdueOnly: parseOverdueQuery(query),
     }
     const nextKeyword = queryString(query.q)
     let changed = false
@@ -1158,6 +1190,12 @@ watch(totalPages, (value) => {
   border-top: 1px solid rgb(231 229 228);
   padding-top: 0.5rem;
   margin-top: 0.25rem;
+}
+.tab-status-scope-hint {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: rgb(100 116 139);
 }
 .task-tabs,
 .task-category-switch {

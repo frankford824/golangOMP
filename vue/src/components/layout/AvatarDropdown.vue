@@ -72,7 +72,7 @@ const accountItems = [
 const taskItems = [
   { label: '我的任务 · 进行中', to: '/tasks?tab=mine&status=InProgress' },
   { label: '我的任务 · 已完成', to: '/tasks?tab=mine&status=Completed' },
-  { label: '我的任务 · 已终止', to: '/tasks?tab=terminated&status=Cancelled' },
+  { label: '我的任务 · 已终止', to: '/tasks?tab=mine&status=Cancelled' },
   { label: '我的任务 · 草稿', to: '/me/task-drafts' },
 ]
 
