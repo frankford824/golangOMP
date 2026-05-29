@@ -104,6 +104,9 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 	if len(filter.Statuses) > 0 && !containsTaskStatus(filter.Statuses, item.TaskStatus) {
 		return false
 	}
+	if len(filter.Priorities) > 0 && !containsTaskPriority(filter.Priorities, item.Priority) {
+		return false
+	}
 	if len(filter.TaskTypes) > 0 && !containsTaskType(filter.TaskTypes, item.TaskType) {
 		return false
 	}
@@ -280,6 +283,15 @@ func sortTaskListItems(items []*domain.TaskListItem) {
 		}
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
+}
+
+func containsTaskPriority(values []domain.TaskPriority, want domain.TaskPriority) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func containsTaskStatus(values []domain.TaskStatus, want domain.TaskStatus) bool {

@@ -10450,6 +10450,16 @@ paths:
           name: designer_id
           schema: { type: integer }
         - in: query
+          name: priority
+          description: Filters by task priority (`t.priority`). Supports comma-separated multi-value queries such as `priority=critical,high`.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [low, normal, high, critical]
+          style: form
+          explode: false
+        - in: query
           name: designer_empty
           description: When `true`, returns only tasks with no designer assignment (`designer_id` IS NULL or `0`). Use with `workflow_lane=customization` for customization-lane unassigned-artwork filtering; do not combine with `status=PendingAssign` for that case.
           schema: { type: boolean }

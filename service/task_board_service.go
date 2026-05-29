@@ -280,6 +280,7 @@ func taskBoardFiltersSchema() domain.TaskBoardFiltersSchema {
 		},
 		SupportedGlobalFilters: []string{
 			"keyword",
+			"priority",
 			"task_type",
 			"source_mode",
 			"workflow_lane",
@@ -306,6 +307,7 @@ func taskBoardFiltersSchema() domain.TaskBoardFiltersSchema {
 		TaskListEndpoint: "/v1/tasks",
 		TaskListPassthroughFields: []string{
 			"status",
+			"priority",
 			"task_type",
 			"source_mode",
 			"workflow_lane",
@@ -505,6 +507,10 @@ func mergeTaskBoardFilter(base TaskFilter, preset domain.TaskQueryFilterDefiniti
 	var ok bool
 
 	merged.Statuses, ok = intersectComparableSlice(base.Statuses, preset.Statuses)
+	if !ok {
+		return TaskFilter{}, false
+	}
+	merged.Priorities, ok = intersectComparableSlice(base.Priorities, preset.Priorities)
 	if !ok {
 		return TaskFilter{}, false
 	}

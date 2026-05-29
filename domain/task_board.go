@@ -24,6 +24,7 @@ func (v TaskBoardView) Valid() bool {
 
 type TaskQueryFilterDefinition struct {
 	Statuses                     []TaskStatus                    `json:"statuses,omitempty"`
+	Priorities                   []TaskPriority                  `json:"priorities,omitempty"`
 	TaskTypes                    []TaskType                      `json:"task_types,omitempty"`
 	SourceModes                  []TaskSourceMode                `json:"source_modes,omitempty"`
 	BusinessLanes                []TaskBusinessLane              `json:"business_lanes,omitempty"`

@@ -1652,6 +1652,7 @@ func stringsToSlice(values []string) []string {
 
 func appendTaskQueryDefinitionWhere(where *[]string, args *[]interface{}, filter domain.TaskQueryFilterDefinition, exprs taskListQueryExpressions) error {
 	appendInClause(where, args, "t.task_status", comparableValuesToStrings(filter.Statuses))
+	appendInClause(where, args, "t.priority", comparableValuesToStrings(filter.Priorities))
 	appendInClause(where, args, "t.task_type", comparableValuesToStrings(filter.TaskTypes))
 	appendInClause(where, args, "t.source_mode", comparableValuesToStrings(filter.SourceModes))
 	appendBusinessLaneClause(where, args, filter.BusinessLanes)
