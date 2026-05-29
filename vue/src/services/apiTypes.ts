@@ -330,6 +330,7 @@ export interface AssetAccessPolicy {
 
 /** canonical 下载模式：当前主链优先 `direct`，`proxy` 仅兼容 fallback。 */
 export type AssetDownloadMode = 'direct' | 'proxy' | 'public' | 'private_network'
+export type AssetResourceSource = 'system' | 'external' | 'all'
 
 /** 资产版本（含访问策略）
  * v0.6 对齐：必须仅根据 preview_available 与 download_mode 决策 UI */
@@ -361,6 +362,20 @@ export interface BackendAssetVersion {
 /** 后端资产项 */
 export interface BackendAsset {
   id: string
+  /** 统一资源 ID：系统资产为数字字符串，外部资源为 ext-{id}。 */
+  resource_id?: string
+  /** UI 只展示 system/external 两类来源，避免泄露挂载细节。 */
+  source_type?: 'system' | 'external' | string
+  source_label?: string
+  external_kind?: 'netdisk' | 'nas_local' | string
+  external_mount_path?: string
+  external_driver?: string
+  origin_path?: string
+  oss_sync_status?: string
+  external_preview_status?: string
+  last_prepare_error?: string
+  download_url?: string
+  preview_available?: boolean
   task_id?: string
   file_role: string
   previous_asset_id?: string | number | null

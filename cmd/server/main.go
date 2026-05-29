@@ -27,6 +27,7 @@ import (
 	"workflow/service/blueprint"
 	designsourcesvc "workflow/service/design_source"
 	erpproductsvc "workflow/service/erp_product"
+	externalassets "workflow/service/external_assets"
 	r3module "workflow/service/module_action"
 	notificationsvc "workflow/service/notification"
 	orgmovesvc "workflow/service/org_move_request"
@@ -133,6 +134,7 @@ func main() {
 	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
+	externalAssetRepo := mysqlrepo.NewExternalAssetRepo(mdb)
 	taskAutoArchiveRepo := mysqlrepo.NewTaskAutoArchiveRepo(mdb)
 	orgMoveRequestRepo := mysqlrepo.NewOrgMoveRequestRepo(mdb)
 	taskDraftRepo := mysqlrepo.NewTaskDraftRepo(mdb)
@@ -252,6 +254,7 @@ func main() {
 			zap.String("bucket", cfg.OSSDirect.Bucket),
 			zap.String("endpoint", cfg.OSSDirect.Endpoint))
 	}
+	externalAssetSvc := externalassets.NewService(externalAssetRepo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirectSvc)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
@@ -312,6 +315,7 @@ func main() {
 		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo))
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient)
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
+	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)
 	taskDetailSvc := service.NewTaskDetailAggregateService(taskRepo, procurementRepo, productRepo, costRuleRepo, auditV7Repo, outsourceRepo, taskAssetRepo, warehouseRepo, taskEventRepo, taskCostOverrideEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo,
 		service.WithTaskDetailScopeUserRepo(userRepo),
@@ -346,6 +350,7 @@ func main() {
 	erpProductSvc := erpproductsvc.NewService(erpBridgeSvc)
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
 	searchSvc := searchsvc.NewService(searchRepo)
+	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
 	reportL1Svc := reportl1svc.NewService(reportL1Repo, reportl1svc.WithPermissionLogRepo(permissionLogRepo))
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
@@ -417,6 +422,7 @@ func main() {
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	workers.NewGroup(db, rdb, logger, erpSyncSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	startExternalAssetRefresh(workerCtx, externalAssetSvc, logger.Named("external_assets"))
 	logger.Info("background workers started")
 
 	// ── 7.1 Cron(R6.A.2) ─────────────────────────────────────────────────────
@@ -511,6 +517,84 @@ func buildLogger(level string) *zap.Logger {
 		panic(fmt.Sprintf("failed to build logger: %v", err))
 	}
 	return logger
+}
+
+func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service, logger *zap.Logger) {
+	if svc == nil || !svc.Enabled() {
+		return
+	}
+	go func() {
+		interval := svc.SyncInterval()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		logger.Info("external asset refresh worker started", zap.Duration("interval", interval))
+		runRefresh := func() {
+			refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			keywords := []string{"psd", "jpg", "png"}
+			seen := map[string]struct{}{}
+			for _, keyword := range keywords {
+				seen[keyword] = struct{}{}
+			}
+			for _, keyword := range svc.RecentKeywords(50) {
+				if _, ok := seen[keyword]; ok {
+					continue
+				}
+				seen[keyword] = struct{}{}
+				keywords = append(keywords, keyword)
+			}
+			for _, keyword := range keywords {
+				if err := svc.SyncKeyword(refreshCtx, keyword, 50); err != nil {
+					logger.Warn("external keyword refresh failed", zap.String("keyword", keyword), zap.Error(err))
+				}
+			}
+			ready, failed, err := svc.RefreshDirectURLs(refreshCtx, 100)
+			if err != nil {
+				logger.Warn("external direct url refresh failed", zap.Error(err))
+			} else if ready > 0 || failed > 0 {
+				logger.Info("external direct url refresh finished", zap.Int("ready", ready), zap.Int("failed", failed))
+			}
+		}
+		runRefresh()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runRefresh()
+			}
+		}
+	}()
+	go func() {
+		interval := 2 * time.Minute
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		logger.Info("external asset prepare worker started", zap.Duration("interval", interval))
+		runPrepare := func() {
+			prepareCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+			defer cancel()
+			ossDone, err := svc.ProcessPendingOSS(prepareCtx, 5)
+			if err != nil {
+				logger.Warn("external oss prepare failed", zap.Error(err))
+			}
+			previewDone, err := svc.ProcessPendingPreview(prepareCtx, 5)
+			if err != nil {
+				logger.Warn("external preview prepare failed", zap.Error(err))
+			}
+			if ossDone > 0 || previewDone > 0 {
+				logger.Info("external asset prepare finished", zap.Int("oss_done", ossDone), zap.Int("preview_done", previewDone))
+			}
+		}
+		runPrepare()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runPrepare()
+			}
+		}
+	}()
 }
 
 func erpRemoteServiceConfig(cfg *config.Config, log *zap.Logger) service.ERPRemoteClientConfig {

@@ -2,6 +2,7 @@ package asset_center
 
 import (
 	"context"
+	"strconv"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -25,6 +26,23 @@ func (s *Service) GetDetail(ctx context.Context, assetID int64) (*AssetDetail, *
 	return buildAssetDetail(current, versions), nil
 }
 
+func (s *Service) GetExternalDetail(ctx context.Context, externalID int64) (*AssetDetail, *domain.AppError) {
+	if externalID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id must be greater than zero", nil)
+	}
+	if s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return nil, domain.ErrNotFound
+	}
+	row, err := s.externalSvc.Get(ctx, externalID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if row == nil {
+		return nil, domain.ErrNotFound
+	}
+	return s.buildExternalAssetDetail(row), nil
+}
+
 func buildAssetDetail(row *repo.TaskAssetSearchRow, versions []*repo.TaskAssetSearchRow) *AssetDetail {
 	if row == nil || row.Asset == nil || row.Task == nil {
 		return nil
@@ -35,6 +53,9 @@ func buildAssetDetail(row *repo.TaskAssetSearchRow, versions []*repo.TaskAssetSe
 	currentVersionID := a.ID
 	detail := &AssetDetail{
 		ID:                  valueInt64(a.AssetID, a.ID),
+		ResourceID:          strconv.FormatInt(valueInt64(a.AssetID, a.ID), 10),
+		SourceType:          string(domain.AssetResourceSourceSystem),
+		SourceLabel:         "系统资源",
 		TaskID:              a.TaskID,
 		AssetNo:             row.AssetNo,
 		AssetType:           a.AssetType,

@@ -27,6 +27,7 @@ import (
 	"workflow/service/blueprint"
 	designsourcesvc "workflow/service/design_source"
 	erpproductsvc "workflow/service/erp_product"
+	externalassets "workflow/service/external_assets"
 	r3module "workflow/service/module_action"
 	notificationsvc "workflow/service/notification"
 	orgmovesvc "workflow/service/org_move_request"
@@ -123,6 +124,7 @@ func main() {
 	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
+	externalAssetRepo := mysqlrepo.NewExternalAssetRepo(mdb)
 	orgMoveRequestRepo := mysqlrepo.NewOrgMoveRequestRepo(mdb)
 	taskDraftRepo := mysqlrepo.NewTaskDraftRepo(mdb)
 	notificationRepo := mysqlrepo.NewNotificationRepo(mdb)
@@ -191,6 +193,7 @@ func main() {
 		PublicEndpoint:  cfg.OSSDirect.PublicEndpoint,
 		PartSize:        cfg.OSSDirect.PartSize,
 	})
+	externalAssetSvc := externalassets.NewService(externalAssetRepo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirectSvc)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
@@ -249,6 +252,7 @@ func main() {
 		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo))
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient)
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
+	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)
 	taskDetailSvc := service.NewTaskDetailAggregateService(taskRepo, procurementRepo, productRepo, costRuleRepo, auditV7Repo, outsourceRepo, taskAssetRepo, warehouseRepo, taskEventRepo, taskCostOverrideEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo,
 		service.WithTaskDetailScopeUserRepo(userRepo),
@@ -283,6 +287,7 @@ func main() {
 	erpProductSvc := erpproductsvc.NewService(erpBridgeSvc)
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
 	searchSvc := searchsvc.NewService(searchRepo)
+	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
 	reportL1Svc := reportl1svc.NewService(reportL1Repo, reportl1svc.WithPermissionLogRepo(permissionLogRepo))
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))

@@ -50,14 +50,20 @@
       <template v-else>
         <dl class="detail-grid">
           <div class="detail-row">
-            <dt>SKU</dt>
-            <dd class="cell-mono">{{ businessSku(asset) }}</dd>
+            <dt>资源来源</dt>
+            <dd>{{ assetSourceLabel(asset) }}</dd>
           </div>
           <div class="detail-row">
+            <dt>{{ isExternalAsset(asset) ? '文件名' : 'SKU' }}</dt>
+            <dd :class="{ 'cell-mono': !isExternalAsset(asset) }">
+              {{ isExternalAsset(asset) ? assetFileName(asset) : businessSku(asset) }}
+            </dd>
+          </div>
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
             <dt>所属任务号</dt>
             <dd class="cell-mono">{{ businessTaskNo(asset) }}</dd>
           </div>
-          <div class="detail-row">
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
             <dt>任务创建运营</dt>
             <dd>{{ taskCreatorLabel(asset) }}</dd>
           </div>
@@ -73,21 +79,29 @@
             <dt>产品名称</dt>
             <dd>{{ assetProductLabel(asset) }}</dd>
           </div>
-          <div class="detail-row">
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
             <dt>上传状态</dt>
             <dd>{{ assetUploadStatus(asset.upload_status) }}</dd>
           </div>
-          <div class="detail-row">
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
             <dt>归档状态</dt>
             <dd>{{ assetArchiveStatus(asset.archive_status) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>系统资产号</dt>
-            <dd class="cell-mono">{{ displayText(asset.id) }}</dd>
+            <dt>{{ isExternalAsset(asset) ? '资源编号' : '系统资产号' }}</dt>
+            <dd class="cell-mono">{{ displayText(assetResourceId(asset)) }}</dd>
           </div>
-          <div class="detail-row">
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
             <dt>当前有效稿件</dt>
             <dd class="cell-mono">{{ displayText(asset.current_asset_id ?? asset.id) }}</dd>
+          </div>
+          <div v-if="isExternalAsset(asset)" class="detail-row">
+            <dt>外部资源状态</dt>
+            <dd>{{ externalAssetStatusLabel(asset) }}</dd>
+          </div>
+          <div v-if="isExternalAsset(asset)" class="detail-row detail-row-full">
+            <dt>外部路径</dt>
+            <dd>{{ externalOriginPath(asset) }}</dd>
           </div>
           <div class="detail-row">
             <dt>业务线 / 来源部门</dt>
@@ -198,11 +212,13 @@ const previewMeta = ref<Record<string, unknown> | null>(null)
 const previewUnavailable = ref(false)
 /** GET /preview 返回 404：预览入口资源不存在 */
 const previewNotFound = ref(false)
+const previewPreparing = ref(false)
 
 const versions = computed<BackendAssetVersion[]>(() => asset.value?.versions ?? [])
-const assetTaskId = computed(() => String(asset.value?.task_id ?? taskId.value ?? '').trim())
+const assetTaskId = computed(() => positiveID(asset.value?.task_id) || positiveID(taskId.value))
 
 const previewStateLabel = computed(() => {
+  if (previewPreparing.value) return '正在准备预览'
   if (previewUnavailable.value) return '当前不可预览（仅可下载，非不存在）'
   if (previewNotFound.value) return '预览资源不存在（404）'
   if (previewMeta.value?.preview_available === true) return '可预览'
@@ -217,10 +233,68 @@ function displayText(value: unknown): string {
   return text || '—'
 }
 
+function positiveID(value: unknown): string {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  const numeric = Number(text)
+  if (Number.isFinite(numeric) && numeric <= 0) return ''
+  return text
+}
+
 function displayTime(value: unknown): string {
   const text = displayText(value)
   if (text === '—') return text
   return formatDateTimeBeijing(text) || text
+}
+
+function rawAssetSourceType(row: BackendAsset | null | undefined): string {
+  const record = row as Record<string, unknown> | null | undefined
+  return String(record?.source_type ?? record?.sourceType ?? '').trim().toLowerCase()
+}
+
+function isExternalAsset(row: BackendAsset | null | undefined): boolean {
+  if (!row) return false
+  const record = row as Record<string, unknown>
+  const resourceID = String(record.resource_id ?? record.resourceId ?? '').trim()
+  return rawAssetSourceType(row) === 'external' || resourceID.startsWith('ext-')
+}
+
+function assetResourceId(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  const resourceID = String(record.resource_id ?? record.resourceId ?? '').trim()
+  if (resourceID) return resourceID
+  const id = String(row.id ?? '').trim()
+  return isExternalAsset(row) && id && !id.startsWith('ext-') ? `ext-${id}` : id
+}
+
+function assetSourceLabel(row: BackendAsset | null | undefined): string {
+  const record = row as Record<string, unknown> | null | undefined
+  const label = String(record?.source_label ?? record?.sourceLabel ?? '').trim()
+  if (label) return label
+  return isExternalAsset(row) ? '外部资源' : '系统资源'
+}
+
+function externalAssetStatusLabel(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  const oss = String(record.oss_sync_status ?? record.ossSyncStatus ?? '').trim()
+  const preview = String(record.external_preview_status ?? record.externalPreviewStatus ?? '').trim()
+  const hasDisplayUrl = ['download_url', 'downloadUrl', 'preview_url', 'previewUrl'].some((key) => {
+    const value = record[key]
+    return typeof value === 'string' && value.trim().length > 5
+  })
+  const canPreview = record.preview_available === true || record.previewAvailable === true || hasDisplayUrl
+  if (preview === 'ready' || canPreview) return '可预览'
+  if (oss === 'ready') return '可下载'
+  if (preview === 'pending') return '正在准备预览'
+  if (oss === 'pending') return '正在准备下载'
+  if (preview === 'failed' || oss === 'failed') return '外部资源暂时不可用'
+  return '按需准备'
+}
+
+function externalOriginPath(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  const path = String(record.origin_path ?? record.originPath ?? record.product_name ?? '').trim()
+  return path || assetFileName(row)
 }
 
 function businessSku(row: BackendAsset): string {
@@ -238,7 +312,8 @@ function businessTaskNo(row: BackendAsset): string {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
-  return row.task_id != null && String(row.task_id).trim() ? `任务 ${row.task_id}` : '未绑定任务'
+  const id = positiveID(row.task_id)
+  return id ? `任务 ${id}` : '未绑定任务'
 }
 
 function taskCreatorLabel(row: BackendAsset): string {
@@ -326,7 +401,10 @@ function goTaskAssets() {
 
 function goAssetsIndex() {
   if (!canAccessPage('assets_index')) return
-  const query = taskId.value ? { task_id: taskId.value, asset_id: assetId.value } : { asset_id: assetId.value }
+  const query: Record<string, string> = taskId.value
+    ? { task_id: taskId.value, asset_id: assetId.value }
+    : { asset_id: assetId.value }
+  if (isExternalAsset(asset.value)) query.source = 'external'
   void router.push({ name: 'AssetsIndex', query })
 }
 
@@ -348,6 +426,7 @@ async function loadAsset() {
   previewMeta.value = null
   previewUnavailable.value = false
   previewNotFound.value = false
+  previewPreparing.value = false
   try {
     const [assetRes, downloadRes] = await Promise.allSettled([
       assetsApi.getAsset(assetId.value),
@@ -379,6 +458,8 @@ async function loadAsset() {
         download_url: previewResult.displayUrl,
         preview_available: true,
       }
+    } else if (previewResult.status === 'preparing') {
+      previewPreparing.value = true
     } else if (previewResult.status === 'unavailable') {
       previewUnavailable.value = true
     } else if (previewResult.status === 'not_found') {

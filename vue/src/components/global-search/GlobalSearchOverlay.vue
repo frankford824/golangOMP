@@ -71,10 +71,10 @@
               </div>
               <div class="flex shrink-0 flex-col items-end gap-1">
                 <span
-                  v-if="result.statusLabel"
+                  v-if="result.badgeLabel || result.statusLabel"
                   class="max-w-[5.5rem] truncate rounded bg-white px-1.5 py-0.5 text-[10px] text-[var(--v1-text-secondary)] ring-1 ring-[var(--v1-border)]"
                 >
-                  {{ result.statusLabel }}
+                  {{ result.badgeLabel || result.statusLabel }}
                 </span>
                 <span
                   v-if="!isNavigable(group.key)"

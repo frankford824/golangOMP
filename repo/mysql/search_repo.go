@@ -199,6 +199,9 @@ func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]d
 		}
 		item.SourceModuleKey = nullStringPtr(module)
 		item.TaskID = nullInt64Ptr(taskID)
+		item.ResourceID = fmt.Sprintf("%d", item.AssetID)
+		item.SourceType = string(domain.AssetResourceSourceSystem)
+		item.SourceLabel = "系统资源"
 		out = append(out, item)
 	}
 	return out, rows.Err()

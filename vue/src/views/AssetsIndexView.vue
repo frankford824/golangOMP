@@ -24,7 +24,7 @@
             v-model="filters.keyword"
             type="search"
             class="ac-search-input"
-            placeholder="搜索资产 ID、任务 ID、SKU…"
+            placeholder="搜索系统资产、外部资源、任务 ID、SKU…"
             autocomplete="off"
             enterkeyhint="search"
           />
@@ -68,6 +68,11 @@
         class="ac-filters-panel"
       >
         <div class="ac-filters-grid">
+          <BaseSelect
+            v-model="filters.resourceSource"
+            label="资源来源"
+            :options="assetSourceOptions"
+          />
           <BaseInput v-model="filters.taskId" label="任务 ID" placeholder="按任务 ID 过滤" />
           <BaseSelect
             v-model="filters.assetKind"
@@ -129,24 +134,27 @@
       <template v-else>
         <article
           v-for="asset in pagedAssets"
-          :key="asset.id"
+          :key="assetResourceId(asset)"
           class="ac-card"
           :class="{
-            'ac-card--active': selectedAssetId === String(asset.id),
+            'ac-card--active': selectedAssetId === assetResourceId(asset),
             'ac-card--selected': isAssetSelected(asset),
+            'ac-card--external': isExternalAsset(asset),
           }"
         >
           <label class="ac-card-check" @click.stop>
             <input
               type="checkbox"
               class="ac-card-checkbox"
+              :disabled="isExternalAsset(asset)"
+              :title="isExternalAsset(asset) ? '外部资源请单个下载' : ''"
               :checked="isAssetSelected(asset)"
               @change.stop="onAssetSelectionChange(asset, $event)"
             />
           </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
-              :asset-id="String(asset.id)"
+              :asset-id="assetResourceId(asset)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
               defer-until-visible
               alt=""
@@ -157,7 +165,7 @@
             <AssetDownloadLink
               class="ac-card-download-fab"
               variant="button"
-              :asset-id="String(asset.id)"
+              :asset-id="assetResourceId(asset)"
               :href="listCardResolvedPreviewUrl(asset)"
               :aria-label="`下载 ${businessSku(asset)} 资产文件`"
               @click.stop
@@ -167,7 +175,10 @@
           </div>
           <div class="ac-card-info">
             <div class="ac-title-row">
-              <h2 class="ac-card-title" :title="businessSku(asset)">{{ businessSku(asset) }}</h2>
+              <h2 class="ac-card-title" :title="assetDisplayTitle(asset)">{{ assetDisplayTitle(asset) }}</h2>
+              <span class="ac-source-pill" :class="{ 'ac-source-pill--external': isExternalAsset(asset) }">
+                {{ assetSourceLabel(asset) }}
+              </span>
               <span
                 class="ac-format-pill"
                 :class="assetTypeToneClass(asset)"
@@ -178,33 +189,41 @@
             </div>
             <div class="ac-card-meta">
               <div class="ac-business-row">
-                <span class="ac-business-key">任务</span>
-                <span class="ac-business-value ac-mono">{{ businessTaskNo(asset) }}</span>
+                <span class="ac-business-key">{{ isExternalAsset(asset) ? '文件' : '任务' }}</span>
+                <span class="ac-business-value" :class="{ 'ac-mono': !isExternalAsset(asset) }">
+                  {{ isExternalAsset(asset) ? fileInfoLabel(asset) : businessTaskNo(asset) }}
+                </span>
               </div>
               <div class="ac-business-row">
-                <span class="ac-business-key">文件</span>
-                <span class="ac-business-value">{{ assetFileName(asset) }}</span>
+                <span class="ac-business-key">{{ isExternalAsset(asset) ? '路径' : '文件' }}</span>
+                <span class="ac-business-value">{{ isExternalAsset(asset) ? externalOriginPath(asset) : assetFileName(asset) }}</span>
               </div>
               <button
                 type="button"
                 class="ac-copy-tag"
-                @click.stop="copyBusinessSku(asset)"
+                @click.stop="copyBusinessKey(asset)"
               >
-                复制 SKU
+                {{ isExternalAsset(asset) ? '复制路径' : '复制 SKU' }}
               </button>
             </div>
           </div>
           <div class="ac-card-footer">
             <div>
-              <div class="ac-footer-label">创建运营</div>
-              <div class="ac-footer-stat ac-footer-stat--operator">{{ taskCreatorLabel(asset) }}</div>
+              <div class="ac-footer-label">{{ isExternalAsset(asset) ? '准备状态' : '创建运营' }}</div>
+              <div
+                class="ac-footer-stat ac-footer-stat--operator"
+                :class="{ 'ac-footer-stat--external': isExternalAsset(asset) }"
+              >
+                {{ isExternalAsset(asset) ? externalAssetStatusLabel(asset) : taskCreatorLabel(asset) }}
+              </div>
             </div>
             <div class="ac-footer-right">
-              <span class="ac-footer-tag">{{ assetProductLabel(asset) }}</span>
+              <span class="ac-footer-tag">{{ assetFooterLabel(asset) }}</span>
             </div>
           </div>
           <div class="ac-card-actions">
             <button
+              v-if="!isExternalAsset(asset)"
               type="button"
               class="ac-card-link-btn ac-card-link-btn--task"
               :disabled="!assetTaskId(asset)"
@@ -215,7 +234,7 @@
             <button
               type="button"
               class="ac-card-link-btn"
-              @click.stop="openAssetDetail(String(asset.id))"
+              @click.stop="openAssetDetail(assetResourceId(asset))"
             >
               资产详情
             </button>
@@ -354,7 +373,7 @@
             <div class="bulk-result-preview">
               <AssetPreviewMedia
                 v-if="result.asset"
-                :asset-id="String(result.asset.id)"
+                :asset-id="assetResourceId(result.asset)"
                 :resolved-preview-url="listCardResolvedPreviewUrl(result.asset)"
                 defer-until-visible
                 alt=""
@@ -442,14 +461,20 @@
 
         <dl class="detail-grid">
           <div class="detail-row">
-            <dt>SKU</dt>
-            <dd class="cell-mono">{{ businessSku(selectedAsset) }}</dd>
+            <dt>资源来源</dt>
+            <dd>{{ assetSourceLabel(selectedAsset) }}</dd>
           </div>
           <div class="detail-row">
+            <dt>{{ isExternalAsset(selectedAsset) ? '文件名' : 'SKU' }}</dt>
+            <dd :class="{ 'cell-mono': !isExternalAsset(selectedAsset) }">
+              {{ isExternalAsset(selectedAsset) ? assetFileName(selectedAsset) : businessSku(selectedAsset) }}
+            </dd>
+          </div>
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
             <dt>所属任务号</dt>
             <dd class="cell-mono">{{ businessTaskNo(selectedAsset) }}</dd>
           </div>
-          <div class="detail-row">
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
             <dt>任务创建运营</dt>
             <dd>{{ taskCreatorLabel(selectedAsset) }}</dd>
           </div>
@@ -461,17 +486,25 @@
             <dt>文件名</dt>
             <dd>{{ assetFileName(selectedAsset) }}</dd>
           </div>
-          <div class="detail-row">
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
             <dt>上传状态</dt>
             <dd>{{ assetUploadStatus(selectedAsset.upload_status) }}</dd>
           </div>
-          <div class="detail-row">
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
             <dt>归档状态</dt>
             <dd>{{ assetArchiveStatus(selectedAsset.archive_status) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>系统资产号</dt>
-            <dd class="cell-mono">{{ displayText(selectedAsset.id) }}</dd>
+            <dt>{{ isExternalAsset(selectedAsset) ? '资源编号' : '系统资产号' }}</dt>
+            <dd class="cell-mono">{{ displayText(assetResourceId(selectedAsset)) }}</dd>
+          </div>
+          <div v-if="isExternalAsset(selectedAsset)" class="detail-row">
+            <dt>外部资源状态</dt>
+            <dd>{{ externalAssetStatusLabel(selectedAsset) }}</dd>
+          </div>
+          <div v-if="isExternalAsset(selectedAsset)" class="detail-row detail-row-full">
+            <dt>外部路径</dt>
+            <dd>{{ externalOriginPath(selectedAsset) }}</dd>
           </div>
           <div class="detail-row">
             <dt>下载模式</dt>
@@ -484,6 +517,7 @@
         </dl>
         <div class="detail-business-actions">
           <button
+            v-if="!isExternalAsset(selectedAsset)"
             type="button"
             class="ac-card-link-btn ac-card-link-btn--task"
             :disabled="!assetTaskId(selectedAsset)"
@@ -571,10 +605,11 @@ import {
   type AssetExcelPackageItem,
   type AssetExcelPackageRow,
 } from '@/services/api/assetsApi'
-import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
+import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { userAccountDisplay } from '@/domain/user-display'
+import { formatFileSizeBytes } from '@/domain/formatters/file-size'
 import {
   buildTimestampedZipFilename,
   downloadBatchAsZip,
@@ -625,10 +660,17 @@ const bulkSearchError = ref('')
 
 const filters = reactive({
   keyword: '',
+  resourceSource: 'all' as AssetResourceSource,
   taskId: '',
   assetKind: '',
   scopeSkuCode: '',
 })
+
+const assetSourceOptions: BaseSelectOption[] = [
+  { value: 'all', label: '全部资源' },
+  { value: 'system', label: '系统资源' },
+  { value: 'external', label: '外部资源' },
+]
 
 const assetKindOptions: BaseSelectOption[] = [
   { value: 'reference', label: '运营参考图（reference）' },
@@ -651,7 +693,7 @@ const requestedAssetId = computed(() => {
 const selectedAsset = computed(
   () =>
     selectedAssetDetail.value ??
-    assets.value.find((item) => String(item.id) === selectedAssetId.value) ??
+    assets.value.find((item) => assetResourceId(item) === selectedAssetId.value) ??
     null,
 )
 
@@ -717,7 +759,7 @@ watch(listTotalPages, (tp) => {
 })
 
 watch(
-  () => [filters.keyword, filters.taskId, filters.assetKind, filters.scopeSkuCode],
+  () => [filters.keyword, filters.resourceSource, filters.taskId, filters.assetKind, filters.scopeSkuCode],
   () => {
     listPage.value = 1
     scheduleReload()
@@ -748,13 +790,85 @@ const selectedAssetIdForPreview = computed(() => {
     return undefined
   }
   const id = String(selectedAsset.value?.id ?? '').trim()
-  return id || undefined
+  return selectedAsset.value ? assetResourceId(selectedAsset.value) : id || undefined
 })
 
 const selectedPreviewFallbackUrl = computed(() => {
   const url = String(previewMeta.value?.download_url ?? '').trim()
   return url || undefined
 })
+
+function rawAssetSourceType(asset: BackendAsset | null | undefined): string {
+  const r = asset as Record<string, unknown> | null | undefined
+  return String(r?.source_type ?? r?.sourceType ?? '').trim().toLowerCase()
+}
+
+function isExternalAsset(asset: BackendAsset | null | undefined): boolean {
+  if (!asset) return false
+  const r = asset as Record<string, unknown>
+  const resourceID = String(r.resource_id ?? r.resourceId ?? '').trim()
+  return rawAssetSourceType(asset) === 'external' || resourceID.startsWith('ext-')
+}
+
+function assetResourceId(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  const resourceID = String(r.resource_id ?? r.resourceId ?? '').trim()
+  if (resourceID) return resourceID
+  const id = String(asset.id ?? '').trim()
+  return isExternalAsset(asset) && id && !id.startsWith('ext-') ? `ext-${id}` : id
+}
+
+function assetSourceLabel(asset: BackendAsset | null | undefined): string {
+  const r = asset as Record<string, unknown> | null | undefined
+  const label = String(r?.source_label ?? r?.sourceLabel ?? '').trim()
+  if (label) return label
+  return isExternalAsset(asset) ? '外部资源' : '系统资源'
+}
+
+function externalOriginPath(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  const path = String(r.origin_path ?? r.originPath ?? r.product_name ?? '').trim()
+  return path || assetFileName(asset)
+}
+
+function assetDisplayTitle(asset: BackendAsset): string {
+  return isExternalAsset(asset) ? assetFileName(asset) : businessSku(asset)
+}
+
+function numericFileSize(asset: BackendAsset): number {
+  const r = asset as Record<string, unknown>
+  const raw = r.file_size ?? r.fileSize
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function fileInfoLabel(asset: BackendAsset): string {
+  const parts = [fileFormatLabel(asset)]
+  const size = numericFileSize(asset)
+  if (size > 0) parts.push(formatFileSizeBytes(size))
+  return parts.join(' · ')
+}
+
+function assetFooterLabel(asset: BackendAsset): string {
+  return isExternalAsset(asset) ? assetSourceLabel(asset) : assetProductLabel(asset)
+}
+
+function externalAssetStatusLabel(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  const oss = String(r.oss_sync_status ?? r.ossSyncStatus ?? '').trim()
+  const preview = String(r.external_preview_status ?? r.externalPreviewStatus ?? '').trim()
+  const hasDisplayUrl = ['download_url', 'downloadUrl', 'preview_url', 'previewUrl'].some((key) => {
+    const v = r[key]
+    return typeof v === 'string' && v.trim().length > 5
+  })
+  const canPreview = r.preview_available === true || r.previewAvailable === true || hasDisplayUrl
+  if (preview === 'ready' || canPreview) return '可预览'
+  if (oss === 'ready') return '可下载'
+  if (preview === 'pending') return '正在准备预览'
+  if (oss === 'pending') return '正在准备下载'
+  if (preview === 'failed' || oss === 'failed') return '外部资源暂时不可用'
+  return '按需准备'
+}
 
 function cardTitle(asset: BackendAsset): string {
   const r = asset as Record<string, unknown>
@@ -787,12 +901,12 @@ function businessTaskNo(asset: BackendAsset): string {
     const value = r[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
-  return asset.task_id != null && String(asset.task_id).trim() ? `任务 ${asset.task_id}` : '未绑定任务'
+  const id = positiveID(asset.task_id)
+  return id ? `任务 ${id}` : '未绑定任务'
 }
 
 function assetTaskId(asset: BackendAsset | null | undefined): string {
-  const id = String(asset?.task_id ?? '').trim()
-  return id
+  return positiveID(asset?.task_id)
 }
 
 function taskCreatorLabel(asset: BackendAsset): string {
@@ -859,22 +973,27 @@ function fileFormatLabel(asset: BackendAsset): string {
 }
 
 function toSelectedAssetSummary(asset: BackendAsset): SelectedAssetSummary {
+  const id = assetResourceId(asset)
   return {
-    id: String(asset.id),
+    id,
     taskId: displayText(asset.task_id),
     taskNo: businessTaskNo(asset),
-    sku: businessSku(asset),
-    title: `${businessSku(asset)} · ${assetFileName(asset)}`,
+    sku: isExternalAsset(asset) ? '外部资源' : businessSku(asset),
+    title: isExternalAsset(asset) ? assetFileName(asset) : `${businessSku(asset)} · ${assetFileName(asset)}`,
     kind: imageBusinessTypeLabel(asset),
   }
 }
 
 function isAssetSelected(asset: BackendAsset): boolean {
-  return selectedAssetMap.has(String(asset.id))
+  return selectedAssetMap.has(assetResourceId(asset))
 }
 
 function toggleAssetSelection(asset: BackendAsset, checked?: boolean) {
-  const id = String(asset.id)
+  if (isExternalAsset(asset)) {
+    batchDownloadError.value = '外部资源请在卡片上单个下载'
+    return
+  }
+  const id = assetResourceId(asset)
   const nextChecked = typeof checked === 'boolean' ? checked : !selectedAssetMap.has(id)
   if (!nextChecked) {
     selectedAssetMap.delete(id)
@@ -999,6 +1118,7 @@ async function searchBulkAssetTerm(term: string): Promise<BulkSearchResult> {
   try {
     const res = await assetsApi.searchAssets({
       keyword: term,
+      source: 'system',
       page: 1,
       size: 50,
       is_archived: 'false',
@@ -1442,7 +1562,11 @@ async function copyText(text: string, successMessage: string) {
   }
 }
 
-async function copyBusinessSku(asset: BackendAsset) {
+async function copyBusinessKey(asset: BackendAsset) {
+  if (isExternalAsset(asset)) {
+    await copyText(externalOriginPath(asset), '已复制外部路径')
+    return
+  }
   const sku = businessSku(asset)
   if (sku === '未绑定 SKU') {
     copyHint.value = '当前资产未绑定 SKU'
@@ -1458,6 +1582,14 @@ function displayText(value: unknown): string {
   if (value == null) return '—'
   const text = String(value).trim()
   return text || '—'
+}
+
+function positiveID(value: unknown): string {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  const numeric = Number(text)
+  if (Number.isFinite(numeric) && numeric <= 0) return ''
+  return text
 }
 
 function displayTime(value: unknown): string {
@@ -1512,6 +1644,7 @@ function scheduleReload() {
 function syncQuerySelection() {
   const nextQuery: Record<string, string> = {}
   if (filters.taskId.trim()) nextQuery.task_id = filters.taskId.trim()
+  if (filters.resourceSource !== 'all') nextQuery.source = filters.resourceSource
   if (selectedAssetId.value.trim()) nextQuery.asset_id = selectedAssetId.value.trim()
   void router.replace({ query: nextQuery })
 }
@@ -1520,6 +1653,7 @@ function openAssetDetail(assetId: string) {
   if (!canAccessPage('asset_detail')) return
   const query: Record<string, string> = {}
   if (filters.taskId.trim()) query.task_id = filters.taskId.trim()
+  if (filters.resourceSource !== 'all') query.source = filters.resourceSource
   void router.push({ name: 'AssetDetail', params: { id: assetId }, query })
 }
 
@@ -1535,6 +1669,7 @@ async function reload() {
   try {
     const res = await assetsApi.searchAssets({
       keyword: effectiveSearchKeyword.value || undefined,
+      source: filters.resourceSource,
       page: listPage.value,
       size: listPageSize.value,
     })
@@ -1559,11 +1694,11 @@ async function reload() {
       syncQuerySelection()
     } else {
       let nextId = ''
-      if (requestedAssetId.value && assets.value.some((item) => String(item.id) === requestedAssetId.value)) {
+      if (requestedAssetId.value && assets.value.some((item) => assetResourceId(item) === requestedAssetId.value)) {
         nextId = requestedAssetId.value
       } else if (
         selectedAssetId.value &&
-        assets.value.some((item) => String(item.id) === selectedAssetId.value)
+        assets.value.some((item) => assetResourceId(item) === selectedAssetId.value)
       ) {
         nextId = selectedAssetId.value
       }
@@ -1592,6 +1727,10 @@ async function reload() {
 onMounted(() => {
   if (requestedTaskId.value) {
     filters.taskId = requestedTaskId.value
+  }
+  const requestedSource = typeof route.query.source === 'string' ? route.query.source.trim() : ''
+  if (requestedSource === 'system' || requestedSource === 'external' || requestedSource === 'all') {
+    filters.resourceSource = requestedSource
   }
   void reload()
 })
@@ -1900,6 +2039,10 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.28);
 }
 
+.ac-card--external {
+  border-color: rgba(14, 165, 233, 0.18);
+}
+
 .ac-card-check {
   position: absolute;
   top: 10px;
@@ -1919,6 +2062,11 @@ onBeforeUnmount(() => {
   width: 14px;
   height: 14px;
   cursor: pointer;
+}
+
+.ac-card-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .ac-card-img-box {
@@ -1971,6 +2119,24 @@ onBeforeUnmount(() => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   color: var(--ac-text);
+}
+
+.ac-source-pill {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.ac-source-pill--external {
+  color: #0369a1;
+  background: #e0f2fe;
+  border-color: #bae6fd;
 }
 
 .ac-card-meta {
@@ -2152,6 +2318,10 @@ onBeforeUnmount(() => {
 
 .detail-row {
   margin: 0;
+}
+
+.detail-row-full {
+  grid-column: 1 / -1;
 }
 
 .detail-row dt {
@@ -3012,6 +3182,13 @@ onBeforeUnmount(() => {
   line-height: 1.25 !important;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ac-footer-stat--external {
+  max-width: 10rem;
+  font-size: 0.82rem !important;
+  line-height: 1.25 !important;
+  white-space: normal !important;
 }
 
 .ac-card-link-btn {

@@ -26,6 +26,20 @@ func (s *Service) DownloadVersion(ctx context.Context, assetID, versionID int64)
 	return s.downloadRow(row)
 }
 
+func (s *Service) DownloadExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return nil, domain.ErrNotFound
+	}
+	return s.externalSvc.DownloadInfo(ctx, externalID)
+}
+
+func (s *Service) PreviewExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return nil, domain.ErrNotFound
+	}
+	return s.externalSvc.PreviewInfo(ctx, externalID)
+}
+
 func (s *Service) downloadRow(row *repo.TaskAssetSearchRow) (*domain.AssetDownloadInfo, *domain.AppError) {
 	if row == nil || row.Asset == nil || row.Task == nil {
 		return nil, domain.ErrNotFound

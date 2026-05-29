@@ -347,6 +347,44 @@ func (s *OSSDirectService) UploadObject(ctx context.Context, objectKey, contentT
 	return nil
 }
 
+func (s *OSSDirectService) UploadObjectFromReader(ctx context.Context, objectKey, contentType string, body io.Reader) error {
+	if !s.Enabled() {
+		return fmt.Errorf("oss direct service is not enabled")
+	}
+	objectKey = strings.TrimSpace(objectKey)
+	if objectKey == "" {
+		return fmt.Errorf("oss direct upload object_key is required")
+	}
+	if body == nil {
+		return fmt.Errorf("oss direct upload body is nil")
+	}
+	contentType = normalizeRequiredUploadContentType(contentType)
+
+	reqURL := s.bucketURL() + "/" + ossEscapePath(objectKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, body)
+	if err != nil {
+		return fmt.Errorf("oss direct upload reader build request: %w", err)
+	}
+	date := time.Now().UTC().Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	req.Header.Set("Content-Type", contentType)
+
+	canonResource := "/" + s.cfg.Bucket + "/" + objectKey
+	sig := s.signV1(http.MethodPut, "", contentType, date, "", canonResource)
+	req.Header.Set("Authorization", "OSS "+s.cfg.AccessKeyID+":"+sig)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("oss direct upload reader request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("oss direct upload reader failed: status=%d body=%s", resp.StatusCode, string(raw))
+	}
+	return nil
+}
+
 func (s *OSSDirectService) HeadObject(ctx context.Context, objectKey string) (bool, error) {
 	if !s.Enabled() {
 		return false, fmt.Errorf("oss direct service is not enabled")

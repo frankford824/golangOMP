@@ -26,6 +26,7 @@ type Config struct {
 	ERPRemote      ERPRemoteConfig
 	UploadService  UploadServiceConfig
 	OSSDirect      OSSDirectConfig
+	ExternalAssets ExternalAssetsConfig
 	AssetCleanup   AssetCleanupConfig
 	Log            LogConfig
 	Auth           domain.AuthSettings
@@ -45,6 +46,20 @@ type OSSDirectConfig struct {
 
 type AssetCleanupConfig struct {
 	Enabled bool
+}
+
+type ExternalAssetsConfig struct {
+	Enabled             bool
+	BFFBaseURL          string
+	BFFBrowserBaseURL   string
+	AListBaseURL        string
+	AListToken          string
+	AListMounts         string
+	SyncInterval        time.Duration
+	LinkRefreshInterval time.Duration
+	OSSOriginalPrefix   string
+	OSSPreviewPrefix    string
+	LocalPathMappings   string
 }
 
 type ServerConfig struct {
@@ -208,6 +223,19 @@ func Load() (*Config, error) {
 			PresignExpiry:   mustParseDuration(getEnv("OSS_PRESIGN_EXPIRY", "15m")),
 			PublicEndpoint:  getEnv("OSS_PUBLIC_ENDPOINT", ""),
 			PartSize:        mustParseInt64(getEnv("OSS_PART_SIZE", "10485760")),
+		},
+		ExternalAssets: ExternalAssetsConfig{
+			Enabled:             mustParseBool(getEnv("EXTERNAL_ASSETS_ENABLED", "false")),
+			BFFBaseURL:          getEnv("EXTERNAL_ASSETS_BFF_BASE_URL", ""),
+			BFFBrowserBaseURL:   getEnv("EXTERNAL_ASSETS_BFF_BROWSER_BASE_URL", ""),
+			AListBaseURL:        getEnv("EXTERNAL_ASSETS_ALIST_BASE_URL", ""),
+			AListToken:          getEnv("EXTERNAL_ASSETS_ALIST_TOKEN", ""),
+			AListMounts:         getEnv("EXTERNAL_ASSETS_ALIST_MOUNTS", "/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local"),
+			SyncInterval:        mustParseDuration(getEnv("EXTERNAL_ASSETS_SYNC_INTERVAL", "1h")),
+			LinkRefreshInterval: mustParseDuration(getEnv("EXTERNAL_ASSETS_LINK_REFRESH_INTERVAL", "1h")),
+			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
+			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
+			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),
 		},
 		AssetCleanup: AssetCleanupConfig{
 			Enabled: mustParseBool(getEnv("ASSET_CLEANUP_ENABLED", "false")),

@@ -182,6 +182,21 @@ type SKUTraceRepo interface {
 	UpsertComboRelation(ctx context.Context, tx Tx, relation *domain.OMPSKUComboRelation) error
 }
 
+type ExternalAssetRepo interface {
+	Search(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error)
+	Upsert(ctx context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error)
+	GetByID(ctx context.Context, id int64) (*domain.ExternalAssetRecord, error)
+	UpdateDirectURL(ctx context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error
+	MarkOSSPreparePending(ctx context.Context, id int64) error
+	MarkPreviewPreparePending(ctx context.Context, id int64) error
+	ListDirectURLRefreshCandidates(ctx context.Context, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error)
+	ListPendingOSS(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error)
+	ListPendingPreview(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error)
+	MarkOSSReady(ctx context.Context, id int64, objectKey string) error
+	MarkPreviewReady(ctx context.Context, id int64, previewKey string) error
+	MarkPrepareFailed(ctx context.Context, id int64, target, message string) error
+}
+
 // ERPSyncRunRepo stores ERP sync execution history.
 type ERPSyncRunRepo interface {
 	Create(ctx context.Context, tx Tx, run *domain.ERPSyncRun) (int64, error)

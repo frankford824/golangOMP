@@ -32,10 +32,16 @@ type SearchTask struct {
 }
 
 type SearchAsset struct {
-	AssetID         int64   `json:"asset_id"`
-	FileName        string  `json:"file_name"`
-	SourceModuleKey *string `json:"source_module_key"`
-	TaskID          *int64  `json:"task_id"`
+	AssetID           int64   `json:"asset_id"`
+	ResourceID        string  `json:"resource_id,omitempty"`
+	FileName          string  `json:"file_name"`
+	SourceModuleKey   *string `json:"source_module_key"`
+	TaskID            *int64  `json:"task_id"`
+	SourceType        string  `json:"source_type,omitempty"`
+	SourceLabel       string  `json:"source_label,omitempty"`
+	ExternalKind      string  `json:"external_kind,omitempty"`
+	ExternalMountPath string  `json:"external_mount_path,omitempty"`
+	ExternalDriver    string  `json:"external_driver,omitempty"`
 }
 
 type SearchProduct struct {

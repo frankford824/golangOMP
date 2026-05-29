@@ -7,7 +7,7 @@
 
 import axios from 'axios'
 import http from '@/services/http'
-import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
+import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 
 export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'design_thumb'
 
@@ -225,6 +225,8 @@ export interface AssetListQuery {
 
 export interface AssetSearchQuery {
   keyword?: string
+  source?: AssetResourceSource
+  resource_source?: AssetResourceSource
   page?: number
   size?: number
   module_key?: string

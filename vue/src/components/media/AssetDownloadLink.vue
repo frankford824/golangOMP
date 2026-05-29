@@ -42,6 +42,10 @@ async function onClick(ev: MouseEvent) {
   }
   if (props.href?.trim()) {
     window.open(props.href.trim(), '_blank', 'noopener,noreferrer')
+    return
+  }
+  if (result.message) {
+    window.alert(result.message)
   }
 }
 </script>

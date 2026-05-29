@@ -8,7 +8,7 @@ import type { AssetDownloadMeta } from '@/services/api/assetsApi'
 import { assetsApi } from '@/services/api/assetsApi'
 import { toRelativeAssetUrl } from '@/utils/url'
 
-export type AssetPreviewMetaStatus = 'ok' | 'not_found' | 'unavailable' | 'error'
+export type AssetPreviewMetaStatus = 'ok' | 'preparing' | 'not_found' | 'unavailable' | 'error'
 
 export interface AssetPreviewMetaResult {
   status: AssetPreviewMetaStatus
@@ -18,7 +18,7 @@ export interface AssetPreviewMetaResult {
   message?: string
 }
 
-export type AssetDownloadMetaStatus = 'ok' | 'not_found' | 'forbidden' | 'error'
+export type AssetDownloadMetaStatus = 'ok' | 'preparing' | 'not_found' | 'forbidden' | 'error'
 
 export interface AssetDownloadMetaResult {
   status: AssetDownloadMetaStatus
@@ -151,6 +151,11 @@ export async function fetchAssetPreviewMeta(
         writePreviewMetaCache(id, out)
         return out
       }
+      const raw = meta as Record<string, unknown> | undefined
+      const hint = String(raw?.access_hint ?? raw?.accessHint ?? '').trim()
+      if (hint.includes('prepare_required')) {
+        return { status: 'preparing', message: '正在准备预览，请稍后自动刷新' }
+      }
       return { status: 'unavailable', message: '预览地址为空' }
     } catch (e) {
       if (axios.isAxiosError(e)) {
@@ -174,6 +179,14 @@ export async function fetchAssetPreviewMeta(
 function buildDownloadMetaResult(meta: AssetDownloadMeta | undefined): AssetDownloadMetaResult {
   const downloadUrl = normalizeDisplayUrl(pickMetaUrl(meta))
   if (!downloadUrl) {
+    const raw = meta as Record<string, unknown> | undefined
+    const hint = String(raw?.access_hint ?? raw?.accessHint ?? '').trim()
+    if (hint.includes('prepare_required')) {
+      return {
+        status: 'preparing',
+        message: '外部资源正在准备中，请稍后刷新后再下载',
+      }
+    }
     return { status: 'error', message: '下载地址为空' }
   }
   const filename = pickDownloadFilenameFromMeta(meta)

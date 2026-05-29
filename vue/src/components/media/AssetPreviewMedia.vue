@@ -17,6 +17,12 @@
         <button type="button" class="apm-retry apm-retry--below" @click.stop="reload">重试</button>
       </div>
     </template>
+    <template v-else-if="phase === 'preparing'">
+      <div class="apm-placeholder apm-loading" role="status" aria-live="polite">
+        <span>正在准备预览…</span>
+        <button type="button" class="apm-retry apm-retry--below" @click.stop="reload">刷新</button>
+      </div>
+    </template>
     <template v-else-if="phase === 'error'">
       <div class="apm-empty apm-empty--stack" role="alert">
         <img :src="placeholderSrc" alt="" class="apm-placeholder-img" />
@@ -89,7 +95,7 @@ const emit = defineEmits<{
   'open-full': [url: string]
 }>()
 
-type Phase = 'idle' | 'deferred' | 'loading' | 'ready' | 'not_found' | 'unavailable' | 'error'
+type Phase = 'idle' | 'deferred' | 'loading' | 'ready' | 'preparing' | 'not_found' | 'unavailable' | 'error'
 const phase = ref<Phase>('idle')
 const displaySrc = ref('')
 const errorHint = ref('加载失败')
@@ -100,6 +106,7 @@ const innerImgClass = computed(() => props.innerImgClass)
 let seq = 0
 let objectUrl: string | null = null
 let io: IntersectionObserver | null = null
+let prepareRetryTimer: number | null = null
 /** 已满足「进入视区」条件，或无需 defer */
 const viewportGateOpen = ref(!props.deferUntilVisible)
 
@@ -120,6 +127,21 @@ function disconnectDeferIo() {
   }
   io?.disconnect()
   io = null
+}
+
+function clearPrepareRetryTimer() {
+  if (prepareRetryTimer != null) {
+    window.clearTimeout(prepareRetryTimer)
+    prepareRetryTimer = null
+  }
+}
+
+function schedulePrepareRetry() {
+  clearPrepareRetryTimer()
+  prepareRetryTimer = window.setTimeout(() => {
+    prepareRetryTimer = null
+    void runLoad()
+  }, 12_000)
 }
 
 function bindDeferIo() {
@@ -182,6 +204,7 @@ async function materializeDisplaySrc(url: string): Promise<string | undefined> {
 
 async function runLoad() {
   const my = ++seq
+  clearPrepareRetryTimer()
   if (props.deferUntilVisible && !viewportGateOpen.value) {
     phase.value = 'deferred'
     return
@@ -254,6 +277,12 @@ async function runLoad() {
     }
     return
   }
+  if (res.status === 'preparing') {
+    errorHint.value = res.message ?? '正在准备预览'
+    phase.value = 'preparing'
+    schedulePrepareRetry()
+    return
+  }
   errorHint.value = res.message ?? '加载失败'
   phase.value = 'error'
   if (props.fallbackSrc?.trim()) {
@@ -316,6 +345,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disconnectDeferIo()
+  clearPrepareRetryTimer()
   clearObjectUrl()
 })
 

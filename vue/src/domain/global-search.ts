@@ -31,9 +31,15 @@ export interface V1GlobalSearchTaskHit {
 
 export interface V1GlobalSearchAssetHit {
   asset_id: number
+  resource_id?: string | null
   file_name: string
   source_module_key?: string | null
   task_id?: number | null
+  source_type?: 'system' | 'external' | string | null
+  source_label?: string | null
+  external_kind?: string | null
+  external_mount_path?: string | null
+  external_driver?: string | null
 }
 
 export interface V1GlobalSearchProductHit {
@@ -69,6 +75,7 @@ export type GlobalSearchOverlayHit = {
   subtitle: string
   /** 任务状态中文（来自 API task_status，未知则回退原字符串） */
   statusLabel?: string
+  badgeLabel?: string
 }
 
 export type GlobalSearchOverlayBundle = {
@@ -114,19 +121,27 @@ function taskHitToOverlay(row: V1GlobalSearchTaskHit): GlobalSearchOverlayHit {
 }
 
 function assetHitToOverlay(row: V1GlobalSearchAssetHit): GlobalSearchOverlayHit {
+  const sourceLabel =
+    typeof row.source_label === 'string' && row.source_label.trim()
+      ? row.source_label.trim()
+      : row.source_type === 'external'
+      ? '外部资源'
+      : '系统资源'
   const moduleBit =
     row.source_module_key != null && String(row.source_module_key).trim() !== ''
       ? sourceModuleLabelForSearch(row.source_module_key)
       : ''
-  const sub =
+  const businessSub =
     row.task_id != null
       ? `任务 #${row.task_id}${moduleBit ? ` · ${moduleBit}` : ''}`
       : moduleBit || ''
+  const sub = [sourceLabel, businessSub].filter(Boolean).join(' · ')
   return {
-    id: String(row.asset_id),
+    id: String(row.resource_id || row.asset_id),
     type: 'asset',
     title: row.file_name,
     subtitle: sub,
+    badgeLabel: sourceLabel,
   }
 }
 

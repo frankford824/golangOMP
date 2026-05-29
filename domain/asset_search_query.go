@@ -29,6 +29,7 @@ type AssetSearchQuery struct {
 	Size          int
 	IsArchived    AssetArchiveFilter
 	TaskStatus    AssetTaskStatusFilter
+	Source        AssetResourceSource
 }
 
 func (q AssetSearchQuery) Normalized() AssetSearchQuery {
@@ -50,6 +51,11 @@ func (q AssetSearchQuery) Normalized() AssetSearchQuery {
 	case AssetTaskStatusFilterOpen, AssetTaskStatusFilterClosed, AssetTaskStatusFilterArchived:
 	default:
 		q.TaskStatus = AssetTaskStatusFilterAll
+	}
+	switch q.Source {
+	case AssetResourceSourceSystem, AssetResourceSourceExternal:
+	default:
+		q.Source = AssetResourceSourceAll
 	}
 	return q
 }

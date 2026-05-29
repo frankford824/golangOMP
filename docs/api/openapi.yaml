@@ -6778,8 +6778,36 @@ components:
         - $ref: '#/components/schemas/DesignAsset'
         - type: object
           properties:
+            resource_id:
+              type: string
+              description: Unified resource id. System assets use numeric strings; external resources use `ext-{id}`.
+            source_type:
+              type: string
+              enum: [system, external]
+            source_label:
+              type: string
+              description: UI bucket label, currently `系统资源` or `外部资源`.
             source_module_key:
               type: string
+            external_kind:
+              type: string
+              enum: [netdisk, nas_local]
+              nullable: true
+            external_mount_path:
+              type: string
+              nullable: true
+            external_driver:
+              type: string
+              nullable: true
+            origin_path:
+              type: string
+              nullable: true
+            oss_sync_status:
+              type: string
+              nullable: true
+            external_preview_status:
+              type: string
+              nullable: true
             lifecycle_state:
               $ref: '#/components/schemas/AssetLifecycleState'
     ERPProductSnapshot:
@@ -6903,12 +6931,32 @@ components:
               asset_id:
                 type: integer
                 format: int64
+              resource_id:
+                type: string
+                nullable: true
+                description: Unified resource id. External resources use `ext-{id}`.
               file_name:
                 type: string
+              source_type:
+                type: string
+                enum: [system, external]
+                nullable: true
+              source_label:
+                type: string
+                nullable: true
               source_module_key:
                 type: string
                 nullable: true
                 description: One of `basic_info` / `design` / `audit` / `customization` / `warehouse`.
+              external_kind:
+                type: string
+                nullable: true
+              external_mount_path:
+                type: string
+                nullable: true
+              external_driver:
+                type: string
+                nullable: true
               task_id:
                 type: integer
                 format: int64
@@ -7162,6 +7210,15 @@ components:
       properties:
         id:
           type: integer
+        resource_id:
+          type: string
+          description: Unified resource id. System assets use numeric strings; external resources use `ext-{id}`.
+        source_type:
+          type: string
+          enum: [system, external]
+        source_label:
+          type: string
+          description: UI bucket label, currently `系统资源` or `外部资源`.
         task_id:
           type: integer
         asset_no:
@@ -7194,6 +7251,33 @@ components:
           nullable: true
         mime_type:
           type: string
+        download_url:
+          type: string
+          nullable: true
+        preview_available:
+          type: boolean
+        external_kind:
+          type: string
+          enum: [netdisk, nas_local]
+          nullable: true
+        external_mount_path:
+          type: string
+          nullable: true
+        external_driver:
+          type: string
+          nullable: true
+        origin_path:
+          type: string
+          nullable: true
+        oss_sync_status:
+          type: string
+          nullable: true
+        external_preview_status:
+          type: string
+          nullable: true
+        last_prepare_error:
+          type: string
+          nullable: true
         task_no:
           type: string
         task_status:
@@ -9823,7 +9907,8 @@ paths:
           name: asset_id
           required: true
           schema:
-            type: integer
+            type: string
+          description: Numeric system asset id or external resource id such as `ext-123`.
       responses:
         '200':
           description: Asset detail with version list
@@ -9883,7 +9968,8 @@ paths:
           name: asset_id
           required: true
           schema:
-            type: integer
+            type: string
+          description: Numeric system asset id or external resource id such as `ext-123`.
       responses:
         '200':
           description: Asset download metadata
@@ -9917,7 +10003,8 @@ paths:
           name: asset_id
           required: true
           schema:
-            type: integer
+            type: string
+          description: Numeric system asset id or external resource id such as `ext-123`.
       responses:
         '200':
           description: Asset preview metadata
@@ -14966,8 +15053,15 @@ paths:
       parameters:
         - in: query
           name: keyword
-          description: Fuzzy match asset_id / task_id / sku_code / primary_sku_code / scope_sku_code / file_name / original_filename / task_no / task title.
+          description: Fuzzy match system asset fields and indexed external resource paths/names.
           schema: { type: string }
+        - in: query
+          name: source
+          description: Resource source bucket. `all` returns system + external; external resources are read-only and prepared for preview/download on demand.
+          schema:
+            type: string
+            enum: [all, system, external]
+            default: all
         - in: query
           name: module_key
           description: Restrict to one source module.

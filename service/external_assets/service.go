@@ -1,0 +1,902 @@
+package externalassets
+
+import (
+	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"mime"
+	"net"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"workflow/config"
+	"workflow/domain"
+	"workflow/repo"
+	baseservice "workflow/service"
+)
+
+const ErrCodeExternalAssetPreparing = "EXTERNAL_ASSET_PREPARING"
+
+type MountConfig struct {
+	Path   string
+	Kind   domain.ExternalAssetKind
+	Driver string
+}
+
+type Config struct {
+	Enabled             bool
+	BFFBaseURL          string
+	BFFBrowserBaseURL   string
+	AListBaseURL        string
+	AListToken          string
+	Mounts              []MountConfig
+	SyncInterval        time.Duration
+	LinkRefreshInterval time.Duration
+	OSSOriginalPrefix   string
+	OSSPreviewPrefix    string
+	LocalPathMappings   map[string]string
+}
+
+type Service struct {
+	cfg       Config
+	repo      repo.ExternalAssetRepo
+	bff       *BFFClient
+	alist     *AListClient
+	ossDirect *baseservice.OSSDirectService
+	renderer  baseservice.AssetPreviewRenderer
+	nowFn     func() time.Time
+	recentMu  sync.Mutex
+	recent    map[string]time.Time
+}
+
+func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
+	return Config{
+		Enabled:             cfg.Enabled,
+		BFFBaseURL:          strings.TrimSpace(cfg.BFFBaseURL),
+		BFFBrowserBaseURL:   strings.TrimSpace(cfg.BFFBrowserBaseURL),
+		AListBaseURL:        strings.TrimSpace(cfg.AListBaseURL),
+		AListToken:          strings.TrimSpace(cfg.AListToken),
+		Mounts:              ParseMounts(cfg.AListMounts),
+		SyncInterval:        cfg.SyncInterval,
+		LinkRefreshInterval: cfg.LinkRefreshInterval,
+		OSSOriginalPrefix:   strings.Trim(strings.TrimSpace(cfg.OSSOriginalPrefix), "/"),
+		OSSPreviewPrefix:    strings.Trim(strings.TrimSpace(cfg.OSSPreviewPrefix), "/"),
+		LocalPathMappings:   ParseLocalPathMappings(cfg.LocalPathMappings),
+	}
+}
+
+func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.OSSDirectService) *Service {
+	if cfg.SyncInterval <= 0 {
+		cfg.SyncInterval = time.Hour
+	}
+	if cfg.LinkRefreshInterval <= 0 {
+		cfg.LinkRefreshInterval = time.Hour
+	}
+	if cfg.OSSOriginalPrefix == "" {
+		cfg.OSSOriginalPrefix = "external-assets/alist/original"
+	}
+	if cfg.OSSPreviewPrefix == "" {
+		cfg.OSSPreviewPrefix = "external-assets/alist/preview"
+	}
+	if len(cfg.Mounts) == 0 {
+		cfg.Mounts = ParseMounts("/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local")
+	}
+	return &Service{
+		cfg:       cfg,
+		repo:      repo,
+		bff:       NewBFFClient(cfg.BFFBaseURL, cfg.BFFBrowserBaseURL, 30*time.Second),
+		alist:     NewAListClient(cfg.AListBaseURL, cfg.AListToken, 30*time.Second),
+		ossDirect: ossDirect,
+		renderer:  baseservice.NewExternalAssetPreviewRenderer(),
+		nowFn:     time.Now,
+		recent:    map[string]time.Time{},
+	}
+}
+
+func (s *Service) Enabled() bool {
+	return s != nil && s.cfg.Enabled && s.repo != nil
+}
+
+func (s *Service) SyncInterval() time.Duration {
+	if s == nil || s.cfg.SyncInterval <= 0 {
+		return time.Hour
+	}
+	return s.cfg.SyncInterval
+}
+
+func ParseMounts(raw string) []MountConfig {
+	var out []MountConfig
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		fields := strings.Split(part, ":")
+		mount := cleanAListPath(fields[0])
+		kind := domain.ExternalAssetKindNetdisk
+		if len(fields) > 1 && strings.EqualFold(strings.TrimSpace(fields[1]), string(domain.ExternalAssetKindNASLocal)) {
+			kind = domain.ExternalAssetKindNASLocal
+		}
+		driver := ""
+		if len(fields) > 2 {
+			driver = strings.TrimSpace(fields[2])
+		}
+		out = append(out, MountConfig{Path: mount, Kind: kind, Driver: driver})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+func ParseLocalPathMappings(raw string) map[string]string {
+	out := map[string]string{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		key = cleanAListPath(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func normalizeRecentKeyword(keyword string) string {
+	keyword = strings.Join(strings.Fields(strings.TrimSpace(keyword)), " ")
+	if keyword == "" {
+		return ""
+	}
+	runes := []rune(keyword)
+	if len(runes) > 80 {
+		keyword = string(runes[:80])
+	}
+	return keyword
+}
+
+func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
+	if !s.Enabled() {
+		return []*domain.ExternalAssetRecord{}, 0, nil
+	}
+	query = query.Normalized()
+	if query.Keyword != "" && s.searchBackendReady() {
+		s.recordRecentKeyword(query.Keyword)
+		_ = s.SyncKeyword(ctx, query.Keyword, query.Size)
+		if s.directLinkBackendReady() {
+			_, _, _ = s.RefreshDirectURLs(ctx, query.Size)
+		}
+	}
+	return s.repo.Search(ctx, query)
+}
+
+func (s *Service) recordRecentKeyword(keyword string) {
+	if s == nil {
+		return
+	}
+	keyword = normalizeRecentKeyword(keyword)
+	if keyword == "" {
+		return
+	}
+	s.recentMu.Lock()
+	defer s.recentMu.Unlock()
+	if s.recent == nil {
+		s.recent = map[string]time.Time{}
+	}
+	s.recent[keyword] = s.nowFn().UTC()
+	if len(s.recent) <= 200 {
+		return
+	}
+	type pair struct {
+		keyword string
+		seenAt  time.Time
+	}
+	items := make([]pair, 0, len(s.recent))
+	for k, v := range s.recent {
+		items = append(items, pair{keyword: k, seenAt: v})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].seenAt.After(items[j].seenAt) })
+	for _, item := range items[160:] {
+		delete(s.recent, item.keyword)
+	}
+}
+
+func (s *Service) RecentKeywords(limit int) []string {
+	if s == nil {
+		return nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	type pair struct {
+		keyword string
+		seenAt  time.Time
+	}
+	s.recentMu.Lock()
+	items := make([]pair, 0, len(s.recent))
+	for k, v := range s.recent {
+		items = append(items, pair{keyword: k, seenAt: v})
+	}
+	s.recentMu.Unlock()
+	sort.Slice(items, func(i, j int) bool { return items[i].seenAt.After(items[j].seenAt) })
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.keyword)
+	}
+	return out
+}
+
+func (s *Service) SearchGlobal(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, _, err := s.Search(ctx, domain.ExternalAssetSearchQuery{Keyword: q, Page: 1, Size: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.SearchAsset, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, domain.SearchAsset{
+			AssetID:           0,
+			ResourceID:        row.ResourceID,
+			FileName:          row.FileName,
+			TaskID:            nil,
+			SourceType:        string(domain.AssetResourceSourceExternal),
+			SourceLabel:       "外部资源",
+			ExternalKind:      string(row.Kind),
+			ExternalMountPath: row.MountPath,
+			ExternalDriver:    row.Driver,
+		})
+	}
+	return out, nil
+}
+
+func (s *Service) SyncKeyword(ctx context.Context, keyword string, perMountLimit int) error {
+	if !s.Enabled() || !s.searchBackendReady() {
+		return nil
+	}
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil
+	}
+	if perMountLimit <= 0 || perMountLimit > 100 {
+		perMountLimit = 50
+	}
+	for _, mount := range s.cfg.Mounts {
+		resp, err := s.searchMount(ctx, mount.Path, keyword, perMountLimit)
+		if err != nil {
+			continue
+		}
+		for _, item := range resp.Content {
+			if isSkippableExternalSearchItem(item) {
+				continue
+			}
+			upsert := s.upsertFromSearchItem(mount, item)
+			if _, err := s.repo.Upsert(ctx, upsert); err != nil {
+				continue
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) searchBackendReady() bool {
+	return s != nil && ((s.bff != nil && s.bff.Enabled()) || (s.alist != nil && s.alist.Enabled()))
+}
+
+func (s *Service) directLinkBackendReady() bool {
+	return s != nil && ((s.bff != nil && s.bff.Enabled()) || (s.alist != nil && s.alist.Enabled()))
+}
+
+func (s *Service) searchMount(ctx context.Context, mountPath, keyword string, limit int) (*AListSearchResponse, error) {
+	if s.bff != nil && s.bff.Enabled() {
+		return s.bff.Search(ctx, mountPath, keyword, 1, limit)
+	}
+	return s.alist.Search(ctx, mountPath, keyword, 1, limit)
+}
+
+func (s *Service) resolveNetdiskDirectURL(ctx context.Context, row *domain.ExternalAssetRecord, preview bool) (string, error) {
+	if s.bff != nil && s.bff.Enabled() {
+		return s.bff.DirectURL(ctx, row.OriginPath, preview)
+	}
+	info, err := s.alist.Get(ctx, row.OriginPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(info.RawURL), nil
+}
+
+func (s *Service) RefreshDirectURLs(ctx context.Context, limit int) (int, int, error) {
+	if !s.Enabled() || !s.directLinkBackendReady() {
+		return 0, 0, nil
+	}
+	staleBefore := s.nowFn().UTC().Add(-s.cfg.LinkRefreshInterval)
+	rows, err := s.repo.ListDirectURLRefreshCandidates(ctx, limit, staleBefore)
+	if err != nil {
+		return 0, 0, err
+	}
+	success := 0
+	failed := 0
+	for _, row := range rows {
+		if row == nil || row.Kind != domain.ExternalAssetKindNetdisk {
+			continue
+		}
+		rawURL, err := s.resolveNetdiskDirectURL(ctx, row, false)
+		if err != nil {
+			failed++
+			_ = s.repo.UpdateDirectURL(ctx, row.ID, "", nil, "failed")
+			continue
+		}
+		rawURL = strings.TrimSpace(rawURL)
+		if rawURL == "" || s.isInternalProviderURL(rawURL) {
+			failed++
+			_ = s.repo.UpdateDirectURL(ctx, row.ID, "", nil, "missing")
+			continue
+		}
+		success++
+		_ = s.repo.UpdateDirectURL(ctx, row.ID, rawURL, nil, "ready")
+	}
+	return success, failed, nil
+}
+
+func (s *Service) Get(ctx context.Context, id int64) (*domain.ExternalAssetRecord, error) {
+	if !s.Enabled() {
+		return nil, nil
+	}
+	return s.repo.GetByID(ctx, id)
+}
+
+func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if row == nil || row.Status == domain.ExternalAssetStatusMissing {
+		return nil, domain.ErrNotFound
+	}
+	if row.IsDir {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "文件夹暂不支持下载", nil)
+	}
+	if urlValue := s.BrowserDownloadURL(row); urlValue != "" {
+		return &domain.AssetDownloadInfo{
+			DownloadMode:     domain.AssetDownloadModeDirect,
+			DownloadURL:      &urlValue,
+			AccessHint:       "external_bff_browser_download",
+			PreviewAvailable: canDirectBrowserPreview(row.FileName, row.MimeType),
+			Filename:         row.FileName,
+			FileSize:         row.FileSize,
+			MimeType:         row.MimeType,
+		}, nil
+	}
+	if row.Kind == domain.ExternalAssetKindNASLocal {
+		return s.localDownloadInfo(ctx, row)
+	}
+	return s.netdiskDownloadInfo(ctx, row, false)
+}
+
+func (s *Service) PreviewInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if row == nil || row.Status == domain.ExternalAssetStatusMissing {
+		return nil, domain.ErrNotFound
+	}
+	if row.IsDir {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "文件夹暂不支持预览", nil)
+	}
+	if urlValue := s.BrowserPreviewURL(row); urlValue != "" {
+		return &domain.AssetDownloadInfo{
+			DownloadMode:     domain.AssetDownloadModeDirect,
+			DownloadURL:      &urlValue,
+			AccessHint:       "external_bff_browser_preview",
+			PreviewAvailable: true,
+			Filename:         row.FileName,
+			FileSize:         row.FileSize,
+			MimeType:         row.MimeType,
+		}, nil
+	}
+	if canRenderDerivedPreview(row.FileName, row.MimeType) {
+		_ = s.repo.MarkPreviewPreparePending(ctx, row.ID)
+		return prepareInfo(row, "external_preview_prepare_required"), nil
+	}
+	return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该文件暂不支持在线预览，可直接下载原文件", nil)
+}
+
+func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
+	if row == nil || row.IsDir {
+		return ""
+	}
+	if row.OSSPreviewKey != "" && row.PreviewStatus == domain.ExternalAssetPreviewStatusReady {
+		if urlValue := s.presignedPreviewURL(row); urlValue != "" {
+			return urlValue
+		}
+	}
+	if !canDirectBrowserPreview(row.FileName, row.MimeType) {
+		return ""
+	}
+	if row.Kind == domain.ExternalAssetKindNASLocal {
+		return ""
+	}
+	if row.Kind == domain.ExternalAssetKindNetdisk {
+		rawURL := strings.TrimSpace(row.RawURL)
+		if rawURL != "" && !s.isInternalProviderURL(rawURL) {
+			return rawURL
+		}
+	}
+	if s.bff == nil || !s.bff.Enabled() {
+		return ""
+	}
+	return s.bff.BrowserFetchURL(row.OriginPath, true, row.Kind == domain.ExternalAssetKindNASLocal)
+}
+
+func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
+	if row == nil || row.IsDir {
+		return ""
+	}
+	if row.Kind == domain.ExternalAssetKindNASLocal {
+		if row.OSSOriginalKey == "" || row.OSSSyncStatus != domain.ExternalAssetOSSStatusReady {
+			return ""
+		}
+		return s.presignedOriginalURL(row)
+	}
+	if row.Kind == domain.ExternalAssetKindNetdisk {
+		rawURL := strings.TrimSpace(row.RawURL)
+		if rawURL != "" && !s.isInternalProviderURL(rawURL) {
+			return rawURL
+		}
+	}
+	if s.bff == nil || !s.bff.Enabled() {
+		return ""
+	}
+	return s.bff.BrowserFetchURL(row.OriginPath, false, row.Kind == domain.ExternalAssetKindNASLocal)
+}
+
+func (s *Service) presignedPreviewURL(row *domain.ExternalAssetRecord) string {
+	if s == nil || s.ossDirect == nil || !s.ossDirect.Enabled() || row == nil || strings.TrimSpace(row.OSSPreviewKey) == "" {
+		return ""
+	}
+	signed := s.ossDirect.PresignPreviewURL(row.OSSPreviewKey)
+	if signed == nil {
+		return ""
+	}
+	return strings.TrimSpace(signed.DownloadURL)
+}
+
+func (s *Service) presignedOriginalURL(row *domain.ExternalAssetRecord) string {
+	if s == nil || s.ossDirect == nil || !s.ossDirect.Enabled() || row == nil || strings.TrimSpace(row.OSSOriginalKey) == "" {
+		return ""
+	}
+	signed := s.ossDirect.PresignDownloadURLWithFilename(row.OSSOriginalKey, row.FileName)
+	if signed == nil {
+		return ""
+	}
+	return strings.TrimSpace(signed.DownloadURL)
+}
+
+func (s *Service) localDownloadInfo(ctx context.Context, row *domain.ExternalAssetRecord) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
+		return s.ossDownloadInfo(row, row.OSSOriginalKey, false, "external_local_oss")
+	}
+	if err := s.repo.MarkOSSPreparePending(ctx, row.ID); err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	return prepareInfo(row, "external_local_prepare_required"), nil
+}
+
+func (s *Service) netdiskDownloadInfo(ctx context.Context, row *domain.ExternalAssetRecord, preview bool) (*domain.AssetDownloadInfo, *domain.AppError) {
+	rawURL := strings.TrimSpace(row.RawURL)
+	if s.shouldRefreshDirectURL(row) {
+		nextURL, err := s.resolveNetdiskDirectURL(ctx, row, preview)
+		if err != nil {
+			_ = s.repo.UpdateDirectURL(ctx, row.ID, "", nil, "failed")
+			return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘暂时无法获取文件，请稍后再试", map[string]interface{}{"detail": err.Error()})
+		}
+		rawURL = strings.TrimSpace(nextURL)
+		_ = s.repo.UpdateDirectURL(ctx, row.ID, rawURL, nil, directURLStatus(rawURL))
+	}
+	if rawURL == "" || s.isInternalProviderURL(rawURL) {
+		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘暂时没有可用直链，请稍后再试", nil)
+	}
+	filename := row.FileName
+	return &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      &rawURL,
+		AccessHint:       "external_netdisk_direct",
+		PreviewAvailable: preview && canDirectBrowserPreview(row.FileName, row.MimeType),
+		Filename:         filename,
+		FileSize:         row.FileSize,
+		MimeType:         row.MimeType,
+	}, nil
+}
+
+func (s *Service) shouldRefreshDirectURL(row *domain.ExternalAssetRecord) bool {
+	if row == nil || row.Kind != domain.ExternalAssetKindNetdisk {
+		return false
+	}
+	if strings.TrimSpace(row.RawURL) == "" {
+		return true
+	}
+	if row.LastLinkCheckedAt == nil {
+		return true
+	}
+	return s.nowFn().UTC().Sub(*row.LastLinkCheckedAt) >= s.cfg.LinkRefreshInterval
+}
+
+func (s *Service) isInternalProviderURL(rawURL string) bool {
+	if strings.TrimSpace(rawURL) == "" {
+		return false
+	}
+	if isPrivateNetworkURL(rawURL) {
+		return true
+	}
+	if s.alist != nil && s.alist.IsAListURL(rawURL) {
+		return true
+	}
+	if s.bff != nil && s.bff.IsBFFURL(rawURL) {
+		return true
+	}
+	return false
+}
+
+func isPrivateNetworkURL(rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	ip := net.ParseIP(u.Hostname())
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+func (s *Service) ossDownloadInfo(row *domain.ExternalAssetRecord, objectKey string, preview bool, hint string) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.ossDirect == nil || !s.ossDirect.Enabled() {
+		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "OSS 下载服务未配置", nil)
+	}
+	var signed *baseservice.OSSDirectDownloadInfo
+	if preview {
+		signed = s.ossDirect.PresignPreviewURL(objectKey)
+	} else {
+		signed = s.ossDirect.PresignDownloadURLWithFilename(objectKey, row.FileName)
+	}
+	if signed == nil || strings.TrimSpace(signed.DownloadURL) == "" {
+		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "OSS 下载地址生成失败", nil)
+	}
+	urlValue := signed.DownloadURL
+	return &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      &urlValue,
+		AccessHint:       hint,
+		PreviewAvailable: preview,
+		Filename:         row.FileName,
+		FileSize:         row.FileSize,
+		MimeType:         row.MimeType,
+		ExpiresAt:        &signed.ExpiresAt,
+	}, nil
+}
+
+func prepareInfo(row *domain.ExternalAssetRecord, hint string) *domain.AssetDownloadInfo {
+	return &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      nil,
+		AccessHint:       hint,
+		PreviewAvailable: false,
+		Filename:         row.FileName,
+		FileSize:         row.FileSize,
+		MimeType:         row.MimeType,
+	}
+}
+
+func (s *Service) BuildOSSOriginalKey(row *domain.ExternalAssetRecord) string {
+	return path.Join(s.cfg.OSSOriginalPrefix, row.MountPath, rowOriginShortHash(row), safeObjectFilename(row.FileName))
+}
+
+func (s *Service) BuildOSSPreviewKey(row *domain.ExternalAssetRecord) string {
+	return path.Join(s.cfg.OSSPreviewPrefix, row.MountPath, rowOriginShortHash(row), safeObjectFilename(stripExt(row.FileName)+".webp"))
+}
+
+func (s *Service) LocalFilesystemPath(row *domain.ExternalAssetRecord) (string, bool) {
+	if row == nil {
+		return "", false
+	}
+	base, ok := s.cfg.LocalPathMappings[row.MountPath]
+	if !ok || strings.TrimSpace(base) == "" {
+		return "", false
+	}
+	rel := strings.TrimPrefix(row.OriginPath, row.MountPath)
+	rel = strings.TrimLeft(rel, "/")
+	return filepath.Join(base, filepath.FromSlash(rel)), true
+}
+
+func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error) {
+	rows, err := s.repo.ListPendingOSS(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	done := 0
+	for _, row := range rows {
+		if err := s.uploadLocalOriginal(ctx, row); err != nil {
+			_ = s.repo.MarkPrepareFailed(ctx, row.ID, "oss", err.Error())
+			continue
+		}
+		done++
+	}
+	return done, nil
+}
+
+func (s *Service) ProcessPendingPreview(ctx context.Context, limit int) (int, error) {
+	rows, err := s.repo.ListPendingPreview(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	done := 0
+	for _, row := range rows {
+		if err := s.renderAndUploadPreview(ctx, row); err != nil {
+			_ = s.repo.MarkPrepareFailed(ctx, row.ID, "preview", err.Error())
+			continue
+		}
+		done++
+	}
+	return done, nil
+}
+
+func (s *Service) uploadLocalOriginal(ctx context.Context, row *domain.ExternalAssetRecord) error {
+	if s.ossDirect == nil || !s.ossDirect.Enabled() {
+		return fmt.Errorf("oss direct is not enabled")
+	}
+	rc, err := s.openSourceForUpload(ctx, row)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	key := s.BuildOSSOriginalKey(row)
+	if err := s.ossDirect.UploadObjectFromReader(ctx, key, normalizeMimeType(row.FileName, row.MimeType), rc); err != nil {
+		return err
+	}
+	return s.repo.MarkOSSReady(ctx, row.ID, key)
+}
+
+func (s *Service) renderAndUploadPreview(ctx context.Context, row *domain.ExternalAssetRecord) error {
+	if s.ossDirect == nil || !s.ossDirect.Enabled() {
+		return fmt.Errorf("oss direct is not enabled")
+	}
+	sourcePath := ""
+	cleanup := func() {}
+	if row.Kind == domain.ExternalAssetKindNASLocal {
+		if localPath, ok := s.LocalFilesystemPath(row); ok {
+			if _, err := os.Stat(localPath); err == nil {
+				sourcePath = localPath
+			}
+		}
+		if sourcePath == "" {
+			rc, err := s.openSourceForUpload(ctx, row)
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+			tmp, err := os.CreateTemp("", "external-asset-*"+filepath.Ext(row.FileName))
+			if err != nil {
+				return err
+			}
+			sourcePath = tmp.Name()
+			if _, err := io.Copy(tmp, rc); err != nil {
+				_ = tmp.Close()
+				_ = os.Remove(sourcePath)
+				return err
+			}
+			_ = tmp.Close()
+			cleanup = func() { _ = os.Remove(sourcePath) }
+		}
+	} else {
+		rc, err := s.openSourceForUpload(ctx, row)
+		if err != nil {
+			return err
+		}
+		defer rc.Close()
+		tmp, err := os.CreateTemp("", "external-asset-*"+filepath.Ext(row.FileName))
+		if err != nil {
+			return err
+		}
+		sourcePath = tmp.Name()
+		if _, err := io.Copy(tmp, rc); err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(sourcePath)
+			return err
+		}
+		_ = tmp.Close()
+		cleanup = func() { _ = os.Remove(sourcePath) }
+	}
+	defer cleanup()
+	webp, err := s.renderer.Render(ctx, sourcePath, baseservice.AssetPreviewSourceMeta{
+		Filename: row.FileName,
+		MimeType: row.MimeType,
+	}, baseservice.AssetPreviewRenderSpec{MaxWidth: 1600, MaxHeight: 1600, Quality: 82})
+	if err != nil {
+		return err
+	}
+	key := s.BuildOSSPreviewKey(row)
+	if err := s.ossDirect.UploadObject(ctx, key, "image/webp", webp); err != nil {
+		return err
+	}
+	return s.repo.MarkPreviewReady(ctx, row.ID, key)
+}
+
+func (s *Service) openSourceForUpload(ctx context.Context, row *domain.ExternalAssetRecord) (io.ReadCloser, error) {
+	if row == nil {
+		return nil, fmt.Errorf("external asset row is required")
+	}
+	if row.Kind == domain.ExternalAssetKindNASLocal {
+		if localPath, ok := s.LocalFilesystemPath(row); ok {
+			if f, err := os.Open(localPath); err == nil {
+				return f, nil
+			}
+		}
+		if s.bff != nil && s.bff.Enabled() {
+			return s.bff.OpenFetch(ctx, row.OriginPath, false)
+		}
+		return nil, fmt.Errorf("local file is not available")
+	}
+	rawURL := strings.TrimSpace(row.RawURL)
+	if rawURL == "" || s.isInternalProviderURL(rawURL) {
+		nextURL, err := s.resolveNetdiskDirectURL(ctx, row, false)
+		if err != nil {
+			return nil, err
+		}
+		rawURL = strings.TrimSpace(nextURL)
+	}
+	if rawURL != "" && !s.isInternalProviderURL(rawURL) {
+		return openHTTPBody(ctx, rawURL)
+	}
+	if s.bff != nil && s.bff.Enabled() {
+		return s.bff.OpenFetch(ctx, row.OriginPath, false)
+	}
+	return nil, fmt.Errorf("external asset source is not available")
+}
+
+func (s *Service) upsertFromSearchItem(mount MountConfig, item AListSearchItem) domain.ExternalAssetUpsert {
+	originPath := joinAListPath(item.Parent, item.Name)
+	ext := strings.ToLower(filepath.Ext(item.Name))
+	mimeType := normalizeMimeType(item.Name, "")
+	driver := mount.Driver
+	if driver == "" {
+		driver = driverForMountKind(mount.Kind, mount.Path)
+	}
+	return domain.ExternalAssetUpsert{
+		Provider:       "alist",
+		Kind:           mount.Kind,
+		Driver:         driver,
+		MountPath:      mount.Path,
+		OriginPath:     originPath,
+		ParentPath:     item.Parent,
+		FileName:       item.Name,
+		FileExt:        ext,
+		MimeType:       mimeType,
+		FileSize:       item.Size,
+		IsDir:          item.IsDir,
+		SearchableText: strings.Join([]string{originPath, item.Parent, item.Name, driver, string(mount.Kind)}, " "),
+		ScannedAt:      s.nowFn().UTC(),
+	}
+}
+
+func isSkippableExternalSearchItem(item AListSearchItem) bool {
+	originPath := strings.ToLower(joinAListPath(item.Parent, item.Name))
+	fileName := strings.ToLower(strings.TrimSpace(item.Name))
+	return strings.Contains(originPath, "/@eadir/") ||
+		strings.Contains(originPath, "/#recycle/") ||
+		strings.Contains(fileName, "@syno")
+}
+
+func driverForMountKind(kind domain.ExternalAssetKind, mountPath string) string {
+	if kind == domain.ExternalAssetKindNASLocal {
+		return "Local"
+	}
+	switch mountPath {
+	case "/quark":
+		return "Quark"
+	case "/p1", "/p2":
+		return "AliyundriveOpen"
+	default:
+		return "Netdisk"
+	}
+}
+
+func directURLStatus(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return "empty"
+	}
+	if _, err := url.ParseRequestURI(rawURL); err != nil {
+		return "invalid"
+	}
+	return "ready"
+}
+
+func normalizeMimeType(filename, fallback string) string {
+	if fallback = strings.TrimSpace(fallback); fallback != "" {
+		return fallback
+	}
+	if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
+		if mt := mime.TypeByExtension(ext); mt != "" {
+			return mt
+		}
+	}
+	return "application/octet-stream"
+}
+
+func canDirectBrowserPreview(filename, mimeType string) bool {
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	if strings.HasPrefix(mimeType, "image/") && !strings.Contains(mimeType, "photoshop") {
+		return true
+	}
+	if strings.HasPrefix(mimeType, "video/") || mimeType == "application/pdf" {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".pdf", ".mp4", ".mov":
+		return true
+	default:
+		return false
+	}
+}
+
+func canRenderDerivedPreview(filename, mimeType string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	if strings.HasPrefix(mimeType, "image/") || strings.Contains(mimeType, "photoshop") || strings.Contains(mimeType, "illustrator") {
+		return true
+	}
+	if mimeType == "application/pdf" {
+		return true
+	}
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".pdf", ".psd", ".psb", ".ai":
+		return true
+	default:
+		return false
+	}
+}
+
+func rowOriginShortHash(row *domain.ExternalAssetRecord) string {
+	h := sha1.Sum([]byte(row.OriginPathHash + row.OriginPath))
+	return hex.EncodeToString(h[:])[:16]
+}
+
+func safeObjectFilename(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return "file"
+	}
+	replacer := strings.NewReplacer("/", "_", "\\", "_", "\x00", "")
+	filename = replacer.Replace(filename)
+	if len([]rune(filename)) > 160 {
+		runes := []rune(filename)
+		ext := filepath.Ext(filename)
+		prefixLen := 140
+		if prefixLen > len(runes) {
+			prefixLen = len(runes)
+		}
+		filename = string(runes[:prefixLen]) + ext
+	}
+	return filename
+}
+
+func stripExt(filename string) string {
+	ext := filepath.Ext(filename)
+	return strings.TrimSuffix(filename, ext)
+}
