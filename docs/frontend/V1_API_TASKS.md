@@ -846,6 +846,7 @@ Content-Type: `application/json`
 | `manual_cost_override_reason` | string | 否 | - |
 | `trigger_filing` | boolean | 否 | Legacy compatibility switch. Prefer backend auto-policy; this flag forces one filing evaluation. |
 | `filed_at` | string | 否 | Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source. |
+| `priority` | enum(low/normal/high/critical) | 否 | Task priority. When provided, updates `tasks.priority` without requiring other business-info fields. |
 | `remark` | string | 否 | - |
 
 ### 响应体 schema
@@ -7303,7 +7304,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 ### 简介
 支持方法: GET。
 
-- `GET`: Downloads the Excel assist workbook for creating one task at a time. Phase 2A supports only `task_type=new_product_development` with `mode=single`. The workbook contains one data row slot; `parse-excel` rejects workbooks with more than one non-empty data row.
+- `GET`: Downloads the Excel assist workbook for creating one task at a time with `mode=single`. `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required); optional `规格尺寸`, `材质`, `材质备注`, `备注`. `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`. The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -7315,7 +7316,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `task_type` | query | enum(new_product_development) | 是 | - |
+| `task_type` | query | enum(new_product_development/purchase_task) | 是 | - |
 | `mode` | query | enum(single) | 是 | - |
 
 请求体: 无请求体。
@@ -7358,7 +7359,7 @@ curl -X GET https://api.example.com/v1/tasks/excel-assist/template.xlsx \
 ### 简介
 支持方法: POST。
 
-- `POST`: Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. Phase 2A supports only `new_product_development` + `mode=single`. Required columns: `产品款式编码`, `产品名称`, `设计要求`. Optional: `规格尺寸`, `材质`, `材质备注`, `备注`. More than one non-empty data row returns `multiple_rows_not_allowed`. Parsed `product_i_id` values are validated against ERP i_id options when configured.
+- `POST`: Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`. For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`. More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`. Parsed `product_i_id` values are validated against ERP i_id options when configured.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -7374,7 +7375,7 @@ Content-Type: `multipart/form-data`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `task_type` | enum(new_product_development) | 是 | - |
+| `task_type` | enum(new_product_development/purchase_task) | 是 | - |
 | `mode` | enum(single) | 是 | - |
 | `file` | string | 是 | - |
 
@@ -7389,7 +7390,8 @@ Content-Type: `multipart/form-data`
     "draft": {
       "product_i_id": "...",
       "product_name": "...",
-      "design_requirement": "..."
+      "design_requirement": "...",
+      "spec_text": "..."
     },
     "violations": [
       "..."

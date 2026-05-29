@@ -85,8 +85,10 @@ func validateExcelAssistMode(mode string) *domain.AppError {
 }
 
 func validateExcelAssistTaskType(taskType domain.TaskType) *domain.AppError {
-	if taskType != domain.TaskTypeNewProductDevelopment {
+	switch taskType {
+	case domain.TaskTypeNewProductDevelopment, domain.TaskTypePurchaseTask:
+		return nil
+	default:
 		return domain.NewAppError("excel_assist_task_type_not_supported", "task_type is not supported for single-task Excel assist", nil)
 	}
-	return nil
 }

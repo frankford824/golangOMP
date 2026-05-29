@@ -51,8 +51,9 @@ func WithIIDLookup(lookup ERPIIDLookup) ParseOption {
 type SingleTaskDraft struct {
 	ProductIID        string `json:"product_i_id"`
 	ProductName       string `json:"product_name"`
-	DesignRequirement string `json:"design_requirement"`
+	DesignRequirement string `json:"design_requirement,omitempty"`
 	SpecText          string `json:"spec_text,omitempty"`
+	Quantity          *int64 `json:"quantity,omitempty"`
 	Material          string `json:"material,omitempty"`
 	MaterialOther     string `json:"material_other,omitempty"`
 	Remark            string `json:"remark,omitempty"`

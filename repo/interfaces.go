@@ -217,6 +217,7 @@ type TaskRepo interface {
 	List(ctx context.Context, filter TaskListFilter) ([]*domain.TaskListItem, int64, error)
 	ListBoardCandidates(ctx context.Context, filter TaskBoardCandidateFilter) ([]*domain.TaskListItem, error)
 	UpdateDetailBusinessInfo(ctx context.Context, tx Tx, detail *domain.TaskDetail) error
+	UpdatePriority(ctx context.Context, tx Tx, id int64, priority domain.TaskPriority) error
 	UpdateProductBinding(ctx context.Context, tx Tx, task *domain.Task) error
 	// UpdateStatus performs a direct status update inside a transaction.
 	// The service layer is responsible for validating the transition before calling this.

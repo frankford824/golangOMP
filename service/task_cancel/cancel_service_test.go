@@ -215,6 +215,12 @@ func (r *cancelTaskRepoStub) ListBoardCandidates(context.Context, repo.TaskBoard
 func (r *cancelTaskRepoStub) UpdateDetailBusinessInfo(context.Context, repo.Tx, *domain.TaskDetail) error {
 	return nil
 }
+func (r *cancelTaskRepoStub) UpdatePriority(_ context.Context, _ repo.Tx, _ int64, priority domain.TaskPriority) error {
+	if r.task != nil {
+		r.task.Priority = priority
+	}
+	return nil
+}
 func (r *cancelTaskRepoStub) UpdateProductBinding(context.Context, repo.Tx, *domain.Task) error {
 	return nil
 }

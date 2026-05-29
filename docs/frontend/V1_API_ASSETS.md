@@ -228,7 +228,7 @@ curl -X POST https://api.example.com/v1/assets/excel-package/preview \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `asset_id` | path | integer | 是 | - |
+| `asset_id` | path | string | 是 | Numeric system asset id or external resource id such as `ext-123`. |
 
 请求体: 无请求体。
 
@@ -239,9 +239,9 @@ curl -X POST https://api.example.com/v1/assets/excel-package/preview \
 {
   "data": {
     "id": 123,
-    "task_id": 123,
-    "asset_no": "string",
-    "scope_sku_code": "string"
+    "resource_id": "string",
+    "source_type": "system",
+    "source_label": "string"
   }
 }
 ```
@@ -316,7 +316,7 @@ curl -X DELETE https://api.example.com/v1/assets/<asset_id> \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `asset_id` | path | integer | 是 | - |
+| `asset_id` | path | string | 是 | Numeric system asset id or external resource id such as `ext-123`. |
 
 请求体: 无请求体。
 
@@ -372,7 +372,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/download \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `asset_id` | path | integer | 是 | - |
+| `asset_id` | path | string | 是 | Numeric system asset id or external resource id such as `ext-123`. |
 
 请求体: 无请求体。
 

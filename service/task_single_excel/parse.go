@@ -3,6 +3,7 @@ package task_single_excel
 import (
 	"context"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -155,6 +156,12 @@ func parseDataRow(row []string, fields []FieldSpec, columnIndex map[string]int, 
 			draft.DesignRequirement = value
 		case "spec_text":
 			draft.SpecText = value
+		case "quantity":
+			parsed, qtyViolations := parseQuantityField(rowNumber, field, value)
+			violations = append(violations, qtyViolations...)
+			if parsed != nil {
+				draft.Quantity = parsed
+			}
 		case "material":
 			draft.Material = value
 		case "material_other":
@@ -180,6 +187,18 @@ func missingRequiredViolations(rowNumber int, fields []FieldSpec, columnIndex ma
 		violations = append(violations, violationForField(rowNumber, field, field.ViolationCodes.Missing, "missing required value"))
 	}
 	return violations
+}
+
+func parseQuantityField(rowNumber int, field FieldSpec, value string) (*int64, []ParseViolation) {
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		code := field.ViolationCodes.Invalid
+		if code == "" {
+			code = "invalid_quantity"
+		}
+		return nil, []ParseViolation{violationForField(rowNumber, field, code, "quantity must be a positive integer")}
+	}
+	return &parsed, nil
 }
 
 func violationForField(rowNumber int, field FieldSpec, code, message string) ParseViolation {

@@ -4198,6 +4198,13 @@ func (r *prdTaskRepo) ListBoardCandidates(_ context.Context, filter repo.TaskBoa
 	return filtered, nil
 }
 
+func (r *prdTaskRepo) UpdatePriority(_ context.Context, _ repo.Tx, id int64, priority domain.TaskPriority) error {
+	if r.tasks[id] != nil {
+		r.tasks[id].Priority = priority
+	}
+	return nil
+}
+
 func (r *prdTaskRepo) UpdateDetailBusinessInfo(_ context.Context, _ repo.Tx, detail *domain.TaskDetail) error {
 	r.details[detail.TaskID] = detail
 	return nil

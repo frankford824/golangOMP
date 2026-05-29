@@ -4533,6 +4533,10 @@ components:
           format: date-time
           nullable: true
           description: Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source.
+        priority:
+          type: string
+          enum: [low, normal, high, critical]
+          description: Task priority. When provided, updates `tasks.priority` without requiring other business-info fields.
         remark: { type: string }
     CreateCategoryRequest:
       type: object
@@ -6752,12 +6756,18 @@ components:
           type: string
         code:
           type: string
+          description: |
+            Row-level parse code. Common values include `missing_required_field`, `invalid_i_id`,
+            `multiple_rows_not_allowed`, `invalid_header`, and `invalid_quantity` (non-numeric or
+            non-positive quantity for purchase single-task assist).
         message:
           type: string
     SingleTaskExcelDraft:
       type: object
-      description: Draft fields for single-task Excel assist (Phase 2A new product development only).
-      required: [product_i_id, product_name, design_requirement]
+      description: |
+        Draft fields for single-task Excel assist. Required columns depend on `task_type`:
+        `new_product_development` requires `product_i_id`, `product_name`, `design_requirement`;
+        `purchase_task` requires `product_i_id`, `product_name`, `quantity`, `spec_text`.
       properties:
         product_i_id:
           type: string
@@ -6766,8 +6776,14 @@ components:
           type: string
         design_requirement:
           type: string
+          description: Required for `new_product_development` only.
         spec_text:
           type: string
+          description: Optional for `new_product_development`; required for `purchase_task`.
+        quantity:
+          type: integer
+          format: int64
+          description: Required for `purchase_task` only; must be a positive integer.
         material:
           type: string
         material_other:
@@ -6779,7 +6795,7 @@ components:
       properties:
         task_type:
           type: string
-          enum: [new_product_development]
+          enum: [new_product_development, purchase_task]
         mode:
           type: string
           enum: [single]
@@ -14985,7 +15001,11 @@ paths:
     get:
       summary: Download single-task Excel assist template
       description: |
-        Downloads the Excel assist workbook for creating one task at a time. Phase 2A supports only `task_type=new_product_development` with `mode=single`. The workbook contains one data row slot; `parse-excel` rejects workbooks with more than one non-empty data row.
+        Downloads the Excel assist workbook for creating one task at a time with `mode=single`.
+        `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required);
+        optional `规格尺寸`, `材质`, `材质备注`, `备注`.
+        `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`.
+        The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5
@@ -14995,7 +15015,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [new_product_development]
+            enum: [new_product_development, purchase_task]
         - in: query
           name: mode
           required: true
@@ -15032,7 +15052,11 @@ paths:
     post:
       summary: Parse a single-task Excel assist file
       description: |
-        Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. Phase 2A supports only `new_product_development` + `mode=single`. Required columns: `产品款式编码`, `产品名称`, `设计要求`. Optional: `规格尺寸`, `材质`, `材质备注`, `备注`. More than one non-empty data row returns `multiple_rows_not_allowed`. Parsed `product_i_id` values are validated against ERP i_id options when configured.
+        Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks.
+        `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`.
+        For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`.
+        More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`.
+        Parsed `product_i_id` values are validated against ERP i_id options when configured.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5
@@ -15046,7 +15070,7 @@ paths:
               properties:
                 task_type:
                   type: string
-                  enum: [new_product_development]
+                  enum: [new_product_development, purchase_task]
                 mode:
                   type: string
                   enum: [single]

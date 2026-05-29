@@ -232,6 +232,7 @@ type updateTaskBusinessInfoReq struct {
 	TriggerFiling            bool                     `json:"trigger_filing"`
 	FiledAt                  *string                  `json:"filed_at"`
 	Remark                   string                   `json:"remark"`
+	Priority                 *string                  `json:"priority"`
 }
 
 type retryTaskFilingReq struct {
@@ -1035,7 +1036,7 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		base = buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
 	}
 
-	detail, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), service.UpdateTaskBusinessInfoParams{
+	updateParams := service.UpdateTaskBusinessInfoParams{
 		TaskID:                   taskID,
 		OperatorID:               operatorID,
 		ProductName:              firstNonEmptyTrimmed(req.ProductName, req.ProductNameSnapshot),
@@ -1043,6 +1044,7 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		Category:                 req.Category,
 		CategoryID:               req.CategoryID,
 		CategoryCode:             req.CategoryCode,
+		ApplyCategory:            strings.TrimSpace(req.Category) != "" || req.CategoryID != nil || strings.TrimSpace(req.CategoryCode) != "",
 		SpecText:                 req.SpecText,
 		Material:                 req.Material,
 		SizeText:                 req.SizeText,
@@ -1068,7 +1070,17 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		TriggerFiling:            req.TriggerFiling,
 		FiledAt:                  filedAt,
 		Remark:                   req.Remark,
-	})
+	}
+	if req.Priority != nil {
+		normalized, appErr := validateCreateTaskPriority(*req.Priority)
+		if appErr != nil {
+			respondError(c, appErr)
+			return
+		}
+		updateParams.Priority = domain.TaskPriority(normalized)
+		updateParams.PrioritySet = true
+	}
+	detail, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), updateParams)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1535,6 +1547,9 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 	if req.ProductSelection != nil {
 		params.ProductSelection = req.ProductSelection.toDomain()
 	}
+	if req.Category != nil || req.CategoryID != nil || req.CategoryCode != nil {
+		params.ApplyCategory = true
+	}
 	if req.Category != nil {
 		params.Category = strings.TrimSpace(*req.Category)
 	}
@@ -1867,12 +1882,9 @@ func (h *TaskHandler) loadTaskAggregate(c *gin.Context, taskID int64) (*domain.T
 func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggregate *domain.TaskDetailAggregate) service.UpdateTaskBusinessInfoParams {
 	detail := aggregate.TaskDetail
 	return service.UpdateTaskBusinessInfoParams{
-		TaskID:                   taskID,
-		OperatorID:               operatorID,
-		Category:                 detail.Category,
-		CategoryID:               detail.CategoryID,
-		CategoryCode:             detail.CategoryCode,
-		SpecText:                 detail.SpecText,
+		TaskID:     taskID,
+		OperatorID: operatorID,
+		SpecText:   detail.SpecText,
 		Material:                 detail.Material,
 		SizeText:                 detail.SizeText,
 		Note:                     detail.Note,

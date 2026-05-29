@@ -48,10 +48,24 @@ func TestExcelAssist_DownloadTemplate_InvalidMode(t *testing.T) {
 	}
 }
 
-func TestExcelAssist_DownloadTemplate_UnsupportedTaskType(t *testing.T) {
+func TestExcelAssist_DownloadTemplate_PurchaseSuccess(t *testing.T) {
 	router := excelAssistRouter(true)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/excel-assist/template.xlsx?task_type=purchase_task&mode=single", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := excelize.OpenReader(bytes.NewReader(rec.Body.Bytes())); err != nil {
+		t.Fatalf("open workbook: %v", err)
+	}
+}
+
+func TestExcelAssist_DownloadTemplate_UnsupportedTaskType(t *testing.T) {
+	router := excelAssistRouter(true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/excel-assist/template.xlsx?task_type=retouch_task&mode=single", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -127,9 +141,43 @@ func TestExcelAssist_ParseUpload_InvalidMode(t *testing.T) {
 	}
 }
 
+func TestExcelAssist_ParseUpload_PurchaseHappyPath(t *testing.T) {
+	content, appErr := tasksingleexcel.NewTemplateService().Generate(t.Context(), domain.TaskTypePurchaseTask, tasksingleexcel.AssistModeSingle)
+	if appErr != nil {
+		t.Fatalf("Generate appErr = %v", appErr)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("open template: %v", err)
+	}
+	defer f.Close()
+	_ = f.SetCellValue("Items", "A2", "IID-PTEST")
+	_ = f.SetCellValue("Items", "B2", "采购产品名")
+	_ = f.SetCellValue("Items", "C2", "10")
+	_ = f.SetCellValue("Items", "D2", "规格尺寸")
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+
+	router := excelAssistRouter(true)
+	body, contentType := excelAssistMultipart(t, "purchase_task", "single", buf.Bytes())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/excel-assist/parse-excel", body)
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"quantity"`) {
+		t.Fatalf("body=%s, want quantity in draft", rec.Body.String())
+	}
+}
+
 func TestExcelAssist_ParseUpload_UnsupportedTaskType(t *testing.T) {
 	router := excelAssistRouter(true)
-	body, contentType := excelAssistMultipart(t, "purchase_task", "single", []byte("x"))
+	body, contentType := excelAssistMultipart(t, "retouch_task", "single", []byte("x"))
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/excel-assist/parse-excel", body)
 	req.Header.Set("Authorization", "Bearer token")
