@@ -16,6 +16,7 @@ const props = defineProps<{ status: TaskStatus }>()
 const statusLabels: Record<TaskStatus, string> = {
   Draft: '草稿',
   PendingAssign: '待指派',
+  Assigned: '已指派',
   InProgress: '进行中',
   PendingAuditA: '待审核',
   RejectedByAuditA: '审核打回',

@@ -29,6 +29,7 @@ export type {
 export const TASK_STATUS_LABELS: Record<LegacyTaskStatus, string> = {
   Draft: '草稿',
   PendingAssign: '待指派',
+  Assigned: '已指派',
   InProgress: '设计中',
   PendingAuditA: '待审核',
   RejectedByAuditA: '审核打回',

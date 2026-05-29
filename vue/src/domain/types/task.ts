@@ -12,6 +12,7 @@ import type { TaskPriorityApi } from '@/domain/task-priority'
 export type LegacyTaskStatus =
   | 'Draft'
   | 'PendingAssign'
+  | 'Assigned'
   | 'InProgress'
   | 'PendingAuditA'
   | 'RejectedByAuditA'

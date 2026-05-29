@@ -502,9 +502,18 @@ function selectedIdsAsNumericOrError(): number[] | null {
 }
 
 const STATUS_FILTER_EXPANSION: Partial<Record<LegacyTaskStatus, LegacyTaskStatus[]>> = {
-  PendingAuditA: ['PendingAuditA', 'PendingAuditB'],
-  RejectedByAuditA: ['RejectedByAuditA', 'RejectedByAuditB'],
-  Outsourcing: ['Outsourcing', 'PendingOutsourceReview', 'PendingCustomizationReview'],
+  InProgress: ['InProgress', 'Assigned'],
+  PendingAuditA: ['PendingAuditA', 'PendingAuditB', 'PendingEffectReview'],
+  RejectedByAuditA: ['RejectedByAuditA', 'RejectedByAuditB', 'PendingEffectRevision'],
+  Outsourcing: [
+    'Outsourcing',
+    'PendingOutsourceReview',
+    'PendingCustomizationReview',
+    'PendingCustomizationProduction',
+    'PendingEffectRevision',
+    'PendingProductionTransfer',
+  ],
+  Completed: ['Completed', 'PendingClose'],
 }
 
 function expandStatusFilter(statuses: LegacyTaskStatus[]): LegacyTaskStatus[] {
@@ -648,7 +657,6 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
   if (activeTab.value === 'terminated') {
     const terminatedStatus = f.status.length ? expandStatusFilter(f.status).join(',') : 'Cancelled'
     params.status = terminatedStatus
-    params.task_status = terminatedStatus
   } else if (f.status.length) {
     params.status = expandStatusFilter(f.status).join(',')
   }
