@@ -58,7 +58,13 @@
         {{ selectedFileName }}
       </p>
       <p v-if="templateName" class="template-line">模板：{{ templateName }}</p>
-      <p class="rule-line">
+      <p v-if="isPurchase" class="rule-line">
+        每次上传仅创建 <strong>1 个</strong> 采购任务。<br />
+        必填：产品款式编码、产品名称、数量、规格尺寸。<br />
+        可选：备注。<br />
+        本版 Excel 不支持参考图；如需参考图请在任务创建后于详情页上传。
+      </p>
+      <p v-else class="rule-line">
         每次上传仅创建 <strong>1 个</strong> 新款单 SKU 任务。<br />
         必填：产品款式编码、产品名称、设计要求。<br />
         可选：规格尺寸、材质、材质备注、备注。<br />
@@ -75,10 +81,20 @@ import { computed, ref } from 'vue'
 import {
   excelAssistApi,
   normalizeSingleTaskDraft,
+  type ExcelAssistSingleTaskType,
   type ExcelAssistViolation,
   type SingleTaskExcelDraft,
 } from '@/services/api/excelAssistApi'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
+
+const props = withDefaults(
+  defineProps<{
+    taskType?: ExcelAssistSingleTaskType
+  }>(),
+  {
+    taskType: 'new_product_development',
+  },
+)
 
 const emit = defineEmits<{
   parsed: [payload: { draft: SingleTaskExcelDraft; violations: ExcelAssistViolation[] }]
@@ -110,6 +126,8 @@ const activeStep = computed(() => {
 })
 const selectedFileName = computed(() => selectedFile.value?.name ?? '未选择任何文件')
 
+const isPurchase = computed(() => props.taskType === 'purchase_task')
+
 function openFilePicker(): void {
   fileInput.value?.click()
 }
@@ -118,7 +136,7 @@ async function downloadTemplate(): Promise<void> {
   downloading.value = true
   errorText.value = ''
   try {
-    const res = await excelAssistApi.downloadTemplate()
+    const res = await excelAssistApi.downloadTemplate(props.taskType)
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data as BlobPart])
     const disposition = String(res.headers?.['content-disposition'] ?? '')
     const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i)
@@ -149,7 +167,7 @@ async function parseFile(): Promise<void> {
   parsing.value = true
   errorText.value = ''
   try {
-    const res = await excelAssistApi.parseExcel(selectedFile.value)
+    const res = await excelAssistApi.parseExcel(selectedFile.value, props.taskType)
     const raw = res.data as {
       data?: { draft?: SingleTaskExcelDraft; violations?: ExcelAssistViolation[] }
       draft?: SingleTaskExcelDraft

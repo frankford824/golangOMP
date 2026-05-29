@@ -7,11 +7,14 @@ export interface ExcelAssistViolation {
   message?: string
 }
 
+export type ExcelAssistSingleTaskType = 'new_product_development' | 'purchase_task'
+
 export interface SingleTaskExcelDraft {
   product_i_id?: string
   product_name?: string
   design_requirement?: string
   spec_text?: string
+  quantity?: number
   material?: string
   material_other?: string
   remark?: string
@@ -37,11 +40,22 @@ export function normalizeSingleTaskDraft(raw: unknown): SingleTaskExcelDraft {
     }
     return undefined
   }
+  const pickQuantity = (): number | undefined => {
+    const raw = r.quantity ?? r.Quantity
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      const n = Number(raw)
+      if (Number.isFinite(n)) return n
+    }
+    return undefined
+  }
+
   return {
     product_i_id: pick('product_i_id', 'productIId'),
     product_name: pick('product_name', 'productName'),
     design_requirement: pick('design_requirement', 'designRequirement'),
     spec_text: pick('spec_text', 'specText'),
+    quantity: pickQuantity(),
     material: pick('material'),
     material_other: pick('material_other', 'materialOther'),
     remark: pick('remark'),
@@ -50,7 +64,7 @@ export function normalizeSingleTaskDraft(raw: unknown): SingleTaskExcelDraft {
 
 export const excelAssistApi = {
   downloadTemplate: (
-    taskType: 'new_product_development' = 'new_product_development',
+    taskType: ExcelAssistSingleTaskType = 'new_product_development',
     mode: 'single' = 'single',
     signal?: AbortSignal,
   ) =>
@@ -62,7 +76,7 @@ export const excelAssistApi = {
 
   parseExcel: (
     file: File,
-    taskType: 'new_product_development' = 'new_product_development',
+    taskType: ExcelAssistSingleTaskType = 'new_product_development',
     mode: 'single' = 'single',
     signal?: AbortSignal,
   ) => {

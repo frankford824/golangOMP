@@ -7,7 +7,7 @@ export type { SingleTaskExcelDraft, ExcelAssistViolation }
 
 export type ExcelAssistTaskType = 'new_product_development' | 'purchase_task'
 
-export type ExcelAssistFlow = 'new_batch' | 'new_single'
+export type ExcelAssistFlow = 'new_batch' | 'new_single' | 'purchase_single'
 
 export interface ExcelAssistSingleSubmitForm {
   draft: SingleTaskExcelDraft | null
@@ -17,6 +17,11 @@ export interface ExcelAssistSingleSubmitForm {
 }
 
 export interface MapExcelSingleTaskInput {
+  draft: SingleTaskExcelDraft
+  pageNote?: string
+}
+
+export interface MapExcelPurchaseSingleTaskInput {
   draft: SingleTaskExcelDraft
   pageNote?: string
 }
@@ -127,7 +132,9 @@ export function excelAssistTaskTypeLabel(taskType: ExcelAssistTaskType): string 
 }
 
 export function excelAssistFlowLabel(flow: ExcelAssistFlow): string {
-  return flow === 'new_single' ? '新款单 SKU' : '新款批量 SKU'
+  if (flow === 'purchase_single') return '采购单 SKU'
+  if (flow === 'new_single') return '新款单 SKU'
+  return '新款批量 SKU'
 }
 
 export function mapExcelPreviewToSingleTask(input: MapExcelSingleTaskInput): Record<string, unknown> {
@@ -148,6 +155,38 @@ export function mapExcelPreviewToSingleTask(input: MapExcelSingleTaskInput): Rec
   }
 }
 
+export function mapExcelPreviewToPurchaseSingleTask(
+  input: MapExcelPurchaseSingleTaskInput,
+): Record<string, unknown> {
+  const { draft, pageNote } = input
+  const remarkParts = [pageNote?.trim(), draft.remark?.trim()].filter(Boolean)
+  const quantity =
+    typeof draft.quantity === 'number' && Number.isFinite(draft.quantity) && draft.quantity > 0
+      ? draft.quantity
+      : undefined
+  return {
+    taskType: 'PURCHASE_TASK',
+    skuMode: 'single',
+    productSource: 'new',
+    category: draft.product_i_id?.trim(),
+    productCategoryCode: draft.product_i_id?.trim(),
+    productName: draft.product_name?.trim() ?? '',
+    prefillSpecText: draft.spec_text?.trim() ?? '',
+    costPriceMode: 'template',
+    purchaseInfo: {
+      status: 'PendingPurchase',
+      supplierName: '',
+      quantity,
+    },
+    note: remarkParts.length > 0 ? remarkParts.join('\n') : undefined,
+    syncErpOnCreate: true,
+    requiresAssetVersions: false,
+    businessType: 'PURCHASE_TASK',
+    businessLane: 'normal',
+    workflowLane: 'normal',
+  }
+}
+
 export function canSubmitExcelAssistSingle(form: ExcelAssistSingleSubmitForm): boolean {
   if (!form.groupId.trim()) return false
   if (!form.dueAt) return false
@@ -157,6 +196,21 @@ export function canSubmitExcelAssistSingle(form: ExcelAssistSingleSubmitForm): b
   if (!draft.product_i_id?.trim()) return false
   if (!draft.product_name?.trim()) return false
   if (!draft.design_requirement?.trim()) return false
+  if (isErpProductNameTooLong(draft.product_name)) return false
+  return true
+}
+
+export function canSubmitExcelAssistPurchaseSingle(form: ExcelAssistSingleSubmitForm): boolean {
+  if (!form.groupId.trim()) return false
+  if (!form.dueAt) return false
+  if (form.violations.length > 0) return false
+  const draft = form.draft
+  if (!draft) return false
+  if (!draft.product_i_id?.trim()) return false
+  if (!draft.product_name?.trim()) return false
+  if (!draft.spec_text?.trim()) return false
+  const quantity = draft.quantity
+  if (quantity == null || !Number.isFinite(quantity) || quantity <= 0) return false
   if (isErpProductNameTooLong(draft.product_name)) return false
   return true
 }

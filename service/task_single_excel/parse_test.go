@@ -154,9 +154,169 @@ func TestParse_InvalidMode(t *testing.T) {
 }
 
 func TestParse_UnsupportedTaskType(t *testing.T) {
-	_, appErr := NewParseService().Parse(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle, bytes.NewReader([]byte{}))
+	_, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeRetouchTask, AssistModeSingle, bytes.NewReader([]byte{}))
 	if appErr == nil || appErr.Code != "excel_assist_task_type_not_supported" {
 		t.Fatalf("appErr = %#v, want excel_assist_task_type_not_supported", appErr)
+	}
+}
+
+func TestTemplateGenerate_Purchase_Single(t *testing.T) {
+	content, appErr := NewTemplateService().Generate(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle)
+	if appErr != nil {
+		t.Fatalf("Generate appErr = %v", appErr)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("open template: %v", err)
+	}
+	defer f.Close()
+	rows, err := f.GetRows(itemsSheet)
+	if err != nil || len(rows) < 1 {
+		t.Fatalf("Items rows = %#v err=%v", rows, err)
+	}
+	wantHeaders := []string{"产品款式编码", "产品名称", "数量", "规格尺寸", "备注"}
+	for i, want := range wantHeaders {
+		if rows[0][i] != want {
+			t.Fatalf("header[%d] = %q, want %q", i, rows[0][i], want)
+		}
+	}
+}
+
+func TestParse_Purchase_HappyPath_OneRow(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypePurchaseTask, map[string]string{
+		"product_i_id": "IID-P001",
+		"product_name": "采购产品",
+		"quantity":     "12",
+		"spec_text":    "20x30cm",
+		"remark":       "行备注",
+	})
+	lookup := &mockIIDLookup{valid: map[string]bool{"IID-P001": true}}
+	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
+		t.Context(),
+		domain.TaskTypePurchaseTask,
+		AssistModeSingle,
+		bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+	if result.Draft == nil || result.Draft.Quantity == nil || *result.Draft.Quantity != 12 {
+		t.Fatalf("draft = %+v", result.Draft)
+	}
+	if result.Draft.DesignRequirement != "" {
+		t.Fatalf("design_requirement should be empty for purchase, got %q", result.Draft.DesignRequirement)
+	}
+}
+
+func TestParse_Purchase_MissingQuantity(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypePurchaseTask, map[string]string{
+		"product_i_id": "IID-P001",
+		"product_name": "采购产品",
+		"spec_text":    "20x30cm",
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "missing_required_field") {
+		t.Fatalf("violations = %+v, want missing_required_field", result.Violations)
+	}
+}
+
+func TestParse_Purchase_InvalidQuantity_NotNumber(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypePurchaseTask, map[string]string{
+		"product_i_id": "IID-P001",
+		"product_name": "采购产品",
+		"quantity":     "abc",
+		"spec_text":    "20x30cm",
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "invalid_quantity") {
+		t.Fatalf("violations = %+v, want invalid_quantity", result.Violations)
+	}
+}
+
+func TestParse_Purchase_InvalidQuantity_Zero(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypePurchaseTask, map[string]string{
+		"product_i_id": "IID-P001",
+		"product_name": "采购产品",
+		"quantity":     "0",
+		"spec_text":    "20x30cm",
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "invalid_quantity") {
+		t.Fatalf("violations = %+v, want invalid_quantity", result.Violations)
+	}
+}
+
+func TestParse_Purchase_InvalidQuantity_Negative(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypePurchaseTask, map[string]string{
+		"product_i_id": "IID-P001",
+		"product_name": "采购产品",
+		"quantity":     "-3",
+		"spec_text":    "20x30cm",
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "invalid_quantity") {
+		t.Fatalf("violations = %+v, want invalid_quantity", result.Violations)
+	}
+}
+
+func TestParse_Purchase_MultipleRows_NotAllowed(t *testing.T) {
+	content := testSingleWorkbookRowsForTaskType(t, domain.TaskTypePurchaseTask,
+		map[string]string{
+			"product_i_id": "IID-P001",
+			"product_name": "产品A",
+			"quantity":     "1",
+			"spec_text":    "规格A",
+		},
+		map[string]string{
+			"product_i_id": "IID-P002",
+			"product_name": "产品B",
+			"quantity":     "2",
+			"spec_text":    "规格B",
+		},
+	)
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "multiple_rows_not_allowed") {
+		t.Fatalf("violations = %+v, want multiple_rows_not_allowed", result.Violations)
+	}
+}
+
+func TestParse_Purchase_InvalidIID(t *testing.T) {
+	content := testSingleWorkbookForTaskType(t, domain.TaskTypePurchaseTask, map[string]string{
+		"product_i_id": "UNKNOWN",
+		"product_name": "采购产品",
+		"quantity":     "5",
+		"spec_text":    "20x30cm",
+	})
+	lookup := &mockIIDLookup{valid: map[string]bool{}}
+	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
+		t.Context(),
+		domain.TaskTypePurchaseTask,
+		AssistModeSingle,
+		bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "invalid_i_id") {
+		t.Fatalf("violations = %+v, want invalid_i_id", result.Violations)
 	}
 }
 
@@ -171,12 +331,22 @@ func hasViolationCode(violations []ParseViolation, code string) bool {
 
 func testSingleWorkbook(t *testing.T, row map[string]string) []byte {
 	t.Helper()
-	return testSingleWorkbookRows(t, row)
+	return testSingleWorkbookForTaskType(t, domain.TaskTypeNewProductDevelopment, row)
+}
+
+func testSingleWorkbookForTaskType(t *testing.T, taskType domain.TaskType, row map[string]string) []byte {
+	t.Helper()
+	return testSingleWorkbookRowsForTaskType(t, taskType, row)
 }
 
 func testSingleWorkbookRows(t *testing.T, rows ...map[string]string) []byte {
 	t.Helper()
-	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment, AssistModeSingle)
+	return testSingleWorkbookRowsForTaskType(t, domain.TaskTypeNewProductDevelopment, rows...)
+}
+
+func testSingleWorkbookRowsForTaskType(t *testing.T, taskType domain.TaskType, rows ...map[string]string) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(taskType, AssistModeSingle)
 	f := excelize.NewFile()
 	defer f.Close()
 	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
