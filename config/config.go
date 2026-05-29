@@ -57,6 +57,11 @@ type ExternalAssetsConfig struct {
 	AListMounts         string
 	SyncInterval        time.Duration
 	LinkRefreshInterval time.Duration
+	FullSyncEnabled     bool
+	FullSyncPageSize    int
+	FullSyncMaxDepth    int
+	FullSyncMaxFiles    int
+	FullSyncMaxDirs     int
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	LocalPathMappings   string
@@ -233,6 +238,11 @@ func Load() (*Config, error) {
 			AListMounts:         getEnv("EXTERNAL_ASSETS_ALIST_MOUNTS", "/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local"),
 			SyncInterval:        mustParseDuration(getEnv("EXTERNAL_ASSETS_SYNC_INTERVAL", "1h")),
 			LinkRefreshInterval: mustParseDuration(getEnv("EXTERNAL_ASSETS_LINK_REFRESH_INTERVAL", "1h")),
+			FullSyncEnabled:     mustParseBool(getEnv("EXTERNAL_ASSETS_FULL_SYNC_ENABLED", "true")),
+			FullSyncPageSize:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_PAGE_SIZE", "100")),
+			FullSyncMaxDepth:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DEPTH", "16")),
+			FullSyncMaxFiles:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT", "20000")),
+			FullSyncMaxDirs:     mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DIRS_PER_MOUNT", "5000")),
 			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
 			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
 			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),

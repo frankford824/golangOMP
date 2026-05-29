@@ -40,9 +40,28 @@ type Config struct {
 	Mounts              []MountConfig
 	SyncInterval        time.Duration
 	LinkRefreshInterval time.Duration
+	FullSyncEnabled     bool
+	FullSyncPageSize    int
+	FullSyncMaxDepth    int
+	FullSyncMaxFiles    int
+	FullSyncMaxDirs     int
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	LocalPathMappings   map[string]string
+}
+
+type FullSyncResult struct {
+	Mounts        []MountSyncResult `json:"mounts"`
+	ScannedCount  int               `json:"scanned_count"`
+	UpsertedCount int               `json:"upserted_count"`
+}
+
+type MountSyncResult struct {
+	MountPath     string `json:"mount_path"`
+	Status        string `json:"status"`
+	ScannedCount  int    `json:"scanned_count"`
+	UpsertedCount int    `json:"upserted_count"`
+	ErrorMessage  string `json:"error_message,omitempty"`
 }
 
 type Service struct {
@@ -67,6 +86,11 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		Mounts:              ParseMounts(cfg.AListMounts),
 		SyncInterval:        cfg.SyncInterval,
 		LinkRefreshInterval: cfg.LinkRefreshInterval,
+		FullSyncEnabled:     cfg.FullSyncEnabled,
+		FullSyncPageSize:    cfg.FullSyncPageSize,
+		FullSyncMaxDepth:    cfg.FullSyncMaxDepth,
+		FullSyncMaxFiles:    cfg.FullSyncMaxFiles,
+		FullSyncMaxDirs:     cfg.FullSyncMaxDirs,
 		OSSOriginalPrefix:   strings.Trim(strings.TrimSpace(cfg.OSSOriginalPrefix), "/"),
 		OSSPreviewPrefix:    strings.Trim(strings.TrimSpace(cfg.OSSPreviewPrefix), "/"),
 		LocalPathMappings:   ParseLocalPathMappings(cfg.LocalPathMappings),
@@ -89,6 +113,18 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 	if len(cfg.Mounts) == 0 {
 		cfg.Mounts = ParseMounts("/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local")
 	}
+	if cfg.FullSyncPageSize <= 0 || cfg.FullSyncPageSize > 200 {
+		cfg.FullSyncPageSize = 100
+	}
+	if cfg.FullSyncMaxDepth <= 0 {
+		cfg.FullSyncMaxDepth = 16
+	}
+	if cfg.FullSyncMaxFiles < 0 {
+		cfg.FullSyncMaxFiles = 0
+	}
+	if cfg.FullSyncMaxDirs < 0 {
+		cfg.FullSyncMaxDirs = 0
+	}
 	return &Service{
 		cfg:       cfg,
 		repo:      repo,
@@ -110,6 +146,10 @@ func (s *Service) SyncInterval() time.Duration {
 		return time.Hour
 	}
 	return s.cfg.SyncInterval
+}
+
+func (s *Service) FullSyncReady() bool {
+	return s != nil && s.Enabled() && s.cfg.FullSyncEnabled && s.alist != nil && s.alist.Enabled()
 }
 
 func ParseMounts(raw string) []MountConfig {
@@ -274,25 +314,202 @@ func (s *Service) SyncKeyword(ctx context.Context, keyword string, perMountLimit
 	if keyword == "" {
 		return nil
 	}
-	if perMountLimit <= 0 || perMountLimit > 100 {
+	if perMountLimit <= 0 {
 		perMountLimit = 50
 	}
+	if perMountLimit > 200 {
+		perMountLimit = 200
+	}
+	var firstErr error
 	for _, mount := range s.cfg.Mounts {
+		runID := s.startSyncRun(ctx, domain.ExternalAssetSyncRunTypeKeyword, mount.Path, keyword)
+		scanned := 0
+		upserted := 0
+		var mountErr error
 		resp, err := s.searchMount(ctx, mount.Path, keyword, perMountLimit)
 		if err != nil {
+			s.finishSyncRun(ctx, runID, domain.ExternalAssetSyncRunStatusFailed, scanned, upserted, err.Error())
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		for _, item := range resp.Content {
 			if isSkippableExternalSearchItem(item) {
 				continue
 			}
+			scanned++
 			upsert := s.upsertFromSearchItem(mount, item)
 			if _, err := s.repo.Upsert(ctx, upsert); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				if mountErr == nil {
+					mountErr = err
+				}
 				continue
 			}
+			upserted++
+		}
+		status := domain.ExternalAssetSyncRunStatusCompleted
+		errMessage := ""
+		if mountErr != nil {
+			status = domain.ExternalAssetSyncRunStatusPartial
+			errMessage = mountErr.Error()
+		}
+		s.finishSyncRun(ctx, runID, status, scanned, upserted, errMessage)
+	}
+	return firstErr
+}
+
+func (s *Service) SyncFullIndex(ctx context.Context) (*FullSyncResult, error) {
+	result := &FullSyncResult{}
+	if !s.Enabled() {
+		return result, nil
+	}
+	if !s.cfg.FullSyncEnabled {
+		return result, nil
+	}
+	if s.alist == nil || !s.alist.Enabled() {
+		return result, fmt.Errorf("alist client is required for full external asset sync")
+	}
+	var firstErr error
+	for _, mount := range s.cfg.Mounts {
+		mountResult, err := s.syncFullMount(ctx, mount)
+		result.Mounts = append(result.Mounts, mountResult)
+		result.ScannedCount += mountResult.ScannedCount
+		result.UpsertedCount += mountResult.UpsertedCount
+		if err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return result, firstErr
+}
+
+type fullSyncQueueItem struct {
+	path  string
+	depth int
+}
+
+func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSyncResult, error) {
+	startedAt := s.nowFn().UTC().Truncate(time.Second)
+	runID := s.startSyncRun(ctx, domain.ExternalAssetSyncRunTypeFull, mount.Path, "")
+	result := MountSyncResult{
+		MountPath: mount.Path,
+		Status:    domain.ExternalAssetSyncRunStatusCompleted,
+	}
+	queue := []fullSyncQueueItem{{path: mount.Path, depth: 0}}
+	seenDirs := map[string]struct{}{mount.Path: {}}
+	dirsRead := 0
+	limited := false
+	var firstErr error
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			firstErr = err
+			break
+		}
+		next := queue[0]
+		queue = queue[1:]
+		if s.cfg.FullSyncMaxDirs > 0 && dirsRead >= s.cfg.FullSyncMaxDirs {
+			limited = true
+			firstErr = fmt.Errorf("external asset full sync dir limit reached for %s", mount.Path)
+			break
+		}
+		dirsRead++
+		page := 1
+		for {
+			resp, err := s.alist.List(ctx, next.path, page, s.cfg.FullSyncPageSize)
+			if err != nil {
+				firstErr = err
+				break
+			}
+			if len(resp.Content) == 0 {
+				break
+			}
+			for _, item := range resp.Content {
+				if isSkippableExternalSearchItem(item) {
+					continue
+				}
+				childPath := joinAListPath(item.Parent, item.Name)
+				if item.IsDir {
+					if next.depth+1 <= s.cfg.FullSyncMaxDepth {
+						if _, ok := seenDirs[childPath]; !ok {
+							seenDirs[childPath] = struct{}{}
+							queue = append(queue, fullSyncQueueItem{path: childPath, depth: next.depth + 1})
+						}
+					}
+					continue
+				}
+				result.ScannedCount++
+				if s.cfg.FullSyncMaxFiles > 0 && result.ScannedCount > s.cfg.FullSyncMaxFiles {
+					limited = true
+					firstErr = fmt.Errorf("external asset full sync file limit reached for %s", mount.Path)
+					break
+				}
+				upsert := s.upsertFromSearchItem(mount, item)
+				upsert.ScannedAt = startedAt
+				if _, err := s.repo.Upsert(ctx, upsert); err != nil {
+					if firstErr == nil {
+						firstErr = err
+					}
+					continue
+				}
+				result.UpsertedCount++
+			}
+			if firstErr != nil {
+				break
+			}
+			if resp.Total > 0 && int64(page*s.cfg.FullSyncPageSize) >= resp.Total {
+				break
+			}
+			if len(resp.Content) < s.cfg.FullSyncPageSize {
+				break
+			}
+			page++
+		}
+		if firstErr != nil {
+			break
+		}
+	}
+	if firstErr != nil {
+		result.Status = domain.ExternalAssetSyncRunStatusFailed
+		if limited {
+			result.Status = domain.ExternalAssetSyncRunStatusPartial
+		}
+		result.ErrorMessage = firstErr.Error()
+	} else if err := s.repo.MarkMountMissingBefore(ctx, mount.Path, startedAt); err != nil {
+		result.Status = domain.ExternalAssetSyncRunStatusPartial
+		result.ErrorMessage = err.Error()
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	s.finishSyncRun(ctx, runID, result.Status, result.ScannedCount, result.UpsertedCount, result.ErrorMessage)
+	return result, firstErr
+}
+
+func (s *Service) startSyncRun(ctx context.Context, runType, mountPath, keyword string) int64 {
+	if s == nil || s.repo == nil {
+		return 0
+	}
+	id, err := s.repo.CreateSyncRun(ctx, &domain.ExternalAssetSyncRun{
+		RunType:   runType,
+		MountPath: mountPath,
+		Keyword:   keyword,
+		Status:    domain.ExternalAssetSyncRunStatusRunning,
+		StartedAt: s.nowFn().UTC(),
+	})
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+func (s *Service) finishSyncRun(ctx context.Context, id int64, status string, scannedCount, upsertedCount int, errorMessage string) {
+	if s == nil || s.repo == nil || id <= 0 {
+		return
+	}
+	_ = s.repo.FinishSyncRun(ctx, id, status, scannedCount, upsertedCount, errorMessage)
 }
 
 func (s *Service) searchBackendReady() bool {
@@ -799,7 +1016,9 @@ func isSkippableExternalSearchItem(item AListSearchItem) bool {
 	originPath := strings.ToLower(joinAListPath(item.Parent, item.Name))
 	fileName := strings.ToLower(strings.TrimSpace(item.Name))
 	return strings.Contains(originPath, "/@eadir/") ||
+		strings.HasSuffix(originPath, "/@eadir") ||
 		strings.Contains(originPath, "/#recycle/") ||
+		strings.HasSuffix(originPath, "/#recycle") ||
 		strings.Contains(fileName, "@syno")
 }
 

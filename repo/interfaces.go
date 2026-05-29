@@ -186,6 +186,9 @@ type ExternalAssetRepo interface {
 	Search(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error)
 	Upsert(ctx context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error)
 	GetByID(ctx context.Context, id int64) (*domain.ExternalAssetRecord, error)
+	CreateSyncRun(ctx context.Context, run *domain.ExternalAssetSyncRun) (int64, error)
+	FinishSyncRun(ctx context.Context, id int64, status string, scannedCount, upsertedCount int, errorMessage string) error
+	MarkMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error
 	UpdateDirectURL(ctx context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error
 	MarkOSSPreparePending(ctx context.Context, id int64) error
 	MarkPreviewPreparePending(ctx context.Context, id int64) error

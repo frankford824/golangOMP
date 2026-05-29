@@ -73,6 +73,11 @@ type AListSearchResponse struct {
 	Total   int64             `json:"total"`
 }
 
+type AListListResponse struct {
+	Content []AListSearchItem `json:"content"`
+	Total   int64             `json:"total"`
+}
+
 type AListFileInfo struct {
 	ID       string    `json:"id"`
 	Path     string    `json:"path"`
@@ -117,6 +122,59 @@ func (c *AListClient) Search(ctx context.Context, parent, keyword string, page, 
 		return nil, fmt.Errorf("alist search code=%d message=%s", out.Code, out.Message)
 	}
 	return &out.Data, nil
+}
+
+func (c *AListClient) List(ctx context.Context, parent string, page, perPage int) (*AListListResponse, error) {
+	if !c.Enabled() {
+		return nil, fmt.Errorf("alist client is not configured")
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 100
+	}
+	parent = cleanAListPath(parent)
+	var out struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Content []struct {
+				Name  string `json:"name"`
+				IsDir bool   `json:"is_dir"`
+				Size  int64  `json:"size"`
+				Type  int    `json:"type"`
+			} `json:"content"`
+			Total int64 `json:"total"`
+		} `json:"data"`
+	}
+	if err := c.post(ctx, "/api/fs/list", map[string]interface{}{
+		"path":     parent,
+		"password": "",
+		"page":     page,
+		"per_page": perPage,
+		"refresh":  false,
+	}, &out); err != nil {
+		return nil, err
+	}
+	if out.Code != http.StatusOK {
+		return nil, fmt.Errorf("alist list code=%d message=%s", out.Code, out.Message)
+	}
+	items := make([]AListSearchItem, 0, len(out.Data.Content))
+	for _, item := range out.Data.Content {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		items = append(items, AListSearchItem{
+			Parent: parent,
+			Name:   name,
+			IsDir:  item.IsDir,
+			Size:   item.Size,
+			Type:   item.Type,
+		})
+	}
+	return &AListListResponse{Content: items, Total: out.Data.Total}, nil
 }
 
 func (c *BFFClient) Search(ctx context.Context, parent, keyword string, page, perPage int) (*AListSearchResponse, error) {

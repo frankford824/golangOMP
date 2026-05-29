@@ -19,22 +19,25 @@ import (
 )
 
 type summary struct {
-	OSSProcessed        int    `json:"oss_processed"`
-	PreviewProcessed    int    `json:"preview_processed"`
-	DirectURLReady      int    `json:"direct_url_ready"`
-	DirectURLFailed     int    `json:"direct_url_failed"`
-	DirectURLCandidates int    `json:"direct_url_candidates,omitempty"`
-	DryRun              bool   `json:"dry_run"`
-	Message             string `json:"message,omitempty"`
+	OSSProcessed        int                            `json:"oss_processed"`
+	PreviewProcessed    int                            `json:"preview_processed"`
+	DirectURLReady      int                            `json:"direct_url_ready"`
+	DirectURLFailed     int                            `json:"direct_url_failed"`
+	DirectURLCandidates int                            `json:"direct_url_candidates,omitempty"`
+	FullSync            *externalassets.FullSyncResult `json:"full_sync,omitempty"`
+	DryRun              bool                           `json:"dry_run"`
+	Message             string                         `json:"message,omitempty"`
 }
 
 func main() {
 	var limit int
 	var timeout time.Duration
 	var dryRun bool
+	var fullSync bool
 	flag.IntVar(&limit, "limit", 20, "maximum jobs per queue to process")
 	flag.DurationVar(&timeout, "timeout", 30*time.Minute, "whole run timeout")
 	flag.BoolVar(&dryRun, "dry-run", false, "print pending counts without uploading")
+	flag.BoolVar(&fullSync, "full-sync", false, "scan configured AList mounts into the external asset index")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -84,6 +87,18 @@ func main() {
 			DryRun:              true,
 			Message:             "pending counts only",
 		})
+		return
+	}
+	if fullSync {
+		full, err := svc.SyncFullIndex(ctx)
+		out := summary{FullSync: full}
+		if err != nil {
+			out.Message = err.Error()
+		}
+		writeSummary(out)
+		if err != nil {
+			os.Exit(1)
+		}
 		return
 	}
 

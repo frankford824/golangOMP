@@ -114,6 +114,71 @@ func (r *externalAssetRepo) GetByID(ctx context.Context, id int64) (*domain.Exte
 	return scanExternalAssetRow(row)
 }
 
+func (r *externalAssetRepo) CreateSyncRun(ctx context.Context, run *domain.ExternalAssetSyncRun) (int64, error) {
+	if run == nil {
+		return 0, fmt.Errorf("external asset sync run is required")
+	}
+	status := strings.TrimSpace(run.Status)
+	if status == "" {
+		status = domain.ExternalAssetSyncRunStatusRunning
+	}
+	startedAt := run.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	result, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO external_asset_sync_runs (
+		  run_type, mount_path, keyword, status, scanned_count, upserted_count, error_message, started_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(run.RunType), strings.TrimSpace(run.MountPath), strings.TrimSpace(run.Keyword), status,
+		run.ScannedCount, run.UpsertedCount, nullableString(run.ErrorMessage), startedAt)
+	if err != nil {
+		return 0, fmt.Errorf("create external asset sync run: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("create external asset sync run id: %w", err)
+	}
+	return id, nil
+}
+
+func (r *externalAssetRepo) FinishSyncRun(ctx context.Context, id int64, status string, scannedCount, upsertedCount int, errorMessage string) error {
+	if id <= 0 {
+		return nil
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = domain.ExternalAssetSyncRunStatusCompleted
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		UPDATE external_asset_sync_runs
+		   SET status = ?, scanned_count = ?, upserted_count = ?, error_message = ?, finished_at = UTC_TIMESTAMP()
+		 WHERE id = ?`,
+		status, scannedCount, upsertedCount, nullableString(errorMessage), id)
+	if err != nil {
+		return fmt.Errorf("finish external asset sync run: %w", err)
+	}
+	return nil
+}
+
+func (r *externalAssetRepo) MarkMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error {
+	mountPath = strings.TrimSpace(mountPath)
+	if mountPath == "" || scannedBefore.IsZero() {
+		return nil
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET status = 'missing'
+		 WHERE mount_path = ?
+		   AND status <> 'missing'
+		   AND (last_scanned_at IS NULL OR last_scanned_at < ?)`,
+		mountPath, scannedBefore)
+	if err != nil {
+		return fmt.Errorf("mark external mount missing: %w", err)
+	}
+	return nil
+}
+
 func (r *externalAssetRepo) UpdateDirectURL(ctx context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error {
 	_, err := r.db.db.ExecContext(ctx, `
 		UPDATE external_asset_records
@@ -295,4 +360,12 @@ func fromNullStringValue(value sql.NullString) string {
 		return ""
 	}
 	return value.String
+}
+
+func nullableString(value string) interface{} {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
 }
