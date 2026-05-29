@@ -4,35 +4,20 @@
       <header class="page-header">
         <div>
           <h2 class="page-title">Excel 辅助创建任务</h2>
-          <p class="page-subtitle">当前仅支持新款批量 SKU、采购批量 SKU。解析 Excel 后确认创建，仍走现有任务创建接口。</p>
+          <p class="page-subtitle">
+            当前仅支持新款批量 SKU 的 Excel 辅助创建。原款开发、新款单 SKU、采购单 SKU 的 Excel
+            辅助创建将在后续版本中支持。
+          </p>
         </div>
         <BaseButton variant="secondary" size="sm" @click="goBack">返回任务中心</BaseButton>
       </header>
 
-      <section class="type-switch" aria-label="任务类型">
-        <button
-          type="button"
-          class="type-btn"
-          :class="{ 'is-active': taskType === 'new_product_development' }"
-          @click="selectTaskType('new_product_development')"
-        >
-          新款批量 SKU
-        </button>
-        <button
-          type="button"
-          class="type-btn"
-          :class="{ 'is-active': taskType === 'purchase_task' }"
-          @click="selectTaskType('purchase_task')"
-        >
-          采购批量 SKU
-        </button>
-      </section>
+      <p class="flow-label" aria-label="当前任务类型">新款批量 SKU</p>
 
       <div class="layout-grid">
         <div class="main-column">
           <ExcelBatchSkuPanel
-            :key="taskType"
-            :task-type="taskType"
+            task-type="new_product_development"
             :hide-preview="true"
             @parsed="onExcelParsed"
             @reset="onExcelReset"
@@ -51,13 +36,7 @@
                   <tr>
                     <th>行</th>
                     <th>产品名</th>
-                    <th v-if="taskType === 'new_product_development'">设计要求</th>
-                    <template v-else>
-                      <th>类目编码</th>
-                      <th>成本模式</th>
-                      <th>数量</th>
-                      <th>基础售价</th>
-                    </template>
+                    <th>设计要求</th>
                     <th>产品款式编码</th>
                     <th>参考图</th>
                     <th>错误</th>
@@ -66,20 +45,12 @@
                 <tbody>
                   <tr
                     v-for="(row, idx) in previewRows"
-                    :key="`preview-${taskType}-${idx}`"
+                    :key="`preview-npd-${idx}`"
                     :class="{ 'has-error': previewRowErrors(idx + 1).length > 0 }"
                   >
                     <td>{{ idx + 1 }}</td>
                     <td>{{ row.product_name || '—' }}</td>
-                    <td v-if="taskType === 'new_product_development'" class="cell-ellipsis">
-                      {{ row.design_requirement || '—' }}
-                    </td>
-                    <template v-else>
-                      <td>{{ row.category_code || '—' }}</td>
-                      <td>{{ row.cost_price_mode || '—' }}</td>
-                      <td>{{ row.quantity ?? '—' }}</td>
-                      <td>{{ row.base_sale_price ?? '—' }}</td>
-                    </template>
+                    <td class="cell-ellipsis">{{ row.design_requirement || '—' }}</td>
                     <td>{{ row.product_i_id || '—' }}</td>
                     <td>
                       <div v-if="row.reference_file_refs?.length" class="ref-thumbs">
@@ -196,11 +167,7 @@ import { useAuth } from '@/composables/useAuth'
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
 import type { Task } from '@/domain/types/task'
 import type { TaskBatchItem } from '@/domain/types'
-import {
-  canSubmitExcelAssistBatch,
-  mapExcelPreviewToBatchItems,
-  type ExcelAssistTaskType,
-} from '@/domain/task-excel-assist'
+import { canSubmitExcelAssistBatch, mapExcelPreviewToBatchItems } from '@/domain/task-excel-assist'
 import { normalizePriorityForApi } from '@/domain/task-priority'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import {
@@ -211,6 +178,8 @@ import {
   toBeijingHourISO,
 } from '@/utils/date'
 
+const EXCEL_ASSIST_TASK_TYPE = 'new_product_development' as const
+
 const router = useRouter()
 const tasksStore = useTasksStore()
 const permissionsStore = usePermissionsStore()
@@ -219,7 +188,6 @@ const { filterOwnerTeamOptions, validateOwnerScope, defaultOwnerTeam, hideOwnerF
   useActorOwnerScope()
 const { isDeptAdminPlus } = useAuth()
 
-const taskType = ref<ExcelAssistTaskType>('new_product_development')
 const previewRows = ref<BatchPreviewRow[]>([])
 const violations = ref<BatchViolation[]>([])
 const batchItems = ref<TaskBatchItem[]>([])
@@ -287,7 +255,7 @@ const urgentChecked = computed({
 
 const canSubmit = computed(() =>
   canSubmitExcelAssistBatch({
-    taskType: taskType.value,
+    taskType: EXCEL_ASSIST_TASK_TYPE,
     batchItems: batchItems.value,
     violations: violations.value,
     groupId: groupId.value,
@@ -320,12 +288,6 @@ watch(
   { immediate: true },
 )
 
-function selectTaskType(next: ExcelAssistTaskType) {
-  if (taskType.value === next) return
-  taskType.value = next
-  resetExcelState()
-}
-
 function resetExcelState() {
   previewRows.value = []
   violations.value = []
@@ -336,7 +298,7 @@ function resetExcelState() {
 function onExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchViolation[] }) {
   previewRows.value = payload.preview
   violations.value = payload.violations
-  batchItems.value = mapExcelPreviewToBatchItems(taskType.value, payload.preview, {
+  batchItems.value = mapExcelPreviewToBatchItems(EXCEL_ASSIST_TASK_TYPE, payload.preview, {
     skuCodeType: 'regular',
   })
   submitError.value = ''
@@ -390,11 +352,10 @@ async function submit() {
 
   const currentUser = permissionsStore.currentUser
   const now = nowISO()
-  const businessType = taskType.value === 'purchase_task' ? 'PURCHASE_TASK' : 'NEW_PRODUCT_DEV'
   const normalizedPriority = normalizePriorityForApi(priority.value)
 
   const payload = {
-    taskType: businessType,
+    taskType: 'NEW_PRODUCT_DEV',
     skuMode: 'multiple' as const,
     businessLane: 'normal',
     workflowLane: 'normal',
@@ -416,8 +377,8 @@ async function submit() {
     batchItems: batchItems.value,
     batchExcelImported: true,
     assetVersions: [],
-    businessType,
-    requiresAssetVersions: businessType !== 'PURCHASE_TASK',
+    businessType: 'NEW_PRODUCT_DEV',
+    requiresAssetVersions: true,
     createdAt: now,
     updatedAt: now,
   }
@@ -476,26 +437,15 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-.type-switch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1.25rem;
-}
-
-.type-btn {
-  border: 1px solid var(--color-border, #d1d5db);
-  background: var(--color-surface-muted, #f9fafb);
+.flow-label {
+  display: inline-block;
+  margin: 0 0 1.25rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--color-primary, #2563eb);
   border-radius: 8px;
-  padding: 0.45rem 0.9rem;
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-
-.type-btn.is-active {
-  border-color: var(--color-primary, #2563eb);
   background: color-mix(in srgb, var(--color-primary, #2563eb) 8%, white);
   color: var(--color-primary, #2563eb);
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
