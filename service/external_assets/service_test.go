@@ -223,6 +223,94 @@ func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
 	}
 }
 
+func TestSearchUsesCachedIndexAndSchedulesKeywordRefreshAsync(t *testing.T) {
+	repo := &externalAssetRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{ID: 7, FileName: "cached.jpg"},
+		},
+	}
+	svc := NewService(repo, Config{
+		Enabled:      true,
+		AListBaseURL: "http://alist.invalid",
+		AListToken:   "token",
+		Mounts:       ParseMounts("/p3:nas_local"),
+	}, nil)
+	scheduled := 0
+	svc.keywordRefreshAsyncFn = func(fn func()) {
+		scheduled++
+	}
+
+	rows, total, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
+		Keyword: "cached",
+		Page:    1,
+		Size:    20,
+	})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].FileName != "cached.jpg" {
+		t.Fatalf("Search() rows=%+v total=%d, want cached row", rows, total)
+	}
+	if scheduled != 1 {
+		t.Fatalf("scheduled refreshes=%d, want 1", scheduled)
+	}
+	if len(repo.upserts) != 0 || len(repo.finishedRuns) != 0 {
+		t.Fatalf("keyword sync ran inline: upserts=%d finishedRuns=%d", len(repo.upserts), len(repo.finishedRuns))
+	}
+}
+
+func TestSearchDeduplicatesActiveKeywordRefresh(t *testing.T) {
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:      true,
+		AListBaseURL: "http://alist.invalid",
+		AListToken:   "token",
+		Mounts:       ParseMounts("/p3:nas_local"),
+	}, nil)
+	scheduled := 0
+	svc.keywordRefreshAsyncFn = func(fn func()) {
+		scheduled++
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, _, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
+			Keyword: "same-keyword",
+			Page:    1,
+			Size:    20,
+		}); err != nil {
+			t.Fatalf("Search() error = %v", err)
+		}
+	}
+	if scheduled != 1 {
+		t.Fatalf("scheduled refreshes=%d, want 1", scheduled)
+	}
+}
+
+func TestSearchDoesNotRefreshVeryShortASCIIKeyword(t *testing.T) {
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:      true,
+		AListBaseURL: "http://alist.invalid",
+		AListToken:   "token",
+		Mounts:       ParseMounts("/p3:nas_local"),
+	}, nil)
+	scheduled := 0
+	svc.keywordRefreshAsyncFn = func(fn func()) {
+		scheduled++
+	}
+
+	if _, _, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
+		Keyword: "N",
+		Page:    1,
+		Size:    20,
+	}); err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if scheduled != 0 {
+		t.Fatalf("scheduled refreshes=%d, want 0", scheduled)
+	}
+}
+
 type externalAssetRepoStub struct {
 	upserts      []domain.ExternalAssetUpsert
 	nextRunID    int64
@@ -233,11 +321,19 @@ type externalAssetRepoStub struct {
 		upserted int
 		message  string
 	}
-	missingMount string
+	missingMount  string
+	searchRows    []*domain.ExternalAssetRecord
+	searchTotal   int64
+	searchQueries []domain.ExternalAssetSearchQuery
 }
 
-func (r *externalAssetRepoStub) Search(context.Context, domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
-	return nil, 0, nil
+func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
+	r.searchQueries = append(r.searchQueries, query)
+	total := r.searchTotal
+	if total == 0 && len(r.searchRows) > 0 {
+		total = int64(len(r.searchRows))
+	}
+	return r.searchRows, total, nil
 }
 
 func (r *externalAssetRepoStub) Upsert(_ context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error) {

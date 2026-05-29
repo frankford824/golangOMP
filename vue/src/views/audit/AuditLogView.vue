@@ -58,26 +58,28 @@
           description="根据当前筛选条件未找到日志记录。"
         />
         <template v-else>
-          <table class="simple-table mt-2">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>操作人</th>
-                <th>任务号</th>
-                <th>动作</th>
-                <th>原因</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="r in pagedRecords" :key="r.id">
-                <td>{{ formatAt(r.createdAt) }}</td>
-                <td>{{ r.auditorName }}</td>
-                <td>{{ taskNoOf(r.taskId) }}</td>
-                <td>{{ actionLabel(r.action) }}</td>
-                <td>{{ r.comment ?? '-' }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="simple-table mt-2">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>操作人</th>
+                  <th>任务号</th>
+                  <th>动作</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in pagedRecords" :key="r.id">
+                  <td>{{ formatAt(r.createdAt) }}</td>
+                  <td>{{ r.auditorName }}</td>
+                  <td>{{ taskNoOf(r.taskId) }}</td>
+                  <td>{{ actionLabel(r.action) }}</td>
+                  <td>{{ r.comment ?? '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <div class="pager">
             <button
               type="button"
@@ -251,8 +253,15 @@ onMounted(() => {
 }
 .simple-table {
   width: 100%;
+  min-width: 42rem;
   border-collapse: collapse;
   font-size: 0.75rem;
+}
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .simple-table th {
   background: #f3f4f6;
@@ -291,5 +300,16 @@ onMounted(() => {
 .pager-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pager {
+    align-items: stretch;
+  }
 }
 </style>

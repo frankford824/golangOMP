@@ -35,11 +35,11 @@ import (
 	searchsvc "workflow/service/search"
 	"workflow/service/task_aggregator"
 	taskbatchexcel "workflow/service/task_batch_excel"
-	tasksingleexcel "workflow/service/task_single_excel"
 	"workflow/service/task_cancel"
 	taskdraftsvc "workflow/service/task_draft"
 	tasklifecycle "workflow/service/task_lifecycle"
 	"workflow/service/task_pool"
+	tasksingleexcel "workflow/service/task_single_excel"
 	wsservice "workflow/service/websocket"
 	"workflow/transport"
 	"workflow/transport/handler"
@@ -144,6 +144,7 @@ func main() {
 	moduleNotificationRepo := mysqlrepo.NewModuleNotificationRepo(mdb)
 	searchRepo := mysqlrepo.NewSearchRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
+	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
 
 	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
 	auditSvc := service.NewAuditService(auditRepo, skuRepo, assetVersionRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
@@ -355,6 +356,7 @@ func main() {
 	searchSvc := searchsvc.NewService(searchRepo)
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
 	reportL1Svc := reportl1svc.NewService(reportL1Repo, reportl1svc.WithPermissionLogRepo(permissionLogRepo))
+	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
 	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen))
@@ -372,7 +374,7 @@ func main() {
 	policyH := handler.NewPolicyHandler(policySvc)
 	authH := handler.NewAuthHandler(identitySvc)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()
-	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc)
+	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc, workflowTraceEventSvc)
 
 	// V7 handlers
 	erpBridgeH := handler.NewERPBridgeHandler(erpBridgeSvc)
@@ -420,7 +422,7 @@ func main() {
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, wsH, routeAccessCatalog, identitySvc, identitySvc, logger)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())

@@ -14,7 +14,7 @@ type TemplateService interface {
 }
 
 type ParseService interface {
-	Parse(ctx context.Context, taskType domain.TaskType, file io.Reader, opts ...ParseOption) (*ParseResult, *domain.AppError)
+	Parse(ctx context.Context, taskType domain.TaskType, file io.Reader, opts ...ParseOption) (*BatchParseResult, *domain.AppError)
 }
 
 type ParseOptions struct {
@@ -67,7 +67,7 @@ type BatchItem struct {
 	ReferenceFileRefs []domain.ReferenceFileRef `json:"reference_file_refs,omitempty"`
 }
 
-type ParseResult struct {
+type BatchParseResult struct {
 	TaskType   domain.TaskType  `json:"task_type"`
 	Preview    []BatchItem      `json:"preview"`
 	Violations []ParseViolation `json:"violations"`

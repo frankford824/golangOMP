@@ -4,33 +4,34 @@
     <transition name="fade-scale">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-[3000] flex items-center justify-center bg-stone-900/40"
+        class="fixed inset-0 z-[3000] flex items-center justify-center bg-stone-900/40 p-3 sm:p-4"
         role="dialog"
         aria-modal="true"
       >
         <div
           :class="[
-            'w-full max-h-[88vh] rounded-2xl border border-stone-200/80 bg-white shadow-float overflow-hidden flex flex-col',
+            'w-full max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-2rem)] max-h-[88dvh] rounded-2xl border border-stone-200/80 bg-white shadow-float overflow-hidden flex flex-col',
             panelClass,
           ]"
         >
-          <header class="flex-shrink-0 px-5 pt-5 pb-4 flex items-center justify-between">
-            <h2 class="text-base font-headline font-bold text-slate-900">
+          <header class="flex-shrink-0 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 flex items-center justify-between gap-3">
+            <h2 class="min-w-0 text-base font-headline font-bold text-slate-900">
               {{ title }}
             </h2>
             <button
               type="button"
-              class="text-slate-400 hover:text-slate-600"
+              class="modal-close-btn text-slate-400 hover:text-slate-600"
+              aria-label="关闭"
               @click="close"
             >
               ×
             </button>
           </header>
-          <div class="flex-1 min-h-0 overflow-y-auto px-5 pb-1 text-sm text-slate-700">
+          <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 pb-1 text-sm text-slate-700">
             <slot />
           </div>
           <slot name="footer">
-            <footer class="flex-shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
+            <footer class="flex-shrink-0 flex flex-wrap justify-end gap-2 px-4 sm:px-5 py-3 sm:py-4 border-t border-slate-100">
               <BaseButton variant="secondary" size="sm" @click="close">
                 {{ cancelText }}
               </BaseButton>
@@ -145,6 +146,40 @@ footer {
 
 button {
   color: inherit;
+}
+
+.modal-close-btn {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  background: transparent;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.modal-close-btn:hover {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+
+@media (max-width: 640px) {
+  .fixed.inset-0 {
+    align-items: flex-end;
+  }
+
+  .fixed.inset-0 > div {
+    max-height: calc(100dvh - 1rem) !important;
+    border-radius: 1rem 1rem 0.75rem 0.75rem !important;
+  }
+
+  footer :deep(button) {
+    flex: 1 1 8rem;
+  }
 }
 
 /* Teleport 到 body 后在 #app 外，需局部复用 main.css 蓝色主按钮皮肤 */

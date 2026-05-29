@@ -317,6 +317,48 @@ export interface ServerLog {
   created_at: string
 }
 
+/** GET /v1/trace-events 单条全链路事件 */
+export interface WorkflowTraceEvent {
+  id: number
+  event_id: string
+  trace_id?: string
+  event_source: 'api' | 'frontend' | 'system' | 'integration' | string
+  event_type: 'api_request' | 'page_view' | 'user_action' | string
+  action?: string
+  actor_id?: number | null
+  actor_username?: string
+  actor_source?: string
+  actor_auth_mode?: string
+  actor_roles?: string[]
+  actor_department?: string
+  actor_team?: string
+  route_method?: string
+  route_path?: string
+  route_full_path?: string
+  http_status?: number | null
+  latency_ms?: number | null
+  client_ip?: string
+  user_agent?: string
+  page_url?: string
+  page_name?: string
+  component_id?: string
+  task_id?: number | null
+  task_module_id?: number | null
+  module_key?: string
+  sku_code?: string
+  task_sku_item_id?: number | null
+  asset_id?: number | null
+  design_asset_id?: number | null
+  task_asset_id?: number | null
+  integration_call_log_id?: number | null
+  resource_type?: string
+  resource_id?: string
+  outcome?: 'succeeded' | 'failed' | string
+  payload?: Record<string, unknown> | unknown
+  occurred_at: string
+  created_at: string
+}
+
 // ─── 资产与访问策略（live v0.4）──────────────────────────────────────────────────
 
 /** 资产访问策略（后端返回，前端按此展示下载方式） */

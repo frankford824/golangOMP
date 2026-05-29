@@ -297,4 +297,24 @@ const DraggableList = {
 :deep(.remove-btn) {
   color: #ff9b95;
 }
+
+@media (max-width: 700px) {
+  .field-selector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .selector-arrows {
+    flex-direction: row;
+    justify-content: flex-start;
+    padding-top: 0;
+  }
+
+  :deep(.selected-item) {
+    align-items: flex-start;
+  }
+
+  :deep(.item-actions) {
+    flex: 0 0 auto;
+  }
+}
 </style>

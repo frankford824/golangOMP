@@ -8,6 +8,7 @@ import {
   isDashboardEntryRoute,
   resolveFirstAccessibleHomeRoute,
 } from '@/router/home-fallback'
+import { logsApi } from '@/services/api/logsApi'
 
 /**
  * 路由门禁：以后端 `frontend_access.menus` 为 SoT（Single Source of Truth）。
@@ -320,3 +321,50 @@ router.beforeEach(async (to, _from, next) => {
 
   next()
 })
+
+router.afterEach((to) => {
+  if (typeof window === 'undefined') return
+  if (!getToken()) return
+  if (to.path === '/login') return
+
+  const pageName = routePageName(to.meta, to.name, to.path)
+  const componentID = typeof to.name === 'string' ? to.name : String(to.name ?? '')
+  const taskID = numericRouteParam(to.params.id)
+
+  window.setTimeout(() => {
+    logsApi
+      .recordTraceEvent({
+        event_type: 'page_view',
+        action: '打开页面',
+        page_url: window.location.href,
+        page_name: pageName,
+        component_id: componentID,
+        task_id: taskID,
+        outcome: 'succeeded',
+        payload: {
+          route_path: to.path,
+          route_name: componentID,
+          query_keys: Object.keys(to.query),
+        },
+      })
+      .catch(() => {
+        // 前端行为追踪不能影响用户主流程。
+      })
+  }, 0)
+})
+
+function routePageName(meta: unknown, routeName: unknown, path: string): string {
+  if (meta && typeof meta === 'object') {
+    const title = (meta as { emptyTitle?: unknown }).emptyTitle
+    if (typeof title === 'string' && title.trim()) return title.trim()
+  }
+  if (typeof routeName === 'string' && routeName.trim()) return routeName.trim()
+  return path
+}
+
+function numericRouteParam(raw: unknown): number | undefined {
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}

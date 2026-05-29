@@ -74,6 +74,13 @@ type Service struct {
 	nowFn     func() time.Time
 	recentMu  sync.Mutex
 	recent    map[string]time.Time
+
+	keywordRefreshMu       sync.Mutex
+	keywordRefreshLast     map[string]time.Time
+	keywordRefreshActive   map[string]struct{}
+	keywordRefreshCooldown time.Duration
+	keywordRefreshTimeout  time.Duration
+	keywordRefreshAsyncFn  func(func())
 }
 
 func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
@@ -134,6 +141,14 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 		renderer:  baseservice.NewExternalAssetPreviewRenderer(),
 		nowFn:     time.Now,
 		recent:    map[string]time.Time{},
+
+		keywordRefreshLast:     map[string]time.Time{},
+		keywordRefreshActive:   map[string]struct{}{},
+		keywordRefreshCooldown: 10 * time.Minute,
+		keywordRefreshTimeout:  2 * time.Minute,
+		keywordRefreshAsyncFn: func(fn func()) {
+			go fn()
+		},
 	}
 }
 
@@ -214,12 +229,93 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 	query = query.Normalized()
 	if query.Keyword != "" && s.searchBackendReady() {
 		s.recordRecentKeyword(query.Keyword)
-		_ = s.SyncKeyword(ctx, query.Keyword, query.Size)
-		if s.directLinkBackendReady() {
-			_, _, _ = s.RefreshDirectURLs(ctx, query.Size)
+		if shouldScheduleKeywordRefresh(query.Keyword) {
+			s.scheduleKeywordRefresh(query.Keyword, query.Size)
 		}
 	}
 	return s.repo.Search(ctx, query)
+}
+
+func shouldScheduleKeywordRefresh(keyword string) bool {
+	keyword = normalizeRecentKeyword(keyword)
+	if keyword == "" {
+		return false
+	}
+	runes := []rune(keyword)
+	if len(runes) >= 3 {
+		return true
+	}
+	if len(runes) < 2 {
+		return false
+	}
+	for _, r := range runes {
+		if r > 127 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) scheduleKeywordRefresh(keyword string, perMountLimit int) {
+	if !s.Enabled() || !s.searchBackendReady() {
+		return
+	}
+	keyword = normalizeRecentKeyword(keyword)
+	if keyword == "" {
+		return
+	}
+	if perMountLimit <= 0 {
+		perMountLimit = 50
+	}
+	if perMountLimit > 200 {
+		perMountLimit = 200
+	}
+	now := s.nowFn().UTC()
+	cooldown := s.keywordRefreshCooldown
+	if cooldown <= 0 {
+		cooldown = 10 * time.Minute
+	}
+	timeout := s.keywordRefreshTimeout
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+
+	s.keywordRefreshMu.Lock()
+	if s.keywordRefreshLast == nil {
+		s.keywordRefreshLast = map[string]time.Time{}
+	}
+	if s.keywordRefreshActive == nil {
+		s.keywordRefreshActive = map[string]struct{}{}
+	}
+	if _, active := s.keywordRefreshActive[keyword]; active {
+		s.keywordRefreshMu.Unlock()
+		return
+	}
+	if last, ok := s.keywordRefreshLast[keyword]; ok && now.Sub(last) < cooldown {
+		s.keywordRefreshMu.Unlock()
+		return
+	}
+	s.keywordRefreshActive[keyword] = struct{}{}
+	s.keywordRefreshLast[keyword] = now
+	runAsync := s.keywordRefreshAsyncFn
+	if runAsync == nil {
+		runAsync = func(fn func()) { go fn() }
+	}
+	s.keywordRefreshMu.Unlock()
+
+	runAsync(func() {
+		defer func() {
+			s.keywordRefreshMu.Lock()
+			delete(s.keywordRefreshActive, keyword)
+			s.keywordRefreshMu.Unlock()
+		}()
+		refreshCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		_ = s.SyncKeyword(refreshCtx, keyword, perMountLimit)
+		if s.directLinkBackendReady() {
+			_, _, _ = s.RefreshDirectURLs(refreshCtx, perMountLimit)
+		}
+	})
 }
 
 func (s *Service) recordRecentKeyword(keyword string) {

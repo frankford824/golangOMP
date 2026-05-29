@@ -220,16 +220,20 @@ function updatePanelPosition() {
   const rect = trigger.getBoundingClientRect()
   const panelHeight = panelEl.value?.offsetHeight ?? 0
   const viewportHeight = window.innerHeight
+  const viewportWidth = window.innerWidth
   const gap = 8
   const placeAbove = panelHeight > 0 && rect.bottom + gap + panelHeight > viewportHeight && rect.top - gap - panelHeight >= 8
   const top = placeAbove
     ? Math.max(8, rect.top - panelHeight - gap)
     : Math.min(viewportHeight - panelHeight - 8, rect.bottom + gap)
+  const width = Math.min(Math.max(rect.width, 180), Math.max(180, viewportWidth - 16))
+  const left = Math.min(Math.max(8, rect.left), Math.max(8, viewportWidth - width - 8))
 
   panelStyle.value = {
     top: `${Math.max(8, top)}px`,
-    left: `${Math.max(8, rect.left)}px`,
-    width: `${rect.width}px`,
+    left: `${left}px`,
+    width: `${width}px`,
+    maxWidth: 'calc(100vw - 16px)',
     // Must stay above BaseModal overlay (7100) after visual upgrade.
     zIndex: '7200',
   }

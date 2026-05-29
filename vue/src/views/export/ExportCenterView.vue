@@ -134,26 +134,28 @@
           title="暂无导出记录"
           description="完成首次导出后将在此展示最近记录。"
         />
-        <table v-else class="simple-table mt-2">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>导出人</th>
-              <th>类型</th>
-              <th>条数</th>
-              <th>文件大小</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in exportHistory" :key="item.id">
-              <td>{{ item.exportedAt }}</td>
-              <td>{{ item.userName }}</td>
-              <td>{{ item.typeLabel }}</td>
-              <td>{{ item.count }}</td>
-              <td>{{ item.sizeLabel }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="table-scroll">
+          <table class="simple-table mt-2">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>导出人</th>
+                <th>类型</th>
+                <th>条数</th>
+                <th>文件大小</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in exportHistory" :key="item.id">
+                <td>{{ item.exportedAt }}</td>
+                <td>{{ item.userName }}</td>
+                <td>{{ item.typeLabel }}</td>
+                <td>{{ item.count }}</td>
+                <td>{{ item.sizeLabel }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </template>
   </div>
@@ -507,13 +509,17 @@ onMounted(() => {
   color: #0f172a;
 }
 .tabs {
-  display: inline-flex;
+  display: flex;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   gap: 0.25rem;
   padding: 0.125rem;
   border-radius: 9999px;
   background: #e2e8f0;
 }
 .tab-btn {
+  flex: 0 0 auto;
   padding: 0.25rem 0.75rem;
   font-size: 0.75rem;
   border-radius: 9999px;
@@ -545,8 +551,32 @@ onMounted(() => {
 }
 .simple-table {
   width: 100%;
+  min-width: 40rem;
   border-collapse: collapse;
   font-size: 0.75rem;
+}
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mt-2.flex,
+  .tabs {
+    width: 100%;
+  }
+
+  .mt-2.flex {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 .simple-table th {
   background: #f3f4f6;

@@ -668,6 +668,124 @@ components:
         created_at:
           type: string
           format: date-time
+    WorkflowTraceEvent:
+      type: object
+      description: Lightweight business trace event used by the business tracing and AI insight page.
+      properties:
+        id: { type: integer }
+        event_id: { type: string }
+        trace_id: { type: string }
+        event_source:
+          type: string
+          enum: [api, frontend, system, integration]
+        event_type:
+          type: string
+          example: api_request
+        action: { type: string }
+        actor_id:
+          type: integer
+          nullable: true
+        actor_username: { type: string }
+        actor_source: { type: string }
+        actor_auth_mode:
+          $ref: '#/components/schemas/PlaceholderAuthMode'
+        actor_roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/V7Role'
+        actor_department: { type: string }
+        actor_team: { type: string }
+        route_method: { type: string }
+        route_path: { type: string }
+        route_full_path: { type: string }
+        http_status:
+          type: integer
+          nullable: true
+        latency_ms:
+          type: integer
+          nullable: true
+        client_ip: { type: string }
+        user_agent: { type: string }
+        page_url: { type: string }
+        page_name: { type: string }
+        component_id: { type: string }
+        task_id:
+          type: integer
+          nullable: true
+        task_module_id:
+          type: integer
+          nullable: true
+        module_key: { type: string }
+        sku_code: { type: string }
+        task_sku_item_id:
+          type: integer
+          nullable: true
+        asset_id:
+          type: integer
+          nullable: true
+        design_asset_id:
+          type: integer
+          nullable: true
+        task_asset_id:
+          type: integer
+          nullable: true
+        integration_call_log_id:
+          type: integer
+          nullable: true
+        resource_type: { type: string }
+        resource_id: { type: string }
+        outcome: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    WorkflowTraceEventRecordRequest:
+      type: object
+      required: [event_type]
+      properties:
+        event_type: { type: string }
+        action: { type: string }
+        page_url: { type: string }
+        page_name: { type: string }
+        component_id: { type: string }
+        task_id:
+          type: integer
+          nullable: true
+        task_module_id:
+          type: integer
+          nullable: true
+        module_key: { type: string }
+        sku_code: { type: string }
+        task_sku_item_id:
+          type: integer
+          nullable: true
+        asset_id:
+          type: integer
+          nullable: true
+        design_asset_id:
+          type: integer
+          nullable: true
+        task_asset_id:
+          type: integer
+          nullable: true
+        integration_call_log_id:
+          type: integer
+          nullable: true
+        resource_type: { type: string }
+        resource_id: { type: string }
+        outcome: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+        occurred_at:
+          type: string
+          format: date-time
     PolicyMode:
       type: string
       description: |
@@ -8292,6 +8410,142 @@ paths:
                       $ref: '#/components/schemas/OperationLogEntry'
                   pagination:
                     $ref: '#/components/schemas/PaginationMeta'
+  /v1/trace-events:
+    get:
+      summary: List business trace events
+      description: |
+        Query the lightweight full-chain event ledger for business tracing and AI insight use cases.
+        Supports filtering by people, department, task, SKU, asset, ERP/integration call, event source,
+        outcome, trace ID, and occurred time range.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Admin, SuperAdmin, HRAdmin]
+      parameters:
+        - in: query
+          name: trace_id
+          schema: { type: string }
+        - in: query
+          name: event_source
+          schema: { type: string, enum: [api, frontend, system, integration] }
+        - in: query
+          name: event_type
+          schema: { type: string }
+        - in: query
+          name: action
+          schema: { type: string }
+        - in: query
+          name: actor_id
+          schema: { type: integer }
+        - in: query
+          name: actor_username
+          schema: { type: string }
+          description: Contains match on logged-in username/display name snapshot.
+        - in: query
+          name: actor_source
+          schema: { type: string, enum: [session_token, anonymous, header_placeholder, header_roles_placeholder, system_fallback] }
+          description: Filter by actor source; business dashboards typically use session_token.
+        - in: query
+          name: actor_department
+          schema: { type: string }
+        - in: query
+          name: actor_team
+          schema: { type: string }
+        - in: query
+          name: route_path
+          schema: { type: string }
+        - in: query
+          name: task_id
+          schema: { type: integer }
+        - in: query
+          name: module_key
+          schema: { type: string }
+        - in: query
+          name: sku_code
+          schema: { type: string }
+        - in: query
+          name: asset_id
+          schema: { type: integer }
+        - in: query
+          name: design_asset_id
+          schema: { type: integer }
+        - in: query
+          name: task_asset_id
+          schema: { type: integer }
+        - in: query
+          name: integration_call_log_id
+          schema: { type: integer }
+        - in: query
+          name: resource_type
+          schema: { type: string }
+        - in: query
+          name: resource_id
+          schema: { type: string }
+        - in: query
+          name: outcome
+          schema: { type: string, enum: [succeeded, failed] }
+        - in: query
+          name: business_only
+          schema: { type: boolean }
+          description: Excludes low-value technical traffic such as auth, polling, websocket, and log-center routes.
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: until
+          schema: { type: string, format: date-time }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: page_size
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Business trace events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkflowTraceEvent'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+    post:
+      summary: Record frontend business trace event
+      description: |
+        Authenticated frontend endpoint for recording page-view and user-action events.
+        The server enriches the record with session actor, client IP, user agent, and request trace ID.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowTraceEventRecordRequest'
+      responses:
+        '200':
+          description: Created business trace event
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkflowTraceEvent'
   /v1/audit-logs:
     get:
       summary: List audit records (cross-task)

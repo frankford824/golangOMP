@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -68,13 +70,18 @@ func NewRouter(
 	actorResolver RequestActorResolver,
 	permissionLogger PermissionLogWriter,
 	logger *zap.Logger,
+	traceRecorders ...workflowTraceRecorder,
 ) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
+	var traceRecorder workflowTraceRecorder
+	if len(traceRecorders) > 0 {
+		traceRecorder = traceRecorders[0]
+	}
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(injectTraceID())
 	r.Use(injectRequestActor(actorResolver))
-	r.Use(requestLogger(logger, serverLogH))
+	r.Use(requestLogger(logger, serverLogH, traceRecorder))
 	registerOperationalRoutes(r)
 
 	v1 := r.Group("/v1")
@@ -99,6 +106,9 @@ func NewRouter(
 	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
 
 	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH, notificationH)
+
+	v1.POST("/trace-events", access(v1, http.MethodPost, "/trace-events", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), userAdminH.RecordWorkflowTraceEvent)
+	v1.GET("/trace-events", access(v1, http.MethodGet, "/trace-events", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin), userAdminH.ListWorkflowTraceEvents)
 
 	// SKU endpoints
 	skuGroup := v1.Group("/sku")
@@ -615,23 +625,148 @@ type serverLogRecorder interface {
 	RecordHTTPError(c *gin.Context, status int, path, method, traceID, clientIP string)
 }
 
-func requestLogger(logger *zap.Logger, recorder serverLogRecorder) gin.HandlerFunc {
+type workflowTraceRecorder interface {
+	RecordTraceEvent(ctx context.Context, event *domain.WorkflowTraceEvent) (*domain.WorkflowTraceEvent, *domain.AppError)
+}
+
+func requestLogger(logger *zap.Logger, recorder serverLogRecorder, traceRecorder workflowTraceRecorder) gin.HandlerFunc {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
 		status := c.Writer.Status()
+		latency := time.Since(start)
 		logger.Info("http_request",
 			zap.String("method", c.Request.Method),
 			zap.String("path", c.Request.URL.Path),
 			zap.Int("status", status),
-			zap.Duration("latency", time.Since(start)),
+			zap.Duration("latency", latency),
 			zap.String("trace_id", c.GetString(traceIDKey)),
 			zap.String("client_ip", c.ClientIP()),
 		)
 		if recorder != nil && status >= 500 {
 			recorder.RecordHTTPError(c, status, c.Request.URL.Path, c.Request.Method, c.GetString(traceIDKey), c.ClientIP())
 		}
+		recordHTTPWorkflowTraceEvent(c, traceRecorder, logger, status, start, latency)
 	}
+}
+
+func recordHTTPWorkflowTraceEvent(c *gin.Context, recorder workflowTraceRecorder, logger *zap.Logger, status int, start time.Time, latency time.Duration) {
+	if recorder == nil || shouldSkipWorkflowTracePath(c.Request.URL.Path) {
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	routePath := routePathForLog(c)
+	latencyMS := latency.Milliseconds()
+	outcome := domain.WorkflowTraceOutcomeSucceeded
+	if status >= 400 {
+		outcome = domain.WorkflowTraceOutcomeFailed
+	}
+	httpStatus := status
+	event := &domain.WorkflowTraceEvent{
+		TraceID:         c.GetString(traceIDKey),
+		EventSource:     domain.WorkflowTraceSourceAPI,
+		EventType:       domain.WorkflowTraceEventAPIRequest,
+		Action:          c.Request.Method + " " + routePath,
+		ActorID:         actorIDPtrFromTransportActor(actor),
+		ActorUsername:   actor.Username,
+		ActorSource:     actor.Source,
+		ActorAuthMode:   actor.AuthMode,
+		ActorRoles:      actor.Roles,
+		ActorDepartment: actor.Department,
+		ActorTeam:       actor.Team,
+		RouteMethod:     c.Request.Method,
+		RoutePath:       routePath,
+		RouteFullPath:   c.Request.URL.Path,
+		HTTPStatus:      &httpStatus,
+		LatencyMS:       &latencyMS,
+		ClientIP:        c.ClientIP(),
+		UserAgent:       c.GetHeader("User-Agent"),
+		TaskID:          taskIDFromRoute(c),
+		TaskModuleID:    positiveInt64Param(c, "task_module_id"),
+		ModuleKey:       strings.TrimSpace(c.Param("module_key")),
+		TaskSKUItemID:   positiveInt64Param(c, "sku_item_id"),
+		AssetID:         assetIDFromRoute(c),
+		Outcome:         outcome,
+		Payload:         httpTracePayload(c),
+		OccurredAt:      start.UTC(),
+	}
+	if strings.Contains(routePath, "/integration/call-logs/:id") {
+		event.IntegrationCallLogID = positiveInt64Param(c, "id")
+	}
+	ctx := context.WithoutCancel(c.Request.Context())
+	if _, appErr := recorder.RecordTraceEvent(ctx, event); appErr != nil {
+		logger.Warn("workflow_trace_http_record_failed",
+			zap.String("code", appErr.Code),
+			zap.String("message", appErr.Message),
+			zap.String("trace_id", event.TraceID),
+			zap.String("route_path", routePath),
+		)
+	}
+}
+
+func shouldSkipWorkflowTracePath(path string) bool {
+	switch strings.TrimSpace(path) {
+	case "/health", "/healthz", "/ping", "/favicon.ico", "/v1/trace-events", "/v1/search", "/v1/assets/search":
+		return true
+	default:
+		return false
+	}
+}
+
+func actorIDPtrFromTransportActor(actor domain.RequestActor) *int64 {
+	if actor.ID <= 0 {
+		return nil
+	}
+	return &actor.ID
+}
+
+func taskIDFromRoute(c *gin.Context) *int64 {
+	routePath := routePathForLog(c)
+	if strings.Contains(routePath, "/tasks/:id") || strings.Contains(routePath, "/tasks/{id}") {
+		return positiveInt64Param(c, "id")
+	}
+	return positiveInt64Param(c, "task_id")
+}
+
+func assetIDFromRoute(c *gin.Context) *int64 {
+	routePath := routePathForLog(c)
+	if strings.Contains(routePath, "/assets/:asset_id") {
+		return positiveInt64Param(c, "asset_id")
+	}
+	return positiveInt64Param(c, "asset_id")
+}
+
+func positiveInt64Param(c *gin.Context, name string) *int64 {
+	raw := strings.TrimSpace(c.Param(name))
+	if raw == "" {
+		return nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return nil
+	}
+	return &value
+}
+
+func httpTracePayload(c *gin.Context) json.RawMessage {
+	payload := map[string]string{}
+	if rawQuery := strings.TrimSpace(c.Request.URL.RawQuery); rawQuery != "" {
+		payload["query"] = rawQuery
+	}
+	if referer := strings.TrimSpace(c.GetHeader("Referer")); referer != "" {
+		payload["referer"] = referer
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func withCompatibilityRoute(successorPath, targetRemovalPhase string) gin.HandlerFunc {

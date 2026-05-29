@@ -169,8 +169,8 @@ function handleClose() {
 }
 .drawer-panel {
   position: relative;
-  width: 400px;
-  max-width: 100%;
+  width: min(26rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
   border-left: 1px solid #e5e7eb;
   background: #ffffff;
   box-shadow: -20px 0 40px -12px rgba(15, 23, 42, 0.12);
@@ -276,5 +276,22 @@ function handleClose() {
 }
 .trace-link:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .drawer-overlay {
+    padding: 0.5rem 0 0;
+  }
+
+  .drawer-panel {
+    width: 100%;
+    max-width: 100%;
+    border-left: 0;
+    border-radius: 1rem 1rem 0 0;
+  }
+
+  .event-replacement-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

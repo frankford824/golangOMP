@@ -640,6 +640,8 @@ const AUTO_RELOAD_DELAY_MS = 400
 const MAX_BATCH_DOWNLOAD_ASSETS = 100
 const MAX_BULK_SEARCH_TERMS = 200
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
+let reloadAbort: AbortController | null = null
+let reloadRequestSeq = 0
 const previewLightboxSrc = ref<string | null>(null)
 const filtersExpanded = ref(false)
 const copyHint = ref('')
@@ -1664,15 +1666,23 @@ function openRelatedTask(asset: BackendAsset | null | undefined) {
 }
 
 async function reload() {
+  reloadAbort?.abort()
+  const requestSeq = ++reloadRequestSeq
+  const abortController = new AbortController()
+  reloadAbort = abortController
   loading.value = true
   error.value = ''
   try {
-    const res = await assetsApi.searchAssets({
-      keyword: effectiveSearchKeyword.value || undefined,
-      source: filters.resourceSource,
-      page: listPage.value,
-      size: listPageSize.value,
-    })
+    const res = await assetsApi.searchAssets(
+      {
+        keyword: effectiveSearchKeyword.value || undefined,
+        source: filters.resourceSource,
+        page: listPage.value,
+        size: listPageSize.value,
+      },
+      abortController.signal,
+    )
+    if (abortController.signal.aborted || requestSeq !== reloadRequestSeq) return
     const body = res.data
     const backendItems = Array.isArray(body?.data) ? body.data : []
     const backendTotal = Number(body?.total)
@@ -1713,6 +1723,7 @@ async function reload() {
       detailError.value = ''
     }
   } catch (err) {
+    if (abortController.signal.aborted || requestSeq !== reloadRequestSeq) return
     error.value = err instanceof Error ? err.message : '加载资产列表失败'
     assets.value = []
     listTotal.value = 0
@@ -1720,7 +1731,12 @@ async function reload() {
     selectedAssetDetail.value = null
     detailModalOpen.value = false
   } finally {
-    loading.value = false
+    if (reloadAbort === abortController) {
+      reloadAbort = null
+    }
+    if (requestSeq === reloadRequestSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -1740,6 +1756,8 @@ onBeforeUnmount(() => {
     clearTimeout(reloadTimer)
     reloadTimer = null
   }
+  reloadAbort?.abort()
+  reloadAbort = null
   clearSelectedAssets()
 })
 </script>

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,6 +14,7 @@ import (
 type UserAdminHandler struct {
 	svc             service.IdentityService
 	operationLogSvc service.OperationLogService
+	traceEventSvc   service.WorkflowTraceEventService
 	routeRules      routeAccessRuleReader
 }
 
@@ -19,8 +22,12 @@ type routeAccessRuleReader interface {
 	ListRouteAccessRules() []domain.RouteAccessRule
 }
 
-func NewUserAdminHandler(svc service.IdentityService, routeRules routeAccessRuleReader, operationLogSvc service.OperationLogService) *UserAdminHandler {
-	return &UserAdminHandler{svc: svc, routeRules: routeRules, operationLogSvc: operationLogSvc}
+func NewUserAdminHandler(svc service.IdentityService, routeRules routeAccessRuleReader, operationLogSvc service.OperationLogService, traceEventSvcs ...service.WorkflowTraceEventService) *UserAdminHandler {
+	h := &UserAdminHandler{svc: svc, routeRules: routeRules, operationLogSvc: operationLogSvc}
+	if len(traceEventSvcs) > 0 {
+		h.traceEventSvc = traceEventSvcs[0]
+	}
+	return h
 }
 
 type patchUserReq struct {
@@ -554,6 +561,158 @@ func (h *UserAdminHandler) ListOperationLogs(c *gin.Context) {
 	respondOKWithPagination(c, logs, pagination)
 }
 
+type recordWorkflowTraceEventReq struct {
+	EventType            string          `json:"event_type"`
+	Action               string          `json:"action"`
+	PageURL              string          `json:"page_url"`
+	PageName             string          `json:"page_name"`
+	ComponentID          string          `json:"component_id"`
+	TaskID               *int64          `json:"task_id"`
+	TaskModuleID         *int64          `json:"task_module_id"`
+	ModuleKey            string          `json:"module_key"`
+	SKUCode              string          `json:"sku_code"`
+	TaskSKUItemID        *int64          `json:"task_sku_item_id"`
+	AssetID              *int64          `json:"asset_id"`
+	DesignAssetID        *int64          `json:"design_asset_id"`
+	TaskAssetID          *int64          `json:"task_asset_id"`
+	IntegrationCallLogID *int64          `json:"integration_call_log_id"`
+	ResourceType         string          `json:"resource_type"`
+	ResourceID           string          `json:"resource_id"`
+	Outcome              string          `json:"outcome"`
+	Payload              json.RawMessage `json:"payload"`
+	OccurredAt           *time.Time      `json:"occurred_at"`
+}
+
+func (h *UserAdminHandler) RecordWorkflowTraceEvent(c *gin.Context) {
+	if h.traceEventSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "workflow trace service is not configured", nil))
+		return
+	}
+	var req recordWorkflowTraceEventReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	event := &domain.WorkflowTraceEvent{
+		TraceID:              c.GetString("trace_id"),
+		EventSource:          domain.WorkflowTraceSourceFrontend,
+		EventType:            req.EventType,
+		Action:               req.Action,
+		ActorID:              actorIDPtrFromRequestActor(actor),
+		ActorUsername:        actor.Username,
+		ActorSource:          actor.Source,
+		ActorAuthMode:        actor.AuthMode,
+		ActorRoles:           actor.Roles,
+		ActorDepartment:      actor.Department,
+		ActorTeam:            actor.Team,
+		ClientIP:             c.ClientIP(),
+		UserAgent:            c.GetHeader("User-Agent"),
+		PageURL:              req.PageURL,
+		PageName:             req.PageName,
+		ComponentID:          req.ComponentID,
+		TaskID:               req.TaskID,
+		TaskModuleID:         req.TaskModuleID,
+		ModuleKey:            req.ModuleKey,
+		SKUCode:              req.SKUCode,
+		TaskSKUItemID:        req.TaskSKUItemID,
+		AssetID:              req.AssetID,
+		DesignAssetID:        req.DesignAssetID,
+		TaskAssetID:          req.TaskAssetID,
+		IntegrationCallLogID: req.IntegrationCallLogID,
+		ResourceType:         req.ResourceType,
+		ResourceID:           req.ResourceID,
+		Outcome:              req.Outcome,
+		Payload:              req.Payload,
+	}
+	if req.OccurredAt != nil {
+		event.OccurredAt = req.OccurredAt.UTC()
+	}
+	created, appErr := h.traceEventSvc.RecordTraceEvent(c.Request.Context(), event)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, created)
+}
+
+func (h *UserAdminHandler) ListWorkflowTraceEvents(c *gin.Context) {
+	if !h.ensureOperationLogAccess(c) {
+		return
+	}
+	if h.traceEventSvc == nil {
+		respondOKWithPagination(c, []*domain.WorkflowTraceEvent{}, domain.PaginationMeta{Page: 1, PageSize: 20, Total: 0})
+		return
+	}
+	page, _ := parseInt(c.Query("page"))
+	pageSize, _ := parseInt(c.Query("page_size"))
+	filter := service.WorkflowTraceEventFilter{
+		TraceID:         c.Query("trace_id"),
+		EventSource:     c.Query("event_source"),
+		EventType:       c.Query("event_type"),
+		Action:          c.Query("action"),
+		ActorUsername:   c.Query("actor_username"),
+		ActorSource:     c.Query("actor_source"),
+		ActorDepartment: c.Query("actor_department"),
+		ActorTeam:       c.Query("actor_team"),
+		RoutePath:       c.Query("route_path"),
+		ModuleKey:       c.Query("module_key"),
+		SKUCode:         c.Query("sku_code"),
+		ResourceType:    c.Query("resource_type"),
+		ResourceID:      c.Query("resource_id"),
+		Outcome:         c.Query("outcome"),
+		BusinessOnly:    parseTraceBool(c.Query("business_only")),
+		Page:            page,
+		PageSize:        pageSize,
+	}
+	if raw := strings.TrimSpace(c.Query("actor_id")); raw != "" {
+		if value, err := parseInt64(raw); err == nil && value > 0 {
+			filter.ActorID = &value
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("task_id")); raw != "" {
+		if value, err := parseInt64(raw); err == nil && value > 0 {
+			filter.TaskID = &value
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("asset_id")); raw != "" {
+		if value, err := parseInt64(raw); err == nil && value > 0 {
+			filter.AssetID = &value
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("design_asset_id")); raw != "" {
+		if value, err := parseInt64(raw); err == nil && value > 0 {
+			filter.DesignAssetID = &value
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("task_asset_id")); raw != "" {
+		if value, err := parseInt64(raw); err == nil && value > 0 {
+			filter.TaskAssetID = &value
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("integration_call_log_id")); raw != "" {
+		if value, err := parseInt64(raw); err == nil && value > 0 {
+			filter.IntegrationCallLogID = &value
+		}
+	}
+	if raw := firstNonEmptyTraceQuery(c.Query("from"), c.Query("since")); raw != "" {
+		if value, err := time.Parse(time.RFC3339, raw); err == nil {
+			filter.From = &value
+		}
+	}
+	if raw := firstNonEmptyTraceQuery(c.Query("to"), c.Query("until")); raw != "" {
+		if value, err := time.Parse(time.RFC3339, raw); err == nil {
+			filter.To = &value
+		}
+	}
+	events, pagination, appErr := h.traceEventSvc.ListTraceEvents(c.Request.Context(), filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, events, pagination)
+}
+
 func (h *UserAdminHandler) ensureManagementReadAccess(c *gin.Context) bool {
 	user, appErr := h.svc.GetCurrentUser(c.Request.Context())
 	if appErr != nil {
@@ -660,4 +819,29 @@ func hasOperationLogAccess(roles []domain.Role) bool {
 		}
 	}
 	return false
+}
+
+func actorIDPtrFromRequestActor(actor domain.RequestActor) *int64 {
+	if actor.ID <= 0 {
+		return nil
+	}
+	return &actor.ID
+}
+
+func firstNonEmptyTraceQuery(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func parseTraceBool(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }

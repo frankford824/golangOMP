@@ -1,5 +1,5 @@
 <template>
-  <div class="app-shell bg-[#f5f6f8] font-body text-gray-900 flex overflow-hidden h-screen">
+  <div class="app-shell bg-[#f5f6f8] font-body text-gray-900 flex overflow-hidden h-[100dvh]">
     <!-- Light Slim Sidebar -->
     <aside
       class="sidebar hidden md:flex flex-col h-full w-20 bg-white border-r border-gray-200 transition-all duration-300 overflow-hidden group hover:w-64"
@@ -69,10 +69,18 @@
     <main class="app-main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
       <!-- TopNavBar: Light solid bar -->
       <header class="flex justify-between items-center px-8 py-4 bg-white border-b border-gray-200 z-10">
-        <div class="flex items-center gap-12">
-          <span class="text-lg font-headline font-extrabold tracking-tighter text-gray-900 uppercase">永箔运营管理系统</span>
+        <div class="flex min-w-0 items-center gap-3 md:gap-12">
+          <button
+            type="button"
+            class="mobile-menu-button md:hidden"
+            aria-label="打开导航"
+            @click="mobileSidebarOpen = true"
+          >
+            <span class="material-symbols-outlined">menu</span>
+          </button>
+          <span class="min-w-0 truncate text-lg font-headline font-extrabold tracking-tighter text-gray-900 uppercase">永箔运营管理系统</span>
         </div>
-        <div class="flex items-center gap-6">
+        <div class="flex min-w-0 items-center gap-3 sm:gap-6">
           <div class="relative hidden sm:block">
             <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 !text-lg pointer-events-none">search</span>
             <input
@@ -101,21 +109,76 @@
     </main>
     <GlobalSearchOverlay v-model:open="searchOpen" />
     <NotificationCenter v-model:open="notificationOpen" />
+    <BaseLoadingOverlay
+      :active="routeLoading"
+      fixed
+      teleport
+      label="页面加载中"
+      description="正在切换业务页面"
+    />
+    <Teleport to="body">
+      <transition name="mobile-sidebar">
+        <div
+          v-if="mobileSidebarOpen"
+          class="mobile-sidebar-backdrop md:hidden"
+          @click.self="closeMobileSidebar"
+        >
+          <aside class="mobile-sidebar-panel" aria-label="移动端导航">
+            <div class="mobile-sidebar-header">
+              <div class="mobile-brand">
+                <span class="material-symbols-outlined">architecture</span>
+                <strong>永箔运营</strong>
+              </div>
+              <button type="button" class="mobile-close-button" aria-label="关闭导航" @click="closeMobileSidebar">
+                <span class="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <nav class="mobile-sidebar-nav custom-scrollbar">
+              <template v-for="section in menuSections" :key="section.key">
+                <div class="mobile-nav-section-label">{{ section.label }}</div>
+                <router-link
+                  v-for="menu in section.menus"
+                  :key="menu.key"
+                  :to="menu.to"
+                  :active-class="menu.exact ? '' : 'active'"
+                  :exact-active-class="menu.exact ? 'active' : ''"
+                  class="mobile-nav-item"
+                  @click="closeMobileSidebar"
+                >
+                  <span class="material-symbols-outlined">{{ menu.icon }}</span>
+                  <span>{{ menu.label }}</span>
+                  <span v-if="menu.badge && menu.badge() > 0" class="mobile-nav-badge">{{ menu.badge() }}</span>
+                </router-link>
+              </template>
+            </nav>
+          </aside>
+        </div>
+      </transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { usePermissionsStore } from '@/stores/permissions'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
+import BaseLoadingOverlay from '@/components/base/BaseLoadingOverlay.vue'
 
 const permissionsStore = usePermissionsStore()
+const router = useRouter()
 
 const searchOpen = ref(false)
 const notificationOpen = ref(false)
+const mobileSidebarOpen = ref(false)
+const routeLoading = ref(false)
+let routeLoadingTimer: ReturnType<typeof setTimeout> | null = null
+let removeRouteBeforeGuard: (() => void) | null = null
+let removeRouteAfterHook: (() => void) | null = null
+let removeRouteErrorHook: (() => void) | null = null
 
 interface MenuConfig {
   key: string
@@ -191,7 +254,7 @@ const MENU_CONFIG: MenuConfig[] = [
   },
   {
     key: 'logs_center',
-    label: '日志管理',
+    label: '业务追踪',
     to: '/logs',
     aliases: ['logs_manage'],
     section: 'data',
@@ -249,9 +312,36 @@ const visibleMenus = computed(() => {
 const workbenchMenus = computed(() => visibleMenus.value.filter((m) => m.section === 'workbench'))
 const businessMenus = computed(() => visibleMenus.value.filter((m) => m.section === 'business'))
 const dataMenus = computed(() => visibleMenus.value.filter((m) => m.section === 'data'))
+const menuSections = computed(() =>
+  [
+    { key: 'workbench', label: '工作台', menus: workbenchMenus.value },
+    { key: 'business', label: '业务处理', menus: businessMenus.value },
+    { key: 'data', label: '数据与配置', menus: dataMenus.value },
+  ].filter((section) => section.menus.length > 0),
+)
 
 function openSearch() {
   searchOpen.value = true
+}
+
+function closeMobileSidebar() {
+  mobileSidebarOpen.value = false
+}
+
+function startRouteLoading() {
+  if (routeLoadingTimer) clearTimeout(routeLoadingTimer)
+  routeLoadingTimer = setTimeout(() => {
+    routeLoading.value = true
+  }, 140)
+}
+
+function stopRouteLoading() {
+  if (routeLoadingTimer) {
+    clearTimeout(routeLoadingTimer)
+    routeLoadingTimer = null
+  }
+  routeLoading.value = false
+  closeMobileSidebar()
 }
 
 function onGlobalKeydown(event: KeyboardEvent) {
@@ -261,8 +351,27 @@ function onGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown)
+  removeRouteBeforeGuard = router.beforeEach((_to, _from, next) => {
+    startRouteLoading()
+    next()
+  })
+  removeRouteAfterHook = router.afterEach(() => {
+    stopRouteLoading()
+  })
+  removeRouteErrorHook = router.onError(() => {
+    stopRouteLoading()
+  })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+  stopRouteLoading()
+  removeRouteBeforeGuard?.()
+  removeRouteAfterHook?.()
+  removeRouteErrorHook?.()
+})
 
 function onSidebarTransitionEnd(e: TransitionEvent) {
   if (e.propertyName === 'width') {
@@ -525,5 +634,205 @@ main > header input::placeholder {
 .content {
   padding: 0.75rem;
   background: #f5f6f8;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.mobile-menu-button,
+.mobile-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  color: #374151;
+}
+
+.mobile-menu-button:hover,
+.mobile-close-button:hover {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.mobile-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 7500;
+  display: flex;
+  background: rgba(15, 23, 42, 0.2);
+  padding: 0.75rem;
+}
+
+.mobile-sidebar-panel {
+  display: flex;
+  width: min(20rem, calc(100vw - 1.5rem));
+  max-width: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow: 0 24px 48px -28px rgba(15, 23, 42, 0.55);
+}
+
+.mobile-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0.85rem;
+}
+
+.mobile-brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+  color: #111827;
+}
+
+.mobile-brand .material-symbols-outlined {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  background: #eff6ff;
+  color: #2563eb !important;
+}
+
+.mobile-brand strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-sidebar-nav {
+  display: grid;
+  min-height: 0;
+  gap: 0.35rem;
+  overflow-y: auto;
+  padding: 0.8rem;
+}
+
+.mobile-nav-section-label {
+  padding: 0.7rem 0.35rem 0.2rem;
+  color: #9ca3af;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.mobile-nav-item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 0.8rem;
+  padding: 0.55rem 0.65rem;
+  color: #4b5563;
+}
+
+.mobile-nav-item:hover {
+  background: #f3f4f6;
+  color: #111827;
+  text-decoration: none;
+}
+
+.mobile-nav-item.active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.mobile-nav-item .material-symbols-outlined {
+  color: currentColor !important;
+}
+
+.mobile-nav-item span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-nav-badge {
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.mobile-sidebar-enter-active,
+.mobile-sidebar-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.mobile-sidebar-enter-active .mobile-sidebar-panel,
+.mobile-sidebar-leave-active .mobile-sidebar-panel {
+  transition: transform 0.18s ease;
+}
+
+.mobile-sidebar-enter-from,
+.mobile-sidebar-leave-to {
+  opacity: 0;
+}
+
+.mobile-sidebar-enter-from .mobile-sidebar-panel,
+.mobile-sidebar-leave-to .mobile-sidebar-panel {
+  transform: translateX(-0.75rem);
+}
+
+@media (max-width: 767px) {
+  .app-shell {
+    display: block;
+  }
+
+  .app-main {
+    width: 100%;
+    height: 100%;
+  }
+
+  main > header {
+    margin: 0.5rem 0.5rem 0;
+    min-height: 3.25rem;
+    padding: 0.5rem 0.65rem !important;
+    border-radius: 0.85rem;
+  }
+
+  main > header > div:first-child > span {
+    font-size: 0.92rem !important;
+  }
+
+  .content {
+    padding: 0.55rem;
+  }
+}
+
+@media (max-width: 420px) {
+  main > header {
+    gap: 0.4rem;
+  }
+
+  .mobile-menu-button {
+    width: 2.2rem;
+    height: 2.2rem;
+  }
 }
 </style>

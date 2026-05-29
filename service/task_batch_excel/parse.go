@@ -29,7 +29,7 @@ type parseService struct {
 
 var batchFieldPathRE = regexp.MustCompile(`^batch_items\[(\d+)\](?:\.(.+))?$`)
 
-func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file io.Reader, opts ...ParseOption) (*ParseResult, *domain.AppError) {
+func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file io.Reader, opts ...ParseOption) (*BatchParseResult, *domain.AppError) {
 	fields, ok := FieldsForTaskType(taskType)
 	if !ok {
 		return nil, unsupportedTaskTypeError(taskType)
@@ -86,14 +86,14 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 		itemRows = append(itemRows, rowNumber)
 		if len(parseViolations) > 0 {
 			parseViolations = parseViolationsForRow(rowIdx+1, parseViolations)
-			return &ParseResult{TaskType: taskType, Preview: preview, Violations: parseViolations}, nil
+			return &BatchParseResult{TaskType: taskType, Preview: preview, Violations: parseViolations}, nil
 		}
 	}
 
 	if iidViolations, appErr := s.validateProductIIDs(ctx, items, itemRows, options.IIDLookup); appErr != nil {
 		return nil, appErr
 	} else if len(iidViolations) > 0 {
-		return &ParseResult{TaskType: taskType, Preview: preview, Violations: iidViolations}, nil
+		return &BatchParseResult{TaskType: taskType, Preview: preview, Violations: iidViolations}, nil
 	}
 
 	params := service.CreateTaskParams{
@@ -103,7 +103,7 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 		BatchItems:   items,
 	}
 	if appErr := service.ValidateBatchTaskCreateRequest(params); appErr != nil {
-		return &ParseResult{
+		return &BatchParseResult{
 			TaskType:   taskType,
 			Preview:    preview,
 			Violations: mapValidationViolations(appErr, fields),
@@ -112,7 +112,7 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 	if appErr := s.uploadEmbeddedReferenceImages(ctx, imagesByRow, options, items, preview, itemRows); appErr != nil {
 		return nil, appErr
 	}
-	return &ParseResult{TaskType: taskType, Preview: preview, Violations: []ParseViolation{}}, nil
+	return &BatchParseResult{TaskType: taskType, Preview: preview, Violations: []ParseViolation{}}, nil
 }
 
 func parseHeader(header []string, fields []FieldSpec) (map[string]int, *domain.AppError) {

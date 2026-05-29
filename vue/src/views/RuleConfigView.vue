@@ -194,6 +194,7 @@ function ruleTypeLabel(row: CodeRule) {
 }
 .data-table {
   width: 100%;
+  min-width: 44rem;
   border-collapse: collapse;
   font-size: 0.875rem;
 }
@@ -228,5 +229,19 @@ function ruleTypeLabel(row: CodeRule) {
 }
 .edit-section .preview-panel {
   margin-bottom: 1rem;
+}
+
+@media (max-width: 980px) {
+  .content-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .list-section,
+  .edit-section {
+    padding: 0.85rem;
+  }
 }
 </style>

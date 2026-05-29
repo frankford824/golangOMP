@@ -163,12 +163,16 @@ html,
 body,
 #app {
   min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {
   font-family: var(--yb-font-text);
   color: var(--yb-music-text);
   background: var(--yb-music-bg);
+  text-size-adjust: 100%;
 }
 
 ::selection {
@@ -186,6 +190,69 @@ body {
 #app {
   isolation: isolate;
   background: var(--yb-music-bg);
+}
+
+#app :where(.app-shell, .app-main, .content, main, section, article, header, footer, form, fieldset, .page-header, .content-card) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+#app :where(img, picture, video, canvas, svg) {
+  max-width: 100%;
+}
+
+#app :where(img, picture, video, canvas) {
+  height: auto;
+}
+
+#app :where(pre, code, .json-body, .json-cell-preview, .mono, .font-mono) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+#app :where(.tabs, .tab-list, .tabbar, .segmented-control) {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#app :where(.table-wrap, .table-scroll, .preview-table-wrap, .batch-preview-table-wrap, .sku-table-wrap, .responsive-table-wrap) {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+}
+
+#app :where(.table-wrap, .table-scroll, .preview-table-wrap, .batch-preview-table-wrap, .sku-table-wrap, .responsive-table-wrap) > table {
+  width: max-content;
+  min-width: 100%;
+}
+
+#app :where(.content-card > table.simple-table, .content-card > table.data-table, .content-card > table.preview-table) {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#app :where(.content-card > table.simple-table thead, .content-card > table.data-table thead, .content-card > table.preview-table thead),
+#app :where(.content-card > table.simple-table tbody, .content-card > table.data-table tbody, .content-card > table.preview-table tbody) {
+  min-width: max-content;
+}
+
+#app :where(.responsive-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 1rem;
+}
+
+#app :where(.responsive-actions) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 #app,
@@ -321,6 +388,52 @@ body {
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --yb-glass-blur: 0px;
+  }
+}
+
+@media (max-width: 768px) {
+  #app :where(.page-header) {
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  #app :where(.page-title) {
+    font-size: 1rem;
+    line-height: 1.35;
+  }
+
+  #app :where(.page-subtitle) {
+    line-height: 1.45;
+  }
+
+  #app :where(.content-card, .glass-card, .board-panel, .detail-v3-module, .detail-v3-info-card) {
+    border-radius: 0.75rem;
+  }
+
+  #app :where(.filter-row, .filter-actions, .page-header-actions, .quick-actions, .responsive-actions) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    width: 100%;
+  }
+
+  #app :where(.filter-row input, .filter-row select, .filter-row button, .filter-actions button, .page-header-actions button, .quick-actions button) {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  #app :where(.content-card, .glass-card, .board-panel, .detail-v3-module, .detail-v3-info-card) {
+    padding: 0.85rem;
+  }
+
+  #app :where(.pager) {
+    flex-wrap: wrap;
+  }
+
+  #app :where(.pager-btn) {
+    flex: 1 1 7rem;
   }
 }
 
