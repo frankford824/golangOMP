@@ -659,7 +659,7 @@ func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
 	if s.bff == nil || !s.bff.Enabled() {
 		return ""
 	}
-	return s.bff.BrowserFetchURL(row.OriginPath, true, row.Kind == domain.ExternalAssetKindNASLocal)
+	return s.bff.BrowserFetchURL(row.OriginPath, true, true)
 }
 
 func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
@@ -681,7 +681,7 @@ func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
 	if s.bff == nil || !s.bff.Enabled() {
 		return ""
 	}
-	return s.bff.BrowserFetchURL(row.OriginPath, false, row.Kind == domain.ExternalAssetKindNASLocal)
+	return s.bff.BrowserFetchURL(row.OriginPath, false, true)
 }
 
 func (s *Service) presignedPreviewURL(row *domain.ExternalAssetRecord) string {

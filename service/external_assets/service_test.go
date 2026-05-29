@@ -129,6 +129,57 @@ func TestSyncFullIndexWalksMountAndFiltersSystemFiles(t *testing.T) {
 	}
 }
 
+func TestNetdiskBrowserURLsUseBFFProxyWhenDirectURLMissing(t *testing.T) {
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:           true,
+		BFFBaseURL:        "http://internal-bff",
+		BFFBrowserBaseURL: "http://browser-bff",
+		Mounts:            ParseMounts("/quark:netdisk"),
+	}, nil)
+	row := &domain.ExternalAssetRecord{
+		Kind:       domain.ExternalAssetKindNetdisk,
+		MountPath:  "/quark",
+		OriginPath: "/quark/a/b.jpg",
+		FileName:   "b.jpg",
+		FileExt:    ".jpg",
+		MimeType:   "image/jpeg",
+	}
+
+	previewURL := svc.BrowserPreviewURL(row)
+	if !strings.Contains(previewURL, "proxy=1") || !strings.Contains(previewURL, "inline=1") {
+		t.Fatalf("preview URL = %q, want BFF proxy inline URL", previewURL)
+	}
+	downloadURL := svc.BrowserDownloadURL(row)
+	if !strings.Contains(downloadURL, "proxy=1") || strings.Contains(downloadURL, "inline=1") {
+		t.Fatalf("download URL = %q, want BFF proxy download URL", downloadURL)
+	}
+}
+
+func TestNetdiskBrowserURLsPreferPublicRawURL(t *testing.T) {
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:           true,
+		BFFBaseURL:        "http://internal-bff",
+		BFFBrowserBaseURL: "http://browser-bff",
+		Mounts:            ParseMounts("/quark:netdisk"),
+	}, nil)
+	row := &domain.ExternalAssetRecord{
+		Kind:       domain.ExternalAssetKindNetdisk,
+		MountPath:  "/quark",
+		OriginPath: "/quark/a/b.jpg",
+		FileName:   "b.jpg",
+		FileExt:    ".jpg",
+		MimeType:   "image/jpeg",
+		RawURL:     "https://cdn.example.com/b.jpg",
+	}
+
+	if got := svc.BrowserPreviewURL(row); got != row.RawURL {
+		t.Fatalf("preview URL = %q, want raw URL", got)
+	}
+	if got := svc.BrowserDownloadURL(row); got != row.RawURL {
+		t.Fatalf("download URL = %q, want raw URL", got)
+	}
+}
+
 type externalAssetRepoStub struct {
 	upserts      []domain.ExternalAssetUpsert
 	nextRunID    int64
