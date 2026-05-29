@@ -1,0 +1,210 @@
+package task_single_excel
+
+import (
+	"bytes"
+	"context"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/xuri/excelize/v2"
+
+	"workflow/domain"
+)
+
+type mockIIDLookup struct {
+	valid map[string]bool
+}
+
+func (m *mockIIDLookup) ListIIDs(ctx context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError) {
+	_ = ctx
+	if m.valid[strings.TrimSpace(filter.Q)] {
+		return &domain.ERPIIDListResponse{
+			Items: []*domain.ERPIIDOption{{IID: filter.Q}},
+		}, nil
+	}
+	return &domain.ERPIIDListResponse{Items: nil}, nil
+}
+
+func TestTemplateGenerate_NPD_Single(t *testing.T) {
+	content, appErr := NewTemplateService().Generate(t.Context(), domain.TaskTypeNewProductDevelopment, AssistModeSingle)
+	if appErr != nil {
+		t.Fatalf("Generate appErr = %v", appErr)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("open template: %v", err)
+	}
+	defer f.Close()
+	rows, err := f.GetRows(itemsSheet)
+	if err != nil || len(rows) < 1 {
+		t.Fatalf("Items rows = %#v err=%v", rows, err)
+	}
+	wantHeaders := []string{"产品款式编码", "产品名称", "设计要求", "规格尺寸", "材质", "材质备注", "备注"}
+	if len(rows[0]) < len(wantHeaders) {
+		t.Fatalf("header = %v, want at least %v", rows[0], wantHeaders)
+	}
+	for i, want := range wantHeaders {
+		if rows[0][i] != want {
+			t.Fatalf("header[%d] = %q, want %q", i, rows[0][i], want)
+		}
+	}
+	if len(rows) > 2 {
+		t.Fatalf("template data rows = %d, want header only (no sample rows)", len(rows)-1)
+	}
+}
+
+func TestParse_HappyPath_OneRow(t *testing.T) {
+	content := testSingleWorkbook(t, map[string]string{
+		"product_i_id":        "IID-001",
+		"product_name":        "测试产品",
+		"design_requirement":  "设计要求文案",
+		"spec_text":           "10x10cm",
+		"material":            "棉",
+		"material_other":      "备注材质",
+		"remark":              "行备注",
+	})
+	lookup := &mockIIDLookup{valid: map[string]bool{"IID-001": true}}
+	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
+		t.Context(),
+		domain.TaskTypeNewProductDevelopment,
+		AssistModeSingle,
+		bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+	if result.Draft == nil {
+		t.Fatal("draft is nil")
+	}
+	if result.Draft.ProductIID != "IID-001" || result.Draft.ProductName != "测试产品" {
+		t.Fatalf("draft = %+v", result.Draft)
+	}
+	if result.Mode != AssistModeSingle {
+		t.Fatalf("mode = %q", result.Mode)
+	}
+}
+
+func TestParse_MultipleRows_NotAllowed(t *testing.T) {
+	content := testSingleWorkbookRows(t,
+		map[string]string{
+			"product_i_id":       "IID-001",
+			"product_name":       "产品A",
+			"design_requirement": "要求A",
+		},
+		map[string]string{
+			"product_i_id":       "IID-002",
+			"product_name":       "产品B",
+			"design_requirement": "要求B",
+		},
+	)
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "multiple_rows_not_allowed") {
+		t.Fatalf("violations = %+v, want multiple_rows_not_allowed", result.Violations)
+	}
+}
+
+func TestParse_MissingRequiredField(t *testing.T) {
+	content := testSingleWorkbook(t, map[string]string{
+		"product_i_id":       "IID-001",
+		"product_name":       "",
+		"design_requirement": "要求",
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, AssistModeSingle, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "missing_required_field") {
+		t.Fatalf("violations = %+v, want missing_required_field", result.Violations)
+	}
+}
+
+func TestParse_InvalidIID(t *testing.T) {
+	content := testSingleWorkbook(t, map[string]string{
+		"product_i_id":       "UNKNOWN-IID",
+		"product_name":       "产品",
+		"design_requirement": "要求",
+	})
+	lookup := &mockIIDLookup{valid: map[string]bool{}}
+	result, appErr := NewParseServiceWithDependencies(lookup).Parse(
+		t.Context(),
+		domain.TaskTypeNewProductDevelopment,
+		AssistModeSingle,
+		bytes.NewReader(content),
+	)
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if !hasViolationCode(result.Violations, "invalid_i_id") {
+		t.Fatalf("violations = %+v, want invalid_i_id", result.Violations)
+	}
+}
+
+func TestParse_InvalidMode(t *testing.T) {
+	_, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, "multiple", bytes.NewReader([]byte{}))
+	if appErr == nil || appErr.Code != "invalid_excel_assist_mode" {
+		t.Fatalf("appErr = %#v, want invalid_excel_assist_mode", appErr)
+	}
+}
+
+func TestParse_UnsupportedTaskType(t *testing.T) {
+	_, appErr := NewParseService().Parse(t.Context(), domain.TaskTypePurchaseTask, AssistModeSingle, bytes.NewReader([]byte{}))
+	if appErr == nil || appErr.Code != "excel_assist_task_type_not_supported" {
+		t.Fatalf("appErr = %#v, want excel_assist_task_type_not_supported", appErr)
+	}
+}
+
+func hasViolationCode(violations []ParseViolation, code string) bool {
+	for _, v := range violations {
+		if v.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func testSingleWorkbook(t *testing.T, row map[string]string) []byte {
+	t.Helper()
+	return testSingleWorkbookRows(t, row)
+}
+
+func testSingleWorkbookRows(t *testing.T, rows ...map[string]string) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment, AssistModeSingle)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+	for i, field := range fields {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(itemsSheet, cell, field.Column)
+	}
+	for rowIdx, values := range rows {
+		for _, field := range fields {
+			col, _ := excelize.ColumnNumberToName(fieldIndex(fields, field.Key) + 1)
+			cell := col + strconv.Itoa(rowIdx+2)
+			if v, ok := values[field.Key]; ok && v != "" {
+				_ = f.SetCellValue(itemsSheet, cell, v)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func fieldIndex(fields []FieldSpec, key string) int {
+	for i, field := range fields {
+		if field.Key == key {
+			return i
+		}
+	}
+	return 0
+}

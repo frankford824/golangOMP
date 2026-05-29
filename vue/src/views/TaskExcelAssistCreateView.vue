@@ -5,25 +5,45 @@
         <div>
           <h2 class="page-title">Excel 辅助创建任务</h2>
           <p class="page-subtitle">
-            当前仅支持新款批量 SKU 的 Excel 辅助创建。原款开发、新款单 SKU、采购单 SKU 的 Excel
-            辅助创建将在后续版本中支持。
+            支持新款批量 SKU 与新款单 SKU 的 Excel 辅助创建。原款开发、采购单 SKU 等类型将在后续版本中支持。
           </p>
         </div>
         <BaseButton variant="secondary" size="sm" @click="goBack">返回任务中心</BaseButton>
       </header>
 
-      <p class="flow-label" aria-label="当前任务类型">新款批量 SKU</p>
+      <div class="flow-switch" role="tablist" aria-label="Excel 辅助创建类型">
+        <button
+          v-for="opt in flowOptions"
+          :key="opt.value"
+          type="button"
+          role="tab"
+          class="flow-tab"
+          :class="{ active: flow === opt.value }"
+          :aria-selected="flow === opt.value"
+          @click="switchFlow(opt.value)"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+
+      <p class="flow-label" aria-label="当前任务类型">{{ excelAssistFlowLabel(flow) }}</p>
 
       <div class="layout-grid">
         <div class="main-column">
           <ExcelBatchSkuPanel
+            v-if="flow === 'new_batch'"
             task-type="new_product_development"
             :hide-preview="true"
-            @parsed="onExcelParsed"
-            @reset="onExcelReset"
+            @parsed="onBatchExcelParsed"
+            @reset="onBatchExcelReset"
+          />
+          <ExcelSingleSkuPanel
+            v-else
+            @parsed="onSingleExcelParsed"
+            @reset="onSingleExcelReset"
           />
 
-          <section v-if="previewRows.length > 0" class="preview-section">
+          <section v-if="flow === 'new_batch' && previewRows.length > 0" class="preview-section">
             <div class="preview-header">
               <h3 class="section-title">解析预览</h3>
               <span class="preview-meta">
@@ -85,6 +105,49 @@
                 </tbody>
               </table>
             </div>
+          </section>
+
+          <section v-if="flow === 'new_single' && singleDraft" class="preview-section">
+            <div class="preview-header">
+              <h3 class="section-title">解析预览</h3>
+              <span class="preview-meta">单任务 · 错误 {{ singleViolations.length }} 条</span>
+            </div>
+            <dl class="single-draft-grid">
+              <div class="draft-row">
+                <dt>产品款式编码</dt>
+                <dd>{{ singleDraft.product_i_id || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>产品名称</dt>
+                <dd>{{ singleDraft.product_name || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>设计要求</dt>
+                <dd>{{ singleDraft.design_requirement || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>规格尺寸</dt>
+                <dd>{{ singleDraft.spec_text || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>材质</dt>
+                <dd>{{ singleDraft.material || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>材质备注</dt>
+                <dd>{{ singleDraft.material_other || '—' }}</dd>
+              </div>
+              <div class="draft-row">
+                <dt>Excel 备注</dt>
+                <dd>{{ singleDraft.remark || '—' }}</dd>
+              </div>
+            </dl>
+            <ul v-if="singleViolations.length > 0" class="single-violation-list">
+              <li v-for="(err, idx) in singleViolations" :key="`${err.code}-${idx}`">
+                <span v-if="err.row">第 {{ err.row }} 行 · </span>
+                {{ err.column ? `${err.column} · ` : '' }}{{ err.message || err.code }}
+              </li>
+            </ul>
           </section>
         </div>
 
@@ -159,15 +222,24 @@ import BaseButton from '@/components/base/BaseButton.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import ExcelBatchSkuPanel from '@/components/task-create/ExcelBatchSkuPanel.vue'
+import ExcelSingleSkuPanel from '@/components/task-create/ExcelSingleSkuPanel.vue'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
 import { useTeamOptions } from '@/composables/useTeamOptions'
 import { useActorOwnerScope } from '@/composables/useActorOwnerScope'
 import { useAuth } from '@/composables/useAuth'
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
+import type { SingleTaskExcelDraft, ExcelAssistViolation } from '@/services/api/excelAssistApi'
 import type { Task } from '@/domain/types/task'
 import type { TaskBatchItem } from '@/domain/types'
-import { canSubmitExcelAssistBatch, mapExcelPreviewToBatchItems } from '@/domain/task-excel-assist'
+import {
+  canSubmitExcelAssistBatch,
+  canSubmitExcelAssistSingle,
+  excelAssistFlowLabel,
+  mapExcelPreviewToBatchItems,
+  mapExcelPreviewToSingleTask,
+  type ExcelAssistFlow,
+} from '@/domain/task-excel-assist'
 import { normalizePriorityForApi } from '@/domain/task-priority'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import {
@@ -188,9 +260,19 @@ const { filterOwnerTeamOptions, validateOwnerScope, defaultOwnerTeam, hideOwnerF
   useActorOwnerScope()
 const { isDeptAdminPlus } = useAuth()
 
+const flowOptions: { value: ExcelAssistFlow; label: string }[] = [
+  { value: 'new_batch', label: '新款批量 SKU' },
+  { value: 'new_single', label: '新款单 SKU' },
+]
+
+const flow = ref<ExcelAssistFlow>('new_batch')
+
 const previewRows = ref<BatchPreviewRow[]>([])
 const violations = ref<BatchViolation[]>([])
 const batchItems = ref<TaskBatchItem[]>([])
+
+const singleDraft = ref<SingleTaskExcelDraft | null>(null)
+const singleViolations = ref<ExcelAssistViolation[]>([])
 
 const groupId = ref('')
 const dueAt = ref<string | null>(null)
@@ -253,21 +335,34 @@ const urgentChecked = computed({
   },
 })
 
-const canSubmit = computed(() =>
-  canSubmitExcelAssistBatch({
-    taskType: EXCEL_ASSIST_TASK_TYPE,
-    batchItems: batchItems.value,
-    violations: violations.value,
+const canSubmit = computed(() => {
+  if (flow.value === 'new_batch') {
+    return canSubmitExcelAssistBatch({
+      taskType: EXCEL_ASSIST_TASK_TYPE,
+      batchItems: batchItems.value,
+      violations: violations.value,
+      groupId: groupId.value,
+      dueAt: dueAt.value,
+    })
+  }
+  return canSubmitExcelAssistSingle({
+    draft: singleDraft.value,
+    violations: singleViolations.value,
     groupId: groupId.value,
     dueAt: dueAt.value,
-  }),
-)
+  })
+})
 
 const submitBlockReason = computed(() => {
   if (!groupId.value.trim()) return '请选择所属组'
   if (!dueAt.value) return '请填写任务截止时间'
-  if (batchItems.value.length < 2) return '批量模式至少需要 2 行有效数据'
-  if (violations.value.length > 0) return 'Excel 存在行级错误，请修正后重新上传'
+  if (flow.value === 'new_batch') {
+    if (batchItems.value.length < 2) return '批量模式至少需要 2 行有效数据'
+    if (violations.value.length > 0) return 'Excel 存在行级错误，请修正后重新上传'
+    return ''
+  }
+  if (!singleDraft.value) return '请先上传并解析 Excel'
+  if (singleViolations.value.length > 0) return 'Excel 存在错误，请修正后重新上传'
   return ''
 })
 
@@ -288,14 +383,30 @@ watch(
   { immediate: true },
 )
 
-function resetExcelState() {
+function switchFlow(next: ExcelAssistFlow) {
+  if (flow.value === next) return
+  flow.value = next
+  resetAllExcelState()
+}
+
+function resetBatchExcelState() {
   previewRows.value = []
   violations.value = []
   batchItems.value = []
+}
+
+function resetSingleExcelState() {
+  singleDraft.value = null
+  singleViolations.value = []
+}
+
+function resetAllExcelState() {
+  resetBatchExcelState()
+  resetSingleExcelState()
   submitError.value = ''
 }
 
-function onExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchViolation[] }) {
+function onBatchExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchViolation[] }) {
   previewRows.value = payload.preview
   violations.value = payload.violations
   batchItems.value = mapExcelPreviewToBatchItems(EXCEL_ASSIST_TASK_TYPE, payload.preview, {
@@ -304,8 +415,23 @@ function onExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchV
   submitError.value = ''
 }
 
-function onExcelReset() {
-  resetExcelState()
+function onBatchExcelReset() {
+  resetBatchExcelState()
+  submitError.value = ''
+}
+
+function onSingleExcelParsed(payload: {
+  draft: SingleTaskExcelDraft
+  violations: ExcelAssistViolation[]
+}) {
+  singleDraft.value = payload.draft
+  singleViolations.value = payload.violations
+  submitError.value = ''
+}
+
+function onSingleExcelReset() {
+  resetSingleExcelState()
+  submitError.value = ''
 }
 
 function previewRowErrors(row: number): BatchViolation[] {
@@ -333,35 +459,14 @@ function goBack() {
   void router.push({ name: 'TaskList' })
 }
 
-async function submit() {
-  if (!canSubmit.value || submitting.value) return
-  submitError.value = ''
-  submitting.value = true
-
-  const preflightOwnerDepartment = resolveOwnerDepartmentForSubmit()
-  const ownerScopeDeny = validateOwnerScope({
-    owner_department: preflightOwnerDepartment,
-    owner_org_team: groupId.value,
-    owner_team: groupId.value,
-  })
-  if (ownerScopeDeny) {
-    submitError.value = ownerScopeDeny
-    submitting.value = false
-    return
-  }
-
+function buildCommonTaskFields() {
   const currentUser = permissionsStore.currentUser
   const now = nowISO()
-  const normalizedPriority = normalizePriorityForApi(priority.value)
-
-  const payload = {
-    taskType: 'NEW_PRODUCT_DEV',
-    skuMode: 'multiple' as const,
-    businessLane: 'normal',
-    workflowLane: 'normal',
-    productName: '',
-    productSource: 'new',
-    status: 'PendingAssign',
+  const preflightOwnerDepartment = resolveOwnerDepartmentForSubmit()
+  return {
+    businessLane: 'normal' as const,
+    workflowLane: 'normal' as const,
+    status: 'PendingAssign' as const,
     groupId: groupId.value,
     groupName: resolveGroupName(),
     ownerDepartment: hideOwnerFields.value ? undefined : preflightOwnerDepartment,
@@ -371,16 +476,58 @@ async function submit() {
     creatorId: currentUser?.id ?? null,
     creatorName: currentUser?.name ?? null,
     dueAt: dueAt.value,
-    priority: normalizedPriority,
-    note: note.value,
+    priority: normalizePriorityForApi(priority.value),
     syncErpOnCreate: true,
-    batchItems: batchItems.value,
-    batchExcelImported: true,
-    assetVersions: [],
-    businessType: 'NEW_PRODUCT_DEV',
+    assetVersions: [] as unknown[],
+    businessType: 'NEW_PRODUCT_DEV' as const,
     requiresAssetVersions: true,
     createdAt: now,
     updatedAt: now,
+    preflightOwnerDepartment,
+  }
+}
+
+async function submit() {
+  if (!canSubmit.value || submitting.value) return
+  submitError.value = ''
+  submitting.value = true
+
+  const common = buildCommonTaskFields()
+  const ownerScopeDeny = validateOwnerScope({
+    owner_department: common.preflightOwnerDepartment,
+    owner_org_team: groupId.value,
+    owner_team: groupId.value,
+  })
+  if (ownerScopeDeny) {
+    submitError.value = ownerScopeDeny
+    submitting.value = false
+    return
+  }
+
+  let payload: Record<string, unknown>
+
+  if (flow.value === 'new_batch') {
+    payload = {
+      taskType: 'NEW_PRODUCT_DEV',
+      skuMode: 'multiple' as const,
+      productName: '',
+      productSource: 'new',
+      note: note.value,
+      batchItems: batchItems.value,
+      batchExcelImported: true,
+      ...common,
+    }
+    delete payload.preflightOwnerDepartment
+  } else {
+    const mapped = mapExcelPreviewToSingleTask({
+      draft: singleDraft.value!,
+      pageNote: note.value,
+    })
+    payload = {
+      ...common,
+      ...mapped,
+    }
+    delete payload.preflightOwnerDepartment
   }
 
   try {
@@ -435,6 +582,31 @@ onMounted(() => {
   color: var(--color-text-secondary, #6b7280);
   font-size: 0.875rem;
   line-height: 1.5;
+}
+
+.flow-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.flow-tab {
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 8px;
+  padding: 0.4rem 0.85rem;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.flow-tab.active {
+  border-color: var(--color-primary, #2563eb);
+  background: color-mix(in srgb, var(--color-primary, #2563eb) 8%, white);
+  color: var(--color-primary, #2563eb);
+  font-weight: 600;
 }
 
 .flow-label {
@@ -523,6 +695,40 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.single-draft-grid {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+}
+
+.draft-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.draft-row dt {
+  margin: 0;
+  color: var(--color-text-secondary, #6b7280);
+  font-weight: 500;
+}
+
+.draft-row dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.single-violation-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  color: #b91c1c;
 }
 
 .ref-thumbs {

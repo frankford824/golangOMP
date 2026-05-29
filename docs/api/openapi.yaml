@@ -6754,6 +6754,41 @@ components:
           type: string
         message:
           type: string
+    SingleTaskExcelDraft:
+      type: object
+      description: Draft fields for single-task Excel assist (Phase 2A new product development only).
+      required: [product_i_id, product_name, design_requirement]
+      properties:
+        product_i_id:
+          type: string
+          description: ERP product style i_id (maps to task create `i_id` / category).
+        product_name:
+          type: string
+        design_requirement:
+          type: string
+        spec_text:
+          type: string
+        material:
+          type: string
+        material_other:
+          type: string
+        remark:
+          type: string
+    ExcelAssistParseResult:
+      type: object
+      properties:
+        task_type:
+          type: string
+          enum: [new_product_development]
+        mode:
+          type: string
+          enum: [single]
+        draft:
+          $ref: '#/components/schemas/SingleTaskExcelDraft'
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParseViolation'
     BatchCreateParseResult:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §3.5.4."
@@ -14942,6 +14977,112 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Draft not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/tasks/excel-assist/template.xlsx:
+    get:
+      summary: Download single-task Excel assist template
+      description: |
+        Downloads the Excel assist workbook for creating one task at a time. Phase 2A supports only `task_type=new_product_development` with `mode=single`. The workbook contains one data row slot; `parse-excel` rejects workbooks with more than one non-empty data row.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R5
+      parameters:
+        - in: query
+          name: task_type
+          required: true
+          schema:
+            type: string
+            enum: [new_product_development]
+        - in: query
+          name: mode
+          required: true
+          schema:
+            type: string
+            enum: [single]
+      responses:
+        '200':
+          description: Excel template stream
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid task_type or mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/tasks/excel-assist/parse-excel:
+    post:
+      summary: Parse a single-task Excel assist file
+      description: |
+        Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. Phase 2A supports only `new_product_development` + `mode=single`. Required columns: `产品款式编码`, `产品名称`, `设计要求`. Optional: `规格尺寸`, `材质`, `材质备注`, `备注`. More than one non-empty data row returns `multiple_rows_not_allowed`. Parsed `product_i_id` values are validated against ERP i_id options when configured.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R5
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [task_type, mode, file]
+              properties:
+                task_type:
+                  type: string
+                  enum: [new_product_development]
+                mode:
+                  type: string
+                  enum: [single]
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Excel parse draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExcelAssistParseResult'
+        '400':
+          description: Invalid upload or parse error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: File too large
           content:
             application/json:
               schema:

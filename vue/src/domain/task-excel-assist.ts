@@ -1,8 +1,25 @@
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
+import type { SingleTaskExcelDraft, ExcelAssistViolation } from '@/services/api/excelAssistApi'
 import type { TaskBatchItem, TaskSkuCodeType } from '@/domain/types'
 import { isErpProductNameTooLong } from '@/domain/erp-product-name'
 
+export type { SingleTaskExcelDraft, ExcelAssistViolation }
+
 export type ExcelAssistTaskType = 'new_product_development' | 'purchase_task'
+
+export type ExcelAssistFlow = 'new_batch' | 'new_single'
+
+export interface ExcelAssistSingleSubmitForm {
+  draft: SingleTaskExcelDraft | null
+  violations: ExcelAssistViolation[]
+  groupId: string
+  dueAt: string | null
+}
+
+export interface MapExcelSingleTaskInput {
+  draft: SingleTaskExcelDraft
+  pageNote?: string
+}
 
 export interface MapExcelPreviewOptions {
   skuCodeType?: TaskSkuCodeType
@@ -107,4 +124,39 @@ export function canSubmitExcelAssistBatch(form: ExcelAssistSubmitForm): boolean 
 
 export function excelAssistTaskTypeLabel(taskType: ExcelAssistTaskType): string {
   return taskType === 'purchase_task' ? '采购批量 SKU' : '新款批量 SKU'
+}
+
+export function excelAssistFlowLabel(flow: ExcelAssistFlow): string {
+  return flow === 'new_single' ? '新款单 SKU' : '新款批量 SKU'
+}
+
+export function mapExcelPreviewToSingleTask(input: MapExcelSingleTaskInput): Record<string, unknown> {
+  const { draft, pageNote } = input
+  const remarkParts = [pageNote?.trim(), draft.remark?.trim()].filter(Boolean)
+  return {
+    taskType: 'NEW_PRODUCT_DEV',
+    skuMode: 'single',
+    productSource: 'new',
+    category: draft.product_i_id?.trim(),
+    productCategoryCode: draft.product_i_id?.trim(),
+    productName: draft.product_name?.trim() ?? '',
+    designRequirement: draft.design_requirement?.trim() ?? '',
+    prefillSpecText: draft.spec_text?.trim() || undefined,
+    material: draft.material?.trim() || undefined,
+    materialOther: draft.material_other?.trim() || undefined,
+    note: remarkParts.length > 0 ? remarkParts.join('\n') : undefined,
+  }
+}
+
+export function canSubmitExcelAssistSingle(form: ExcelAssistSingleSubmitForm): boolean {
+  if (!form.groupId.trim()) return false
+  if (!form.dueAt) return false
+  if (form.violations.length > 0) return false
+  const draft = form.draft
+  if (!draft) return false
+  if (!draft.product_i_id?.trim()) return false
+  if (!draft.product_name?.trim()) return false
+  if (!draft.design_requirement?.trim()) return false
+  if (isErpProductNameTooLong(draft.product_name)) return false
+  return true
 }

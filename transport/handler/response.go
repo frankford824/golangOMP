@@ -53,6 +53,9 @@ func httpStatusFromCode(code string) int {
 		return http.StatusForbidden
 	case domain.ErrCodeUnauthorized:
 		return http.StatusUnauthorized
+	case "invalid_excel_assist_mode",
+		"excel_assist_task_type_not_supported":
+		return http.StatusBadRequest
 	case domain.ErrCodeInvalidRequest,
 		domain.ErrCodeReasonRequired,
 		domain.ErrCodeAssetNotStable,

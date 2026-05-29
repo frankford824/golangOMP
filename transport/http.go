@@ -44,6 +44,7 @@ func NewRouter(
 	taskCostOverrideH *handler.TaskCostOverrideHandler,
 	taskBoardH *handler.TaskBoardHandler,
 	taskBatchExcelH *handler.TaskBatchExcelHandler,
+	taskSingleExcelH *handler.TaskSingleExcelHandler,
 	workbenchH *handler.WorkbenchHandler,
 	exportCenterH *handler.ExportCenterHandler,
 	integrationCenterH *handler.IntegrationCenterHandler,
@@ -209,6 +210,8 @@ func NewRouter(
 	{
 		taskGroup.POST("/reference-upload", access(taskGroup, http.MethodPost, "/reference-upload", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.UploadFile)
 		taskGroup.POST("/prepare-product-codes", access(taskGroup, http.MethodPost, "/prepare-product-codes", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), taskH.PrepareProductCodes)
+		taskGroup.GET("/excel-assist/template.xlsx", access(taskGroup, http.MethodGet, "/excel-assist/template.xlsx", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskSingleExcelH.DownloadTemplate)
+		taskGroup.POST("/excel-assist/parse-excel", access(taskGroup, http.MethodPost, "/excel-assist/parse-excel", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskSingleExcelH.ParseUpload)
 		taskGroup.GET("/batch-create/template.xlsx", access(taskGroup, http.MethodGet, "/batch-create/template.xlsx", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBatchExcelH.DownloadTemplate)
 		taskGroup.POST("/batch-create/parse-excel", access(taskGroup, http.MethodPost, "/batch-create/parse-excel", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBatchExcelH.ParseUpload)
 		taskGroup.POST("", access(taskGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskH.Create)
