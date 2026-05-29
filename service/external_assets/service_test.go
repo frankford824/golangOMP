@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"workflow/domain"
+	baseservice "workflow/service"
 )
 
 func TestAListClientList(t *testing.T) {
@@ -177,6 +178,48 @@ func TestNetdiskBrowserURLsPreferPublicRawURL(t *testing.T) {
 	}
 	if got := svc.BrowserDownloadURL(row); got != row.RawURL {
 		t.Fatalf("download URL = %q, want raw URL", got)
+	}
+}
+
+func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
+	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        "oss-cn-hangzhou.aliyuncs.com",
+		PublicEndpoint:  "oss-cn-hangzhou.aliyuncs.com",
+		Bucket:          "test-bucket",
+		AccessKeyID:     "test-key",
+		AccessKeySecret: "test-secret",
+		PresignExpiry:   15 * time.Minute,
+	})
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled: true,
+		Mounts:  ParseMounts("/p3:nas_local"),
+	}, ossDirect)
+	row := &domain.ExternalAssetRecord{
+		Kind:           domain.ExternalAssetKindNASLocal,
+		MountPath:      "/p3",
+		OriginPath:     "/p3/a/b.jpg",
+		FileName:       "b.jpg",
+		FileExt:        ".jpg",
+		MimeType:       "image/jpeg",
+		OSSOriginalKey: "external-assets/alist/original/p3/abc/b.jpg",
+		OSSSyncStatus:  domain.ExternalAssetOSSStatusReady,
+	}
+
+	previewURL := svc.BrowserPreviewURL(row)
+	if previewURL == "" {
+		t.Fatal("preview URL is empty, want ready original OSS preview URL")
+	}
+	if !strings.Contains(previewURL, row.OSSOriginalKey) || !strings.Contains(previewURL, "inline") {
+		t.Fatalf("preview URL = %q, want original OSS inline URL", previewURL)
+	}
+
+	downloadURL := svc.BrowserDownloadURL(row)
+	if downloadURL == "" {
+		t.Fatal("download URL is empty, want ready original OSS download URL")
+	}
+	if !strings.Contains(downloadURL, row.OSSOriginalKey) || !strings.Contains(downloadURL, "attachment") {
+		t.Fatalf("download URL = %q, want original OSS attachment URL", downloadURL)
 	}
 }
 

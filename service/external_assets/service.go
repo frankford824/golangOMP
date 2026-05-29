@@ -648,6 +648,11 @@ func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
 		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNASLocal {
+		if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
+			if urlValue := s.presignedOriginalPreviewURL(row); urlValue != "" {
+				return urlValue
+			}
+		}
 		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNetdisk {
@@ -689,6 +694,17 @@ func (s *Service) presignedPreviewURL(row *domain.ExternalAssetRecord) string {
 		return ""
 	}
 	signed := s.ossDirect.PresignPreviewURL(row.OSSPreviewKey)
+	if signed == nil {
+		return ""
+	}
+	return strings.TrimSpace(signed.DownloadURL)
+}
+
+func (s *Service) presignedOriginalPreviewURL(row *domain.ExternalAssetRecord) string {
+	if s == nil || s.ossDirect == nil || !s.ossDirect.Enabled() || row == nil || strings.TrimSpace(row.OSSOriginalKey) == "" {
+		return ""
+	}
+	signed := s.ossDirect.PresignPreviewURL(row.OSSOriginalKey)
 	if signed == nil {
 		return ""
 	}
