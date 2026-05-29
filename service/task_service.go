@@ -144,6 +144,11 @@ type UpdateTaskBusinessInfoParams struct {
 	// New clients should use TriggerFiling.
 	FiledAt *time.Time
 	Remark  string
+	// ApplyCategory gates category_id/category/category_code resolution. Partial product-info
+	// and cost-info patches must leave this false unless the request body changed category fields.
+	ApplyCategory bool
+	Priority      domain.TaskPriority
+	PrioritySet   bool
 }
 
 type UpdateTaskProcurementParams struct {
@@ -1557,6 +1562,29 @@ func validTaskSourceMode(mode domain.TaskSourceMode) bool {
 	}
 }
 
+func shouldApplyCategoryUpdate(p UpdateTaskBusinessInfoParams) bool {
+	if p.ApplyCategory {
+		return true
+	}
+	return p.CategoryID != nil || strings.TrimSpace(p.CategoryCode) != "" || strings.TrimSpace(p.Category) != ""
+}
+
+func normalizeUpdateTaskPriority(priority string) (domain.TaskPriority, *domain.AppError) {
+	normalized := strings.TrimSpace(priority)
+	if normalized == "" {
+		return domain.TaskPriorityNormal, nil
+	}
+	if !validTaskPriority(domain.TaskPriority(normalized)) {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "task_priority_invalid", map[string]interface{}{
+			"field":        "priority",
+			"deny_code":    "task_priority_invalid",
+			"allowed":      []string{"low", "normal", "high", "critical"},
+			"actual_value": normalized,
+		})
+	}
+	return domain.TaskPriority(normalized), nil
+}
+
 func validTaskPriority(priority domain.TaskPriority) bool {
 	switch priority {
 	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
@@ -1862,6 +1890,14 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		bindingChanged = true
 	}
 
+	if p.PrioritySet {
+		normalized, appErr := normalizeUpdateTaskPriority(string(p.Priority))
+		if appErr != nil {
+			return nil, appErr
+		}
+		task.Priority = normalized
+	}
+
 	if productIID := strings.TrimSpace(p.ProductIID); productIID != "" {
 		detail.Category = productIID
 		detail.CategoryName = productIID
@@ -1869,7 +1905,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		if strings.TrimSpace(p.CategoryCode) != "" {
 			detail.CategoryCode = strings.ToUpper(strings.TrimSpace(p.CategoryCode))
 		}
-	} else if p.CategoryID != nil || strings.TrimSpace(p.CategoryCode) != "" || strings.TrimSpace(p.Category) != "" {
+	} else if shouldApplyCategoryUpdate(p) {
 		categoryLookupValue := strings.TrimSpace(p.CategoryCode)
 		if categoryLookupValue == "" {
 			categoryLookupValue = strings.TrimSpace(p.Category)
@@ -2118,6 +2154,11 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if bindingChanged {
 			if err := s.taskRepo.UpdateProductBinding(ctx, tx, task); err != nil {
+				return err
+			}
+		}
+		if p.PrioritySet {
+			if err := s.taskRepo.UpdatePriority(ctx, tx, task.ID, task.Priority); err != nil {
 				return err
 			}
 		}

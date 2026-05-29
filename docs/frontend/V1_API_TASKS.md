@@ -846,6 +846,7 @@ Content-Type: `application/json`
 | `manual_cost_override_reason` | string | 否 | - |
 | `trigger_filing` | boolean | 否 | Legacy compatibility switch. Prefer backend auto-policy; this flag forces one filing evaluation. |
 | `filed_at` | string | 否 | Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source. |
+| `priority` | enum(low/normal/high/critical) | 否 | Task priority. When provided, updates `tasks.priority` without requiring other business-info fields. |
 | `remark` | string | 否 | - |
 
 ### 响应体 schema

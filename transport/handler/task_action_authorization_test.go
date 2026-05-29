@@ -656,6 +656,12 @@ func (r *routeTaskRepo) UpdateDetailBusinessInfo(_ context.Context, _ repo.Tx, d
 	r.details[detail.TaskID] = cloneRouteDetail(detail)
 	return nil
 }
+func (r *routeTaskRepo) UpdatePriority(_ context.Context, _ repo.Tx, id int64, priority domain.TaskPriority) error {
+	if task := r.tasks[id]; task != nil {
+		task.Priority = priority
+	}
+	return nil
+}
 func (r *routeTaskRepo) UpdateProductBinding(_ context.Context, _ repo.Tx, task *domain.Task) error {
 	r.tasks[task.ID] = cloneRouteTask(task)
 	return nil

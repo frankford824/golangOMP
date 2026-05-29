@@ -297,6 +297,10 @@ func (r *ownerTeamTaskRepo) UpdateDetailBusinessInfo(context.Context, repo.Tx, *
 	return nil
 }
 
+func (r *ownerTeamTaskRepo) UpdatePriority(context.Context, repo.Tx, int64, domain.TaskPriority) error {
+	return nil
+}
+
 func (r *ownerTeamTaskRepo) UpdateProductBinding(context.Context, repo.Tx, *domain.Task) error {
 	return nil
 }

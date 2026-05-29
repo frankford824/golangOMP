@@ -4533,6 +4533,10 @@ components:
           format: date-time
           nullable: true
           description: Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source.
+        priority:
+          type: string
+          enum: [low, normal, high, critical]
+          description: Task priority. When provided, updates `tasks.priority` without requiring other business-info fields.
         remark: { type: string }
     CreateCategoryRequest:
       type: object

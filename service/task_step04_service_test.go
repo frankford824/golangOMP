@@ -1378,6 +1378,13 @@ func (r *step04TaskRepo) UpdateDetailBusinessInfo(_ context.Context, _ repo.Tx, 
 	return nil
 }
 
+func (r *step04TaskRepo) UpdatePriority(_ context.Context, _ repo.Tx, id int64, priority domain.TaskPriority) error {
+	if task := r.tasks[id]; task != nil {
+		task.Priority = priority
+	}
+	return nil
+}
+
 func (r *step04TaskRepo) UpdateProductBinding(_ context.Context, _ repo.Tx, task *domain.Task) error {
 	r.tasks[task.ID] = task
 	return nil

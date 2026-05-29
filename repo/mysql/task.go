@@ -785,6 +785,21 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 	return nil
 }
 
+func (r *taskRepo) UpdatePriority(ctx context.Context, tx repo.Tx, id int64, priority domain.TaskPriority) error {
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx,
+		`UPDATE tasks SET priority = ? WHERE id = ?`,
+		string(priority), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update task priority: %w", err)
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *taskRepo) UpdateProductBinding(ctx context.Context, tx repo.Tx, task *domain.Task) error {
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx,
