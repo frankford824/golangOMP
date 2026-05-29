@@ -744,7 +744,11 @@
                           :disabled="actionLoading === 'warehouse-archive'"
                           @click="archiveWarehouseFromDetail"
                         >
-                          {{ actionLoading === 'warehouse-archive' ? '结单中...' : '结单' }}
+                          {{
+                            actionLoading === 'warehouse-archive'
+                              ? '完成中...'
+                              : '完成仓库处理'
+                          }}
                         </button>
                       </div>
                       <p v-else class="detail-v3-card-muted">当前不在仓库可操作阶段，仅展示仓库状态。</p>
@@ -876,7 +880,11 @@ import {
   taskHasRecordedDesignOutput,
   taskHasAssignee,
 } from '@/domain/task-actions'
-import { getTaskActionAvailability } from '@/domain/task-action-availability'
+import {
+  getTaskActionAvailability,
+  shouldHideWarehouseCompleteAction,
+  shouldHideWarehouseReceiveActions,
+} from '@/domain/task-action-availability'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import {
   canUserScheduleDesignerAssignment,
@@ -1782,6 +1790,7 @@ const showWarehouseReceiveActionButtons = computed(
   () => {
     // 与审核条一致：仓管常跨组处理「待仓库接收」任务，不因 owner_department 拦截。
     if (!task.value || !can([...WAREHOUSE_RECEIVE_PERMISSION_KEYS])) return false
+    if (shouldHideWarehouseReceiveActions(task.value)) return false
     if (isPurchaseTask.value) return purchaseWorkflowCanPrepareWarehouse.value
     if (hasModuleActionProjection(warehouseModuleSummary.value)) {
       return hasModuleAction(warehouseModuleSummary.value, ['receive', 'submit'])
@@ -1792,6 +1801,7 @@ const showWarehouseReceiveActionButtons = computed(
 const showWarehouseReturnActionButton = computed(
   () => {
     if (!task.value || !can([...WAREHOUSE_RETURN_PERMISSION_KEYS])) return false
+    if (shouldHideWarehouseReceiveActions(task.value)) return false
     if (isPurchaseTask.value) return false
     if (hasModuleActionProjection(warehouseModuleSummary.value)) {
       return hasModuleAction(warehouseModuleSummary.value, ['reject', 'return'])
@@ -1805,6 +1815,7 @@ const showWarehouseActionButtons = computed(
 const showWarehouseCompleteActionButton = computed(
   () => {
     if (!task.value || !can([...WAREHOUSE_FLOW_COMPLETE_PERMISSION_KEYS])) return false
+    if (shouldHideWarehouseCompleteAction(task.value)) return false
     // 与后端 maintenance scope（如 role_plus_maintenance_scope / task_out_of_department_scope）对齐
     if (!canOperateTask(task.value)) return false
     if (isPurchaseTask.value) return purchaseWorkflowCanClose.value
@@ -2667,8 +2678,7 @@ async function receiveWarehouseFromDetail(): Promise<void> {
         }
       }
       try {
-        await tasksApi.warehouseComplete(currentTask.id)
-        await tasksStore.loadTaskById(currentTask.id)
+        await tasksStore.completeWarehouseFlow(currentTask.id)
       } catch (err: unknown) {
         if (isWarehouseProgressConflictError(err)) {
           await tasksStore.loadTaskById(currentTask.id)
@@ -2702,7 +2712,7 @@ async function rejectWarehouseFromDetail(): Promise<void> {
 async function archiveWarehouseFromDetail(): Promise<void> {
   if (!task.value) return
   if (!showWarehouseCompleteActionButton.value && !canCloseTask.value) return
-  await runDetailAction('warehouse-archive', '结单失败', async () => {
+  await runDetailAction('warehouse-archive', '仓库处理或结单失败', async () => {
     if (isPurchaseTask.value) {
       const currentTask = task.value!
       if (currentTask.workflowCanClose === true) {
@@ -2743,8 +2753,7 @@ async function archiveWarehouseFromDetail(): Promise<void> {
         }
       }
       try {
-        await tasksApi.warehouseComplete(currentTask.id)
-        await tasksStore.loadTaskById(currentTask.id)
+        await tasksStore.completeWarehouseFlow(currentTask.id)
       } catch (err) {
         if (isWarehouseProgressConflictError(err)) {
           await tasksStore.loadTaskById(currentTask.id)
@@ -2763,7 +2772,11 @@ async function archiveWarehouseFromDetail(): Promise<void> {
     } else {
       await tasksStore.archiveTask(task.value!.id)
     }
-    flashSuccess('已结单')
+    flashSuccess(
+      task.value?.status === 'PendingClose' || task.value?.status === 'Completed'
+        ? '已结单'
+        : '已完成仓库处理，请使用顶部「结单」完成归档',
+    )
     void loadSideEvents()
   })
 }

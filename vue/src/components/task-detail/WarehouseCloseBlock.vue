@@ -32,7 +32,7 @@
           :disabled="!canWarehouseComplete || closeLoading"
           @click="closeTask"
         >
-          {{ closeLoading ? '结单中…' : '结单' }}
+          {{ closeLoading ? '完成中…' : '完成仓库处理' }}
         </BaseButton>
         <span v-if="!canWarehouseComplete" class="close-hint">{{ warehouseCompleteBlockedHint }}</span>
       </div>
@@ -61,7 +61,10 @@ import {
   formatCloseArchiveError,
   isTaskCloseFlowTerminal,
 } from '@/domain/task-close-eligibility'
-import { getTaskActionAvailability } from '@/domain/task-action-availability'
+import {
+  getTaskActionAvailability,
+  shouldHideWarehouseCompleteAction,
+} from '@/domain/task-action-availability'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { usePermission } from '@/composables/usePermission'
 import { useTasksStore } from '@/stores/tasks'
@@ -107,9 +110,12 @@ const closeBlockedHint = computed(() => {
   return reasons.length > 0 ? reasons.join('；') : '请满足上方结单条件'
 })
 
-/** 仓库侧结单入口：PendingProductionTransfer + 仓库已接收，底层先 warehouse/complete 再 close */
+/** 仓库完成入口：PendingProductionTransfer + 已接收；底层 archiveTask 会先 complete 再 close */
 const canShowWarehouseComplete = computed(
-  () => availability.value.canShowWarehouseComplete && can('task.close'),
+  () =>
+    !shouldHideWarehouseCompleteAction(task.value) &&
+    availability.value.canShowWarehouseComplete &&
+    can('task.close'),
 )
 const canWarehouseComplete = computed(
   () =>
