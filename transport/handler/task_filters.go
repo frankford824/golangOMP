@@ -10,10 +10,16 @@ import (
 )
 
 func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError) {
+	priorities, appErr := parseTaskPriorities(c, "priority")
+	if appErr != nil {
+		return service.TaskFilter{}, appErr
+	}
+
 	mineFilterEnabled := strings.EqualFold(strings.TrimSpace(c.Query("filter")), "mine")
 	filter := service.TaskFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
 			Statuses:                     parseTaskStatuses(c, "status"),
+			Priorities:                   priorities,
 			TaskTypes:                    parseTaskTypes(c, "task_type"),
 			SourceModes:                  parseTaskSourceModes(c, "source_mode"),
 			BusinessLanes:                parseTaskBusinessLanes(c, "business_lane"),
@@ -105,6 +111,39 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 	}
 
 	return filter, nil
+}
+
+func parseTaskPriorities(c *gin.Context, key string) ([]domain.TaskPriority, *domain.AppError) {
+	values := readQueryList(c, key)
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make([]domain.TaskPriority, 0, len(values))
+	seen := make(map[domain.TaskPriority]struct{}, len(values))
+	for _, value := range values {
+		priority := domain.TaskPriority(strings.ToLower(strings.TrimSpace(value)))
+		if !validListTaskPriority(priority) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_priority_invalid", map[string]interface{}{
+				"field": "priority",
+				"value": value,
+			})
+		}
+		if _, exists := seen[priority]; exists {
+			continue
+		}
+		seen[priority] = struct{}{}
+		out = append(out, priority)
+	}
+	return out, nil
+}
+
+func validListTaskPriority(priority domain.TaskPriority) bool {
+	switch priority {
+	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseTaskStatuses(c *gin.Context, key string) []domain.TaskStatus {

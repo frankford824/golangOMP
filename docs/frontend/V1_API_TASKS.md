@@ -118,6 +118,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `warehouse_blocking_reason_code` | query | array<string> | 否 | Filters tasks that currently contain any of the given `workflow.warehouse_blocking_reasons.code` values. Supports comma-separated multi-value queries. |
 | `creator_id` | query | integer | 否 | - |
 | `designer_id` | query | integer | 否 | - |
+| `priority` | query | array<enum(low/normal/high/critical)> | 否 | Filters by task priority (`t.priority`). Supports comma-separated multi-value queries such as `priority=critical,high`. |
 | `designer_empty` | query | boolean | 否 | When `true`, returns only tasks with no designer assignment (`designer_id` IS NULL or `0`). Use with `workflow_lane=customization` for customization-lane unassigned-artwork filtering; do not combine with `status=PendingAssign` for that case. |
 | `need_outsource` | query | boolean | 否 | - |
 | `overdue` | query | boolean | 否 | When `true`, filters `deadline_at < now` and excludes `Completed`/`Archived`/`Cancelled`; when `false`, returns the complement set. |

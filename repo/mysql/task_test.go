@@ -177,6 +177,55 @@ func TestBuildTaskListQuerySpecSupportsWorkflowLaneFilter(t *testing.T) {
 	}
 }
 
+func TestBuildTaskListQuerySpecSupportsPriorityFilter(t *testing.T) {
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
+		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
+			Priorities: []domain.TaskPriority{domain.TaskPriorityCritical},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	if !strings.Contains(spec.whereSQL, "t.priority IN (?)") {
+		t.Fatalf("whereSQL missing t.priority IN clause: %s", spec.whereSQL)
+	}
+}
+
+func TestBuildTaskListQuerySpecSupportsPriorityMultiValueFilter(t *testing.T) {
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
+		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
+			Priorities: []domain.TaskPriority{
+				domain.TaskPriorityCritical,
+				domain.TaskPriorityHigh,
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	if !strings.Contains(spec.whereSQL, "t.priority IN (?, ?)") {
+		t.Fatalf("whereSQL missing multi-value t.priority IN clause: %s", spec.whereSQL)
+	}
+}
+
+func TestBuildTaskListQuerySpecPriorityDoesNotBreakStatusFilter(t *testing.T) {
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
+		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
+			Priorities: []domain.TaskPriority{domain.TaskPriorityCritical},
+			Statuses:   []domain.TaskStatus{domain.TaskStatusInProgress},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	if !strings.Contains(spec.whereSQL, "t.priority IN (?)") {
+		t.Fatalf("whereSQL missing t.priority IN clause: %s", spec.whereSQL)
+	}
+	if !strings.Contains(spec.whereSQL, "t.task_status IN (?)") {
+		t.Fatalf("whereSQL missing t.task_status IN clause: %s", spec.whereSQL)
+	}
+}
+
 func TestBuildTaskListQuerySpecSupportsStageVisibilityScope(t *testing.T) {
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
 		ScopeStageVisibilities: []repo.ScopeStageVisibility{
