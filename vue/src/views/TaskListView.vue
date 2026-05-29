@@ -16,6 +16,13 @@
           <BaseButton v-if="can('task.create')" variant="primary" @click="goCreate">
             创建任务
           </BaseButton>
+          <BaseButton
+            v-if="can('task.create')"
+            variant="secondary"
+            @click="goExcelAssistCreate"
+          >
+            Excel 辅助创建
+          </BaseButton>
         </div>
       </div>
       <div class="task-category-switch" aria-label="任务分类">
@@ -889,6 +896,12 @@ function goCreate() {
   } else {
     showCreateModal.value = true
   }
+}
+
+function goExcelAssistCreate() {
+  if (!can('task.create')) return
+  saveState()
+  void router.push({ name: 'TaskExcelAssistCreate' })
 }
 
 function goDetail(task: Task) {

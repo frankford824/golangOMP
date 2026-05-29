@@ -201,7 +201,7 @@ async function downloadTemplate(): Promise<void> {
   downloading.value = true
   errorText.value = ''
   try {
-    const res = await batchSkuApi.downloadTemplate()
+    const res = await batchSkuApi.downloadTemplate(props.taskType)
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data as BlobPart])
     const disposition = String(res.headers?.['content-disposition'] ?? '')
     const match = disposition.match(/filename\\*?=(?:UTF-8'')?\"?([^\";]+)/i)

@@ -60,6 +60,15 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'tasks/excel-assist',
+        name: 'TaskExcelAssistCreate',
+        component: () => import('@/views/TaskExcelAssistCreateView.vue'),
+        meta: {
+          requiresAuth: true,
+          requiredPermissions: ['task:create'],
+        },
+      },
+      {
         path: 'tasks/:id',
         name: 'TaskDetail',
         component: () => import('@/views/TaskDetailView.vue'),
