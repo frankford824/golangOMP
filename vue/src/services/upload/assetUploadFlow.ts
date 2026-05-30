@@ -161,6 +161,7 @@ export async function prepareTaskAssetUploadSession(
   const remark = remarkBase + (options?.remarkSuffix ?? '')
 
   const payload: CreateAssetUploadSessionPayload = {
+    asset_id: intent.asset_id,
     asset_kind: intent.asset_kind,
     file_name: intent.file_name ?? file.name,
     expected_size: intent.expected_size ?? file.size,

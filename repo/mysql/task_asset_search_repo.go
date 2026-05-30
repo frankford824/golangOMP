@@ -164,6 +164,31 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 		clauses = append(clauses, `t.task_status = ?`)
 		args = append(args, string(domain.TaskStatusArchived))
 	}
+	switch query.UsableState {
+	case domain.AssetUsableStateFilterEditable:
+		clauses = append(clauses, `ta.asset_type IN (?, ?, ?)`)
+		args = append(args, string(domain.TaskAssetTypeDelivery), string(domain.TaskAssetTypeSource), string(domain.TaskAssetTypeReference))
+		clauses = append(clauses, `COALESCE(ta.flow_review_status, '') NOT IN (?, ?)`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusSuperseded), string(domain.TaskAssetFlowReviewStatusCleaned))
+	case domain.AssetUsableStateFilterReadyForUse:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusApproved))
+	case domain.AssetUsableStateFilterPendingReview:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusPendingReview))
+	case domain.AssetUsableStateFilterRejected:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusRejected))
+	case domain.AssetUsableStateFilterHistory:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusSuperseded))
+	case domain.AssetUsableStateFilterCleaned:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusCleaned))
+	case domain.AssetUsableStateFilterOther:
+		clauses = append(clauses, `(ta.flow_review_status IS NULL OR ta.flow_review_status = ? OR ta.flow_review_status = '')`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusNotApplicable))
+	}
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 

@@ -19,6 +19,19 @@ const (
 	AssetTaskStatusFilterAll      AssetTaskStatusFilter = "all"
 )
 
+type AssetUsableStateFilter string
+
+const (
+	AssetUsableStateFilterAll           AssetUsableStateFilter = "all"
+	AssetUsableStateFilterEditable      AssetUsableStateFilter = "editable"
+	AssetUsableStateFilterReadyForUse   AssetUsableStateFilter = "ready_for_use"
+	AssetUsableStateFilterPendingReview AssetUsableStateFilter = "pending_review"
+	AssetUsableStateFilterRejected      AssetUsableStateFilter = "rejected"
+	AssetUsableStateFilterHistory       AssetUsableStateFilter = "history"
+	AssetUsableStateFilterCleaned       AssetUsableStateFilter = "cleaned"
+	AssetUsableStateFilterOther         AssetUsableStateFilter = "not_applicable"
+)
+
 type AssetSearchQuery struct {
 	Keyword       string
 	ModuleKey     string
@@ -30,6 +43,7 @@ type AssetSearchQuery struct {
 	IsArchived    AssetArchiveFilter
 	TaskStatus    AssetTaskStatusFilter
 	Source        AssetResourceSource
+	UsableState   AssetUsableStateFilter
 }
 
 func (q AssetSearchQuery) Normalized() AssetSearchQuery {
@@ -56,6 +70,17 @@ func (q AssetSearchQuery) Normalized() AssetSearchQuery {
 	case AssetResourceSourceSystem, AssetResourceSourceExternal:
 	default:
 		q.Source = AssetResourceSourceAll
+	}
+	switch q.UsableState {
+	case AssetUsableStateFilterEditable,
+		AssetUsableStateFilterReadyForUse,
+		AssetUsableStateFilterPendingReview,
+		AssetUsableStateFilterRejected,
+		AssetUsableStateFilterHistory,
+		AssetUsableStateFilterCleaned,
+		AssetUsableStateFilterOther:
+	default:
+		q.UsableState = AssetUsableStateFilterAll
 	}
 	return q
 }

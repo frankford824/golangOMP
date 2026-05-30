@@ -14,6 +14,8 @@ export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'desig
 /** POST /v1/assets/upload-sessions 请求体（新集成，不传 upload_mode） */
 export interface CreateAssetUploadSessionPayload {
   task_id?: string | number
+  /** Existing design asset id. When present, the upload replaces that asset's current version. */
+  asset_id?: string | number
   asset_kind: AssetKind
   /** 规范字段名 */
   file_name: string

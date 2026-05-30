@@ -45,6 +45,9 @@ func (s *Service) SetExternalAssetService(externalSvc *externalassets.Service) {
 
 func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*SearchResult, *domain.AppError) {
 	query = query.Normalized()
+	if query.UsableState != domain.AssetUsableStateFilterAll && query.Source == domain.AssetResourceSourceExternal {
+		return &SearchResult{Items: []*AssetDetail{}, Total: 0, Page: query.Page, Size: query.Size}, nil
+	}
 	if query.Source == domain.AssetResourceSourceExternal {
 		return s.searchExternal(ctx, query)
 	}
@@ -56,7 +59,9 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 	for _, row := range rows {
 		items = append(items, buildAssetDetail(row, nil))
 	}
-	if query.Source == domain.AssetResourceSourceAll && s.externalSvc != nil && s.externalSvc.Enabled() {
+	if query.Source == domain.AssetResourceSourceAll &&
+		query.UsableState == domain.AssetUsableStateFilterAll &&
+		s.externalSvc != nil && s.externalSvc.Enabled() {
 		external, externalTotal, appErr := s.searchExternalRows(ctx, query)
 		if appErr != nil {
 			return nil, appErr

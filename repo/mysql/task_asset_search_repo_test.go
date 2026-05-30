@@ -90,6 +90,37 @@ func TestBuildTaskAssetSearchWhereExcludesSystemDerivedPreviewAssets(t *testing.
 	}
 }
 
+func TestBuildTaskAssetSearchWhereFiltersUsableState(t *testing.T) {
+	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		UsableState: domain.AssetUsableStateFilterReadyForUse,
+	})
+
+	if !strings.Contains(where, "ta.flow_review_status = ?") {
+		t.Fatalf("where clause missing flow review status filter: %s", where)
+	}
+	if got := args[len(args)-1]; got != string(domain.TaskAssetFlowReviewStatusApproved) {
+		t.Fatalf("last arg = %#v, want approved", got)
+	}
+}
+
+func TestBuildTaskAssetSearchWhereFiltersEditableAssets(t *testing.T) {
+	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		UsableState: domain.AssetUsableStateFilterEditable,
+	})
+
+	for _, expected := range []string{
+		"ta.asset_type IN (?, ?, ?)",
+		"COALESCE(ta.flow_review_status, '') NOT IN (?, ?)",
+	} {
+		if !strings.Contains(where, expected) {
+			t.Fatalf("where clause missing %q: %s", expected, where)
+		}
+	}
+	if got, want := strings.Count(where, "?"), len(args); got != want {
+		t.Fatalf("placeholder count = %d, args count = %d", got, want)
+	}
+}
+
 func TestBuildListCurrentByAssetIDsQueryBuildsParameterizedINClause(t *testing.T) {
 	query, args := buildListCurrentByAssetIDsQuery([]int64{101, 202, 303})
 	if query == "" {

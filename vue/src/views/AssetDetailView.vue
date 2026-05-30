@@ -10,6 +10,15 @@
       </div>
       <div class="page-actions">
         <BaseButton
+          v-if="assetCanBeReplaced(asset)"
+          variant="primary"
+          size="sm"
+          :disabled="replacementUploading"
+          @click="startReplaceAsset"
+        >
+          {{ replacementUploading ? '上传中' : '修改资源' }}
+        </BaseButton>
+        <BaseButton
           v-if="assetTaskId"
           variant="primary"
           size="sm"
@@ -36,7 +45,18 @@
         <BaseButton size="sm" :disabled="loading" @click="loadAsset">
           {{ loading ? '加载中…' : '刷新详情' }}
         </BaseButton>
+        <input
+          ref="replacementFileInput"
+          type="file"
+          class="hidden-file-input"
+          @change="handleReplacementFile"
+        />
       </div>
+    </div>
+
+    <div v-if="replacementStatus || replacementError" class="replace-message">
+      <span v-if="replacementStatus" class="replace-message-ok">{{ replacementStatus }}</span>
+      <span v-if="replacementError" class="replace-message-error">{{ replacementError }}</span>
     </div>
 
     <section class="detail-card">
@@ -48,6 +68,17 @@
         description="未拿到资产详情，请确认资产 ID 或访问权限。"
       />
       <template v-else>
+        <div
+          v-if="!isExternalAsset(asset)"
+          class="asset-usable-summary"
+          :class="assetUsableToneClass(asset)"
+        >
+          <div>
+            <span class="asset-usable-label">使用状态</span>
+            <strong>{{ assetUsableLabel(asset) }}</strong>
+          </div>
+          <span v-if="assetCanBeReplaced(asset)" class="asset-editable-label">可修改资源</span>
+        </div>
         <dl class="detail-grid">
           <div class="detail-row">
             <dt>资源来源</dt>
@@ -212,10 +243,12 @@ import {
   fetchTaskAssetPreviewWithDerivedFallback,
   primeAssetDownloadMetaCache,
 } from '@/domain/asset-access'
-import { assetsApi } from '@/services/api/assetsApi'
+import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { userAccountDisplay } from '@/domain/user-display'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 
 const route = useRoute()
 const router = useRouter()
@@ -237,6 +270,10 @@ const previewUnavailable = ref(false)
 /** GET /preview 返回 404：预览入口资源不存在 */
 const previewNotFound = ref(false)
 const previewPreparing = ref(false)
+const replacementFileInput = ref<HTMLInputElement | null>(null)
+const replacementUploading = ref(false)
+const replacementStatus = ref('')
+const replacementError = ref('')
 
 const versions = computed<BackendAssetVersion[]>(() => asset.value?.versions ?? [])
 const assetTaskId = computed(() => positiveID(asset.value?.task_id) || positiveID(taskId.value))
@@ -366,6 +403,31 @@ function versionUsableToneClass(version: BackendAssetVersion): string {
   return usableToneClass(version as Record<string, unknown>)
 }
 
+function rawAssetKind(row: BackendAsset | null | undefined): string {
+  if (!row) return ''
+  const record = row as Record<string, unknown>
+  return String(record.asset_kind ?? record.asset_type ?? row.file_role ?? '').trim().toLowerCase()
+}
+
+function assetScopeSkuCode(row: BackendAsset | null | undefined): string {
+  if (!row) return ''
+  const record = row as Record<string, unknown>
+  for (const key of ['scope_sku_code', 'sku_code', 'primary_sku_code', 'target_sku_code'] as const) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function assetCanBeReplaced(row: BackendAsset | null | undefined): boolean {
+  if (!row || isExternalAsset(row)) return false
+  if (!assetTaskId.value || !positiveID(assetResourceId(row))) return false
+  const kind = rawAssetKind(row)
+  if (kind !== 'delivery' && kind !== 'source' && kind !== 'reference') return false
+  const state = rawUsableState(row as Record<string, unknown>)
+  return state !== 'history' && state !== 'cleaned'
+}
+
 function externalOriginPath(row: BackendAsset): string {
   const record = row as Record<string, unknown>
   const path = String(record.origin_path ?? record.originPath ?? record.product_name ?? '').trim()
@@ -488,6 +550,68 @@ function goTaskDetail() {
   void router.push({ name: 'TaskDetail', params: { id: assetTaskId.value } })
 }
 
+function startReplaceAsset() {
+  if (!assetCanBeReplaced(asset.value)) {
+    replacementStatus.value = ''
+    replacementError.value = '当前资源不可修改；只有系统内的参考图、源文件、最终成品图可替换'
+    return
+  }
+  replacementStatus.value = ''
+  replacementError.value = ''
+  if (replacementFileInput.value) {
+    replacementFileInput.value.value = ''
+    replacementFileInput.value.click()
+  }
+}
+
+async function handleReplacementFile(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  const row = asset.value
+  if (!file || !row) return
+
+  const assetID = positiveID(assetResourceId(row))
+  const kind = rawAssetKind(row)
+  if (!assetTaskId.value || !assetID || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
+    replacementStatus.value = ''
+    replacementError.value = '当前资源缺少任务或资产信息，不能直接修改'
+    if (input) input.value = ''
+    return
+  }
+
+  replacementUploading.value = true
+  replacementStatus.value = '正在上传并生成新版本'
+  replacementError.value = ''
+  try {
+    await uploadTaskFileViaAssetSession(
+      assetTaskId.value,
+      file,
+      {
+        asset_id: assetID,
+        asset_kind: kind as AssetKind,
+        target_sku_code: assetScopeSkuCode(row) || undefined,
+        remark: `资产详情修改资源：${file.name}`,
+      },
+      {
+        onProgress: (progress) => {
+          const percent = Number(progress.percent)
+          replacementStatus.value = Number.isFinite(percent)
+            ? `正在上传并生成新版本 ${Math.max(0, Math.min(100, Math.round(percent)))}%`
+            : '正在上传并生成新版本'
+        },
+      },
+    )
+    replacementStatus.value = '资源已修改，新版本已进入对应审核状态'
+    await loadAsset()
+  } catch (err) {
+    replacementStatus.value = ''
+    replacementError.value = resolveApiUserMessage(err, { fallback: '修改资源失败，请稍后重试' })
+  } finally {
+    replacementUploading.value = false
+    if (input) input.value = ''
+  }
+}
+
 async function loadAsset() {
   if (!assetId.value) {
     asset.value = null
@@ -594,6 +718,30 @@ onMounted(() => {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+.hidden-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.replace-message {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.875rem;
+  background: #eff6ff;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+.replace-message-ok {
+  color: #1d4ed8;
+}
+.replace-message-error {
+  color: #b91c1c;
+}
 .detail-card {
   background: #fff;
   border: 1px solid #e2e8f0;
@@ -634,6 +782,60 @@ onMounted(() => {
   font-size: 0.8125rem;
   color: #0f172a;
   word-break: break-word;
+}
+.asset-usable-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  border-radius: 0.875rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 0.75rem 0.9rem;
+}
+.asset-usable-label {
+  display: block;
+  margin-bottom: 0.18rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.asset-usable-summary strong {
+  color: inherit;
+  font-size: 1rem;
+  font-weight: 900;
+}
+.asset-usable-summary.detail-state-pill--ready {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+.asset-usable-summary.detail-state-pill--pending {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+.asset-usable-summary.detail-state-pill--rejected {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.asset-usable-summary.detail-state-pill--history,
+.asset-usable-summary.detail-state-pill--cleaned,
+.asset-usable-summary.detail-state-pill--neutral {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+}
+.asset-editable-label {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #ffffff;
+  padding: 0.24rem 0.62rem;
+  font-size: 0.72rem;
+  font-weight: 900;
 }
 .detail-state-pill {
   display: inline-flex;

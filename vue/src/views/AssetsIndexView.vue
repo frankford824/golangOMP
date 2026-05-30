@@ -56,6 +56,12 @@
             accept=".xlsx"
             @change="handleExcelPackageFile"
           />
+          <input
+            ref="replacementFileInput"
+            type="file"
+            class="ac-hidden-file"
+            @change="handleReplacementFile"
+          />
           <button type="button" class="ac-icon-btn ac-icon-btn--primary" @click="selectedModalOpen = true">
             已选资产
           </button>
@@ -80,6 +86,11 @@
             placeholder="全部类型"
             :options="assetKindOptions"
             clearable
+          />
+          <BaseSelect
+            v-model="filters.usableState"
+            label="使用状态"
+            :options="assetUsableStateOptions"
           />
           <BaseInput
             v-model="filters.scopeSkuCode"
@@ -119,6 +130,10 @@
       <span v-if="excelPackageStatus" class="ac-batch-status">{{ excelPackageStatus }}</span>
       <span v-if="excelPackageError" class="ac-batch-error">{{ excelPackageError }}</span>
     </div>
+    <div v-if="replacementStatus || replacementError" class="ac-excel-package-bar">
+      <span v-if="replacementStatus" class="ac-batch-status">{{ replacementStatus }}</span>
+      <span v-if="replacementError" class="ac-batch-error">{{ replacementError }}</span>
+    </div>
     <main class="ac-grid">
       <div v-if="loading" class="ac-loading-state">
         <p class="ac-loading-title">正在加载</p>
@@ -153,6 +168,10 @@
             />
           </label>
           <div class="ac-card-img-box">
+            <span class="ac-card-state-badge" :class="assetStateToneClass(asset)">
+              {{ assetPrimaryStateLabel(asset) }}
+            </span>
+            <span v-if="assetCanBeReplaced(asset)" class="ac-card-editable-badge">可修改资源</span>
             <AssetPreviewMedia
               :asset-id="assetResourceId(asset)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
@@ -237,6 +256,15 @@
               @click.stop="openRelatedTask(asset)"
             >
               打开任务
+            </button>
+            <button
+              v-if="assetCanBeReplaced(asset)"
+              type="button"
+              class="ac-card-link-btn ac-card-link-btn--edit"
+              :disabled="replacementUploading"
+              @click.stop="startReplaceAsset(asset)"
+            >
+              {{ replacementUploading && replacementTargetId === assetResourceId(asset) ? '上传中' : '修改资源' }}
             </button>
             <button
               type="button"
@@ -544,6 +572,15 @@
           >
             打开对应任务
           </button>
+          <button
+            v-if="assetCanBeReplaced(selectedAsset)"
+            type="button"
+            class="ac-card-link-btn ac-card-link-btn--edit"
+            :disabled="replacementUploading"
+            @click="startReplaceAsset(selectedAsset)"
+          >
+            {{ replacementUploading && replacementTargetId === assetResourceId(selectedAsset) ? '上传中' : '修改资源' }}
+          </button>
         </div>
 
         <div class="versions-section">
@@ -635,12 +672,14 @@ import {
   type AssetExcelPackageFailure,
   type AssetExcelPackageItem,
   type AssetExcelPackageRow,
+  type AssetKind,
 } from '@/services/api/assetsApi'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { userAccountDisplay } from '@/domain/user-display'
 import { formatFileSizeBytes } from '@/domain/formatters/file-size'
+import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import {
   buildTimestampedZipFilename,
   downloadBatchAsZip,
@@ -684,6 +723,11 @@ const excelFileInput = ref<HTMLInputElement | null>(null)
 const excelPackaging = ref(false)
 const excelPackageStatus = ref('')
 const excelPackageError = ref('')
+const replacementFileInput = ref<HTMLInputElement | null>(null)
+const replacementTargetAsset = ref<BackendAsset | null>(null)
+const replacementUploading = ref(false)
+const replacementStatus = ref('')
+const replacementError = ref('')
 const bulkSearchModalOpen = ref(false)
 const bulkSearchInput = ref('')
 const bulkSearchRunning = ref(false)
@@ -691,11 +735,22 @@ const bulkSearchDownloading = ref(false)
 const bulkSearchStatus = ref('')
 const bulkSearchError = ref('')
 
+type AssetUsableFilter =
+  | 'all'
+  | 'editable'
+  | 'ready_for_use'
+  | 'pending_review'
+  | 'rejected'
+  | 'history'
+  | 'cleaned'
+  | 'not_applicable'
+
 const filters = reactive({
   keyword: '',
   resourceSource: 'all' as AssetResourceSource,
   taskId: '',
   assetKind: '',
+  usableState: 'all' as AssetUsableFilter,
   scopeSkuCode: '',
 })
 
@@ -711,6 +766,17 @@ const assetKindOptions: BaseSelectOption[] = [
   { value: 'delivery', label: '最终成品图（delivery）' },
   { value: 'preview', label: '预览辅助（preview）' },
   { value: 'design_thumb', label: '预览辅助（design_thumb）' },
+]
+
+const assetUsableStateOptions: BaseSelectOption[] = [
+  { value: 'all', label: '全部状态' },
+  { value: 'editable', label: '可修改资源' },
+  { value: 'ready_for_use', label: '可直接使用' },
+  { value: 'pending_review', label: '待审核' },
+  { value: 'rejected', label: '审核未通过' },
+  { value: 'history', label: '历史版本' },
+  { value: 'cleaned', label: '文件已清理' },
+  { value: 'not_applicable', label: '不进入审核流' },
 ]
 
 const requestedTaskId = computed(() => {
@@ -757,6 +823,9 @@ const selectedAssets = computed(() => Array.from(selectedAssetMap.values()))
 const canBatchDownload = computed(
   () => selectedCount.value > 0 && selectedCount.value <= MAX_BATCH_DOWNLOAD_ASSETS && !batchDownloading.value,
 )
+const replacementTargetId = computed(() =>
+  replacementTargetAsset.value ? assetResourceId(replacementTargetAsset.value) : '',
+)
 
 const EXCEL_PACKAGE_CONCURRENCY = 4
 const bulkSearchResults = ref<BulkSearchResult[]>([])
@@ -792,7 +861,7 @@ watch(listTotalPages, (tp) => {
 })
 
 watch(
-  () => [filters.keyword, filters.resourceSource, filters.taskId, filters.assetKind, filters.scopeSkuCode],
+  () => [filters.keyword, filters.resourceSource, filters.taskId, filters.assetKind, filters.usableState, filters.scopeSkuCode],
   () => {
     listPage.value = 1
     scheduleReload()
@@ -952,6 +1021,40 @@ function assetUsableToneClass(asset: BackendAsset): string {
 
 function versionUsableToneClass(version: BackendAssetVersion): string {
   return usableToneClass(version as Record<string, unknown>)
+}
+
+function rawAssetKind(asset: BackendAsset | null | undefined): string {
+  if (!asset) return ''
+  const record = asset as Record<string, unknown>
+  return String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? '').trim().toLowerCase()
+}
+
+function assetScopeSkuCode(asset: BackendAsset | null | undefined): string {
+  if (!asset) return ''
+  const record = asset as Record<string, unknown>
+  for (const key of ['scope_sku_code', 'sku_code', 'primary_sku_code', 'target_sku_code'] as const) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function assetPrimaryStateLabel(asset: BackendAsset): string {
+  if (isExternalAsset(asset)) return `外部资源 · ${externalAssetStatusLabel(asset)}`
+  return assetUsableLabel(asset)
+}
+
+function assetStateToneClass(asset: BackendAsset): string {
+  return isExternalAsset(asset) ? 'ac-state-badge--external' : assetUsableToneClass(asset)
+}
+
+function assetCanBeReplaced(asset: BackendAsset | null | undefined): boolean {
+  if (!asset || isExternalAsset(asset)) return false
+  if (!assetTaskId(asset) || !positiveID(assetResourceId(asset))) return false
+  const kind = rawAssetKind(asset)
+  if (kind !== 'delivery' && kind !== 'source' && kind !== 'reference') return false
+  const state = rawUsableState(asset as Record<string, unknown>)
+  return state !== 'history' && state !== 'cleaned'
 }
 
 function cardTitle(asset: BackendAsset): string {
@@ -1334,6 +1437,70 @@ function openExcelPicker() {
   if (excelFileInput.value) {
     excelFileInput.value.value = ''
     excelFileInput.value.click()
+  }
+}
+
+function startReplaceAsset(asset: BackendAsset | null | undefined) {
+  if (!asset || !assetCanBeReplaced(asset)) {
+    replacementStatus.value = ''
+    replacementError.value = '当前资源不可修改；只有系统内的参考图、源文件、最终成品图可替换'
+    return
+  }
+  replacementTargetAsset.value = asset
+  replacementStatus.value = ''
+  replacementError.value = ''
+  if (replacementFileInput.value) {
+    replacementFileInput.value.value = ''
+    replacementFileInput.value.click()
+  }
+}
+
+async function handleReplacementFile(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  const asset = replacementTargetAsset.value
+  if (!file || !asset) return
+
+  const taskId = assetTaskId(asset)
+  const assetId = positiveID(assetResourceId(asset))
+  const kind = rawAssetKind(asset)
+  if (!taskId || !assetId || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
+    replacementStatus.value = ''
+    replacementError.value = '当前资源缺少任务或资产信息，不能在资产中心直接修改'
+    if (input) input.value = ''
+    return
+  }
+
+  replacementUploading.value = true
+  replacementStatus.value = '正在上传并生成新版本'
+  replacementError.value = ''
+  try {
+    await uploadTaskFileViaAssetSession(
+      taskId,
+      file,
+      {
+        asset_id: assetId,
+        asset_kind: kind as AssetKind,
+        target_sku_code: assetScopeSkuCode(asset) || undefined,
+        remark: `资产中心修改资源：${file.name}`,
+      },
+      {
+        onProgress: (progress) => {
+          const percent = Number(progress.percent)
+          replacementStatus.value = Number.isFinite(percent)
+            ? `正在上传并生成新版本 ${Math.max(0, Math.min(100, Math.round(percent)))}%`
+            : '正在上传并生成新版本'
+        },
+      },
+    )
+    replacementStatus.value = '资源已修改，新版本已进入对应审核状态'
+    await reload()
+  } catch (err) {
+    replacementStatus.value = ''
+    replacementError.value = resolveApiUserMessage(err, { fallback: '修改资源失败，请稍后重试' })
+  } finally {
+    replacementUploading.value = false
+    if (input) input.value = ''
   }
 }
 
@@ -1729,6 +1896,7 @@ function syncQuerySelection() {
   const nextQuery: Record<string, string> = {}
   if (filters.taskId.trim()) nextQuery.task_id = filters.taskId.trim()
   if (filters.resourceSource !== 'all') nextQuery.source = filters.resourceSource
+  if (filters.usableState !== 'all') nextQuery.usable_state = filters.usableState
   if (selectedAssetId.value.trim()) nextQuery.asset_id = selectedAssetId.value.trim()
   void router.replace({ query: nextQuery })
 }
@@ -1738,6 +1906,7 @@ function openAssetDetail(assetId: string) {
   const query: Record<string, string> = {}
   if (filters.taskId.trim()) query.task_id = filters.taskId.trim()
   if (filters.resourceSource !== 'all') query.source = filters.resourceSource
+  if (filters.usableState !== 'all') query.usable_state = filters.usableState
   void router.push({ name: 'AssetDetail', params: { id: assetId }, query })
 }
 
@@ -1759,6 +1928,7 @@ async function reload() {
       {
         keyword: effectiveSearchKeyword.value || undefined,
         source: filters.resourceSource,
+        usable_state: filters.usableState === 'all' ? undefined : filters.usableState,
         page: listPage.value,
         size: listPageSize.value,
       },
@@ -1829,6 +1999,10 @@ onMounted(() => {
   const requestedSource = typeof route.query.source === 'string' ? route.query.source.trim() : ''
   if (requestedSource === 'system' || requestedSource === 'external' || requestedSource === 'all') {
     filters.resourceSource = requestedSource
+  }
+  const requestedUsableState = typeof route.query.usable_state === 'string' ? route.query.usable_state.trim() : ''
+  if (assetUsableStateOptions.some((option) => option.value === requestedUsableState)) {
+    filters.usableState = requestedUsableState as AssetUsableFilter
   }
   void reload()
 })
@@ -3067,6 +3241,73 @@ onBeforeUnmount(() => {
   max-height: 82% !important;
 }
 
+.ac-card-state-badge,
+.ac-card-editable-badge {
+  position: absolute;
+  top: 0.45rem;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  max-width: 54%;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.92);
+  color: #475569;
+  font-size: 0.66rem;
+  font-weight: 900;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.ac-card-state-badge {
+  left: 0.45rem;
+}
+
+.ac-card-editable-badge {
+  right: 0.45rem;
+  max-width: 46%;
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(239, 246, 255, 0.96);
+  color: #1d4ed8;
+}
+
+.ac-card-state-badge.ac-usability--ready {
+  border-color: rgba(22, 163, 74, 0.28) !important;
+  background: rgba(240, 253, 244, 0.96) !important;
+  color: #15803d !important;
+}
+
+.ac-card-state-badge.ac-usability--pending {
+  border-color: rgba(217, 119, 6, 0.28) !important;
+  background: rgba(255, 251, 235, 0.96) !important;
+  color: #b45309 !important;
+}
+
+.ac-card-state-badge.ac-usability--rejected {
+  border-color: rgba(220, 38, 38, 0.25) !important;
+  background: rgba(254, 242, 242, 0.96) !important;
+  color: #b91c1c !important;
+}
+
+.ac-card-state-badge.ac-usability--history,
+.ac-card-state-badge.ac-usability--cleaned,
+.ac-card-state-badge.ac-usability--neutral,
+.ac-card-state-badge.ac-state-badge--external {
+  border-color: rgba(148, 163, 184, 0.36) !important;
+  background: rgba(248, 250, 252, 0.96) !important;
+  color: #475569 !important;
+}
+
+.ac-card-state-badge.ac-state-badge--external {
+  max-width: calc(100% - 0.9rem);
+}
+
 .ac-card-download-fab {
   position: absolute !important;
   right: 0.5rem !important;
@@ -3393,6 +3634,12 @@ onBeforeUnmount(() => {
 .ac-card-link-btn--task {
   background: #2563eb !important;
   border-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.ac-card-link-btn--edit {
+  background: #0f766e !important;
+  border-color: #0f766e !important;
   color: #ffffff !important;
 }
 
