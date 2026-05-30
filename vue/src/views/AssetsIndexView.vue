@@ -168,10 +168,6 @@
             />
           </label>
           <div class="ac-card-img-box">
-            <span class="ac-card-state-badge" :class="assetStateToneClass(asset)">
-              {{ assetPrimaryStateLabel(asset) }}
-            </span>
-            <span v-if="assetCanBeReplaced(asset)" class="ac-card-editable-badge">可修改资源</span>
             <AssetPreviewMedia
               :asset-id="assetResourceId(asset)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
@@ -206,6 +202,12 @@
                 {{ assetUsableLabel(asset) }}
               </span>
               <span
+                v-if="assetCanBeReplaced(asset)"
+                class="ac-editable-pill"
+              >
+                可修改资源
+              </span>
+              <span
                 class="ac-format-pill"
                 :class="assetTypeToneClass(asset)"
                 :title="imageBusinessTypeLabel(asset)"
@@ -233,7 +235,7 @@
               </button>
             </div>
           </div>
-          <div class="ac-card-footer">
+          <div v-if="isExternalAsset(asset)" class="ac-card-footer">
             <div>
               <div class="ac-footer-label">{{ isExternalAsset(asset) ? '准备状态' : '使用状态' }}</div>
               <div
@@ -1037,15 +1039,6 @@ function assetScopeSkuCode(asset: BackendAsset | null | undefined): string {
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
   return ''
-}
-
-function assetPrimaryStateLabel(asset: BackendAsset): string {
-  if (isExternalAsset(asset)) return `外部资源 · ${externalAssetStatusLabel(asset)}`
-  return assetUsableLabel(asset)
-}
-
-function assetStateToneClass(asset: BackendAsset): string {
-  return isExternalAsset(asset) ? 'ac-state-badge--external' : assetUsableToneClass(asset)
 }
 
 function assetCanBeReplaced(asset: BackendAsset | null | undefined): boolean {
@@ -2414,6 +2407,7 @@ onBeforeUnmount(() => {
 }
 
 .ac-usability-pill,
+.ac-editable-pill,
 .detail-state-pill {
   display: inline-flex;
   align-items: center;
@@ -2430,6 +2424,12 @@ onBeforeUnmount(() => {
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ac-editable-pill {
+  border-color: #99f6e4 !important;
+  background: #f0fdfa !important;
+  color: #0f766e !important;
 }
 
 .detail-state-pill {
@@ -3168,14 +3168,21 @@ onBeforeUnmount(() => {
   min-height: 12.25rem !important;
   display: grid !important;
   grid-template-columns: 9.25rem minmax(0, 1fr) !important;
+  grid-template-rows: auto minmax(2.6rem, auto) !important;
+  grid-template-areas:
+    "preview info"
+    "preview actions" !important;
+  gap: 0.78rem 1.05rem !important;
+  padding: 0.9rem !important;
+  border-radius: 1.05rem !important;
+}
+
+.ac-card--external {
   grid-template-rows: auto auto minmax(2.6rem, auto) !important;
   grid-template-areas:
     "preview info"
     "preview footer"
     "preview actions" !important;
-  gap: 0.78rem 1.05rem !important;
-  padding: 0.9rem !important;
-  border-radius: 1.05rem !important;
 }
 
 .ac-card:hover,
@@ -3239,73 +3246,6 @@ onBeforeUnmount(() => {
 .ac-card-img-box :deep(.apm-placeholder-img) {
   max-width: 82% !important;
   max-height: 82% !important;
-}
-
-.ac-card-state-badge,
-.ac-card-editable-badge {
-  position: absolute;
-  top: 0.45rem;
-  z-index: 4;
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.35rem;
-  max-width: 54%;
-  overflow: hidden;
-  border-radius: 999px;
-  padding: 0.12rem 0.45rem;
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  background: rgba(255, 255, 255, 0.92);
-  color: #475569;
-  font-size: 0.66rem;
-  font-weight: 900;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-  backdrop-filter: blur(8px);
-}
-
-.ac-card-state-badge {
-  left: 0.45rem;
-}
-
-.ac-card-editable-badge {
-  right: 0.45rem;
-  max-width: 46%;
-  border-color: rgba(37, 99, 235, 0.28);
-  background: rgba(239, 246, 255, 0.96);
-  color: #1d4ed8;
-}
-
-.ac-card-state-badge.ac-usability--ready {
-  border-color: rgba(22, 163, 74, 0.28) !important;
-  background: rgba(240, 253, 244, 0.96) !important;
-  color: #15803d !important;
-}
-
-.ac-card-state-badge.ac-usability--pending {
-  border-color: rgba(217, 119, 6, 0.28) !important;
-  background: rgba(255, 251, 235, 0.96) !important;
-  color: #b45309 !important;
-}
-
-.ac-card-state-badge.ac-usability--rejected {
-  border-color: rgba(220, 38, 38, 0.25) !important;
-  background: rgba(254, 242, 242, 0.96) !important;
-  color: #b91c1c !important;
-}
-
-.ac-card-state-badge.ac-usability--history,
-.ac-card-state-badge.ac-usability--cleaned,
-.ac-card-state-badge.ac-usability--neutral,
-.ac-card-state-badge.ac-state-badge--external {
-  border-color: rgba(148, 163, 184, 0.36) !important;
-  background: rgba(248, 250, 252, 0.96) !important;
-  color: #475569 !important;
-}
-
-.ac-card-state-badge.ac-state-badge--external {
-  max-width: calc(100% - 0.9rem);
 }
 
 .ac-card-download-fab {
@@ -3401,10 +3341,12 @@ onBeforeUnmount(() => {
 
 .ac-card-actions {
   grid-area: actions;
-  display: flex !important;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(5.35rem, 1fr)) !important;
   align-items: flex-end !important;
   justify-content: flex-start !important;
   margin: 0 !important;
+  gap: 0.5rem !important;
 }
 
 .ac-footer-right {
@@ -3614,21 +3556,18 @@ onBeforeUnmount(() => {
   background: #eff6ff !important;
   border-color: #bfdbfe !important;
   color: #2563eb !important;
-  flex: 1 1 0;
-  min-width: 6.6rem;
+  min-width: 0;
   min-height: 2.3rem;
+  padding-inline: 0.58rem !important;
   border-radius: 0.78rem !important;
   font-weight: 800 !important;
+  white-space: nowrap;
 }
 
 .detail-business-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: 0.9rem;
-}
-
-.ac-card-actions {
-  gap: 0.5rem !important;
 }
 
 .ac-card-link-btn--task {
@@ -3670,6 +3609,13 @@ onBeforeUnmount(() => {
     grid-template-areas:
       "preview"
       "info"
+      "actions" !important;
+  }
+
+  .ac-card--external {
+    grid-template-areas:
+      "preview"
+      "info"
       "footer"
       "actions" !important;
   }
@@ -3700,7 +3646,7 @@ onBeforeUnmount(() => {
   }
 
   .ac-card-actions {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr) !important;
     align-items: stretch !important;
   }
 }
