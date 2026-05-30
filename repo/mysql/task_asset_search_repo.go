@@ -57,7 +57,7 @@ func (r *taskAssetSearchRepo) Search(ctx context.Context, query domain.AssetSear
 	}
 	args = append(args, (query.Page-1)*query.Size, query.Size)
 	rows, err := r.db.db.QueryContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+where+`
-		ORDER BY ta.created_at DESC, ta.id DESC
+		ORDER BY da.updated_at DESC, ta.created_at DESC, ta.id DESC
 		LIMIT ?, ?`, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search task assets: %w", err)
@@ -189,6 +189,13 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 		clauses = append(clauses, `(ta.flow_review_status IS NULL OR ta.flow_review_status = ? OR ta.flow_review_status = '')`)
 		args = append(args, string(domain.TaskAssetFlowReviewStatusNotApplicable))
 	}
+	clauses, args = appendAssetFormatCategoryWhere(
+		clauses,
+		args,
+		[]string{`LOWER(ta.file_name)`, `LOWER(COALESCE(ta.original_filename, ''))`},
+		`LOWER(COALESCE(ta.mime_type, ''))`,
+		query.FormatCategory,
+	)
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 

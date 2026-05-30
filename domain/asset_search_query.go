@@ -32,18 +32,30 @@ const (
 	AssetUsableStateFilterOther         AssetUsableStateFilter = "not_applicable"
 )
 
+type AssetFormatCategoryFilter string
+
+const (
+	AssetFormatCategoryAll     AssetFormatCategoryFilter = "all"
+	AssetFormatCategoryImage   AssetFormatCategoryFilter = "image"
+	AssetFormatCategoryDesign  AssetFormatCategoryFilter = "design"
+	AssetFormatCategoryPDF     AssetFormatCategoryFilter = "pdf"
+	AssetFormatCategoryVideo   AssetFormatCategoryFilter = "video"
+	AssetFormatCategoryArchive AssetFormatCategoryFilter = "archive"
+)
+
 type AssetSearchQuery struct {
-	Keyword       string
-	ModuleKey     string
-	OwnerTeamCode string
-	CreatedFrom   *time.Time
-	CreatedTo     *time.Time
-	Page          int
-	Size          int
-	IsArchived    AssetArchiveFilter
-	TaskStatus    AssetTaskStatusFilter
-	Source        AssetResourceSource
-	UsableState   AssetUsableStateFilter
+	Keyword        string
+	ModuleKey      string
+	OwnerTeamCode  string
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
+	Page           int
+	Size           int
+	IsArchived     AssetArchiveFilter
+	TaskStatus     AssetTaskStatusFilter
+	Source         AssetResourceSource
+	UsableState    AssetUsableStateFilter
+	FormatCategory AssetFormatCategoryFilter
 }
 
 func (q AssetSearchQuery) Normalized() AssetSearchQuery {
@@ -81,6 +93,15 @@ func (q AssetSearchQuery) Normalized() AssetSearchQuery {
 		AssetUsableStateFilterOther:
 	default:
 		q.UsableState = AssetUsableStateFilterAll
+	}
+	switch q.FormatCategory {
+	case AssetFormatCategoryImage,
+		AssetFormatCategoryDesign,
+		AssetFormatCategoryPDF,
+		AssetFormatCategoryVideo,
+		AssetFormatCategoryArchive:
+	default:
+		q.FormatCategory = AssetFormatCategoryAll
 	}
 	return q
 }

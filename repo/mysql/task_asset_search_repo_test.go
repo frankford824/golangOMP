@@ -31,12 +31,12 @@ func TestBuildTaskAssetSearchWhereKeywordCoversPlannedFields(t *testing.T) {
 	if got, want := strings.Count(where, "?"), len(args); got != want {
 		t.Fatalf("placeholder count = %d, args count = %d", got, want)
 	}
-	if got, want := len(args), 9; got != want {
-		t.Fatalf("args len = %d, want %d", got, want)
+	if got, wantMin := len(args), 9; got < wantMin {
+		t.Fatalf("args len = %d, want at least %d", got, wantMin)
 	}
 
 	wantLike := "%ABC-123%"
-	for i, arg := range args {
+	for i, arg := range args[:9] {
 		got, ok := arg.(string)
 		if !ok {
 			t.Fatalf("args[%d] type = %T, want string", i, arg)
@@ -90,6 +90,25 @@ func TestBuildTaskAssetSearchWhereExcludesSystemDerivedPreviewAssets(t *testing.
 	}
 }
 
+func TestBuildTaskAssetSearchWhereDefaultsToRelevantAssetFormats(t *testing.T) {
+	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{})
+
+	for _, expected := range []string{
+		"LOWER(ta.file_name) LIKE ?",
+		"LOWER(COALESCE(ta.original_filename, '')) LIKE ?",
+		"LOWER(COALESCE(ta.mime_type, '')) LIKE ?",
+	} {
+		if !strings.Contains(where, expected) {
+			t.Fatalf("where clause missing format condition %q: %s", expected, where)
+		}
+	}
+	for _, ignored := range []string{"%.doc", "%.docx", "%.json"} {
+		if containsStringArg(args, ignored) {
+			t.Fatalf("default asset search should not include ignored format %q in args: %#v", ignored, args)
+		}
+	}
+}
+
 func TestBuildTaskAssetSearchWhereFiltersUsableState(t *testing.T) {
 	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
 		UsableState: domain.AssetUsableStateFilterReadyForUse,
@@ -98,8 +117,24 @@ func TestBuildTaskAssetSearchWhereFiltersUsableState(t *testing.T) {
 	if !strings.Contains(where, "ta.flow_review_status = ?") {
 		t.Fatalf("where clause missing flow review status filter: %s", where)
 	}
-	if got := args[len(args)-1]; got != string(domain.TaskAssetFlowReviewStatusApproved) {
-		t.Fatalf("last arg = %#v, want approved", got)
+	if !containsStringArg(args, string(domain.TaskAssetFlowReviewStatusApproved)) {
+		t.Fatalf("args missing approved status: %#v", args)
+	}
+}
+
+func TestBuildTaskAssetSearchWhereFiltersFormatCategory(t *testing.T) {
+	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		FormatCategory: domain.AssetFormatCategoryDesign,
+	})
+
+	if !strings.Contains(where, "LOWER(ta.file_name) LIKE ?") {
+		t.Fatalf("where clause missing file extension format filter: %s", where)
+	}
+	if !containsStringArg(args, "%.psd") {
+		t.Fatalf("args missing psd extension: %#v", args)
+	}
+	if containsStringArg(args, "%.jpg") {
+		t.Fatalf("design format filter should not include image extensions: %#v", args)
 	}
 }
 
@@ -167,4 +202,14 @@ func TestBuildListCurrentByAssetIDsQueryUsesCurrentReadModelSelect(t *testing.T)
 	if !strings.Contains(query, "ta.original_filename") || !strings.Contains(query, "ta.storage_key") {
 		t.Fatalf("query missing key ZIP fields: %s", query)
 	}
+}
+
+func containsStringArg(args []interface{}, want string) bool {
+	for _, arg := range args {
+		got, ok := arg.(string)
+		if ok && got == want {
+			return true
+		}
+	}
+	return false
 }

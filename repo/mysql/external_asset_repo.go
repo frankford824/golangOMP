@@ -46,6 +46,7 @@ func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAss
 func buildExternalAssetWhere(query domain.ExternalAssetSearchQuery) (string, []interface{}) {
 	clauses := []string{
 		`status <> 'missing'`,
+		`is_dir = 0`,
 		`origin_path NOT LIKE '%/@eaDir/%'`,
 		`origin_path NOT LIKE '%/#recycle/%'`,
 		`file_name NOT LIKE '%@Syno%'`,
@@ -64,6 +65,21 @@ func buildExternalAssetWhere(query domain.ExternalAssetSearchQuery) (string, []i
 		clauses = append(clauses, `mount_path = ?`)
 		args = append(args, query.MountPath)
 	}
+	if query.CreatedFrom != nil {
+		clauses = append(clauses, `updated_at >= ?`)
+		args = append(args, *query.CreatedFrom)
+	}
+	if query.CreatedTo != nil {
+		clauses = append(clauses, `updated_at <= ?`)
+		args = append(args, *query.CreatedTo)
+	}
+	clauses, args = appendAssetFormatCategoryWhere(
+		clauses,
+		args,
+		[]string{`LOWER(file_name)`, `LOWER(COALESCE(file_ext, ''))`},
+		`LOWER(COALESCE(mime_type, ''))`,
+		query.FormatCategory,
+	)
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 

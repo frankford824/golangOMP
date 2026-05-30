@@ -237,6 +237,7 @@ export interface AssetSearchQuery {
   task_status?: 'open' | 'closed' | 'archived' | 'all'
   created_from?: string
   created_to?: string
+  format_category?: 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
   [key: string]: unknown
 }
 

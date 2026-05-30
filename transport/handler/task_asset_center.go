@@ -746,13 +746,14 @@ func normalizeAssetTypeInput(primary, fallback string) string {
 
 func parseAssetSearchQuery(c *gin.Context) (domain.AssetSearchQuery, *domain.AppError) {
 	query := domain.AssetSearchQuery{
-		Keyword:       strings.TrimSpace(c.Query("keyword")),
-		ModuleKey:     strings.TrimSpace(c.Query("module_key")),
-		OwnerTeamCode: strings.TrimSpace(c.Query("owner_team_code")),
-		IsArchived:    domain.AssetArchiveFilter(strings.TrimSpace(c.DefaultQuery("is_archived", string(domain.AssetArchiveFilterFalse)))),
-		TaskStatus:    domain.AssetTaskStatusFilter(strings.TrimSpace(c.DefaultQuery("task_status", string(domain.AssetTaskStatusFilterAll)))),
-		Source:        domain.NormalizeAssetResourceSource(firstNonEmptyTrimmed(c.Query("source"), c.Query("resource_source"))),
-		UsableState:   domain.AssetUsableStateFilter(strings.TrimSpace(c.DefaultQuery("usable_state", string(domain.AssetUsableStateFilterAll)))),
+		Keyword:        strings.TrimSpace(c.Query("keyword")),
+		ModuleKey:      strings.TrimSpace(c.Query("module_key")),
+		OwnerTeamCode:  strings.TrimSpace(c.Query("owner_team_code")),
+		IsArchived:     domain.AssetArchiveFilter(strings.TrimSpace(c.DefaultQuery("is_archived", string(domain.AssetArchiveFilterFalse)))),
+		TaskStatus:     domain.AssetTaskStatusFilter(strings.TrimSpace(c.DefaultQuery("task_status", string(domain.AssetTaskStatusFilterAll)))),
+		Source:         domain.NormalizeAssetResourceSource(firstNonEmptyTrimmed(c.Query("source"), c.Query("resource_source"))),
+		UsableState:    domain.AssetUsableStateFilter(strings.TrimSpace(c.DefaultQuery("usable_state", string(domain.AssetUsableStateFilterAll)))),
+		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(c.DefaultQuery("format_category", string(domain.AssetFormatCategoryAll)))),
 	}
 	if raw := strings.TrimSpace(c.Query("created_from")); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)

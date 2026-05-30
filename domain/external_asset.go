@@ -95,11 +95,14 @@ type ExternalAssetRecord struct {
 }
 
 type ExternalAssetSearchQuery struct {
-	Keyword   string
-	Kind      ExternalAssetKind
-	MountPath string
-	Page      int
-	Size      int
+	Keyword        string
+	Kind           ExternalAssetKind
+	MountPath      string
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
+	FormatCategory AssetFormatCategoryFilter
+	Page           int
+	Size           int
 }
 
 func (q ExternalAssetSearchQuery) Normalized() ExternalAssetSearchQuery {
@@ -118,6 +121,15 @@ func (q ExternalAssetSearchQuery) Normalized() ExternalAssetSearchQuery {
 	case ExternalAssetKindNetdisk, ExternalAssetKindNASLocal:
 	default:
 		q.Kind = ""
+	}
+	switch q.FormatCategory {
+	case AssetFormatCategoryImage,
+		AssetFormatCategoryDesign,
+		AssetFormatCategoryPDF,
+		AssetFormatCategoryVideo,
+		AssetFormatCategoryArchive:
+	default:
+		q.FormatCategory = AssetFormatCategoryAll
 	}
 	return q
 }

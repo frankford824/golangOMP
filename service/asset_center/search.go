@@ -2,7 +2,6 @@ package asset_center
 
 import (
 	"context"
-	"sort"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -67,9 +66,6 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 			return nil, appErr
 		}
 		items = append(items, external...)
-		sort.SliceStable(items, func(i, j int) bool {
-			return items[i].UpdatedAt.After(items[j].UpdatedAt)
-		})
 		if len(items) > query.Size {
 			items = items[:query.Size]
 		}
@@ -91,9 +87,12 @@ func (s *Service) searchExternalRows(ctx context.Context, query domain.AssetSear
 		return []*AssetDetail{}, 0, nil
 	}
 	rows, total, err := s.externalSvc.Search(ctx, domain.ExternalAssetSearchQuery{
-		Keyword: query.Keyword,
-		Page:    query.Page,
-		Size:    query.Size,
+		Keyword:        query.Keyword,
+		CreatedFrom:    query.CreatedFrom,
+		CreatedTo:      query.CreatedTo,
+		FormatCategory: query.FormatCategory,
+		Page:           query.Page,
+		Size:           query.Size,
 	})
 	if err != nil {
 		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)

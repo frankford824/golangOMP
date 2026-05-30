@@ -79,26 +79,27 @@
             label="资源来源"
             :options="assetSourceOptions"
           />
-          <BaseInput v-model="filters.taskId" label="任务 ID" placeholder="按任务 ID 过滤" />
-          <BaseSelect
-            v-model="filters.assetKind"
-            label="资产类型"
-            placeholder="全部类型"
-            :options="assetKindOptions"
-            clearable
+          <BaseInput
+            v-model="filters.createdFrom"
+            type="date"
+            label="开始时间"
+          />
+          <BaseInput
+            v-model="filters.createdTo"
+            type="date"
+            label="结束时间"
           />
           <BaseSelect
             v-model="filters.usableState"
-            label="使用状态"
+            label="可用状态"
             :options="assetUsableStateOptions"
           />
-          <BaseInput
-            v-model="filters.scopeSkuCode"
-            label="SKU 作用域"
-            placeholder="请输入 SKU 编码"
+          <BaseSelect
+            v-model="filters.formatCategory"
+            label="格式分类"
+            :options="assetFormatCategoryOptions"
           />
         </div>
-        <p v-if="keywordAutoQueryHint" class="ac-filter-hint">{{ keywordAutoQueryHint }}</p>
       </div>
     </header>
 
@@ -747,27 +748,21 @@ type AssetUsableFilter =
   | 'cleaned'
   | 'not_applicable'
 
+type AssetFormatFilter = 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
+
 const filters = reactive({
   keyword: '',
   resourceSource: 'all' as AssetResourceSource,
-  taskId: '',
-  assetKind: '',
+  createdFrom: '',
+  createdTo: '',
   usableState: 'all' as AssetUsableFilter,
-  scopeSkuCode: '',
+  formatCategory: 'all' as AssetFormatFilter,
 })
 
 const assetSourceOptions: BaseSelectOption[] = [
   { value: 'all', label: '全部资源' },
   { value: 'system', label: '系统资源' },
   { value: 'external', label: '外部资源' },
-]
-
-const assetKindOptions: BaseSelectOption[] = [
-  { value: 'reference', label: '运营参考图（reference）' },
-  { value: 'source', label: '设计源文件 / 审核修订源文件（source）' },
-  { value: 'delivery', label: '最终成品图（delivery）' },
-  { value: 'preview', label: '预览辅助（preview）' },
-  { value: 'design_thumb', label: '预览辅助（design_thumb）' },
 ]
 
 const assetUsableStateOptions: BaseSelectOption[] = [
@@ -779,6 +774,15 @@ const assetUsableStateOptions: BaseSelectOption[] = [
   { value: 'history', label: '历史版本' },
   { value: 'cleaned', label: '文件已清理' },
   { value: 'not_applicable', label: '不进入审核流' },
+]
+
+const assetFormatCategoryOptions: BaseSelectOption[] = [
+  { value: 'all', label: '全部常用格式' },
+  { value: 'image', label: '图片' },
+  { value: 'design', label: '设计源文件' },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'video', label: '视频' },
+  { value: 'archive', label: '压缩包' },
 ]
 
 const requestedTaskId = computed(() => {
@@ -836,26 +840,14 @@ const bulkSearchMatchedResults = computed(() => bulkSearchResults.value.filter((
 const bulkSearchMatchedCount = computed(() => bulkSearchMatchedResults.value.length)
 const bulkSearchFailedCount = computed(() => bulkSearchResults.value.filter((item) => item.status !== 'matched').length)
 
-const effectiveSearchKeyword = computed(
-  () => filters.keyword.trim() || filters.taskId.trim() || filters.scopeSkuCode.trim(),
-)
-
-const keywordAutoQueryHint = computed(() => {
-  if (!filters.taskId.trim() && !filters.scopeSkuCode.trim()) return ''
-  return '任务 ID / SKU 作用域将作为 keyword 交给后端统一搜索'
-})
+const effectiveSearchKeyword = computed(() => filters.keyword.trim())
 
 const listTotalPages = computed(() =>
   Math.max(1, Math.ceil(listTotal.value / listPageSize.value)),
 )
 
 const pagedAssets = computed(() => {
-  const selectedKind = filters.assetKind.trim()
-  if (!selectedKind) return assets.value
-  return assets.value.filter((asset) => {
-    const record = asset as Record<string, unknown>
-    return String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? '') === selectedKind
-  })
+  return assets.value
 })
 
 watch(listTotalPages, (tp) => {
@@ -863,7 +855,7 @@ watch(listTotalPages, (tp) => {
 })
 
 watch(
-  () => [filters.keyword, filters.resourceSource, filters.taskId, filters.assetKind, filters.usableState, filters.scopeSkuCode],
+  () => [filters.keyword, filters.resourceSource, filters.createdFrom, filters.createdTo, filters.usableState, filters.formatCategory],
   () => {
     listPage.value = 1
     scheduleReload()
@@ -1842,6 +1834,19 @@ function displayTime(value: unknown): string {
   return formatDateTimeBeijing(text) || text
 }
 
+function dateFilterToRFC3339(value: string, boundary: 'start' | 'end'): string | undefined {
+  const date = value.trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined
+  return boundary === 'start' ? `${date}T00:00:00+08:00` : `${date}T23:59:59+08:00`
+}
+
+function dateFilterFromQuery(value: unknown): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
+  const match = /^(\d{4}-\d{2}-\d{2})T/.exec(text)
+  return match?.[1] ?? ''
+}
+
 function assetKind(asset: BackendAsset | string | null | undefined): string {
   if (typeof asset === 'string') return assetKindLabelCn(asset)
   if (!asset) return '—'
@@ -1887,9 +1892,11 @@ function scheduleReload() {
 
 function syncQuerySelection() {
   const nextQuery: Record<string, string> = {}
-  if (filters.taskId.trim()) nextQuery.task_id = filters.taskId.trim()
   if (filters.resourceSource !== 'all') nextQuery.source = filters.resourceSource
   if (filters.usableState !== 'all') nextQuery.usable_state = filters.usableState
+  if (filters.formatCategory !== 'all') nextQuery.format_category = filters.formatCategory
+  if (filters.createdFrom) nextQuery.created_from = filters.createdFrom
+  if (filters.createdTo) nextQuery.created_to = filters.createdTo
   if (selectedAssetId.value.trim()) nextQuery.asset_id = selectedAssetId.value.trim()
   void router.replace({ query: nextQuery })
 }
@@ -1897,9 +1904,11 @@ function syncQuerySelection() {
 function openAssetDetail(assetId: string) {
   if (!canAccessPage('asset_detail')) return
   const query: Record<string, string> = {}
-  if (filters.taskId.trim()) query.task_id = filters.taskId.trim()
   if (filters.resourceSource !== 'all') query.source = filters.resourceSource
   if (filters.usableState !== 'all') query.usable_state = filters.usableState
+  if (filters.formatCategory !== 'all') query.format_category = filters.formatCategory
+  if (filters.createdFrom) query.created_from = filters.createdFrom
+  if (filters.createdTo) query.created_to = filters.createdTo
   void router.push({ name: 'AssetDetail', params: { id: assetId }, query })
 }
 
@@ -1922,6 +1931,9 @@ async function reload() {
         keyword: effectiveSearchKeyword.value || undefined,
         source: filters.resourceSource,
         usable_state: filters.usableState === 'all' ? undefined : filters.usableState,
+        format_category: filters.formatCategory === 'all' ? undefined : filters.formatCategory,
+        created_from: dateFilterToRFC3339(filters.createdFrom, 'start'),
+        created_to: dateFilterToRFC3339(filters.createdTo, 'end'),
         page: listPage.value,
         size: listPageSize.value,
       },
@@ -1987,7 +1999,7 @@ async function reload() {
 
 onMounted(() => {
   if (requestedTaskId.value) {
-    filters.taskId = requestedTaskId.value
+    filters.keyword = requestedTaskId.value
   }
   const requestedSource = typeof route.query.source === 'string' ? route.query.source.trim() : ''
   if (requestedSource === 'system' || requestedSource === 'external' || requestedSource === 'all') {
@@ -1997,6 +2009,12 @@ onMounted(() => {
   if (assetUsableStateOptions.some((option) => option.value === requestedUsableState)) {
     filters.usableState = requestedUsableState as AssetUsableFilter
   }
+  const requestedFormat = typeof route.query.format_category === 'string' ? route.query.format_category.trim() : ''
+  if (assetFormatCategoryOptions.some((option) => option.value === requestedFormat)) {
+    filters.formatCategory = requestedFormat as AssetFormatFilter
+  }
+  filters.createdFrom = dateFilterFromQuery(route.query.created_from)
+  filters.createdTo = dateFilterFromQuery(route.query.created_to)
   void reload()
 })
 
