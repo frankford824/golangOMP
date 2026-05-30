@@ -22,6 +22,7 @@ import (
 	"workflow/policy"
 	mysqlrepo "workflow/repo/mysql"
 	"workflow/service"
+	aiagentsvc "workflow/service/aiagent"
 	assetcenter "workflow/service/asset_center"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	"workflow/service/asset_lifecycle/scheduler"
@@ -35,6 +36,7 @@ import (
 	reportl1svc "workflow/service/report_l1"
 	searchsvc "workflow/service/search"
 	"workflow/service/task_aggregator"
+	taskaisummarysvc "workflow/service/task_ai_summary"
 	taskbatchexcel "workflow/service/task_batch_excel"
 	"workflow/service/task_cancel"
 	taskdraftsvc "workflow/service/task_draft"
@@ -372,6 +374,16 @@ func main() {
 		task_aggregator.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
 		task_aggregator.WithReferenceFileRefEnricher(service.NewReferenceFileRefsEnricher(ossDirectSvc, nil)),
 		task_aggregator.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
+	aiSummaryClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
+		Enabled:   cfg.AI.Enabled,
+		Provider:  cfg.AI.Provider,
+		BaseURL:   cfg.AI.BaseURL,
+		APIKey:    cfg.AI.APIKey,
+		Model:     cfg.AI.Model,
+		Timeout:   cfg.AI.Timeout,
+		MaxTokens: cfg.AI.MaxTokens,
+	}, logger.Named("ai_agent"))
+	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
 
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
@@ -400,6 +412,7 @@ func main() {
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
 	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
+	taskAISummaryH := handler.NewTaskAISummaryHandler(taskAISummarySvc)
 	taskCostOverrideH := handler.NewTaskCostOverrideHandler(taskCostOverrideSvc)
 	taskBoardH := handler.NewTaskBoardHandler(taskBoardSvc)
 	taskBatchExcelH := handler.NewTaskBatchExcelHandler(taskBatchTemplateSvc, taskBatchParseSvc)
@@ -428,7 +441,7 @@ func main() {
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())

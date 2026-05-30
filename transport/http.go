@@ -43,6 +43,7 @@ func NewRouter(
 	assetFilesH *handler.AssetFilesHandler,
 	designSubmissionH *handler.DesignSubmissionHandler,
 	taskDetailH *handler.TaskDetailHandler,
+	taskAISummaryH *handler.TaskAISummaryHandler,
 	taskCostOverrideH *handler.TaskCostOverrideHandler,
 	taskBoardH *handler.TaskBoardHandler,
 	taskBatchExcelH *handler.TaskBatchExcelHandler,
@@ -243,6 +244,7 @@ func NewRouter(
 		taskGroup.PATCH("/:id/procurement", access(taskGroup, http.MethodPatch, "/:id/procurement", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.UpdateProcurement)
 		taskGroup.POST("/:id/procurement/advance", access(taskGroup, http.MethodPost, "/:id/procurement/advance", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.AdvanceProcurement)
 		taskGroup.GET("/:id/detail", access(taskGroup, http.MethodGet, "/:id/detail", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskDetailH.GetByTaskID)
+		taskGroup.POST("/:id/ai-summary", access(taskGroup, http.MethodPost, "/:id/ai-summary", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAISummaryH.Generate)
 		taskGroup.POST("/:id/modules/:module_key/claim", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/claim", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.ModuleClaim)
 		taskGroup.POST("/:id/modules/:module_key/actions/:action", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/actions/:action", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.ModuleAction)
 		taskGroup.POST("/:id/modules/:module_key/reassign", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/reassign", domain.APIReadinessReadyForFrontend, v1R1ManagementRoles()...), taskH.ModuleReassign)

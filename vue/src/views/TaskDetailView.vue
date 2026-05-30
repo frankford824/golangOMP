@@ -115,6 +115,7 @@
                   size="sm"
                   @click="navigateBackToTaskList"
                 >
+                  <ArrowLeft class="detail-top-chip-icon" aria-hidden="true" />
                   返回
                 </BaseButton>
                 <BaseButton
@@ -123,7 +124,23 @@
                   variant="ghost"
                   size="sm"
                   @click="refreshDetail"
-                >刷新</BaseButton>
+                >
+                  <RotateCcw class="detail-top-chip-icon" aria-hidden="true" />
+                  刷新
+                </BaseButton>
+                <BaseButton
+                  v-if="task && !isTempId"
+                  type="button"
+                  class="detail-top-chip"
+                  variant="ghost"
+                  size="sm"
+                  :loading="aiSummaryLoading"
+                  :disabled="aiSummaryLoading"
+                  @click="openAiSummary"
+                >
+                  <Sparkles class="detail-top-chip-icon" aria-hidden="true" />
+                  AI 摘要
+                </BaseButton>
                 <BaseButton
                   v-if="task && !isTempId"
                   type="button"
@@ -132,6 +149,7 @@
                   size="sm"
                   @click="eventLogOpen = true"
                 >
+                  <ScrollText class="detail-top-chip-icon" aria-hidden="true" />
                   事件日志
                 </BaseButton>
                 <BaseButton
@@ -144,6 +162,7 @@
                   :disabled="erpFilingRetrying"
                   @click="onErpFilingRetry"
                 >
+                  <RefreshCcw class="detail-top-chip-icon" aria-hidden="true" />
                   重试同步
                 </BaseButton>
                 <BaseButton
@@ -154,6 +173,7 @@
                   size="sm"
                   @click="openTaskAssetsPage"
                 >
+                  <Images class="detail-top-chip-icon" aria-hidden="true" />
                   任务资产页
                 </BaseButton>
                 <button
@@ -162,6 +182,7 @@
                   class="detail-top-chip detail-top-chip--danger"
                   @click="openCancel = true"
                 >
+                  <XCircle class="detail-top-chip-icon" aria-hidden="true" />
                   终止任务
                 </button>
                 <button
@@ -170,6 +191,7 @@
                   class="detail-top-chip detail-top-chip--primary"
                   @click="doClose"
                 >
+                  <CheckCircle2 class="detail-top-chip-icon" aria-hidden="true" />
                   结单
                 </button>
               </div>
@@ -811,6 +833,76 @@
 
     <EventLogDrawer v-model="eventLogOpen" :task-id="taskId" />
 
+    <BaseModal
+      v-model="aiSummaryOpen"
+      title="任务全链路 AI 摘要"
+      :show-confirm="false"
+      panel-class="max-w-5xl"
+    >
+      <section class="ai-summary-modal">
+        <div v-if="aiSummaryLoading" class="ai-summary-loading" role="status">
+          <div class="ai-summary-loading-dot" aria-hidden="true" />
+          <div>
+            <p class="ai-summary-loading-title">正在生成摘要</p>
+            <p class="ai-summary-loading-sub">系统正在读取任务、SKU、资产、ERP 与成本链路。</p>
+          </div>
+        </div>
+
+        <div v-else-if="aiSummaryError" class="ai-summary-error">
+          <p>{{ aiSummaryError }}</p>
+          <BaseButton size="sm" variant="primary" @click="loadAiSummary">重新生成</BaseButton>
+        </div>
+
+        <div v-else-if="aiSummary" class="ai-summary-content ai-summary-content--compact">
+          <header class="ai-summary-hero">
+            <p class="ai-summary-eyebrow">AI 处置建议</p>
+            <h3>{{ aiSummaryDecision }}</h3>
+            <p>{{ aiSummaryImpact }}</p>
+          </header>
+
+          <div class="ai-summary-action-grid">
+            <article class="ai-summary-panel ai-summary-panel--risk">
+              <h4>当前卡点</h4>
+              <div class="ai-summary-blocker">
+                <strong>{{ aiSummaryBlocker.title }}</strong>
+                <p>{{ aiSummaryBlocker.reason || '系统暂未识别到明确原因。' }}</p>
+                <span v-if="aiSummaryBlocker.owner">责任方：{{ aiSummaryBlocker.owner }}</span>
+              </div>
+            </article>
+
+            <article class="ai-summary-panel">
+              <h4>下一步动作</h4>
+              <ol v-if="aiSummaryActionList.length" class="ai-summary-next-actions">
+                <li v-for="action in aiSummaryActionList" :key="`${action.role}-${action.action}`">
+                  <span>{{ action.timing || '下一步' }}</span>
+                  <strong>{{ action.role || '相关责任人' }}</strong>
+                  <p>{{ action.action }}</p>
+                </li>
+              </ol>
+              <p v-else class="ai-summary-muted">系统暂未识别到明确动作。</p>
+            </article>
+          </div>
+
+          <details class="ai-summary-evidence">
+            <summary>查看证据</summary>
+            <ul v-if="aiSummaryEvidenceLines.length">
+              <li v-for="line in aiSummaryEvidenceLines" :key="line">{{ line }}</li>
+            </ul>
+            <p v-else>系统暂无可展示证据。</p>
+          </details>
+        </div>
+      </section>
+      <template #footer>
+        <footer class="ai-summary-footer">
+          <span v-if="aiSummary" class="ai-summary-meta">{{ aiSummary.model || 'AI' }} · 简短处置卡片</span>
+          <div class="ai-summary-footer-actions">
+            <BaseButton size="sm" variant="secondary" :disabled="aiSummaryLoading" @click="aiSummaryOpen = false">关闭</BaseButton>
+            <BaseButton size="sm" variant="primary" :loading="aiSummaryLoading" :disabled="aiSummaryLoading" @click="loadAiSummary">重新生成</BaseButton>
+          </div>
+        </footer>
+      </template>
+    </BaseModal>
+
     <ReassignDesignerDialog
       v-model="reassignDialogVisible"
       :designers="designerOptions"
@@ -946,9 +1038,20 @@ import {
 } from '@/domain/constants/reference-upload'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile, isBitmapDeliveryFile } from '@/domain/constants/upload-types'
 import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES, designUploadTooLargeMessage } from '@/domain/copy/design-upload'
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Images,
+  RefreshCcw,
+  RotateCcw,
+  ScrollText,
+  Sparkles,
+  XCircle,
+} from 'lucide-vue-next'
 
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
+import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import SequenceGapBanner from '@/components/business/SequenceGapBanner.vue'
@@ -974,6 +1077,7 @@ import DesignAssetBlock from '@/components/task-detail/DesignAssetBlock.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { warehouseBlockingReasonLine } from '@/utils/warehouse-blocking'
+import type { TaskAiSummaryResponse } from '@/services/api/tasksApi'
 // v0.5 对齐：FRONTEND_ALIGNMENT_v0.5.md 第 D 节，任务详情内指派弹窗使用 GET /v1/users/designers
 
 const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
@@ -2395,6 +2499,10 @@ const actionLoading = ref<
 const assignDialogVisible = ref(false)
 const reassignDialogVisible = ref(false)
 const eventLogOpen = ref(false)
+const aiSummaryOpen = ref(false)
+const aiSummaryLoading = ref(false)
+const aiSummaryError = ref('')
+const aiSummary = ref<TaskAiSummaryResponse | null>(null)
 const openCancel = ref(false)
 const cancelErrorText = ref('')
 const cancelSuggestForce = ref(false)
@@ -2468,8 +2576,107 @@ async function loadSideEvents() {
   }
 }
 
+function unwrapAiSummaryResponse(payload: unknown): TaskAiSummaryResponse | null {
+  if (!payload || typeof payload !== 'object') return null
+  const root = payload as Record<string, unknown>
+  const nested = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : root
+  return nested as unknown as TaskAiSummaryResponse
+}
+
+async function openAiSummary() {
+  aiSummaryOpen.value = true
+  if (!aiSummary.value && !aiSummaryLoading.value) {
+    await loadAiSummary()
+  }
+}
+
+async function loadAiSummary() {
+  const tid = taskId.value
+  if (!tid || isTempId.value) return
+  aiSummaryLoading.value = true
+  aiSummaryError.value = ''
+  try {
+    const response = await tasksApi.generateAiSummary(tid)
+    const summary = unwrapAiSummaryResponse(response.data)
+    if (!summary) throw new Error('AI 摘要返回为空')
+    aiSummary.value = {
+      ...summary,
+      actions: Array.isArray(summary.actions) ? summary.actions : [],
+      evidence: Array.isArray(summary.evidence) ? summary.evidence : [],
+      people: Array.isArray(summary.people) ? summary.people : [],
+      timeline: Array.isArray(summary.timeline) ? summary.timeline : [],
+      stuck_points: Array.isArray(summary.stuck_points) ? summary.stuck_points : [],
+      sku_asset_erp_cost: Array.isArray(summary.sku_asset_erp_cost) ? summary.sku_asset_erp_cost : [],
+      next_actions: Array.isArray(summary.next_actions) ? summary.next_actions : [],
+    }
+  } catch (e) {
+    aiSummaryError.value = resolveApiUserMessage(e) || 'AI 摘要生成失败'
+  } finally {
+    aiSummaryLoading.value = false
+  }
+}
+
+const aiSummaryDecision = computed(() => {
+  const summary = aiSummary.value
+  return summary?.decision?.trim() || summary?.headline?.trim() || '系统暂无明确判断'
+})
+
+const aiSummaryImpact = computed(() => {
+  const summary = aiSummary.value
+  return summary?.impact?.trim() || summary?.current_status?.trim() || '系统暂无影响说明。'
+})
+
+const aiSummaryBlocker = computed(() => {
+  const summary = aiSummary.value
+  const blocker = summary?.primary_blocker
+  if (blocker && (blocker.title || blocker.reason || blocker.owner)) {
+    return {
+      title: blocker.title || '待确认卡点',
+      owner: blocker.owner || '',
+      reason: blocker.reason || '',
+    }
+  }
+  const point = summary?.stuck_points?.[0]
+  if (point) {
+    return {
+      title: point.title || '待确认卡点',
+      owner: point.owner || '',
+      reason: point.reason || '',
+    }
+  }
+  return { title: '暂未识别主卡点', owner: '', reason: '系统暂无明确异常证据。' }
+})
+
+const aiSummaryActionList = computed(() => {
+  const summary = aiSummary.value
+  const actions = summary?.actions?.filter((item) => item && item.action?.trim()) ?? []
+  if (actions.length) return actions.slice(0, 3)
+  return (summary?.next_actions ?? [])
+    .filter((action) => action?.trim())
+    .slice(0, 3)
+    .map((action) => ({ role: '相关责任人', action, timing: '下一步' }))
+})
+
+const aiSummaryEvidenceLines = computed(() => {
+  const summary = aiSummary.value
+  const direct = summary?.evidence?.filter((line) => line?.trim()) ?? []
+  if (direct.length) return direct.slice(0, 4)
+  const lines: string[] = []
+  for (const item of summary?.sku_asset_erp_cost ?? []) {
+    const line = [item.sku, item.erp_status, item.cost_status, item.asset_status].filter(Boolean).join(' · ')
+    if (line) lines.push(line)
+  }
+  for (const item of summary?.timeline ?? []) {
+    const line = [item.stage, item.actor, item.summary].filter(Boolean).join(' · ')
+    if (line) lines.push(line)
+  }
+  return [...new Set(lines)].slice(0, 4)
+})
+
 watch(taskId, () => {
   if (!taskId.value || isTempId.value) return
+  aiSummary.value = null
+  aiSummaryError.value = ''
   auditRejectReasonCategory.value = ''
   auditComment.value = ''
   auditCommentError.value = ''
@@ -3211,27 +3418,44 @@ watch(taskId, (id) => {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
+  max-width: 100%;
 }
 .detail-top-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 2.125rem;
-  padding: 0 0.9rem;
+  gap: 0.35rem;
+  min-width: 4.75rem;
+  height: 2rem;
+  padding: 0 0.7rem;
   border: none;
   border-radius: var(--dv-r-control);
   background: #f2f4f7;
   color: #475467;
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
+}
+.detail-top-chip :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  white-space: nowrap;
 }
 .detail-top-chip:hover {
   background: #e9edf3;
   color: #1f2937;
+}
+.detail-top-chip-icon {
+  width: 0.86rem;
+  height: 0.86rem;
+  flex: 0 0 auto;
 }
 .detail-top-chip:focus-visible {
   outline: 2px solid #98a2b3;
@@ -3253,6 +3477,317 @@ watch(taskId, (id) => {
 .detail-top-chip--primary:hover {
   background: #1d4ed8;
   color: #fff;
+}
+
+.ai-summary-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+}
+.ai-summary-loading,
+.ai-summary-error {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-height: 8rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  padding: 1rem;
+}
+.ai-summary-error {
+  justify-content: space-between;
+  color: #991b1b;
+  background: #fff5f5;
+  border-color: #fecaca;
+}
+.ai-summary-loading-dot {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  border: 2px solid #c7d2fe;
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: ai-summary-spin 0.8s linear infinite;
+}
+.ai-summary-loading-title {
+  margin: 0;
+  color: #111827;
+  font-weight: 800;
+}
+.ai-summary-loading-sub {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+.ai-summary-content {
+  display: grid;
+  gap: 0.9rem;
+}
+.ai-summary-content--compact {
+  gap: 0.75rem;
+}
+.ai-summary-hero,
+.ai-summary-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  padding: 1rem;
+}
+.ai-summary-hero {
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+  border-color: #bfdbfe;
+}
+.ai-summary-eyebrow {
+  margin: 0 0 0.35rem;
+  color: #2563eb;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.ai-summary-hero h3,
+.ai-summary-panel h4 {
+  margin: 0;
+  color: #0f172a;
+  font-weight: 850;
+}
+.ai-summary-hero h3 {
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+.ai-summary-hero p:last-child {
+  margin: 0.45rem 0 0;
+  color: #475569;
+  line-height: 1.7;
+}
+.ai-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.9rem;
+}
+.ai-summary-action-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 0.75rem;
+}
+.ai-summary-blocker {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+.ai-summary-blocker strong {
+  color: #111827;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.ai-summary-blocker p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-blocker span {
+  color: #b45309;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+.ai-summary-next-actions {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ai-action;
+}
+.ai-summary-next-actions li {
+  counter-increment: ai-action;
+  display: grid;
+  grid-template-columns: auto minmax(4rem, auto) minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.6rem;
+  background: #f8fbff;
+}
+.ai-summary-next-actions li::before {
+  content: counter(ai-action);
+  display: inline-flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+.ai-summary-next-actions span {
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.ai-summary-next-actions strong {
+  min-width: 0;
+  color: #111827;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+.ai-summary-next-actions p {
+  grid-column: 2 / -1;
+  margin: 0;
+  color: #334155;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-evidence {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  padding: 0.75rem 0.9rem;
+}
+.ai-summary-evidence summary {
+  cursor: pointer;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+.ai-summary-evidence ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.7rem 0 0;
+  padding-left: 1rem;
+  color: #64748b;
+  line-height: 1.55;
+}
+.ai-summary-evidence p {
+  margin: 0.7rem 0 0;
+  color: #94a3b8;
+}
+.ai-summary-panel ul,
+.ai-summary-actions {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ai-summary-panel li {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.ai-summary-panel li span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+.ai-summary-panel li strong,
+.ai-summary-sku-row strong,
+.ai-summary-timeline strong {
+  min-width: 0;
+  color: #111827;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.ai-summary-panel li small,
+.ai-summary-sku-row small {
+  color: #64748b;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-panel--risk {
+  border-color: #fed7aa;
+  background: #fffaf5;
+}
+.ai-summary-sku-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.ai-summary-sku-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1.1fr) repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.6rem;
+  background: #f8fafc;
+}
+.ai-summary-sku-row span {
+  min-width: 0;
+  color: #475569;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+.ai-summary-sku-row small {
+  grid-column: 1 / -1;
+}
+.ai-summary-timeline {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ai-summary-timeline li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.ai-summary-timeline time {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+.ai-summary-timeline div {
+  display: grid;
+  gap: 0.2rem;
+}
+.ai-summary-timeline span {
+  color: #475569;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-actions li {
+  padding-left: 0.7rem;
+  border-left: 3px solid #2563eb;
+  color: #334155;
+  line-height: 1.55;
+}
+.ai-summary-muted {
+  margin: 0.75rem 0 0;
+  color: #94a3b8;
+}
+.ai-summary-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+.ai-summary-meta {
+  min-width: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.ai-summary-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+@keyframes ai-summary-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 顶栏 WorkflowProgress 的 Pencil 风格覆写：色点 + 内联文字 */
@@ -4012,6 +4547,56 @@ watch(taskId, (id) => {
     border-left: none;
   }
 }
+
+@media (max-width: 760px) {
+  .detail-top-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .detail-top-chip {
+    min-width: 0;
+    width: 100%;
+  }
+  .detail-top-chip :deep(span) {
+    min-width: 0;
+  }
+  .detail-top-chip :deep(span),
+  .detail-top-chip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ai-summary-action-grid,
+  .ai-summary-grid,
+  .ai-summary-sku-row {
+    grid-template-columns: 1fr;
+  }
+  .ai-summary-next-actions li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .ai-summary-next-actions span {
+    grid-column: 2;
+  }
+  .ai-summary-next-actions strong,
+  .ai-summary-next-actions p {
+    grid-column: 2;
+  }
+  .ai-summary-timeline li {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .ai-summary-footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 0.85rem 1rem;
+  }
+  .ai-summary-footer-actions {
+    justify-content: stretch;
+  }
+  .ai-summary-footer-actions :deep(button) {
+    flex: 1 1 7rem;
+  }
+}
 .action-error {
   width: 100%;
   margin: 0 0 0.5rem;
@@ -4451,6 +5036,7 @@ watch(taskId, (id) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ai-summary-loading-dot,
   .detail-v3-side-event,
   .detail-top-flow-shell :deep(.step-chip),
   .detail-top-flow-shell :deep(.step-dot--sm),
@@ -4781,6 +5367,132 @@ watch(taskId, (id) => {
 
   .detail-top-right {
     justify-self: end;
+  }
+}
+
+@media (max-width: 1100px) {
+  .detail-top-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.85rem !important;
+  }
+
+  .detail-top-left,
+  .detail-top-mid,
+  .detail-top-right,
+  .detail-top-identity {
+    width: 100%;
+    justify-self: stretch !important;
+  }
+
+  .detail-top-right {
+    justify-content: flex-start;
+  }
+
+  .detail-top-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+    width: 100%;
+    justify-content: stretch !important;
+  }
+
+  .detail-top-chip {
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .detail-top-unified.detail-top-v6 {
+    padding: 0.95rem !important;
+  }
+
+  .detail-top-taskno {
+    font-size: 1.35rem;
+    line-height: 1.2;
+  }
+
+  .detail-top-sub {
+    overflow-wrap: anywhere;
+  }
+
+  .detail-top-current.detail-top-status-pill {
+    width: 100%;
+    align-items: flex-start;
+    border-radius: 0.85rem;
+    white-space: normal;
+  }
+
+  .detail-top-flow-shell {
+    overflow-x: hidden !important;
+    padding-bottom: 0 !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--horizontal),
+  .detail-top-flow-shell :deep(.workflow-progress--naive.workflow-progress--horizontal) {
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+    gap: 0.02rem !important;
+    padding: 0.36rem 0.28rem !important;
+    overflow: hidden !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step) {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step--process-status) {
+    padding: 0.18rem 0.45rem 0.18rem 0.25rem !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content) {
+    flex: 0 0 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    padding-left: 0 !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step--process-status .n-step-content) {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    padding-left: 0.18rem !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content-header__title) {
+    display: none !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step--process-status .n-step-content-header__title) {
+    display: block !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    max-width: 2.4rem !important;
+    overflow: hidden !important;
+    font-size: 0.7rem !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content__description) {
+    display: none !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-splitor) {
+    flex: 0 0 0.38rem !important;
+    width: 0.38rem !important;
+    min-width: 0.38rem !important;
+    margin-inline: 0.04rem !important;
+  }
+
+  .detail-top-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .detail-top-chip {
+    min-height: 2.15rem;
+    height: auto;
+    padding: 0.45rem 0.55rem;
   }
 }
 </style>

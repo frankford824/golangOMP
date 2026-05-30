@@ -49,6 +49,68 @@ export interface TaskReferenceBatchDownloadResponse {
   data?: TaskReferenceBatchDownloadManifest
 }
 
+export interface TaskAiSummaryPerson {
+  role: string
+  name: string
+  id?: string
+  note?: string
+}
+
+export interface TaskAiSummaryBlocker {
+  title: string
+  owner?: string
+  reason?: string
+}
+
+export interface TaskAiSummaryAction {
+  role: string
+  action: string
+  timing?: string
+}
+
+export interface TaskAiSummaryTimelineItem {
+  time?: string
+  stage: string
+  actor?: string
+  summary: string
+}
+
+export interface TaskAiSummaryStuckPoint {
+  level: 'high' | 'medium' | 'low' | string
+  title: string
+  reason: string
+  owner?: string
+  next_action?: string
+}
+
+export interface TaskAiSummarySkuAssetCost {
+  sku: string
+  asset_status?: string
+  erp_status?: string
+  cost_status?: string
+  note?: string
+}
+
+export interface TaskAiSummaryResponse {
+  decision?: string
+  impact?: string
+  primary_blocker?: TaskAiSummaryBlocker | null
+  actions?: TaskAiSummaryAction[]
+  evidence?: string[]
+  headline?: string
+  current_status?: string
+  people?: TaskAiSummaryPerson[]
+  timeline?: TaskAiSummaryTimelineItem[]
+  stuck_points?: TaskAiSummaryStuckPoint[]
+  sku_asset_erp_cost?: TaskAiSummarySkuAssetCost[]
+  next_actions?: string[]
+  confidence?: 'high' | 'medium' | 'low' | string
+  raw_text?: string
+  generated_at?: string
+  model?: string
+  provider?: string
+}
+
 // ─── 任务列表 / 详情 ──────────────────────────────────────────────────────────
 
 export const tasksApi = {
@@ -110,6 +172,13 @@ export const tasksApi = {
    */
   getDetail: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/tasks/${id}/detail`, { signal }),
+
+  generateAiSummary: (id: string, signal?: AbortSignal) =>
+    http.post<{ data?: TaskAiSummaryResponse }>(
+      `/v1/tasks/${encodeURIComponent(id)}/ai-summary`,
+      {},
+      { signal },
+    ),
 
   batchDownloadTaskReferences: (id: string, signal?: AbortSignal) =>
     http.post<TaskReferenceBatchDownloadResponse>(

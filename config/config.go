@@ -28,9 +28,20 @@ type Config struct {
 	OSSDirect      OSSDirectConfig
 	ExternalAssets ExternalAssetsConfig
 	AssetCleanup   AssetCleanupConfig
+	AI             AIConfig
 	Log            LogConfig
 	Auth           domain.AuthSettings
 	FrontendAccess domain.FrontendAccessSettings
+}
+
+type AIConfig struct {
+	Enabled   bool
+	Provider  string
+	BaseURL   string
+	APIKey    string
+	Model     string
+	Timeout   time.Duration
+	MaxTokens int
 }
 
 type OSSDirectConfig struct {
@@ -249,6 +260,15 @@ func Load() (*Config, error) {
 		},
 		AssetCleanup: AssetCleanupConfig{
 			Enabled: mustParseBool(getEnv("ASSET_CLEANUP_ENABLED", "false")),
+		},
+		AI: AIConfig{
+			Enabled:   mustParseBool(getEnv("AI_AGENT_ENABLED", "false")),
+			Provider:  getEnv("AI_AGENT_PROVIDER", "anthropic_compatible"),
+			BaseURL:   getEnv("AI_AGENT_BASE_URL", ""),
+			APIKey:    getEnv("AI_AGENT_API_KEY", ""),
+			Model:     getEnv("AI_AGENT_MODEL", ""),
+			Timeout:   mustParseDuration(getEnv("AI_AGENT_TIMEOUT", "30s")),
+			MaxTokens: mustParseInt(getEnv("AI_AGENT_MAX_TOKENS", "900")),
 		},
 		Log: LogConfig{
 			Level: getEnv("LOG_LEVEL", "info"),
