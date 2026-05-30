@@ -118,9 +118,14 @@ type taskAssetCenterService struct {
 }
 
 const (
-	taskAssetVersionUniqueKey     = "uq_task_assets_task_version"
-	assetVersionRaceRetryDenyCode = "asset_version_race_retry"
+	taskAssetVersionUniqueKey        = "uq_task_assets_task_version"
+	assetVersionRaceRetryDenyCode    = "asset_version_race_retry"
+	assetVersionReplacementRetention = 15 * 24 * time.Hour
 )
+
+type taskAssetVersionSupersedeRepo interface {
+	MarkAssetVersionSuperseded(ctx context.Context, tx repo.Tx, versionID, supersededByVersionID int64, supersededAt, cleanupAfterAt time.Time) error
+}
 
 type TaskAssetCenterServiceOption func(*taskAssetCenterService)
 
@@ -564,6 +569,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	storageRefID := uuid.NewString()
 	var asset *domain.DesignAsset
 	attemptedTimelineVersionNo := 0
+	var previousCurrentVersionID *int64
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if request.AssetID != nil {
@@ -595,6 +601,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			}
 			asset = existingAsset
 			assetID = existingAsset.ID
+			previousCurrentVersionID = domain.CloneInt64Ptr(existingAsset.CurrentVersionID)
 		} else {
 			assetNo, err := s.designAssetRepo.NextAssetNo(ctx, tx, params.TaskID)
 			if err != nil {
@@ -629,6 +636,10 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 
 		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
 		previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
+		flowReviewStatus := domain.TaskAssetFlowReviewStatusNotApplicable
+		if requestAssetType.IsDelivery() {
+			flowReviewStatus = domain.TaskAssetFlowReviewStatusPendingReview
+		}
 		taskAsset := &domain.TaskAsset{
 			TaskID:               params.TaskID,
 			AssetID:              &assetID,
@@ -653,6 +664,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			UploadedAt:           &now,
 			Remark:               firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
 			SourceModuleKey:      designAssetSourceModuleKeyForTask(task, requestAssetType),
+			FlowReviewStatus:     flowReviewStatus,
 		}
 		id, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
 		if err != nil {
@@ -686,6 +698,14 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}
 		if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
 			return fmt.Errorf("update design asset current version: %w", err)
+		}
+		if previousCurrentVersionID != nil && *previousCurrentVersionID > 0 && *previousCurrentVersionID != versionID {
+			if supersedeRepo, ok := s.taskAssetRepo.(taskAssetVersionSupersedeRepo); ok {
+				cleanupAfter := now.Add(assetVersionReplacementRetention)
+				if err := supersedeRepo.MarkAssetVersionSuperseded(ctx, tx, *previousCurrentVersionID, versionID, now, cleanupAfter); err != nil {
+					return err
+				}
+			}
 		}
 		if err := s.uploadRequestRepo.UpdateBinding(ctx, tx, request.RequestID, &versionID, storageRefID, domain.UploadRequestStatusBound, taskAsset.Remark); err != nil {
 			return fmt.Errorf("update upload request binding: %w", err)

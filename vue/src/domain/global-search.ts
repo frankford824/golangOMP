@@ -35,6 +35,9 @@ export interface V1GlobalSearchAssetHit {
   file_name: string
   source_module_key?: string | null
   task_id?: number | null
+  flow_review_status?: string | null
+  usable_state?: string | null
+  usable_label?: string | null
   source_type?: 'system' | 'external' | string | null
   source_label?: string | null
   external_kind?: string | null
@@ -121,6 +124,10 @@ function taskHitToOverlay(row: V1GlobalSearchTaskHit): GlobalSearchOverlayHit {
 }
 
 function assetHitToOverlay(row: V1GlobalSearchAssetHit): GlobalSearchOverlayHit {
+  const usableLabel =
+    typeof row.usable_label === 'string' && row.usable_label.trim()
+      ? row.usable_label.trim()
+      : ''
   const sourceLabel =
     typeof row.source_label === 'string' && row.source_label.trim()
       ? row.source_label.trim()
@@ -141,7 +148,7 @@ function assetHitToOverlay(row: V1GlobalSearchAssetHit): GlobalSearchOverlayHit 
     type: 'asset',
     title: row.file_name,
     subtitle: sub,
-    badgeLabel: sourceLabel,
+    badgeLabel: usableLabel || sourceLabel,
   }
 }
 

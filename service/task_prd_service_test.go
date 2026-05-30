@@ -2165,6 +2165,61 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testi
 	}
 }
 
+func TestTaskServiceBatchSKUItemCostPrefillUsesProductIIDForSprayCloth(t *testing.T) {
+	costRuleRepo := newCostRuleRepoStub()
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        27,
+			RuleVersion:   1,
+			RuleName:      "常规喷绘布基础单价",
+			CategoryCode:  "SPRAY_CLOTH_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(4),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	svc := NewTaskServiceWithCatalog(
+		&prdTaskRepo{},
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		nil,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	).(*taskService)
+
+	detail := &domain.TaskDetail{TaskID: 986, CategoryCode: "GENERAL"}
+	item := &domain.TaskSKUItem{
+		TaskID:              986,
+		SKUCode:             "CGG000070",
+		CategoryCode:        "GENERAL",
+		ProductNameSnapshot: "CPT-常规喷绘布/端午保龄球游戏地垫粽子大号/130*240cm",
+		VariantJSON:         json.RawMessage(`{"product_i_id":"常规喷绘布"}`),
+	}
+
+	if appErr := svc.applyTaskSKUItemCostPrefill(context.Background(), detail, item); appErr != nil {
+		t.Fatalf("applyTaskSKUItemCostPrefill() unexpected error: %+v", appErr)
+	}
+	if item.CostPrice == nil || math.Abs(*item.CostPrice-13.728) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 13.728", item.CostPrice)
+	}
+	if item.EstimatedCost == nil || math.Abs(*item.EstimatedCost-13.728) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 13.728", item.EstimatedCost)
+	}
+	if item.CostRuleName != "常规喷绘布基础单价" {
+		t.Fatalf("cost_rule_name = %q, want 常规喷绘布基础单价", item.CostRuleName)
+	}
+	if item.RequiresManualReview {
+		t.Fatal("requires_manual_review = true, want false")
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoIgnoresStaleImplicitCostRuleIDMismatch(t *testing.T) {
 	costRuleRepo := newCostRuleRepoStub()
 	costRuleRepo.rules = []*domain.CostRule{

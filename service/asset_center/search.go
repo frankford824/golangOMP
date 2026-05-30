@@ -133,6 +133,8 @@ func (s *Service) buildExternalAssetDetail(row *domain.ExternalAssetRecord) *Ass
 		MimeType:              row.MimeType,
 		DownloadURL:           stringPtrIfNotEmpty(downloadURL),
 		PreviewAvailable:      previewAvailable,
+		UsableState:           domain.TaskAssetUsableStateNotApplicable,
+		UsableLabel:           "外部资源",
 		ProductName:           row.OriginPath,
 		CreatedAt:             row.CreatedAt,
 		UpdatedAt:             row.UpdatedAt,

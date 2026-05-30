@@ -173,7 +173,11 @@ func (r *workflowTraceEventRepo) List(ctx context.Context, filter repo.WorkflowT
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.Outcome); value != "" {
-		where = append(where, "outcome = ?")
+		if value == domain.WorkflowTraceOutcomeFailed {
+			where = append(where, "(outcome = ? AND (http_status IS NULL OR http_status >= 500))")
+		} else {
+			where = append(where, "outcome = ?")
+		}
 		args = append(args, value)
 	}
 	if filter.BusinessOnly {

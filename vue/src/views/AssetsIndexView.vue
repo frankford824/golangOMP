@@ -180,6 +180,13 @@
                 {{ assetSourceLabel(asset) }}
               </span>
               <span
+                v-if="!isExternalAsset(asset)"
+                class="ac-usability-pill"
+                :class="assetUsableToneClass(asset)"
+              >
+                {{ assetUsableLabel(asset) }}
+              </span>
+              <span
                 class="ac-format-pill"
                 :class="assetTypeToneClass(asset)"
                 :title="imageBusinessTypeLabel(asset)"
@@ -209,12 +216,12 @@
           </div>
           <div class="ac-card-footer">
             <div>
-              <div class="ac-footer-label">{{ isExternalAsset(asset) ? '准备状态' : '创建运营' }}</div>
+              <div class="ac-footer-label">{{ isExternalAsset(asset) ? '准备状态' : '使用状态' }}</div>
               <div
                 class="ac-footer-stat ac-footer-stat--operator"
-                :class="{ 'ac-footer-stat--external': isExternalAsset(asset) }"
+                :class="isExternalAsset(asset) ? 'ac-footer-stat--external' : assetUsableToneClass(asset)"
               >
-                {{ isExternalAsset(asset) ? externalAssetStatusLabel(asset) : taskCreatorLabel(asset) }}
+                {{ isExternalAsset(asset) ? externalAssetStatusLabel(asset) : assetUsableLabel(asset) }}
               </div>
             </div>
             <div class="ac-footer-right">
@@ -478,6 +485,18 @@
             <dt>任务创建运营</dt>
             <dd>{{ taskCreatorLabel(selectedAsset) }}</dd>
           </div>
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
+            <dt>使用状态</dt>
+            <dd>
+              <span class="detail-state-pill" :class="assetUsableToneClass(selectedAsset)">
+                {{ assetUsableLabel(selectedAsset) }}
+              </span>
+            </dd>
+          </div>
+          <div v-if="!isExternalAsset(selectedAsset) && selectedAsset.cleanup_after_at" class="detail-row">
+            <dt>旧版清理时间</dt>
+            <dd>{{ displayTime(selectedAsset.cleanup_after_at) }}</dd>
+          </div>
           <div class="detail-row">
             <dt>图片类型</dt>
             <dd>{{ imageBusinessTypeLabel(selectedAsset) }}</dd>
@@ -560,6 +579,18 @@
                 <div class="detail-row">
                   <dt>创建时间</dt>
                   <dd>{{ displayTime(version.created_at) }}</dd>
+                </div>
+                <div class="detail-row">
+                  <dt>使用状态</dt>
+                  <dd>
+                    <span class="detail-state-pill" :class="versionUsableToneClass(version)">
+                      {{ versionUsableLabel(version) }}
+                    </span>
+                  </dd>
+                </div>
+                <div v-if="version.cleanup_after_at" class="detail-row">
+                  <dt>清理时间</dt>
+                  <dd>{{ displayTime(version.cleanup_after_at) }}</dd>
                 </div>
               </dl>
             </article>
@@ -870,6 +901,57 @@ function externalAssetStatusLabel(asset: BackendAsset): string {
   if (oss === 'pending') return '正在准备下载'
   if (preview === 'failed' || oss === 'failed') return '外部资源暂时不可用'
   return '按需准备'
+}
+
+function rawUsableState(row: Record<string, unknown>): string {
+  const state = String(row.usable_state ?? row.usableState ?? '').trim()
+  if (state) return state
+  const flow = String(row.flow_review_status ?? row.flowReviewStatus ?? '').trim()
+  if (flow === 'approved') return 'ready_for_use'
+  if (flow === 'pending_review') return 'pending_review'
+  if (flow === 'rejected') return 'rejected'
+  if (flow === 'superseded') return 'history'
+  if (flow === 'cleaned') return 'cleaned'
+  return 'not_applicable'
+}
+
+function usableLabelFromState(state: string): string {
+  if (state === 'ready_for_use') return '可直接使用'
+  if (state === 'pending_review') return '待审核'
+  if (state === 'rejected') return '审核未通过'
+  if (state === 'history') return '历史版本'
+  if (state === 'cleaned') return '文件已清理'
+  return '不进入审核流'
+}
+
+function assetUsableLabel(asset: BackendAsset): string {
+  const r = asset as Record<string, unknown>
+  const label = String(r.usable_label ?? r.usableLabel ?? '').trim()
+  return label || usableLabelFromState(rawUsableState(r))
+}
+
+function versionUsableLabel(version: BackendAssetVersion): string {
+  const r = version as Record<string, unknown>
+  const label = String(r.usable_label ?? r.usableLabel ?? '').trim()
+  return label || usableLabelFromState(rawUsableState(r))
+}
+
+function usableToneClass(row: Record<string, unknown>): string {
+  const state = rawUsableState(row)
+  if (state === 'ready_for_use') return 'ac-usability--ready'
+  if (state === 'pending_review') return 'ac-usability--pending'
+  if (state === 'rejected') return 'ac-usability--rejected'
+  if (state === 'history') return 'ac-usability--history'
+  if (state === 'cleaned') return 'ac-usability--cleaned'
+  return 'ac-usability--neutral'
+}
+
+function assetUsableToneClass(asset: BackendAsset): string {
+  return usableToneClass(asset as Record<string, unknown>)
+}
+
+function versionUsableToneClass(version: BackendAssetVersion): string {
+  return usableToneClass(version as Record<string, unknown>)
 }
 
 function cardTitle(asset: BackendAsset): string {
@@ -2157,6 +2239,56 @@ onBeforeUnmount(() => {
   border-color: #bae6fd;
 }
 
+.ac-usability-pill,
+.detail-state-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 8rem;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 0.18rem 0.52rem;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-state-pill {
+  max-width: 100%;
+  font-size: 0.76rem;
+}
+
+.ac-usability--ready {
+  border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
+  color: #15803d !important;
+}
+
+.ac-usability--pending {
+  border-color: #fde68a !important;
+  background: #fffbeb !important;
+  color: #b45309 !important;
+}
+
+.ac-usability--rejected {
+  border-color: #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+}
+
+.ac-usability--history,
+.ac-usability--cleaned,
+.ac-usability--neutral {
+  border-color: #e2e8f0 !important;
+  background: #f8fafc !important;
+  color: #64748b !important;
+}
+
 .ac-card-meta {
   font-size: 13px;
   color: var(--ac-sec);
@@ -3207,6 +3339,34 @@ onBeforeUnmount(() => {
   font-size: 0.82rem !important;
   line-height: 1.25 !important;
   white-space: normal !important;
+}
+
+.ac-footer-stat.ac-usability--ready,
+.ac-footer-stat.ac-usability--pending,
+.ac-footer-stat.ac-usability--rejected,
+.ac-footer-stat.ac-usability--history,
+.ac-footer-stat.ac-usability--cleaned,
+.ac-footer-stat.ac-usability--neutral {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.ac-footer-stat.ac-usability--ready {
+  color: #15803d !important;
+}
+
+.ac-footer-stat.ac-usability--pending {
+  color: #b45309 !important;
+}
+
+.ac-footer-stat.ac-usability--rejected {
+  color: #b91c1c !important;
+}
+
+.ac-footer-stat.ac-usability--history,
+.ac-footer-stat.ac-usability--cleaned,
+.ac-footer-stat.ac-usability--neutral {
+  color: #64748b !important;
 }
 
 .ac-card-link-btn {

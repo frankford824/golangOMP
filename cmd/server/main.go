@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -326,10 +327,15 @@ func main() {
 		service.WithTaskDetailUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskDetailDesignAssetReadModel(designAssetRepo))
 	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo)
-	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb,
+	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
 		service.WithAuditV7ScopeUserRepo(userRepo),
-		service.WithAuditV7FilingTrigger(taskSvc))
+		service.WithAuditV7FilingTrigger(taskSvc),
+	}
+	if assetFlowRepo, ok := taskAssetRepo.(service.AuditAssetFlowRepo); ok {
+		auditV7Options = append(auditV7Options, service.WithAuditV7AssetFlowRepo(assetFlowRepo))
+	}
+	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb, auditV7Options...)
 	outsourceSvc := service.NewOutsourceService(outsourceRepo, taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb)
 	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
 		service.WithTaskEventUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
@@ -470,6 +476,36 @@ func main() {
 			logger.Fatal("cron auto-archive add failed", zap.Error(err))
 		}
 		logger.Info("cron auto-archive enabled", zap.String("spec", archiveSpec))
+	}
+	if os.Getenv("ENABLE_CRON_WAREHOUSE_AUTO_RELEASE") == "1" {
+		releaseSpec := envOr("CRON_SCHEDULE_WAREHOUSE_AUTO_RELEASE", "*/5 * * * *")
+		autoReleaseCandidateRepo, ok := taskAssetRepo.(service.WarehouseAutoReleaseCandidateRepo)
+		if !ok {
+			logger.Fatal("cron warehouse-auto-release requires candidate repo support")
+		}
+		autoReleaseJob := service.NewWarehouseAutoReleaseJob(
+			autoReleaseCandidateRepo,
+			taskRepo,
+			warehouseRepo,
+			taskEventRepo,
+			mdb,
+			log.New(os.Stderr, "[WAREHOUSE-AUTO-RELEASE-CRON] ", log.LstdFlags),
+			service.WithWarehouseAutoReleaseModuleRepos(taskModuleRepo, taskModuleEventRepo),
+		)
+		if err := cronInst.Add("warehouse-auto-release", releaseSpec, func(ctx context.Context) error {
+			_, appErr := autoReleaseJob.Run(ctx, service.WarehouseAutoReleaseOptions{
+				Limit:         envInt("WAREHOUSE_AUTO_RELEASE_LIMIT", 100),
+				GracePeriod:   time.Duration(envInt("WAREHOUSE_AUTO_RELEASE_GRACE_MINUTES", 30)) * time.Minute,
+				SystemActorID: int64(envInt("WAREHOUSE_AUTO_RELEASE_SYSTEM_ACTOR_ID", 0)),
+			})
+			if appErr != nil {
+				return fmt.Errorf("%s: %s", appErr.Code, appErr.Message)
+			}
+			return nil
+		}); err != nil {
+			logger.Fatal("cron warehouse-auto-release add failed", zap.Error(err))
+		}
+		logger.Info("cron warehouse-auto-release enabled", zap.String("spec", releaseSpec))
 	}
 	cronInst.Start()
 	logger.Info("cron started", zap.Int("entries", len(cronInst.Entries())))
@@ -669,6 +705,18 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 func connectRedis(cfg config.RedisConfig) (*redis.Client, error) {

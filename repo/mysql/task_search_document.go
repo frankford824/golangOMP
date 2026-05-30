@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 type taskSearchDocumentSQL interface {
@@ -22,6 +23,41 @@ func taskSearchDocumentsTableExists(ctx context.Context, q taskSearchDocumentSQL
 	return err == nil && n > 0
 }
 
+func mysqlColumnExists(ctx context.Context, q taskSearchDocumentSQL, table, column string) bool {
+	table = strings.TrimSpace(table)
+	column = strings.TrimSpace(column)
+	if table == "" || column == "" {
+		return false
+	}
+	var n int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM information_schema.columns
+		 WHERE table_schema = DATABASE()
+		   AND table_name = ?
+		   AND column_name = ?`, table, column).Scan(&n)
+	return err == nil && n > 0
+}
+
+func taskAssetsActiveSQL(ctx context.Context, q taskSearchDocumentSQL, alias string) string {
+	prefix := strings.TrimSpace(alias)
+	if prefix != "" {
+		prefix += "."
+	}
+	hasDeletedAt := mysqlColumnExists(ctx, q, "task_assets", "deleted_at")
+	hasCleanedAt := mysqlColumnExists(ctx, q, "task_assets", "cleaned_at")
+	switch {
+	case hasDeletedAt && hasCleanedAt:
+		return fmt.Sprintf("COALESCE(%sdeleted_at, %scleaned_at) IS NULL", prefix, prefix)
+	case hasDeletedAt:
+		return fmt.Sprintf("%sdeleted_at IS NULL", prefix)
+	case hasCleanedAt:
+		return fmt.Sprintf("%scleaned_at IS NULL", prefix)
+	default:
+		return "1=1"
+	}
+}
+
 func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
 	if taskID <= 0 || !taskSearchDocumentsTableExists(ctx, q) {
 		return nil
@@ -29,8 +65,9 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 	if _, err := q.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
 		return fmt.Errorf("set task search group_concat_max_len: %w", err)
 	}
-	_, err := q.ExecContext(ctx, `
-		INSERT INTO task_search_documents (
+	activeAssetWhere := taskAssetsActiveSQL(ctx, q, "")
+	query := strings.Replace(`
+			INSERT INTO task_search_documents (
 		  task_id, task_no, product_name_snapshot, sku_code, primary_sku_code, product_i_id,
 		  task_type, task_status, priority, owner_department, owner_team, owner_org_team,
 		  creator_id, creator_name, requester_id, requester_name, designer_id, designer_name,
@@ -89,11 +126,11 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 		LEFT JOIN users designer ON designer.id = t.designer_id
 		LEFT JOIN users handler ON handler.id = t.current_handler_id
 		LEFT JOIN (
-		  SELECT task_id, GROUP_CONCAT(CONCAT_WS(' ', file_name, original_filename, storage_key, source_module_key) SEPARATOR ' ') AS asset_text
-		  FROM task_assets
-		  WHERE task_id = ? AND COALESCE(deleted_at, cleaned_at) IS NULL
-		  GROUP BY task_id
-		) assets ON assets.task_id = t.id
+			  SELECT task_id, GROUP_CONCAT(CONCAT_WS(' ', file_name, original_filename, storage_key, source_module_key) SEPARATOR ' ') AS asset_text
+			  FROM task_assets
+			  WHERE task_id = ? AND {{active_asset_where}}
+			  GROUP BY task_id
+			) assets ON assets.task_id = t.id
 		WHERE t.id = ?
 		ON DUPLICATE KEY UPDATE
 		  task_no = VALUES(task_no),
@@ -116,10 +153,11 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 		  current_handler_id = VALUES(current_handler_id),
 		  current_handler_name = VALUES(current_handler_name),
 		  created_at = VALUES(created_at),
-		  updated_at = VALUES(updated_at),
-		  deadline_at = VALUES(deadline_at),
-		  asset_text = VALUES(asset_text),
-		  search_text = VALUES(search_text)`,
+			  updated_at = VALUES(updated_at),
+			  deadline_at = VALUES(deadline_at),
+			  asset_text = VALUES(asset_text),
+			  search_text = VALUES(search_text)`, "{{active_asset_where}}", activeAssetWhere, 1)
+	_, err := q.ExecContext(ctx, query,
 		taskID,
 		taskID,
 	)

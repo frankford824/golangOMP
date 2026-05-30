@@ -1287,7 +1287,10 @@ function formatTraceLocation(event: WorkflowTraceEvent): string {
 }
 
 function outcomeLabel(outcome: string | undefined, httpStatus?: number | null): string {
-  if (httpStatus && httpStatus >= 400) return '异常'
+  if (httpStatus && httpStatus >= 500) return '异常'
+  if (httpStatus === 403) return '无权限'
+  if (httpStatus === 404) return '未找到'
+  if (httpStatus && httpStatus >= 400) return '未完成'
   const raw = outcome?.trim()
   if (!raw) return '—'
   if (raw === 'succeeded') return '成功'
@@ -1296,7 +1299,8 @@ function outcomeLabel(outcome: string | undefined, httpStatus?: number | null): 
 }
 
 function isFailedTrace(event: WorkflowTraceEvent): boolean {
-  return event.outcome === 'failed' || Boolean(event.http_status && event.http_status >= 400)
+  if (event.http_status) return event.http_status >= 500
+  return event.outcome === 'failed'
 }
 
 function traceOutcomeClass(event: WorkflowTraceEvent): string {

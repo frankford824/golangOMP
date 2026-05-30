@@ -67,6 +67,18 @@
             <dt>任务创建运营</dt>
             <dd>{{ taskCreatorLabel(asset) }}</dd>
           </div>
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
+            <dt>使用状态</dt>
+            <dd>
+              <span class="detail-state-pill" :class="assetUsableToneClass(asset)">
+                {{ assetUsableLabel(asset) }}
+              </span>
+            </dd>
+          </div>
+          <div v-if="!isExternalAsset(asset) && asset.cleanup_after_at" class="detail-row">
+            <dt>旧版清理时间</dt>
+            <dd>{{ displayTime(asset.cleanup_after_at) }}</dd>
+          </div>
           <div class="detail-row">
             <dt>图片类型</dt>
             <dd>{{ imageBusinessTypeLabel(asset) }}</dd>
@@ -161,6 +173,18 @@
                 <div class="detail-row">
                   <dt>上传人</dt>
                   <dd>{{ versionCreatorLabel(version) }}</dd>
+                </div>
+                <div class="detail-row">
+                  <dt>使用状态</dt>
+                  <dd>
+                    <span class="detail-state-pill" :class="versionUsableToneClass(version)">
+                      {{ versionUsableLabel(version) }}
+                    </span>
+                  </dd>
+                </div>
+                <div v-if="version.cleanup_after_at" class="detail-row">
+                  <dt>清理时间</dt>
+                  <dd>{{ displayTime(version.cleanup_after_at) }}</dd>
                 </div>
               </dl>
             </article>
@@ -289,6 +313,57 @@ function externalAssetStatusLabel(row: BackendAsset): string {
   if (oss === 'pending') return '正在准备下载'
   if (preview === 'failed' || oss === 'failed') return '外部资源暂时不可用'
   return '按需准备'
+}
+
+function rawUsableState(row: Record<string, unknown>): string {
+  const state = String(row.usable_state ?? row.usableState ?? '').trim()
+  if (state) return state
+  const flow = String(row.flow_review_status ?? row.flowReviewStatus ?? '').trim()
+  if (flow === 'approved') return 'ready_for_use'
+  if (flow === 'pending_review') return 'pending_review'
+  if (flow === 'rejected') return 'rejected'
+  if (flow === 'superseded') return 'history'
+  if (flow === 'cleaned') return 'cleaned'
+  return 'not_applicable'
+}
+
+function usableLabelFromState(state: string): string {
+  if (state === 'ready_for_use') return '可直接使用'
+  if (state === 'pending_review') return '待审核'
+  if (state === 'rejected') return '审核未通过'
+  if (state === 'history') return '历史版本'
+  if (state === 'cleaned') return '文件已清理'
+  return '不进入审核流'
+}
+
+function assetUsableLabel(row: BackendAsset): string {
+  const record = row as Record<string, unknown>
+  const label = String(record.usable_label ?? record.usableLabel ?? '').trim()
+  return label || usableLabelFromState(rawUsableState(record))
+}
+
+function versionUsableLabel(version: BackendAssetVersion): string {
+  const record = version as Record<string, unknown>
+  const label = String(record.usable_label ?? record.usableLabel ?? '').trim()
+  return label || usableLabelFromState(rawUsableState(record))
+}
+
+function usableToneClass(row: Record<string, unknown>): string {
+  const state = rawUsableState(row)
+  if (state === 'ready_for_use') return 'detail-state-pill--ready'
+  if (state === 'pending_review') return 'detail-state-pill--pending'
+  if (state === 'rejected') return 'detail-state-pill--rejected'
+  if (state === 'history') return 'detail-state-pill--history'
+  if (state === 'cleaned') return 'detail-state-pill--cleaned'
+  return 'detail-state-pill--neutral'
+}
+
+function assetUsableToneClass(row: BackendAsset): string {
+  return usableToneClass(row as Record<string, unknown>)
+}
+
+function versionUsableToneClass(version: BackendAssetVersion): string {
+  return usableToneClass(version as Record<string, unknown>)
 }
 
 function externalOriginPath(row: BackendAsset): string {
@@ -559,6 +634,41 @@ onMounted(() => {
   font-size: 0.8125rem;
   color: #0f172a;
   word-break: break-word;
+}
+.detail-state-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 9999px;
+  padding: 0.18rem 0.56rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+.detail-state-pill--ready {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+.detail-state-pill--pending {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+.detail-state-pill--rejected {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.detail-state-pill--history,
+.detail-state-pill--cleaned,
+.detail-state-pill--neutral {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
 }
 .versions-section {
   margin-top: 1rem;

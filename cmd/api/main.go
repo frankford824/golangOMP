@@ -263,10 +263,15 @@ func main() {
 		service.WithTaskDetailUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskDetailDesignAssetReadModel(designAssetRepo))
 	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo)
-	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb,
+	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
 		service.WithAuditV7ScopeUserRepo(userRepo),
-		service.WithAuditV7FilingTrigger(taskSvc))
+		service.WithAuditV7FilingTrigger(taskSvc),
+	}
+	if assetFlowRepo, ok := taskAssetRepo.(service.AuditAssetFlowRepo); ok {
+		auditV7Options = append(auditV7Options, service.WithAuditV7AssetFlowRepo(assetFlowRepo))
+	}
+	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb, auditV7Options...)
 	outsourceSvc := service.NewOutsourceService(outsourceRepo, taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb)
 	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
 		service.WithTaskEventUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))

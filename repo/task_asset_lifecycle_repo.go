@@ -20,8 +20,10 @@ type TaskAssetCleanupCandidate struct {
 	TaskID             int64
 	SourceTaskModuleID *int64
 	StorageKey         string
+	RelatedStorageKeys []string
 	SourceModuleKey    string
 	TaskUpdatedAt      time.Time
+	CleanupReason      string
 }
 
 type TaskAssetLifecycleRepo interface {

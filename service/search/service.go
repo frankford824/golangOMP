@@ -103,7 +103,7 @@ func (s *Service) appendExternalAssets(ctx context.Context, result *domain.Searc
 	}
 	items, err := s.external.SearchGlobal(ctx, q, limit)
 	if err != nil {
-		return err
+		return nil
 	}
 	if len(items) == 0 {
 		return nil

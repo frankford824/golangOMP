@@ -1003,6 +1003,7 @@ const WAREHOUSE_FLOW_COMPLETE_PERMISSION_KEYS = [
   'task.warehouse.complete',
   'warehouse.complete',
 ] as const
+const COST_OVERRIDE_TIMELINE_ROLES = ['Ops', 'Warehouse', 'Admin', 'SuperAdmin'] as const
 
 const route = useRoute()
 const router = useRouter()
@@ -1072,6 +1073,9 @@ const showCostInDetail = computed(
     }
     return Boolean(t.costPrice || t.costOverrideSummary || t.governanceAuditSummary || t.procurementSummary)
   },
+)
+const canReadCostOverrideTimeline = computed(() =>
+  permissionsStore.hasAnyRole(COST_OVERRIDE_TIMELINE_ROLES),
 )
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -2429,11 +2433,15 @@ async function loadSideEvents() {
   }
   sideEventsLoading.value = true
   try {
+    const shouldLoadCostEvents = canReadCostOverrideTimeline.value
     const [taskEventsResult, costEventsResult] = await Promise.allSettled([
       tasksApi.listTaskEvents(tid),
-      tasksApi.getCostOverrides(tid),
+      shouldLoadCostEvents ? tasksApi.getCostOverrides(tid) : Promise.resolve(null),
     ])
-    if (taskEventsResult.status === 'rejected' && costEventsResult.status === 'rejected') {
+    if (
+      taskEventsResult.status === 'rejected' &&
+      (!shouldLoadCostEvents || costEventsResult.status === 'rejected')
+    ) {
       throw taskEventsResult.reason
     }
     const taskEvents =
@@ -2443,7 +2451,7 @@ async function loadSideEvents() {
           )
         : []
     const costEvents =
-      costEventsResult.status === 'fulfilled'
+      shouldLoadCostEvents && costEventsResult.status === 'fulfilled' && costEventsResult.value
         ? extractCostOverrideEventsList(costEventsResult.value.data).map((row) =>
             mapCostOverrideEventToRecentEvent(row, tid, task.value?.taskNo),
           )

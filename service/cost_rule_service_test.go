@@ -392,6 +392,18 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			want:         []string{"PHOTO_CLOTH_STANDARD"},
 		},
 		{
+			name:         "regular spray cloth maps to spray cloth rule",
+			categoryCode: "GENERAL",
+			notes:        "CPT-常规喷绘布/端午保龄球游戏地垫粽子大号/130*240cm",
+			want:         []string{"SPRAY_CLOTH_STANDARD"},
+		},
+		{
+			name:         "custom spray cloth maps to custom spray cloth rule",
+			categoryCode: "GENERAL",
+			notes:        "CPT-定制喷绘布/地垫/80*240cm",
+			want:         []string{"SPRAY_CLOTH_CUSTOM"},
+		},
+		{
 			name:         "pp poster is not mistaken for photo cloth",
 			categoryCode: "GENERAL",
 			notes:        "PP海报背胶 30*40cm",

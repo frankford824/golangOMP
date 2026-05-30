@@ -661,7 +661,7 @@ func recordHTTPWorkflowTraceEvent(c *gin.Context, recorder workflowTraceRecorder
 	routePath := routePathForLog(c)
 	latencyMS := latency.Milliseconds()
 	outcome := domain.WorkflowTraceOutcomeSucceeded
-	if status >= 400 {
+	if status >= 500 {
 		outcome = domain.WorkflowTraceOutcomeFailed
 	}
 	httpStatus := status

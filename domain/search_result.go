@@ -42,6 +42,9 @@ type SearchAsset struct {
 	ExternalKind      string  `json:"external_kind,omitempty"`
 	ExternalMountPath string  `json:"external_mount_path,omitempty"`
 	ExternalDriver    string  `json:"external_driver,omitempty"`
+	FlowReviewStatus  string  `json:"flow_review_status,omitempty"`
+	UsableState       string  `json:"usable_state,omitempty"`
+	UsableLabel       string  `json:"usable_label,omitempty"`
 }
 
 type SearchProduct struct {

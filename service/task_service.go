@@ -235,7 +235,7 @@ type CustomizationJobFilter struct {
 // TaskFilter for list queries.
 type TaskFilter struct {
 	domain.TaskQueryFilterDefinition
-	CreatorID     *int64
+	CreatorID *int64
 	// MineActorID scopes GET /v1/tasks?filter=mine to tasks owned by the actor as creator, designer, or current handler.
 	MineActorID   *int64
 	DesignerID    *int64
@@ -2746,6 +2746,7 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		item.ProductShortName,
 		item.DesignRequirement,
 		item.CategoryCode,
+		taskSKUItemProductIID(item),
 	), " ")
 	rules, err := s.listActiveCostRulesForText(ctx, categoryID, categoryCode, notes)
 	if err != nil {
@@ -2890,6 +2891,12 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 			return add("PHOTO_CLOTH_CUSTOM")
 		}
 		return add("PHOTO_CLOTH_STANDARD")
+	}
+	if strings.Contains(combined, "喷绘布") {
+		if strings.Contains(combined, "定制") {
+			return add("SPRAY_CLOTH_CUSTOM")
+		}
+		return add("SPRAY_CLOTH_STANDARD")
 	}
 	if strings.Contains(combined, "旗帜布") {
 		if strings.Contains(combined, "车缝") {

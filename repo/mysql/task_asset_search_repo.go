@@ -22,6 +22,7 @@ const taskAssetSearchSelect = `
 	       ta.mime_type, ta.file_size, ta.file_path, ta.storage_key, ta.whole_hash, ta.upload_status, ta.preview_status,
 	       ta.uploaded_by, ta.uploaded_at, ta.remark, ta.created_at,
 	       ta.source_module_key, ta.source_task_module_id, ta.is_archived, ta.archived_at, ta.archived_by, ta.cleaned_at, ta.deleted_at,
+	       ta.flow_review_status, ta.approved_at, ta.approved_by, ta.rejected_at, ta.rejected_by, ta.superseded_by_version_id, ta.superseded_at, ta.cleanup_after_at, ta.source_asset_version_id,
 	       t.id, t.task_no, t.source_mode, t.product_id, t.sku_code, t.product_name_snapshot,
 	       t.task_type, t.operator_group_id, t.owner_team, t.owner_department, t.owner_org_team, t.creator_id, t.requester_id,
 	       t.designer_id, t.current_handler_id, t.task_status, t.priority, t.deadline_at, t.need_outsource, t.is_outsource,
@@ -193,10 +194,11 @@ type taskAssetSearchScanner interface {
 func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearchRow, error) {
 	var a domain.TaskAsset
 	var t domain.Task
-	var assetID, assetVersionNo, sourceTaskModuleID, archivedBy, productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
+	var assetID, assetVersionNo, sourceTaskModuleID, archivedBy, approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID, productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var scopeSKUCode, uploadMode, uploadRequestID, storageRefID, originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var flowReviewStatus sql.NullString
 	var fileSize sql.NullInt64
-	var uploadedAt, archivedAt, cleanedAt, deletedAt, deadlineAt sql.NullTime
+	var uploadedAt, archivedAt, cleanedAt, deletedAt, approvedAt, rejectedAt, supersededAt, cleanupAfterAt, deadlineAt sql.NullTime
 	var needOutsource, isOutsource, customizationRequired, isBatchTask sql.NullBool
 	var assetNo string
 	var designCreatedBy int64
@@ -209,6 +211,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 		&mimeType, &fileSize, &filePath, &storageKey, &wholeHash, &uploadStatus, &previewStatus,
 		&a.UploadedBy, &uploadedAt, &a.Remark, &a.CreatedAt,
 		&a.SourceModuleKey, &sourceTaskModuleID, &a.IsArchived, &archivedAt, &archivedBy, &cleanedAt, &deletedAt,
+		&flowReviewStatus, &approvedAt, &approvedBy, &rejectedAt, &rejectedBy, &supersededByVersionID, &supersededAt, &cleanupAfterAt, &sourceAssetVersionID,
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
 		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &t.OwnerDepartment, &t.OwnerOrgTeam, &t.CreatorID, &requesterID,
 		&designerID, &currentHandlerID, &t.TaskStatus, &t.Priority, &deadlineAt, &needOutsource, &isOutsource,
@@ -245,6 +248,19 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	a.ArchivedBy = fromNullInt64(archivedBy)
 	a.CleanedAt = fromNullTime(cleanedAt)
 	a.DeletedAt = fromNullTime(deletedAt)
+	if flowReviewStatus.Valid {
+		a.FlowReviewStatus = domain.NormalizeTaskAssetFlowReviewStatus(domain.TaskAssetFlowReviewStatus(flowReviewStatus.String), a.AssetType)
+	} else {
+		a.FlowReviewStatus = domain.NormalizeTaskAssetFlowReviewStatus("", a.AssetType)
+	}
+	a.ApprovedAt = fromNullTime(approvedAt)
+	a.ApprovedBy = fromNullInt64(approvedBy)
+	a.RejectedAt = fromNullTime(rejectedAt)
+	a.RejectedBy = fromNullInt64(rejectedBy)
+	a.SupersededByVersionID = fromNullInt64(supersededByVersionID)
+	a.SupersededAt = fromNullTime(supersededAt)
+	a.CleanupAfterAt = fromNullTime(cleanupAfterAt)
+	a.SourceAssetVersionID = fromNullInt64(sourceAssetVersionID)
 	t.ProductID = fromNullInt64(productID)
 	t.OperatorGroupID = fromNullInt64(operatorGroupID)
 	t.RequesterID = fromNullInt64(requesterID)

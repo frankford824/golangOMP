@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -36,6 +37,7 @@ type auditV7Service struct {
 	filingTrigger     auditTaskFilingTrigger
 	dataScopeResolver DataScopeResolver
 	scopeUserRepo     repo.UserRepo
+	assetFlowRepo     AuditAssetFlowRepo
 }
 
 type auditTaskFilingTrigger interface {
@@ -44,6 +46,11 @@ type auditTaskFilingTrigger interface {
 
 type taskNeedOutsourceUpdater interface {
 	UpdateNeedOutsource(ctx context.Context, tx repo.Tx, id int64, needOutsource bool) error
+}
+
+type AuditAssetFlowRepo interface {
+	MarkCurrentDeliveryVersionsApprovedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, approvedAt time.Time) (int64, error)
+	MarkCurrentDeliveryVersionsRejectedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, rejectedAt time.Time) (int64, error)
 }
 
 type AuditV7ServiceOption func(*auditV7Service)
@@ -63,6 +70,12 @@ func WithAuditV7DataScopeResolver(resolver DataScopeResolver) AuditV7ServiceOpti
 func WithAuditV7ScopeUserRepo(userRepo repo.UserRepo) AuditV7ServiceOption {
 	return func(s *auditV7Service) {
 		s.scopeUserRepo = userRepo
+	}
+}
+
+func WithAuditV7AssetFlowRepo(assetFlowRepo AuditAssetFlowRepo) AuditV7ServiceOption {
+	return func(s *auditV7Service) {
+		s.assetFlowRepo = assetFlowRepo
 	}
 }
 
@@ -208,6 +221,11 @@ func (s *auditV7Service) Approve(ctx context.Context, p ApproveAuditParams) *dom
 		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, nextHandlerID); err != nil {
 			return err
 		}
+		if p.NextStatus == domain.TaskStatusPendingWarehouseReceive && s.assetFlowRepo != nil {
+			if _, err := s.assetFlowRepo.MarkCurrentDeliveryVersionsApprovedForTask(ctx, tx, p.TaskID, p.AuditorID, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		eventExtra := map[string]interface{}{
 			"auditor_id":     p.AuditorID,
 			"stage":          string(p.Stage),
@@ -298,6 +316,11 @@ func (s *auditV7Service) Reject(ctx context.Context, p RejectAuditParams) *domai
 		}
 		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, nextHandlerID); err != nil {
 			return err
+		}
+		if s.assetFlowRepo != nil {
+			if _, err := s.assetFlowRepo.MarkCurrentDeliveryVersionsRejectedForTask(ctx, tx, p.TaskID, p.AuditorID, time.Now().UTC()); err != nil {
+				return err
+			}
 		}
 		rejectExtra := map[string]interface{}{
 			"auditor_id":     p.AuditorID,

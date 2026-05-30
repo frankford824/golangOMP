@@ -44,9 +44,10 @@ func (r *searchRepo) searchTasksFromDocuments(ctx context.Context, q string, lim
 func (r *searchRepo) searchTasksLegacy(ctx context.Context, q string, limit int) ([]domain.SearchTask, error) {
 	limit = normalizeSearchLimit(limit)
 	like := "%" + strings.TrimSpace(q) + "%"
-	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT t.id, t.task_no, t.product_name_snapshot, t.task_status, t.priority,
-		       t.task_type, t.sku_code, t.primary_sku_code,
+	activeAssetWhere := taskAssetsActiveSQL(ctx, r.db.db, "ta")
+	query := strings.Replace(`
+			SELECT t.id, t.task_no, t.product_name_snapshot, t.task_status, t.priority,
+			       t.task_type, t.sku_code, t.primary_sku_code,
 		       COALESCE(
 		         NULLIF(td.category, ''),
 		         NULLIF(td.category_name, ''),
@@ -100,15 +101,16 @@ func (r *searchRepo) searchTasksLegacy(ctx context.Context, q string, limit int)
 		    OR (JSON_VALID(td.product_selection_snapshot_json) AND JSON_UNQUOTE(JSON_EXTRACT(td.product_selection_snapshot_json, '$.erp_product.product_name')) LIKE ?)
 		    OR (JSON_VALID(td.last_filing_payload_json) AND JSON_UNQUOTE(JSON_EXTRACT(td.last_filing_payload_json, '$.product.i_id')) LIKE ?)
 		    OR (JSON_VALID(td.last_filing_payload_json) AND JSON_UNQUOTE(JSON_EXTRACT(td.last_filing_payload_json, '$.i_id')) LIKE ?)
-		    OR EXISTS (
-		        SELECT 1
-		          FROM task_assets ta
-		         WHERE ta.task_id = t.id
-		           AND COALESCE(ta.deleted_at, ta.cleaned_at) IS NULL
-		           AND (ta.file_name LIKE ? OR COALESCE(ta.original_filename, '') LIKE ? OR COALESCE(ta.storage_key, '') LIKE ? OR COALESCE(ta.source_module_key, '') LIKE ?)
-		    )
-		 ORDER BY t.id DESC
-		 LIMIT ?`, repeatArgs(like, 42, limit)...)
+			    OR EXISTS (
+			        SELECT 1
+			          FROM task_assets ta
+			         WHERE ta.task_id = t.id
+			           AND {{active_asset_where}}
+			           AND (ta.file_name LIKE ? OR COALESCE(ta.original_filename, '') LIKE ? OR COALESCE(ta.storage_key, '') LIKE ? OR COALESCE(ta.source_module_key, '') LIKE ?)
+			    )
+			 ORDER BY t.id DESC
+			 LIMIT ?`, "{{active_asset_where}}", activeAssetWhere, 1)
+	rows, err := r.db.db.QueryContext(ctx, query, repeatArgs(like, 42, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("search tasks: %w", err)
 	}
@@ -159,15 +161,24 @@ func scanSearchTasks(rows *sql.Rows) ([]domain.SearchTask, error) {
 func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
 	limit = normalizeSearchLimit(limit)
 	like := "%" + strings.TrimSpace(q) + "%"
-	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT COALESCE(ta.asset_id, ta.id) AS asset_id, ta.file_name, ta.source_module_key, ta.task_id
-		  FROM task_assets ta
-		  LEFT JOIN tasks t ON t.id = ta.task_id
-		  LEFT JOIN users creator ON creator.id = t.creator_id
-		  LEFT JOIN users designer ON designer.id = t.designer_id
-		 WHERE COALESCE(ta.deleted_at, ta.cleaned_at) IS NULL
-		   AND (ta.file_name LIKE ?
-		    OR COALESCE(ta.original_filename, '') LIKE ?
+	activeAssetWhere := taskAssetsActiveSQL(ctx, r.db.db, "ta")
+	query := strings.Replace(`
+			SELECT COALESCE(ta.asset_id, ta.id) AS asset_id, ta.file_name, ta.source_module_key, ta.task_id,
+			       ta.asset_type, ta.flow_review_status
+			  FROM task_assets ta
+			  LEFT JOIN design_assets da ON da.id = ta.asset_id
+			  LEFT JOIN tasks t ON t.id = ta.task_id
+			  LEFT JOIN users creator ON creator.id = t.creator_id
+			  LEFT JOIN users designer ON designer.id = t.designer_id
+			 WHERE {{active_asset_where}}
+			   AND (
+			       ta.asset_id IS NULL
+			       OR ta.id = COALESCE(da.current_version_id, (
+			           SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
+			       ))
+			   )
+			   AND (ta.file_name LIKE ?
+			    OR COALESCE(ta.original_filename, '') LIKE ?
 		    OR COALESCE(ta.storage_key, '') LIKE ?
 		    OR COALESCE(ta.source_module_key, '') LIKE ?
 		    OR COALESCE(t.task_no, '') LIKE ?
@@ -180,10 +191,11 @@ func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]d
 		    OR COALESCE(t.owner_org_team, '') LIKE ?
 		    OR COALESCE(creator.username, '') LIKE ?
 		    OR COALESCE(creator.display_name, '') LIKE ?
-		    OR COALESCE(designer.username, '') LIKE ?
-		    OR COALESCE(designer.display_name, '') LIKE ?)
-		 ORDER BY COALESCE(ta.asset_id, ta.id) DESC
-		 LIMIT ?`, repeatArgs(like, 16, limit)...)
+			    OR COALESCE(designer.username, '') LIKE ?
+			    OR COALESCE(designer.display_name, '') LIKE ?)
+			 ORDER BY COALESCE(ta.asset_id, ta.id) DESC
+			 LIMIT ?`, "{{active_asset_where}}", activeAssetWhere, 1)
+	rows, err := r.db.db.QueryContext(ctx, query, repeatArgs(like, 16, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("search assets: %w", err)
 	}
@@ -194,7 +206,8 @@ func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]d
 		var item domain.SearchAsset
 		var module sql.NullString
 		var taskID sql.NullInt64
-		if err := rows.Scan(&item.AssetID, &item.FileName, &module, &taskID); err != nil {
+		var assetType, flowReviewStatus sql.NullString
+		if err := rows.Scan(&item.AssetID, &item.FileName, &module, &taskID, &assetType, &flowReviewStatus); err != nil {
 			return nil, fmt.Errorf("scan search asset: %w", err)
 		}
 		item.SourceModuleKey = nullStringPtr(module)
@@ -202,9 +215,54 @@ func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]d
 		item.ResourceID = fmt.Sprintf("%d", item.AssetID)
 		item.SourceType = string(domain.AssetResourceSourceSystem)
 		item.SourceLabel = "系统资源"
+		status := domain.NormalizeTaskAssetFlowReviewStatus(domain.TaskAssetFlowReviewStatus(nullStringValue(flowReviewStatus)), domain.TaskAssetType(nullStringValue(assetType)))
+		item.FlowReviewStatus = string(status)
+		item.UsableState = string(usableStateFromFlowStatus(status))
+		item.UsableLabel = usableLabelFromState(usableStateFromFlowStatus(status))
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func nullStringValue(value sql.NullString) string {
+	if value.Valid {
+		return value.String
+	}
+	return ""
+}
+
+func usableStateFromFlowStatus(status domain.TaskAssetFlowReviewStatus) domain.TaskAssetUsableState {
+	switch status {
+	case domain.TaskAssetFlowReviewStatusApproved:
+		return domain.TaskAssetUsableStateReadyForUse
+	case domain.TaskAssetFlowReviewStatusRejected:
+		return domain.TaskAssetUsableStateRejected
+	case domain.TaskAssetFlowReviewStatusSuperseded:
+		return domain.TaskAssetUsableStateHistory
+	case domain.TaskAssetFlowReviewStatusCleaned:
+		return domain.TaskAssetUsableStateCleaned
+	case domain.TaskAssetFlowReviewStatusPendingReview:
+		return domain.TaskAssetUsableStatePendingReview
+	default:
+		return domain.TaskAssetUsableStateNotApplicable
+	}
+}
+
+func usableLabelFromState(state domain.TaskAssetUsableState) string {
+	switch state {
+	case domain.TaskAssetUsableStateReadyForUse:
+		return "可直接使用"
+	case domain.TaskAssetUsableStatePendingReview:
+		return "待审核"
+	case domain.TaskAssetUsableStateRejected:
+		return "审核未通过"
+	case domain.TaskAssetUsableStateHistory:
+		return "历史版本"
+	case domain.TaskAssetUsableStateCleaned:
+		return "文件已清理"
+	default:
+		return "不进入审核流"
+	}
 }
 
 func (r *searchRepo) SearchProducts(ctx context.Context, q string, limit int) ([]domain.SearchProduct, error) {

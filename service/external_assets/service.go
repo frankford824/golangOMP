@@ -397,6 +397,8 @@ func (s *Service) SearchGlobal(ctx context.Context, q string, limit int) ([]doma
 			ExternalKind:      string(row.Kind),
 			ExternalMountPath: row.MountPath,
 			ExternalDriver:    row.Driver,
+			UsableState:       string(domain.TaskAssetUsableStateNotApplicable),
+			UsableLabel:       "外部资源",
 		})
 	}
 	return out, nil

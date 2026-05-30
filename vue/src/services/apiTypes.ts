@@ -378,10 +378,18 @@ export type AssetResourceSource = 'system' | 'external' | 'all'
  * v0.6 对齐：必须仅根据 preview_available 与 download_mode 决策 UI */
 export interface BackendAssetVersion {
   id: string
+  version_id?: string | number
   file_role: string
   version?: number
   file_name?: string
   created_at?: string
+  flow_review_status?: string
+  usable_state?: string
+  usable_label?: string
+  approved_at?: string
+  rejected_at?: string
+  superseded_at?: string
+  cleanup_after_at?: string
   /** 规范业务文件访问入口（列表嵌套版本时由后端下发） */
   download_url?: string
   lan_url?: string
@@ -440,6 +448,13 @@ export interface BackendAsset {
   original_filename?: string
   asset_type?: string
   asset_kind?: string
+  flow_review_status?: string
+  usable_state?: string
+  usable_label?: string
+  approved_at?: string
+  rejected_at?: string
+  superseded_at?: string
+  cleanup_after_at?: string
   versions?: BackendAssetVersion[]
   approved_version?: number
   warehouse_ready_version?: number
