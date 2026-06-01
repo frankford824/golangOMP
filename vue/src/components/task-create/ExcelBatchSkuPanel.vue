@@ -20,7 +20,15 @@
       </li>
     </ol>
 
-    <div class="excel-actions-card">
+    <div
+      class="excel-actions-card"
+      tabindex="0"
+      @focusin="activateExcelFileReceiver"
+      @pointerenter="activateExcelFileReceiver"
+      @dragover.prevent="onExcelDragOver"
+      @drop.prevent="onExcelDrop"
+      @paste="onExcelPaste"
+    >
       <button
         type="button"
         class="hh-btn hh-btn-primary"
@@ -43,7 +51,7 @@
         class="hh-btn hh-btn-file"
         @click="openFilePicker"
       >
-        选择文件
+        选择/拖拽/粘贴文件
       </button>
 
       <button
@@ -145,6 +153,12 @@ import { computed, ref } from 'vue'
 import { batchSkuApi, normalizeBatchPreviewRow } from '@/services/api/batchSkuApi'
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 
 type PreviewRow = BatchPreviewRow
 type Violation = BatchViolation
@@ -174,6 +188,14 @@ const preview = ref<PreviewRow[]>([])
 const violations = ref<Violation[]>([])
 const errorText = ref('')
 
+const { activateFileReceiver: activateExcelFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => !parsing.value),
+  onFiles: (files) => {
+    const file = files[0] ?? null
+    if (file) selectFile(file)
+  },
+})
+
 const stepItems = [
   { value: 1, label: '模板' },
   { value: 2, label: '说明' },
@@ -190,6 +212,7 @@ const activeStep = computed(() => {
 const selectedFileName = computed(() => selectedFile.value?.name ?? '未选择任何文件')
 
 function openFilePicker(): void {
+  activateExcelFileReceiver()
   fileInput.value?.click()
 }
 
@@ -221,10 +244,46 @@ async function downloadTemplate(): Promise<void> {
 
 function onFileChange(event: Event): void {
   const file = (event.target as HTMLInputElement).files?.[0] ?? null
+  selectFile(file)
+}
+
+function isExcelFile(file: File): boolean {
+  return /\.(xlsx|xls|csv)$/i.test(file.name)
+}
+
+function selectFile(file: File | null): void {
   selectedFile.value = file
   preview.value = []
   violations.value = []
   errorText.value = ''
+  if (file && !isExcelFile(file)) {
+    selectedFile.value = null
+    errorText.value = '仅支持上传 xlsx、xls 或 csv 文件'
+  }
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+function onExcelDragOver(event: DragEvent): void {
+  if (parsing.value || !hasFileDataTransfer(event.dataTransfer)) return
+  activateExcelFileReceiver()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onExcelDrop(event: DragEvent): void {
+  if (parsing.value) return
+  const file = getFilesFromDataTransfer(event.dataTransfer)[0] ?? null
+  if (!file) return
+  activateExcelFileReceiver()
+  selectFile(file)
+}
+
+function onExcelPaste(event: ClipboardEvent): void {
+  if (parsing.value) return
+  const file = getFilesFromClipboardEvent(event)[0] ?? null
+  if (!file) return
+  event.preventDefault()
+  activateExcelFileReceiver()
+  selectFile(file)
 }
 
 function isImage(mimeType: string): boolean {
@@ -362,6 +421,15 @@ function reset(): void {
   border: 1px solid #e6eaf0;
   background: #f7f8fa;
   padding: 0.55rem;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.excel-actions-card:focus-within,
+.excel-actions-card:hover {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.12);
 }
 .hh-btn {
   display: inline-flex;

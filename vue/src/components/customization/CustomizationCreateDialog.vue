@@ -68,7 +68,15 @@
               <h4 class="section-title">附件</h4>
               <p class="section-subtitle">源文件可选，参考图建议上传 1~3 张</p>
             </div>
-            <div class="source-upload-card">
+            <div
+              class="source-upload-card"
+              tabindex="0"
+              @focusin="activateSourceFileReceiver"
+              @pointerenter="activateSourceFileReceiver"
+              @dragover.prevent="onSourceDragOver"
+              @drop.prevent="onSourceDrop"
+              @paste="onSourcePaste"
+            >
               <div class="source-upload-head">
                 <span class="source-upload-title">源文件（可选）</span>
                 <button
@@ -77,7 +85,7 @@
                   :disabled="submitting"
                   @click="triggerSourcePick"
                 >
-                  选择源文件
+                  选择/拖拽/粘贴源文件
                 </button>
               </div>
               <p class="source-upload-hint">
@@ -346,6 +354,12 @@ import {
   isErpProductNameTooLong,
 } from '@/domain/erp-product-name'
 import { getBeijingDateString, toBeijingEndOfDayISO } from '@/utils/date'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 
 type CreateTaskType = 'ORIGINAL_PRODUCT_DEV' | 'NEW_PRODUCT_DEV'
 type SourceUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed'
@@ -409,6 +423,13 @@ const submitError = ref('')
 const showValidationError = ref(false)
 const sourceInputRef = ref<HTMLInputElement | null>(null)
 const sourceFiles = ref<SourceFileItem[]>([])
+
+const { activateFileReceiver: activateSourceFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => props.modelValue && !submitting.value),
+  onFiles: (files) => {
+    addSourceFiles(files)
+  },
+})
 
 const form = reactive({
   orderNumber: '',
@@ -622,6 +643,7 @@ function onProductSelect(product: Product) {
 }
 
 function triggerSourcePick() {
+  activateSourceFileReceiver()
   sourceInputRef.value?.click()
 }
 
@@ -632,8 +654,35 @@ function buildSourceFileKey(file: File): string {
 function onSourceFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   const files = input.files
+  if (files?.length) addSourceFiles(files)
+  input.value = ''
+}
+
+function onSourceDragOver(event: DragEvent) {
+  if (submitting.value || !hasFileDataTransfer(event.dataTransfer)) return
+  activateSourceFileReceiver()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onSourceDrop(event: DragEvent) {
+  if (submitting.value) return
+  const files = getFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) return
+  activateSourceFileReceiver()
+  addSourceFiles(files)
+}
+
+function onSourcePaste(event: ClipboardEvent) {
+  if (submitting.value) return
+  const files = getFilesFromClipboardEvent(event)
+  if (!files.length) return
+  event.preventDefault()
+  activateSourceFileReceiver()
+  addSourceFiles(files)
+}
+
+function addSourceFiles(files: FileList | File[]) {
   if (!files?.length) {
-    input.value = ''
     return
   }
   const existing = new Set(sourceFiles.value.map((item) => item.key))
@@ -651,7 +700,6 @@ function onSourceFileChange(event: Event) {
     sourceFiles.value.push({ key, file, status: 'pending' })
     existing.add(key)
   }
-  input.value = ''
 }
 
 function removeSourceFile(key: string) {
@@ -929,6 +977,17 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 0.36rem;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.source-upload-card:focus-within,
+.source-upload-card:hover {
+  border-color: #60a5fa;
+  background: #f8fbff;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.12);
 }
 .source-upload-head {
   display: flex;

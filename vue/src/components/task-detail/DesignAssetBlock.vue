@@ -365,7 +365,7 @@ const submitButtonLabel = computed(() => {
   return undefined
 })
 const uploadButtonLabel = computed(() =>
-  isCustomizationTask.value ? '上传本次定制设计稿（可多选）' : '上传本次设计稿（可多选）',
+  isCustomizationTask.value ? '上传/拖拽/粘贴定制设计稿' : '上传/拖拽/粘贴设计稿',
 )
 const submitHintIdle = computed(() =>
   isCustomizationTask.value

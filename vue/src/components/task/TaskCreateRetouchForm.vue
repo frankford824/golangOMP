@@ -53,7 +53,16 @@
           </div>
 
           <div class="requirement-col requirement-col--files">
-            <div class="req-upload-panel">
+            <div
+              class="req-upload-panel"
+              :class="{ 'req-upload-panel-active': isActiveRetouchFileTarget(index, 'reference') }"
+              tabindex="0"
+              @focusin="activateRetouchFileReceiver(index, 'reference')"
+              @pointerenter="activateRetouchFileReceiver(index, 'reference')"
+              @dragover.prevent="onRetouchDragOver(index, 'reference', $event)"
+              @drop.prevent="onRetouchDrop(index, 'reference', $event)"
+              @paste="onRetouchPaste(index, 'reference', $event)"
+            >
               <div class="req-upload-toolbar">
                 <div class="req-upload-title-wrap">
                   <span class="req-upload-label">本条参考图</span>
@@ -86,7 +95,16 @@
               <p v-else class="req-upload-empty">暂未选择参考图</p>
             </div>
 
-            <div class="req-upload-panel">
+            <div
+              class="req-upload-panel"
+              :class="{ 'req-upload-panel-active': isActiveRetouchFileTarget(index, 'source') }"
+              tabindex="0"
+              @focusin="activateRetouchFileReceiver(index, 'source')"
+              @pointerenter="activateRetouchFileReceiver(index, 'source')"
+              @dragover.prevent="onRetouchDragOver(index, 'source', $event)"
+              @drop.prevent="onRetouchDrop(index, 'source', $event)"
+              @paste="onRetouchPaste(index, 'source', $event)"
+            >
               <div class="req-upload-toolbar">
                 <div class="req-upload-title-wrap">
                   <span class="req-upload-label">本条素材文件</span>
@@ -140,8 +158,15 @@ import {
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
 import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES } from '@/domain/copy/design-upload'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 
 const pickError = ref('')
+type RetouchUploadKind = 'reference' | 'source'
 
 const props = defineProps<{
   form: TaskCreateFormModel
@@ -189,6 +214,17 @@ function removeRequirement(index: number) {
 
 const referenceInputRefs = ref<Record<number, HTMLInputElement | null>>({})
 const sourceInputRefs = ref<Record<number, HTMLInputElement | null>>({})
+const activeUploadTarget = ref<{ index: number; kind: RetouchUploadKind } | null>(null)
+
+const { activateFileReceiver } = useFileDropPasteReceiver({
+  enabled: () => activeUploadTarget.value != null,
+  onFiles: (files) => {
+    const target = activeUploadTarget.value
+    if (!target) return
+    if (target.kind === 'reference') addReferenceFiles(target.index, files)
+    else addSourceFiles(target.index, files)
+  },
+})
 
 function setReferenceInputRef(index: number, el: Element | ComponentPublicInstance | null) {
   referenceInputRefs.value[index] = el instanceof HTMLInputElement ? el : null
@@ -216,18 +252,56 @@ function updateRequirementAt(index: number, patch: Partial<RetouchRequirementDra
 
 function triggerReferencePick(index: number) {
   pickError.value = ''
+  activateRetouchFileReceiver(index, 'reference')
   referenceInputRefs.value[index]?.click()
 }
 
 function triggerSourcePick(index: number) {
   pickError.value = ''
+  activateRetouchFileReceiver(index, 'source')
   sourceInputRefs.value[index]?.click()
+}
+
+function activateRetouchFileReceiver(index: number, kind: RetouchUploadKind) {
+  activeUploadTarget.value = { index, kind }
+  activateFileReceiver()
+}
+
+function isActiveRetouchFileTarget(index: number, kind: RetouchUploadKind): boolean {
+  return activeUploadTarget.value?.index === index && activeUploadTarget.value?.kind === kind
+}
+
+function onRetouchDragOver(index: number, kind: RetouchUploadKind, event: DragEvent) {
+  if (!hasFileDataTransfer(event.dataTransfer)) return
+  activateRetouchFileReceiver(index, kind)
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onRetouchDrop(index: number, kind: RetouchUploadKind, event: DragEvent) {
+  activateRetouchFileReceiver(index, kind)
+  const files = getFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) return
+  if (kind === 'reference') addReferenceFiles(index, files)
+  else addSourceFiles(index, files)
+}
+
+function onRetouchPaste(index: number, kind: RetouchUploadKind, event: ClipboardEvent) {
+  const files = getFilesFromClipboardEvent(event)
+  if (!files.length) return
+  event.preventDefault()
+  activateRetouchFileReceiver(index, kind)
+  if (kind === 'reference') addReferenceFiles(index, files)
+  else addSourceFiles(index, files)
 }
 
 function onReferenceFileChange(index: number, event: Event) {
   const input = event.target as HTMLInputElement
   const files = input.files
-  if (!files?.length) return
+  if (files?.length) addReferenceFiles(index, files)
+  input.value = ''
+}
+
+function addReferenceFiles(index: number, files: FileList | File[]) {
   const current = localForm.value.retouchRequirements?.[index]
   if (!current) return
   const existing = [...(current.pendingReferenceFiles ?? [])]
@@ -246,13 +320,16 @@ function onReferenceFileChange(index: number, event: Event) {
     existing.push(file)
   }
   updateRequirementAt(index, { pendingReferenceFiles: existing })
-  input.value = ''
 }
 
 function onSourceFileChange(index: number, event: Event) {
   const input = event.target as HTMLInputElement
   const files = input.files
-  if (!files?.length) return
+  if (files?.length) addSourceFiles(index, files)
+  input.value = ''
+}
+
+function addSourceFiles(index: number, files: FileList | File[]) {
   const current = localForm.value.retouchRequirements?.[index]
   if (!current) return
   const existing = [...(current.pendingSourceFiles ?? [])]
@@ -271,7 +348,6 @@ function onSourceFileChange(index: number, event: Event) {
     existing.push(file)
   }
   updateRequirementAt(index, { pendingSourceFiles: existing })
-  input.value = ''
 }
 
 function removeReferenceFile(index: number, fileIndex: number) {
@@ -479,6 +555,18 @@ function prettyFileSize(size: number): string {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.req-upload-panel-active,
+.req-upload-panel:focus-within {
+  border-color: #60a5fa;
+  background: #f8fbff;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.14);
 }
 
 .req-upload-toolbar {

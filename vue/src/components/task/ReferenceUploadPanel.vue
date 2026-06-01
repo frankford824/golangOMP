@@ -4,11 +4,16 @@
     <div
       class="upload-zone"
       :class="{ 'upload-zone-disabled': uploading, 'upload-zone-drag-active': isDragActive }"
+      role="button"
+      tabindex="0"
       @click="openFilePicker"
+      @focusin="activateFileReceiver"
+      @pointerenter="activateFileReceiver"
       @dragenter.prevent="onDragEnter"
       @dragover.prevent="onDragOver"
       @dragleave.prevent="onDragLeave"
       @drop.prevent="handleDrop"
+      @paste="handlePaste"
     >
       <input
         ref="fileInput"
@@ -20,7 +25,7 @@
         @change="onFileChange"
       />
       <span class="upload-plus">+</span>
-      <p>{{ compact ? '上传参考图/附件' : `点击或拖拽上传参考图（任意格式，单文件不超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB）` }}</p>
+      <p>{{ compact ? '上传参考图/附件' : `点击、拖拽或粘贴上传参考图（任意格式，单文件不超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB）` }}</p>
       <p class="upload-hint">
         {{ uploadHintText }}
       </p>
@@ -69,6 +74,12 @@ import { toRelativeAssetUrl } from '@/utils/url'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { useTasksStore } from '@/stores/tasks'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 import {
   REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
   REFERENCE_UPLOAD_MAX_FILE_SIZE_MB,
@@ -123,7 +134,7 @@ const emit = defineEmits<{
 
 const uploadHintText = computed(() =>
   props.compact
-    ? (uploading.value ? '上传中...' : '点击选择，或拖拽文件到此处')
+    ? (uploading.value ? '上传中...' : '点击选择、拖拽或 Ctrl+V 粘贴文件')
     : (
   props.taskId?.trim()
     ? '已关联当前任务，上传的参考图会直接绑定到该任务。'
@@ -167,10 +178,12 @@ function syncFromModelValue() {
   fileRefs.value = nextItems
 }
 
-function hasDraggedFiles(e: DragEvent): boolean {
-  const types = e.dataTransfer?.types
-  return Array.isArray(types) && types.includes('Files')
-}
+const { activateFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => !uploading.value),
+  onFiles: (files) => {
+    void processFiles(files)
+  },
+})
 
 function openFilePicker() {
   if (uploading.value) return
@@ -178,13 +191,15 @@ function openFilePicker() {
 }
 
 function onDragEnter(e: DragEvent) {
-  if (uploading.value || !hasDraggedFiles(e)) return
+  if (uploading.value || !hasFileDataTransfer(e.dataTransfer)) return
+  activateFileReceiver()
   dragDepth.value += 1
   isDragActive.value = true
 }
 
 function onDragOver(e: DragEvent) {
-  if (uploading.value || !hasDraggedFiles(e)) return
+  if (uploading.value || !hasFileDataTransfer(e.dataTransfer)) return
+  activateFileReceiver()
   isDragActive.value = true
   if (e.dataTransfer) {
     e.dataTransfer.dropEffect = 'copy'
@@ -192,7 +207,7 @@ function onDragOver(e: DragEvent) {
 }
 
 function onDragLeave(e: DragEvent) {
-  if (!hasDraggedFiles(e)) return
+  if (!hasFileDataTransfer(e.dataTransfer)) return
   dragDepth.value = Math.max(0, dragDepth.value - 1)
   if (dragDepth.value === 0) {
     isDragActive.value = false
@@ -203,8 +218,17 @@ function handleDrop(e: DragEvent) {
   isDragActive.value = false
   dragDepth.value = 0
   if (uploading.value) return
-  const files = e.dataTransfer?.files
-  if (files?.length) processFiles(files)
+  const files = getFilesFromDataTransfer(e.dataTransfer)
+  if (files.length) processFiles(files)
+}
+
+function handlePaste(e: ClipboardEvent) {
+  if (uploading.value) return
+  const files = getFilesFromClipboardEvent(e)
+  if (!files.length) return
+  e.preventDefault()
+  activateFileReceiver()
+  void processFiles(files)
 }
 
 function onFileChange(e: Event) {
@@ -213,7 +237,7 @@ function onFileChange(e: Event) {
   input.value = ''
 }
 
-async function processFiles(files: FileList) {
+async function processFiles(files: FileList | File[]) {
   if (uploading.value) return
   limitError.value = ''
   uploadError.value = ''

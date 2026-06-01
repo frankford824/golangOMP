@@ -12,7 +12,7 @@ export const DESIGN_UPLOAD_COPY = {
   uploadingToServer: '正在上传至服务器...',
   uploadComplete: '上传完成',
   retry: '重试',
-  dropHint: '点击或拖拽上传本次设计稿（可多选，任意格式）',
+  dropHint: '点击、拖拽或粘贴上传本次设计稿（可多选，任意格式）',
   sizeLimitHint: `单文件不超过 ${DESIGN_UPLOAD_MAX_FILE_SIZE_MB}MB，超过将被拒绝上传`,
   batchSubmitHint: '批量 SKU 会一次汇总提交；每桶需绑定对应商品的 SKU。',
   reading: '读取中...',

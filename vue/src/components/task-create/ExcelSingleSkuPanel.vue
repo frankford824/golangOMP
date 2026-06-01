@@ -20,7 +20,15 @@
       </li>
     </ol>
 
-    <div class="excel-actions-card">
+    <div
+      class="excel-actions-card"
+      tabindex="0"
+      @focusin="activateExcelFileReceiver"
+      @pointerenter="activateExcelFileReceiver"
+      @dragover.prevent="onExcelDragOver"
+      @drop.prevent="onExcelDrop"
+      @paste="onExcelPaste"
+    >
       <button
         type="button"
         class="hh-btn hh-btn-primary"
@@ -38,7 +46,7 @@
         @change="onFileChange"
       />
 
-      <button type="button" class="hh-btn hh-btn-file" @click="openFilePicker">选择文件</button>
+      <button type="button" class="hh-btn hh-btn-file" @click="openFilePicker">选择/拖拽/粘贴文件</button>
 
       <button
         type="button"
@@ -93,6 +101,12 @@ import {
   type SingleTaskExcelDraft,
 } from '@/services/api/excelAssistApi'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 
 const props = withDefaults(
   defineProps<{
@@ -117,6 +131,14 @@ const draft = ref<SingleTaskExcelDraft | null>(null)
 const violations = ref<ExcelAssistViolation[]>([])
 const errorText = ref('')
 
+const { activateFileReceiver: activateExcelFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => !parsing.value),
+  onFiles: (files) => {
+    const file = files[0] ?? null
+    if (file) selectFile(file)
+  },
+})
+
 const stepItems = [
   { value: 1, label: '模板' },
   { value: 2, label: '说明' },
@@ -137,6 +159,7 @@ const isPurchase = computed(() => props.taskType === 'purchase_task')
 const isOriginal = computed(() => props.taskType === 'original_product_development')
 
 function openFilePicker(): void {
+  activateExcelFileReceiver()
   fileInput.value?.click()
 }
 
@@ -164,10 +187,46 @@ async function downloadTemplate(): Promise<void> {
 
 function onFileChange(event: Event): void {
   const file = (event.target as HTMLInputElement).files?.[0] ?? null
+  selectFile(file)
+}
+
+function isExcelFile(file: File): boolean {
+  return /\.(xlsx|xls)$/i.test(file.name)
+}
+
+function selectFile(file: File | null): void {
   selectedFile.value = file
   draft.value = null
   violations.value = []
   errorText.value = ''
+  if (file && !isExcelFile(file)) {
+    selectedFile.value = null
+    errorText.value = '仅支持上传 xlsx 或 xls 文件'
+  }
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+function onExcelDragOver(event: DragEvent): void {
+  if (parsing.value || !hasFileDataTransfer(event.dataTransfer)) return
+  activateExcelFileReceiver()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onExcelDrop(event: DragEvent): void {
+  if (parsing.value) return
+  const file = getFilesFromDataTransfer(event.dataTransfer)[0] ?? null
+  if (!file) return
+  activateExcelFileReceiver()
+  selectFile(file)
+}
+
+function onExcelPaste(event: ClipboardEvent): void {
+  if (parsing.value) return
+  const file = getFilesFromClipboardEvent(event)[0] ?? null
+  if (!file) return
+  event.preventDefault()
+  activateExcelFileReceiver()
+  selectFile(file)
 }
 
 async function parseFile(): Promise<void> {
@@ -294,6 +353,16 @@ function reset(): void {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+  border-radius: 0.75rem;
+  outline: none;
+  transition:
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+.excel-actions-card:focus-within,
+.excel-actions-card:hover {
+  background: #f8fbff;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.12);
 }
 .hh-btn {
   border-radius: 0.5rem;

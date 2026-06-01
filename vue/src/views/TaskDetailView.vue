@@ -303,7 +303,16 @@
                       <p class="detail-v3-card-text">{{ detailNoteLabel }}</p>
                     </article>
 
-                    <article class="detail-v3-info-card detail-v3-info-card--refs">
+                    <article
+                      class="detail-v3-info-card detail-v3-info-card--refs"
+                      :class="{ 'detail-v3-file-drop-active': isActiveDetailUploadTarget('reference') }"
+                      :tabindex="canUploadReferenceFromOps ? 0 : undefined"
+                      @focusin="activateDetailFileReceiver('reference')"
+                      @pointerenter="activateDetailFileReceiver('reference')"
+                      @dragover.prevent="onDetailUploadDragOver('reference', $event)"
+                      @drop.prevent="onDetailUploadDrop('reference', $event)"
+                      @paste="onDetailUploadPaste('reference', $event)"
+                    >
                       <p class="detail-v3-card-kicker">
                         {{ isBatchTask ? '全部参考图汇总（母任务）' : '参考图 / 附件' }}
                       </p>
@@ -333,9 +342,11 @@
                           v-if="canUploadReferenceFromOps"
                           type="button"
                           class="detail-v3-upload-ref-btn"
+                          @focusin="activateDetailFileReceiver('reference')"
+                          @pointerenter="activateDetailFileReceiver('reference')"
                           @click="opsReferenceUploadInputRef?.click()"
                         >
-                          上传参考图
+                          上传/拖拽/粘贴参考图
                         </button>
                         <button
                           v-if="opsReferenceThumbItems.length > 0"
@@ -685,17 +696,27 @@
                             type="button"
                             class="detail-v3-light-btn"
                             :disabled="actionLoading === 'audit-upload'"
+                            @focusin="activateDetailFileReceiver('audit-source')"
+                            @pointerenter="activateDetailFileReceiver('audit-source')"
+                            @dragover.prevent="onDetailUploadDragOver('audit-source', $event)"
+                            @drop.prevent="onDetailUploadDrop('audit-source', $event)"
+                            @paste="onDetailUploadPaste('audit-source', $event)"
                             @click="auditSourceUploadInputRef?.click()"
                           >
-                            上传修订源文件
+                            上传/拖拽/粘贴修订源文件
                           </button>
                           <button
                             type="button"
                             class="detail-v3-dark-btn"
                             :disabled="actionLoading === 'audit-upload'"
+                            @focusin="activateDetailFileReceiver('audit-delivery')"
+                            @pointerenter="activateDetailFileReceiver('audit-delivery')"
+                            @dragover.prevent="onDetailUploadDragOver('audit-delivery', $event)"
+                            @drop.prevent="onDetailUploadDrop('audit-delivery', $event)"
+                            @paste="onDetailUploadPaste('audit-delivery', $event)"
                             @click="auditDeliveryUploadInputRef?.click()"
                           >
-                            上传最终成品图
+                            上传/拖拽/粘贴最终成品图
                           </button>
                         </div>
                         <p v-if="auditAssetUploadStatus" class="detail-v3-ref-status">{{ auditAssetUploadStatus }}</p>
@@ -987,6 +1008,12 @@ import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
 import { useAuth } from '@/composables/useAuth'
 import { useTaskCancel } from '@/composables/useTaskCancel'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 import { isReferenceUrlExpiringSoon } from '@/utils/referenceUrl'
 import { tasksApi } from '@/services/api/tasksApi'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
@@ -1708,6 +1735,8 @@ const auditSourceUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditDeliveryUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditAssetUploadError = ref('')
 const auditAssetUploadStatus = ref('')
+type DetailUploadTarget = 'reference' | 'audit-source' | 'audit-delivery'
+const activeDetailUploadTarget = ref<DetailUploadTarget | null>(null)
 
 // provide：让所有子区块无需 props 直接注入 task
 provide(TASK_DETAIL_KEY, task)
@@ -1992,6 +2021,73 @@ const canEditBasicInfo = computed(
   },
 )
 const canUploadReferenceFromOps = computed(() => canEditBasicInfo.value)
+function detailUploadTargetEnabled(target: DetailUploadTarget | null): boolean {
+  if (target === 'reference') return canUploadReferenceFromOps.value
+  if (target === 'audit-source' || target === 'audit-delivery') {
+    return canUploadAuditAssets.value && actionLoading.value !== 'audit-upload'
+  }
+  return false
+}
+
+const { activateFileReceiver: activateDetailGlobalFileReceiver } = useFileDropPasteReceiver({
+  enabled: () => detailUploadTargetEnabled(activeDetailUploadTarget.value),
+  onFiles: (files) => {
+    const target = activeDetailUploadTarget.value
+    if (target === 'reference') {
+      void handleOpsReferenceFiles(files)
+      return
+    }
+    if (target === 'audit-source') {
+      void handleAuditAssetFiles(files, 'source')
+      return
+    }
+    if (target === 'audit-delivery') {
+      void handleAuditAssetFiles(files, 'delivery')
+    }
+  },
+})
+
+function activateDetailFileReceiver(target: DetailUploadTarget) {
+  if (!detailUploadTargetEnabled(target)) return
+  activeDetailUploadTarget.value = target
+  activateDetailGlobalFileReceiver()
+}
+
+function isActiveDetailUploadTarget(target: DetailUploadTarget): boolean {
+  return activeDetailUploadTarget.value === target && detailUploadTargetEnabled(target)
+}
+
+function onDetailUploadDragOver(target: DetailUploadTarget, event: DragEvent) {
+  if (!detailUploadTargetEnabled(target) || !hasFileDataTransfer(event.dataTransfer)) return
+  activateDetailFileReceiver(target)
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onDetailUploadDrop(target: DetailUploadTarget, event: DragEvent) {
+  if (!detailUploadTargetEnabled(target)) return
+  const files = getFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) return
+  activateDetailFileReceiver(target)
+  if (target === 'reference') {
+    void handleOpsReferenceFiles(files)
+  } else {
+    void handleAuditAssetFiles(files, target === 'audit-delivery' ? 'delivery' : 'source')
+  }
+}
+
+function onDetailUploadPaste(target: DetailUploadTarget, event: ClipboardEvent) {
+  if (!detailUploadTargetEnabled(target)) return
+  const files = getFilesFromClipboardEvent(event)
+  if (!files.length) return
+  event.preventDefault()
+  activateDetailFileReceiver(target)
+  if (target === 'reference') {
+    void handleOpsReferenceFiles(files)
+  } else {
+    void handleAuditAssetFiles(files, target === 'audit-delivery' ? 'delivery' : 'source')
+  }
+}
+
 const canDirectSkuDesignUpload = computed(() => {
   if (!task.value || isPurchaseTask.value || !hasTaskScopeAccess.value) return false
   if (!can('design.upload')) return false
@@ -2209,10 +2305,15 @@ function triggerReferenceUploadFromDetail(): void {
 
 async function handleOpsReferenceUpload(e: Event) {
   const input = e.target as HTMLInputElement
-  const currentTask = task.value
-  if (!input.files?.length || !currentTask?.id) return
-  const picked = Array.from(input.files)
+  const files = input.files
   input.value = ''
+  await handleOpsReferenceFiles(files ?? [])
+}
+
+async function handleOpsReferenceFiles(files: FileList | File[]) {
+  const currentTask = task.value
+  if (!files.length || !currentTask?.id) return
+  const picked = Array.from(files)
   opsReferenceUploadError.value = ''
   opsReferenceUploadStatus.value = ''
 
@@ -2376,10 +2477,15 @@ function validateAuditUploadFiles(files: File[], kind: AssetKind): { validFiles:
 
 async function handleAuditAssetUpload(e: Event, kind: AssetKind) {
   const input = e.target as HTMLInputElement
-  const currentTask = task.value
-  if (!input.files?.length || !currentTask?.id) return
-  const picked = Array.from(input.files)
+  const files = input.files
   input.value = ''
+  await handleAuditAssetFiles(files ?? [], kind)
+}
+
+async function handleAuditAssetFiles(files: FileList | File[], kind: AssetKind) {
+  const currentTask = task.value
+  if (!files.length || !currentTask?.id) return
+  const picked = Array.from(files)
   auditAssetUploadError.value = ''
   auditAssetUploadStatus.value = ''
 
@@ -3993,6 +4099,11 @@ watch(taskId, (id) => {
 .detail-v3-info-card--refs {
   background: #eef5ff;
   border-color: #dbeafe;
+}
+.detail-v3-file-drop-active {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.14);
+  outline: none;
 }
 .detail-v3-info-card--cost {
   background: #fffaf0;
