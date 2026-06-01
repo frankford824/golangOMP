@@ -377,6 +377,18 @@
             rows="8"
             placeholder="一行一个，例如：&#10;NSKT000261&#10;NSKT000294&#10;RW-20260513-A-000689"
           />
+          <div class="bulk-search-filter-grid">
+            <BaseSelect
+              v-model="bulkSearchFilters.format"
+              label="下载格式"
+              :options="bulkSearchFormatOptions"
+            />
+            <BaseSelect
+              v-model="bulkSearchFilters.assetKind"
+              label="资源类型"
+              :options="bulkSearchAssetKindOptions"
+            />
+          </div>
           <div class="bulk-search-actions">
             <button type="button" class="ac-batch-btn ac-batch-btn--primary" :disabled="bulkSearchRunning" @click="runBulkAssetSearch">
               {{ bulkSearchRunning ? '搜索中...' : '生成下载明细' }}
@@ -389,7 +401,7 @@
             </button>
           </div>
           <p class="bulk-search-hint">
-            支持粘贴多行 SKU 或任务单号，自动去重后搜索 JPG / PNG 资产。默认优先选择最终成品图，其次预览图。
+            支持粘贴多行 SKU 或任务单号，自动去重后按所选格式和资源类型筛选。默认搜索 JPG / PNG，优先选择最终成品图，其次预览图。
           </p>
           <p v-if="bulkSearchStatus" class="ac-batch-status">{{ bulkSearchStatus }}</p>
           <p v-if="bulkSearchError" class="ac-batch-error">{{ bulkSearchError }}</p>
@@ -399,6 +411,8 @@
           <span>输入 {{ bulkSearchTermCount }} 项</span>
           <span>命中 {{ bulkSearchMatchedCount }} 项</span>
           <span>未命中 {{ bulkSearchFailedCount }} 项</span>
+          <span>格式：{{ bulkSearchFormatFilterLabel }}</span>
+          <span>类型：{{ bulkSearchAssetKindFilterLabel }}</span>
         </div>
 
         <div v-if="bulkSearchResults.length" class="bulk-result-list">
@@ -438,8 +452,12 @@
                     <dd class="cell-mono">{{ businessTaskNo(result.asset) }}</dd>
                   </div>
                   <div>
-                    <dt>图片类型</dt>
-                    <dd>{{ imageBusinessTypeLabel(result.asset) }}</dd>
+                    <dt>资源类型</dt>
+                    <dd>{{ assetKind(result.asset) }}</dd>
+                  </div>
+                  <div>
+                    <dt>文件格式</dt>
+                    <dd>{{ fileFormatLabel(result.asset) }}</dd>
                   </div>
                   <div>
                     <dt>创建运营</dt>
@@ -449,7 +467,7 @@
               </template>
               <p v-else class="bulk-result-message">{{ result.message }}</p>
               <p v-if="result.asset && result.candidates > 1" class="bulk-result-message">
-                共找到 {{ result.candidates }} 个图片候选，已按成品图优先规则选择最新匹配项。
+                共找到 {{ result.candidates }} 个符合筛选的候选资源，已按当前规则选择最新匹配项。
               </p>
             </div>
           </article>
@@ -675,6 +693,7 @@ import {
   type AssetExcelPackageFailure,
   type AssetExcelPackageItem,
   type AssetExcelPackageRow,
+  type AssetSearchQuery,
   type AssetKind,
 } from '@/services/api/assetsApi'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
@@ -749,6 +768,24 @@ type AssetUsableFilter =
   | 'not_applicable'
 
 type AssetFormatFilter = 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
+type BulkSearchFormatFilter =
+  | 'jpg_png'
+  | 'jpg'
+  | 'png'
+  | 'webp'
+  | 'image'
+  | 'design'
+  | 'pdf'
+  | 'archive'
+  | 'all'
+type BulkSearchAssetKindFilter =
+  | 'auto'
+  | 'all'
+  | 'delivery'
+  | 'reference'
+  | 'source'
+  | 'preview'
+  | 'other'
 
 const filters = reactive({
   keyword: '',
@@ -757,6 +794,11 @@ const filters = reactive({
   createdTo: '',
   usableState: 'all' as AssetUsableFilter,
   formatCategory: 'all' as AssetFormatFilter,
+})
+
+const bulkSearchFilters = reactive({
+  format: 'jpg_png' as BulkSearchFormatFilter,
+  assetKind: 'auto' as BulkSearchAssetKindFilter,
 })
 
 const assetSourceOptions: BaseSelectOption[] = [
@@ -784,6 +826,36 @@ const assetFormatCategoryOptions: BaseSelectOption[] = [
   { value: 'video', label: '视频' },
   { value: 'archive', label: '压缩包' },
 ]
+
+const bulkSearchFormatOptions: BaseSelectOption[] = [
+  { value: 'jpg_png', label: 'JPG / PNG' },
+  { value: 'image', label: '全部图片' },
+  { value: 'jpg', label: '仅 JPG' },
+  { value: 'png', label: '仅 PNG' },
+  { value: 'webp', label: '仅 WEBP' },
+  { value: 'design', label: '设计源文件' },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'archive', label: '压缩包' },
+  { value: 'all', label: '全部格式' },
+]
+
+const bulkSearchAssetKindOptions: BaseSelectOption[] = [
+  { value: 'auto', label: '自动匹配（成品图优先）' },
+  { value: 'delivery', label: '最终成品图' },
+  { value: 'reference', label: '参考图' },
+  { value: 'source', label: '源文件 / 修订源文件' },
+  { value: 'preview', label: '预览辅助图' },
+  { value: 'other', label: '其他类型' },
+  { value: 'all', label: '全部类型' },
+]
+
+const bulkSearchFormatFilterLabel = computed(() =>
+  bulkSearchFormatOptions.find((item) => item.value === bulkSearchFilters.format)?.label ?? '全部格式',
+)
+
+const bulkSearchAssetKindFilterLabel = computed(() =>
+  bulkSearchAssetKindOptions.find((item) => item.value === bulkSearchFilters.assetKind)?.label ?? '全部类型',
+)
 
 const requestedTaskId = computed(() => {
   const raw = route.query.task_id
@@ -859,6 +931,16 @@ watch(
   () => {
     listPage.value = 1
     scheduleReload()
+  },
+)
+
+watch(
+  () => [bulkSearchFilters.format, bulkSearchFilters.assetKind],
+  () => {
+    if (!bulkSearchResults.value.length && !bulkSearchStatus.value && !bulkSearchError.value) return
+    bulkSearchResults.value = []
+    bulkSearchError.value = ''
+    bulkSearchStatus.value = '筛选条件已更新，请重新生成下载明细'
   },
 )
 
@@ -1144,6 +1226,24 @@ function fileFormatLabel(asset: BackendAsset): string {
   return '文件'
 }
 
+const BULK_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tif', 'tiff'])
+const BULK_DESIGN_EXTENSIONS = new Set(['psd', 'psb', 'ai', 'cdr', 'eps', 'sketch', 'fig', 'xd'])
+const BULK_ARCHIVE_EXTENSIONS = new Set(['zip', 'rar', '7z', 'tar', 'gz'])
+
+function assetFileExtension(asset: BackendAsset): string {
+  const label = fileFormatLabel(asset).trim().toLowerCase()
+  if (label && label !== '文件') return label === 'jpeg' ? 'jpg' : label
+  const name = assetFileName(asset)
+  const match = /\.([a-z0-9]{2,8})(?:$|[?#])/i.exec(name)
+  const ext = match?.[1]?.toLowerCase() ?? ''
+  return ext === 'jpeg' ? 'jpg' : ext
+}
+
+function assetMimeType(asset: BackendAsset): string {
+  const record = asset as Record<string, unknown>
+  return String(record.mime_type ?? record.content_type ?? '').trim().toLowerCase()
+}
+
 function toSelectedAssetSummary(asset: BackendAsset): SelectedAssetSummary {
   const id = assetResourceId(asset)
   return {
@@ -1235,14 +1335,35 @@ function clearBulkSearch() {
   bulkSearchError.value = ''
 }
 
-function isBulkSearchImageAsset(asset: BackendAsset): boolean {
-  const format = fileFormatLabel(asset).toLowerCase()
-  if (['jpg', 'jpeg', 'png'].includes(format)) return true
-  const record = asset as Record<string, unknown>
-  const mime = String(record.mime_type ?? record.content_type ?? '').toLowerCase()
-  if (mime === 'image/jpeg' || mime === 'image/png') return true
-  const title = cardTitle(asset).toLowerCase()
-  return /\.(jpe?g|png)(?:$|[?#])/.test(title)
+function matchesBulkSearchFormat(asset: BackendAsset): boolean {
+  const ext = assetFileExtension(asset)
+  const mime = assetMimeType(asset)
+  const selected = bulkSearchFilters.format
+  if (selected === 'all') return true
+  if (selected === 'jpg_png') return ext === 'jpg' || ext === 'png' || mime === 'image/jpeg' || mime === 'image/png'
+  if (selected === 'jpg') return ext === 'jpg' || mime === 'image/jpeg'
+  if (selected === 'png') return ext === 'png' || mime === 'image/png'
+  if (selected === 'webp') return ext === 'webp' || mime === 'image/webp'
+  if (selected === 'image') return BULK_IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/')
+  if (selected === 'design') return BULK_DESIGN_EXTENSIONS.has(ext)
+  if (selected === 'pdf') return ext === 'pdf' || mime === 'application/pdf'
+  if (selected === 'archive') {
+    return BULK_ARCHIVE_EXTENSIONS.has(ext) || mime.includes('zip') || mime.includes('rar') || mime.includes('7z')
+  }
+  return true
+}
+
+function matchesBulkSearchAssetKind(asset: BackendAsset): boolean {
+  const selected = bulkSearchFilters.assetKind
+  if (selected === 'auto' || selected === 'all') return true
+  const kind = rawAssetKind(asset)
+  if (selected === 'preview') return kind === 'preview' || kind === 'design_thumb'
+  if (selected === 'other') return !['delivery', 'reference', 'source', 'preview', 'design_thumb'].includes(kind)
+  return kind === selected
+}
+
+function isBulkSearchCandidateAsset(asset: BackendAsset): boolean {
+  return matchesBulkSearchFormat(asset) && matchesBulkSearchAssetKind(asset)
 }
 
 function bulkSearchAssetScore(asset: BackendAsset, term: string): number {
@@ -1275,7 +1396,7 @@ function bulkSearchAssetScore(asset: BackendAsset, term: string): number {
 }
 
 function chooseBulkSearchAsset(term: string, assetsForTerm: BackendAsset[]): BackendAsset | undefined {
-  const candidates = assetsForTerm.filter(isBulkSearchImageAsset)
+  const candidates = assetsForTerm.filter(isBulkSearchCandidateAsset)
   candidates.sort((a, b) => {
     const diff = bulkSearchAssetScore(b, term) - bulkSearchAssetScore(a, term)
     if (diff !== 0) return diff
@@ -1286,32 +1407,46 @@ function chooseBulkSearchAsset(term: string, assetsForTerm: BackendAsset[]): Bac
   return candidates[0]
 }
 
+function bulkSearchBackendFormatCategory(): AssetSearchQuery['format_category'] | undefined {
+  const selected = bulkSearchFilters.format
+  if (selected === 'jpg_png' || selected === 'jpg' || selected === 'png' || selected === 'webp' || selected === 'image') return 'image'
+  if (selected === 'design' || selected === 'pdf' || selected === 'archive') return selected
+  return undefined
+}
+
+function bulkSearchNoMatchMessage(totalRows: number): string {
+  if (!totalRows) return '未找到匹配资产'
+  return `找到了资产，但没有符合「${bulkSearchFormatFilterLabel.value} / ${bulkSearchAssetKindFilterLabel.value}」的可下载资源`
+}
+
 async function searchBulkAssetTerm(term: string): Promise<BulkSearchResult> {
   try {
+    const formatCategory = bulkSearchBackendFormatCategory()
     const res = await assetsApi.searchAssets({
       keyword: term,
       source: 'system',
       page: 1,
-      size: 50,
+      size: 80,
       is_archived: 'false',
       task_status: 'all',
+      ...(formatCategory ? { format_category: formatCategory } : {}),
     })
     const rows = Array.isArray(res.data?.data) ? res.data.data : []
-    const imageRows = rows.filter(isBulkSearchImageAsset)
+    const candidateRows = rows.filter(isBulkSearchCandidateAsset)
     const asset = chooseBulkSearchAsset(term, rows)
     if (!asset) {
       return {
         term,
         status: 'not_found',
-        message: rows.length ? '找到了资产，但没有可下载的 JPG/PNG 图片' : '未找到匹配资产',
-        candidates: imageRows.length,
+        message: bulkSearchNoMatchMessage(rows.length),
+        candidates: candidateRows.length,
       }
     }
     return {
       term,
       status: 'matched',
       message: '已匹配',
-      candidates: imageRows.length,
+      candidates: candidateRows.length,
       asset,
     }
   } catch (err) {
@@ -2877,6 +3012,13 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
+.bulk-search-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
 .bulk-search-actions,
 .bulk-search-summary {
   display: flex;
@@ -3050,6 +3192,10 @@ onBeforeUnmount(() => {
   }
 
   .bulk-result-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bulk-search-filter-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
