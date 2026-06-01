@@ -63,6 +63,8 @@ func registerV1IdentityRoutes(
 		v1.GET("/reports/l1/throughput", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), reportL1H.Throughput)
 		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodGet, "/v1/reports/l1/module-dwell", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin))
 		v1.GET("/reports/l1/module-dwell", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), reportL1H.ModuleDwell)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPost, "/v1/reports/l1/kpi-ai-analysis", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin))
+		v1.POST("/reports/l1/kpi-ai-analysis", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), reportL1H.KPIAIAnalysis)
 	}
 	if notificationH != nil {
 		v1.GET("/me/notifications", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.MyList)

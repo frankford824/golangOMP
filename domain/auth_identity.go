@@ -166,6 +166,7 @@ type User struct {
 	Account            string             `db:"-"                      json:"account"`
 	DisplayName        string             `db:"display_name"           json:"display_name"`
 	Name               string             `db:"-"                      json:"name"`
+	RealName           string             `db:"-"                      json:"real_name,omitempty"`
 	Department         Department         `db:"department"             json:"department"`
 	Team               string             `db:"team"                   json:"team,omitempty"`
 	Group              string             `db:"-"                      json:"group,omitempty"`

@@ -61,6 +61,8 @@ export interface BackendUser {
   id: string
   username: string
   display_name: string
+  name?: string
+  real_name?: string
   department: string
   team: string
   roles: string[]

@@ -158,10 +158,12 @@ func (h *UserAdminHandler) ListDesigners(c *gin.Context) {
 		ID          int64  `json:"id"`
 		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
+		Name        string `json:"name,omitempty"`
+		RealName    string `json:"real_name,omitempty"`
 	}
 	items := make([]designerItem, 0, len(users))
 	for _, u := range users {
-		items = append(items, designerItem{ID: u.ID, Username: u.Username, DisplayName: u.DisplayName})
+		items = append(items, designerItem{ID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Name: u.Name, RealName: u.RealName})
 	}
 	total := int64(len(items))
 	respondOKWithPagination(c, items, domain.PaginationMeta{

@@ -11,6 +11,16 @@
           <option :value="14">近 14 天</option>
           <option :value="30">近 30 天</option>
         </select>
+        <BaseButton
+          variant="secondary"
+          size="sm"
+          :loading="aiAnalysisLoading"
+          :disabled="loading || !events.length"
+          @click="openAIAnalysis"
+        >
+          <Sparkles class="button-icon" aria-hidden="true" />
+          AI 分析
+        </BaseButton>
         <BaseButton variant="secondary" size="sm" :loading="loading" @click="load">刷新</BaseButton>
       </div>
     </div>
@@ -141,6 +151,111 @@
         </div>
       </template>
     </template>
+
+    <BaseModal
+      v-model="aiAnalysisOpen"
+      title="绩效 AI 分析"
+      :show-confirm="false"
+      panel-class="max-w-6xl"
+    >
+      <section class="kpi-ai-modal">
+        <div v-if="aiAnalysisLoading" class="kpi-ai-loading" role="status">
+          <div class="kpi-ai-loading-dot" aria-hidden="true" />
+          <div>
+            <p class="kpi-ai-loading-title">正在生成分析</p>
+            <p class="kpi-ai-loading-sub">系统正在读取本周期任务、人员、设计提交、审核与资产链路。</p>
+          </div>
+        </div>
+
+        <div v-else-if="aiAnalysisError" class="kpi-ai-error">
+          <p>{{ aiAnalysisError }}</p>
+          <BaseButton size="sm" variant="primary" @click="loadAIAnalysis">重新生成</BaseButton>
+        </div>
+
+        <div v-else-if="aiAnalysis" class="kpi-ai-content">
+          <header class="kpi-ai-hero">
+            <span>AI 管理结论</span>
+            <h3>{{ aiAnalysis.headline }}</h3>
+            <p>{{ aiAnalysis.overview }}</p>
+          </header>
+
+          <div v-if="aiHighlights.length" class="kpi-ai-grid kpi-ai-grid--metrics">
+            <article v-for="item in aiHighlights" :key="`${item.title}-${item.value || ''}`" class="kpi-ai-panel">
+              <span>{{ item.title }}</span>
+              <strong>{{ item.value || '—' }}</strong>
+              <p>{{ item.note }}</p>
+            </article>
+          </div>
+
+          <div class="kpi-ai-grid kpi-ai-grid--main">
+            <article class="kpi-ai-panel">
+              <h4>人员洞察</h4>
+              <ul v-if="aiPeopleInsights.length" class="kpi-ai-list">
+                <li v-for="item in aiPeopleInsights" :key="`${item.role || ''}-${item.name}-${item.metric || item.signal}`">
+                  <strong>{{ item.name }}</strong>
+                  <span>{{ [item.role, item.metric].filter(Boolean).join(' · ') }}</span>
+                  <p>{{ item.signal }}</p>
+                  <small v-if="item.action">{{ item.action }}</small>
+                </li>
+              </ul>
+              <p v-else class="kpi-ai-muted">本周期暂无可展示的人员洞察。</p>
+            </article>
+
+            <article class="kpi-ai-panel">
+              <h4>风险与动作</h4>
+              <ul v-if="aiRisks.length" class="kpi-ai-list">
+                <li v-for="risk in aiRisks" :key="`${risk.level || ''}-${risk.title}`">
+                  <strong>{{ risk.title }}</strong>
+                  <span>{{ riskLevelLabel(risk.level) }}</span>
+                  <p>{{ risk.reason }}</p>
+                </li>
+              </ul>
+              <div v-if="aiActions.length" class="kpi-ai-actions">
+                <div v-for="action in aiActions" :key="`${action.owner || ''}-${action.action}`">
+                  <span>{{ action.timing || '下一步' }}</span>
+                  <strong>{{ action.owner || '相关负责人' }}</strong>
+                  <p>{{ action.action }}</p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <article class="kpi-ai-panel">
+            <h4>典型任务链路</h4>
+            <div v-if="aiTaskSamples.length" class="kpi-ai-task-list">
+              <section v-for="sample in aiTaskSamples" :key="sample.task_no" class="kpi-ai-task">
+                <div>
+                  <strong>{{ sample.task_no }}</strong>
+                  <span>{{ [sample.task_type, sample.task_name].filter(Boolean).join(' · ') }}</span>
+                </div>
+                <ol>
+                  <li v-for="line in sample.timeline || []" :key="line">{{ line }}</li>
+                </ol>
+                <p v-if="sample.observation">{{ sample.observation }}</p>
+              </section>
+            </div>
+            <p v-else class="kpi-ai-muted">本周期暂无可展示的典型任务链路。</p>
+          </article>
+
+          <details class="kpi-ai-evidence">
+            <summary>查看证据</summary>
+            <ul v-if="aiEvidence.length">
+              <li v-for="line in aiEvidence" :key="line">{{ line }}</li>
+            </ul>
+            <p v-else>系统暂无可展示证据。</p>
+          </details>
+        </div>
+      </section>
+      <template #footer>
+        <footer class="kpi-ai-footer">
+          <span v-if="aiAnalysis">{{ aiAnalysis.model || 'AI' }} · {{ confidenceLabel(aiAnalysis.confidence) }}</span>
+          <div class="kpi-ai-footer-actions">
+            <BaseButton size="sm" variant="secondary" :disabled="aiAnalysisLoading" @click="aiAnalysisOpen = false">关闭</BaseButton>
+            <BaseButton size="sm" variant="primary" :loading="aiAnalysisLoading" :disabled="aiAnalysisLoading" @click="loadAIAnalysis">重新生成</BaseButton>
+          </div>
+        </footer>
+      </template>
+    </BaseModal>
   </section>
 </template>
 
@@ -149,14 +264,17 @@ import { computed, onMounted, ref } from 'vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
+import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import { logsApi } from '@/services/api/logsApi'
 import { reportsApi } from '@/services/api/reportsApi'
+import type { KpiAiAnalysisResponse } from '@/services/api/reportsApi'
 import { usersApi } from '@/services/api/usersApi'
 import type { BackendUser, OperationLogEntry, WorkflowTraceEvent } from '@/services/apiTypes'
 import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
 import { userAccountDisplay } from '@/domain/user-display'
+import { Sparkles } from 'lucide-vue-next'
 
 interface L1Card {
   key?: string
@@ -174,6 +292,7 @@ interface UserDirectoryEntry {
   id: string
   username: string
   name: string
+  realName: string
   department: string
   team: string
 }
@@ -208,12 +327,24 @@ const error = ref('')
 const events = ref<WorkflowTraceEvent[]>([])
 const reportCards = ref<L1Card[]>([])
 const traceTotal = ref(0)
+const aiAnalysisOpen = ref(false)
+const aiAnalysisLoading = ref(false)
+const aiAnalysisError = ref('')
+const aiAnalysis = ref<KpiAiAnalysisResponse | null>(null)
 const userDirectory = ref(new Map<string, UserDirectoryEntry>())
 const userDirectoryByUsername = computed(() => {
   const next = new Map<string, UserDirectoryEntry>()
   for (const user of userDirectory.value.values()) {
     const username = user.username.trim().toLowerCase()
     if (username) next.set(username, user)
+  }
+  return next
+})
+const userDirectoryByDisplayName = computed(() => {
+  const next = new Map<string, UserDirectoryEntry>()
+  for (const user of userDirectory.value.values()) {
+    const key = normalizedPersonName(user.realName || user.name)
+    if (key && !next.has(key)) next.set(key, user)
   }
   return next
 })
@@ -321,6 +452,13 @@ const summaryMetrics = computed(() => {
   ]
 })
 
+const aiHighlights = computed(() => aiAnalysis.value?.highlights ?? [])
+const aiPeopleInsights = computed(() => aiAnalysis.value?.people_insights ?? [])
+const aiTaskSamples = computed(() => aiAnalysis.value?.task_samples ?? [])
+const aiRisks = computed(() => aiAnalysis.value?.risks ?? [])
+const aiActions = computed(() => aiAnalysis.value?.actions ?? [])
+const aiEvidence = computed(() => aiAnalysis.value?.evidence ?? [])
+
 function dateOnly(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -339,18 +477,30 @@ function eventDay(event: WorkflowTraceEvent): string {
   return ms > 0 ? dateOnly(new Date(ms)) : ''
 }
 
-function actorKey(event: WorkflowTraceEvent): string {
-  if (event.actor_id) return `id:${event.actor_id}`
-  return `name:${event.actor_username || 'unknown'}`
+function normalizedPersonName(value: unknown): string {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
+  if (!text) return ''
+  if (/^未知用户$/i.test(text)) return ''
+  if (/^(用户|人员)\s*#?\d+$/i.test(text)) return ''
+  if (/^#?\d+$/.test(text)) return ''
+  if (/^session_actor\s*#?\d+$/i.test(text)) return ''
+  return text.toLowerCase()
 }
 
-function actorName(event: WorkflowTraceEvent): string {
-  const byId = event.actor_id ? userDirectory.value.get(String(event.actor_id)) : undefined
-  if (byId?.name) return byId.name
-  const username = String(event.actor_username ?? '').trim().toLowerCase()
-  const byUsername = username ? userDirectoryByUsername.value.get(username) : undefined
-  if (byUsername?.name) return byUsername.name
-  const payloadName = readPayloadText(event.payload, [
+function userDirectoryDisplayName(user: UserDirectoryEntry): string {
+  return userAccountDisplay(user.realName, user.name, user.username, `用户#${user.id}`)
+}
+
+function payloadPersonName(event: WorkflowTraceEvent): string {
+  return readPayloadText(event.payload, [
+    'actor_real_name',
+    'real_name',
+    'employee_name',
+    'staff_name',
+    'operator_real_name',
+    'creator_real_name',
+    'designer_real_name',
+    'auditor_real_name',
     'actor_display_name',
     'actor_name',
     'display_name',
@@ -361,6 +511,32 @@ function actorName(event: WorkflowTraceEvent): string {
     'auditor_name',
     'to_handler_name',
   ])
+}
+
+function resolveEventUser(event: WorkflowTraceEvent): UserDirectoryEntry | undefined {
+  const byId = event.actor_id ? userDirectory.value.get(String(event.actor_id)) : undefined
+  if (byId) return byId
+  const username = String(event.actor_username ?? '').trim().toLowerCase()
+  const byUsername = username ? userDirectoryByUsername.value.get(username) : undefined
+  if (byUsername) return byUsername
+  const nameKey = normalizedPersonName(payloadPersonName(event) || event.actor_username)
+  return nameKey ? userDirectoryByDisplayName.value.get(nameKey) : undefined
+}
+
+function actorKey(event: WorkflowTraceEvent): string {
+  const user = resolveEventUser(event)
+  const stableName = normalizedPersonName(user ? userDirectoryDisplayName(user) : actorName(event))
+  if (stableName) return `person:${stableName}`
+  const username = String(event.actor_username ?? '').trim().toLowerCase()
+  if (username) return `username:${username}`
+  if (event.actor_id) return `id:${event.actor_id}`
+  return 'unknown'
+}
+
+function actorName(event: WorkflowTraceEvent): string {
+  const user = resolveEventUser(event)
+  if (user) return userDirectoryDisplayName(user)
+  const payloadName = payloadPersonName(event)
   return userAccountDisplay(payloadName, event.actor_username, event.actor_id ? `人员#${event.actor_id}` : '')
 }
 
@@ -463,11 +639,12 @@ function looksLike(row: PersonStats, keyword: string): boolean {
 }
 
 function emptyStats(event: WorkflowTraceEvent): PersonStats {
+  const user = resolveEventUser(event)
   return {
     key: actorKey(event),
     name: actorName(event),
-    department: event.actor_department || '',
-    team: event.actor_team || '',
+    department: event.actor_department || user?.department || '',
+    team: event.actor_team || user?.team || '',
     activeDays: new Set<string>(),
     taskCreates: 0,
     createTimes: [],
@@ -485,6 +662,18 @@ function emptyStats(event: WorkflowTraceEvent): PersonStats {
   }
 }
 
+function mergePersonMeta(stat: PersonStats, event: WorkflowTraceEvent) {
+  const user = resolveEventUser(event)
+  const nextName = actorName(event)
+  if (normalizedPersonName(nextName) && stat.name !== nextName) {
+    stat.name = nextName
+  }
+  const department = String(event.actor_department || user?.department || '').trim()
+  const team = String(event.actor_team || user?.team || '').trim()
+  if (!stat.department && department) stat.department = department
+  if (!stat.team && team) stat.team = team
+}
+
 function buildStats(source: WorkflowTraceEvent[]): PersonStats[] {
   const sorted = [...source].sort((a, b) => eventAt(a) - eventAt(b))
   const byActor = new Map<string, PersonStats>()
@@ -495,6 +684,7 @@ function buildStats(source: WorkflowTraceEvent[]): PersonStats[] {
     const key = actorKey(event)
     const stat = byActor.get(key) ?? emptyStats(event)
     byActor.set(key, stat)
+    mergePersonMeta(stat, event)
     const day = eventDay(event)
     if (day) stat.activeDays.add(day)
     const at = eventAt(event)
@@ -607,11 +797,33 @@ function parseReportCards(body: { data?: L1Card[] } | L1Card[] | undefined): L1C
   return Array.isArray(list) ? list : []
 }
 
+function parseKpiAiAnalysis(body: { data?: KpiAiAnalysisResponse } | KpiAiAnalysisResponse | undefined): KpiAiAnalysisResponse | null {
+  if (!body) return null
+  const nested = (body as { data?: KpiAiAnalysisResponse }).data
+  return nested ?? (body as KpiAiAnalysisResponse)
+}
+
 function reportCardTitle(card: L1Card): string {
   const key = String(card.key ?? '').trim()
   const title = String(card.title ?? '').trim()
   const normalizedTitle = title.toLowerCase().replace(/\s+/g, '_')
   return REPORT_CARD_LABELS[key] || REPORT_CARD_LABELS[title] || REPORT_CARD_LABELS[normalizedTitle] || title || key || '指标'
+}
+
+function confidenceLabel(value: unknown): string {
+  const text = String(value ?? '').toLowerCase()
+  if (text === 'high') return '可信度高'
+  if (text === 'medium') return '可信度中'
+  if (text === 'low') return '可信度低'
+  return '可信度待判断'
+}
+
+function riskLevelLabel(value: unknown): string {
+  const text = String(value ?? '').toLowerCase()
+  if (text === 'high') return '高风险'
+  if (text === 'medium') return '中风险'
+  if (text === 'low') return '低风险'
+  return '待观察'
 }
 
 function operationActorId(entry: OperationLogEntry): number | null {
@@ -684,7 +896,8 @@ async function loadUserDirectory() {
       next.set(id, {
         id,
         username: String(user.username ?? '').trim(),
-        name: userAccountDisplay(user.display_name, (user as { name?: unknown }).name, user.username, `用户#${id}`),
+        realName: String(user.real_name ?? '').trim(),
+        name: userAccountDisplay(user.real_name, user.name, user.display_name, user.username, `用户#${id}`),
         department: String(user.department ?? '').trim(),
         team: String(user.team ?? '').trim(),
       })
@@ -703,7 +916,8 @@ async function loadUserDirectory() {
         next.set(id, {
           id,
           username: String(record.username ?? '').trim(),
-          name: userAccountDisplay(record.display_name, record.name, record.username, `人员#${id}`),
+          realName: String(record.real_name ?? '').trim(),
+          name: userAccountDisplay(record.real_name, record.name, record.display_name, record.username, `人员#${id}`),
           department: '',
           team: '',
         })
@@ -712,6 +926,33 @@ async function loadUserDirectory() {
     } catch {
       userDirectory.value = new Map()
     }
+  }
+}
+
+async function openAIAnalysis() {
+  aiAnalysisOpen.value = true
+  if (!aiAnalysis.value && !aiAnalysisLoading.value) {
+    await loadAIAnalysis()
+  }
+}
+
+async function loadAIAnalysis() {
+  aiAnalysisLoading.value = true
+  aiAnalysisError.value = ''
+  try {
+    const res = await reportsApi.kpiAiAnalysis({
+      from: dateOnly(rangeStart.value),
+      to: dateOnly(rangeEnd.value),
+    })
+    const parsed = parseKpiAiAnalysis(res.data as { data?: KpiAiAnalysisResponse } | KpiAiAnalysisResponse)
+    if (!parsed) {
+      throw new Error('AI 分析暂未返回内容')
+    }
+    aiAnalysis.value = parsed
+  } catch (e) {
+    aiAnalysisError.value = e instanceof Error ? e.message : 'AI 分析生成失败，请稍后重试'
+  } finally {
+    aiAnalysisLoading.value = false
   }
 }
 
@@ -746,6 +987,8 @@ async function fetchTaskOperationEvents(): Promise<WorkflowTraceEvent[]> {
 async function load() {
   loading.value = true
   error.value = ''
+  aiAnalysis.value = null
+  aiAnalysisError.value = ''
   try {
     if (!canLoadTrace.value && !canLoadReports.value) {
       events.value = []
@@ -953,6 +1196,212 @@ onMounted(load)
 .danger {
   color: #dc2626;
   font-weight: 700;
+}
+.button-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-right: 0.35rem;
+}
+.kpi-ai-modal {
+  color: #0f172a;
+  letter-spacing: 0;
+}
+.kpi-ai-loading,
+.kpi-ai-error {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-height: 9rem;
+  padding: 1rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.5rem;
+  background: #eff6ff;
+}
+.kpi-ai-error {
+  justify-content: space-between;
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+.kpi-ai-loading-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.32);
+  animation: kpiPulse 1.25s ease-in-out infinite;
+}
+.kpi-ai-loading-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 750;
+  color: #0f172a;
+}
+.kpi-ai-loading-sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+.kpi-ai-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.kpi-ai-hero {
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+  background: #eff6ff;
+}
+.kpi-ai-hero span {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #2563eb;
+}
+.kpi-ai-hero h3 {
+  margin: 0.25rem 0 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+  font-weight: 800;
+}
+.kpi-ai-hero p,
+.kpi-ai-panel p {
+  margin: 0.35rem 0 0;
+  line-height: 1.5;
+  color: #475569;
+}
+.kpi-ai-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+.kpi-ai-grid--metrics {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+.kpi-ai-grid--main {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+.kpi-ai-panel {
+  min-width: 0;
+  padding: 0.8rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background: #fff;
+}
+.kpi-ai-panel h4 {
+  margin: 0 0 0.55rem;
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+.kpi-ai-panel > span,
+.kpi-ai-list span,
+.kpi-ai-actions span,
+.kpi-ai-task span {
+  display: block;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+.kpi-ai-panel > strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+.kpi-ai-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kpi-ai-list li {
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid #edf2f7;
+}
+.kpi-ai-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.kpi-ai-list strong,
+.kpi-ai-actions strong,
+.kpi-ai-task strong {
+  display: block;
+  font-size: 0.8125rem;
+  color: #0f172a;
+}
+.kpi-ai-list small {
+  display: block;
+  margin-top: 0.3rem;
+  color: #0f766e;
+}
+.kpi-ai-actions {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+.kpi-ai-actions div {
+  padding: 0.6rem;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+.kpi-ai-task-list {
+  display: grid;
+  gap: 0.65rem;
+}
+.kpi-ai-task {
+  padding: 0.65rem;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+.kpi-ai-task ol {
+  margin: 0.5rem 0 0;
+  padding-left: 1.15rem;
+}
+.kpi-ai-task li {
+  margin: 0.18rem 0;
+  color: #334155;
+  line-height: 1.45;
+}
+.kpi-ai-muted {
+  color: #94a3b8;
+}
+.kpi-ai-evidence {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  padding: 0.7rem 0.85rem;
+}
+.kpi-ai-evidence summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.kpi-ai-evidence ul {
+  margin: 0.55rem 0 0;
+  padding-left: 1.1rem;
+}
+.kpi-ai-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+.kpi-ai-footer-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+@keyframes kpiPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.32);
+  }
+  70% {
+    box-shadow: 0 0 0 0.55rem rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
 }
 @media (min-width: 1180px) {
   .role-grid {

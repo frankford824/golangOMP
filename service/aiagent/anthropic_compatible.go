@@ -138,6 +138,83 @@ func (c *AnthropicCompatibleClient) GenerateTaskSummary(ctx context.Context, evi
 	return summary, nil
 }
 
+func (c *AnthropicCompatibleClient) GenerateKPIAnalysis(ctx context.Context, evidence any) (*KPIAnalysis, error) {
+	if !c.Ready() {
+		return nil, errors.New("ai analysis provider is not configured")
+	}
+	payload, err := json.Marshal(evidence)
+	if err != nil {
+		return nil, fmt.Errorf("marshal kpi analysis evidence: %w", err)
+	}
+	maxTokens := c.cfg.MaxTokens
+	if maxTokens < 1200 {
+		maxTokens = 1200
+	}
+	body := anthropicMessageRequest{
+		Model:       c.cfg.Model,
+		MaxTokens:   maxTokens,
+		Temperature: 0.2,
+		System:      kpiAnalysisSystemPrompt,
+		Messages: []anthropicMessage{{
+			Role:    "user",
+			Content: "请基于下面这份绩效证据，生成管理层可直接阅读的 KPI 分析。证据 JSON：\n" + string(payload),
+		}},
+	}
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ai request: %w", err)
+	}
+
+	reqCtx := ctx
+	var cancel context.CancelFunc
+	if c.cfg.Timeout > 0 {
+		reqCtx, cancel = context.WithTimeout(ctx, c.cfg.Timeout)
+		defer cancel()
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, messagesURL(c.cfg.BaseURL), bytes.NewReader(rawBody))
+	if err != nil {
+		return nil, fmt.Errorf("build ai request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("x-api-key", c.cfg.APIKey)
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("call ai provider: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read ai response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.logger.Warn("ai provider returned non-2xx", zap.Int("status", resp.StatusCode), zap.String("provider", c.cfg.Provider))
+		return nil, fmt.Errorf("ai provider returned HTTP %d: %s", resp.StatusCode, truncateForError(string(respBody), 800))
+	}
+
+	text, err := extractAnthropicText(respBody)
+	if err != nil {
+		return nil, err
+	}
+	analysis, err := ParseKPIAnalysisText(text)
+	if err != nil {
+		analysis = &KPIAnalysis{
+			Headline:   "AI 已返回内容，但未能结构化",
+			Overview:   truncateForError(strings.TrimSpace(text), 320),
+			RawText:    strings.TrimSpace(text),
+			Confidence: "low",
+		}
+	}
+	normalizeKPIAnalysis(analysis)
+	analysis.GeneratedAt = time.Now()
+	analysis.Model = c.cfg.Model
+	analysis.Provider = c.cfg.Provider
+	return analysis, nil
+}
+
 type anthropicMessageRequest struct {
 	Model       string             `json:"model"`
 	MaxTokens   int                `json:"max_tokens"`
@@ -167,6 +244,30 @@ JSON 结构必须是：
   "primary_blocker": {"title":"主卡点","owner":"责任方","reason":"业务原因"},
   "actions": [{"role":"责任角色","action":"下一步动作","timing":"现在/处理后/等待"}],
   "evidence": ["关键证据，不超过4条"],
+  "confidence": "high|medium|low"
+}`
+
+const kpiAnalysisSystemPrompt = `你是公司运营管理系统里的绩效分析助手。请只基于用户给出的证据，不要编造。
+
+输出要求：
+1. 使用普通管理者能看懂的中文，不输出接口名、JSON 字段名、英文错误码；技术细节只可放到 evidence。
+2. 基础 KPI 数字必须尊重证据，不得自行改写或估算。
+3. 重点回答：本周期业务量、人员效率、异常风险、下一步管理动作。
+4. 人员姓名要使用证据中的真实姓名或显示姓名，不要用账号名替代真实姓名，除非证据没有姓名。
+5. task_samples 必须优先体现“谁在几号创建了什么任务、设计何时提交了什么类型文件、审核何时处理”等链路。
+6. 只输出一个 JSON 对象，不要 Markdown，不要代码块。
+7. 严格控长：highlights 最多 5 条；people_insights 最多 8 条；task_samples 最多 6 条；risks 最多 5 条；actions 最多 5 条；evidence 最多 8 条。
+
+JSON 结构必须是：
+{
+  "headline": "一句话总判断",
+  "overview": "本周期绩效概览，2到4句话",
+  "highlights": [{"title":"指标名称","value":"指标值","note":"业务解释"}],
+  "people_insights": [{"role":"运营/设计/审核","name":"人员姓名","metric":"关键指标","signal":"表现或异常","action":"建议动作"}],
+  "task_samples": [{"task_no":"任务编号","task_name":"任务名称","task_type":"任务类型","timeline":["时间 人员 动作"],"observation":"链路观察"}],
+  "risks": [{"level":"high|medium|low","title":"风险点","reason":"原因"}],
+  "actions": [{"owner":"责任角色或人员","action":"建议动作","timing":"现在/本周/持续观察"}],
+  "evidence": ["关键证据，不超过8条"],
   "confidence": "high|medium|low"
 }`
 
@@ -244,6 +345,69 @@ func ParseTaskSummaryText(text string) (*TaskSummary, error) {
 	}
 	normalizeTaskSummary(&summary)
 	return &summary, nil
+}
+
+func ParseKPIAnalysisText(text string) (*KPIAnalysis, error) {
+	candidate := extractJSONObject(text)
+	if candidate == "" {
+		return nil, errors.New("ai response does not contain a json object")
+	}
+	var analysis KPIAnalysis
+	if err := json.Unmarshal([]byte(candidate), &analysis); err != nil {
+		return nil, err
+	}
+	normalizeKPIAnalysis(&analysis)
+	return &analysis, nil
+}
+
+func normalizeKPIAnalysis(analysis *KPIAnalysis) {
+	if analysis == nil {
+		return
+	}
+	if analysis.Highlights == nil {
+		analysis.Highlights = []KPIAnalysisHighlight{}
+	}
+	if analysis.PeopleInsights == nil {
+		analysis.PeopleInsights = []KPIAnalysisPersonInsight{}
+	}
+	if analysis.TaskSamples == nil {
+		analysis.TaskSamples = []KPIAnalysisTaskSample{}
+	}
+	if analysis.Risks == nil {
+		analysis.Risks = []KPIAnalysisRisk{}
+	}
+	if analysis.Actions == nil {
+		analysis.Actions = []KPIAnalysisAction{}
+	}
+	if analysis.Evidence == nil {
+		analysis.Evidence = []string{}
+	}
+	if strings.TrimSpace(analysis.Headline) == "" {
+		analysis.Headline = "本周期绩效分析已生成"
+	}
+	if strings.TrimSpace(analysis.Overview) == "" {
+		analysis.Overview = analysis.Headline
+	}
+	if len(analysis.Highlights) > 5 {
+		analysis.Highlights = analysis.Highlights[:5]
+	}
+	if len(analysis.PeopleInsights) > 8 {
+		analysis.PeopleInsights = analysis.PeopleInsights[:8]
+	}
+	if len(analysis.TaskSamples) > 6 {
+		analysis.TaskSamples = analysis.TaskSamples[:6]
+	}
+	if len(analysis.Risks) > 5 {
+		analysis.Risks = analysis.Risks[:5]
+	}
+	if len(analysis.Actions) > 5 {
+		analysis.Actions = analysis.Actions[:5]
+	}
+	if len(analysis.Evidence) > 8 {
+		analysis.Evidence = analysis.Evidence[:8]
+	}
+	analysis.Headline = truncateForError(analysis.Headline, 180)
+	analysis.Overview = truncateForError(analysis.Overview, 520)
 }
 
 func normalizeTaskSummary(summary *TaskSummary) {

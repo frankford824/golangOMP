@@ -135,6 +135,7 @@ func main() {
 	moduleNotificationRepo := mysqlrepo.NewModuleNotificationRepo(mdb)
 	searchRepo := mysqlrepo.NewSearchRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
+	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
 
 	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
@@ -299,7 +300,6 @@ func main() {
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
 	searchSvc := searchsvc.NewService(searchRepo)
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
-	reportL1Svc := reportl1svc.NewService(reportL1Repo, reportl1svc.WithPermissionLogRepo(permissionLogRepo))
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
@@ -318,6 +318,10 @@ func main() {
 		Timeout:   cfg.AI.Timeout,
 		MaxTokens: cfg.AI.MaxTokens,
 	}, logger.Named("ai_agent"))
+	reportL1Svc := reportl1svc.NewService(reportL1Repo,
+		reportl1svc.WithPermissionLogRepo(permissionLogRepo),
+		reportl1svc.WithKPIAnalysisRepo(kpiAnalysisRepo),
+		reportl1svc.WithKPIAnalysisGenerator(aiSummaryClient))
 	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
 
 	skuH := handler.NewSKUHandler(skuSvc)

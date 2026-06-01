@@ -899,6 +899,9 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	if err := s.attachRolesForUsers(ctx, users); err != nil {
 		return nil, domain.PaginationMeta{}, infraError("attach user roles", err)
 	}
+	for _, user := range users {
+		s.prepareUserForResponse(user)
+	}
 	return users, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
 
@@ -1913,6 +1916,7 @@ func (s *identityService) prepareUserForResponse(user *domain.User) {
 	}
 	user.Account = user.Username
 	user.Name = user.DisplayName
+	user.RealName = user.DisplayName
 	user.Group = user.Team
 	user.Phone = user.Mobile
 	user.FrontendAccess = domain.BuildFrontendAccess(user, s.frontendAccessSettings)

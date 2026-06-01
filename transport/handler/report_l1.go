@@ -61,6 +61,42 @@ func (h *ReportL1Handler) ModuleDwell(c *gin.Context) {
 	c.JSON(200, gin.H{"data": data})
 }
 
+func (h *ReportL1Handler) KPIAIAnalysis(c *gin.Context) {
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "请求格式不正确", nil))
+			return
+		}
+	}
+	if strings.TrimSpace(req.From) == "" {
+		req.From = c.Query("from")
+	}
+	if strings.TrimSpace(req.To) == "" {
+		req.To = c.Query("to")
+	}
+	from, err := time.Parse("2006-01-02", strings.TrimSpace(req.From))
+	if err != nil {
+		respondError(c, domain.NewAppError(reportl1svc.CodeInvalidDateRange, "invalid from date", nil))
+		return
+	}
+	to, err := time.Parse("2006-01-02", strings.TrimSpace(req.To))
+	if err != nil {
+		respondError(c, domain.NewAppError(reportl1svc.CodeInvalidDateRange, "invalid to date", nil))
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.KPIAIAnalysis(c.Request.Context(), actor, reportl1svc.KPIAIAnalysisParams{From: from.UTC(), To: to.UTC()})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, gin.H{"data": data})
+}
+
 func parseReportRange(c *gin.Context) (time.Time, time.Time, *int64, *string, *domain.AppError) {
 	from, err := time.Parse("2006-01-02", strings.TrimSpace(c.Query("from")))
 	if err != nil {

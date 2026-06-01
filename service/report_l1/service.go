@@ -11,14 +11,24 @@ import (
 const CodeInvalidDateRange = "invalid_date_range"
 
 type Service struct {
-	repo     repo.ReportL1Repo
-	auditLog repo.PermissionLogRepo
+	repo                 repo.ReportL1Repo
+	kpiAnalysisRepo      repo.KPIAnalysisRepo
+	kpiAnalysisGenerator KPIAnalysisGenerator
+	auditLog             repo.PermissionLogRepo
 }
 
 type Option func(*Service)
 
 func WithPermissionLogRepo(auditLog repo.PermissionLogRepo) Option {
 	return func(s *Service) { s.auditLog = auditLog }
+}
+
+func WithKPIAnalysisRepo(kpiRepo repo.KPIAnalysisRepo) Option {
+	return func(s *Service) { s.kpiAnalysisRepo = kpiRepo }
+}
+
+func WithKPIAnalysisGenerator(generator KPIAnalysisGenerator) Option {
+	return func(s *Service) { s.kpiAnalysisGenerator = generator }
 }
 
 func NewService(repo repo.ReportL1Repo, opts ...Option) *Service {

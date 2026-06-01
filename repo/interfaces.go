@@ -726,6 +726,17 @@ type TaskEventListFilter struct {
 	PageSize  int
 }
 
+type KPIAnalysisRepo interface {
+	ListTaskEvents(ctx context.Context, filter KPIAnalysisFilter) ([]domain.KPIAnalysisEvent, error)
+	ListTaskAssets(ctx context.Context, filter KPIAnalysisFilter) ([]domain.KPIAnalysisAsset, error)
+}
+
+type KPIAnalysisFilter struct {
+	From  time.Time
+	To    time.Time
+	Limit int
+}
+
 // OutsourceListFilter for paginated outsource order queries.
 type OutsourceListFilter struct {
 	TaskID   *int64
