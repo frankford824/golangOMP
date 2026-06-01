@@ -351,6 +351,9 @@
                   {{ msg }}
                 </li>
               </ul>
+              <div v-if="normalCustomizationWarning" class="submit-warning-card">
+                {{ normalCustomizationWarning }}
+              </div>
             </section>
           </aside>
         </div>
@@ -961,6 +964,56 @@ const validationIssues = computed<string[]>(() => {
   return canSubmit.value ? [] : issues.slice(0, 3)
 })
 
+const CUSTOMIZATION_KEYWORDS = ['定制', '客制', '来图定做', '个性化']
+
+function textLooksCustomization(value: unknown): boolean {
+  const text = String(value ?? '').trim()
+  if (!text) return false
+  return CUSTOMIZATION_KEYWORDS.some((keyword) => text.includes(keyword))
+}
+
+function addCustomizationSignal(signals: string[], label: string, value: unknown) {
+  const text = String(value ?? '').trim()
+  if (!textLooksCustomization(text)) return
+  signals.push(`${label}：${text}`)
+}
+
+function erpSnapshotSignals(snapshot: unknown): string[] {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return []
+  const raw = snapshot as Record<string, unknown>
+  const signals: string[] = []
+  addCustomizationSignal(signals, 'ERP款式', raw.i_id ?? raw.iId)
+  addCustomizationSignal(signals, 'ERP名称', raw.name ?? raw.sku_name ?? raw.skuName)
+  addCustomizationSignal(signals, 'ERP分类', raw.category_name ?? raw.categoryName)
+  return signals
+}
+
+const normalCustomizationSignals = computed(() => {
+  if (taskGroup.value !== 'normal') return []
+  const signals: string[] = []
+  const f = form.value
+  const template = batchTemplateModel.value
+
+  addCustomizationSignal(signals, '商品名称', f.productName)
+  addCustomizationSignal(signals, '产品简称', f.productShortName)
+  addCustomizationSignal(signals, '款式编码', f.category ?? f.productCategoryCode)
+  addCustomizationSignal(signals, '分类名称', f.productCategoryName)
+  addCustomizationSignal(signals, '批量模板名称', template.productName)
+  addCustomizationSignal(signals, '批量模板款式', template.categoryCode ?? template.productIId)
+  for (const item of f.batchItems ?? []) {
+    addCustomizationSignal(signals, '批量商品名称', item.productName)
+    addCustomizationSignal(signals, '批量商品款式', item.categoryCode ?? item.productIId)
+  }
+  signals.push(...erpSnapshotSignals(f.erpProductSnapshot))
+  return Array.from(new Set(signals)).slice(0, 5)
+})
+
+const normalCustomizationWarning = computed(() => {
+  if (normalCustomizationSignals.value.length === 0) return ''
+  const preview = normalCustomizationSignals.value.slice(0, 3).join('；')
+  return `检测到常规任务中包含定制特征：${preview}。如果这是定制单，请切换到“定制任务”；继续按常规创建会进入常规审核并生成常规 SKU。`
+})
+
 const canSubmit = computed(() => {
   if (form.value.skuMode === 'multiple' && taskKind.value !== 'ORIGINAL_PRODUCT_DEV') {
     return Boolean(
@@ -1269,6 +1322,14 @@ async function submit() {
   submitStatusMessage.value = ''
   batchItemsError.value = ''
   fieldErrors.value = {}
+
+  if (normalCustomizationWarning.value) {
+    const confirmed = window.confirm(
+      `${normalCustomizationWarning.value}\n\n仍然按常规任务创建吗？`,
+    )
+    if (!confirmed) return
+  }
+
   submitting.value = true
 
   // Round I.g · D1：submit-guard 兜底，避免脏 groupId 绕过下拉过滤直达 axios。
@@ -2105,6 +2166,16 @@ async function submit() {
 }
 .issue-item::marker {
   color: #f97316;
+}
+.submit-warning-card {
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #fed7aa;
+  border-radius: 0.5rem;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 .issue-ok {
   margin: 0.2rem 0 0;

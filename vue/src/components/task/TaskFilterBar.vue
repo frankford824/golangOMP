@@ -1,5 +1,15 @@
 <template>
   <div class="filter-bar">
+    <div class="filter-field">
+      <span class="field-label">任务分组</span>
+      <BaseSelect
+        :model-value="filters.taskCategory"
+        clearable
+        placeholder="全部分组"
+        :options="taskCategoryOptions"
+        @update:model-value="patchFilters({ taskCategory: String($event) })"
+      />
+    </div>
     <div class="filter-field filter-field--status">
       <span class="field-label">任务状态</span>
       <TaskStatusMultiSelect
@@ -190,6 +200,11 @@ const statusOptions: { value: TaskStatus; label: string }[] = [
   { value: 'Archived', label: '已归档' },
   { value: 'Blocked', label: '阻塞' },
   { value: 'Cancelled', label: '已取消' },
+]
+
+const taskCategoryOptions: BaseSelectOption[] = [
+  { label: '常规任务', value: 'normal' },
+  { label: '定制任务', value: 'customization' },
 ]
 
 const taskTypeOptions: BaseSelectOption[] = [

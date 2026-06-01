@@ -572,6 +572,7 @@ const filters = ref<TaskListFilters>({
 const activeAdvancedFilterCount = computed(() => {
   const f = filters.value
   let count = 0
+  if (f.taskCategory) count += 1
   if (f.status.length > 0) count += 1
   if (f.taskType) count += 1
   if (f.priority) count += 1
