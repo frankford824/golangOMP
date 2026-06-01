@@ -2,11 +2,13 @@ package report_l1
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"workflow/domain"
 	"workflow/repo"
+	"workflow/service/aiagent"
 )
 
 type stubReportRepo struct {
@@ -15,12 +17,31 @@ type stubReportRepo struct {
 	dwell      []domain.L1ModuleDwellPoint
 }
 
+type stubKPIAnalysisRepo struct {
+	events []domain.KPIAnalysisEvent
+	assets []domain.KPIAnalysisAsset
+}
+
+type failingKPIAnalysisGenerator struct{}
+
 func (s *stubReportRepo) GetCards(context.Context) ([]domain.L1Card, error) { return s.cards, nil }
 func (s *stubReportRepo) GetThroughput(context.Context, repo.ReportL1Filter) ([]domain.L1ThroughputPoint, error) {
 	return s.throughput, nil
 }
 func (s *stubReportRepo) GetModuleDwell(context.Context, repo.ReportL1Filter) ([]domain.L1ModuleDwellPoint, error) {
 	return s.dwell, nil
+}
+
+func (s *stubKPIAnalysisRepo) ListTaskEvents(context.Context, repo.KPIAnalysisFilter) ([]domain.KPIAnalysisEvent, error) {
+	return s.events, nil
+}
+
+func (s *stubKPIAnalysisRepo) ListTaskAssets(context.Context, repo.KPIAnalysisFilter) ([]domain.KPIAnalysisAsset, error) {
+	return s.assets, nil
+}
+
+func (failingKPIAnalysisGenerator) GenerateKPIAnalysis(context.Context, any) (*aiagent.KPIAnalysis, error) {
+	return nil, errors.New("provider timeout")
 }
 
 func TestReportL1ServiceRBAC(t *testing.T) {
@@ -69,6 +90,32 @@ func TestReportL1ServicePassThrough(t *testing.T) {
 	dwell, appErr := svc.ModuleDwell(context.Background(), reportActor(domain.RoleSuperAdmin), from, from, nil, nil)
 	if appErr != nil || len(dwell) != 1 || dwell[0].Samples != 2 {
 		t.Fatalf("dwell=%+v err=%+v", dwell, appErr)
+	}
+}
+
+func TestKPIAIAnalysisFallsBackWhenGeneratorFails(t *testing.T) {
+	from := time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC)
+	kpiRepo := &stubKPIAnalysisRepo{
+		events: []domain.KPIAnalysisEvent{
+			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", EventType: "task.created", OperatorName: "运营甲", CreatedAt: from.Add(time.Hour)},
+			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", EventType: "task.design.submitted", OperatorName: "设计甲", CreatedAt: from.Add(2 * time.Hour)},
+			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", EventType: "task.audit.rejected", OperatorName: "审核甲", CreatedAt: from.Add(3 * time.Hour)},
+		},
+		assets: []domain.KPIAnalysisAsset{
+			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", AssetType: "final", OriginalName: "final.psd", UploadedByName: "设计甲", CreatedAt: from.Add(2 * time.Hour)},
+		},
+	}
+	svc := NewService(&stubReportRepo{}, WithKPIAnalysisRepo(kpiRepo), WithKPIAnalysisGenerator(failingKPIAnalysisGenerator{}))
+
+	analysis, appErr := svc.KPIAIAnalysis(context.Background(), reportActor(domain.RoleSuperAdmin), KPIAIAnalysisParams{From: from, To: from})
+	if appErr != nil {
+		t.Fatalf("appErr=%+v", appErr)
+	}
+	if analysis == nil || analysis.Provider != "system_fallback" {
+		t.Fatalf("analysis=%+v", analysis)
+	}
+	if analysis.Headline == "" || analysis.Overview == "" || len(analysis.Highlights) == 0 {
+		t.Fatalf("fallback missing readable content: %+v", analysis)
 	}
 }
 

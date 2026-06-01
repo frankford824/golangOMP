@@ -98,7 +98,7 @@ func (s *Service) KPIAIAnalysis(ctx context.Context, actor domain.RequestActor, 
 	if params.From.IsZero() || params.To.IsZero() || params.From.After(params.To) {
 		return nil, domain.NewAppError(CodeInvalidDateRange, "from must be before or equal to to", nil)
 	}
-	if s.kpiAnalysisRepo == nil || s.kpiAnalysisGenerator == nil {
+	if s.kpiAnalysisRepo == nil {
 		return nil, domain.NewAppError(CodeAIAnalysisNotConfigured, "AI 绩效分析服务尚未配置", nil)
 	}
 
@@ -117,14 +117,177 @@ func (s *Service) KPIAIAnalysis(ctx context.Context, actor domain.RequestActor, 
 	}
 
 	evidence := buildKPIAnalysisEvidence(params.From, params.To, events, assets)
+	if s.kpiAnalysisGenerator == nil {
+		return fallbackKPIAnalysis(evidence, nil), nil
+	}
 	analysis, err := s.kpiAnalysisGenerator.GenerateKPIAnalysis(ctx, evidence)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "AI 绩效分析生成失败，请稍后重试", map[string]string{"cause": err.Error()})
+	if err != nil || analysis == nil {
+		return fallbackKPIAnalysis(evidence, err), nil
 	}
 	if analysis.Evidence == nil {
 		analysis.Evidence = []string{}
 	}
 	return analysis, nil
+}
+
+func fallbackKPIAnalysis(evidence kpiAnalysisEvidence, cause error) *aiagent.KPIAnalysis {
+	metrics := evidence.Metrics
+	overview := fmt.Sprintf("%s 至 %s：系统记录任务创建 %d 条，设计接单 %d 次，设计提交 %d 次，审核通过 %d 次，审核打回 %d 次，最终成品图 %d 个。AI 深度解读暂时不可用，当前先展示系统统计分析。",
+		evidence.Period.From,
+		evidence.Period.To,
+		metrics.TaskCreates,
+		metrics.DesignClaims,
+		metrics.DesignSubmits,
+		metrics.AuditApproves,
+		metrics.AuditRejects,
+		metrics.FinalAssets,
+	)
+	highlights := []aiagent.KPIAnalysisHighlight{
+		{Title: "运营任务创建", Value: fmt.Sprintf("%d", metrics.TaskCreates), Note: "按任务创建和批量子项创建动作统计"},
+		{Title: "设计接单", Value: fmt.Sprintf("%d", metrics.DesignClaims), Note: "按指派、改派和批量指派动作统计"},
+		{Title: "设计提交", Value: fmt.Sprintf("%d", metrics.DesignSubmits), Note: "按设计提交动作统计"},
+		{Title: "审核通过", Value: fmt.Sprintf("%d", metrics.AuditApproves), Note: fmt.Sprintf("审核通过率 %s", fallbackRate(metrics.AuditApproves, metrics.AuditApproves+metrics.AuditRejects))},
+		{Title: "审核打回", Value: fmt.Sprintf("%d", metrics.AuditRejects), Note: "用于观察返工压力"},
+		{Title: "最终成品图", Value: fmt.Sprintf("%d", metrics.FinalAssets), Note: "按最终成品图资产记录统计"},
+	}
+
+	lines := append([]string{}, evidence.Evidence...)
+	lines = append(lines, "AI 深度解读暂时不可用，已切换为系统统计分析。")
+	if cause != nil && strings.TrimSpace(cause.Error()) != "" {
+		lines = append(lines, "本次未使用 AI 文本结论，避免把临时模型异常展示给一线用户。")
+	}
+
+	return &aiagent.KPIAnalysis{
+		Headline:       "绩效统计已生成，AI 深度解读暂时不可用",
+		Overview:       overview,
+		Highlights:     highlights,
+		PeopleInsights: fallbackPeopleInsights(evidence.People),
+		TaskSamples:    fallbackTaskSamples(evidence.TaskSamples),
+		Risks:          fallbackKPIRisks(metrics),
+		Actions:        fallbackKPIActions(metrics),
+		Evidence:       lines,
+		Confidence:     "medium",
+		GeneratedAt:    time.Now().UTC(),
+		Model:          "system",
+		Provider:       "system_fallback",
+	}
+}
+
+func fallbackRate(numerator, denominator int) string {
+	if denominator <= 0 {
+		return "暂无数据"
+	}
+	return fmt.Sprintf("%.1f%%", float64(numerator)*100/float64(denominator))
+}
+
+func fallbackPeopleInsights(people []kpiAnalysisPerson) []aiagent.KPIAnalysisPersonInsight {
+	out := make([]aiagent.KPIAnalysisPersonInsight, 0, min(len(people), 5))
+	for _, person := range people {
+		if len(out) >= 5 {
+			break
+		}
+		total := person.TaskCreates + person.DesignClaims + person.DesignSubmits + person.AuditApproves + person.AuditRejects + person.FinalAssets
+		if total <= 0 {
+			continue
+		}
+		metric := fmt.Sprintf("创建%d，接单%d，提交%d，通过%d，打回%d，成品图%d",
+			person.TaskCreates,
+			person.DesignClaims,
+			person.DesignSubmits,
+			person.AuditApproves,
+			person.AuditRejects,
+			person.FinalAssets,
+		)
+		signal := "本周期有可追踪业务动作"
+		if person.AuditRejects > 0 {
+			signal = "存在审核打回记录，建议复盘打回原因"
+		} else if person.DesignSubmits > 0 {
+			signal = "有设计提交产出"
+		} else if person.TaskCreates > 0 {
+			signal = "有任务发起动作"
+		}
+		out = append(out, aiagent.KPIAnalysisPersonInsight{
+			Role:   person.Role,
+			Name:   person.Name,
+			Metric: metric,
+			Signal: signal,
+			Action: "结合任务明细继续核对异常单据",
+		})
+	}
+	return out
+}
+
+func fallbackTaskSamples(tasks []kpiAnalysisTaskSample) []aiagent.KPIAnalysisTaskSample {
+	out := make([]aiagent.KPIAnalysisTaskSample, 0, min(len(tasks), 4))
+	for _, task := range tasks {
+		if len(out) >= 4 {
+			break
+		}
+		timeline := append([]string{}, task.Timeline...)
+		if len(timeline) == 0 && len(task.Assets) > 0 {
+			timeline = append(timeline, task.Assets...)
+		}
+		if len(timeline) > 4 {
+			timeline = timeline[len(timeline)-4:]
+		}
+		observation := "该任务有近期可追踪动作。"
+		if len(task.Assets) > 0 {
+			observation = "该任务包含近期设计资产记录，可作为抽查样本。"
+		}
+		out = append(out, aiagent.KPIAnalysisTaskSample{
+			TaskNo:      task.TaskNo,
+			TaskName:    task.TaskName,
+			TaskType:    task.TaskType,
+			Timeline:    timeline,
+			Observation: observation,
+		})
+	}
+	return out
+}
+
+func fallbackKPIRisks(metrics kpiAnalysisMetrics) []aiagent.KPIAnalysisRisk {
+	risks := []aiagent.KPIAnalysisRisk{}
+	if metrics.AuditRejects > 0 {
+		risks = append(risks, aiagent.KPIAnalysisRisk{
+			Level:  "medium",
+			Title:  "存在审核打回",
+			Reason: fmt.Sprintf("本周期审核打回 %d 次，需要按人员和任务复盘返工原因。", metrics.AuditRejects),
+		})
+	}
+	if metrics.DesignClaims > 0 && metrics.DesignSubmits < metrics.DesignClaims {
+		risks = append(risks, aiagent.KPIAnalysisRisk{
+			Level:  "low",
+			Title:  "设计接单与提交存在差额",
+			Reason: fmt.Sprintf("接单 %d 次，提交 %d 次，可能包含进行中任务或未及时提交的任务。", metrics.DesignClaims, metrics.DesignSubmits),
+		})
+	}
+	if metrics.FinalAssets == 0 && metrics.DesignSubmits > 0 {
+		risks = append(risks, aiagent.KPIAnalysisRisk{
+			Level:  "low",
+			Title:  "成品图记录不足",
+			Reason: "已有设计提交，但最终成品图资产统计为 0，需要核对上传入口和资产归类。",
+		})
+	}
+	if len(risks) == 0 {
+		risks = append(risks, aiagent.KPIAnalysisRisk{
+			Level:  "low",
+			Title:  "暂无明显异常",
+			Reason: "系统统计未发现突出的打回或资产缺口。",
+		})
+	}
+	return risks
+}
+
+func fallbackKPIActions(metrics kpiAnalysisMetrics) []aiagent.KPIAnalysisAction {
+	actions := []aiagent.KPIAnalysisAction{
+		{Owner: "运营主管", Action: "查看任务创建量和平均发起间隔，确认任务分配是否集中在少数人员。", Timing: "当天"},
+		{Owner: "设计主管", Action: "按接单未提交和审核打回筛选任务，优先处理影响交付的单据。", Timing: "当天"},
+		{Owner: "审核主管", Action: "复盘打回样本，沉淀常见问题口径。", Timing: "本周期"},
+	}
+	if metrics.AuditRejects == 0 {
+		actions[2].Action = "抽查审核通过任务和最终成品图，确认可用状态标记准确。"
+	}
+	return actions
 }
 
 func buildKPIAnalysisEvidence(from, to time.Time, events []domain.KPIAnalysisEvent, assets []domain.KPIAnalysisAsset) kpiAnalysisEvidence {
