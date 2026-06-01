@@ -52,7 +52,7 @@
               <table class="kpi-table">
                 <thead>
                   <tr>
-                    <th>人员</th>
+                    <th>用户姓名</th>
                     <th>任务单量</th>
                     <th>活跃天数</th>
                     <th>平均发起间隔</th>
@@ -82,7 +82,7 @@
               <table class="kpi-table">
                 <thead>
                   <tr>
-                    <th>人员</th>
+                    <th>用户姓名</th>
                     <th>接单</th>
                     <th>接单完成率</th>
                     <th>平均完成时间</th>
@@ -116,7 +116,7 @@
               <table class="kpi-table">
                 <thead>
                   <tr>
-                    <th>人员</th>
+                    <th>用户姓名</th>
                     <th>审核量</th>
                     <th>通过</th>
                     <th>打回</th>
@@ -172,6 +172,7 @@ interface PaginationEnvelope<T> {
 
 interface UserDirectoryEntry {
   id: string
+  username: string
   name: string
   department: string
   team: string
@@ -208,6 +209,14 @@ const events = ref<WorkflowTraceEvent[]>([])
 const reportCards = ref<L1Card[]>([])
 const traceTotal = ref(0)
 const userDirectory = ref(new Map<string, UserDirectoryEntry>())
+const userDirectoryByUsername = computed(() => {
+  const next = new Map<string, UserDirectoryEntry>()
+  for (const user of userDirectory.value.values()) {
+    const username = user.username.trim().toLowerCase()
+    if (username) next.set(username, user)
+  }
+  return next
+})
 
 const KPI_TASK_EVENT_TYPES = [
   'task.created',
@@ -336,7 +345,23 @@ function actorKey(event: WorkflowTraceEvent): string {
 }
 
 function actorName(event: WorkflowTraceEvent): string {
-  return userAccountDisplay(event.actor_username, event.actor_id ? `人员#${event.actor_id}` : '')
+  const byId = event.actor_id ? userDirectory.value.get(String(event.actor_id)) : undefined
+  if (byId?.name) return byId.name
+  const username = String(event.actor_username ?? '').trim().toLowerCase()
+  const byUsername = username ? userDirectoryByUsername.value.get(username) : undefined
+  if (byUsername?.name) return byUsername.name
+  const payloadName = readPayloadText(event.payload, [
+    'actor_display_name',
+    'actor_name',
+    'display_name',
+    'name',
+    'operator_name',
+    'creator_name',
+    'designer_name',
+    'auditor_name',
+    'to_handler_name',
+  ])
+  return userAccountDisplay(payloadName, event.actor_username, event.actor_id ? `人员#${event.actor_id}` : '')
 }
 
 function eventSearchText(event: WorkflowTraceEvent): string {
@@ -658,7 +683,8 @@ async function loadUserDirectory() {
       if (!id) continue
       next.set(id, {
         id,
-        name: userAccountDisplay(user.display_name, user.username, `用户#${id}`),
+        username: String(user.username ?? '').trim(),
+        name: userAccountDisplay(user.display_name, (user as { name?: unknown }).name, user.username, `用户#${id}`),
         department: String(user.department ?? '').trim(),
         team: String(user.team ?? '').trim(),
       })
@@ -676,7 +702,8 @@ async function loadUserDirectory() {
         if (!id) continue
         next.set(id, {
           id,
-          name: userAccountDisplay(record.display_name, record.username, `人员#${id}`),
+          username: String(record.username ?? '').trim(),
+          name: userAccountDisplay(record.display_name, record.name, record.username, `人员#${id}`),
           department: '',
           team: '',
         })
