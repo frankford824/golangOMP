@@ -148,10 +148,12 @@ func TestERPBridgeCostVerificationFailureMessageReadbackNotFound(t *testing.T) {
 			Message: erpBridgeCostReadbackNotFoundExhaustedMessage,
 		},
 	}
-	failure := erpBridgeCostVerificationFailureMessage(result, 1)
-	want := "ERP成本已提交，但多次回查仍未找到商品，等待 ERP/Bridge 确认"
-	if failure != want {
-		t.Fatalf("failure = %q, want %q", failure, want)
+	if failure := erpBridgeCostVerificationFailureMessage(result, 1); failure != "" {
+		t.Fatalf("failure = %q, want empty because readback_not_found is pending confirmation", failure)
+	}
+	want := "ERP已提交，等待系统回查确认"
+	if got := erpBridgeCostVerificationPendingMessage(result); got != want {
+		t.Fatalf("pending message = %q, want %q", got, want)
 	}
 }
 
@@ -172,7 +174,7 @@ func TestERPBridgeUpsertProductWithCostRetryZeroCostMatched(t *testing.T) {
 				ActualCost:   float64Ptr(0),
 			},
 		}, nil
-	}, domain.ERPProductUpsertPayload{SKUID: "SKU-0", CostPrice: erpCostPriceOrZero(nil)})
+	}, domain.ERPProductUpsertPayload{SKUID: "SKU-0", CostPrice: erpCostPriceForFiling(float64Ptr(0))})
 	if appErr != nil {
 		t.Fatalf("unexpected appErr: %+v", appErr)
 	}

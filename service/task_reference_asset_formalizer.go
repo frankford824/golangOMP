@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -137,7 +138,7 @@ func (s *taskReferenceAssetFormalizer) formalizeOne(ctx context.Context, taskID,
 		if assetVersionErr != nil {
 			return fmt.Errorf("next task asset asset_version_no: %w", assetVersionErr)
 		}
-		storageRefID := refID + "-formalized-" + strings.ReplaceAll(now.Format("20060102150405.000"), ".", "")
+		storageRefID := newTaskAssetStorageRefID()
 		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
 		previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
 		scopeSKU := ""
@@ -220,6 +221,10 @@ func (s *taskReferenceAssetFormalizer) formalizeOne(ctx context.Context, taskID,
 		return infraError("formalize task-create reference ref", txErr)
 	}
 	return nil
+}
+
+func newTaskAssetStorageRefID() string {
+	return uuid.NewString()
 }
 
 func isTaskReferenceAssetBindingDuplicateErr(err error) bool {

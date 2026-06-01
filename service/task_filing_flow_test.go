@@ -529,11 +529,11 @@ func TestBatchNewProductCreateSyncAllowsMissingCost(t *testing.T) {
 	if got := bridgeStub.upsertPayloads[0].BusinessInfo.CostPrice; got == nil || *got != 5.1 {
 		t.Fatalf("batch upsert[0] business_info.cost_price = %v, want 5.1", got)
 	}
-	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got == nil || *got != 0 {
-		t.Fatalf("batch upsert[1] business_info.cost_price = %v, want explicit 0", got)
+	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got != nil {
+		t.Fatalf("batch upsert[1] business_info.cost_price = %v, want nil for unknown cost", got)
 	}
-	if got := bridgeStub.upsertPayloads[1].CostPrice; got == nil || *got != 0 {
-		t.Fatalf("batch upsert[1] cost_price = %v, want explicit 0", got)
+	if got := bridgeStub.upsertPayloads[1].CostPrice; got != nil {
+		t.Fatalf("batch upsert[1] cost_price = %v, want nil for unknown cost", got)
 	}
 }
 
@@ -902,14 +902,14 @@ func TestRetryFilingBatchMultiSKUDoesNotReportTopLevelIIDMissingOnReadbackNotFou
 	if appErr != nil {
 		t.Fatalf("RetryFiling() unexpected error: %+v", appErr)
 	}
-	if view.FilingStatus != domain.FilingStatusFilingFailed {
-		t.Fatalf("filing_status = %s, want filing_failed", view.FilingStatus)
+	if view.FilingStatus != domain.FilingStatusPending {
+		t.Fatalf("filing_status = %s, want pending_filing", view.FilingStatus)
 	}
 	if strings.Contains(strings.Join(view.MissingFields, ","), "i_id") {
 		t.Fatalf("missing_fields = %+v, should not contain top-level i_id for batch", view.MissingFields)
 	}
-	if got := strings.TrimSpace(view.FilingErrorMessage); got == "" || !strings.Contains(got, "回查") {
-		t.Fatalf("filing_error_message = %q, want readback failure message", got)
+	if got := strings.TrimSpace(view.FilingErrorMessage); got == "" || !strings.Contains(got, "等待系统回查确认") {
+		t.Fatalf("filing_error_message = %q, want pending readback message", got)
 	}
 }
 
@@ -1193,11 +1193,11 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	if taskRepo.skuItems[task.ID][0].ERPSyncRequired {
 		t.Fatal("sku item erp_sync_required should be false after create filing")
 	}
-	if got := bridgeStub.upsertPayload.CostPrice; got == nil || *got != 0 {
-		t.Fatalf("create erp cost_price = %v, want explicit 0", got)
+	if got := bridgeStub.upsertPayload.CostPrice; got != nil {
+		t.Fatalf("create erp cost_price = %v, want nil for unknown cost", got)
 	}
-	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || *got != 0 {
-		t.Fatalf("create erp business_info.cost_price = %v, want explicit 0", got)
+	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got != nil {
+		t.Fatalf("create erp business_info.cost_price = %v, want nil for unknown cost", got)
 	}
 
 	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
@@ -1493,7 +1493,7 @@ func TestNewProductFilingSucceedsWhenERPCostReadback404ThenMatched(t *testing.T)
 	}
 }
 
-func TestNewProductFilingFailsWhenERPCostReadback404Exhausted(t *testing.T) {
+func TestNewProductFilingStaysPendingWhenERPCostReadback404Exhausted(t *testing.T) {
 	erpBridgeCostReadbackSleep = func(time.Duration) {}
 	erpBridgeCostVerificationSleep = func(time.Duration) {}
 	t.Cleanup(func() {
@@ -1569,10 +1569,10 @@ func TestNewProductFilingFailsWhenERPCostReadback404Exhausted(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFilingFailed {
-		t.Fatalf("filing_status = %s, want filing_failed", taskRepo.details[task.ID].FilingStatus)
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusPending {
+		t.Fatalf("filing_status = %s, want pending_filing", taskRepo.details[task.ID].FilingStatus)
 	}
-	wantMsg := "ERP成本已提交，但多次回查仍未找到商品，等待 ERP/Bridge 确认"
+	wantMsg := "ERP已提交，等待系统回查确认"
 	if taskRepo.details[task.ID].FilingErrorMessage != wantMsg {
 		t.Fatalf("filing_error_message = %q, want %q", taskRepo.details[task.ID].FilingErrorMessage, wantMsg)
 	}

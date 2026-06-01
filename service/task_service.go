@@ -3460,7 +3460,7 @@ func buildERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.TaskDe
 		Price:        cloneFloat64Ptr(snapshot.Price),
 		SPrice:       cloneFloat64Ptr(snapshot.SPrice),
 		Remark:       strings.TrimSpace(remark),
-		CostPrice:    erpCostPriceOrZero(detail.CostPrice),
+		CostPrice:    erpCostPriceForFiling(detail.CostPrice),
 		Operation:    "original_product_update",
 		SKUImmutable: &skuImmutable,
 		Currency:     snapshot.Currency,
@@ -3487,7 +3487,7 @@ func buildERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.TaskDe
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(detail.Quantity),
-			CostPrice:    erpCostPriceOrZero(detail.CostPrice),
+			CostPrice:    erpCostPriceForFiling(detail.CostPrice),
 		},
 	}
 	payload.TaskContext.FiledAt = time.Now().UTC().Format(time.RFC3339)
@@ -3646,10 +3646,8 @@ func erpBridgeCostVerificationFailureMessage(result *domain.ERPProductUpsertResu
 	}
 	verification := result.CostVerification
 	switch strings.ToLower(strings.TrimSpace(verification.Status)) {
-	case "", "matched", "skipped":
+	case "", "matched", "skipped", "readback_not_found":
 		return ""
-	case "readback_not_found":
-		return "ERP成本已提交，但多次回查仍未找到商品，等待 ERP/Bridge 确认"
 	case "mismatched":
 		var base string
 		if verification.ExpectedCost != nil && verification.ActualCost != nil {
@@ -3670,6 +3668,20 @@ func erpBridgeCostVerificationFailureMessage(result *domain.ERPProductUpsertResu
 		}
 		return "ERP成本回查失败"
 	}
+}
+
+func erpBridgeCostVerificationIsReadbackPending(result *domain.ERPProductUpsertResult) bool {
+	if result == nil || result.CostVerification == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(result.CostVerification.Status), "readback_not_found")
+}
+
+func erpBridgeCostVerificationPendingMessage(result *domain.ERPProductUpsertResult) string {
+	if erpBridgeCostVerificationIsReadbackPending(result) {
+		return "ERP已提交，等待系统回查确认"
+	}
+	return ""
 }
 
 func buildERPBridgeFilingEventPayload(result *domain.ERPProductUpsertResult, callLogID *int64) map[string]interface{} {

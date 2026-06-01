@@ -50,6 +50,7 @@ type taskFilingItemResult struct {
 	CallLogID   *int64
 	Failure     string
 	Succeeded   bool
+	Pending     bool
 	LastFiledAt *time.Time
 }
 
@@ -58,6 +59,7 @@ type taskFilingAttemptSummary struct {
 	LastCallLog *int64
 	ItemResults []taskFilingItemResult
 	Failure     string
+	Pending     bool
 }
 
 func (s *taskService) GetFilingStatus(ctx context.Context, taskID int64) (*domain.TaskFilingStatusView, *domain.AppError) {
@@ -194,6 +196,10 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		detail.FilingStatus = domain.FilingStatusFilingFailed
 		detail.FilingErrorMessage = summary.Failure
 		detail.ERPSyncRequired = true
+	} else if summary.Pending {
+		detail.FilingStatus = domain.FilingStatusPending
+		detail.FilingErrorMessage = erpBridgeCostVerificationPendingMessage(summary.LastResult)
+		detail.ERPSyncRequired = true
 	} else {
 		successAt := time.Now().UTC()
 		detail.FilingStatus = domain.FilingStatusFiled
@@ -305,11 +311,14 @@ func (s *taskService) performERPBridgeFilingPayloads(ctx context.Context, taskID
 			Result:    result,
 			CallLogID: callLogID,
 			Failure:   failure,
-			Succeeded: failure == "",
+			Pending:   failure == "" && erpBridgeCostVerificationIsReadbackPending(result),
 		}
+		itemResult.Succeeded = failure == "" && !itemResult.Pending
 		if itemResult.Succeeded {
 			successAt := time.Now().UTC()
 			itemResult.LastFiledAt = &successAt
+		} else if itemResult.Pending {
+			summary.Pending = true
 		} else {
 			failures = append(failures, fmt.Sprintf("%s：%s", firstNonEmptyString(itemResult.SKUCode, "SKU"), failure))
 		}
@@ -424,7 +433,7 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 		CategoryName:     categoryName,
 		SPrice:           sPrice,
 		Remark:           strings.TrimSpace(remark),
-		CostPrice:        erpCostPriceOrZero(detail.CostPrice),
+		CostPrice:        erpCostPriceForFiling(detail.CostPrice),
 		Operation:        "product_profile_upsert",
 		SKUImmutable:     &skuImmutable,
 		Source:           strings.TrimSpace(source),
@@ -450,7 +459,7 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(detail.Quantity),
-			CostPrice:    erpCostPriceOrZero(detail.CostPrice),
+			CostPrice:    erpCostPriceForFiling(detail.CostPrice),
 		},
 	}
 	if task.TaskType == domain.TaskTypeOriginalProductDevelopment {
@@ -499,7 +508,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		CategoryCode:     strings.TrimSpace(item.CategoryCode),
 		CategoryName:     strings.TrimSpace(detail.CategoryName),
 		SPrice:           sPrice,
-		CostPrice:        erpCostPriceOrZero(item.CostPrice),
+		CostPrice:        erpCostPriceForFiling(item.CostPrice),
 		Remark:           strings.TrimSpace(remark),
 		Operation:        "product_profile_upsert",
 		Source:           strings.TrimSpace(source),
@@ -525,7 +534,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 			Height:       cloneFloat64Ptr(detail.Height),
 			Area:         cloneFloat64Ptr(detail.Area),
 			Quantity:     cloneInt64Ptr(item.Quantity),
-			CostPrice:    erpCostPriceOrZero(item.CostPrice),
+			CostPrice:    erpCostPriceForFiling(item.CostPrice),
 		},
 	}
 	return normalizeERPProductUpsertPayload(payload), nil
@@ -549,10 +558,7 @@ func zeroFloat64Ptr() *float64 {
 	return &zero
 }
 
-func erpCostPriceOrZero(value *float64) *float64 {
-	if value == nil {
-		return zeroFloat64Ptr()
-	}
+func erpCostPriceForFiling(value *float64) *float64 {
 	return cloneFloat64Ptr(value)
 }
 
@@ -635,6 +641,9 @@ func (s *taskService) persistTaskFilingState(
 						syncRequired = false
 						lastFiledAt = itemResult.LastFiledAt
 						errorMessage = ""
+					} else if itemResult.Pending {
+						status = domain.FilingStatusPending
+						errorMessage = erpBridgeCostVerificationPendingMessage(itemResult.Result)
 					}
 					if err := updater.UpdateSKUItemFilingProjection(ctx, tx, task.ID, itemResult.SKUItemID, status, syncRequired, detail.ERPSyncVersion, lastFiledAt, errorMessage); err != nil {
 						return err
@@ -833,6 +842,7 @@ func buildERPBridgeFilingItemEventPayload(results []taskFilingItemResult) []map[
 			"sku_item_id": result.SKUItemID,
 			"sku_code":    result.SKUCode,
 			"succeeded":   result.Succeeded,
+			"pending":     result.Pending,
 		}
 		if result.CallLogID != nil {
 			item["integration_call_log_id"] = *result.CallLogID

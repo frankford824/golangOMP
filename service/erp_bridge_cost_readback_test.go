@@ -160,9 +160,11 @@ func TestERPBridgeServiceUpsertProductCostReadback404Exhausted(t *testing.T) {
 	if result.CostVerification.Status != erpBridgeCostVerificationStatusReadbackNotFound {
 		t.Fatalf("status = %s, want readback_not_found", result.CostVerification.Status)
 	}
-	failure := erpBridgeCostVerificationFailureMessage(result, 1)
-	if failure != "ERP成本已提交，但多次回查仍未找到商品，等待 ERP/Bridge 确认" {
-		t.Fatalf("failure = %q", failure)
+	if failure := erpBridgeCostVerificationFailureMessage(result, 1); failure != "" {
+		t.Fatalf("failure = %q, want empty because readback_not_found is pending confirmation", failure)
+	}
+	if got := erpBridgeCostVerificationPendingMessage(result); got != "ERP已提交，等待系统回查确认" {
+		t.Fatalf("pending message = %q", got)
 	}
 	if client.upsertCalls != 1 {
 		t.Fatalf("upsert calls = %d, want 1", client.upsertCalls)
@@ -223,8 +225,8 @@ func TestERPBridgeServiceUpsertProductUpsertFailureStillFails(t *testing.T) {
 }
 
 type erpBridgeUpsertFailureClient struct {
-	inner     *erpBridgeReadbackSequenceClient
-	upsertErr error
+	inner       *erpBridgeReadbackSequenceClient
+	upsertErr   error
 	upsertCalls int
 }
 
