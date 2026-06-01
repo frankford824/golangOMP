@@ -18,7 +18,7 @@
     <BaseErrorState v-if="error" :title="error" @retry="load" />
     <template v-else>
       <div v-if="loading" class="metric-grid">
-        <BaseSkeleton v-for="i in 8" :key="i" width="100%" height="5.5rem" />
+        <BaseSkeleton v-for="i in 8" :key="i" width="100%" height="4.75rem" />
       </div>
       <template v-else>
         <div class="metric-grid">
@@ -31,7 +31,7 @@
 
         <div v-if="reportCards.length" class="report-strip">
           <article v-for="card in reportCards" :key="card.key || card.title" class="report-card">
-            <span>{{ card.title || card.key }}</span>
+            <span>{{ reportCardTitle(card) }}</span>
             <strong>{{ card.value }}<small v-if="card.unit">{{ card.unit }}</small></strong>
           </article>
         </div>
@@ -152,7 +152,8 @@ import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import { logsApi } from '@/services/api/logsApi'
 import { reportsApi } from '@/services/api/reportsApi'
-import type { WorkflowTraceEvent } from '@/services/apiTypes'
+import { usersApi } from '@/services/api/usersApi'
+import type { BackendUser, OperationLogEntry, WorkflowTraceEvent } from '@/services/apiTypes'
 import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
 import { userAccountDisplay } from '@/domain/user-display'
@@ -167,6 +168,13 @@ interface L1Card {
 interface PaginationEnvelope<T> {
   data?: T[]
   pagination?: { total?: unknown }
+}
+
+interface UserDirectoryEntry {
+  id: string
+  name: string
+  department: string
+  team: string
 }
 
 interface PersonStats {
@@ -199,6 +207,29 @@ const error = ref('')
 const events = ref<WorkflowTraceEvent[]>([])
 const reportCards = ref<L1Card[]>([])
 const traceTotal = ref(0)
+const userDirectory = ref(new Map<string, UserDirectoryEntry>())
+
+const KPI_TASK_EVENT_TYPES = [
+  'task.created',
+  'task.batch_items_created',
+  'task.assigned',
+  'task.reassigned',
+  'task.batch_assigned',
+  'task.design.submitted',
+  'task.audit.approved',
+  'task.audit.rejected',
+] as const
+
+const REPORT_CARD_LABELS: Record<string, string> = {
+  tasks_in_progress: '进行中任务',
+  in_progress: '进行中任务',
+  tasks_completed_today: '今日完成任务',
+  completed_today: '今日完成任务',
+  archived_total: '累计归档',
+  archived: '累计归档',
+  pool_waiting: '待接单任务',
+  pool: '待接单任务',
+}
 
 const canLoadTrace = computed(() => can('logs.view') || permissionsStore.hasMenu('logs_center'))
 const canLoadReports = computed(
@@ -254,7 +285,7 @@ const summaryMetrics = computed(() => {
   const auditDecisions = sum(people.value, (row) => row.auditDecisions)
   const auditRejects = sum(people.value, (row) => row.auditRejects)
   return [
-    { key: 'trace_total', label: '业务动作', value: traceTotal.value, hint: '当前查询范围' },
+    { key: 'kpi_events', label: '关键动作', value: events.value.length, hint: '创建 / 指派 / 提交 / 审核' },
     { key: 'task_creates', label: '运营任务单量', value: taskCreates, hint: '任务创建动作' },
     {
       key: 'avg_create_cycle',
@@ -277,6 +308,7 @@ const summaryMetrics = computed(() => {
       value: percentLabel(auditRejects, auditDecisions),
       hint: '打回 / 审核处理',
     },
+    { key: 'trace_total', label: '链路事件', value: traceTotal.value, hint: '接口与页面行为参考' },
   ]
 })
 
@@ -304,7 +336,7 @@ function actorKey(event: WorkflowTraceEvent): string {
 }
 
 function actorName(event: WorkflowTraceEvent): string {
-  return userAccountDisplay(event.actor_username, event.actor_id ? `用户#${event.actor_id}` : '')
+  return userAccountDisplay(event.actor_username, event.actor_id ? `人员#${event.actor_id}` : '')
 }
 
 function eventSearchText(event: WorkflowTraceEvent): string {
@@ -324,6 +356,30 @@ function eventSearchText(event: WorkflowTraceEvent): string {
   return fields.filter(Boolean).join(' ').toLowerCase()
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function readPayloadNumber(payload: unknown, keys: string[]): number {
+  const record = asRecord(payload)
+  for (const key of keys) {
+    const raw = record[key]
+    if (raw === null || raw === undefined || raw === '') continue
+    const value = Number(raw)
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  return 0
+}
+
+function readPayloadText(payload: unknown, keys: string[]): string {
+  const record = asRecord(payload)
+  for (const key of keys) {
+    const text = String(record[key] ?? '').trim()
+    if (text && text !== 'null') return text
+  }
+  return ''
+}
+
 function hasAny(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => text.includes(keyword.toLowerCase()))
 }
@@ -332,7 +388,7 @@ function isTaskCreate(event: WorkflowTraceEvent): boolean {
   const text = eventSearchText(event)
   const method = event.route_method?.toUpperCase()
   return (
-    hasAny(text, ['create_task', 'task.create', '创建任务', '发起任务']) ||
+    hasAny(text, ['create_task', 'task.create', 'task.created', 'task.batch_items_created', '创建任务', '发起任务']) ||
     (method === 'POST' && /\/v1\/tasks\/?$/.test(event.route_path || '')) ||
     (method === 'POST' && /\/tasks\/?$/.test(event.route_path || ''))
   )
@@ -340,22 +396,41 @@ function isTaskCreate(event: WorkflowTraceEvent): boolean {
 
 function isDesignClaim(event: WorkflowTraceEvent): boolean {
   const text = eventSearchText(event)
-  return hasAny(text, ['claim', '接单', 'assign_self', 'design_claim', 'customization_claim'])
+  if (text.includes('task.audit.')) return false
+  return hasAny(text, [
+    'task.assigned',
+    'task.reassigned',
+    'task.batch_assigned',
+    'claim',
+    '接单',
+    'assign_self',
+    'design_claim',
+    'customization_claim',
+  ])
 }
 
 function isDesignSubmit(event: WorkflowTraceEvent): boolean {
   const text = eventSearchText(event)
-  return hasAny(text, ['design_submit', 'submit_design', 'design-submissions', 'asset_upload', '上传成品', '提交设计', '提交审核'])
+  return hasAny(text, [
+    'task.design.submitted',
+    'design_submit',
+    'submit_design',
+    'design-submissions',
+    'asset_upload',
+    '上传成品',
+    '提交设计',
+    '提交审核',
+  ])
 }
 
 function isAuditApprove(event: WorkflowTraceEvent): boolean {
   const text = eventSearchText(event)
-  return hasAny(text, ['audit_approve', 'approve', 'pass', '审核通过', '通过审核'])
+  return hasAny(text, ['task.audit.approved', 'audit_approve', 'approve', 'pass', '审核通过', '通过审核'])
 }
 
 function isAuditReject(event: WorkflowTraceEvent): boolean {
   const text = eventSearchText(event)
-  return hasAny(text, ['audit_reject', 'reject', '打回', '驳回'])
+  return hasAny(text, ['task.audit.rejected', 'audit_reject', 'reject', '打回', '驳回'])
 }
 
 function looksLike(row: PersonStats, keyword: string): boolean {
@@ -489,9 +564,156 @@ function parseTraceResponse(body: PaginationEnvelope<WorkflowTraceEvent> | Workf
   return { items, total: Number.isFinite(total) ? total : items.length }
 }
 
+function parseOperationResponse(body: PaginationEnvelope<OperationLogEntry> | OperationLogEntry[] | undefined) {
+  if (Array.isArray(body)) return { items: body, total: body.length }
+  const items = Array.isArray(body?.data) ? body.data : []
+  const totalRaw = body?.pagination?.total
+  const total = typeof totalRaw === 'number' ? totalRaw : Number(totalRaw)
+  return { items, total: Number.isFinite(total) ? total : items.length }
+}
+
+function parseUserList(body: PaginationEnvelope<BackendUser> | BackendUser[] | undefined): BackendUser[] {
+  if (Array.isArray(body)) return body
+  return Array.isArray(body?.data) ? body.data : []
+}
+
 function parseReportCards(body: { data?: L1Card[] } | L1Card[] | undefined): L1Card[] {
   const list = Array.isArray(body) ? body : body?.data
   return Array.isArray(list) ? list : []
+}
+
+function reportCardTitle(card: L1Card): string {
+  const key = String(card.key ?? '').trim()
+  const title = String(card.title ?? '').trim()
+  const normalizedTitle = title.toLowerCase().replace(/\s+/g, '_')
+  return REPORT_CARD_LABELS[key] || REPORT_CARD_LABELS[title] || REPORT_CARD_LABELS[normalizedTitle] || title || key || '指标'
+}
+
+function operationActorId(entry: OperationLogEntry): number | null {
+  if (['task.assigned', 'task.reassigned', 'task.batch_assigned'].includes(entry.event_type)) {
+    const assignedTo = readPayloadNumber(entry.payload, ['designer_id', 'to_handler_id', 'handler_id', 'assignee_id'])
+    if (assignedTo > 0) return assignedTo
+  }
+  const payloadActor = readPayloadNumber(entry.payload, ['operator_id', 'creator_id', 'designer_id', 'auditor_id'])
+  if (payloadActor > 0 && !entry.actor_id) return payloadActor
+  return entry.actor_id ?? null
+}
+
+function userDirectoryEntry(id: number | null): UserDirectoryEntry | undefined {
+  return id ? userDirectory.value.get(String(id)) : undefined
+}
+
+function operationToTrace(entry: OperationLogEntry): WorkflowTraceEvent | null {
+  const createdAt = entry.created_at
+  const at = createdAt ? new Date(createdAt).getTime() : 0
+  if (!Number.isFinite(at) || at < rangeStart.value.getTime() || at > rangeEnd.value.getTime()) return null
+
+  const actorId = operationActorId(entry)
+  const user = userDirectoryEntry(actorId)
+  const fallbackName = readPayloadText(entry.payload, ['designer_name', 'to_handler_name', 'creator_name', 'auditor_name'])
+  const actorUsername = user?.name || entry.actor_username || fallbackName || (actorId ? `人员#${actorId}` : '')
+  const taskID = Number(entry.reference_id)
+  return {
+    id: Number(entry.log_id) || at,
+    event_id: `operation:${entry.source}:${entry.log_id}`,
+    event_source: 'system',
+    event_type: 'user_action',
+    action: entry.event_type,
+    actor_id: actorId,
+    actor_username: actorUsername,
+    actor_source: entry.actor_type,
+    actor_department: user?.department || '',
+    actor_team: user?.team || '',
+    route_method: '',
+    route_path: '',
+    resource_type: entry.reference_type,
+    resource_id: entry.reference_id,
+    task_id: Number.isFinite(taskID) && taskID > 0 ? taskID : null,
+    outcome: entry.status === 'failed' ? 'failed' : 'succeeded',
+    payload: entry.payload,
+    occurred_at: createdAt,
+    created_at: createdAt,
+  }
+}
+
+function dedupeEvents(source: WorkflowTraceEvent[]): WorkflowTraceEvent[] {
+  const seen = new Set<string>()
+  const out: WorkflowTraceEvent[] = []
+  for (const event of source) {
+    const key = event.event_id || `${event.action}:${event.task_id}:${event.actor_id}:${event.created_at}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(event)
+  }
+  return out.sort((a, b) => eventAt(b) - eventAt(a))
+}
+
+async function loadUserDirectory() {
+  try {
+    const res = await usersApi.list({ page: 1, page_size: 500 })
+    const list = parseUserList(res.data as PaginationEnvelope<BackendUser> | BackendUser[])
+    const next = new Map<string, UserDirectoryEntry>()
+    for (const user of list) {
+      const id = String(user.id ?? '').trim()
+      if (!id) continue
+      next.set(id, {
+        id,
+        name: userAccountDisplay(user.display_name, user.username, `用户#${id}`),
+        department: String(user.department ?? '').trim(),
+        team: String(user.team ?? '').trim(),
+      })
+    }
+    userDirectory.value = next
+  } catch {
+    try {
+      const res = await usersApi.getDesigners({ workflowLane: 'all' })
+      const body = res.data as { data?: unknown } | unknown[]
+      const list = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : []
+      const next = new Map<string, UserDirectoryEntry>()
+      for (const raw of list) {
+        const record = asRecord(raw)
+        const id = String(record.id ?? '').trim()
+        if (!id) continue
+        next.set(id, {
+          id,
+          name: userAccountDisplay(record.display_name, record.username, `人员#${id}`),
+          department: '',
+          team: '',
+        })
+      }
+      userDirectory.value = next
+    } catch {
+      userDirectory.value = new Map()
+    }
+  }
+}
+
+async function fetchTaskOperationEvents(): Promise<WorkflowTraceEvent[]> {
+  const maxPages = rangeDays.value <= 7 ? 3 : rangeDays.value <= 14 ? 5 : 8
+  const collected: WorkflowTraceEvent[] = []
+
+  await Promise.all(
+    KPI_TASK_EVENT_TYPES.map(async (eventType) => {
+      for (let page = 1; page <= maxPages; page += 1) {
+        const res = await logsApi.operationLogs({
+          source: 'task_event',
+          event_type: eventType,
+          page,
+          page_size: 100,
+        })
+        const parsed = parseOperationResponse(res.data as PaginationEnvelope<OperationLogEntry> | OperationLogEntry[])
+        collected.push(...(parsed.items.map(operationToTrace).filter(Boolean) as WorkflowTraceEvent[]))
+
+        const oldest = parsed.items.reduce((min, item) => {
+          const ms = item.created_at ? new Date(item.created_at).getTime() : 0
+          return ms > 0 ? Math.min(min, ms) : min
+        }, Number.POSITIVE_INFINITY)
+        if (parsed.items.length < 100 || oldest < rangeStart.value.getTime()) break
+      }
+    }),
+  )
+
+  return dedupeEvents(collected)
 }
 
 async function load() {
@@ -508,20 +730,23 @@ async function load() {
     const jobs: Promise<void>[] = []
     if (canLoadTrace.value) {
       jobs.push(
-        logsApi
-          .traceEvents({
-            actor_source: 'session_token',
-            business_only: true,
-            from: rangeStart.value.toISOString(),
-            to: rangeEnd.value.toISOString(),
-            page: 1,
-            page_size: 200,
-          })
-          .then((res) => {
-            const parsed = parseTraceResponse(res.data as PaginationEnvelope<WorkflowTraceEvent> | WorkflowTraceEvent[])
-            events.value = parsed.items
-            traceTotal.value = parsed.total
-          }),
+        (async () => {
+          await loadUserDirectory()
+          const [taskEvents, traceRes] = await Promise.all([
+            fetchTaskOperationEvents(),
+            logsApi.traceEvents({
+              actor_source: 'session_token',
+              business_only: true,
+              from: rangeStart.value.toISOString(),
+              to: rangeEnd.value.toISOString(),
+              page: 1,
+              page_size: 100,
+            }),
+          ])
+          const parsed = parseTraceResponse(traceRes.data as PaginationEnvelope<WorkflowTraceEvent> | WorkflowTraceEvent[])
+          events.value = taskEvents.length ? taskEvents : parsed.items
+          traceTotal.value = parsed.total
+        })(),
       )
     }
     if (canLoadReports.value) {
@@ -552,7 +777,12 @@ onMounted(load)
 .kpi-overview {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
+  color: #0f172a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
 }
 .panel-header,
 .role-header {
@@ -564,15 +794,19 @@ onMounted(load)
 .panel-title,
 .role-header h4 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: 0.9375rem;
+  font-weight: 750;
+  line-height: 1.25;
   color: #0f172a;
+  letter-spacing: 0;
 }
 .panel-subtitle,
 .role-header span {
-  margin: 0.25rem 0 0;
+  margin: 0.2rem 0 0;
   font-size: 0.75rem;
+  line-height: 1.35;
   color: #64748b;
+  letter-spacing: 0;
 }
 .panel-actions {
   display: inline-flex;
@@ -580,18 +814,19 @@ onMounted(load)
   gap: 0.5rem;
 }
 .range-select {
-  height: 2.25rem;
+  height: 2rem;
   border: 1px solid #cbd5e1;
   border-radius: 0.5rem;
   background: #fff;
-  padding: 0 0.75rem;
-  font-size: 0.8125rem;
+  padding: 0 0.65rem;
+  font-size: 0.75rem;
   color: #334155;
+  letter-spacing: 0;
 }
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(9.25rem, 1fr));
+  gap: 0.5rem;
 }
 .metric-card,
 .report-card,
@@ -601,51 +836,56 @@ onMounted(load)
   background: #fff;
 }
 .metric-card {
-  min-height: 5.5rem;
-  padding: 0.875rem;
+  min-height: 4.75rem;
+  padding: 0.7rem 0.75rem;
 }
 .metric-card span,
 .report-card span {
   display: block;
-  font-size: 0.75rem;
+  font-size: 0.71875rem;
+  line-height: 1.3;
   color: #64748b;
+  letter-spacing: 0;
 }
 .metric-card strong,
 .report-card strong {
   display: block;
-  margin-top: 0.35rem;
-  font-size: 1.5rem;
-  line-height: 1.15;
+  margin-top: 0.25rem;
+  font-size: 1.35rem;
+  line-height: 1.1;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 .metric-card small,
 .report-card small {
   display: block;
-  margin-top: 0.35rem;
+  margin-top: 0.28rem;
   font-size: 0.6875rem;
+  line-height: 1.25;
   color: #94a3b8;
+  letter-spacing: 0;
 }
 .report-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 .report-card {
-  padding: 0.75rem;
+  padding: 0.65rem 0.75rem;
   background: #f8fafc;
 }
 .role-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.875rem;
+  gap: 0.65rem;
 }
 .role-card {
   min-width: 0;
   overflow: hidden;
 }
 .role-header {
-  padding: 0.875rem 1rem;
+  padding: 0.7rem 0.85rem;
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
 }
@@ -659,12 +899,14 @@ onMounted(load)
 }
 .kpi-table th,
 .kpi-table td {
-  padding: 0.75rem 1rem;
+  padding: 0.58rem 0.75rem;
   border-bottom: 1px solid #edf2f7;
   text-align: left;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
   color: #334155;
   white-space: nowrap;
+  letter-spacing: 0;
 }
 .kpi-table th {
   background: #fff;
@@ -677,7 +919,8 @@ onMounted(load)
 }
 .kpi-table td small {
   display: block;
-  margin-top: 0.2rem;
+  margin-top: 0.15rem;
+  font-size: 0.6875rem;
   color: #94a3b8;
 }
 .danger {

@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">数据中心</h2>
-        <p class="page-subtitle">导出、业务追踪、绩效与排查统一入口</p>
+        <p class="page-subtitle">导出、业务追踪、绩效与排查</p>
       </div>
       <BaseButton variant="secondary" size="sm" @click="refreshToken++">刷新当前页</BaseButton>
     </div>
@@ -154,38 +154,56 @@ watch(
   display: flex;
   min-height: 100dvh;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
+  padding-bottom: 1.5rem;
+  color: #0f172a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
 }
 .page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  padding: 0.125rem 0.125rem 0;
 }
 .page-title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 700;
+  font-size: 1rem;
+  font-weight: 750;
+  line-height: 1.3;
   color: #0f172a;
+  letter-spacing: 0;
 }
 .page-subtitle {
-  margin: 0.25rem 0 0;
-  font-size: 0.8125rem;
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
   color: #64748b;
+  letter-spacing: 0;
 }
 .module-tabs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
-  gap: 0.625rem;
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 0.125rem;
+  scrollbar-width: thin;
 }
 .module-tab {
-  min-height: 4.25rem;
-  border: 1px solid #dbeafe;
+  display: inline-flex;
+  min-width: 11rem;
+  min-height: 3.1rem;
+  flex: 1 1 11rem;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid #d7e0ea;
   border-radius: 0.5rem;
   background: #fff;
-  padding: 0.75rem;
+  padding: 0.55rem 0.7rem;
   text-align: left;
-  color: #334155;
+  color: #1e293b;
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease,
@@ -193,19 +211,26 @@ watch(
 }
 .module-tab span {
   display: block;
-  font-size: 0.875rem;
-  font-weight: 700;
+  font-size: 0.8125rem;
+  font-weight: 750;
+  line-height: 1.25;
+  letter-spacing: 0;
 }
 .module-tab small {
   display: block;
-  margin-top: 0.35rem;
+  margin-top: 0.2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.6875rem;
-  color: #64748b;
+  line-height: 1.25;
+  color: #718096;
+  letter-spacing: 0;
 }
 .module-tab.active {
   border-color: #2563eb;
-  background: #eff6ff;
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.18);
+  background: #f3f8ff;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.16);
   color: #1d4ed8;
 }
 .module-body {
