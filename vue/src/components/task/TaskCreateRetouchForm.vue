@@ -68,8 +68,13 @@
                   <span class="req-upload-label">本条参考图</span>
                   <span class="req-upload-optional">可选</span>
                 </div>
-                <button type="button" class="req-pick-btn" @click="triggerReferencePick(index)">
-                  选择文件
+                <button
+                  type="button"
+                  class="req-pick-btn"
+                  title="选择参考图，也可拖拽到此区域或 Ctrl+V 粘贴"
+                  @click="triggerReferencePick(index)"
+                >
+                  选择参考图
                 </button>
               </div>
               <input
@@ -79,6 +84,9 @@
                 multiple
                 @change="onReferenceFileChange(index, $event)"
               />
+              <p class="req-upload-helper">
+                点击选择、拖拽到此处，或 Ctrl+V 粘贴参考图/附件。
+              </p>
               <ul v-if="pendingReferenceList(item).length" class="pending-file-list">
                 <li
                   v-for="(file, fi) in pendingReferenceList(item)"
@@ -92,7 +100,7 @@
                   </button>
                 </li>
               </ul>
-              <p v-else class="req-upload-empty">暂未选择参考图</p>
+              <p v-else class="req-upload-empty">暂未添加参考图，可直接拖入或粘贴。</p>
             </div>
 
             <div
@@ -110,8 +118,13 @@
                   <span class="req-upload-label">本条素材文件</span>
                   <span class="req-upload-optional">可选</span>
                 </div>
-                <button type="button" class="req-pick-btn" @click="triggerSourcePick(index)">
-                  选择文件
+                <button
+                  type="button"
+                  class="req-pick-btn"
+                  title="选择素材文件，也可拖拽到此区域或 Ctrl+V 粘贴"
+                  @click="triggerSourcePick(index)"
+                >
+                  选择素材
                 </button>
               </div>
               <input
@@ -122,6 +135,9 @@
                 multiple
                 @change="onSourceFileChange(index, $event)"
               />
+              <p class="req-upload-helper">
+                支持 PSD / AI / ZIP / 图片等素材，点击选择、拖拽到此处，或 Ctrl+V 粘贴。
+              </p>
               <ul v-if="pendingSourceList(item).length" class="pending-file-list">
                 <li
                   v-for="(file, fi) in pendingSourceList(item)"
@@ -135,7 +151,7 @@
                   </button>
                 </li>
               </ul>
-              <p v-else class="req-upload-empty">暂未选择素材文件</p>
+              <p v-else class="req-upload-empty">暂未添加素材文件，可直接拖入或粘贴。</p>
             </div>
           </div>
         </div>
@@ -599,6 +615,14 @@ function prettyFileSize(size: number): string {
 
 .req-pick-btn {
   padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.req-upload-helper {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #475569;
 }
 
 .req-upload-empty {
