@@ -105,13 +105,13 @@ func (s *Service) KPIAIAnalysis(ctx context.Context, actor domain.RequestActor, 
 	filter := repo.KPIAnalysisFilter{
 		From:  params.From,
 		To:    params.To.AddDate(0, 0, 1),
-		Limit: 400,
+		Limit: 260,
 	}
 	events, err := s.kpiAnalysisRepo.ListTaskEvents(ctx, filter)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
-	assets, err := s.kpiAnalysisRepo.ListTaskAssets(ctx, repo.KPIAnalysisFilter{From: filter.From, To: filter.To, Limit: 250})
+	assets, err := s.kpiAnalysisRepo.ListTaskAssets(ctx, repo.KPIAnalysisFilter{From: filter.From, To: filter.To, Limit: 140})
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
@@ -163,7 +163,7 @@ func buildKPIAnalysisEvidence(from, to time.Time, events []domain.KPIAnalysisEve
 		}
 	}
 
-	recentAssets := make([]kpiAnalysisAsset, 0, min(len(assets), 30))
+	recentAssets := make([]kpiAnalysisAsset, 0, min(len(assets), 15))
 	for _, asset := range assets {
 		if asset.AssetType == "final" {
 			metrics.FinalAssets++
@@ -186,7 +186,7 @@ func buildKPIAnalysisEvidence(from, to time.Time, events []domain.KPIAnalysisEve
 				task.lastAt = asset.CreatedAt
 			}
 		}
-		if len(recentAssets) < 30 {
+		if len(recentAssets) < 15 {
 			recentAssets = append(recentAssets, kpiAnalysisAsset{
 				Time:     formatLocalDateTime(asset.CreatedAt),
 				TaskNo:   asset.TaskNo,
@@ -287,8 +287,8 @@ func summarizePeople(people map[string]*personAccumulator) []kpiAnalysisPerson {
 		}
 		return out[i].Name < out[j].Name
 	})
-	if len(out) > 40 {
-		return out[:40]
+	if len(out) > 25 {
+		return out[:25]
 	}
 	return out
 }
@@ -303,17 +303,17 @@ func summarizeTasks(tasks map[int64]*taskAccumulator) []kpiAnalysisTaskSample {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].lastAt.After(items[j].lastAt) })
 
-	out := make([]kpiAnalysisTaskSample, 0, min(len(items), 20))
+	out := make([]kpiAnalysisTaskSample, 0, min(len(items), 12))
 	for _, item := range items {
-		if len(out) >= 20 {
+		if len(out) >= 12 {
 			break
 		}
 		task := item.kpiAnalysisTaskSample
-		if len(task.Timeline) > 8 {
-			task.Timeline = task.Timeline[len(task.Timeline)-8:]
+		if len(task.Timeline) > 5 {
+			task.Timeline = task.Timeline[len(task.Timeline)-5:]
 		}
-		if len(task.Assets) > 6 {
-			task.Assets = task.Assets[:6]
+		if len(task.Assets) > 3 {
+			task.Assets = task.Assets[:3]
 		}
 		out = append(out, task)
 	}

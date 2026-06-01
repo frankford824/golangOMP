@@ -401,11 +401,13 @@ const operatorRows = computed(() =>
 )
 const designerRows = computed(() =>
   people.value
-    .filter((row) => row.designClaims > 0 || row.designSubmits > 0 || row.designRejects > 0 || looksLike(row, '设计') || looksLike(row, '美工'))
+    .filter((row) => hasDesignActivity(row))
     .sort(
       (a, b) =>
-        b.designSubmits - a.designSubmits ||
         b.designClaims - a.designClaims ||
+        b.designSubmits - a.designSubmits ||
+        designCompletionRate(b) - designCompletionRate(a) ||
+        a.designRejects - b.designRejects ||
         a.name.localeCompare(b.name, 'zh-Hans-CN'),
     )
     .slice(0, 10),
@@ -638,6 +640,14 @@ function looksLike(row: PersonStats, keyword: string): boolean {
   return `${row.department} ${row.team}`.includes(keyword)
 }
 
+function hasDesignActivity(row: PersonStats): boolean {
+  return row.designClaims > 0 || row.designSubmits > 0 || row.designRejects > 0
+}
+
+function designCompletionRate(row: PersonStats): number {
+  return row.designClaims > 0 ? row.designSubmits / row.designClaims : 0
+}
+
 function emptyStats(event: WorkflowTraceEvent): PersonStats {
   const user = resolveEventUser(event)
   return {
@@ -826,10 +836,27 @@ function riskLevelLabel(value: unknown): string {
   return '待观察'
 }
 
+function isAssignmentOperation(entry: OperationLogEntry): boolean {
+  return ['task.assigned', 'task.reassigned', 'task.batch_assigned'].includes(entry.event_type)
+}
+
 function operationActorId(entry: OperationLogEntry): number | null {
-  if (['task.assigned', 'task.reassigned', 'task.batch_assigned'].includes(entry.event_type)) {
+  if (isAssignmentOperation(entry)) {
     const assignedTo = readPayloadNumber(entry.payload, ['designer_id', 'to_handler_id', 'handler_id', 'assignee_id'])
     if (assignedTo > 0) return assignedTo
+    return null
+  }
+  if (entry.event_type === 'task.design.submitted') {
+    const designer = readPayloadNumber(entry.payload, ['designer_id', 'uploaded_by', 'operator_id'])
+    if (designer > 0) return designer
+  }
+  if (entry.event_type === 'task.audit.approved' || entry.event_type === 'task.audit.rejected') {
+    const auditor = readPayloadNumber(entry.payload, ['auditor_id', 'operator_id'])
+    if (auditor > 0) return auditor
+  }
+  if (entry.event_type === 'task.created' || entry.event_type === 'task.batch_items_created') {
+    const creator = readPayloadNumber(entry.payload, ['creator_id', 'operator_id'])
+    if (creator > 0) return creator
   }
   const payloadActor = readPayloadNumber(entry.payload, ['operator_id', 'creator_id', 'designer_id', 'auditor_id'])
   if (payloadActor > 0 && !entry.actor_id) return payloadActor
@@ -846,6 +873,7 @@ function operationToTrace(entry: OperationLogEntry): WorkflowTraceEvent | null {
   if (!Number.isFinite(at) || at < rangeStart.value.getTime() || at > rangeEnd.value.getTime()) return null
 
   const actorId = operationActorId(entry)
+  if (actorId === null && isAssignmentOperation(entry)) return null
   const user = userDirectoryEntry(actorId)
   const fallbackName = readPayloadText(entry.payload, ['designer_name', 'to_handler_name', 'creator_name', 'auditor_name'])
   const actorUsername = user?.name || entry.actor_username || fallbackName || (actorId ? `人员#${actorId}` : '')
@@ -887,20 +915,27 @@ function dedupeEvents(source: WorkflowTraceEvent[]): WorkflowTraceEvent[] {
 
 async function loadUserDirectory() {
   try {
-    const res = await usersApi.list({ page: 1, page_size: 500 })
-    const list = parseUserList(res.data as PaginationEnvelope<BackendUser> | BackendUser[])
     const next = new Map<string, UserDirectoryEntry>()
-    for (const user of list) {
-      const id = String(user.id ?? '').trim()
-      if (!id) continue
-      next.set(id, {
-        id,
-        username: String(user.username ?? '').trim(),
-        realName: String(user.real_name ?? '').trim(),
-        name: userAccountDisplay(user.real_name, user.name, user.display_name, user.username, `用户#${id}`),
-        department: String(user.department ?? '').trim(),
-        team: String(user.team ?? '').trim(),
-      })
+    const pageSize = 500
+    for (let page = 1; page <= 20; page += 1) {
+      const res = await usersApi.list({ page, page_size: pageSize })
+      const body = res.data as PaginationEnvelope<BackendUser> | BackendUser[]
+      const list = parseUserList(body)
+      for (const user of list) {
+        const id = String(user.id ?? '').trim()
+        if (!id) continue
+        next.set(id, {
+          id,
+          username: String(user.username ?? '').trim(),
+          realName: String(user.real_name ?? user.display_name ?? '').trim(),
+          name: userAccountDisplay(user.real_name, user.name, user.display_name, user.username, `用户#${id}`),
+          department: String(user.department ?? '').trim(),
+          team: String(user.team ?? '').trim(),
+        })
+      }
+      const totalRaw = Array.isArray(body) ? list.length : body?.pagination?.total
+      const total = typeof totalRaw === 'number' ? totalRaw : Number(totalRaw)
+      if (list.length < pageSize || (Number.isFinite(total) && next.size >= total)) break
     }
     userDirectory.value = next
   } catch {

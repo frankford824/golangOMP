@@ -71,5 +71,8 @@ export const reportsApi = {
 
   /** POST /v1/reports/l1/kpi-ai-analysis */
   kpiAiAnalysis: (params: Pick<L1ReportRangeParams, 'from' | 'to'>, signal?: AbortSignal) =>
-    http.post<{ data?: KpiAiAnalysisResponse }>('/v1/reports/l1/kpi-ai-analysis', params, { signal }),
+    http.post<{ data?: KpiAiAnalysisResponse }>('/v1/reports/l1/kpi-ai-analysis', params, {
+      signal,
+      timeout: 120_000,
+    }),
 }
