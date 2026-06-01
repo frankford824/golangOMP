@@ -1,6 +1,6 @@
 <template>
   <div class="export-center-view min-h-[100dvh]">
-    <div class="page-header">
+    <div v-if="!props.embedded" class="page-header">
       <h2 class="page-title">导出中心</h2>
     </div>
     <div v-if="!canExport" class="mt-6">
@@ -189,6 +189,15 @@ import {
   taskCurrentHandlerDisplayName,
   taskDesignerDisplayName,
 } from '@/domain/task-actors'
+
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+  }>(),
+  {
+    embedded: false,
+  },
+)
 
 const tasksStore = useTasksStore()
 const auditsStore = useAuditsStore()

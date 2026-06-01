@@ -154,6 +154,16 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, requiredMenuKey: ['org_admin'], emptyTitle: '异动申请' },
       },
       {
+        path: 'data-center',
+        name: 'DataCenter',
+        component: () => import('@/views/data-center/DataCenterView.vue'),
+        meta: {
+          requiresAuth: true,
+          requiredMenuKey: ['report_center', 'export_center', 'logs_center', 'kpi', 'finance'],
+          emptyTitle: '数据中心',
+        },
+      },
+      {
         path: 'reports',
         name: 'Reports',
         component: () => import('@/views/reports/ReportsHomeView.vue'),
@@ -208,8 +218,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'export-center',
         name: 'ExportCenter',
-        component: () => import('@/views/export/ExportCenterView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'export_center' },
+        redirect: { name: 'DataCenter', query: { tab: 'export' } },
       },
       {
         path: 'audit-log',
@@ -220,8 +229,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'logs',
         name: 'LogsManagement',
-        component: () => import('@/views/logs/LogsManagementView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'logs_center' },
+        redirect: { name: 'DataCenter', query: { tab: 'business' } },
       },
       {
         path: 'finance',
@@ -232,8 +240,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'kpi',
         name: 'Kpi',
-        component: () => import('@/views/kpi/KpiView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'kpi' },
+        redirect: { name: 'DataCenter', query: { tab: 'kpi' } },
       },
     ],
   },

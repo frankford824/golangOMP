@@ -1,6 +1,6 @@
 <template>
-  <div class="logs-management-view min-h-[100dvh]">
-    <div class="page-header">
+  <div class="logs-management-view min-h-[100dvh]" :class="{ 'is-embedded': props.embedded }">
+    <div v-if="!props.embedded" class="page-header">
       <div>
         <h2 class="page-title">业务追踪中心</h2>
         <p class="page-subtitle">人员、部门、任务、SKU、资产、ERP 全链路</p>
@@ -13,7 +13,7 @@
     </div>
 
     <template v-else>
-      <div class="tabs mb-4">
+      <div v-if="!props.lockedTab" class="tabs mb-4">
         <button
           type="button"
           class="tab"
@@ -685,7 +685,20 @@ const { can } = usePermission()
 const canView = computed(() => can('logs.view') || permissionsStore.hasMenu('logs_center'))
 const canViewServerLogs = computed(() => can('logs.server.view'))
 
-const activeTab = ref<ActiveTab>('business')
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+    defaultTab?: ActiveTab
+    lockedTab?: ActiveTab | ''
+  }>(),
+  {
+    embedded: false,
+    defaultTab: 'business',
+    lockedTab: '',
+  },
+)
+
+const activeTab = ref<ActiveTab>(props.lockedTab || props.defaultTab || 'business')
 
 const tracePage = ref(1)
 const tracePageSize = 20
@@ -1494,6 +1507,12 @@ watch(activeTab, (tab) => {
   if (tab === 'permission' && !permData.value.items.length && !permLoading.value) loadPermissionLogs()
   if (tab === 'server' && canViewServerLogs.value) loadServerLogs()
 })
+watch(
+  () => props.lockedTab,
+  (tab) => {
+    if (tab && activeTab.value !== tab) activeTab.value = tab
+  },
+)
 watch(tracePage, loadTraceEvents)
 watch(opPage, () => {
   if (skipNextOpPageWatch.value) {
@@ -1506,11 +1525,7 @@ watch(permPage, loadPermissionLogs)
 watch(serverPage, loadServerLogs)
 
 onMounted(() => {
-  if (canView.value) {
-    loadTraceEvents()
-    loadTraceAnalysis()
-    loadTraceStats()
-  }
+  refreshActiveTab()
 })
 </script>
 
