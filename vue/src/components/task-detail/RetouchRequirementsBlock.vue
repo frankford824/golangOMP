@@ -183,6 +183,7 @@ import FileIconFallback from '@/components/base/FileIconFallback.vue'
 import {
   buildRetouchBatchDownloadPlan,
   countRetouchDownloadableAttachments,
+  resolveRetouchBatchZipPrefix,
   runRetouchBatchDownload,
   resolveRetouchSingleAttachmentFilename,
   validateRetouchBatchDownloadPlan,
@@ -201,6 +202,7 @@ const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
 const props = defineProps<{
   requirements: RetouchRequirement[]
+  taskTitle?: string
 }>()
 
 const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
@@ -381,7 +383,13 @@ async function runBatchDownload(
 }
 
 function handleBatchAllAttachments() {
-  void runBatchDownload('block-all', 'all_attachments', undefined, 'retouch-requirements-all', 'block')
+  void runBatchDownload(
+    'block-all',
+    'all_attachments',
+    undefined,
+    resolveRetouchBatchZipPrefix(props.requirements, 'all_attachments', undefined, props.taskTitle),
+    'block',
+  )
 }
 
 function handleBatchRequirementAll(item: RetouchRequirement, index: number) {
@@ -389,7 +397,7 @@ function handleBatchRequirementAll(item: RetouchRequirement, index: number) {
     batchScopeKey(item, 'all'),
     'requirement_all',
     index,
-    `retouch-requirement-${index + 1}-all`,
+    resolveRetouchBatchZipPrefix(props.requirements, 'requirement_all', index, props.taskTitle),
     item,
   )
 }
@@ -399,7 +407,7 @@ function handleBatchRequirementReferences(item: RetouchRequirement, index: numbe
     batchScopeKey(item, 'references'),
     'requirement_references',
     index,
-    `retouch-requirement-${index + 1}-references`,
+    resolveRetouchBatchZipPrefix(props.requirements, 'requirement_references', index, props.taskTitle),
     item,
   )
 }
@@ -409,7 +417,7 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
     batchScopeKey(item, 'sources'),
     'requirement_sources',
     index,
-    `retouch-requirement-${index + 1}-sources`,
+    resolveRetouchBatchZipPrefix(props.requirements, 'requirement_sources', index, props.taskTitle),
     item,
   )
 }

@@ -295,6 +295,7 @@
                     <RetouchRequirementsBlock
                       v-if="showRetouchRequirementsBlock"
                       :requirements="task!.retouchRequirements ?? []"
+                      :task-title="detailRetouchDownloadTitle"
                       class="detail-v3-retouch-requirements"
                     />
 
@@ -1370,6 +1371,11 @@ const detailSkuLabel = computed(() => dash(activeSkuItem.value?.skuCode ?? task.
 const detailProductNameLabel = computed(() =>
   dash(task.value?.productName ?? task.value?.productNameSnapshot ?? activeSkuItem.value?.productNameSnapshot),
 )
+const detailRetouchDownloadTitle = computed(() => {
+  const product = detailProductNameLabel.value
+  if (product && product !== '-') return product
+  return dash(task.value?.taskNo)
+})
 
 /** V4 标题副线：优先产品名，否则任务类型 */
 const detailHeadlineSuffix = computed(() => {

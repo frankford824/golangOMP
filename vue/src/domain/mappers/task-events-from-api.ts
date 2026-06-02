@@ -210,8 +210,21 @@ function preferredApiSummary(raw: Record<string, unknown>, payload: Record<strin
     pickField(raw, payload, 'summary') ??
     pickField(raw, payload, 'message') ??
     pickField(raw, payload, 'description')
-  if (s && s.length > 0) return s
+  if (s && s.length > 0) return businessReadableEventSummary(s)
   return undefined
+}
+
+const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi
+
+function businessReadableEventSummary(summary: string): string {
+  return summary
+    .replace(/未知用户/g, '待确认人员')
+    .replace(/上传会话\s*[（(]\s*[0-9a-f-]{32,36}\s*[）)]/gi, '上传记录')
+    .replace(/上传会话/g, '上传记录')
+    .replace(UUID_PATTERN, '')
+    .replace(/\s*[（(]\s*[）)]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }
 
 function buildTaskEventSummaryCn(
@@ -270,7 +283,7 @@ function buildTaskEventSummaryCn(
         : designerName
           ? userAccountDisplay(designerName)
           : designerId
-            ? '未知用户'
+            ? '待确认人员'
             : '—'
     const selfRaw = payload.self_assign ?? payload.self_claim ?? payload.is_self_claim
     const self =
@@ -319,8 +332,8 @@ function buildTaskEventSummaryCn(
       'designer_name',
     ])
     const fromSeg =
-      fromName && fromId ? userAccountDisplay(fromName) : fromName ? userAccountDisplay(fromName) : fromId ? '未知用户' : '—'
-    const toSeg = toName && toId ? userAccountDisplay(toName) : toName ? userAccountDisplay(toName) : toId ? '未知用户' : '—'
+      fromName && fromId ? userAccountDisplay(fromName) : fromName ? userAccountDisplay(fromName) : fromId ? '待确认人员' : '—'
+    const toSeg = toName && toId ? userAccountDisplay(toName) : toName ? userAccountDisplay(toName) : toId ? '待确认人员' : '—'
     const mk =
       moduleKeyLabelCn(pickField(raw, payload, 'module_key')) ||
       moduleKeyLabelCn(raw.module_key != null ? String(raw.module_key) : '')
@@ -361,12 +374,10 @@ function buildTaskEventSummaryCn(
   ) {
     const assetType = pickFirst(raw, payload, ['asset_type', 'assetType'])
     const kind = assetType ? assetKindLabelCn(assetType) : ''
-    const sessionId = pickFirst(raw, payload, ['upload_session_id', 'session_id', 'upload_request_id'])
     const verbDone =
       et.endsWith('.created') ? '创建了' : et.endsWith('.completed') ? '完成了' : et.endsWith('.cancelled') ? '取消了' : ''
     const toS = pickFirst(raw, payload, ['to_task_status', 'task_status', 'task_task_status'])
-    let line = `${actor}${verbDone}${kind || '素材'}上传会话`
-    if (sessionId) line += `（${sessionId}）`
+    let line = `${actor} ${verbDone}${kind || '素材'}上传记录`
     if (toS) line += `，任务状态为「${taskStatusDisplayCn(toS) || toS}」`
     line += workflowDetailSuffix(raw, payload)
     line += '。'
@@ -418,7 +429,7 @@ export function mapTaskEventRowToRecentEvent(raw: Record<string, unknown>, taskI
     pickField(raw, payload, 'operator_name') ??
     pickField(raw, payload, 'actor_name') ??
     pickField(raw, payload, 'creator_name') ??
-    (operatorId ? '未知用户' : '—')
+    (operatorId ? '系统记录' : '—')
 
   const title = titleForEvent(eventType, raw, payload)
   const summary = buildTaskEventSummaryCn(eventType, raw, payload)

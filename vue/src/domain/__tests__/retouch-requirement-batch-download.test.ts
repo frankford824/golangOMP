@@ -3,6 +3,7 @@ import {
   buildRetouchBatchDownloadPlan,
   collectRetouchRequirementAssetIdsForScope,
   formatRetouchRequirementFolderLabel,
+  resolveRetouchBatchZipPrefix,
   resolveRetouchSingleAttachmentFilename,
   validateRetouchBatchDownloadPlan,
   MAX_RETouch_BATCH_DOWNLOAD_ASSETS,
@@ -145,5 +146,29 @@ describe('formatRetouchRequirementFolderLabel', () => {
   it('uses 1-based Chinese labels', () => {
     expect(formatRetouchRequirementFolderLabel(0)).toBe('需求1')
     expect(formatRetouchRequirementFolderLabel(2)).toBe('需求3')
+  })
+})
+
+describe('resolveRetouchBatchZipPrefix', () => {
+  it('uses SKU and task business name for all retouch attachments zip', () => {
+    expect(
+      resolveRetouchBatchZipPrefix(
+        [sampleRequirement({ skuCode: 'NSKT001024' })],
+        'all_attachments',
+        undefined,
+        '刘露充绒字母和聪明门画图',
+      ),
+    ).toBe('NSKT001024-刘露充绒字母和聪明门画图')
+  })
+
+  it('adds requirement and attachment scope for single requirement zip', () => {
+    expect(
+      resolveRetouchBatchZipPrefix(
+        [sampleRequirement({ skuCode: 'NSKT001024' })],
+        'requirement_sources',
+        0,
+        '刘露充绒字母和聪明门画图',
+      ),
+    ).toBe('NSKT001024-刘露充绒字母和聪明门画图-需求1-素材文件')
   })
 })

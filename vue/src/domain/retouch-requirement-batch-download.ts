@@ -94,6 +94,57 @@ function isGenericRetouchAttachmentName(filename: string): boolean {
   return /^参考图\s*\d+$/i.test(normalized) || /^素材\s+\S+$/i.test(normalized) || /^asset-\d+$/i.test(normalized)
 }
 
+export function resolveRetouchBatchZipPrefix(
+  requirements: RetouchRequirement[],
+  scope: RetouchBatchDownloadScope,
+  requirementIndex?: number,
+  taskBusinessName?: string,
+): string {
+  const selected =
+    scope === 'all_attachments'
+      ? requirements
+      : requirementIndex != null && requirementIndex >= 0
+        ? [requirements[requirementIndex]].filter(Boolean)
+        : []
+  const fallbackRequirement = selected[0] ?? requirements[0]
+  const sku = resolveRetouchBatchZipSku(selected)
+  const label = String(
+    taskBusinessName ||
+      fallbackRequirement?.description ||
+      fallbackRequirement?.spec ||
+      fallbackRequirement?.remark ||
+      '',
+  ).trim()
+  const scopeLabel = retouchBatchScopeSuffix(scope, requirementIndex)
+  const parts = [sku, label, scopeLabel].filter(Boolean)
+  return sanitizeZipEntryName(parts.join('-'), 'retouch-requirements')
+}
+
+function resolveRetouchBatchZipSku(requirements: Array<RetouchRequirement | undefined>): string {
+  const values = requirements
+    .map((item) => String(item?.skuCode ?? '').trim())
+    .filter(Boolean)
+  if (!values.length) return ''
+  const first = values[0]
+  return values.every((value) => value === first) ? first : 'multi-sku'
+}
+
+function retouchBatchScopeSuffix(scope: RetouchBatchDownloadScope, requirementIndex?: number): string {
+  if (scope === 'all_attachments') return ''
+  const requirementLabel =
+    requirementIndex != null && requirementIndex >= 0 ? formatRetouchRequirementFolderLabel(requirementIndex) : ''
+  switch (scope) {
+    case 'requirement_references':
+      return [requirementLabel, RETOUCH_ZIP_REFERENCE_DIR].filter(Boolean).join('-')
+    case 'requirement_sources':
+      return [requirementLabel, RETOUCH_ZIP_SOURCE_DIR].filter(Boolean).join('-')
+    case 'requirement_all':
+      return requirementLabel
+    default:
+      return ''
+  }
+}
+
 function buildReferenceEntries(
   requirement: RetouchRequirement,
   requirementIndex: number,
