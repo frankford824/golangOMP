@@ -10,6 +10,7 @@ import { assetsApi, type AssetBatchDownloadFailure, type AssetBatchDownloadItem 
 import {
   buildTimestampedZipFilename,
   downloadBatchAsZip,
+  sanitizeZipEntryName,
   type BatchZipDownloadSource,
 } from '@/utils/batchZipDownload'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -54,7 +55,48 @@ export function formatRetouchRequirementFolderLabel(requirementIndex: number): s
   return `需求${requirementIndex + 1}`
 }
 
+function retouchBusinessAttachmentFilename(
+  requirement: RetouchRequirement,
+  requirementIndex: number,
+  sourceFilename: string,
+): string {
+  const sku = String(requirement.skuCode ?? '').trim()
+  const label = String(
+    requirement.description || requirement.spec || requirement.remark || formatRetouchRequirementFolderLabel(requirementIndex),
+  ).trim()
+  if (!sku || !label) return sourceFilename
+  const ext = (() => {
+    const match = /\.([a-z0-9]{1,10})(?:$|[?#])/i.exec(sourceFilename.trim())
+    return match ? `.${match[1]}` : ''
+  })()
+  const base = `${sku}-${label}`
+  const fallback = sourceFilename.trim() || `${sku}-${formatRetouchRequirementFolderLabel(requirementIndex)}${ext}`
+  return sanitizeZipEntryName(`${base}${ext}`, fallback)
+}
+
+export function resolveRetouchSingleAttachmentFilename(
+  requirement: RetouchRequirement | undefined,
+  requirementIndex: number,
+  sourceFilename: string,
+  hasOriginalFilename?: boolean,
+): string {
+  const filename = String(sourceFilename ?? '').trim()
+  if (!requirement) return filename
+  if (hasOriginalFilename === true) return filename
+  if (hasOriginalFilename !== false && filename && !isGenericRetouchAttachmentName(filename)) {
+    return filename
+  }
+  return retouchBusinessAttachmentFilename(requirement, requirementIndex, filename)
+}
+
+function isGenericRetouchAttachmentName(filename: string): boolean {
+  const normalized = filename.trim()
+  return /^参考图\s*\d+$/i.test(normalized) || /^素材\s+\S+$/i.test(normalized) || /^asset-\d+$/i.test(normalized)
+}
+
 function buildReferenceEntries(
+  requirement: RetouchRequirement,
+  requirementIndex: number,
   refs: RetouchReferenceDisplayItem[],
   zipPathPrefix: string,
 ): RetouchBatchDownloadPlanEntry[] {
@@ -66,7 +108,7 @@ function buildReferenceEntries(
       out.push({
         key: `ref-asset-${assetId}-${ref.key}`,
         assetId,
-        preferredFilename: ref.fileName,
+        preferredFilename: retouchBusinessAttachmentFilename(requirement, requirementIndex, ref.fileName),
         zipPath,
       })
       return
@@ -75,7 +117,7 @@ function buildReferenceEntries(
     if (downloadUrl && ref.fileName) {
       out.push({
         key: `ref-legacy-${ref.key}-${index}`,
-        preferredFilename: ref.fileName,
+        preferredFilename: retouchBusinessAttachmentFilename(requirement, requirementIndex, ref.fileName),
         zipPath,
         downloadUrl,
       })
@@ -85,6 +127,8 @@ function buildReferenceEntries(
 }
 
 function buildSourceEntries(
+  requirement: RetouchRequirement,
+  requirementIndex: number,
   sources: RetouchSourceFileDisplayItem[],
   zipPathPrefix: string,
 ): RetouchBatchDownloadPlanEntry[] {
@@ -96,7 +140,7 @@ function buildSourceEntries(
       out.push({
         key: `source-asset-${assetId}-${file.key}`,
         assetId,
-        preferredFilename: file.fileName,
+        preferredFilename: retouchBusinessAttachmentFilename(requirement, requirementIndex, file.fileName),
         zipPath,
       })
       return
@@ -105,7 +149,7 @@ function buildSourceEntries(
     if (downloadUrl && file.fileName) {
       out.push({
         key: `source-legacy-${file.key}`,
-        preferredFilename: file.fileName,
+        preferredFilename: retouchBusinessAttachmentFilename(requirement, requirementIndex, file.fileName),
         zipPath,
         downloadUrl,
       })
@@ -146,11 +190,11 @@ export function buildRetouchBatchDownloadPlan(
       scope === 'all_attachments' || scope === 'requirement_all' || scope === 'requirement_sources'
 
     if (includeRefs) {
-      entries.push(...buildReferenceEntries(refs, folder))
+      entries.push(...buildReferenceEntries(item, index, refs, folder))
       skippedUnavailableCount += countSkippedReferenceAttachments(refs)
     }
     if (includeSources) {
-      entries.push(...buildSourceEntries(sources, folder))
+      entries.push(...buildSourceEntries(item, index, sources, folder))
       skippedUnavailableCount += countSkippedSourceAttachments(sources)
     }
   }
@@ -238,7 +282,7 @@ function manifestItemsToZipSources(
     const planned = pathByAssetId.get(item.asset_id)
     return {
       key: `asset-${item.asset_id}`,
-      filename: item.filename || planned?.preferredFilename,
+      filename: planned?.preferredFilename || item.filename,
       zipPath: planned?.zipPath,
       downloadURL: item.download_url,
       fallbackName: planned?.preferredFilename || `asset-${item.asset_id}`,
@@ -292,7 +336,7 @@ export async function runRetouchBatchDownload(
 
   if (assetIds.length > 0) {
     try {
-      const res = await assetsApi.batchDownload(assetIds)
+      const res = await assetsApi.batchDownload(assetIds, { namingMode: 'business' })
       const manifest = res.data?.data
       const items = Array.isArray(manifest?.items) ? manifest.items : []
       if (!items.length && legacySources.length === 0) {

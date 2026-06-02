@@ -14,7 +14,174 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `107` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `108` 个 `/v1` path；同一路径多 method 合并在同一节。
+
+## GET /v1/trace-events
+
+### 简介
+支持方法: GET, POST。
+
+- `GET`: Query the lightweight full-chain event ledger for business tracing and AI insight use cases. Supports filtering by people, department, task, SKU, asset, ERP/integration call, event source, outcome, trace ID, and occurred time range.
+- `POST`: Authenticated frontend endpoint for recording page-view and user-action events. The server enriches the record with session actor, client IP, user agent, and request trace ID.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### GET 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `trace_id` | query | string | 否 | - |
+| `event_source` | query | enum(api/frontend/system/integration) | 否 | - |
+| `event_type` | query | string | 否 | - |
+| `action` | query | string | 否 | - |
+| `actor_id` | query | integer | 否 | - |
+| `actor_username` | query | string | 否 | Contains match on logged-in username/display name snapshot. |
+| `actor_source` | query | enum(session_token/anonymous/header_placeholder/header_roles_placeholder/system_fallback) | 否 | Filter by actor source; business dashboards typically use session_token. |
+| `actor_department` | query | string | 否 | - |
+| `actor_team` | query | string | 否 | - |
+| `route_path` | query | string | 否 | - |
+| `task_id` | query | integer | 否 | - |
+| `module_key` | query | string | 否 | - |
+| `sku_code` | query | string | 否 | - |
+| `asset_id` | query | integer | 否 | - |
+| `design_asset_id` | query | integer | 否 | - |
+| `task_asset_id` | query | integer | 否 | - |
+| `integration_call_log_id` | query | integer | 否 | - |
+| `resource_type` | query | string | 否 | - |
+| `resource_id` | query | string | 否 | - |
+| `outcome` | query | enum(succeeded/failed) | 否 | - |
+| `business_only` | query | boolean | 否 | Excludes low-value technical traffic such as auth, polling, websocket, and log-center routes. |
+| `from` | query | string | 否 | - |
+| `since` | query | string | 否 | - |
+| `to` | query | string | 否 | - |
+| `until` | query | string | 否 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "event_id": "...",
+      "trace_id": "...",
+      "event_source": "..."
+    }
+  ],
+  "pagination": {
+    "page": 123,
+    "page_size": 123,
+    "total": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<WorkflowTraceEvent> | 否 | - |
+| `pagination` | PaginationMeta | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+##### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/trace-events \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### POST 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `event_type` | string | 是 | - |
+| `action` | string | 否 | - |
+| `page_url` | string | 否 | - |
+| `page_name` | string | 否 | - |
+| `component_id` | string | 否 | - |
+| `task_id` | integer | 否 | - |
+| `task_module_id` | integer | 否 | - |
+| `module_key` | string | 否 | - |
+| `sku_code` | string | 否 | - |
+| `task_sku_item_id` | integer | 否 | - |
+| `asset_id` | integer | 否 | - |
+| `design_asset_id` | integer | 否 | - |
+| `task_asset_id` | integer | 否 | - |
+| `integration_call_log_id` | integer | 否 | - |
+| `resource_type` | string | 否 | - |
+| `resource_id` | string | 否 | - |
+| `outcome` | string | 否 | - |
+| `payload` | object | 否 | - |
+| `occurred_at` | string | 否 | - |
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "event_id": "string",
+    "trace_id": "string",
+    "event_source": "api"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | WorkflowTraceEvent | 否 | Lightweight business trace event used by the business tracing and AI insight page. |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+##### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/trace-events \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/tasks/prepare-product-codes
 

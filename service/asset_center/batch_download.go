@@ -43,7 +43,7 @@ type BatchDownloadFailure struct {
 	Reason   string `json:"reason"`
 }
 
-func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int64) (*BatchDownloadManifest, *domain.AppError) {
+func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int64, opts ...BatchDownloadOption) (*BatchDownloadManifest, *domain.AppError) {
 	if len(assetIDs) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids must not be empty", nil)
 	}
@@ -55,6 +55,7 @@ func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int
 	if s.presigner == nil || !s.presigner.Enabled() {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "oss direct download presigner is not configured", nil)
 	}
+	options := normalizeBatchDownloadOptions(opts)
 
 	rows, err := s.searchRepo.ListCurrentByAssetIDs(ctx, assetIDs)
 	if err != nil {
@@ -80,7 +81,7 @@ func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int
 	var totalSize int64
 
 	for _, requestedAssetID := range assetIDs {
-		item, failure := s.buildBatchDownloadItem(rowMap[requestedAssetID], requestedAssetID, totalSize, usedNames)
+		item, failure := s.buildBatchDownloadItem(rowMap[requestedAssetID], requestedAssetID, totalSize, usedNames, options.NamingMode)
 		if failure != nil {
 			manifest.Failures = append(manifest.Failures, *failure)
 			continue
@@ -114,14 +115,14 @@ func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int
 	return manifest, nil
 }
 
-func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requestedAssetID int64, currentTotal int64, usedNames map[string]int) (BatchDownloadItem, *BatchDownloadFailure) {
+func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requestedAssetID int64, currentTotal int64, usedNames map[string]int, namingMode BatchDownloadNamingMode) (BatchDownloadItem, *BatchDownloadFailure) {
 	if row == nil || row.Asset == nil || row.Task == nil {
 		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: requestedAssetID, Reason: "asset_not_found"}
 	}
 	asset := row.Asset
 	taskID := asset.TaskID
 	assetID := valueInt64(asset.AssetID, asset.ID)
-	filename := resolveBatchFilename(asset, assetID)
+	filename := resolveBatchFilenameForMode(row, assetID, namingMode)
 
 	if asset.DeletedAt != nil {
 		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "deleted"}

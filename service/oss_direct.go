@@ -720,6 +720,121 @@ func ResolveAssetDownloadFilename(originalFilename, fileName string, assetID int
 	return "asset"
 }
 
+func ResolveAssetDownloadFilenameForSingle(originalFilename, fileName string, assetID int64, skuCode string) string {
+	if filename := strings.TrimSpace(originalFilename); filename != "" {
+		return filename
+	}
+	if filename := composeBusinessAssetFilename(skuCode, fileName, fileName); filename != "" {
+		return filename
+	}
+	return ResolveAssetDownloadFilename("", fileName, assetID)
+}
+
+func ResolveAssetDownloadFilenameForBusiness(originalFilename, fileName string, assetID int64, skuCode, businessName string) string {
+	if filename := composeBusinessAssetFilename(skuCode, businessName, firstNonEmptyTrimmed(originalFilename, fileName)); filename != "" {
+		return filename
+	}
+	if filename := composeBusinessAssetFilename(skuCode, fileName, fileName); filename != "" {
+		return filename
+	}
+	return ResolveAssetDownloadFilename(originalFilename, fileName, assetID)
+}
+
+func composeBusinessAssetFilename(skuCode, label, extensionSource string) string {
+	sku := sanitizeDownloadFilenamePart(skuCode)
+	base := sanitizeDownloadFilenamePart(stripFilenameExtension(label))
+	if sku == "" || base == "" {
+		return ""
+	}
+	name := sku + "-" + base
+	ext := safeDownloadExtension(extensionSource)
+	if ext != "" {
+		name += ext
+	}
+	return name
+}
+
+func stripFilenameExtension(value string) string {
+	value = strings.TrimSpace(value)
+	ext := safeDownloadExtension(value)
+	if ext == "" {
+		return value
+	}
+	return strings.TrimSpace(value[:len(value)-len(ext)])
+}
+
+func safeDownloadExtension(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lastSlash := strings.LastIndexAny(value, `/\`)
+	lastDot := strings.LastIndex(value, ".")
+	if lastDot <= lastSlash || lastDot < 0 || lastDot == len(value)-1 {
+		return ""
+	}
+	ext := value[lastDot:]
+	if len(ext) > 12 {
+		return ""
+	}
+	if !isKnownDownloadExtension(strings.ToLower(ext)) {
+		return ""
+	}
+	for _, r := range ext[1:] {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		return ""
+	}
+	return ext
+}
+
+func isKnownDownloadExtension(ext string) bool {
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".heic", ".heif":
+		return true
+	case ".psd", ".psb", ".tif", ".tiff", ".ai", ".cdr", ".pdf":
+		return true
+	case ".zip", ".rar", ".7z", ".xlsx", ".xls":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeDownloadFilenamePart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		`"`, "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+		"\x00", "",
+		"\r", "_",
+		"\n", "_",
+	)
+	value = replacer.Replace(value)
+	value = strings.ReplaceAll(value, "..", "_")
+	return strings.TrimSpace(value)
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func ContentDispositionAttachment(filename string) string {
 	return attachmentContentDisposition(filename)
 }

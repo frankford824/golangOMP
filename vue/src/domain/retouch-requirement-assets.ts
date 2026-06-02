@@ -28,7 +28,9 @@ function normalizeSourceVersion(raw: unknown): BackendAssetVersion | null {
   const ver = raw as Record<string, unknown>
   const id = trimField(ver.id)
   const downloadUrl = pickVersionDownloadUrl(ver)
-  const fileName = trimField(ver.file_name ?? ver.original_filename ?? ver.originalFilename)
+  const originalName = trimField(ver.original_filename ?? ver.originalFilename)
+  const fileName = trimField(originalName || ver.file_name || ver.fileName)
+  const hasOriginalFilename = ver.has_original_filename === true || ver.hasOriginalFilename === true
   const fileSizeRaw = ver.file_size ?? ver.fileSize
   const fileSize =
     typeof fileSizeRaw === 'number' && Number.isFinite(fileSizeRaw) ? fileSizeRaw : undefined
@@ -36,6 +38,8 @@ function normalizeSourceVersion(raw: unknown): BackendAssetVersion | null {
     id: id || '0',
     file_role: 'source',
     file_name: fileName || undefined,
+    original_filename: originalName || undefined,
+    has_original_filename: hasOriginalFilename,
     download_url: downloadUrl || undefined,
     preview_available: ver.preview_available === true || ver.previewAvailable === true,
     mime_type: trimField(ver.mime_type ?? ver.mimeType) || undefined,
@@ -86,6 +90,7 @@ export interface RetouchSourceFileDisplayItem {
   key: string
   assetId?: string
   fileName: string
+  hasOriginalFilename?: boolean
   downloadUrl?: string
   sizeText?: string
   mimeType?: string
@@ -154,6 +159,9 @@ export function retouchSourceAssetsToDisplayItems(assets: BackendAsset[]): Retou
       key: `source-${asset.id}`,
       assetId: parseNumericAssetId(asset.id),
       fileName,
+      hasOriginalFilename:
+        (version as Record<string, unknown> | undefined)?.has_original_filename === true ||
+        (version as Record<string, unknown> | undefined)?.hasOriginalFilename === true,
       downloadUrl: downloadUrl || undefined,
       sizeText: formatRetouchAssetFileSize(
         typeof version?.file_size === 'number' ? version.file_size : undefined,

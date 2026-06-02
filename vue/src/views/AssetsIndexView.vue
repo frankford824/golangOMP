@@ -881,6 +881,7 @@ interface SelectedAssetSummary {
   taskId: string
   taskNo: string
   sku: string
+  productName: string
   title: string
   kind: string
 }
@@ -1251,6 +1252,7 @@ function toSelectedAssetSummary(asset: BackendAsset): SelectedAssetSummary {
     taskId: displayText(asset.task_id),
     taskNo: businessTaskNo(asset),
     sku: isExternalAsset(asset) ? '外部资源' : businessSku(asset),
+    productName: isExternalAsset(asset) ? assetFileName(asset) : assetProductLabel(asset),
     title: isExternalAsset(asset) ? assetFileName(asset) : `${businessSku(asset)} · ${assetFileName(asset)}`,
     kind: imageBusinessTypeLabel(asset),
   }
@@ -1303,7 +1305,20 @@ function normalizeSelectedAssetIDs(): number[] {
 }
 
 function resolveBatchZipFilename(): string {
+  const businessName = sharedSelectedBusinessName()
+  if (businessName) return buildTimestampedZipFilename(sanitizeZipEntryName(`assets-${businessName}`, 'assets'))
   return buildTimestampedZipFilename('assets')
+}
+
+function sharedSelectedBusinessName(): string {
+  const selected = selectedAssets.value
+  if (!selected.length) return ''
+  const first = selected[0]
+  if (!first.sku || first.sku === '未绑定 SKU' || !first.productName) return ''
+  const firstKey = `${first.sku}__${first.productName}`
+  const allSame = selected.every((item) => `${item.sku}__${item.productName}` === firstKey)
+  if (!allSame) return ''
+  return `${first.sku}-${first.productName}`
 }
 
 function openBulkSearchModal() {
@@ -1507,7 +1522,7 @@ async function downloadBulkSearchResults() {
   }
   bulkSearchDownloading.value = true
   try {
-    const res = await assetsApi.batchDownload(assetIDs)
+    const res = await assetsApi.batchDownload(assetIDs, { namingMode: 'original' })
     const manifest = res.data?.data
     const items = Array.isArray(manifest?.items) ? manifest.items : []
     if (!items.length) {
@@ -1870,7 +1885,7 @@ async function handleBatchDownload() {
 
   batchDownloading.value = true
   try {
-    const res = await assetsApi.batchDownload(assetIDs)
+    const res = await assetsApi.batchDownload(assetIDs, { namingMode: 'business' })
     const manifest = res.data?.data
     const items = Array.isArray(manifest?.items) ? manifest.items : []
     if (!items.length) {

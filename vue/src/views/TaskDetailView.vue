@@ -1020,7 +1020,7 @@ import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset } from '@/services/apiTypes'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
-import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
+import { buildTimestampedZipFilename, downloadBatchAsZip, sanitizeZipEntryName } from '@/utils/batchZipDownload'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import {
@@ -2376,6 +2376,30 @@ function formatTaskReferenceBatchFailure(item: {
   return bits.filter(Boolean).join(' ')
 }
 
+function readTaskBatchDownloadField(source: unknown, keys: string[]): string {
+  if (!source || typeof source !== 'object') return ''
+  const record = source as Record<string, unknown>
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function resolveTaskReferenceBatchZipFilename(currentTask: unknown): string {
+  const sku = readTaskBatchDownloadField(currentTask, ['sku', 'skuCode', 'sku_code', 'primarySkuCode', 'primary_sku_code'])
+  const product = readTaskBatchDownloadField(currentTask, [
+    'productName',
+    'product_name',
+    'productNameSnapshot',
+    'product_name_snapshot',
+    'taskName',
+    'task_name',
+  ])
+  const businessName = [sku, product].filter(Boolean).join('-')
+  return buildTimestampedZipFilename(sanitizeZipEntryName(businessName ? `task-references-${businessName}` : 'task-references', 'task-references'))
+}
+
 async function handleReferenceBatchDownload() {
   if (referenceBatchDownloading.value) return
   const currentTask = task.value
@@ -2414,7 +2438,7 @@ async function handleReferenceBatchDownload() {
           reason: 'fetch_failed',
         }),
       })),
-      zipFilename: buildTimestampedZipFilename('task-references'),
+      zipFilename: resolveTaskReferenceBatchZipFilename(currentTask),
       serverFailures: failures.map((entry) => formatTaskReferenceBatchFailure(entry)),
       onStatus: (message) => {
         referenceBatchDownloadStatus.value = message

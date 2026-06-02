@@ -63,11 +63,7 @@ func (s *Service) downloadRow(row *repo.TaskAssetSearchRow) (*domain.AssetDownlo
 	if key == "" {
 		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "asset storage_key is missing", nil)
 	}
-	originalName := ""
-	if row.Asset.OriginalName != nil {
-		originalName = *row.Asset.OriginalName
-	}
-	filename := baseservice.ResolveAssetDownloadFilename(originalName, row.Asset.FileName, valueInt64(row.Asset.AssetID, row.Asset.ID))
+	filename := resolveSingleDownloadFilename(row)
 	fileSize := int64(0)
 	if row.Asset.FileSize != nil {
 		fileSize = *row.Asset.FileSize

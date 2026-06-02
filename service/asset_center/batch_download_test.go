@@ -121,6 +121,47 @@ func TestBuildBatchDownloadManifestDuplicateNamesAddSuffix(t *testing.T) {
 	}
 }
 
+func TestBuildBatchDownloadManifestBusinessNamingModeUsesSKUAndProductName(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scopeSKU := "NSKT000277"
+	repoRows := []*repo.TaskAssetSearchRow{
+		{
+			Asset: &domain.TaskAsset{
+				ID:           25,
+				AssetID:      int64PtrBatchSvc(205),
+				TaskID:       9105,
+				ScopeSKUCode: &scopeSKU,
+				FileName:     "opaque-storage-name.jpg",
+				OriginalName: strPtr("原始稿.jpg"),
+				StorageKey:   strPtr("k-205"),
+				FileSize:     int64PtrBatchSvc(1),
+				UploadStatus: &uploaded,
+			},
+			Task: &domain.Task{
+				ID:                  9105,
+				SKUCode:             "TASK-SKU",
+				ProductNameSnapshot: "端午节保龄球/10.5x15.5cm",
+			},
+		},
+	}
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, &batchPresignerStub{
+		enabled:  true,
+		urlByKey: map[string]string{"k-205": "https://oss.example/k-205"},
+	}, nil)
+
+	result, appErr := svc.BuildBatchDownloadManifest(
+		context.Background(),
+		[]int64{205},
+		WithBatchDownloadNamingMode(BatchDownloadNamingBusiness),
+	)
+	if appErr != nil {
+		t.Fatalf("BuildBatchDownloadManifest error = %+v", appErr)
+	}
+	if result.Items[0].Filename != "NSKT000277-端午节保龄球_10.5x15.5cm.jpg" {
+		t.Fatalf("filename = %q", result.Items[0].Filename)
+	}
+}
+
 func TestBuildBatchDownloadManifestPartialFailure(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	repoRows := []*repo.TaskAssetSearchRow{

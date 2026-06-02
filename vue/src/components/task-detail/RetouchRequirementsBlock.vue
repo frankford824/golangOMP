@@ -184,6 +184,7 @@ import {
   buildRetouchBatchDownloadPlan,
   countRetouchDownloadableAttachments,
   runRetouchBatchDownload,
+  resolveRetouchSingleAttachmentFilename,
   validateRetouchBatchDownloadPlan,
   type RetouchBatchDownloadScope,
 } from '@/domain/retouch-requirement-batch-download'
@@ -298,19 +299,21 @@ async function runDownload(
 
 function handleDownloadReference(file: RetouchReferenceDisplayItem) {
   const item = findRequirementForKey(file.key)
+  const index = item ? requirementIndex(item) : 0
   void runDownload(file.key, item, {
     assetId: file.assetId,
     downloadUrl: file.downloadUrl,
-    preferredFilename: file.fileName,
+    preferredFilename: resolveRetouchSingleAttachmentFilename(item, index, file.fileName),
   })
 }
 
 function handleDownloadSource(file: RetouchSourceFileDisplayItem) {
   const item = findRequirementForKey(file.key)
+  const index = item ? requirementIndex(item) : 0
   void runDownload(file.key, item, {
     assetId: file.assetId,
     downloadUrl: file.downloadUrl,
-    preferredFilename: file.fileName,
+    preferredFilename: resolveRetouchSingleAttachmentFilename(item, index, file.fileName, file.hasOriginalFilename),
   })
 }
 

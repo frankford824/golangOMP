@@ -269,6 +269,7 @@ components:
         account: { type: string }
         display_name: { type: string }
         name: { type: string }
+        real_name: { type: string }
         department:
           $ref: '#/components/schemas/Department'
         team: { type: string }
@@ -2886,6 +2887,12 @@ components:
         created_at:
           type: string
           format: date-time
+    TaskAssetFlowReviewStatus:
+      type: string
+      enum: [not_applicable, pending_review, approved, rejected, superseded, cleaned]
+    TaskAssetUsableState:
+      type: string
+      enum: [not_applicable, pending_review, ready_for_use, rejected, history, cleaned]
     TaskAsset:
       type: object
       description: Task-scoped asset timeline item. Asset semantics are now canonicalized to `reference/source/delivery/preview`, while legacy input aliases remain compatibility-only.
@@ -2965,6 +2972,10 @@ components:
           format: int64
           nullable: true
           description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy timeline row.
+        source_asset_version_id:
+          type: integer
+          nullable: true
+          description: Source version used to derive this asset version when applicable.
         source_module_key:
           type: string
           nullable: true
@@ -2980,6 +2991,33 @@ components:
           format: date-time
           nullable: true
         cleaned_at:
+          type: string
+          format: date-time
+          nullable: true
+        flow_review_status:
+          $ref: '#/components/schemas/TaskAssetFlowReviewStatus'
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          type: integer
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejected_by:
+          type: integer
+          nullable: true
+        superseded_by_version_id:
+          type: integer
+          nullable: true
+        superseded_at:
+          type: string
+          format: date-time
+          nullable: true
+        cleanup_after_at:
           type: string
           format: date-time
           nullable: true
@@ -3045,7 +3083,16 @@ components:
         upload_mode:
           $ref: '#/components/schemas/DesignAssetUploadMode'
           description: Compatibility input alias. New frontend integrations should prefer `asset_kind` and let backend strategy selection drive `upload_strategy`.
+        file_name:
+          type: string
+          description: Stored file name. When no explicit original upload name exists, download naming may fall back to this value.
         original_filename: { type: string }
+        has_original_filename:
+          type: boolean
+          description: Whether `original_filename` came from an explicit uploaded original name rather than a stored-file fallback.
+        product_name_snapshot:
+          type: string
+          description: Task product name snapshot for business download naming.
         remote_file_id:
           type: string
           nullable: true
@@ -3090,6 +3137,35 @@ components:
             Whether this asset version is currently previewable.
             For `asset_kind=source`, preview is available immediately only when source format is OSS IMG direct-preview capable (`jpg/png/bmp/gif/webp/tiff/heic/avif`);
             otherwise preview depends on backend-derived `preview/design_thumb` assets linked by `source_asset_id`.
+        flow_review_status:
+          $ref: '#/components/schemas/TaskAssetFlowReviewStatus'
+        usable_state:
+          $ref: '#/components/schemas/TaskAssetUsableState'
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          type: integer
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejected_by:
+          type: integer
+          nullable: true
+        superseded_by_version_id:
+          type: integer
+          nullable: true
+        superseded_at:
+          type: string
+          format: date-time
+          nullable: true
+        cleanup_after_at:
+          type: string
+          format: date-time
+          nullable: true
         warehouse_ready: { type: boolean }
         approved_for_flow: { type: boolean }
         current_version_role:
@@ -4966,6 +5042,11 @@ components:
           maxItems: 100
           items:
             type: integer
+        naming_mode:
+          type: string
+          enum: [original, business]
+          default: original
+          description: Download filename mode. original keeps original upload/file_name; business uses SKU plus task product name for batch business downloads.
     AssetBatchDownloadItem:
       type: object
       required: [asset_id, task_id, filename, file_size, download_url]
@@ -8032,6 +8113,8 @@ paths:
                         id: { type: integer }
                         username: { type: string }
                         display_name: { type: string }
+                        name: { type: string }
+                        real_name: { type: string }
                   pagination:
                     type: object
                     properties:

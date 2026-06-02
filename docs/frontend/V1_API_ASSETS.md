@@ -102,6 +102,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `asset_ids` | array<integer> | 是 | - |
+| `naming_mode` | enum(original/business) | 否 | Download filename mode. original keeps original upload/file_name; business uses SKU plus task product name for batch business downloads. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

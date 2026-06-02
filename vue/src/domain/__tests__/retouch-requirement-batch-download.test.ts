@@ -3,6 +3,7 @@ import {
   buildRetouchBatchDownloadPlan,
   collectRetouchRequirementAssetIdsForScope,
   formatRetouchRequirementFolderLabel,
+  resolveRetouchSingleAttachmentFilename,
   validateRetouchBatchDownloadPlan,
   MAX_RETouch_BATCH_DOWNLOAD_ASSETS,
 } from '@/domain/retouch-requirement-batch-download'
@@ -73,6 +74,27 @@ describe('buildRetouchBatchDownloadPlan', () => {
     expect(plan.entries).toHaveLength(1)
     expect(plan.entries[0].zipPath).toBe('需求1/素材文件')
     expect(plan.entries[0].preferredFilename).toBe('pack.psd')
+  })
+
+  it('uses SKU and requirement description for retouch batch filenames when available', () => {
+    const plan = buildRetouchBatchDownloadPlan(
+      [
+        sampleRequirement({
+          skuCode: 'NSKT000277',
+          description: '端午节挂饰/蓝色',
+        }),
+      ],
+      'requirement_sources',
+      0,
+    )
+    expect(plan.entries[0].preferredFilename).toBe('NSKT000277-端午节挂饰_蓝色.psd')
+  })
+
+  it('keeps explicit original filename for single retouch attachment download', () => {
+    const req = sampleRequirement({ skuCode: 'NSKT000277', description: '端午节挂饰' })
+    expect(resolveRetouchSingleAttachmentFilename(req, 0, '客户原始附件.png', true)).toBe(
+      '客户原始附件.png',
+    )
   })
 
   it('requirement_all merges references and sources for one row', () => {

@@ -294,7 +294,8 @@ curl -X POST https://api.example.com/v1/users \
     {
       "id": "...",
       "username": "...",
-      "display_name": "..."
+      "display_name": "...",
+      "name": "..."
     }
   ],
   "pagination": {

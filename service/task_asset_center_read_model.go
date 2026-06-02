@@ -45,6 +45,7 @@ func (s *taskAssetCenterService) applyDesignAssetVersionDerivedFields(task *doma
 	}
 	if task != nil {
 		version.TaskNo = task.TaskNo
+		version.ProductNameSnapshot = strings.TrimSpace(task.ProductNameSnapshot)
 	}
 	if asset != nil {
 		version.AssetNo = asset.AssetNo

@@ -1276,7 +1276,7 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 	if version == nil {
 		return nil
 	}
-	filename := ResolveAssetDownloadFilename(version.OriginalFilename, "", version.AssetID)
+	filename := resolveDesignAssetDownloadFilename(version)
 	if ossDirect != nil && ossDirect.Enabled() && strings.TrimSpace(version.StorageKey) != "" {
 		key := strings.TrimSpace(version.StorageKey)
 		var info *OSSDirectDownloadInfo
@@ -1318,7 +1318,7 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 	if version == nil {
 		return nil
 	}
-	filename := ResolveAssetDownloadFilename(version.OriginalFilename, "", version.AssetID)
+	filename := resolveDesignAssetDownloadFilename(version)
 	downloadMode := domain.AssetDownloadModeProxy
 	downloadURL := version.DownloadURL
 	if uploadClient != nil {
@@ -1353,6 +1353,18 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 		FileSize:         fileSize,
 		MimeType:         version.MimeType,
 	}
+}
+
+func resolveDesignAssetDownloadFilename(version *domain.DesignAssetVersion) string {
+	if version == nil {
+		return "asset"
+	}
+	originalName := ""
+	if version.OriginalNameExplicit {
+		originalName = strings.TrimSpace(version.OriginalFilename)
+	}
+	fileName := firstNonEmpty(strings.TrimSpace(version.FileName), strings.TrimSpace(version.OriginalFilename))
+	return ResolveAssetDownloadFilenameForSingle(originalName, fileName, version.AssetID, version.ScopeSKUCode)
 }
 
 func isDirectBrowserURL(urlValue string) bool {

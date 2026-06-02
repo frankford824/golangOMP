@@ -172,7 +172,11 @@ type DesignAssetVersion struct {
 	VersionNo             int                         `json:"version_no"`
 	TimelineVersionNo     int                         `json:"timeline_version_no"`
 	UploadMode            DesignAssetUploadMode       `json:"upload_mode"`
+	FileName              string                      `json:"file_name,omitempty"`
 	OriginalFilename      string                      `json:"original_filename"`
+	OriginalNameExplicit  bool                        `json:"-"`
+	HasOriginalFilename   bool                        `json:"has_original_filename,omitempty"`
+	ProductNameSnapshot   string                      `json:"product_name_snapshot,omitempty"`
 	RemoteFileID          *string                     `json:"remote_file_id,omitempty"`
 	StorageKey            string                      `json:"storage_key"`
 	FileSize              *int64                      `json:"file_size,omitempty"`
@@ -241,8 +245,10 @@ func BuildDesignAssetVersion(taskAsset *TaskAsset) *DesignAssetVersion {
 	}
 	assetType := NormalizeTaskAssetType(taskAsset.AssetType)
 	originalFilename := taskAsset.FileName
+	originalNameExplicit := false
 	if taskAsset.OriginalName != nil && *taskAsset.OriginalName != "" {
 		originalFilename = *taskAsset.OriginalName
+		originalNameExplicit = true
 	}
 	storageKey := ""
 	if taskAsset.StorageKey != nil {
@@ -283,7 +289,10 @@ func BuildDesignAssetVersion(taskAsset *TaskAsset) *DesignAssetVersion {
 		VersionNo:             *taskAsset.AssetVersionNo,
 		TimelineVersionNo:     taskAsset.VersionNo,
 		UploadMode:            uploadMode,
+		FileName:              taskAsset.FileName,
 		OriginalFilename:      originalFilename,
+		OriginalNameExplicit:  originalNameExplicit,
+		HasOriginalFilename:   originalNameExplicit,
 		RemoteFileID:          taskAsset.RemoteFileID,
 		StorageKey:            storageKey,
 		FileSize:              taskAsset.FileSize,

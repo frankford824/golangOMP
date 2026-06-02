@@ -75,6 +75,31 @@ func TestDownloadLatestAppendsProxyDownloadFilename(t *testing.T) {
 	}
 }
 
+func TestDownloadLatestFallsBackToSKUAndFileNameWhenOriginalMissing(t *testing.T) {
+	storageKey := "tasks/x/source.psd"
+	scopeSKU := "NSKT000277"
+	svc := NewService(&fakeSearchRepo{
+		current: &repo.TaskAssetSearchRow{
+			Asset: &domain.TaskAsset{
+				ID:           10,
+				AssetID:      int64Ptr(5),
+				FileName:     "source.psd",
+				ScopeSKUCode: &scopeSKU,
+				StorageKey:   &storageKey,
+			},
+			Task: &domain.Task{TaskStatus: domain.TaskStatusCompleted},
+		},
+	}, nil, fakeBrowserURLBuilder{baseURL: "/v1/assets/files/"})
+
+	info, appErr := svc.DownloadLatest(context.Background(), 5)
+	if appErr != nil {
+		t.Fatalf("DownloadLatest error = %#v", appErr)
+	}
+	if got := info.Filename; got != "NSKT000277-source.psd" {
+		t.Fatalf("Filename = %q, want SKU-prefixed fallback", got)
+	}
+}
+
 type fakeBrowserURLBuilder struct {
 	baseURL string
 }

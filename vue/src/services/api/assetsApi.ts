@@ -250,6 +250,7 @@ export interface AssetSearchResponse {
 
 export interface AssetBatchDownloadPayload {
   asset_ids: number[]
+  naming_mode?: 'original' | 'business'
 }
 
 export interface AssetBatchDownloadItem {
@@ -391,11 +392,14 @@ export const assetsApi = {
       signal,
     }),
 
-  batchDownload: (assetIds: number[], signal?: AbortSignal) =>
+  batchDownload: (
+    assetIds: number[],
+    options?: { namingMode?: 'original' | 'business'; signal?: AbortSignal },
+  ) =>
     http.post<AssetBatchDownloadResponse>(
       '/v1/assets/batch-download',
-      { asset_ids: assetIds } as AssetBatchDownloadPayload,
-      { signal },
+      { asset_ids: assetIds, naming_mode: options?.namingMode } as AssetBatchDownloadPayload,
+      { signal: options?.signal },
     ),
 
   excelPackagePreview: (rows: AssetExcelPackageRow[], signal?: AbortSignal) =>
