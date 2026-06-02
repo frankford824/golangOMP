@@ -7,11 +7,21 @@ import (
 
 	"workflow/domain"
 	"workflow/repo"
+	"workflow/service/blueprint"
 )
 
 type customizationFlowJobRepo struct {
 	nextID int64
 	jobs   map[int64]*domain.CustomizationJob
+}
+
+type customizationNotificationRecorder struct {
+	events []domain.TaskModuleEvent
+}
+
+func (r *customizationNotificationRecorder) GenerateForEvent(_ context.Context, _ repo.Tx, event domain.TaskModuleEvent) error {
+	r.events = append(r.events, event)
+	return nil
 }
 
 func newCustomizationFlowJobRepo(jobs ...*domain.CustomizationJob) *customizationFlowJobRepo {
@@ -161,9 +171,9 @@ func TestSubmitCustomizationReviewApprovedWithoutLevelFields(t *testing.T) {
 	}
 
 	job, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
-		TaskID:     120,
-		ReviewerID: 1,
-		Decision:   domain.CustomizationReviewDecisionApproved,
+		TaskID:            120,
+		ReviewerID:        1,
+		Decision:          domain.CustomizationReviewDecisionApproved,
 		CustomizationNote: "审核通过",
 	})
 	if appErr != nil {
@@ -415,6 +425,88 @@ func TestCustomizationFlowAndPricingSnapshot(t *testing.T) {
 	}
 }
 
+func TestSubmitCustomizationEffectPreviewNotifiesCustomizationAuditPool(t *testing.T) {
+	operatorID := int64(188)
+	currentAssetID := int64(9101)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    407,
+		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
+		CustomizationRequired: true,
+		OwnerDepartment:       "design-dept",
+		OwnerOrgTeam:          "design-team",
+	})
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:                     705,
+		TaskID:                 407,
+		CustomizationLevelCode: "L1",
+		CustomizationLevelName: "Level 1",
+		Status:                 domain.CustomizationJobStatusPendingCustomizationProduction,
+	})
+	notifications := &customizationNotificationRecorder{}
+	rules := blueprint.NewRuleEngine(nil, nil, nil)
+	rules.SetNotificationGenerator(notifications)
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskEventRepo:        &step04TaskEventRepo{},
+		customizationJobRepo: jobRepo,
+		txRunner:             step04TxRunner{},
+		blueprintRuleEngine:  rules,
+		customizationPricingUserRepo: customizationFlowUserRepo{
+			users: map[int64]*domain.User{
+				operatorID: {ID: operatorID, EmploymentType: domain.EmploymentTypeFullTime},
+			},
+		},
+		customizationPricingRuleRepo: customizationFlowRuleRepo{
+			rules: map[string]*domain.CustomizationPricingRule{
+				"L1|" + string(domain.EmploymentTypeFullTime): {
+					CustomizationLevelCode: "L1",
+					EmploymentType:         domain.EmploymentTypeFullTime,
+					UnitPrice:              20,
+					WeightFactor:           1,
+					IsEnabled:              true,
+				},
+			},
+		},
+	}
+
+	job, appErr := svc.SubmitCustomizationEffectPreview(customizationAdminContext(), SubmitCustomizationEffectPreviewParams{
+		JobID:          705,
+		OperatorID:     operatorID,
+		OrderNo:        "ERP-2002",
+		CurrentAssetID: &currentAssetID,
+		Note:           "effect preview",
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitCustomizationEffectPreview() appErr = %+v", appErr)
+	}
+	if job.Status != domain.CustomizationJobStatusPendingEffectReview {
+		t.Fatalf("job status = %s, want pending_effect_review", job.Status)
+	}
+	if taskRepo.tasks[407].TaskStatus != domain.TaskStatusPendingEffectReview {
+		t.Fatalf("task status = %s, want PendingEffectReview", taskRepo.tasks[407].TaskStatus)
+	}
+	if len(notifications.events) != 1 {
+		t.Fatalf("notification events = %+v, want one", notifications.events)
+	}
+	event := notifications.events[0]
+	if event.TaskID != 407 || event.ModuleKey != domain.ModuleKeyAudit || event.EventType != domain.ModuleEventEntered {
+		t.Fatalf("notification event = %+v, want audit entered event for task 407", event)
+	}
+	if event.ActorID == nil || *event.ActorID != operatorID {
+		t.Fatalf("notification actor = %+v, want %d", event.ActorID, operatorID)
+	}
+	payload := map[string]interface{}{}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(notification payload) error = %v", err)
+	}
+	if payload["pool_team_code"] != domain.TeamAuditCustomization {
+		t.Fatalf("pool_team_code = %v, want %q", payload["pool_team_code"], domain.TeamAuditCustomization)
+	}
+	if payload["customization_stage"] != "effect_review" {
+		t.Fatalf("customization_stage = %v, want effect_review", payload["customization_stage"])
+	}
+}
+
 func TestReviewCustomizationEffectReturnToDesigner(t *testing.T) {
 	lastOperatorID := int64(66)
 	currentAssetID := int64(7001)
@@ -618,11 +710,15 @@ func TestSubmitCustomizationEffectPreviewFinalSkipsEffectReview(t *testing.T) {
 		CustomizationLevelName: "Level 1",
 		Status:                 domain.CustomizationJobStatusPendingCustomizationProduction,
 	})
+	notifications := &customizationNotificationRecorder{}
+	rules := blueprint.NewRuleEngine(nil, nil, nil)
+	rules.SetNotificationGenerator(notifications)
 	svc := &taskService{
 		taskRepo:             taskRepo,
 		taskEventRepo:        &step04TaskEventRepo{},
 		customizationJobRepo: jobRepo,
 		txRunner:             step04TxRunner{},
+		blueprintRuleEngine:  rules,
 		customizationPricingUserRepo: customizationFlowUserRepo{
 			users: map[int64]*domain.User{
 				operatorID: {ID: operatorID, EmploymentType: domain.EmploymentTypeFullTime},
@@ -660,6 +756,9 @@ func TestSubmitCustomizationEffectPreviewFinalSkipsEffectReview(t *testing.T) {
 	}
 	if taskRepo.tasks[107].CurrentHandlerID == nil || *taskRepo.tasks[107].CurrentHandlerID != operatorID {
 		t.Fatalf("current_handler_id = %+v, want %d", taskRepo.tasks[107].CurrentHandlerID, operatorID)
+	}
+	if len(notifications.events) != 0 {
+		t.Fatalf("notification events = %+v, want none for final delivery", notifications.events)
 	}
 }
 

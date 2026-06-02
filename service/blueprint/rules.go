@@ -39,6 +39,13 @@ func (e *RuleEngine) SetNotificationGenerator(gen notificationGenerator) {
 	}
 }
 
+func (e *RuleEngine) GenerateNotificationForEvent(ctx context.Context, tx repo.Tx, event domain.TaskModuleEvent) {
+	if e == nil || e.notificationGen == nil {
+		return
+	}
+	_ = e.notificationGen.GenerateForEvent(ctx, tx, event)
+}
+
 func (e *RuleEngine) InitTask(ctx context.Context, tx repo.Tx, task *domain.Task) error {
 	if task == nil {
 		return nil

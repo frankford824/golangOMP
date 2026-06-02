@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"workflow/domain"
@@ -202,7 +203,13 @@ func (s *taskService) SubmitCustomizationEffectPreview(ctx context.Context, p Su
 			"unit_price":                     job.UnitPrice,
 			"weight_factor":                  job.WeightFactor,
 		}))
-		return err
+		if err != nil {
+			return err
+		}
+		if nextTaskStatus == domain.TaskStatusPendingEffectReview {
+			s.notifyCustomizationAuditPool(ctx, tx, task.ID, job.ID, p.OperatorID, "effect_review")
+		}
+		return nil
 	})
 	if txErr != nil {
 		if appErr, ok := txErr.(*domain.AppError); ok {
@@ -211,6 +218,27 @@ func (s *taskService) SubmitCustomizationEffectPreview(ctx context.Context, p Su
 		return nil, infraError("customization effect preview tx", txErr)
 	}
 	return s.GetCustomizationJob(ctx, p.JobID)
+}
+
+func (s *taskService) notifyCustomizationAuditPool(ctx context.Context, tx repo.Tx, taskID, jobID, actorID int64, stage string) {
+	if s == nil || s.blueprintRuleEngine == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"pool_team_code":       domain.TeamAuditCustomization,
+		"customization_job_id": jobID,
+		"customization_stage":  stage,
+	})
+	if err != nil {
+		payload = []byte(`{"pool_team_code":"audit_customization"}`)
+	}
+	s.blueprintRuleEngine.GenerateNotificationForEvent(ctx, tx, domain.TaskModuleEvent{
+		TaskID:    taskID,
+		ModuleKey: domain.ModuleKeyAudit,
+		EventType: domain.ModuleEventEntered,
+		ActorID:   &actorID,
+		Payload:   payload,
+	})
 }
 
 func (s *taskService) ReviewCustomizationEffect(ctx context.Context, p ReviewCustomizationEffectParams) (*domain.CustomizationJob, *domain.AppError) {
