@@ -19,7 +19,7 @@
           <router-link
             v-for="menu in workbenchMenus"
             :key="menu.key"
-            :to="menu.to"
+            :to="resolveMenuTo(menu)"
             :active-class="menu.exact ? '' : 'active'"
             :exact-active-class="menu.exact ? 'active' : ''"
             class="nav-item flex items-center gap-4 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 sidebar-item-hover transition-all"
@@ -139,7 +139,7 @@
                 <router-link
                   v-for="menu in section.menus"
                   :key="menu.key"
-                  :to="menu.to"
+                  :to="resolveMenuTo(menu)"
                   :active-class="menu.exact ? '' : 'active'"
                   :exact-active-class="menu.exact ? 'active' : ''"
                   class="mobile-nav-item"
@@ -295,6 +295,47 @@ const menuSections = computed(() =>
     { key: 'data', label: '数据与配置', menus: dataMenus.value },
   ].filter((section) => section.menus.length > 0),
 )
+
+const CUSTOMIZATION_REVIEWER_ROLES = [
+  'CustomizationReviewer',
+  'customization_reviewer',
+  'customizationreviewer',
+] as const
+const NORMAL_AUDIT_ROLES = ['Audit_A', 'Audit_B', 'audit_a', 'audit_b', 'auditor'] as const
+
+function resolveMenuTo(menu: MenuConfig) {
+  if (menu.key !== 'task_list') return menu.to
+
+  const canReviewCustomization = permissionsStore.hasAnyRole(CUSTOMIZATION_REVIEWER_ROLES)
+  const canReviewNormal = permissionsStore.hasAnyRole(NORMAL_AUDIT_ROLES)
+  if (canReviewCustomization && !canReviewNormal) {
+    return {
+      path: '/tasks',
+      query: {
+        task_category: 'customization',
+        status: 'PendingCustomizationReview,PendingEffectReview',
+      },
+    }
+  }
+  if (canReviewNormal && !canReviewCustomization) {
+    return {
+      path: '/tasks',
+      query: {
+        task_category: 'normal',
+        status: 'PendingAuditA,PendingAuditB',
+      },
+    }
+  }
+  if (canReviewCustomization && canReviewNormal) {
+    return {
+      path: '/tasks',
+      query: {
+        status: 'PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
+      },
+    }
+  }
+  return menu.to
+}
 
 function openSearch() {
   searchOpen.value = true

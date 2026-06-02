@@ -138,7 +138,7 @@ func TestBuildFrontendAccessIncludesCustomizationAndResourceVisibility(t *testin
 	}
 }
 
-func TestBuildFrontendAccessCustomizationReviewerRoleAddsAuditQueueAndAssets(t *testing.T) {
+func TestBuildFrontendAccessCustomizationReviewerRoleUsesTaskCenterAuditQueueAndAssets(t *testing.T) {
 	settings := FrontendAccessSettings{
 		Defaults: FrontendAccessDefaults{
 			AllAuthenticated: FrontendAccessSpec{
@@ -161,11 +161,8 @@ func TestBuildFrontendAccessCustomizationReviewerRoleAddsAuditQueueAndAssets(t *
 	if !containsStringValue(view.Roles, "customization_reviewer") {
 		t.Fatalf("roles missing customization reviewer: %+v", view.Roles)
 	}
-	if !containsStringValue(view.Menus, "customization_management") || !containsStringValue(view.Menus, "resource_management") || !containsStringValue(view.Menus, "audit_queue") {
-		t.Fatalf("menus missing customization/audit/resource visibility: %+v", view.Menus)
-	}
-	if containsStringValue(view.Menus, "task_list") {
-		t.Fatalf("customization reviewer should not receive task_list top-level menu: %+v", view.Menus)
+	if !containsStringValue(view.Menus, "task_list") || !containsStringValue(view.Menus, "customization_management") || !containsStringValue(view.Menus, "resource_management") || !containsStringValue(view.Menus, "audit_queue") {
+		t.Fatalf("menus missing task center/customization/audit/resource visibility: %+v", view.Menus)
 	}
 	if !containsStringValue(view.Pages, "customization_jobs") || !containsStringValue(view.Pages, "assets_index") || !containsStringValue(view.Pages, "audit_workspace") {
 		t.Fatalf("pages missing customization/resource entries: %+v", view.Pages)

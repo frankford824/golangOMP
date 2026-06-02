@@ -25,7 +25,7 @@ const statusLabels: Record<TaskStatus, string> = {
   PendingOutsource: '待定制',
   Outsourcing: '定制中',
   PendingOutsourceReview: '定制中',
-  PendingCustomizationReview: '定制中',
+  PendingCustomizationReview: '待定制审核',
   PendingCustomizationProduction: '待定制生产',
   PendingEffectReview: '待效果审核',
   PendingEffectRevision: '待效果返修',
@@ -59,6 +59,7 @@ function getSemanticKind(status: TaskStatus): SemanticKind {
   if (
     status === 'PendingAuditA' ||
     status === 'PendingAuditB' ||
+    status === 'PendingCustomizationReview' ||
     status === 'PendingEffectReview' ||
     status === 'PendingWarehouseQC' ||
     status === 'PendingWarehouseReceive' ||

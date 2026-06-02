@@ -92,7 +92,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "定制审核组",
 				Roles:      []Role{RoleMember, RoleCustomizationReviewer},
 			},
-			expectMenus: []string{"dashboard", "customization_management", "audit_queue", "resource_management"},
+			expectMenus: []string{"dashboard", "task_list", "customization_management", "audit_queue", "resource_management"},
 		},
 		{
 			name: "Row07_AuditDeptAdmin",

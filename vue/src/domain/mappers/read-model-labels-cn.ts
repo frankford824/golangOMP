@@ -184,7 +184,7 @@ export function assetDownloadModeLabelCn(raw: string | undefined | null): string
 }
 
 const CUSTOMIZATION_JOB_STATUS_CN: Record<string, string> = {
-  pending_customization_review: '定制中',
+  pending_customization_review: '待定制审核',
   pending_customization_production: '待定制生产',
   pending_effect_review: '待效果审核',
   pending_effect_revision: '待效果返修',

@@ -195,6 +195,8 @@ const statusOptions: { value: TaskStatus; label: string }[] = [
   { value: 'RejectedByAuditA', label: '审核打回' },
   { value: 'PendingOutsource', label: '待定制' },
   { value: 'Outsourcing', label: '定制中' },
+  { value: 'PendingCustomizationReview', label: '待定制审核' },
+  { value: 'PendingEffectReview', label: '待效果审核' },
   { value: 'PendingWarehouseReceive', label: '待仓库接收' },
   { value: 'Completed', label: '已完成' },
   { value: 'Archived', label: '已归档' },

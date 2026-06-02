@@ -509,8 +509,8 @@ function selectedIdsAsNumericOrError(): number[] | null {
 
 const STATUS_FILTER_EXPANSION: Partial<Record<LegacyTaskStatus, LegacyTaskStatus[]>> = {
   InProgress: ['InProgress', 'Assigned'],
-  PendingAuditA: ['PendingAuditA', 'PendingAuditB', 'PendingEffectReview'],
-  RejectedByAuditA: ['RejectedByAuditA', 'RejectedByAuditB', 'PendingEffectRevision'],
+  PendingAuditA: ['PendingAuditA', 'PendingAuditB'],
+  RejectedByAuditA: ['RejectedByAuditA', 'RejectedByAuditB'],
   Outsourcing: [
     'Outsourcing',
     'PendingOutsourceReview',
@@ -568,6 +568,67 @@ const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
   ...(savedFiltersRaw as Partial<TaskListFilters>),
 })
+
+const CUSTOMIZATION_REVIEWER_ROLES = [
+  'CustomizationReviewer',
+  'customization_reviewer',
+  'customizationreviewer',
+] as const
+const NORMAL_AUDIT_ROLES = ['Audit_A', 'Audit_B', 'audit_a', 'audit_b', 'auditor'] as const
+const TASK_LIST_SCOPE_QUERY_KEYS = [
+  'tab',
+  'task_category',
+  'status',
+  'q',
+  'task_type',
+  'priority',
+  'creator_id',
+  'owner_department',
+  'owner_org_team',
+  'warehouse_status',
+  'date_from',
+  'date_to',
+  'overdue',
+] as const
+
+function queryHasTaskListScope(query: Record<string, unknown>): boolean {
+  return TASK_LIST_SCOPE_QUERY_KEYS.some((key) => {
+    if (!(key in query) || query[key] == null) return false
+    return queryString(query[key]).trim() !== ''
+  })
+}
+
+function applyAuditRoleDefaultScope() {
+  if (queryHasTaskListScope(route.query as Record<string, unknown>)) return
+  const canReviewCustomization = permissionsStore.hasAnyRole(CUSTOMIZATION_REVIEWER_ROLES)
+  const canReviewNormal = permissionsStore.hasAnyRole(NORMAL_AUDIT_ROLES)
+  if (!canReviewCustomization && !canReviewNormal) return
+
+  activeTab.value = 'all'
+  if (canReviewCustomization && !canReviewNormal) {
+    filters.value = {
+      ...filters.value,
+      taskCategory: 'customization',
+      status: ['PendingCustomizationReview', 'PendingEffectReview'],
+    }
+    return
+  }
+  if (canReviewNormal && !canReviewCustomization) {
+    filters.value = {
+      ...filters.value,
+      taskCategory: 'normal',
+      status: ['PendingAuditA', 'PendingAuditB'],
+    }
+    return
+  }
+  filters.value = {
+    ...filters.value,
+    taskCategory: '',
+    status: ['PendingAuditA', 'PendingAuditB', 'PendingCustomizationReview', 'PendingEffectReview'],
+  }
+}
+
+applyAuditRoleDefaultScope()
 
 const activeAdvancedFilterCount = computed(() => {
   const f = filters.value

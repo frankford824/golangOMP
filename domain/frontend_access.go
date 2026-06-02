@@ -418,7 +418,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"customization_reviewer"},
 			Scopes:  []string{"customization_review_scope", "department:审核部"},
-			Menus:   []string{"customization_management", "audit_queue", "resource_management"},
+			Menus:   []string{"task_list", "customization_management", "audit_queue", "resource_management"},
 			Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "audit_workspace"},
 			Actions: []string{"task.customization.review", "task.customization.effect_review", "task.list", "warehouse_lane_filter"},
 		}

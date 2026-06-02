@@ -11,6 +11,7 @@ interface PermissionStoreLike {
   currentUser: unknown
   hasMenu: (key: string) => boolean
   hasPermission: (perms: PermissionEnumValue | PermissionEnumValue[]) => boolean
+  hasAction?: (key: string) => boolean
 }
 
 interface HomeRouteCandidate {
@@ -44,6 +45,39 @@ export function resolveFirstAccessibleHomeRoute(
 ): RouteLocationRaw | null {
   for (const candidate of HOME_ROUTE_CANDIDATES) {
     if (candidate.name === 'TaskList') {
+      const canReviewCustomization =
+        permissionsStore.hasAction?.('task.customization.review') === true ||
+        permissionsStore.hasAction?.('task.customization.effect_review') === true ||
+        permissionsStore.hasMenu('customization_management')
+      const canReviewNormal =
+        permissionsStore.hasAction?.('task.audit.review') === true ||
+        permissionsStore.hasAction?.('task.audit.claim') === true
+      if (canReviewCustomization && !canReviewNormal) {
+        return {
+          name: candidate.name,
+          query: {
+            task_category: 'customization',
+            status: 'PendingCustomizationReview,PendingEffectReview',
+          },
+        }
+      }
+      if (canReviewNormal && !canReviewCustomization) {
+        return {
+          name: candidate.name,
+          query: {
+            task_category: 'normal',
+            status: 'PendingAuditA,PendingAuditB',
+          },
+        }
+      }
+      if (canReviewCustomization && canReviewNormal) {
+        return {
+          name: candidate.name,
+          query: {
+            status: 'PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
+          },
+        }
+      }
       return { name: candidate.name }
     }
     if (permissionsStore.hasMenu(candidate.menuKey)) {

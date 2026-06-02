@@ -160,7 +160,7 @@
       "scopes": ["outsource_workspace"]
     },
     "CustomizationReviewer": {
-      "menus": ["customization_management", "audit_queue", "resource_management"],
+      "menus": ["task_list", "customization_management", "audit_queue", "resource_management"],
       "pages": ["customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "audit_workspace"],
       "actions": ["task.customization.review", "task.customization.effect_review", "task.list", "warehouse_lane_filter"],
       "scopes": ["customization_review_scope"]
