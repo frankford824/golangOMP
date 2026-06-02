@@ -3,11 +3,14 @@ package aiagent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -86,42 +89,18 @@ func (c *AnthropicCompatibleClient) GenerateTaskSummary(ctx context.Context, evi
 		return nil, fmt.Errorf("marshal ai request: %w", err)
 	}
 
-	reqCtx := ctx
-	var cancel context.CancelFunc
-	if c.cfg.Timeout > 0 {
-		reqCtx, cancel = context.WithTimeout(ctx, c.cfg.Timeout)
-		defer cancel()
-	}
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, messagesURL(c.cfg.BaseURL), bytes.NewReader(rawBody))
+	respBody, err := c.doMessagesRequest(ctx, "task_summary", rawBody, len(payload), maxTokens)
 	if err != nil {
-		return nil, fmt.Errorf("build ai request: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("x-api-key", c.cfg.APIKey)
-	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("call ai provider: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return nil, fmt.Errorf("read ai response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		c.logger.Warn("ai provider returned non-2xx", zap.Int("status", resp.StatusCode), zap.String("provider", c.cfg.Provider))
-		return nil, fmt.Errorf("ai provider returned HTTP %d: %s", resp.StatusCode, truncateForError(string(respBody), 800))
-	}
-
 	text, err := extractAnthropicText(respBody)
 	if err != nil {
+		c.logAIResponseIssue("task_summary", "extract_text", len(respBody), err)
 		return nil, err
 	}
 	summary, err := ParseTaskSummaryText(text)
 	if err != nil {
+		c.logAIResponseIssue("task_summary", "parse_json", len(respBody), err)
 		summary = &TaskSummary{
 			Decision:      "AI 已返回内容，但未能结构化",
 			Impact:        truncateForError(strings.TrimSpace(text), 240),
@@ -165,42 +144,18 @@ func (c *AnthropicCompatibleClient) GenerateKPIAnalysis(ctx context.Context, evi
 		return nil, fmt.Errorf("marshal ai request: %w", err)
 	}
 
-	reqCtx := ctx
-	var cancel context.CancelFunc
-	if c.cfg.Timeout > 0 {
-		reqCtx, cancel = context.WithTimeout(ctx, c.cfg.Timeout)
-		defer cancel()
-	}
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, messagesURL(c.cfg.BaseURL), bytes.NewReader(rawBody))
+	respBody, err := c.doMessagesRequest(ctx, "kpi_analysis", rawBody, len(payload), maxTokens)
 	if err != nil {
-		return nil, fmt.Errorf("build ai request: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("x-api-key", c.cfg.APIKey)
-	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("call ai provider: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return nil, fmt.Errorf("read ai response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		c.logger.Warn("ai provider returned non-2xx", zap.Int("status", resp.StatusCode), zap.String("provider", c.cfg.Provider))
-		return nil, fmt.Errorf("ai provider returned HTTP %d: %s", resp.StatusCode, truncateForError(string(respBody), 800))
-	}
-
 	text, err := extractAnthropicText(respBody)
 	if err != nil {
+		c.logAIResponseIssue("kpi_analysis", "extract_text", len(respBody), err)
 		return nil, err
 	}
 	analysis, err := ParseKPIAnalysisText(text)
 	if err != nil {
+		c.logAIResponseIssue("kpi_analysis", "parse_json", len(respBody), err)
 		analysis = &KPIAnalysis{
 			Headline:   "AI 已返回内容，但未能结构化",
 			Overview:   truncateForError(strings.TrimSpace(text), 320),
@@ -213,6 +168,169 @@ func (c *AnthropicCompatibleClient) GenerateKPIAnalysis(ctx context.Context, evi
 	analysis.Model = c.cfg.Model
 	analysis.Provider = c.cfg.Provider
 	return analysis, nil
+}
+
+func (c *AnthropicCompatibleClient) doMessagesRequest(ctx context.Context, scene string, rawBody []byte, evidenceBytes, maxTokens int) ([]byte, error) {
+	startedAt := time.Now()
+	fields := c.aiLogFields(scene, rawBody, evidenceBytes, maxTokens)
+	c.aiLogger().Info("ai provider request started", fields...)
+
+	reqCtx := ctx
+	var cancel context.CancelFunc
+	if c.cfg.Timeout > 0 {
+		reqCtx, cancel = context.WithTimeout(ctx, c.cfg.Timeout)
+		defer cancel()
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, messagesURL(c.cfg.BaseURL), bytes.NewReader(rawBody))
+	if err != nil {
+		c.logAIRequestFailure(scene, rawBody, evidenceBytes, maxTokens, startedAt, 0, 0, "build_request", err, "")
+		return nil, fmt.Errorf("build ai request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("x-api-key", c.cfg.APIKey)
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.logAIRequestFailure(scene, rawBody, evidenceBytes, maxTokens, startedAt, 0, 0, aiErrorKind(err), err, "")
+		return nil, fmt.Errorf("call ai provider: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		c.logAIRequestFailure(scene, rawBody, evidenceBytes, maxTokens, startedAt, resp.StatusCode, 0, "read_response", err, "")
+		return nil, fmt.Errorf("read ai response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.logAIRequestFailure(scene, rawBody, evidenceBytes, maxTokens, startedAt, resp.StatusCode, len(respBody), "non_2xx", nil, providerErrorSummary(respBody))
+		return nil, fmt.Errorf("ai provider returned HTTP %d: %s", resp.StatusCode, truncateForError(string(respBody), 800))
+	}
+
+	fields = append(fields,
+		zap.Int("status", resp.StatusCode),
+		zap.Int("response_bytes", len(respBody)),
+		zap.Int64("duration_ms", time.Since(startedAt).Milliseconds()),
+	)
+	c.aiLogger().Info("ai provider request finished", fields...)
+	return respBody, nil
+}
+
+func (c *AnthropicCompatibleClient) aiLogFields(scene string, rawBody []byte, evidenceBytes, maxTokens int) []zap.Field {
+	timeoutMS := int64(0)
+	if c.cfg.Timeout > 0 {
+		timeoutMS = c.cfg.Timeout.Milliseconds()
+	}
+	sum := sha256.Sum256(rawBody)
+	return []zap.Field{
+		zap.String("scene", scene),
+		zap.String("provider", c.cfg.Provider),
+		zap.String("model", c.cfg.Model),
+		zap.String("endpoint", sanitizedEndpoint(messagesURL(c.cfg.BaseURL))),
+		zap.Int("evidence_bytes", evidenceBytes),
+		zap.Int("request_bytes", len(rawBody)),
+		zap.String("request_sha256", fmt.Sprintf("%x", sum[:6])),
+		zap.Int("max_tokens", maxTokens),
+		zap.Int64("timeout_ms", timeoutMS),
+	}
+}
+
+func (c *AnthropicCompatibleClient) logAIRequestFailure(scene string, rawBody []byte, evidenceBytes, maxTokens int, startedAt time.Time, status, responseBytes int, errorKind string, err error, providerError string) {
+	fields := c.aiLogFields(scene, rawBody, evidenceBytes, maxTokens)
+	fields = append(fields,
+		zap.Int("status", status),
+		zap.Int("response_bytes", responseBytes),
+		zap.Int64("duration_ms", time.Since(startedAt).Milliseconds()),
+		zap.String("error_kind", errorKind),
+	)
+	if err != nil {
+		fields = append(fields, zap.String("error", truncateForError(err.Error(), 240)))
+	}
+	if providerError != "" {
+		fields = append(fields, zap.String("provider_error", truncateForError(providerError, 240)))
+	}
+	c.aiLogger().Warn("ai provider request failed", fields...)
+}
+
+func (c *AnthropicCompatibleClient) logAIResponseIssue(scene, issue string, responseBytes int, err error) {
+	fields := []zap.Field{
+		zap.String("scene", scene),
+		zap.String("provider", c.cfg.Provider),
+		zap.String("model", c.cfg.Model),
+		zap.Int("response_bytes", responseBytes),
+		zap.String("error_kind", issue),
+	}
+	if err != nil {
+		fields = append(fields, zap.String("error", truncateForError(err.Error(), 240)))
+	}
+	c.aiLogger().Warn("ai provider response not structured", fields...)
+}
+
+func (c *AnthropicCompatibleClient) aiLogger() *zap.Logger {
+	if c != nil && c.logger != nil {
+		return c.logger
+	}
+	return zap.NewNop()
+}
+
+func aiErrorKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return "context_canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline_exceeded"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "network_timeout"
+	}
+	text := strings.ToLower(err.Error())
+	if strings.Contains(text, "timeout") || strings.Contains(text, "deadline exceeded") {
+		return "timeout"
+	}
+	return "transport_error"
+}
+
+func providerErrorSummary(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return "non-json error body omitted"
+	}
+	values := make([]string, 0, 4)
+	if errObj, ok := envelope["error"].(map[string]any); ok {
+		for _, key := range []string{"type", "code", "message"} {
+			if value := strings.TrimSpace(fmt.Sprint(errObj[key])); value != "" && value != "<nil>" {
+				values = append(values, key+"="+value)
+			}
+		}
+	}
+	for _, key := range []string{"type", "code", "message", "msg"} {
+		if value := strings.TrimSpace(fmt.Sprint(envelope[key])); value != "" && value != "<nil>" {
+			values = append(values, key+"="+value)
+		}
+	}
+	if len(values) == 0 {
+		return "json error body without standard message"
+	}
+	return strings.Join(values, "; ")
+}
+
+func sanitizedEndpoint(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 type anthropicMessageRequest struct {
