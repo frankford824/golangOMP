@@ -19,6 +19,7 @@
             <th class="sku-th">产品名称</th>
             <th class="sku-th">款式编码</th>
             <th class="sku-th sku-th--wide">设计要求</th>
+            <th class="sku-th">成本</th>
             <th class="sku-th">参考图</th>
             <th class="sku-th">状态</th>
             <th class="sku-th">ERP 同步</th>
@@ -36,6 +37,14 @@
             <td class="sku-td">{{ dash(item.productNameSnapshot) }}</td>
             <td class="sku-td sku-td--mono">{{ dash(item.productIId) }}</td>
             <td class="sku-td sku-td--req">{{ trunc(item.designRequirement) }}</td>
+            <td class="sku-td sku-td--cost">
+              <div class="sku-cost-cell" :title="skuCostTooltip(item)">
+                <span class="sku-cost-value" :class="{ 'sku-cost-value--empty': skuCostAmount(item) == null }">
+                  {{ formatSkuCost(item) }}
+                </span>
+                <span v-if="skuCostMeta(item)" class="sku-cost-meta">{{ skuCostMeta(item) }}</span>
+              </div>
+            </td>
             <td class="sku-td">
               <div v-if="toThumbItems(item).length" class="sku-refs-cell">
                 <AssetThumbStrip :items="toThumbItems(item)" size="sm" empty-text="未上传" />
@@ -139,6 +148,34 @@ function trunc(value: unknown): string {
   const text = String(value ?? '').trim()
   if (!text) return '-'
   return text.length > 36 ? `${text.slice(0, 36)}...` : text
+}
+
+function skuCostAmount(item: TaskSkuItem): number | undefined {
+  if (typeof item.costPrice === 'number' && Number.isFinite(item.costPrice)) return item.costPrice
+  if (typeof item.estimatedCost === 'number' && Number.isFinite(item.estimatedCost)) return item.estimatedCost
+  return undefined
+}
+
+function formatSkuCost(item: TaskSkuItem): string {
+  const amount = skuCostAmount(item)
+  if (amount == null) return item.requiresManualReview ? '待补成本' : '-'
+  return `¥${amount.toFixed(3)}`
+}
+
+function skuCostMeta(item: TaskSkuItem): string {
+  if (item.manualCostOverride === true || item.costPriceMode === 'manual') return '手动'
+  if (typeof item.costPrice === 'number' && Number.isFinite(item.costPrice)) return '已计算'
+  if (typeof item.estimatedCost === 'number' && Number.isFinite(item.estimatedCost)) return '预估'
+  if (item.requiresManualReview === true) return '待补'
+  return ''
+}
+
+function skuCostTooltip(item: TaskSkuItem): string {
+  const amount = skuCostAmount(item)
+  const ruleName = String(item.costRuleName ?? '').trim()
+  if (amount == null) return item.requiresManualReview ? '成本待补充后再同步 ERP' : '暂无成本'
+  const source = skuCostMeta(item) || '成本'
+  return ruleName ? `${source} ${amount.toFixed(3)}；规则：${ruleName}` : `${source} ${amount.toFixed(3)}`
 }
 
 function toThumbItems(item: TaskSkuItem): AssetThumbItem[] {
@@ -258,7 +295,7 @@ function formatFiledAt(value: string): string {
 
 .sku-table {
   width: 100%;
-  min-width: 860px;
+  min-width: 960px;
   border-collapse: collapse;
 }
 
@@ -303,6 +340,36 @@ function formatFiledAt(value: string): string {
   min-width: 140px;
   max-width: 220px;
   color: #475467;
+}
+
+.sku-td--cost {
+  min-width: 92px;
+}
+
+.sku-cost-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  white-space: nowrap;
+}
+
+.sku-cost-value {
+  font-weight: 800;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+.sku-cost-value--empty {
+  color: #98a2b3;
+  font-weight: 700;
+}
+
+.sku-cost-meta {
+  color: #667085;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .sku-row {

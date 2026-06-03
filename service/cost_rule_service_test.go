@@ -224,6 +224,46 @@ func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewRegularKTUsesTaxedStandardUnitPrice(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   21,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规KT板",
+		DisplayName:  "常规KT板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        21,
+			RuleVersion:   1,
+			RuleName:      "KT板面积单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     costRuleFloat64Ptr(11),
+			TaxMultiplier: costRuleFloat64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "CPT-常规kt板/娜塔莎生日/红色波点裙子大号/150*90cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-16.335) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 16.335", result.EstimatedCost)
+	}
+}
+
 func TestCostRulePreviewTreatsTrailingMultiplierAsBoxFaces(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()
@@ -372,6 +412,30 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			categoryCode: "GENERAL",
 			notes:        "定制覆膜kt板 30*40cm",
 			want:         []string{"KT_CUSTOM_FILM"},
+		},
+		{
+			name:         "regular kt keeps material when variant name has red",
+			categoryCode: "GENERAL",
+			notes:        "CPT-常规kt板/娜塔莎生日/红色波点裙子大号/150*90cm",
+			want:         []string{"KT_STANDARD"},
+		},
+		{
+			name:         "regular kt keeps material when variant name has gold",
+			categoryCode: "GENERAL",
+			notes:        "CPT-常规kt板/活动物料/金色奖牌造型/100*60cm",
+			want:         []string{"KT_STANDARD"},
+		},
+		{
+			name:         "red kt material still maps to red kt",
+			categoryCode: "GENERAL",
+			notes:        "CPT-红色kt板/门头装饰/150*90cm",
+			want:         []string{"KT_RED"},
+		},
+		{
+			name:         "gold kt material still maps to gold kt",
+			categoryCode: "GENERAL",
+			notes:        "CPT-金色kt板/门头装饰/150*90cm",
+			want:         []string{"KT_GOLD"},
 		},
 		{
 			name:         "copper paper can be found from product name",

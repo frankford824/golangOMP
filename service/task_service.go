@@ -2863,21 +2863,8 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 	}
 
 	if strings.Contains(combined, "kt") {
-		switch {
-		case strings.Contains(combined, "覆膜") && strings.Contains(combined, "定制"):
-			return add("KT_CUSTOM_FILM")
-		case strings.Contains(combined, "覆膜"):
-			return add("KT_STANDARD_FILM")
-		case strings.Contains(combined, "河南"):
-			return add("KT_HENAN")
-		case strings.Contains(combined, "红色"):
-			return add("KT_RED")
-		case strings.Contains(combined, "金色"):
-			return add("KT_GOLD")
-		case strings.Contains(combined, "定制"):
-			return add("KT_CUSTOM")
-		case strings.Contains(combined, "常规"):
-			return add("KT_STANDARD")
+		if alias := costKTCategoryAliasFromText(categoryCode, notes); alias != "" {
+			return add(alias)
 		}
 	}
 	looksLikePhotoCloth := strings.Contains(combined, "写真布") ||
@@ -2919,6 +2906,71 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 		return add("DIECUT_STICKER")
 	}
 	return aliases
+}
+
+func costKTCategoryAliasFromText(categoryCode, notes string) string {
+	for _, fragment := range costCategoryAliasFragments(categoryCode, notes) {
+		text := strings.ToLower(strings.TrimSpace(fragment))
+		if !strings.Contains(text, "kt") {
+			continue
+		}
+		compact := compactCostAliasText(text)
+		switch {
+		case strings.Contains(compact, "覆膜") && strings.Contains(compact, "定制"):
+			return "KT_CUSTOM_FILM"
+		case strings.Contains(compact, "覆膜"):
+			return "KT_STANDARD_FILM"
+		case strings.Contains(compact, "河南"):
+			return "KT_HENAN"
+		case strings.Contains(compact, "定制"):
+			return "KT_CUSTOM"
+		case strings.Contains(compact, "常规"):
+			return "KT_STANDARD"
+		case strings.Contains(compact, "红色kt"):
+			return "KT_RED"
+		case strings.Contains(compact, "金色kt"):
+			return "KT_GOLD"
+		}
+	}
+	return ""
+}
+
+func costCategoryAliasFragments(categoryCode, notes string) []string {
+	raw := strings.TrimSpace(categoryCode + " " + notes)
+	if raw == "" {
+		return nil
+	}
+	fragments := make([]string, 0, 8)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			fragments = append(fragments, value)
+		}
+	}
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		switch r {
+		case '/', '／', '\n', '\r', '\t', ',', '，', ';', '；', '|', '｜':
+			return true
+		default:
+			return false
+		}
+	}) {
+		add(part)
+	}
+	add(raw)
+	return fragments
+}
+
+func compactCostAliasText(text string) string {
+	return strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+		"-", "",
+		"－", "",
+		"_", "",
+	).Replace(strings.ToLower(text))
 }
 
 func virtualCostRulesFromText(categoryCode, notes string) []*domain.CostRule {
