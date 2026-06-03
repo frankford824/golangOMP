@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { DataScopeEnum, RoleEnum } from '@/types'
@@ -16,13 +16,22 @@ vi.mock('@/services/api/usersApi', () => ({
 }))
 
 describe('useDesignerOptions workflowLane', () => {
+  let usePermissionsStore: (typeof import('@/stores/permissions'))['usePermissionsStore']
+  let useDesignerOptions: (typeof import('@/composables/useDesignerOptions'))['useDesignerOptions']
+
+  beforeAll(async () => {
+    ;[{ usePermissionsStore }, { useDesignerOptions }] = await Promise.all([
+      import('@/stores/permissions'),
+      import('@/composables/useDesignerOptions'),
+    ])
+  }, 15000)
+
   beforeEach(() => {
     setActivePinia(createPinia())
     getDesignersMock.mockClear()
   })
 
-  it('requests customization lane when workflowLane is customization', async () => {
-    const { usePermissionsStore } = await import('@/stores/permissions')
+  function signInOpsUser(): void {
     const permissions = usePermissionsStore()
     permissions.setCurrentUser({
       id: '9',
@@ -34,8 +43,10 @@ describe('useDesignerOptions workflowLane', () => {
       permissions: [],
     })
     permissions.roles = ['Ops']
+  }
 
-    const { useDesignerOptions } = await import('@/composables/useDesignerOptions')
+  it('requests customization lane when workflowLane is customization', async () => {
+    signInOpsUser()
     const lane = ref<'customization' | undefined>('customization')
     const { loadDesigners } = useDesignerOptions({
       autoLoad: false,
@@ -48,20 +59,7 @@ describe('useDesignerOptions workflowLane', () => {
   })
 
   it('omits workflow_lane for normal designer pool', async () => {
-    const { usePermissionsStore } = await import('@/stores/permissions')
-    const permissions = usePermissionsStore()
-    permissions.setCurrentUser({
-      id: '9',
-      name: 'Ops User',
-      role: RoleEnum.OPS,
-      departmentId: '',
-      groupId: '',
-      dataScope: DataScopeEnum.GLOBAL,
-      permissions: [],
-    })
-    permissions.roles = ['Ops']
-
-    const { useDesignerOptions } = await import('@/composables/useDesignerOptions')
+    signInOpsUser()
     const { loadDesigners } = useDesignerOptions({ autoLoad: false })
 
     await loadDesigners()

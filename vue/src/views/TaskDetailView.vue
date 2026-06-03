@@ -199,6 +199,32 @@
           </div>
         </header>
 
+        <section v-if="taskPredictionSuggestions.length" class="detail-prediction-panel">
+          <div class="detail-prediction-head">
+            <div>
+              <p>预测提示</p>
+              <h2>系统建议的下一步</h2>
+            </div>
+            <button type="button" :disabled="taskPredictionLoading" @click="loadTaskPredictions">
+              {{ taskPredictionLoading ? '刷新中' : '刷新提示' }}
+            </button>
+          </div>
+          <div class="detail-prediction-list">
+            <button
+              v-for="item in taskPredictionSuggestions"
+              :key="item.id"
+              type="button"
+              class="detail-prediction-item"
+              @click="handleTaskPrediction(item)"
+            >
+              <span>{{ item.source || '流程状态' }}</span>
+              <strong>{{ item.title }}</strong>
+              <small v-if="item.detail">{{ item.detail }}</small>
+              <em>{{ item.action_label || '查看' }}</em>
+            </button>
+          </div>
+        </section>
+
         <!-- 主区 V3：业务模块纵向展开，操作留在对应模块内部 -->
         <main class="detail-main detail-main-v6">
           <div class="detail-body-v6">
@@ -1017,6 +1043,7 @@ import {
 } from '@/composables/useFileDropPasteReceiver'
 import { isReferenceUrlExpiringSoon } from '@/utils/referenceUrl'
 import { tasksApi } from '@/services/api/tasksApi'
+import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset } from '@/services/apiTypes'
@@ -1150,6 +1177,8 @@ const { cancel, needForceConfirm } = useTaskCancel()
 const taskId = computed(() => route.params.id as string)
 const isTempId = computed(() => taskId.value?.startsWith('t-'))
 const task = computed(() => tasksStore.getById(taskId.value) ?? null)
+const taskPredictionSuggestions = ref<PredictionSuggestion[]>([])
+const taskPredictionLoading = ref(false)
 const basicInfoModuleSummary = computed(() =>
   task.value?.moduleSummaries?.find((module) => module.module_key === 'basic_info'),
 )
@@ -2591,8 +2620,41 @@ async function loadTask() {
   detailLoading.value = false
   if (taskId.value && !isTempId.value) {
     void loadOpsReferenceBackendAssets()
+    void loadTaskPredictions()
   } else {
     opsReferenceBackendAssets.value = []
+    taskPredictionSuggestions.value = []
+  }
+}
+
+async function loadTaskPredictions(): Promise<void> {
+  if (!taskId.value || isTempId.value) {
+    taskPredictionSuggestions.value = []
+    return
+  }
+  taskPredictionSuggestions.value = []
+  taskPredictionLoading.value = true
+  try {
+    const bundle = await predictionsApi.taskNextActions(taskId.value, { limit: 5 })
+    taskPredictionSuggestions.value = bundle.suggestions
+  } catch {
+    taskPredictionSuggestions.value = []
+  } finally {
+    taskPredictionLoading.value = false
+  }
+}
+
+function handleTaskPrediction(item: PredictionSuggestion): void {
+  if (item.action_type === 'open_task_assets') {
+    openTaskAssetsPage()
+    return
+  }
+  if (item.target_type === 'asset' && item.target_id) {
+    void router.push({ name: 'AssetDetail', params: { id: item.target_id } })
+    return
+  }
+  if (item.target_type === 'task' && item.target_id && item.target_id !== taskId.value) {
+    void router.push({ name: 'TaskDetail', params: { id: item.target_id } })
   }
 }
 
@@ -5491,6 +5553,149 @@ watch(taskId, (id) => {
   width: clamp(1.25rem, 2.4vw, 2.6rem) !important;
   min-width: clamp(1.25rem, 2.4vw, 2.6rem) !important;
   background: #d1d5db !important;
+}
+
+.detail-prediction-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.85rem 0 0;
+  padding: 0.85rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.08), rgba(37, 99, 235, 0.08)),
+    #eff6ff;
+  background-size: 220% 100%;
+  animation: detail-stream-panel 8s linear infinite;
+}
+
+.detail-prediction-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.detail-prediction-head p {
+  margin: 0;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.detail-prediction-head h2 {
+  margin: 0.12rem 0 0;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.detail-prediction-head button {
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.detail-prediction-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.625rem;
+}
+
+.detail-prediction-item {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 6rem;
+  padding: 0.7rem;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 0.625rem;
+  background: #ffffff;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  animation: detail-card-enter 420ms ease both;
+}
+
+.detail-prediction-item:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 14px 28px -22px rgba(37, 99, 235, 0.75);
+}
+
+.detail-prediction-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(59, 130, 246, 0.13) 42%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+}
+
+.detail-prediction-item:hover::after {
+  transform: translateX(120%);
+}
+
+.detail-prediction-item span {
+  color: #2563eb;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.detail-prediction-item strong {
+  color: #111827;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.detail-prediction-item small {
+  color: #475569;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.detail-prediction-item em {
+  width: max-content;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.6875rem;
+  font-style: normal;
+}
+
+@keyframes detail-stream-panel {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes detail-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-prediction-panel,
+  .detail-prediction-item {
+    animation: none !important;
+  }
+
+  .detail-prediction-item,
+  .detail-prediction-item::after {
+    transition: none !important;
+  }
 }
 
 @media (max-width: 1280px) {

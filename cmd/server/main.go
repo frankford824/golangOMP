@@ -33,6 +33,7 @@ import (
 	r3module "workflow/service/module_action"
 	notificationsvc "workflow/service/notification"
 	orgmovesvc "workflow/service/org_move_request"
+	predictionsvc "workflow/service/prediction"
 	reportl1svc "workflow/service/report_l1"
 	searchsvc "workflow/service/search"
 	"workflow/service/task_aggregator"
@@ -146,6 +147,7 @@ func main() {
 	designSourceRepo := mysqlrepo.NewDesignSourceRepo(mdb)
 	moduleNotificationRepo := mysqlrepo.NewModuleNotificationRepo(mdb)
 	searchRepo := mysqlrepo.NewSearchRepo(mdb)
+	predictionRepo := mysqlrepo.NewPredictionRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
 	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
@@ -364,6 +366,7 @@ func main() {
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
 	searchSvc := searchsvc.NewService(searchRepo)
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
+	predictionSvc := predictionsvc.NewService(predictionRepo)
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
@@ -375,13 +378,16 @@ func main() {
 		task_aggregator.WithReferenceFileRefEnricher(service.NewReferenceFileRefsEnricher(ossDirectSvc, nil)),
 		task_aggregator.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
 	aiSummaryClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
-		Enabled:   cfg.AI.Enabled,
-		Provider:  cfg.AI.Provider,
-		BaseURL:   cfg.AI.BaseURL,
-		APIKey:    cfg.AI.APIKey,
-		Model:     cfg.AI.Model,
-		Timeout:   cfg.AI.Timeout,
-		MaxTokens: cfg.AI.MaxTokens,
+		Enabled:         cfg.AI.Enabled,
+		Provider:        cfg.AI.Provider,
+		BaseURL:         cfg.AI.BaseURL,
+		APIKey:          cfg.AI.APIKey,
+		Model:           cfg.AI.Model,
+		Timeout:         cfg.AI.Timeout,
+		MaxTokens:       cfg.AI.MaxTokens,
+		RateLimitWindow: cfg.AI.RateLimitWindow,
+		RateLimitMax:    cfg.AI.RateLimitMax,
+		RateLimiter:     aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
 	}, logger.Named("ai_agent"))
 	reportL1Svc := reportl1svc.NewService(reportL1Repo,
 		reportl1svc.WithPermissionLogRepo(permissionLogRepo),
@@ -442,10 +448,11 @@ func main() {
 	designSourceH := handler.NewDesignSourceHandler(designSourceSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
 	reportL1H := handler.NewReportL1Handler(reportL1Svc, permissionLogRepo)
+	predictionH := handler.NewPredictionHandler(predictionSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())

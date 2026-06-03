@@ -66,6 +66,7 @@ func NewRouter(
 	designSourceH *handler.DesignSourceHandler,
 	searchH *handler.SearchHandler,
 	reportL1H *handler.ReportL1Handler,
+	predictionH *handler.PredictionHandler,
 	wsH *transportws.Handler,
 	routeAccessCatalog *RouteAccessCatalog,
 	actorResolver RequestActorResolver,
@@ -110,6 +111,16 @@ func NewRouter(
 
 	v1.POST("/trace-events", access(v1, http.MethodPost, "/trace-events", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), userAdminH.RecordWorkflowTraceEvent)
 	v1.GET("/trace-events", access(v1, http.MethodGet, "/trace-events", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin), userAdminH.ListWorkflowTraceEvents)
+
+	if predictionH != nil {
+		predictionGroup := v1.Group("/predictions")
+		{
+			predictionGroup.GET("/search", access(predictionGroup, http.MethodGet, "/search", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), predictionH.Search)
+			predictionGroup.GET("/task-create", access(predictionGroup, http.MethodGet, "/task-create", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin), predictionH.TaskCreate)
+			predictionGroup.GET("/assets", access(predictionGroup, http.MethodGet, "/assets", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), predictionH.Assets)
+			predictionGroup.GET("/management", access(predictionGroup, http.MethodGet, "/management", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin, domain.RoleAdmin), predictionH.Management)
+		}
+	}
 
 	// SKU endpoints
 	skuGroup := v1.Group("/sku")
@@ -229,6 +240,9 @@ func NewRouter(
 		taskGroup.GET("", access(taskGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.List)
 		taskGroup.GET("/pool", access(taskGroup, http.MethodGet, "/pool", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.Pool)
 		taskGroup.GET("/:id", access(taskGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.GetByID)
+		if predictionH != nil {
+			taskGroup.GET("/:id/predictions", access(taskGroup, http.MethodGet, "/:id/predictions", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), predictionH.TaskNextActions)
+		}
 		taskGroup.GET("/:id/product-info", access(taskGroup, http.MethodGet, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetProductInfo)
 		taskGroup.PATCH("/:id/product-info", access(taskGroup, http.MethodPatch, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchProductInfo)
 		taskGroup.GET("/:id/cost-info", access(taskGroup, http.MethodGet, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetCostInfo)

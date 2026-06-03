@@ -110,6 +110,29 @@
     >
       当前共 <b>{{ listTotal }}</b> 条，当前页返回 <b>{{ assets.length }}</b> 条，展示 <b>{{ pagedAssets.length }}</b> 条
     </div>
+    <section v-if="assetPredictionSuggestions.length" class="ac-prediction-strip">
+      <div class="ac-prediction-head">
+        <div>
+          <span>预测提示</span>
+          <strong>可能要用的资源</strong>
+        </div>
+        <small>按可用状态和最近匹配排序</small>
+      </div>
+      <div class="ac-prediction-list">
+        <button
+          v-for="item in assetPredictionSuggestions"
+          :key="item.id"
+          type="button"
+          class="ac-prediction-item"
+          @click="openPredictionAsset(item)"
+        >
+          <span>{{ item.source || '资产中心' }}</span>
+          <strong>{{ item.title }}</strong>
+          <small v-if="item.detail">{{ item.detail }}</small>
+          <em>{{ item.action_label || '打开资产' }}</em>
+        </button>
+      </div>
+    </section>
     <div v-if="selectedCount > 0" class="ac-batch-bar">
       <span class="ac-batch-count">已选 {{ selectedCount }} 项</span>
       <button type="button" class="ac-batch-btn" @click="selectedModalOpen = true">查看已选</button>
@@ -696,6 +719,7 @@ import {
   type AssetSearchQuery,
   type AssetKind,
 } from '@/services/api/assetsApi'
+import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -756,6 +780,8 @@ const bulkSearchRunning = ref(false)
 const bulkSearchDownloading = ref(false)
 const bulkSearchStatus = ref('')
 const bulkSearchError = ref('')
+const assetPredictionSuggestions = ref<PredictionSuggestion[]>([])
+let assetPredictionAbort: AbortController | null = null
 
 type AssetUsableFilter =
   | 'all'
@@ -2120,6 +2146,7 @@ function openRelatedTask(asset: BackendAsset | null | undefined) {
 
 async function reload() {
   reloadAbort?.abort()
+  void loadAssetPredictions()
   const requestSeq = ++reloadRequestSeq
   const abortController = new AbortController()
   reloadAbort = abortController
@@ -2197,6 +2224,32 @@ async function reload() {
   }
 }
 
+async function loadAssetPredictions(): Promise<void> {
+  assetPredictionAbort?.abort()
+  assetPredictionSuggestions.value = []
+  const abortController = new AbortController()
+  assetPredictionAbort = abortController
+  try {
+    const bundle = await predictionsApi.assets(
+      { keyword: effectiveSearchKeyword.value, limit: 4 },
+      abortController.signal,
+    )
+    if (abortController.signal.aborted) return
+    assetPredictionSuggestions.value = bundle.suggestions
+  } catch {
+    if (!abortController.signal.aborted) assetPredictionSuggestions.value = []
+  } finally {
+    if (assetPredictionAbort === abortController) assetPredictionAbort = null
+  }
+}
+
+function openPredictionAsset(item: PredictionSuggestion): void {
+  const id = String(item.target_id ?? '').trim()
+  if (id) {
+    openAssetDetail(id)
+  }
+}
+
 onMounted(() => {
   if (requestedTaskId.value) {
     filters.keyword = requestedTaskId.value
@@ -2225,6 +2278,8 @@ onBeforeUnmount(() => {
   }
   reloadAbort?.abort()
   reloadAbort = null
+  assetPredictionAbort?.abort()
+  assetPredictionAbort = null
   clearSelectedAssets()
 })
 </script>
@@ -2384,6 +2439,146 @@ onBeforeUnmount(() => {
 .ac-status-bar b {
   color: #6b7280;
   font-weight: 500;
+}
+
+.ac-prediction-strip {
+  display: grid;
+  gap: 0.75rem;
+  max-width: var(--ac-content-max);
+  margin: 0.75rem auto 0;
+  padding: 0.875rem var(--ac-page-pad);
+  border: 1px solid #bfdbfe;
+  border-radius: 0.875rem;
+  background:
+    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(20, 184, 166, 0.08), rgba(37, 99, 235, 0.08)),
+    #f8fbff;
+  background-size: 220% 100%;
+  animation: ac-stream-panel 8s linear infinite;
+}
+
+.ac-prediction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ac-prediction-head div {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.ac-prediction-head span {
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.ac-prediction-head strong {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.ac-prediction-head small {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.ac-prediction-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.625rem;
+}
+
+.ac-prediction-item {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 6.25rem;
+  padding: 0.75rem;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 0.65rem;
+  background: #ffffff;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  animation: ac-card-enter 420ms ease both;
+}
+
+.ac-prediction-item:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 14px 30px -22px rgba(37, 99, 235, 0.7);
+}
+
+.ac-prediction-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(59, 130, 246, 0.14) 42%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+}
+
+.ac-prediction-item:hover::after {
+  transform: translateX(120%);
+}
+
+.ac-prediction-item span {
+  color: #2563eb;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.ac-prediction-item strong {
+  color: #111827;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+
+.ac-prediction-item small {
+  color: #475569;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.ac-prediction-item em {
+  width: max-content;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.6875rem;
+  font-style: normal;
+}
+
+@keyframes ac-stream-panel {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes ac-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-prediction-strip,
+  .ac-prediction-item {
+    animation: none !important;
+  }
+
+  .ac-prediction-item,
+  .ac-prediction-item::after {
+    transition: none !important;
+  }
 }
 
 .ac-batch-bar {

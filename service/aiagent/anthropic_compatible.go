@@ -12,26 +12,43 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
 
 type Config struct {
-	Enabled   bool
-	Provider  string
-	BaseURL   string
-	APIKey    string
-	Model     string
-	Timeout   time.Duration
-	MaxTokens int
-	HTTP      *http.Client
+	Enabled         bool
+	Provider        string
+	BaseURL         string
+	APIKey          string
+	Model           string
+	Timeout         time.Duration
+	MaxTokens       int
+	RateLimitWindow time.Duration
+	RateLimitMax    int
+	RateLimiter     AIRateLimiter
+	HTTP            *http.Client
+}
+
+type AIRateLimitReservation struct {
+	Allowed bool
+	Count   int
+	ResetAt time.Time
+}
+
+type AIRateLimiter interface {
+	Reserve(ctx context.Context, key string, window time.Duration, maxCalls int) (AIRateLimitReservation, error)
 }
 
 type AnthropicCompatibleClient struct {
-	cfg    Config
-	http   *http.Client
-	logger *zap.Logger
+	cfg             Config
+	http            *http.Client
+	logger          *zap.Logger
+	rateMu          sync.Mutex
+	rateWindowStart time.Time
+	rateWindowCalls int
 }
 
 func NewAnthropicCompatibleClient(cfg Config, logger *zap.Logger) *AnthropicCompatibleClient {
@@ -48,6 +65,12 @@ func NewAnthropicCompatibleClient(cfg Config, logger *zap.Logger) *AnthropicComp
 	}
 	if cfg.Provider == "" {
 		cfg.Provider = "anthropic_compatible"
+	}
+	if cfg.RateLimitWindow <= 0 {
+		cfg.RateLimitWindow = 5 * time.Hour
+	}
+	if cfg.RateLimitMax <= 0 {
+		cfg.RateLimitMax = 800
 	}
 	return &AnthropicCompatibleClient{cfg: cfg, http: client, logger: logger}
 }
@@ -79,6 +102,7 @@ func (c *AnthropicCompatibleClient) GenerateTaskSummary(ctx context.Context, evi
 		MaxTokens:   maxTokens,
 		Temperature: 0.2,
 		System:      taskSummarySystemPrompt,
+		Thinking:    disabledThinkingConfig(),
 		Messages: []anthropicMessage{{
 			Role:    "user",
 			Content: "请基于下面这份任务证据，生成简短处置卡片。证据 JSON：\n" + string(payload),
@@ -134,6 +158,7 @@ func (c *AnthropicCompatibleClient) GenerateKPIAnalysis(ctx context.Context, evi
 		MaxTokens:   maxTokens,
 		Temperature: 0.2,
 		System:      kpiAnalysisSystemPrompt,
+		Thinking:    disabledThinkingConfig(),
 		Messages: []anthropicMessage{{
 			Role:    "user",
 			Content: "请基于下面这份绩效证据，生成管理层可直接阅读的 KPI 分析。证据 JSON：\n" + string(payload),
@@ -173,6 +198,9 @@ func (c *AnthropicCompatibleClient) GenerateKPIAnalysis(ctx context.Context, evi
 func (c *AnthropicCompatibleClient) doMessagesRequest(ctx context.Context, scene string, rawBody []byte, evidenceBytes, maxTokens int) ([]byte, error) {
 	startedAt := time.Now()
 	fields := c.aiLogFields(scene, rawBody, evidenceBytes, maxTokens)
+	if err := c.reserveAICall(ctx, scene, fields); err != nil {
+		return nil, err
+	}
 	c.aiLogger().Info("ai provider request started", fields...)
 
 	reqCtx := ctx
@@ -215,6 +243,103 @@ func (c *AnthropicCompatibleClient) doMessagesRequest(ctx context.Context, scene
 	)
 	c.aiLogger().Info("ai provider request finished", fields...)
 	return respBody, nil
+}
+
+func (c *AnthropicCompatibleClient) reserveAICall(ctx context.Context, scene string, fields []zap.Field) error {
+	if c == nil {
+		return errors.New("ai provider client is nil")
+	}
+	window := c.cfg.RateLimitWindow
+	if window <= 0 {
+		window = 5 * time.Hour
+	}
+	maxCalls := c.cfg.RateLimitMax
+	if maxCalls <= 0 {
+		maxCalls = 800
+	}
+	if c.cfg.RateLimiter != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		limitKey := c.rateLimitKey()
+		reservation, err := c.cfg.RateLimiter.Reserve(ctx, limitKey, window, maxCalls)
+		if err != nil {
+			logFields := append([]zap.Field{}, fields...)
+			logFields = append(logFields,
+				zap.String("rate_limit_key", limitKey),
+				zap.Int("rate_limit_max_calls", maxCalls),
+				zap.Int64("rate_limit_window_ms", window.Milliseconds()),
+				zap.String("error", truncateForError(err.Error(), 240)),
+			)
+			c.aiLogger().Warn("ai provider rate limit check failed", logFields...)
+			return fmt.Errorf("ai provider rate limit check failed: %w", err)
+		}
+		if !reservation.Allowed {
+			logFields := append([]zap.Field{}, fields...)
+			logFields = append(logFields,
+				zap.String("rate_limit_key", limitKey),
+				zap.Int("rate_limit_max_calls", maxCalls),
+				zap.Int("rate_limit_count", reservation.Count),
+				zap.Int64("rate_limit_window_ms", window.Milliseconds()),
+				zap.Time("rate_limit_reset_at", reservation.ResetAt),
+			)
+			c.aiLogger().Warn("ai provider rate limit exceeded", logFields...)
+			return fmt.Errorf("ai provider rate limit exceeded: max %d calls per %s", maxCalls, window)
+		}
+		return nil
+	}
+	now := time.Now()
+	c.rateMu.Lock()
+	defer c.rateMu.Unlock()
+	if c.rateWindowStart.IsZero() || now.Sub(c.rateWindowStart) >= window {
+		c.rateWindowStart = now
+		c.rateWindowCalls = 0
+	}
+	if c.rateWindowCalls >= maxCalls {
+		resetAt := c.rateWindowStart.Add(window)
+		logFields := append([]zap.Field{}, fields...)
+		logFields = append(logFields,
+			zap.Int("rate_limit_max_calls", maxCalls),
+			zap.Int64("rate_limit_window_ms", window.Milliseconds()),
+			zap.Time("rate_limit_reset_at", resetAt),
+		)
+		c.aiLogger().Warn("ai provider rate limit exceeded", logFields...)
+		return fmt.Errorf("ai provider rate limit exceeded: max %d calls per %s", maxCalls, window)
+	}
+	c.rateWindowCalls++
+	return nil
+}
+
+func (c *AnthropicCompatibleClient) rateLimitKey() string {
+	if c == nil {
+		return "unknown:unknown"
+	}
+	return normalizeRateLimitPart(c.cfg.Provider) + ":" + normalizeRateLimitPart(c.cfg.Model)
+}
+
+func normalizeRateLimitPart(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	lastWasDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+			lastWasDash = false
+			continue
+		}
+		if !lastWasDash {
+			b.WriteByte('-')
+			lastWasDash = true
+		}
+	}
+	normalized := strings.Trim(b.String(), "-")
+	if normalized == "" {
+		return "unknown"
+	}
+	return normalized
 }
 
 func (c *AnthropicCompatibleClient) aiLogFields(scene string, rawBody []byte, evidenceBytes, maxTokens int) []zap.Field {
@@ -334,16 +459,25 @@ func sanitizedEndpoint(raw string) string {
 }
 
 type anthropicMessageRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	Temperature float64            `json:"temperature,omitempty"`
-	System      string             `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
+	Model       string                   `json:"model"`
+	MaxTokens   int                      `json:"max_tokens"`
+	Temperature float64                  `json:"temperature,omitempty"`
+	System      string                   `json:"system,omitempty"`
+	Thinking    *anthropicThinkingConfig `json:"thinking,omitempty"`
+	Messages    []anthropicMessage       `json:"messages"`
 }
 
 type anthropicMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type anthropicThinkingConfig struct {
+	Type string `json:"type"`
+}
+
+func disabledThinkingConfig() *anthropicThinkingConfig {
+	return &anthropicThinkingConfig{Type: "disabled"}
 }
 
 const taskSummarySystemPrompt = `你是公司运营管理系统里的任务处置助手。请只基于用户给出的证据，不要编造。

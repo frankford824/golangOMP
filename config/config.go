@@ -35,13 +35,15 @@ type Config struct {
 }
 
 type AIConfig struct {
-	Enabled   bool
-	Provider  string
-	BaseURL   string
-	APIKey    string
-	Model     string
-	Timeout   time.Duration
-	MaxTokens int
+	Enabled         bool
+	Provider        string
+	BaseURL         string
+	APIKey          string
+	Model           string
+	Timeout         time.Duration
+	MaxTokens       int
+	RateLimitWindow time.Duration
+	RateLimitMax    int
 }
 
 type OSSDirectConfig struct {
@@ -262,13 +264,15 @@ func Load() (*Config, error) {
 			Enabled: mustParseBool(getEnv("ASSET_CLEANUP_ENABLED", "false")),
 		},
 		AI: AIConfig{
-			Enabled:   mustParseBool(getEnv("AI_AGENT_ENABLED", "false")),
-			Provider:  getEnv("AI_AGENT_PROVIDER", "anthropic_compatible"),
-			BaseURL:   getEnv("AI_AGENT_BASE_URL", ""),
-			APIKey:    getEnv("AI_AGENT_API_KEY", ""),
-			Model:     getEnv("AI_AGENT_MODEL", ""),
-			Timeout:   mustParseDuration(getEnv("AI_AGENT_TIMEOUT", "30s")),
-			MaxTokens: mustParseInt(getEnv("AI_AGENT_MAX_TOKENS", "900")),
+			Enabled:         mustParseBool(getEnv("AI_AGENT_ENABLED", "false")),
+			Provider:        getEnv("AI_AGENT_PROVIDER", "anthropic_compatible"),
+			BaseURL:         getEnv("AI_AGENT_BASE_URL", ""),
+			APIKey:          getEnv("AI_AGENT_API_KEY", ""),
+			Model:           getEnv("AI_AGENT_MODEL", ""),
+			Timeout:         mustParseDuration(getEnv("AI_AGENT_TIMEOUT", "30s")),
+			MaxTokens:       mustParseInt(getEnv("AI_AGENT_MAX_TOKENS", "900")),
+			RateLimitWindow: mustParseDuration(getEnv("AI_AGENT_RATE_LIMIT_WINDOW", "5h")),
+			RateLimitMax:    mustParseInt(getEnv("AI_AGENT_RATE_LIMIT_MAX_CALLS", "800")),
 		},
 		Log: LogConfig{
 			Level: getEnv("LOG_LEVEL", "info"),

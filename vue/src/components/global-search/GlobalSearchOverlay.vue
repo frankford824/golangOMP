@@ -25,6 +25,29 @@
           {{ scopeLabel(item) }}
         </button>
       </div>
+      <section
+        v-if="predictionSuggestions.length"
+        class="global-prediction-section mt-4 rounded-lg border border-sky-100 bg-sky-50/70 p-3"
+      >
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <p class="text-xs font-semibold text-slate-700">预测提示</p>
+          <span class="text-[10px] text-slate-500">不消耗 AI 调用</span>
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <button
+            v-for="item in predictionSuggestions"
+            :key="item.id"
+            type="button"
+            class="prediction-card"
+            @click="goPrediction(item)"
+          >
+            <span class="prediction-source">{{ item.source || '系统提示' }}</span>
+            <strong>{{ item.title }}</strong>
+            <small v-if="item.detail">{{ item.detail }}</small>
+            <em>{{ item.action_label || '查看' }}</em>
+          </button>
+        </div>
+      </section>
       <div class="mt-4 max-h-[min(70vh,640px)] space-y-4 overflow-y-auto pr-1">
         <section
           v-for="group in panelGroups"
@@ -106,6 +129,7 @@ import {
   type V1GlobalSearchScope,
 } from '@/domain/global-search'
 import { searchApi } from '@/services/api/searchApi'
+import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { useAuth } from '@/composables/useAuth'
 
 const PREVIEW_LIMIT = 5
@@ -120,6 +144,7 @@ const keyword = ref('')
 const scope = ref<V1GlobalSearchScope>('all')
 const slowHintVisible = ref(false)
 const resultBundle = ref(emptyGlobalSearchBundle())
+const predictionSuggestions = ref<PredictionSuggestion[]>([])
 const activeFlatIndex = ref(0)
 
 const scopes: V1GlobalSearchScope[] = ['all', 'tasks', 'assets', 'products', 'users']
@@ -187,6 +212,8 @@ const flatResults = computed(() => {
 let debounceTimer: number | undefined
 let slowHintTimer: number | undefined
 let searchAbort: AbortController | undefined
+let predictionTimer: number | undefined
+let predictionAbort: AbortController | undefined
 
 function clearSearchTimers(): void {
   if (debounceTimer !== undefined) {
@@ -196,6 +223,13 @@ function clearSearchTimers(): void {
   if (slowHintTimer !== undefined) {
     window.clearTimeout(slowHintTimer)
     slowHintTimer = undefined
+  }
+}
+
+function clearPredictionTimer(): void {
+  if (predictionTimer !== undefined) {
+    window.clearTimeout(predictionTimer)
+    predictionTimer = undefined
   }
 }
 
@@ -242,6 +276,31 @@ watch([keyword, scope, open], () => {
   }, 300)
 })
 
+watch([keyword, scope, open], () => {
+  clearPredictionTimer()
+  predictionAbort?.abort()
+  predictionAbort = undefined
+  if (!open.value) {
+    predictionSuggestions.value = []
+    return
+  }
+  predictionSuggestions.value = []
+  const ac = new AbortController()
+  predictionAbort = ac
+  predictionTimer = window.setTimeout(async () => {
+    try {
+      const bundle = await predictionsApi.search(
+        { keyword: keyword.value.trim(), scope: scope.value, limit: 6 },
+        ac.signal,
+      )
+      if (ac.signal.aborted) return
+      predictionSuggestions.value = bundle.suggestions
+    } catch {
+      if (!ac.signal.aborted) predictionSuggestions.value = []
+    }
+  }, 250)
+})
+
 function goToScope(s: Exclude<V1GlobalSearchScope, 'all'>): void {
   scope.value = s
 }
@@ -279,6 +338,32 @@ function goResult(result: GlobalSearchOverlayHit, groupKey: string): void {
     void router.push(`/tasks/${result.id}`)
   } else if (groupKey === 'assets') {
     void router.push(`/asset-center/${result.id}`)
+  }
+  close()
+}
+
+function goPrediction(item: PredictionSuggestion): void {
+  const targetID = String(item.target_id ?? '').trim()
+  switch (item.target_type) {
+    case 'task':
+      if (targetID) void router.push(`/tasks/${targetID}`)
+      break
+    case 'asset':
+      if (targetID) void router.push(`/asset-center/${targetID}`)
+      break
+    case 'task_center':
+      void router.push('/tasks')
+      break
+    case 'data_center':
+      void router.push('/data-center')
+      break
+    case 'logs':
+      void router.push('/data-center')
+      break
+    default:
+      if (item.action_type === 'open_task' && targetID) void router.push(`/tasks/${targetID}`)
+      else if (item.action_type === 'open_asset' && targetID) void router.push(`/asset-center/${targetID}`)
+      else return
   }
   close()
 }
@@ -321,7 +406,9 @@ onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   clearSearchTimers()
+  clearPredictionTimer()
   searchAbort?.abort()
+  predictionAbort?.abort()
 })
 </script>
 
@@ -350,6 +437,98 @@ input::placeholder {
 button {
   border: 1px solid #e5e7eb;
   color: #374151 !important;
+}
+
+.global-prediction-section {
+  background:
+    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.08), rgba(37, 99, 235, 0.08)),
+    #f0f9ff !important;
+  background-size: 220% 100% !important;
+  animation: global-stream-panel 8s linear infinite;
+}
+
+.prediction-card {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 5.25rem;
+  padding: 0.625rem 0.75rem;
+  overflow: hidden;
+  border: 1px solid #bae6fd;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  animation: global-card-enter 420ms ease both;
+}
+
+.prediction-card:hover {
+  transform: translateY(-2px);
+  border-color: #7dd3fc;
+  box-shadow: 0 14px 28px -22px rgba(2, 132, 199, 0.8);
+}
+
+.prediction-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(14, 165, 233, 0.14) 42%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+}
+
+.prediction-card:hover::after {
+  transform: translateX(120%);
+}
+
+.prediction-card strong {
+  color: #0f172a;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+}
+
+.prediction-card small {
+  color: #475569;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.prediction-card em,
+.prediction-source {
+  width: max-content;
+  max-width: 100%;
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+
+.prediction-source {
+  color: #0369a1;
+}
+
+.prediction-card em {
+  margin-top: 0.125rem;
+  padding: 0.125rem 0.45rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+@keyframes global-stream-panel {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes global-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 section {
@@ -384,5 +563,17 @@ span {
   border-radius: 0.25rem;
   background: #dbeafe !important;
   color: #1e3a8a !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-prediction-section,
+  .prediction-card {
+    animation: none !important;
+  }
+
+  .prediction-card,
+  .prediction-card::after {
+    transition: none !important;
+  }
 }
 </style>

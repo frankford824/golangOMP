@@ -46,6 +46,27 @@
           </article>
         </div>
 
+        <section v-if="managementPredictions.length" class="management-prediction-strip">
+          <div class="management-prediction-head">
+            <div>
+              <span>预测提示</span>
+              <strong>本周期管理关注点</strong>
+            </div>
+            <small>基于任务、资产、ERP 状态实时计算</small>
+          </div>
+          <div class="management-prediction-grid">
+            <article
+              v-for="item in managementPredictions"
+              :key="item.id"
+              class="management-prediction-card"
+            >
+              <span>{{ item.source || '系统提示' }}</span>
+              <strong>{{ item.title }}</strong>
+              <p v-if="item.detail">{{ item.detail }}</p>
+            </article>
+          </div>
+        </section>
+
         <BaseEmptyState
           v-if="!events.length"
           title="暂无绩效数据"
@@ -267,6 +288,7 @@ import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import { logsApi } from '@/services/api/logsApi'
+import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { reportsApi } from '@/services/api/reportsApi'
 import type { KpiAiAnalysisResponse } from '@/services/api/reportsApi'
 import { usersApi } from '@/services/api/usersApi'
@@ -331,6 +353,7 @@ const aiAnalysisOpen = ref(false)
 const aiAnalysisLoading = ref(false)
 const aiAnalysisError = ref('')
 const aiAnalysis = ref<KpiAiAnalysisResponse | null>(null)
+const managementPredictions = ref<PredictionSuggestion[]>([])
 const userDirectory = ref(new Map<string, UserDirectoryEntry>())
 const userDirectoryByUsername = computed(() => {
   const next = new Map<string, UserDirectoryEntry>()
@@ -1024,6 +1047,7 @@ async function load() {
   error.value = ''
   aiAnalysis.value = null
   aiAnalysisError.value = ''
+  managementPredictions.value = []
   try {
     if (!canLoadTrace.value && !canLoadReports.value) {
       events.value = []
@@ -1065,6 +1089,7 @@ async function load() {
             reportCards.value = []
           }),
       )
+      jobs.push(loadManagementPredictions())
     }
 
     await Promise.all(jobs)
@@ -1072,6 +1097,19 @@ async function load() {
     error.value = e instanceof Error ? e.message : '加载绩效概览失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadManagementPredictions(): Promise<void> {
+  try {
+    const bundle = await predictionsApi.management({
+      from: dateOnly(rangeStart.value),
+      to: dateOnly(rangeEnd.value),
+      limit: 4,
+    })
+    managementPredictions.value = bundle.suggestions
+  } catch {
+    managementPredictions.value = []
   }
 }
 
@@ -1180,6 +1218,128 @@ onMounted(load)
   padding: 0.65rem 0.75rem;
   background: #f8fafc;
 }
+
+.management-prediction-strip {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.08), rgba(37, 99, 235, 0.08)),
+    #f8fbff;
+  background-size: 220% 100%;
+  animation: kpi-stream-panel 8s linear infinite;
+}
+
+.management-prediction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.management-prediction-head div {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.management-prediction-head span {
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.management-prediction-head strong {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.management-prediction-head small {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.management-prediction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.625rem;
+}
+
+.management-prediction-card {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 6rem;
+  padding: 0.75rem;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 0.625rem;
+  background: #ffffff;
+  animation: kpi-card-enter 420ms ease both;
+}
+
+.management-prediction-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(59, 130, 246, 0.12) 42%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+}
+
+.management-prediction-card:hover::after {
+  transform: translateX(120%);
+}
+
+.management-prediction-card span {
+  color: #2563eb;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.management-prediction-card strong {
+  color: #111827;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+
+.management-prediction-card p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+@keyframes kpi-stream-panel {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes kpi-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .management-prediction-strip,
+  .management-prediction-card {
+    animation: none !important;
+  }
+
+  .management-prediction-card,
+  .management-prediction-card::after {
+    transition: none !important;
+  }
+}
+
 .role-grid {
   display: grid;
   grid-template-columns: 1fr;

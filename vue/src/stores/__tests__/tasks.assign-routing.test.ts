@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const assignMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({}))
@@ -45,6 +45,12 @@ function baseRawTask(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 describe('useTasksStore assign routing', () => {
+  let useTasksStore: (typeof import('@/stores/tasks'))['useTasksStore']
+
+  beforeAll(async () => {
+    ;({ useTasksStore } = await import('@/stores/tasks'))
+  }, 15000)
+
   beforeEach(() => {
     setActivePinia(createPinia())
     assignMock.mockClear()
@@ -57,7 +63,6 @@ describe('useTasksStore assign routing', () => {
   })
 
   it('retouch_task 首次指派时调用 tasksApi.assign', async () => {
-    const { useTasksStore } = await import('@/stores/tasks')
     const store = useTasksStore()
     mockListWithTask(
       baseRawTask({
@@ -78,7 +83,6 @@ describe('useTasksStore assign routing', () => {
   })
 
   it('retouch_task 重新指派时调用 tasksApi.assign', async () => {
-    const { useTasksStore } = await import('@/stores/tasks')
     const store = useTasksStore()
     mockListWithTask(
       baseRawTask({
@@ -101,7 +105,6 @@ describe('useTasksStore assign routing', () => {
   })
 
   it('retouch_task 清空指派时调用 tasksApi.assign', async () => {
-    const { useTasksStore } = await import('@/stores/tasks')
     const store = useTasksStore()
     mockListWithTask(
       baseRawTask({
@@ -124,7 +127,6 @@ describe('useTasksStore assign routing', () => {
   })
 
   it('retouch_task 指派流程不再调用 tasksApi.reassignModule', async () => {
-    const { useTasksStore } = await import('@/stores/tasks')
     const store = useTasksStore()
     mockListWithTask(
       baseRawTask({
@@ -141,7 +143,6 @@ describe('useTasksStore assign routing', () => {
   })
 
   it('customization PendingCustomizationProduction 指派走 tasksApi.assign', async () => {
-    const { useTasksStore } = await import('@/stores/tasks')
     const store = useTasksStore()
     mockListWithTask(
       baseRawTask({
@@ -163,7 +164,6 @@ describe('useTasksStore assign routing', () => {
   })
 
   it('普通 design task 指派逻辑保持为 tasksApi.assign', async () => {
-    const { useTasksStore } = await import('@/stores/tasks')
     const store = useTasksStore()
     mockListWithTask(
       baseRawTask({

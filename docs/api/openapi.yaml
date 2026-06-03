@@ -82,6 +82,48 @@ components:
           type: boolean
         debug_compatible:
           type: boolean
+    PredictionSuggestion:
+      type: object
+      description: Deterministic user-operation suggestion generated from existing workflow traces, tasks, assets, products, or KPI data. This response does not consume AI provider quota.
+      required: [id, type, title]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          description: Suggestion category such as `recent`, `search`, `asset`, `task_create`, `task_next_action`, or `management`.
+        title: { type: string }
+        detail: { type: string }
+        action_label: { type: string }
+        action_type: { type: string }
+        target_type:
+          type: string
+          description: Frontend navigation target such as `task`, `asset`, `product`, `task_center`, `data_center`, or `logs`.
+        target_id: { type: string }
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        source: { type: string }
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    PredictionBundle:
+      type: object
+      required: [suggestions, generated_at]
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PredictionSuggestion'
+        generated_at:
+          type: string
+          format: date-time
+    PredictionBundleResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/PredictionBundle'
     RuleTemplate:
       type: object
       properties:
@@ -10868,6 +10910,50 @@ paths:
           description: "`PERMISSION_DENIED` with `deny_code` such as `task_out_of_department_scope` or `task_out_of_team_scope`."
         '404':
           description: Task not found
+  /v1/tasks/{id}/predictions:
+    get:
+      summary: Get task next-action prediction suggestions
+      description: |
+        Returns deterministic next-action suggestions for a task detail page based on current task status,
+        task modules, task assets, cost, and ERP filing state. This endpoint does not call the AI provider.
+      tags: [Tasks, Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '400':
+          description: Invalid task id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/tasks/{id}/product-info:
     get:
       summary: Get per-task product information
@@ -15914,6 +16000,187 @@ paths:
                     $ref: '#/components/schemas/SearchResultGroup'
         '401':
           description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/search:
+    get:
+      summary: Get global-search prediction suggestions
+      description: |
+        Returns deterministic suggestions for the global search overlay. Empty `q` returns recent personal
+        workflow trace suggestions; non-empty `q` returns task / asset / product suggestions. This endpoint
+        uses existing OMP data only and does not call the AI provider.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Optional keyword. When omitted, returns recent personal suggestions.
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [all, tasks, assets, products, users]
+            default: all
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/task-create:
+    get:
+      summary: Get task-create form prediction suggestions
+      description: |
+        Returns deterministic form-fill suggestions from historical task detail fields. This endpoint is
+        lightweight and does not call the AI provider.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: keyword
+          schema: { type: string }
+          description: Optional form context keyword. Alias `q` is also accepted by the backend.
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Compatibility alias for `keyword`.
+        - in: query
+          name: task_type
+          schema: { type: string }
+          description: Optional task type filter.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/assets:
+    get:
+      summary: Get asset-center prediction suggestions
+      description: |
+        Returns deterministic asset suggestions sorted by asset usable state and recency. This endpoint uses
+        task asset records only and does not call the AI provider.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Optional keyword. Alias `keyword` is also accepted by the backend.
+        - in: query
+          name: keyword
+          schema: { type: string }
+          description: Compatibility alias for `q`.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/management:
+    get:
+      summary: Get management prediction suggestions
+      description: |
+        Returns deterministic management attention points for the KPI/data-center page. This endpoint does
+        not call the AI provider; it aggregates tasks, task details, and task assets.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+          description: Start date, inclusive. Defaults to seven days before now.
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+          description: End date, inclusive. Defaults to now.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '400':
+          description: Invalid date range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
           content:
             application/json:
               schema:

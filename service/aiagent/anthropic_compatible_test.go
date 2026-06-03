@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,6 +43,7 @@ func TestAnthropicClientLogsSanitizedSuccessMetadata(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer secret-api-key" {
 			t.Fatalf("Authorization=%q", got)
 		}
+		assertThinkingDisabled(t, r)
 		writeAnthropicText(t, w, `{"decision":"任务正常","impact":"继续推进","actions":[],"evidence":[],"confidence":"high"}`)
 	}))
 	defer server.Close()
@@ -82,6 +84,7 @@ func TestAnthropicClientLogsSanitizedSuccessMetadata(t *testing.T) {
 func TestAnthropicClientLogsSanitizedProviderFailure(t *testing.T) {
 	core, logs := observer.New(zap.InfoLevel)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertThinkingDisabled(t, r)
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{
@@ -120,6 +123,84 @@ func TestAnthropicClientLogsSanitizedProviderFailure(t *testing.T) {
 	}
 }
 
+func TestAnthropicClientRateLimitPreventsExtraProviderCalls(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		assertThinkingDisabled(t, r)
+		writeAnthropicText(t, w, `{"decision":"任务正常","impact":"继续推进","actions":[],"evidence":[],"confidence":"high"}`)
+	}))
+	defer server.Close()
+
+	client := NewAnthropicCompatibleClient(Config{
+		Enabled:         true,
+		BaseURL:         server.URL,
+		APIKey:          "secret-api-key",
+		Model:           "MiniMax-M3",
+		Timeout:         time.Second,
+		MaxTokens:       64,
+		RateLimitWindow: 5 * time.Hour,
+		RateLimitMax:    1,
+	}, zap.NewNop())
+
+	if _, err := client.GenerateTaskSummary(context.Background(), map[string]string{"task": "first"}); err != nil {
+		t.Fatalf("first GenerateTaskSummary() error=%v", err)
+	}
+	if _, err := client.GenerateTaskSummary(context.Background(), map[string]string{"task": "second"}); err == nil {
+		t.Fatal("second GenerateTaskSummary() expected rate limit error")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("provider calls = %d, want 1", got)
+	}
+}
+
+func TestAnthropicClientDistributedRateLimitPreventsProviderCall(t *testing.T) {
+	var providerCalls int32
+	limiter := &staticAIRateLimiter{
+		reservation: AIRateLimitReservation{
+			Allowed: false,
+			Count:   800,
+			ResetAt: time.Now().Add(time.Hour),
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&providerCalls, 1)
+		writeAnthropicText(t, w, `{"decision":"任务正常","impact":"继续推进","actions":[],"evidence":[],"confidence":"high"}`)
+	}))
+	defer server.Close()
+
+	client := NewAnthropicCompatibleClient(Config{
+		Enabled:     true,
+		BaseURL:     server.URL,
+		APIKey:      "secret-api-key",
+		Model:       "MiniMax-M3",
+		Timeout:     time.Second,
+		MaxTokens:   64,
+		RateLimiter: limiter,
+	}, zap.NewNop())
+
+	if _, err := client.GenerateTaskSummary(context.Background(), map[string]string{"task": "blocked"}); err == nil {
+		t.Fatal("GenerateTaskSummary() expected distributed rate limit error")
+	}
+	if got := atomic.LoadInt32(&limiter.calls); got != 1 {
+		t.Fatalf("limiter calls = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(&providerCalls); got != 0 {
+		t.Fatalf("provider calls = %d, want 0", got)
+	}
+}
+
+type staticAIRateLimiter struct {
+	reservation AIRateLimitReservation
+	err         error
+	calls       int32
+}
+
+func (l *staticAIRateLimiter) Reserve(context.Context, string, time.Duration, int) (AIRateLimitReservation, error) {
+	atomic.AddInt32(&l.calls, 1)
+	return l.reservation, l.err
+}
+
 func writeAnthropicText(t *testing.T, w http.ResponseWriter, text string) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
@@ -130,5 +211,18 @@ func writeAnthropicText(t *testing.T, w http.ResponseWriter, text string) {
 		}},
 	}); err != nil {
 		t.Fatalf("write response: %v", err)
+	}
+}
+
+func assertThinkingDisabled(t *testing.T, r *http.Request) {
+	t.Helper()
+	var body struct {
+		Thinking *anthropicThinkingConfig `json:"thinking"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	if body.Thinking == nil || body.Thinking.Type != "disabled" {
+		t.Fatalf("thinking config = %+v, want disabled", body.Thinking)
 	}
 }

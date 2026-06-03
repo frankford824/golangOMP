@@ -267,6 +267,24 @@
               </div>
             </div>
 
+            <section v-if="createPredictionSuggestions.length" class="create-prediction-section">
+              <div class="create-prediction-head">
+                <span>填写联想</span>
+                <small>来自历史任务规则</small>
+              </div>
+              <button
+                v-for="item in createPredictionSuggestions"
+                :key="item.id"
+                type="button"
+                class="create-prediction-item"
+                @click="applyCreatePrediction(item)"
+              >
+                <strong>{{ item.title }}</strong>
+                <span v-if="item.detail">{{ item.detail }}</span>
+                <em>{{ item.action_label || '套用参考' }}</em>
+              </button>
+            </section>
+
             <ExcelBatchSkuPanel
               v-if="isBatchLayout"
               :task-type="taskKind === 'PURCHASE_TASK' ? 'purchase_task' : 'new_product_development'"
@@ -393,7 +411,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Box, Images, Sparkles, ShoppingCart, Wand2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import type { Task } from '@/domain/types'
@@ -435,6 +453,7 @@ import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { useAuth } from '@/composables/useAuth'
 import { useActorOwnerScope } from '@/composables/useActorOwnerScope'
 import { tasksApi } from '@/services/api/tasksApi'
+import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
 import { getBeijingDateString, nowISO, taskBeijingDateKey, taskBeijingHour, toBeijingHourISO } from '@/utils/date'
 import { humanizeTaskCreateFields, humanizeViolationCode } from '@/domain/task-create-fields'
@@ -473,6 +492,7 @@ const submitError = ref('')
 const submitStatusMessage = ref('')
 const batchItemsError = ref('')
 const fieldErrors = ref<Record<string, string>>({})
+const createPredictionSuggestions = ref<PredictionSuggestion[]>([])
 const preparingSku = ref(false)
 const showCloseConfirm = ref(false)
 const draftId = ref('')
@@ -509,6 +529,10 @@ onMounted(() => {
   if (props.modelValue) handleModalOpened()
 })
 
+onBeforeUnmount(() => {
+  clearCreatePredictionRequest()
+})
+
 const priorityOptions = [
   { value: 'low', label: '低' },
   { value: 'normal', label: '普通' },
@@ -520,6 +544,8 @@ const router = useRouter()
 const tasksStore = useTasksStore()
 const permissionsStore = usePermissionsStore()
 const { isDeptAdminPlus } = useAuth()
+let createPredictionTimer: ReturnType<typeof setTimeout> | null = null
+let createPredictionAbort: AbortController | null = null
 
 type TaskGroup = 'normal' | 'customization'
 type CreateType =
@@ -723,6 +749,20 @@ const showSkuAsCustomization = computed(
   () => isCustomizationFlow.value || form.value.skuCodeType === 'customization',
 )
 
+const createPredictionKeyword = computed(() =>
+  [
+    form.value.productName,
+    form.value.productShortName,
+    form.value.category,
+    form.value.productCategoryName,
+    form.value.material,
+    form.value.designRequirement,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim(),
+)
+
 const copyContentModel = computed({
   get: () => form.value.copyContent ?? '',
   set: (value: string) => {
@@ -735,6 +775,72 @@ const styleKeywordsModel = computed({
     form.value.styleKeywords = value.trim() ? value : undefined
   },
 })
+
+watch([createPredictionKeyword, taskKind, () => props.modelValue], () => {
+  scheduleCreatePredictions()
+})
+
+function clearCreatePredictionRequest(): void {
+  if (createPredictionTimer) {
+    clearTimeout(createPredictionTimer)
+    createPredictionTimer = null
+  }
+  createPredictionAbort?.abort()
+  createPredictionAbort = null
+}
+
+function scheduleCreatePredictions(): void {
+  clearCreatePredictionRequest()
+  createPredictionSuggestions.value = []
+  if (!props.modelValue) {
+    return
+  }
+  if (!createPredictionKeyword.value && taskKind.value === 'ORIGINAL_PRODUCT_DEV') {
+    return
+  }
+  const abortController = new AbortController()
+  createPredictionAbort = abortController
+  createPredictionTimer = setTimeout(async () => {
+    try {
+      const bundle = await predictionsApi.taskCreate(
+        {
+          keyword: createPredictionKeyword.value,
+          taskType: taskKind.value,
+          limit: 4,
+        },
+        abortController.signal,
+      )
+      if (abortController.signal.aborted) return
+      createPredictionSuggestions.value = bundle.suggestions
+    } catch {
+      if (!abortController.signal.aborted) createPredictionSuggestions.value = []
+    }
+  }, 450)
+}
+
+function applyCreatePrediction(item: PredictionSuggestion): void {
+  const meta = item.metadata ?? {}
+  if (meta.category_code && !form.value.category) {
+    form.value.category = meta.category_code
+    form.value.productCategoryCode = meta.category_code
+  }
+  if (meta.category_name && !form.value.productCategoryName) {
+    form.value.productCategoryName = meta.category_name
+  }
+  if (meta.material && !form.value.material) {
+    form.value.material = meta.material
+  }
+  const specHint = [meta.spec_text, meta.size_text].filter(Boolean).join(' / ')
+  if (specHint && !form.value.prefillSpecText) {
+    form.value.prefillSpecText = specHint
+  }
+  const processHint = meta.process?.trim()
+  if (processHint && !String(form.value.designRequirement ?? '').includes(processHint)) {
+    form.value.designRequirement = [form.value.designRequirement, `工艺参考：${processHint}`]
+      .filter(Boolean)
+      .join('\n')
+  }
+}
 
 function applyCreateType(option: (typeof createTypeOptions)[number]) {
   createType.value = option.value
@@ -2531,6 +2637,124 @@ async function submit() {
 .create-context-panel.is-retouch .context-card {
   border-color: #e5e7eb !important;
   background: #ffffff !important;
+}
+
+.create-prediction-section {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.08), rgba(37, 99, 235, 0.08)),
+    #eff6ff;
+  background-size: 220% 100%;
+  animation: create-stream-panel 8s linear infinite;
+}
+
+.create-prediction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.create-prediction-head span {
+  color: #1e3a8a;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.create-prediction-head small {
+  color: #64748b;
+  font-size: 0.6875rem;
+}
+
+.create-prediction-item {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.625rem 0.7rem;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 0.625rem;
+  background: #ffffff;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  animation: create-card-enter 420ms ease both;
+}
+
+.create-prediction-item:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 14px 28px -22px rgba(37, 99, 235, 0.75);
+}
+
+.create-prediction-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(59, 130, 246, 0.13) 42%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+}
+
+.create-prediction-item:hover::after {
+  transform: translateX(120%);
+}
+
+.create-prediction-item strong {
+  color: #111827;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.create-prediction-item span {
+  color: #475569;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.create-prediction-item em {
+  width: max-content;
+  max-width: 100%;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.6875rem;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+@keyframes create-stream-panel {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes create-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .create-prediction-section,
+  .create-prediction-item {
+    animation: none !important;
+  }
+
+  .create-prediction-item,
+  .create-prediction-item::after {
+    transition: none !important;
+  }
 }
 
 @media (max-width: 900px) {
