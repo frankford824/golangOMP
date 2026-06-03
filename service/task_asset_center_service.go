@@ -1282,7 +1282,7 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 		var info *OSSDirectDownloadInfo
 		mimeType := version.MimeType
 		if preview {
-			if process, ok := buildOSSIMGPreviewProcessForSource(version); ok {
+			if process, ok := buildOSSIMGPreviewProcessForVersion(version); ok {
 				info = ossDirect.PresignPreviewURLWithProcess(key, process)
 				if strings.Contains(process, "format,jpg") {
 					mimeType = "image/jpeg"

@@ -1558,6 +1558,77 @@ func TestTaskAssetCenterServiceSourceDirectPreviewUsesOSSIMGProcess(t *testing.T
 	}
 }
 
+func TestTaskAssetCenterServiceDeliveryTiffPreviewUsesOSSIMGProcess(t *testing.T) {
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2052, TaskNo: "T-2052", TaskStatus: domain.TaskStatusInProgress})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+
+	deliveryAssetID, _ := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{
+		TaskID:    2052,
+		AssetNo:   "AST-0002",
+		AssetType: domain.TaskAssetTypeDelivery,
+		CreatedBy: 652,
+	})
+	deliveryVersionNo := 1
+	deliveryVersionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
+		TaskID:         2052,
+		AssetID:        &deliveryAssetID,
+		AssetType:      domain.TaskAssetTypeDelivery,
+		VersionNo:      1,
+		AssetVersionNo: &deliveryVersionNo,
+		UploadMode:     strPtr("multipart"),
+		FileName:       "final.tif",
+		OriginalName:   strPtr("final.tif"),
+		MimeType:       strPtr("image/tiff"),
+		StorageKey:     strPtr("objects/design-assets/final.tif"),
+		UploadStatus:   strPtr("uploaded"),
+		PreviewStatus:  strPtr("not_applicable"),
+		UploadedBy:     652,
+		UploadedAt:     timeValuePtr(time.Date(2026, 4, 15, 9, 20, 0, 0, time.UTC)),
+	})
+	_ = designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, deliveryAssetID, &deliveryVersionID)
+
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		designAssetRepo,
+		taskAssetRepo,
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		&step04TaskEventRepo{},
+		step04TxRunner{},
+		newStubUploadServiceClient(),
+		WithOSSDirectService(newTestOSSDirectService()),
+	).(*taskAssetCenterService)
+
+	previewInfo, appErr := svc.GetAssetPreviewInfoByID(context.Background(), deliveryAssetID)
+	if appErr != nil {
+		t.Fatalf("GetAssetPreviewInfoByID() unexpected error: %+v", appErr)
+	}
+	if previewInfo == nil || previewInfo.DownloadURL == nil {
+		t.Fatalf("GetAssetPreviewInfoByID() = %+v", previewInfo)
+	}
+	if !strings.Contains(*previewInfo.DownloadURL, "x-oss-process=") {
+		t.Fatalf("preview url = %q, want x-oss-process", *previewInfo.DownloadURL)
+	}
+	if !strings.Contains(*previewInfo.DownloadURL, "format%2Cjpg") {
+		t.Fatalf("preview url = %q, want jpg conversion", *previewInfo.DownloadURL)
+	}
+	if previewInfo.MimeType != "image/jpeg" {
+		t.Fatalf("preview mime_type = %q, want image/jpeg", previewInfo.MimeType)
+	}
+
+	downloadInfo, appErr := svc.GetAssetDownloadInfoByID(context.Background(), deliveryAssetID)
+	if appErr != nil {
+		t.Fatalf("GetAssetDownloadInfoByID() unexpected error: %+v", appErr)
+	}
+	if downloadInfo == nil || downloadInfo.DownloadURL == nil {
+		t.Fatalf("GetAssetDownloadInfoByID() = %+v", downloadInfo)
+	}
+	if strings.Contains(*downloadInfo.DownloadURL, "x-oss-process=") {
+		t.Fatalf("download url = %q, should not include x-oss-process", *downloadInfo.DownloadURL)
+	}
+}
+
 func TestTaskAssetCenterServiceSourcePreviewFallsBackToDerivedPreviewAsset(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2051, TaskNo: "T-2051", TaskStatus: domain.TaskStatusInProgress})
 	designAssetRepo := newStep67DesignAssetRepo()
