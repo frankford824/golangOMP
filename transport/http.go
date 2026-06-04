@@ -30,6 +30,7 @@ func NewRouter(
 	userAdminH *handler.UserAdminHandler,
 	erpBridgeH *handler.ERPBridgeHandler,
 	productH *handler.ProductHandler,
+	productManagementH *handler.ProductManagementHandler,
 	categoryH *handler.CategoryHandler,
 	categoryMappingH *handler.CategoryERPMappingHandler,
 	costRuleH *handler.CostRuleHandler,
@@ -168,6 +169,17 @@ func NewRouter(
 		productGroup.GET("/:id", access(productGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse), withCompatibilityRoute("/v1/erp/products/{id}", "candidate_for_v1_0_removal"), productH.GetByID)
 	}
 
+	if productManagementH != nil {
+		productManagementGroup := v1.Group("/product-management")
+		{
+			productManagementGroup.GET("", access(productManagementGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.List)
+			productManagementGroup.GET("/:id/image-candidates", access(productManagementGroup, http.MethodGet, "/:id/image-candidates", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListImageCandidates)
+			productManagementGroup.POST("/:id/reparse-image", access(productManagementGroup, http.MethodPost, "/:id/reparse-image", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ReparseImage)
+			productManagementGroup.POST("/:id/image", access(productManagementGroup, http.MethodPost, "/:id/image", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.SetManualImage)
+			productManagementGroup.POST("/:id/sync-request", access(productManagementGroup, http.MethodPost, "/:id/sync-request", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.RequestSync)
+		}
+	}
+
 	erpGroup := v1.Group("/erp")
 	{
 		erpGroup.GET("/products", access(erpGroup, http.MethodGet, "/products", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleERP, domain.RoleAdmin), erpBridgeH.SearchProducts)
@@ -246,6 +258,9 @@ func NewRouter(
 		taskGroup.GET("/:id/product-info", access(taskGroup, http.MethodGet, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetProductInfo)
 		taskGroup.PATCH("/:id/product-info", access(taskGroup, http.MethodPatch, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchProductInfo)
 		taskGroup.GET("/:id/cost-info", access(taskGroup, http.MethodGet, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetCostInfo)
+		if productManagementH != nil {
+			taskGroup.GET("/:id/product-management", access(taskGroup, http.MethodGet, "/:id/product-management", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListByTaskID)
+		}
 		taskGroup.PATCH("/:id/cost-info", access(taskGroup, http.MethodPatch, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchCostInfo)
 		taskGroup.PATCH("/:id/sku-items/:sku_item_id", access(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchSKUItemInfo)
 		taskGroup.PATCH("/:id/sku-items/:sku_item_id/cost-info", access(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchSKUItemCostInfo)
@@ -340,7 +355,7 @@ func NewRouter(
 		assetGroup.GET("/:asset_id/versions/:version_id/download", access(assetGroup, http.MethodGet, "/:asset_id/versions/:version_id/download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DownloadGlobalAssetVersion)
 		assetGroup.POST("/:asset_id/archive", access(assetGroup, http.MethodPost, "/:asset_id/archive", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.ArchiveGlobalAsset)
 		assetGroup.POST("/:asset_id/restore", access(assetGroup, http.MethodPost, "/:asset_id/restore", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.RestoreGlobalAsset)
-		assetGroup.GET("/:asset_id/preview", access(assetGroup, http.MethodGet, "/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.PreviewAssetResource)
+		assetGroup.GET("/:asset_id/preview", access(assetGroup, http.MethodGet, "/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), taskAssetCenterH.PreviewAssetResource)
 		assetGroup.POST("/upload-sessions", access(assetGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CreateAssetUploadSession)
 		assetGroup.GET("/upload-sessions/:session_id", access(assetGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.GetAssetUploadSession)
 		assetGroup.POST("/upload-sessions/:session_id/complete", access(assetGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CompleteAssetUploadSession)

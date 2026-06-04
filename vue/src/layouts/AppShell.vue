@@ -222,12 +222,12 @@ const MENU_CONFIG: MenuConfig[] = [
     icon: 'perm_media',
   },
   {
-    key: 'org_admin',
-    label: '组织',
-    to: '/org',
-    aliases: ['org_permission'],
+    key: 'product_management',
+    label: '产品管理',
+    to: '/products',
+    aliases: ['resource_management', 'assets_index'],
     section: 'data',
-    icon: 'groups',
+    icon: 'inventory_2',
   },
   {
     key: 'report_center',

@@ -91,6 +91,7 @@ func main() {
 	userSessionRepo := mysqlrepo.NewUserSessionRepo(mdb)
 	permissionLogRepo := mysqlrepo.NewPermissionLogRepo(mdb)
 	productRepo := mysqlrepo.NewProductRepo(mdb)
+	productManagementRepo := mysqlrepo.NewProductManagementRepo(mdb)
 	categoryRepo := mysqlrepo.NewCategoryRepo(mdb)
 	categoryERPMappingRepo := mysqlrepo.NewCategoryERPMappingRepo(mdb)
 	costRuleRepo := mysqlrepo.NewCostRuleRepo(mdb)
@@ -235,10 +236,14 @@ func main() {
 		Enabled:                 cfg.UploadService.Enabled,
 		BaseURL:                 cfg.UploadService.BaseURL,
 		BrowserMultipartBaseURL: cfg.UploadService.BrowserMultipartBaseURL,
+		BrowserDownloadBaseURL:  cfg.UploadService.BrowserDownloadBaseURL,
 		Timeout:                 cfg.UploadService.Timeout,
 		InternalToken:           cfg.UploadService.InternalToken,
 		StorageProvider:         cfg.UploadService.StorageProvider,
 	})
+	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
+		service.WithProductManagementERPBridge(erpBridgeSvc),
+		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient))
 	taskCreateReferenceUploadSvc := service.NewTaskCreateReferenceUploadService(
 		uploadRequestRepo,
 		assetStorageRefRepo,
@@ -341,6 +346,7 @@ func main() {
 
 	erpBridgeH := handler.NewERPBridgeHandler(erpBridgeSvc)
 	productH := handler.NewProductHandler(productSvc)
+	productManagementH := handler.NewProductManagementHandler(productManagementSvc)
 	categoryH := handler.NewCategoryHandler(categorySvc)
 	categoryMappingH := handler.NewCategoryERPMappingHandler(categoryMappingSvc)
 	costRuleH := handler.NewCostRuleHandler(costRuleSvc)
@@ -385,11 +391,11 @@ func main() {
 	predictionH := handler.NewPredictionHandler(predictionSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
-	workers.NewGroup(db, rdb, logger, erpSyncSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	workers.NewGroup(db, rdb, logger, erpSyncSvc, productManagementSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
 	logger.Info("background workers started")
 
 	srv := &http.Server{

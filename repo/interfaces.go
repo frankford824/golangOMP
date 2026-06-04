@@ -130,6 +130,45 @@ type ProductRepo interface {
 	UpsertBatch(ctx context.Context, tx Tx, products []*domain.Product) (int64, error)
 }
 
+type ProductManagementListFilter struct {
+	Keyword     string
+	ImageSource string
+	SyncStatus  string
+	CostStatus  string
+	IssueScope  string
+	CreatorID   *int64
+	Page        int
+	PageSize    int
+}
+
+type ProductManagementImagePatch struct {
+	ImageSource         domain.ProductManagementImageSource
+	ImageSelectionMode  domain.ProductManagementImageSelectionMode
+	ImageAssetID        *int64
+	ImageAssetVersionID *int64
+	ImageFilename       string
+	ImageMimeType       string
+	ImageMissingReason  string
+}
+
+type ProductManagementSyncPatch struct {
+	Status            domain.ProductManagementERPSyncStatus
+	LastERPCheckedAt  *time.Time
+	LastERPSyncedAt   *time.Time
+	SyncCooldownUntil *time.Time
+	LastSyncError     string
+}
+
+type ProductManagementRepo interface {
+	RefreshReadModel(ctx context.Context) error
+	List(ctx context.Context, filter ProductManagementListFilter) ([]*domain.ProductManagementRecord, int64, error)
+	GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error)
+	GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, error)
+	ClaimQueuedSyncRecords(ctx context.Context, limit int, claimToken string, now time.Time) ([]*domain.ProductManagementRecord, error)
+	UpdateImage(ctx context.Context, tx Tx, id int64, patch ProductManagementImagePatch) error
+	UpdateSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
+}
+
 type CategoryRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.Category, error)
 	GetByCode(ctx context.Context, code string) (*domain.Category, error)

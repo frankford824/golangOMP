@@ -124,6 +124,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
       },
       {
+        path: 'products',
+        name: 'ProductManagement',
+        component: () => import('@/views/ProductManagementView.vue'),
+        meta: { requiresAuth: true, requiredMenuKey: ['product_management', 'resource_management'] },
+      },
+      {
         path: 'org',
         name: 'OrgIndex',
         component: () => import('@/views/org/OrgIndexView.vue'),

@@ -467,6 +467,72 @@
                         </BaseButton>
                       </div>
                     </article>
+
+                    <article
+                      v-if="showProductManagementPanel"
+                      class="detail-v3-info-card detail-product-management-card"
+                    >
+                      <div class="detail-product-management-head">
+                        <div>
+                          <p class="detail-v3-card-kicker">产品管理 / ERP 图片</p>
+                          <strong>{{ productManagementRecords.length }} 个 SKU 对照记录</strong>
+                        </div>
+                        <button type="button" class="detail-v3-link-btn" @click="openProductManagement()">
+                          进入产品管理
+                        </button>
+                      </div>
+                      <p v-if="productManagementLoading" class="detail-v3-card-text">产品管理状态加载中...</p>
+                      <p v-else-if="productManagementError" class="detail-v3-ref-error">{{ productManagementError }}</p>
+                      <div v-else class="detail-product-management-list">
+                        <div
+                          v-for="record in productManagementPreviewRecords"
+                          :key="record.id"
+                          class="detail-product-management-item"
+                        >
+                          <div
+                            class="detail-product-management-preview"
+                            :class="{ 'is-missing': !productManagementPreviewURL(record) }"
+                          >
+                            <img
+                              v-if="productManagementPreviewURL(record)"
+                              :src="productManagementPreviewURL(record)"
+                              :alt="record.sku_code"
+                              loading="lazy"
+                            />
+                            <span v-else>待补图</span>
+                          </div>
+                          <div class="detail-product-management-meta">
+                            <strong>{{ record.sku_code || '-' }}</strong>
+                            <small>{{ record.image_source_label }} · {{ formatProductManagementCost(record) }}</small>
+                            <small>{{ productManagementSyncStatusLabel(record.erp_sync_status) }}</small>
+                          </div>
+                          <div class="detail-product-management-actions">
+                            <button type="button" class="detail-v3-link-btn" @click="openProductManagement(record)">
+                              打开
+                            </button>
+                            <button type="button" class="detail-v3-link-btn" @click="openProductManagement(record)">
+                              设图
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_maintain_image"
+                              @click="reparseProductManagementImage(record)"
+                            >
+                              重解析
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_sync_erp"
+                              @click="syncProductManagementRecord(record)"
+                            >
+                              同步
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
                   </div>
                   <p class="detail-v3-module-note">
                     运营创建者、运营管理员可在设计提交审核前维护创建侧信息与参考图；参考图入口位于当前卡片内。
@@ -1046,6 +1112,12 @@ import { tasksApi } from '@/services/api/tasksApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
+import {
+  productManagementApi,
+  type ProductManagementRecord,
+  type ProductSyncStatus,
+} from '@/services/api/productManagementApi'
+import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import type { BackendAsset } from '@/services/apiTypes'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { buildTimestampedZipFilename, downloadBatchAsZip, sanitizeZipEntryName } from '@/utils/batchZipDownload'
@@ -1199,6 +1271,20 @@ const customizationModuleSummary = computed(() =>
 )
 const isBatchTask = computed(() => task.value?.isBatchTask === true)
 const batchSkuItems = computed(() => task.value?.skuItems ?? [])
+const productManagementRecords = ref<ProductManagementRecord[]>([])
+const productManagementLoading = ref(false)
+const productManagementError = ref('')
+const productManagementPreviewURLs = ref<Record<number, string>>({})
+const productManagementPreviewRecords = computed(() =>
+  productManagementRecords.value.slice(0, isBatchTask.value ? 6 : 1),
+)
+const showProductManagementPanel = computed(
+  () =>
+    canAccessPage('product_management') &&
+    (productManagementLoading.value ||
+      productManagementError.value ||
+      productManagementRecords.value.length > 0),
+)
 
 const isPurchaseTask = computed(
   () =>
@@ -2589,6 +2675,114 @@ function navigateBackToTaskList() {
   void router.push('/tasks')
 }
 
+function openProductManagement(record?: ProductManagementRecord): void {
+  const keyword = String(record?.sku_code || task.value?.taskNo || '').trim()
+  void router.push({
+    name: 'ProductManagement',
+    query: keyword ? { keyword, issue_scope: 'all' } : { issue_scope: 'all' },
+  })
+}
+
+async function loadProductManagementRecords(): Promise<void> {
+  const currentID = Number(taskId.value)
+  if (!currentID || Number.isNaN(currentID) || !canAccessPage('product_management')) {
+    productManagementRecords.value = []
+    productManagementError.value = ''
+    return
+  }
+  productManagementLoading.value = true
+  productManagementError.value = ''
+  try {
+    productManagementRecords.value = await productManagementApi.listByTask(currentID)
+    void resolveProductManagementPreviewURLs(productManagementRecords.value)
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '读取产品管理状态失败' })
+  } finally {
+    productManagementLoading.value = false
+  }
+}
+
+function replaceProductManagementRecord(next: ProductManagementRecord): void {
+  const idx = productManagementRecords.value.findIndex((item) => item.id === next.id)
+  if (idx >= 0) {
+    productManagementRecords.value.splice(idx, 1, next)
+  }
+  void resolveProductManagementPreviewURLs([next])
+}
+
+async function reparseProductManagementImage(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceProductManagementRecord(await productManagementApi.reparseImage(record.id))
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '重新解析 ERP 图片失败' })
+  }
+}
+
+async function syncProductManagementRecord(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceProductManagementRecord(await productManagementApi.requestSync(record.id))
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '提交 ERP 同步失败' })
+  }
+}
+
+function formatProductManagementCost(record: ProductManagementRecord): string {
+  const value = record.cost_price
+  if (typeof value !== 'number' || value <= 0) return '成本待维护'
+  return `￥${value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
+}
+
+function productManagementPreviewURL(record: ProductManagementRecord): string {
+  return productManagementPreviewURLs.value[record.id] || directProductManagementPreviewURL(record.image_preview_url) || ''
+}
+
+async function resolveProductManagementPreviewURLs(items: ProductManagementRecord[]): Promise<void> {
+  const next = { ...productManagementPreviewURLs.value }
+  await Promise.all(
+    items.map(async (item) => {
+      const assetID = item.image_asset_id ?? productManagementAssetIDFromPreviewPath(item.image_preview_url)
+      const url = await resolveProductManagementAssetPreviewURL(assetID, item.image_preview_url)
+      if (url) next[item.id] = url
+      else delete next[item.id]
+    }),
+  )
+  productManagementPreviewURLs.value = next
+}
+
+async function resolveProductManagementAssetPreviewURL(assetID?: number | null, fallback?: string): Promise<string> {
+  const direct = directProductManagementPreviewURL(fallback)
+  if (direct) return direct
+  if (!assetID || assetID <= 0) return ''
+  const result = await fetchAssetPreviewMeta(String(assetID)).catch(() => null)
+  return result?.status === 'ok' && result.displayUrl ? result.displayUrl : ''
+}
+
+function directProductManagementPreviewURL(raw?: string): string {
+  const value = String(raw ?? '').trim()
+  if (!value) return ''
+  if (/^(https?:|data:|blob:)/i.test(value)) return value
+  return ''
+}
+
+function productManagementAssetIDFromPreviewPath(raw?: string): number | undefined {
+  const match = String(raw ?? '').match(/\/v1\/assets\/(\d+)\/preview\b/)
+  if (!match) return undefined
+  const id = Number(match[1])
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined
+}
+
+function productManagementSyncStatusLabel(status: ProductSyncStatus): string {
+  const labels: Record<ProductSyncStatus, string> = {
+    pending_sync: '待同步',
+    queued: '已入队',
+    syncing: '同步中',
+    synced: '已同步',
+    failed: '同步失败',
+    cooling_down: '冷却中',
+  }
+  return labels[status] ?? status
+}
+
 async function loadTask() {
   if (!taskId.value) return
 
@@ -2621,9 +2815,11 @@ async function loadTask() {
   if (taskId.value && !isTempId.value) {
     void loadOpsReferenceBackendAssets()
     void loadTaskPredictions()
+    void loadProductManagementRecords()
   } else {
     opsReferenceBackendAssets.value = []
     taskPredictionSuggestions.value = []
+    productManagementRecords.value = []
   }
 }
 
@@ -4200,6 +4396,92 @@ watch(taskId, (id) => {
 .detail-v3-info-card--cost {
   background: #fffaf0;
   border-color: #ffedd4;
+}
+.detail-product-management-card {
+  grid-column: 1 / -1;
+  background: #f8fbff;
+  border-color: #bfdbfe;
+  color: #111827;
+}
+.detail-product-management-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.detail-product-management-head strong {
+  display: block;
+  color: #111827;
+  font-size: 0.92rem;
+}
+.detail-product-management-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.65rem;
+}
+.detail-product-management-item {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.55rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.875rem;
+  background: #ffffff;
+}
+.detail-product-management-preview {
+  display: grid;
+  place-items: center;
+  width: 4rem;
+  height: 3rem;
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.625rem;
+  color: #dc2626;
+  background: #f8fafc;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.detail-product-management-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #ffffff;
+}
+.detail-product-management-preview.is-missing {
+  border-style: dashed;
+}
+.detail-product-management-meta {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+.detail-product-management-meta strong {
+  overflow: hidden;
+  color: #111827;
+  font-family: "SF Mono", "IBM Plex Mono", Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-product-management-meta small {
+  overflow: hidden;
+  color: #4b5563;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-product-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+.detail-product-management-actions .detail-v3-link-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 .detail-v3-erp-retry-row {
   margin-top: 0.75rem;

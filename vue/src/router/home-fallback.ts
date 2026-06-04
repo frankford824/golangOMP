@@ -24,6 +24,7 @@ interface HomeRouteCandidate {
 const HOME_ROUTE_CANDIDATES: HomeRouteCandidate[] = [
   { name: 'Dashboard', menuKey: 'dashboard' },
   { name: 'TaskList', menuKey: 'task_list' },
+  { name: 'ProductManagement', menuKey: 'product_management' },
   { name: 'AssetsIndex', menuKey: 'resource_management' },
   { name: 'DataCenter', menuKey: 'report_center' },
   { name: 'DataCenter', menuKey: 'export_center' },
@@ -32,7 +33,6 @@ const HOME_ROUTE_CANDIDATES: HomeRouteCandidate[] = [
   { name: 'Finance', menuKey: 'finance' },
   { name: 'DataCenter', menuKey: 'kpi' },
   { name: 'RuleConfig', menuKey: 'rules' },
-  { name: 'OrgIndex', menuKey: 'org_admin' },
   { name: 'UserManagement', menuKey: 'user_admin' },
 ]
 

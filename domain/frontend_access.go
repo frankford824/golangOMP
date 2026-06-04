@@ -336,8 +336,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"super_admin"},
 			Scopes:  []string{"view_all", "identity_admin", "organization_admin", "role_admin"},
-			Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center"},
-			Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"},
+			Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"},
+			Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"},
 			Actions: []string{"user.manage", "org.manage", "role.assign", "permission_logs.read"},
 		}
 	case RoleHRAdmin:
@@ -402,8 +402,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"design_director"},
 			Scopes:  []string{"design_department_scope"},
-			Menus:   []string{"design_workspace", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin"},
-			Pages:   []string{"design_workspace", "task_list", "department_users", "task_assets", "asset_detail", "assets_index", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"},
+			Menus:   []string{"design_workspace", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "user_admin"},
+			Pages:   []string{"design_workspace", "task_list", "department_users", "task_assets", "asset_detail", "assets_index", "product_management", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"},
 			Actions: []string{"design.review.read", "department.users.read", "task.list"},
 		}
 	case RoleDesignReviewer:
@@ -418,16 +418,16 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"customization_reviewer"},
 			Scopes:  []string{"customization_review_scope", "department:审核部"},
-			Menus:   []string{"task_list", "customization_management", "audit_queue", "resource_management"},
-			Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "audit_workspace"},
+			Menus:   []string{"task_list", "customization_management", "audit_queue", "resource_management", "product_management"},
+			Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "audit_workspace"},
 			Actions: []string{"task.customization.review", "task.customization.effect_review", "task.list", "warehouse_lane_filter"},
 		}
 	case RoleCustomizationOperator:
 		return FrontendAccessSpec{
 			Roles:   []string{"customization_operator"},
 			Scopes:  []string{"customization_workspace", "department:定制美工部"},
-			Menus:   []string{"design_workspace", "task_list", "resource_management"},
-			Pages:   []string{"design_workspace", "task_list", "my_tasks", "task_assets", "asset_detail", "assets_index"},
+			Menus:   []string{"design_workspace", "task_list", "resource_management", "product_management"},
+			Pages:   []string{"design_workspace", "task_list", "my_tasks", "task_assets", "asset_detail", "assets_index", "product_management"},
 			Actions: []string{"task.customization.submit", "task.customization.transfer", "task.asset_upload", "task.list", "warehouse_lane_filter"},
 		}
 	case RoleMember:
@@ -450,48 +450,48 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"admin"},
 			Scopes:  []string{"view_all", "identity_admin"},
-			Menus:   []string{"user_admin", "logs_center"},
-			Pages:   []string{"admin_users", "admin_permission_logs", "admin_operation_logs"},
+			Menus:   []string{"user_admin", "logs_center", "product_management"},
+			Pages:   []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"},
 			Actions: []string{"user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"},
 		}
 	case RoleOps:
 		return FrontendAccessSpec{
 			Roles:   []string{"ops"},
 			Scopes:  []string{"workflow_ops"},
-			Menus:   []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "resource_management", "customization_management"},
-			Pages:   []string{"task_board", "task_list", "task_create", "assets_index", "task_assets", "asset_detail", "customization_jobs", "customization_job_detail"},
+			Menus:   []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "customization_management"},
+			Pages:   []string{"task_board", "task_list", "task_create", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"},
 			Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"},
 		}
 	case RoleDesigner:
 		return FrontendAccessSpec{
 			Roles:   []string{"designer"},
 			Scopes:  []string{"design_workspace"},
-			Menus:   []string{"design_workspace", "task_list", "resource_management"},
-			Pages:   []string{"design_workspace", "task_list", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail"},
+			Menus:   []string{"design_workspace", "task_list", "resource_management", "product_management"},
+			Pages:   []string{"design_workspace", "task_list", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail", "product_management"},
 			Actions: []string{"task.design_submit", "task.asset_upload", "task.list"},
 		}
 	case RoleAuditA:
 		return FrontendAccessSpec{
 			Roles:   []string{"audit_a"},
 			Scopes:  []string{"audit_workspace"},
-			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management"},
-			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"},
+			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management", "product_management"},
+			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail", "product_management"},
 			Actions: []string{"task.audit.claim", "task.audit.review", "task.asset_upload", "task.list"},
 		}
 	case RoleAuditB:
 		return FrontendAccessSpec{
 			Roles:   []string{"audit_b"},
 			Scopes:  []string{"audit_workspace"},
-			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management"},
-			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail"},
+			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management", "product_management"},
+			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail", "product_management"},
 			Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.asset_upload", "task.list"},
 		}
 	case RoleWarehouse:
 		return FrontendAccessSpec{
 			Roles:   []string{"warehouse"},
 			Scopes:  []string{"warehouse_workspace"},
-			Menus:   []string{"warehouse_receive", "warehouse_processing", "resource_management", "export_center"},
-			Pages:   []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail"},
+			Menus:   []string{"warehouse_receive", "warehouse_processing", "resource_management", "product_management", "export_center"},
+			Pages:   []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"},
 			Actions: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"},
 		}
 	case RoleOutsource:
@@ -506,8 +506,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"erp"},
 			Scopes:  []string{"erp_internal"},
-			Menus:   []string{"integration_center"},
-			Pages:   []string{"erp_sync_console"},
+			Menus:   []string{"integration_center", "product_management"},
+			Pages:   []string{"erp_sync_console", "product_management"},
 			Actions: []string{"erp.sync"},
 		}
 	default:

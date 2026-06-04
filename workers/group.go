@@ -17,6 +17,7 @@ type Group struct {
 	rdb         *redis.Client
 	logger      *zap.Logger
 	erpSyncSvc  service.ERPSyncService
+	productMgmt service.ProductManagementService
 	erpEnabled  bool
 	erpInterval time.Duration
 }
@@ -26,6 +27,7 @@ func NewGroup(
 	rdb *redis.Client,
 	logger *zap.Logger,
 	erpSyncSvc service.ERPSyncService,
+	productMgmt service.ProductManagementService,
 	erpEnabled bool,
 	erpInterval time.Duration,
 ) *Group {
@@ -34,6 +36,7 @@ func NewGroup(
 		rdb:         rdb,
 		logger:      logger,
 		erpSyncSvc:  erpSyncSvc,
+		productMgmt: productMgmt,
 		erpEnabled:  erpEnabled,
 		erpInterval: erpInterval,
 	}
@@ -47,5 +50,8 @@ func (g *Group) Start(ctx context.Context) {
 	go NewEventDispatcher(g.db, g.rdb, g.logger).Run(ctx)
 	if g.erpEnabled && g.erpSyncSvc != nil {
 		go NewERPSyncWorker(g.erpSyncSvc, g.logger, g.erpInterval).Run(ctx)
+	}
+	if g.productMgmt != nil {
+		go NewProductManagementSyncWorker(g.productMgmt, g.logger, 15*time.Second, 10).Run(ctx)
 	}
 }
