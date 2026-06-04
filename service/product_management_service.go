@@ -258,6 +258,7 @@ func (s *productManagementService) syncRecordToERP(ctx context.Context, record *
 		return appErr
 	}
 	productName := firstNonEmptyString(strings.TrimSpace(record.ProductName), strings.TrimSpace(record.SKUCode))
+	shortName := productManagementERPShortName(productName, record.ProductIID, record.SKUCode)
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        strings.TrimSpace(record.SKUCode),
 		SKUID:            strings.TrimSpace(record.SKUCode),
@@ -265,8 +266,8 @@ func (s *productManagementService) syncRecordToERP(ctx context.Context, record *
 		IID:              strings.TrimSpace(record.ProductIID),
 		Name:             productName,
 		ProductName:      productName,
-		ShortName:        productName,
-		ProductShortName: productName,
+		ShortName:        shortName,
+		ProductShortName: shortName,
 		Pic:              imageURL,
 		PicBig:           imageURL,
 		SKUPic:           imageURL,
@@ -283,6 +284,14 @@ func (s *productManagementService) syncRecordToERP(ctx context.Context, record *
 	}
 	_, appErr = s.erpBridge.UpsertProduct(ctx, payload)
 	return appErr
+}
+
+func productManagementERPShortName(productName, productIID, skuCode string) string {
+	shortName := generateERPShortName("product_management_image_sync", "", productName, productIID)
+	if strings.TrimSpace(shortName) == "" {
+		shortName = firstNonEmptyString(productName, skuCode)
+	}
+	return truncateERPShortName(shortName, ERPProductShortNameMaxBytes)
 }
 
 func (s *productManagementService) resolveERPImageURL(ctx context.Context, record *domain.ProductManagementRecord) (string, *domain.AppError) {

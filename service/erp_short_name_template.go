@@ -5,7 +5,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
+
+const ERPProductShortNameMaxBytes = 40
 
 type erpShortNameRuleConfig struct {
 	Enabled         bool              `json:"enabled"`
@@ -53,10 +56,33 @@ func generateERPShortName(scene, templateKey, name, iID string) string {
 	if maxLength <= 0 {
 		maxLength = 32
 	}
-	if len(shortName) > maxLength {
-		shortName = strings.TrimSpace(shortName[:maxLength])
+	if maxLength > ERPProductShortNameMaxBytes {
+		maxLength = ERPProductShortNameMaxBytes
 	}
-	return shortName
+	return truncateERPShortName(shortName, maxLength)
+}
+
+func erpProductShortNameTooLong(value string) bool {
+	return len(strings.TrimSpace(value)) > ERPProductShortNameMaxBytes
+}
+
+func truncateERPShortName(value string, maxBytes int) string {
+	value = strings.TrimSpace(value)
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	cut := 0
+	for cut < len(value) {
+		_, size := utf8.DecodeRuneInString(value[cut:])
+		if size <= 0 || cut+size > maxBytes {
+			break
+		}
+		cut += size
+	}
+	return strings.TrimSpace(value[:cut])
 }
 
 func loadERPShortNameRuleConfig() erpShortNameRuleConfig {

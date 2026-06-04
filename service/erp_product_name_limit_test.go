@@ -3,6 +3,7 @@ package service
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"workflow/domain"
 )
@@ -24,6 +25,32 @@ func TestValidateERPProductUpsertNameLength(t *testing.T) {
 	}
 	if got := details["code"]; got != "erp_product_name_too_long" {
 		t.Fatalf("code = %#v, want erp_product_name_too_long", got)
+	}
+
+	longShortName := strings.Repeat("短", 14)
+	appErr = validateERPProductUpsertNameLength(domain.ERPProductUpsertPayload{Name: "正常产品", ShortName: longShortName})
+	if appErr == nil {
+		t.Fatal("expected long ERP product short name to be rejected")
+	}
+	details, ok = appErr.Details.(map[string]interface{})
+	if !ok {
+		t.Fatalf("details = %#v, want map", appErr.Details)
+	}
+	if got := details["code"]; got != "erp_product_short_name_too_long" {
+		t.Fatalf("code = %#v, want erp_product_short_name_too_long", got)
+	}
+}
+
+func TestTruncateERPShortNameIsRuneSafe(t *testing.T) {
+	got := truncateERPShortName(strings.Repeat("中", 20), ERPProductShortNameMaxBytes)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncateERPShortName() returned invalid UTF-8: %q", got)
+	}
+	if len(got) > ERPProductShortNameMaxBytes {
+		t.Fatalf("byte length = %d, want <= %d", len(got), ERPProductShortNameMaxBytes)
+	}
+	if utf8.RuneCountInString(got) != 13 {
+		t.Fatalf("rune length = %d, want 13", utf8.RuneCountInString(got))
 	}
 }
 
