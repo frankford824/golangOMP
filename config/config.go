@@ -24,6 +24,7 @@ type Config struct {
 	ERP            ERPSyncConfig
 	ERPBridge      ERPBridgeConfig
 	ERPRemote      ERPRemoteConfig
+	ERPImageProxy  ERPImageProxyConfig
 	UploadService  UploadServiceConfig
 	OSSDirect      OSSDirectConfig
 	ExternalAssets ExternalAssetsConfig
@@ -142,6 +143,12 @@ type ERPRemoteConfig struct {
 	FallbackToLocalOnError   bool
 }
 
+type ERPImageProxyConfig struct {
+	PublicBaseURL string
+	SigningSecret string
+	TokenTTL      time.Duration
+}
+
 type UploadServiceConfig struct {
 	Enabled                 bool
 	BaseURL                 string
@@ -222,6 +229,18 @@ func Load() (*Config, error) {
 			HeaderSignature:          getEnv("ERP_REMOTE_HEADER_SIGNATURE", "X-Signature"),
 			SignatureIncludeBodyHash: mustParseBool(getEnv("ERP_REMOTE_SIGNATURE_INCLUDE_BODY_HASH", "true")),
 			FallbackToLocalOnError:   mustParseBool(getEnv("ERP_REMOTE_FALLBACK_LOCAL_ON_ERROR", "true")),
+		},
+		ERPImageProxy: ERPImageProxyConfig{
+			PublicBaseURL: getEnv("ERP_IMAGE_PROXY_PUBLIC_BASE_URL", "https://yongbo.cloud"),
+			SigningSecret: firstNonEmptyEnv(
+				"ERP_IMAGE_PROXY_SIGNING_SECRET",
+				"PRODUCT_MANAGEMENT_IMAGE_PROXY_SIGNING_SECRET",
+				"UPLOAD_SERVICE_INTERNAL_TOKEN",
+				"UPLOAD_SERVICE_AUTH_TOKEN",
+				"OSS_ACCESS_KEY_SECRET",
+				"ERP_REMOTE_APP_SECRET",
+			),
+			TokenTTL: mustParseDuration(getEnv("ERP_IMAGE_PROXY_TOKEN_TTL", "8760h")),
 		},
 		UploadService: UploadServiceConfig{
 			Enabled:                 mustParseBool(getEnv("UPLOAD_SERVICE_ENABLED", "true")),

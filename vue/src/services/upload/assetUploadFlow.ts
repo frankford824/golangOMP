@@ -32,6 +32,7 @@ export interface TaskAssetUploadFlowOptions {
 
 export interface ReferenceUploadFlowOptions {
   taskId?: string | null
+  assetId?: string | number
   targetSkuCode?: string
   /** P 图需求明细 ID；仅在有 taskId 的 upload-session 路径下生效 */
   retouchRequirementId?: number
@@ -170,6 +171,8 @@ export async function prepareTaskAssetUploadSession(
     remark,
     source_asset_id: intent.source_asset_id,
     target_sku_code: intent.target_sku_code,
+    owner_module_key: intent.owner_module_key,
+    upload_policy: intent.upload_policy,
   }
   const retouchRequirementId = resolveRetouchRequirementIdForPayload(intent, options?.retouchRequirementId)
   if (retouchRequirementId != null) {
@@ -447,6 +450,7 @@ export async function uploadReferenceFileRef(
     file,
     {
       asset_kind: 'reference',
+      asset_id: options?.assetId,
       target_sku_code: options?.targetSkuCode,
       owner_module_key: options?.ownerModuleKey,
       upload_policy: options?.uploadPolicy,

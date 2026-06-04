@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   dedupeReferenceFileRefs,
   filterTaskLevelBackendReferenceAssets,
+  mergeReferenceFileRefsPreferBackend,
   referenceFileRefsFromBackendReferenceAssets,
 } from '@/domain/mappers/reference-file-refs'
 import type { BackendAsset } from '@/services/apiTypes'
@@ -138,5 +139,39 @@ describe('referenceFileRefsFromBackendReferenceAssets', () => {
     const fromAssets = referenceFileRefsFromBackendReferenceAssets(assets)
     expect(fromAssets).toHaveLength(1)
     expect(fromAssets[0]?.filename).toBe('task.png')
+  })
+})
+
+describe('mergeReferenceFileRefsPreferBackend', () => {
+  it('uses backend current reference assets as authoritative when present', () => {
+    const legacy: ReferenceFileRef = {
+      asset_id: 'precreate-ref',
+      ref_id: 'precreate-ref',
+      download_url: '/v1/assets/files/tasks/task-create-reference/old.png',
+      filename: 'old.png',
+    }
+    const current: ReferenceFileRef = {
+      asset_id: '4198',
+      download_url: '/v1/assets/files/tasks/RW-1/assets/AST-0001/v2/reference/new.png',
+      filename: 'new.png',
+    }
+
+    const merged = mergeReferenceFileRefsPreferBackend([legacy], [current])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]?.filename).toBe('new.png')
+  })
+
+  it('falls back to legacy refs when no backend reference asset exists', () => {
+    const legacy: ReferenceFileRef = {
+      asset_id: 'precreate-ref',
+      download_url: '/v1/assets/files/tasks/task-create-reference/old.png',
+      filename: 'old.png',
+    }
+
+    const merged = mergeReferenceFileRefsPreferBackend([legacy], [])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]?.filename).toBe('old.png')
   })
 })

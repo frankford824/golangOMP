@@ -31,6 +31,7 @@ type productManagementService struct {
 	erpBridge    ERPBridgeService
 	ossDirect    *OSSDirectService
 	uploadClient UploadServiceClient
+	imageProxy   *ERPImageProxySigner
 	now          func() time.Time
 	refreshEvery time.Duration
 	refreshMu    sync.Mutex
@@ -64,6 +65,12 @@ func WithProductManagementAssetURLServices(ossDirect *OSSDirectService, uploadCl
 	return func(s *productManagementService) {
 		s.ossDirect = ossDirect
 		s.uploadClient = uploadClient
+	}
+}
+
+func WithProductManagementERPImageProxy(imageProxy *ERPImageProxySigner) ProductManagementServiceOption {
+	return func(s *productManagementService) {
+		s.imageProxy = imageProxy
 	}
 }
 
@@ -282,7 +289,13 @@ func (s *productManagementService) resolveERPImageURL(ctx context.Context, recor
 	if record == nil || record.ImageAssetID == nil || *record.ImageAssetID <= 0 {
 		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片待补充，无法同步 ERP", nil)
 	}
-	row, err := s.assetSearch.GetCurrentByAssetID(ctx, *record.ImageAssetID)
+	var row *repo.TaskAssetSearchRow
+	var err error
+	if record.ImageAssetVersionID != nil && *record.ImageAssetVersionID > 0 {
+		row, err = s.assetSearch.GetVersion(ctx, *record.ImageAssetID, *record.ImageAssetVersionID)
+	} else {
+		row, err = s.assetSearch.GetCurrentByAssetID(ctx, *record.ImageAssetID)
+	}
 	if err != nil {
 		return "", infraAppError("get product management erp image asset", err)
 	}
@@ -303,19 +316,32 @@ func (s *productManagementService) resolveERPImageURL(ctx context.Context, recor
 	if isAbsoluteHTTPURL(storageKey) {
 		return storageKey, nil
 	}
+	if s.imageProxy != nil {
+		if proxyURL := s.imageProxy.BuildImageURL(asset); proxyURL != nil && isAbsoluteHTTPURL(*proxyURL) {
+			return strings.TrimSpace(*proxyURL), nil
+		}
+	}
 	filename := strings.TrimSpace(asset.FileName)
 	if asset.OriginalName != nil && strings.TrimSpace(*asset.OriginalName) != "" {
 		filename = strings.TrimSpace(*asset.OriginalName)
 	}
+	ossSignedURLTooLong := false
 	if s.ossDirect != nil && s.ossDirect.Enabled() {
 		if info := s.ossDirect.PresignDownloadURLWithFilename(storageKey, filename); info != nil && isAbsoluteHTTPURL(info.DownloadURL) {
-			return strings.TrimSpace(info.DownloadURL), nil
+			signedURL := strings.TrimSpace(info.DownloadURL)
+			if len(signedURL) <= 300 {
+				return signedURL, nil
+			}
+			ossSignedURLTooLong = true
 		}
 	}
 	if s.uploadClient != nil {
 		if directURL := s.uploadClient.BuildBrowserFileURL(storageKey); directURL != nil && isAbsoluteHTTPURL(*directURL) {
 			return strings.TrimSpace(*directURL), nil
 		}
+	}
+	if ossSignedURLTooLong {
+		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片地址超过聚水潭 300 字符限制，请启用 ERP 图片短链代理", nil)
 	}
 	return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "缺少可供 ERP 拉取的公网图片地址配置", nil)
 }

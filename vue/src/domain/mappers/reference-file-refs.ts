@@ -93,6 +93,18 @@ export function filterTaskLevelBackendReferenceAssets(assets: BackendAsset[]): B
   return assets.filter((asset) => readRetouchRequirementId(asset) == null)
 }
 
+export function isTaskLevelBackendReferenceAsset(asset: BackendAsset): boolean {
+  return readRetouchRequirementId(asset) == null && backendReferenceAssetKind(asset) === 'reference'
+}
+
+export function mergeReferenceFileRefsPreferBackend(
+  legacyRefs: ReferenceFileRef[],
+  backendRefs: ReferenceFileRef[],
+): ReferenceFileRef[] {
+  if (backendRefs.length > 0) return dedupeReferenceFileRefs(backendRefs)
+  return dedupeReferenceFileRefs(legacyRefs)
+}
+
 /**
  * Map GET /v1/tasks/{id}/assets reference rows into ReferenceFileRef for ops detail display.
  */

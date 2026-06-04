@@ -242,6 +242,44 @@ describe('prepareTaskAssetUploadSession — transport fallback', () => {
     )
   })
 
+  it('passes replace metadata when replacing an existing reference asset', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(assetsApi.createAssetUploadSession).mockResolvedValue({
+      data: {
+        data: {
+          session: { id: 'sess-reference-replace' },
+          oss_direct: {
+            upload_strategy: 'single_part',
+            upload_url: 'https://oss.example.com/upload',
+          },
+        },
+      },
+    } as never)
+
+    await prepareTaskAssetUploadSession(
+      '1093',
+      fakeFile('new-ref.png'),
+      {
+        asset_kind: 'reference',
+        asset_id: '4198',
+        owner_module_key: 'basic_info',
+        upload_policy: 'replace',
+        remark: 'new-ref.png',
+      },
+    )
+
+    expect(assetsApi.createAssetUploadSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task_id: 1093,
+        asset_kind: 'reference',
+        asset_id: '4198',
+        owner_module_key: 'basic_info',
+        upload_policy: 'replace',
+      }),
+      undefined,
+    )
+  })
+
   it('fx3: both absent -> throws user-friendly error with upload_transport_unavailable', async () => {
     vi.mocked(assetsApi.createAssetUploadSession).mockResolvedValue({
       data: {

@@ -28,6 +28,8 @@ type CreateTaskAssetUploadSessionParams struct {
 	FileHash             string
 	Remark               string
 	TargetSKUCode        string
+	OwnerModuleKey       string
+	UploadPolicy         string
 	RetouchRequirementID *int64
 }
 
@@ -1158,6 +1160,8 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 			"asset_id":               params.AssetID,
 			"asset_type":             string(params.AssetType),
 			"target_sku_code":        params.TargetSKUCode,
+			"owner_module_key":       strings.TrimSpace(params.OwnerModuleKey),
+			"upload_policy":          strings.TrimSpace(params.UploadPolicy),
 			"retouch_requirement_id": params.RetouchRequirementID,
 			"filename":               request.FileName,
 			"expected_size":          request.ExpectedSize,

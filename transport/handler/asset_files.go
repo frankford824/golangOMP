@@ -2,15 +2,19 @@ package handler
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"workflow/domain"
+	"workflow/repo"
 	"workflow/service"
 )
 
@@ -21,6 +25,8 @@ type AssetFilesHandler struct {
 	internalToken        string
 	storageProvider      string
 	ossPresigner         assetFilesOSSPresigner
+	erpImageAssetRepo    repo.TaskAssetRepo
+	erpImageSigner       *service.ERPImageProxySigner
 	httpClient           *http.Client
 	logger               *zap.Logger
 }
@@ -46,6 +52,14 @@ func NewAssetFilesHandler(uploadServiceBaseURL, internalToken, storageProvider s
 		httpClient:           &http.Client{},
 		logger:               logger.Named("asset_files_proxy"),
 	}
+}
+
+func (h *AssetFilesHandler) SetERPImageProxy(assetRepo repo.TaskAssetRepo, signer *service.ERPImageProxySigner) {
+	if h == nil {
+		return
+	}
+	h.erpImageAssetRepo = assetRepo
+	h.erpImageSigner = signer
 }
 
 // ServeFile handles GET /v1/assets/files/:path where path is the OSS object key or file id.
@@ -170,6 +184,59 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 	)
 }
 
+func (h *AssetFilesHandler) ServeERPProductImage(c *gin.Context) {
+	if h == nil || h.erpImageAssetRepo == nil || h.erpImageSigner == nil || h.ossPresigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "erp image proxy is not configured"})
+		return
+	}
+	versionID, err := strconv.ParseInt(strings.TrimSpace(c.Param("version_id")), 10, 64)
+	if err != nil || versionID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset version id"})
+		return
+	}
+	asset, err := h.erpImageAssetRepo.GetByID(c.Request.Context(), versionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "asset version not found"})
+			return
+		}
+		h.logger.Warn("erp_image_proxy_asset_lookup_failed",
+			zap.Int64("version_id", versionID),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load asset version"})
+		return
+	}
+	if !isERPProductImageProxyAsset(asset) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "asset version is not a supported erp image"})
+		return
+	}
+	if !h.erpImageSigner.Verify(asset, c.Query("exp"), c.Query("sig")) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired erp image signature"})
+		return
+	}
+	storageKey := erpProductImageProxyStorageKey(asset)
+	if storageKey == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "asset storage key is missing"})
+		return
+	}
+	if strings.HasPrefix(storageKey, "http://") || strings.HasPrefix(storageKey, "https://") {
+		c.Redirect(http.StatusFound, storageKey)
+		return
+	}
+	info := h.ossPresigner.PresignPreviewURL(storageKey)
+	if info == nil || strings.TrimSpace(info.DownloadURL) == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to sign erp image"})
+		return
+	}
+	h.logger.Info("erp_image_proxy_redirect",
+		zap.Int64("version_id", versionID),
+		zap.String("storage_key", storageKey),
+	)
+	c.Header("Cache-Control", "private, max-age=300")
+	c.Redirect(http.StatusFound, strings.TrimSpace(info.DownloadURL))
+}
+
 func (h *AssetFilesHandler) redirectToOSSDirect(c *gin.Context, storageKey, downloadFilename, traceID string) bool {
 	if h == nil || h.ossPresigner == nil {
 		return false
@@ -187,6 +254,42 @@ func (h *AssetFilesHandler) redirectToOSSDirect(c *gin.Context, storageKey, down
 	)
 	c.Redirect(http.StatusFound, strings.TrimSpace(info.DownloadURL))
 	return true
+}
+
+func isERPProductImageProxyAsset(asset *domain.TaskAsset) bool {
+	if asset == nil || asset.DeletedAt != nil || asset.CleanedAt != nil {
+		return false
+	}
+	mimeType := ""
+	if asset.MimeType != nil {
+		mimeType = strings.ToLower(strings.TrimSpace(*asset.MimeType))
+	}
+	switch mimeType {
+	case "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif":
+		return true
+	case "image/vnd.adobe.photoshop", "image/tiff", "image/heic", "image/heif", "image/avif":
+		return false
+	}
+	filename := strings.ToLower(strings.TrimSpace(asset.FileName))
+	for _, suffix := range []string{".jpg", ".jpeg", ".png", ".webp", ".gif"} {
+		if strings.HasSuffix(filename, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func erpProductImageProxyStorageKey(asset *domain.TaskAsset) string {
+	if asset == nil {
+		return ""
+	}
+	if asset.StorageKey != nil && strings.TrimSpace(*asset.StorageKey) != "" {
+		return strings.TrimSpace(*asset.StorageKey)
+	}
+	if asset.StorageRef != nil {
+		return strings.TrimSpace(asset.StorageRef.RefKey)
+	}
+	return ""
 }
 
 type assetFilesOSSDownloadPresigner interface {

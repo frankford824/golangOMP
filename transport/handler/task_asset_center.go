@@ -45,6 +45,8 @@ type createTaskAssetUploadSessionReq struct {
 	FileHash             string `json:"file_hash"`
 	Remark               string `json:"remark"`
 	TargetSKUCode        string `json:"target_sku_code"`
+	OwnerModuleKey       string `json:"owner_module_key"`
+	UploadPolicy         string `json:"upload_policy"`
 	RetouchRequirementID *int64 `json:"retouch_requirement_id"`
 }
 
@@ -678,6 +680,8 @@ func (h *TaskAssetCenterHandler) createUploadSessionWithRequest(c *gin.Context, 
 		FileHash:             strings.TrimSpace(req.FileHash),
 		Remark:               strings.TrimSpace(req.Remark),
 		TargetSKUCode:        strings.TrimSpace(req.TargetSKUCode),
+		OwnerModuleKey:       strings.TrimSpace(req.OwnerModuleKey),
+		UploadPolicy:         strings.TrimSpace(req.UploadPolicy),
 		RetouchRequirementID: parseOptionalPositiveInt64(req.RetouchRequirementID, c.Query("retouch_requirement_id")),
 	}
 	resolvedMode := mode

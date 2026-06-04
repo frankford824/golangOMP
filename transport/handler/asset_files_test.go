@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
 	"workflow/domain"
+	"workflow/repo"
 	"workflow/service"
 )
 
@@ -178,6 +181,112 @@ func (s assetFilesPresignerStub) PresignPreviewURL(objectKey string) *service.OS
 		return &service.OSSDirectDownloadInfo{DownloadURL: url}
 	}
 	return nil
+}
+
+func TestAssetFilesHandlerServeERPProductImageRedirectsWithValidSignature(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	storageKey := "tasks/RW-20260603-A-001080/assets/AST-0005/v1/delivery/image.jpg"
+	mimeType := "image/jpeg"
+	asset := &domain.TaskAsset{ID: 4395, TaskID: 1080, FileName: "image.jpg", MimeType: &mimeType, StorageKey: &storageKey}
+	signer := service.NewERPImageProxySigner(service.ERPImageProxyConfig{
+		PublicBaseURL: "https://yongbo.cloud",
+		SigningSecret: "proxy-secret",
+		TokenTTL:      time.Hour,
+	})
+	imageURL := signer.BuildImageURL(asset)
+	if imageURL == nil {
+		t.Fatal("BuildImageURL() = nil")
+	}
+	parsed, err := url.Parse(*imageURL)
+	if err != nil {
+		t.Fatalf("parse image url: %v", err)
+	}
+
+	router := gin.New()
+	h := NewAssetFilesHandler("http://upload.invalid", "", "oss", zap.NewNop(), assetFilesPresignerStub{
+		urls: map[string]string{storageKey: "https://oss.example/object.jpg?OSSAccessKeyId=1"},
+	})
+	h.SetERPImageProxy(assetFilesTaskAssetRepoStub{assets: map[int64]*domain.TaskAsset{4395: asset}}, signer)
+	router.GET(service.ERPImageProxyPathPrefix+"/:version_id", h.ServeERPProductImage)
+
+	req := httptest.NewRequest(http.MethodGet, parsed.RequestURI(), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "https://oss.example/object.jpg?OSSAccessKeyId=1" {
+		t.Fatalf("Location = %q", got)
+	}
+}
+
+func TestAssetFilesHandlerServeERPProductImageRejectsInvalidSignature(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	storageKey := "tasks/RW-20260603-A-001080/assets/AST-0005/v1/delivery/image.jpg"
+	mimeType := "image/jpeg"
+	asset := &domain.TaskAsset{ID: 4395, TaskID: 1080, FileName: "image.jpg", MimeType: &mimeType, StorageKey: &storageKey}
+	signer := service.NewERPImageProxySigner(service.ERPImageProxyConfig{
+		PublicBaseURL: "https://yongbo.cloud",
+		SigningSecret: "proxy-secret",
+		TokenTTL:      time.Hour,
+	})
+	imageURL := signer.BuildImageURL(asset)
+	if imageURL == nil {
+		t.Fatal("BuildImageURL() = nil")
+	}
+	parsed, err := url.Parse(*imageURL)
+	if err != nil {
+		t.Fatalf("parse image url: %v", err)
+	}
+	query := parsed.Query()
+	query.Set("sig", "bad-signature")
+	parsed.RawQuery = query.Encode()
+
+	router := gin.New()
+	h := NewAssetFilesHandler("http://upload.invalid", "", "oss", zap.NewNop(), assetFilesPresignerStub{
+		urls: map[string]string{storageKey: "https://oss.example/object.jpg?OSSAccessKeyId=1"},
+	})
+	h.SetERPImageProxy(assetFilesTaskAssetRepoStub{assets: map[int64]*domain.TaskAsset{4395: asset}}, signer)
+	router.GET(service.ERPImageProxyPathPrefix+"/:version_id", h.ServeERPProductImage)
+
+	req := httptest.NewRequest(http.MethodGet, parsed.RequestURI(), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+type assetFilesTaskAssetRepoStub struct {
+	assets map[int64]*domain.TaskAsset
+}
+
+func (r assetFilesTaskAssetRepoStub) Create(context.Context, repo.Tx, *domain.TaskAsset) (int64, error) {
+	return 0, nil
+}
+
+func (r assetFilesTaskAssetRepoStub) GetByID(_ context.Context, id int64) (*domain.TaskAsset, error) {
+	return r.assets[id], nil
+}
+
+func (r assetFilesTaskAssetRepoStub) ListByTaskID(context.Context, int64) ([]*domain.TaskAsset, error) {
+	return nil, nil
+}
+
+func (r assetFilesTaskAssetRepoStub) ListByAssetID(context.Context, int64) ([]*domain.TaskAsset, error) {
+	return nil, nil
+}
+
+func (r assetFilesTaskAssetRepoStub) NextVersionNo(context.Context, repo.Tx, int64) (int, error) {
+	return 0, nil
+}
+
+func (r assetFilesTaskAssetRepoStub) NextAssetVersionNo(context.Context, repo.Tx, int64) (int, error) {
+	return 0, nil
 }
 
 func TestAssetFilesHandlerServeFileEscapesStorageKeyPath(t *testing.T) {

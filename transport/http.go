@@ -108,6 +108,10 @@ func NewRouter(
 
 	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
 
+	if assetFilesH != nil {
+		v1.GET("/public/erp-product-images/:version_id", assetFilesH.ServeERPProductImage)
+	}
+
 	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH, notificationH)
 
 	v1.POST("/trace-events", access(v1, http.MethodPost, "/trace-events", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), userAdminH.RecordWorkflowTraceEvent)

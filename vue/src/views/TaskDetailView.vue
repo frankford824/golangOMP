@@ -1151,6 +1151,8 @@ import {
 } from '@/utils/filing-status'
 import {
   dedupeReferenceFileRefs,
+  isTaskLevelBackendReferenceAsset,
+  mergeReferenceFileRefsPreferBackend,
   referenceFileRefsFromBackendReferenceAssets,
 } from '@/domain/mappers/reference-file-refs'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
@@ -1655,6 +1657,14 @@ function referenceRefsToThumbItems(
 /** 任务详情 GET /v1/tasks/{id}/assets 中的 reference，用于合并运营侧顶部参考图展示 */
 const opsReferenceBackendAssets = ref<BackendAsset[]>([])
 
+function backendAssetID(asset: BackendAsset | undefined): string | undefined {
+  if (!asset) return undefined
+  const rec = asset as Record<string, unknown>
+  const raw = rec.asset_id ?? rec.assetId ?? asset.id
+  const id = String(raw ?? '').trim()
+  return id || undefined
+}
+
 function unwrapOpsReferenceBackendAssetList(data: unknown): BackendAsset[] {
   if (Array.isArray(data)) return data as BackendAsset[]
   if (data && typeof data === 'object') {
@@ -1689,7 +1699,18 @@ const motherTaskOpsReferenceRefs = computed((): ReferenceFileRef[] => {
   if (!detailTask) return []
   const legacyRefs = motherTaskReferenceRefsForOps(detailTask, isBatchTask.value)
   const assetRefs = referenceFileRefsFromBackendReferenceAssets(opsReferenceBackendAssets.value)
-  return dedupeReferenceFileRefs([...legacyRefs, ...assetRefs])
+  return mergeReferenceFileRefsPreferBackend(legacyRefs, assetRefs)
+})
+
+const taskLevelReferenceBackendAssets = computed(() =>
+  opsReferenceBackendAssets.value.filter(isTaskLevelBackendReferenceAsset),
+)
+
+const replaceableOpsReferenceAssetID = computed((): string | undefined => {
+  const assets = taskLevelReferenceBackendAssets.value
+  if (!assets.length) return undefined
+  if (isBatchTask.value && assets.length !== 1) return undefined
+  return backendAssetID(assets[0])
 })
 
 const detailReferenceLabel = computed(() => {
@@ -2466,10 +2487,16 @@ async function handleOpsReferenceFiles(files: FileList | File[]) {
 
   opsReferenceUploadStatus.value = '上传中...'
   try {
+    await loadOpsReferenceBackendAssets()
+    const replaceAssetId = validFiles.length === 1 ? replaceableOpsReferenceAssetID.value : undefined
     for (const file of validFiles) {
-      await uploadTaskReferenceFileViaAssetSession(currentTask.id, file)
+      await uploadTaskReferenceFileViaAssetSession(currentTask.id, file, {
+        assetId: replaceAssetId,
+        ownerModuleKey: 'basic_info',
+        uploadPolicy: replaceAssetId ? 'replace' : 'append_only',
+      })
     }
-    opsReferenceUploadStatus.value = '上传完成'
+    opsReferenceUploadStatus.value = replaceAssetId ? '参考图已替换' : '参考图已上传'
     await tasksStore.loadTaskById(currentTask.id)
     await loadOpsReferenceBackendAssets()
   } catch (err) {

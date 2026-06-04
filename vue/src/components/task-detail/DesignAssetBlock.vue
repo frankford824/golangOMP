@@ -273,6 +273,7 @@ import {
   taskHasSkuItemsForBatchUi,
 } from '@/domain/task-batch-assets'
 import { taskDesignerDisplayName } from '@/domain/task-actors'
+import { referenceFileRefDedupeKey } from '@/domain/mappers/reference-file-refs'
 
 const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
@@ -564,6 +565,7 @@ function pickDisplayUrl(v: BackendAssetVersion): string {
 }
 function refDisplayItem(v: BackendAssetVersion, asset: BackendAsset) {
   const rec = v as Record<string, unknown>
+  const assetRec = asset as Record<string, unknown>
   const previewOk = v.preview_available === true
   const mode = (v.download_mode ?? 'public') as string
   const publicUrl =
@@ -575,6 +577,7 @@ function refDisplayItem(v: BackendAssetVersion, asset: BackendAsset) {
         ? rec.original_filename
         : ''
   return {
+    assetId: String(assetRec.asset_id ?? assetRec.assetId ?? asset.id ?? '').trim(),
     url: pickDisplayUrl(v),
     lan_url: v.lan_url,
     tailscale_url: v.tailscale_url,
@@ -616,15 +619,27 @@ type RefPaneEntry =
   | { kind: 'legacy'; url: string; ref: ReferenceFileRef }
   | { kind: 'api'; item: ReturnType<typeof refDisplayItem> }
 
-/** legacy referenceFileRefs 在前，后端 reference 资产版本在后（与原先网格顺序一致） */
+/** 后端 current reference 优先；legacy reference_file_refs 只做历史兼容兜底。 */
 const referencePaneEntries = computed((): RefPaneEntry[] => {
   const out: RefPaneEntry[] = []
-  for (const refObj of currentReferenceRefs.value) {
-    const u = (typeof refObj.download_url === 'string' ? refObj.download_url : '').trim()
-    if (u) out.push({ kind: 'legacy', url: u, ref: refObj })
+  const seen = new Set<string>()
+  const pushEntry = (entry: RefPaneEntry, ref: ReferenceFileRef) => {
+    const key = referenceFileRefDedupeKey(ref, out.length)
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(entry)
   }
   for (const item of referenceDisplayList.value) {
-    out.push({ kind: 'api', item })
+    pushEntry(
+      { kind: 'api', item },
+      { asset_id: item.assetId || undefined, download_url: item.url, filename: item.fileName },
+    )
+  }
+  if (out.length === 0) {
+    for (const refObj of currentReferenceRefs.value) {
+      const u = (typeof refObj.download_url === 'string' ? refObj.download_url : '').trim()
+      if (u) pushEntry({ kind: 'legacy', url: u, ref: refObj }, refObj)
+    }
   }
   return out
 })

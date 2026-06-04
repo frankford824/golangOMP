@@ -3,6 +3,7 @@ package config
 import (
 	"sort"
 	"testing"
+	"time"
 )
 
 func TestLoadDefaultsERPBridgeToLoopback(t *testing.T) {
@@ -79,6 +80,46 @@ func TestLoadPrefersUploadServiceInternalToken(t *testing.T) {
 	}
 	if cfg.UploadService.InternalToken != "internal-token" {
 		t.Fatalf("UploadService.InternalToken = %q, want internal-token", cfg.UploadService.InternalToken)
+	}
+}
+
+func TestLoadIncludesERPImageProxyDefaultsAndSecretFallback(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("ERP_IMAGE_PROXY_PUBLIC_BASE_URL", "")
+	t.Setenv("ERP_IMAGE_PROXY_TOKEN_TTL", "")
+	t.Setenv("ERP_IMAGE_PROXY_SIGNING_SECRET", "")
+	t.Setenv("PRODUCT_MANAGEMENT_IMAGE_PROXY_SIGNING_SECRET", "")
+	t.Setenv("UPLOAD_SERVICE_INTERNAL_TOKEN", "internal-token")
+	t.Setenv("UPLOAD_SERVICE_AUTH_TOKEN", "legacy-token")
+	t.Setenv("OSS_ACCESS_KEY_SECRET", "oss-secret")
+	t.Setenv("ERP_REMOTE_APP_SECRET", "erp-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ERPImageProxy.PublicBaseURL != "https://yongbo.cloud" {
+		t.Fatalf("ERPImageProxy.PublicBaseURL = %q", cfg.ERPImageProxy.PublicBaseURL)
+	}
+	if cfg.ERPImageProxy.TokenTTL != 8760*time.Hour {
+		t.Fatalf("ERPImageProxy.TokenTTL = %s, want 8760h", cfg.ERPImageProxy.TokenTTL)
+	}
+	if cfg.ERPImageProxy.SigningSecret != "internal-token" {
+		t.Fatalf("ERPImageProxy.SigningSecret = %q, want internal token fallback", cfg.ERPImageProxy.SigningSecret)
+	}
+}
+
+func TestLoadPrefersExplicitERPImageProxySigningSecret(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("ERP_IMAGE_PROXY_SIGNING_SECRET", "explicit-secret")
+	t.Setenv("UPLOAD_SERVICE_INTERNAL_TOKEN", "internal-token")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ERPImageProxy.SigningSecret != "explicit-secret" {
+		t.Fatalf("ERPImageProxy.SigningSecret = %q, want explicit-secret", cfg.ERPImageProxy.SigningSecret)
 	}
 }
 

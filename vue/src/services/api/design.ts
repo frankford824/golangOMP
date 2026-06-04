@@ -74,7 +74,13 @@ export async function uploadDeliveryFileViaAssetSession(
 export async function uploadTaskReferenceFileViaAssetSession(
   taskId: string,
   file: File,
-  options?: { targetSkuCode?: string; remarkSuffix?: string },
+  options?: {
+    assetId?: string | number
+    targetSkuCode?: string
+    ownerModuleKey?: string
+    uploadPolicy?: 'append_only' | 'replace' | string
+    remarkSuffix?: string
+  },
 ): Promise<void> {
   const remarkSuffix = options?.remarkSuffix ?? ''
   const targetTrim = options?.targetSkuCode?.trim() || undefined
@@ -84,7 +90,10 @@ export async function uploadTaskReferenceFileViaAssetSession(
       file,
       {
         asset_kind: 'reference',
+        asset_id: options?.assetId,
         target_sku_code: targetTrim,
+        owner_module_key: options?.ownerModuleKey,
+        upload_policy: options?.uploadPolicy,
         remark: file.name,
       },
       { remarkSuffix, onProgress: () => {} },

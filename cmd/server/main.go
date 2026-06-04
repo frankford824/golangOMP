@@ -224,6 +224,24 @@ func main() {
 		}
 	}
 	erpBridgeSvc := service.NewERPBridgeService(erpBridgeClient, productRepo, mdb)
+	productManagementERPBridgeSvc := erpBridgeSvc
+	if cfg.Server.Port != "8081" &&
+		strings.TrimSpace(cfg.ERPRemote.BaseURL) != "" &&
+		strings.EqualFold(strings.TrimSpace(cfg.ERPRemote.AuthMode), "openweb") {
+		productManagementRemoteClient, remoteErr := service.NewRemoteERPBridgeClient(erpRemoteServiceConfig(cfg, logger.Named("product_management_erp_remote")))
+		if remoteErr != nil {
+			logger.Warn("product management direct ERP client disabled", zap.Error(remoteErr))
+		} else {
+			productManagementClient := service.NewHybridERPBridgeClient(
+				localERPBridgeClient,
+				productManagementRemoteClient,
+				cfg.ERPRemote.FallbackToLocalOnError,
+				logger.Named("product_management_erp"),
+			)
+			productManagementERPBridgeSvc = service.NewERPBridgeService(productManagementClient, productRepo, mdb)
+			logger.Info("Product management ERP sync uses direct OpenWeb client for background jobs")
+		}
+	}
 	var erpProvider service.ERPProductProvider
 	switch strings.ToLower(strings.TrimSpace(cfg.ERP.SourceMode)) {
 	case "jst", "jst_openweb", "remote_jst":
@@ -262,6 +280,16 @@ func main() {
 		logger.Info("OSS direct presign service enabled",
 			zap.String("bucket", cfg.OSSDirect.Bucket),
 			zap.String("endpoint", cfg.OSSDirect.Endpoint))
+	}
+	erpImageProxySigner := service.NewERPImageProxySigner(service.ERPImageProxyConfig{
+		PublicBaseURL: cfg.ERPImageProxy.PublicBaseURL,
+		SigningSecret: cfg.ERPImageProxy.SigningSecret,
+		TokenTTL:      cfg.ERPImageProxy.TokenTTL,
+	})
+	if erpImageProxySigner.Enabled() {
+		logger.Info("ERP product image short proxy enabled",
+			zap.String("public_base_url", cfg.ERPImageProxy.PublicBaseURL),
+			zap.Duration("token_ttl", cfg.ERPImageProxy.TokenTTL))
 	}
 	externalAssetSvc := externalassets.NewService(externalAssetRepo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirectSvc)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
@@ -305,8 +333,9 @@ func main() {
 		StorageProvider:         cfg.UploadService.StorageProvider,
 	})
 	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
-		service.WithProductManagementERPBridge(erpBridgeSvc),
-		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient))
+		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
+		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
+		service.WithProductManagementERPImageProxy(erpImageProxySigner))
 	taskCreateReferenceUploadSvc := service.NewTaskCreateReferenceUploadService(
 		uploadRequestRepo,
 		assetStorageRefRepo,
@@ -425,6 +454,7 @@ func main() {
 	taskCreateReferenceUploadH := handler.NewTaskCreateReferenceUploadHandler(taskCreateReferenceUploadSvc)
 	assetUploadH := handler.NewAssetUploadHandler(assetUploadSvc)
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
+	assetFilesH.SetERPImageProxy(taskAssetRepo, erpImageProxySigner)
 	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
 	taskAISummaryH := handler.NewTaskAISummaryHandler(taskAISummarySvc)

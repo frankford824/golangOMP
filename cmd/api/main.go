@@ -201,6 +201,11 @@ func main() {
 		PublicEndpoint:  cfg.OSSDirect.PublicEndpoint,
 		PartSize:        cfg.OSSDirect.PartSize,
 	})
+	erpImageProxySigner := service.NewERPImageProxySigner(service.ERPImageProxyConfig{
+		PublicBaseURL: cfg.ERPImageProxy.PublicBaseURL,
+		SigningSecret: cfg.ERPImageProxy.SigningSecret,
+		TokenTTL:      cfg.ERPImageProxy.TokenTTL,
+	})
 	externalAssetSvc := externalassets.NewService(externalAssetRepo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirectSvc)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
@@ -243,7 +248,8 @@ func main() {
 	})
 	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
 		service.WithProductManagementERPBridge(erpBridgeSvc),
-		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient))
+		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
+		service.WithProductManagementERPImageProxy(erpImageProxySigner))
 	taskCreateReferenceUploadSvc := service.NewTaskCreateReferenceUploadService(
 		uploadRequestRepo,
 		assetStorageRefRepo,
@@ -360,6 +366,7 @@ func main() {
 	taskCreateReferenceUploadH := handler.NewTaskCreateReferenceUploadHandler(taskCreateReferenceUploadSvc)
 	assetUploadH := handler.NewAssetUploadHandler(assetUploadSvc)
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
+	assetFilesH.SetERPImageProxy(taskAssetRepo, erpImageProxySigner)
 	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
 	taskAISummaryH := handler.NewTaskAISummaryHandler(taskAISummarySvc)
