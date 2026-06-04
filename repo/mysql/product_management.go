@@ -73,6 +73,18 @@ func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) erro
 		  )
 		ON DUPLICATE KEY UPDATE
 		  task_no = VALUES(task_no),
+		  erp_sync_status = CASE
+		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
+		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.erp_sync_status
+		    WHEN erp_product_sync_records.erp_sync_status = 'synced'
+		      AND (
+		        NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		        OR NOT (erp_product_sync_records.product_i_id <=> VALUES(product_i_id))
+		        OR NOT (erp_product_sync_records.product_name <=> VALUES(product_name))
+		        OR NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))
+		      ) THEN 'pending_sync'
+		    ELSE erp_product_sync_records.erp_sync_status
+		  END,
 		  sku_code = VALUES(sku_code),
 		  product_i_id = VALUES(product_i_id),
 		  product_name = VALUES(product_name),
@@ -80,11 +92,6 @@ func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) erro
 		  creator_id = VALUES(creator_id),
 		  creator_name = VALUES(creator_name),
 		  task_created_at = VALUES(task_created_at),
-		  erp_sync_status = CASE
-		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
-		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'failed', 'cooling_down') THEN erp_product_sync_records.erp_sync_status
-		    ELSE VALUES(erp_sync_status)
-		  END,
 		  last_erp_synced_at = COALESCE(VALUES(last_erp_synced_at), erp_product_sync_records.last_erp_synced_at)`)
 	if err != nil {
 		return fmt.Errorf("refresh product management main task records: %w", err)
@@ -128,6 +135,18 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 		WHERE COALESCE(tsi.sku_code, '') <> ''
 		ON DUPLICATE KEY UPDATE
 		  task_no = VALUES(task_no),
+		  erp_sync_status = CASE
+		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
+		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.erp_sync_status
+		    WHEN erp_product_sync_records.erp_sync_status = 'synced'
+		      AND (
+		        NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		        OR NOT (erp_product_sync_records.product_i_id <=> VALUES(product_i_id))
+		        OR NOT (erp_product_sync_records.product_name <=> VALUES(product_name))
+		        OR NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))
+		      ) THEN 'pending_sync'
+		    ELSE erp_product_sync_records.erp_sync_status
+		  END,
 		  sku_code = VALUES(sku_code),
 		  product_i_id = VALUES(product_i_id),
 		  product_name = VALUES(product_name),
@@ -135,11 +154,6 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 		  creator_id = VALUES(creator_id),
 		  creator_name = VALUES(creator_name),
 		  task_created_at = VALUES(task_created_at),
-		  erp_sync_status = CASE
-		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
-		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'failed', 'cooling_down') THEN erp_product_sync_records.erp_sync_status
-		    ELSE VALUES(erp_sync_status)
-		  END,
 		  last_erp_synced_at = COALESCE(VALUES(last_erp_synced_at), erp_product_sync_records.last_erp_synced_at)`)
 	if err != nil {
 		return fmt.Errorf("refresh product management sku item records: %w", err)
