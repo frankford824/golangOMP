@@ -109,6 +109,27 @@ function taskIdForSessionBody(taskId: string): string | number {
   return taskId
 }
 
+export function normalizeUploadSessionNumericID(
+  value: string | number | undefined,
+  fieldName: 'asset_id' | 'source_asset_id',
+): number | undefined {
+  if (value == null) return undefined
+  if (typeof value === 'number') {
+    if (Number.isSafeInteger(value) && value > 0) return value
+    throw new Error(`${fieldName} 必须是有效的数字资产 ID`)
+  }
+  const raw = value.trim()
+  if (!raw) return undefined
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new Error(`${fieldName} 必须是有效的数字资产 ID`)
+  }
+  const parsed = Number(raw)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${fieldName} 必须是有效的数字资产 ID`)
+  }
+  return parsed
+}
+
 /** 仅接受有效正整数，供 retouch_requirement_id 写入 create-session。 */
 export function normalizeRetouchRequirementId(value: number | undefined): number | undefined {
   if (value == null || !Number.isFinite(value)) return undefined
@@ -160,16 +181,18 @@ export async function prepareTaskAssetUploadSession(
 ): Promise<PreparedTaskAssetUploadSession> {
   const remarkBase = intent.remark ?? file.name
   const remark = remarkBase + (options?.remarkSuffix ?? '')
+  const assetId = normalizeUploadSessionNumericID(intent.asset_id, 'asset_id')
+  const sourceAssetId = normalizeUploadSessionNumericID(intent.source_asset_id, 'source_asset_id')
 
   const payload: CreateAssetUploadSessionPayload = {
-    asset_id: intent.asset_id,
+    asset_id: assetId,
     asset_kind: intent.asset_kind,
     file_name: intent.file_name ?? file.name,
     expected_size: intent.expected_size ?? file.size,
     mime_type: intent.mime_type ?? resolveFileMimeType(file),
     file_hash: intent.file_hash,
     remark,
-    source_asset_id: intent.source_asset_id,
+    source_asset_id: sourceAssetId,
     target_sku_code: intent.target_sku_code,
     owner_module_key: intent.owner_module_key,
     upload_policy: intent.upload_policy,

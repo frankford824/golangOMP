@@ -99,11 +99,33 @@ vi.mock('@/utils/upload-errors', () => ({
 }))
 
 import {
+  normalizeUploadSessionNumericID,
   normalizeRetouchRequirementId,
   prepareTaskAssetUploadSession,
   completePreparedTaskAssetUploadSession,
 } from '../assetUploadFlow'
 import { assetsApi } from '@/services/api/assetsApi'
+
+describe('normalizeUploadSessionNumericID', () => {
+  it('converts positive numeric strings to JSON numbers', () => {
+    expect(normalizeUploadSessionNumericID('4477', 'asset_id')).toBe(4477)
+    expect(normalizeUploadSessionNumericID(4477, 'asset_id')).toBe(4477)
+    expect(normalizeUploadSessionNumericID(undefined, 'asset_id')).toBeUndefined()
+    expect(normalizeUploadSessionNumericID('', 'asset_id')).toBeUndefined()
+  })
+
+  it('rejects UUID and non-integer asset identifiers before create-session', () => {
+    expect(() =>
+      normalizeUploadSessionNumericID('0ec54522-98fb-4d66-a7af-74cafb59e088', 'asset_id'),
+    ).toThrow('asset_id 必须是有效的数字资产 ID')
+    expect(() => normalizeUploadSessionNumericID('4477.1', 'asset_id')).toThrow(
+      'asset_id 必须是有效的数字资产 ID',
+    )
+    expect(() => normalizeUploadSessionNumericID(0, 'asset_id')).toThrow(
+      'asset_id 必须是有效的数字资产 ID',
+    )
+  })
+})
 
 describe('normalizeRetouchRequirementId', () => {
   it('accepts positive integers only', () => {
@@ -272,12 +294,30 @@ describe('prepareTaskAssetUploadSession — transport fallback', () => {
       expect.objectContaining({
         task_id: 1093,
         asset_kind: 'reference',
-        asset_id: '4198',
+        asset_id: 4198,
         owner_module_key: 'basic_info',
         upload_policy: 'replace',
       }),
       undefined,
     )
+  })
+
+  it('does not call create-session when replacement asset_id is a legacy UUID ref', async () => {
+    await expect(
+      prepareTaskAssetUploadSession(
+        '1093',
+        fakeFile('new-ref.png'),
+        {
+          asset_kind: 'reference',
+          asset_id: '0ec54522-98fb-4d66-a7af-74cafb59e088',
+          owner_module_key: 'basic_info',
+          upload_policy: 'replace',
+          remark: 'new-ref.png',
+        },
+      ),
+    ).rejects.toThrow('asset_id 必须是有效的数字资产 ID')
+
+    expect(assetsApi.createAssetUploadSession).not.toHaveBeenCalled()
   })
 
   it('fx3: both absent -> throws user-friendly error with upload_transport_unavailable', async () => {

@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +50,95 @@ type createTaskAssetUploadSessionReq struct {
 	OwnerModuleKey       string `json:"owner_module_key"`
 	UploadPolicy         string `json:"upload_policy"`
 	RetouchRequirementID *int64 `json:"retouch_requirement_id"`
+}
+
+type optionalInt64JSONField struct {
+	value *int64
+}
+
+func (f *optionalInt64JSONField) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if raw == "" || raw == "null" {
+		f.value = nil
+		return nil
+	}
+	if strings.HasPrefix(raw, `"`) {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		raw = strings.TrimSpace(s)
+		if raw == "" {
+			f.value = nil
+			return nil
+		}
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fmt.Errorf("integer fields must use a JSON integer or numeric string")
+	}
+	f.value = &parsed
+	return nil
+}
+
+func (f optionalInt64JSONField) Ptr() *int64 {
+	if f.value == nil {
+		return nil
+	}
+	value := *f.value
+	return &value
+}
+
+type createTaskAssetUploadSessionPayload struct {
+	TaskID               optionalInt64JSONField `json:"task_id"`
+	CreatedBy            optionalInt64JSONField `json:"created_by"`
+	AssetID              optionalInt64JSONField `json:"asset_id"`
+	SourceAssetID        optionalInt64JSONField `json:"source_asset_id"`
+	AssetType            string                 `json:"asset_type"`
+	AssetKind            string                 `json:"asset_kind"`
+	UploadMode           string                 `json:"upload_mode"`
+	Filename             string                 `json:"filename"`
+	FileName             string                 `json:"file_name"`
+	ExpectedSize         optionalInt64JSONField `json:"expected_size"`
+	FileSize             optionalInt64JSONField `json:"file_size"`
+	MimeType             string                 `json:"mime_type"`
+	FileHash             string                 `json:"file_hash"`
+	Remark               string                 `json:"remark"`
+	TargetSKUCode        string                 `json:"target_sku_code"`
+	OwnerModuleKey       string                 `json:"owner_module_key"`
+	UploadPolicy         string                 `json:"upload_policy"`
+	RetouchRequirementID optionalInt64JSONField `json:"retouch_requirement_id"`
+}
+
+func (p createTaskAssetUploadSessionPayload) toRequest() createTaskAssetUploadSessionReq {
+	return createTaskAssetUploadSessionReq{
+		TaskID:               p.TaskID.Ptr(),
+		CreatedBy:            p.CreatedBy.Ptr(),
+		AssetID:              p.AssetID.Ptr(),
+		SourceAssetID:        p.SourceAssetID.Ptr(),
+		AssetType:            p.AssetType,
+		AssetKind:            p.AssetKind,
+		UploadMode:           p.UploadMode,
+		Filename:             p.Filename,
+		FileName:             p.FileName,
+		ExpectedSize:         p.ExpectedSize.Ptr(),
+		FileSize:             p.FileSize.Ptr(),
+		MimeType:             p.MimeType,
+		FileHash:             p.FileHash,
+		Remark:               p.Remark,
+		TargetSKUCode:        p.TargetSKUCode,
+		OwnerModuleKey:       p.OwnerModuleKey,
+		UploadPolicy:         p.UploadPolicy,
+		RetouchRequirementID: p.RetouchRequirementID.Ptr(),
+	}
+}
+
+func bindCreateTaskAssetUploadSessionReq(c *gin.Context) (createTaskAssetUploadSessionReq, *domain.AppError) {
+	var payload createTaskAssetUploadSessionPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		return createTaskAssetUploadSessionReq{}, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil)
+	}
+	return payload.toRequest(), nil
 }
 
 type completeTaskAssetUploadSessionReq struct {
@@ -517,9 +608,9 @@ func (h *TaskAssetCenterHandler) CreateUploadSession(c *gin.Context) {
 }
 
 func (h *TaskAssetCenterHandler) CreateAssetUploadSession(c *gin.Context) {
-	var req createTaskAssetUploadSessionReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+	req, bindErr := bindCreateTaskAssetUploadSessionReq(c)
+	if bindErr != nil {
+		respondError(c, bindErr)
 		return
 	}
 	if req.TaskID == nil || *req.TaskID <= 0 {
@@ -648,9 +739,9 @@ func (h *TaskAssetCenterHandler) AbortUploadSession(c *gin.Context) {
 }
 
 func (h *TaskAssetCenterHandler) createUploadSession(c *gin.Context, taskID int64, mode domain.DesignAssetUploadMode, topLevel bool) {
-	var req createTaskAssetUploadSessionReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+	req, bindErr := bindCreateTaskAssetUploadSessionReq(c)
+	if bindErr != nil {
+		respondError(c, bindErr)
 		return
 	}
 	h.createUploadSessionWithRequest(c, taskID, mode, req, topLevel)
