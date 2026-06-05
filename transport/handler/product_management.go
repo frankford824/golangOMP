@@ -110,6 +110,18 @@ type requestProductManagementSyncReq struct {
 }
 
 func (h *ProductManagementHandler) RequestSync(c *gin.Context) {
+	h.requestSyncByScope(c, "all")
+}
+
+func (h *ProductManagementHandler) RequestBaseSync(c *gin.Context) {
+	h.requestSyncByScope(c, "base")
+}
+
+func (h *ProductManagementHandler) RequestImageSync(c *gin.Context) {
+	h.requestSyncByScope(c, "image")
+}
+
+func (h *ProductManagementHandler) requestSyncByScope(c *gin.Context, scope string) {
 	recordID, ok := productManagementRecordID(c)
 	if !ok {
 		return
@@ -119,7 +131,16 @@ func (h *ProductManagementHandler) RequestSync(c *gin.Context) {
 		_ = c.ShouldBindJSON(&req)
 	}
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	record, appErr := h.svc.RequestSync(c.Request.Context(), actor, recordID, req.Force)
+	var record *domain.ProductManagementRecord
+	var appErr *domain.AppError
+	switch scope {
+	case "base":
+		record, appErr = h.svc.RequestBaseSync(c.Request.Context(), actor, recordID, req.Force)
+	case "image":
+		record, appErr = h.svc.RequestImageSync(c.Request.Context(), actor, recordID, req.Force)
+	default:
+		record, appErr = h.svc.RequestSync(c.Request.Context(), actor, recordID, req.Force)
+	}
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -129,13 +150,15 @@ func (h *ProductManagementHandler) RequestSync(c *gin.Context) {
 
 func parseProductManagementListFilter(c *gin.Context) (repo.ProductManagementListFilter, *domain.AppError) {
 	filter := repo.ProductManagementListFilter{
-		Keyword:     strings.TrimSpace(c.Query("keyword")),
-		ImageSource: strings.TrimSpace(c.Query("image_source")),
-		SyncStatus:  strings.TrimSpace(c.Query("sync_status")),
-		CostStatus:  strings.TrimSpace(c.Query("cost_status")),
-		IssueScope:  strings.TrimSpace(c.DefaultQuery("issue_scope", "attention")),
-		Page:        1,
-		PageSize:    20,
+		Keyword:         strings.TrimSpace(c.Query("keyword")),
+		ImageSource:     strings.TrimSpace(c.Query("image_source")),
+		SyncStatus:      strings.TrimSpace(c.Query("sync_status")),
+		BaseSyncStatus:  strings.TrimSpace(c.Query("base_sync_status")),
+		ImageSyncStatus: strings.TrimSpace(c.Query("image_sync_status")),
+		CostStatus:      strings.TrimSpace(c.Query("cost_status")),
+		IssueScope:      strings.TrimSpace(c.DefaultQuery("issue_scope", "attention")),
+		Page:            1,
+		PageSize:        20,
 	}
 	if filter.Keyword == "" {
 		filter.Keyword = strings.TrimSpace(c.Query("q"))

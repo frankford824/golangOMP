@@ -534,7 +534,8 @@ func validateTaskAssetType(assetType domain.TaskAssetType) *domain.AppError {
 	case domain.TaskAssetTypeReference,
 		domain.TaskAssetTypeSource,
 		domain.TaskAssetTypeDelivery,
-		domain.TaskAssetTypePreview:
+		domain.TaskAssetTypePreview,
+		domain.TaskAssetTypeERPProduct:
 		return nil
 	default:
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset_type", nil)

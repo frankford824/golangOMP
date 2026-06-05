@@ -131,14 +131,16 @@ type ProductRepo interface {
 }
 
 type ProductManagementListFilter struct {
-	Keyword     string
-	ImageSource string
-	SyncStatus  string
-	CostStatus  string
-	IssueScope  string
-	CreatorID   *int64
-	Page        int
-	PageSize    int
+	Keyword         string
+	ImageSource     string
+	SyncStatus      string
+	BaseSyncStatus  string
+	ImageSyncStatus string
+	CostStatus      string
+	IssueScope      string
+	CreatorID       *int64
+	Page            int
+	PageSize        int
 }
 
 type ProductManagementImagePatch struct {
@@ -149,14 +151,22 @@ type ProductManagementImagePatch struct {
 	ImageFilename       string
 	ImageMimeType       string
 	ImageMissingReason  string
+	ImageSyncSource     domain.ProductManagementImageSource
+	ImageSyncStatus     domain.ProductManagementERPSyncStatus
 }
 
 type ProductManagementSyncPatch struct {
 	Status            domain.ProductManagementERPSyncStatus
+	BaseStatus        domain.ProductManagementERPSyncStatus
+	ImageStatus       domain.ProductManagementERPSyncStatus
 	LastERPCheckedAt  *time.Time
 	LastERPSyncedAt   *time.Time
+	LastBaseSyncedAt  *time.Time
+	LastImageSyncedAt *time.Time
 	SyncCooldownUntil *time.Time
 	LastSyncError     string
+	BaseSyncError     string
+	ImageSyncError    string
 }
 
 type ProductManagementRepo interface {
@@ -167,6 +177,8 @@ type ProductManagementRepo interface {
 	ClaimQueuedSyncRecords(ctx context.Context, limit int, claimToken string, now time.Time) ([]*domain.ProductManagementRecord, error)
 	UpdateImage(ctx context.Context, tx Tx, id int64, patch ProductManagementImagePatch) error
 	UpdateSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
+	UpdateBaseSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
+	UpdateImageSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
 }
 
 type CategoryRepo interface {

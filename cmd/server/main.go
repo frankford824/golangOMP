@@ -292,6 +292,20 @@ func main() {
 			zap.Duration("token_ttl", cfg.ERPImageProxy.TokenTTL))
 	}
 	externalAssetSvc := externalassets.NewService(externalAssetRepo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirectSvc)
+	uploadClient := service.NewUploadServiceClient(service.UploadServiceClientConfig{
+		Enabled:                 cfg.UploadService.Enabled,
+		BaseURL:                 cfg.UploadService.BaseURL,
+		BrowserMultipartBaseURL: cfg.UploadService.BrowserMultipartBaseURL,
+		BrowserDownloadBaseURL:  cfg.UploadService.BrowserDownloadBaseURL,
+		Timeout:                 cfg.UploadService.Timeout,
+		InternalToken:           cfg.UploadService.InternalToken,
+		StorageProvider:         cfg.UploadService.StorageProvider,
+	})
+	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
+		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
+		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
+		service.WithProductManagementERPImageProxy(erpImageProxySigner),
+		service.WithProductManagementTaskEventRepo(taskEventRepo))
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
@@ -309,7 +323,8 @@ func main() {
 		service.WithTaskDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskScopeUserRepo(userRepo),
 		service.WithTaskBlueprintRuleEngine(blueprintRules),
-		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo))
+		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
+		service.WithTaskProductManagementCloseSyncer(productManagementSvc))
 	taskBoardSvc := service.NewTaskBoardService(taskSvc)
 	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
 	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
@@ -323,19 +338,6 @@ func main() {
 		service.WithTaskAssetScopeUserRepo(userRepo),
 		service.WithTaskAssetUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
 	assetUploadSvc := service.NewAssetUploadService(taskRepo, uploadRequestRepo, mdb)
-	uploadClient := service.NewUploadServiceClient(service.UploadServiceClientConfig{
-		Enabled:                 cfg.UploadService.Enabled,
-		BaseURL:                 cfg.UploadService.BaseURL,
-		BrowserMultipartBaseURL: cfg.UploadService.BrowserMultipartBaseURL,
-		BrowserDownloadBaseURL:  cfg.UploadService.BrowserDownloadBaseURL,
-		Timeout:                 cfg.UploadService.Timeout,
-		InternalToken:           cfg.UploadService.InternalToken,
-		StorageProvider:         cfg.UploadService.StorageProvider,
-	})
-	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
-		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
-		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
-		service.WithProductManagementERPImageProxy(erpImageProxySigner))
 	taskCreateReferenceUploadSvc := service.NewTaskCreateReferenceUploadService(
 		uploadRequestRepo,
 		assetStorageRefRepo,
@@ -550,6 +552,7 @@ func main() {
 			mdb,
 			log.New(os.Stderr, "[WAREHOUSE-AUTO-RELEASE-CRON] ", log.LstdFlags),
 			service.WithWarehouseAutoReleaseModuleRepos(taskModuleRepo, taskModuleEventRepo),
+			service.WithWarehouseAutoReleaseProductManagementCloseSyncer(productManagementSvc),
 		)
 		if err := cronInst.Add("warehouse-auto-release", releaseSpec, func(ctx context.Context) error {
 			_, appErr := autoReleaseJob.Run(ctx, service.WarehouseAutoReleaseOptions{

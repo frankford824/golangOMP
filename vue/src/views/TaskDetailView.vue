@@ -472,15 +472,25 @@
                       v-if="showProductManagementPanel"
                       class="detail-v3-info-card detail-product-management-card"
                     >
+                      <input
+                        ref="productManagementUploadInput"
+                        class="detail-product-management-file-input"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        @change="onProductManagementImagePicked"
+                      />
                       <div class="detail-product-management-head">
                         <div>
-                          <p class="detail-v3-card-kicker">产品管理 / ERP 图片</p>
+                          <p class="detail-v3-card-kicker">ERP 商品资料</p>
                           <strong>{{ productManagementRecords.length }} 个 SKU 对照记录</strong>
                         </div>
                         <button type="button" class="detail-v3-link-btn" @click="openProductManagement()">
                           进入产品管理
                         </button>
                       </div>
+                      <p v-if="isPurchaseTask" class="detail-v3-card-text detail-product-management-hint">
+                        采购任务不会自动产生设计成品图；如需同步 ERP 图片，请上传 ERP 商品图。
+                      </p>
                       <p v-if="productManagementLoading" class="detail-v3-card-text">产品管理状态加载中...</p>
                       <p v-else-if="productManagementError" class="detail-v3-ref-error">{{ productManagementError }}</p>
                       <div v-else class="detail-product-management-list">
@@ -503,15 +513,40 @@
                           </div>
                           <div class="detail-product-management-meta">
                             <strong>{{ record.sku_code || '-' }}</strong>
-                            <small>{{ record.image_source_label }} · {{ formatProductManagementCost(record) }}</small>
-                            <small>{{ productManagementSyncStatusLabel(record.erp_sync_status) }}</small>
+                            <small>款式：{{ productManagementERPIID(record) }}</small>
+                            <small>{{ formatProductManagementCost(record) }} · {{ record.image_source_label }}</small>
+                            <small
+                              v-if="record.image_sync_source === 'auto_on_close' && record.image_sync_status === 'synced'"
+                              class="detail-product-management-success"
+                            >
+                              已在结单后自动同步 ERP 图片
+                            </small>
+                            <small v-else-if="record.image_sync_status === 'waiting_image'" class="detail-product-management-warning">
+                              {{ record.image_missing_reason || '未找到最终成品图，可上传 ERP 商品图' }}
+                            </small>
+                            <small class="detail-product-management-sync">
+                              基础资料：{{ productManagementSyncStatusLabel(record.base_sync_status || record.erp_sync_status) }}
+                            </small>
+                            <small class="detail-product-management-sync">
+                              ERP 图片：{{ productManagementSyncStatusLabel(record.image_sync_status || record.erp_sync_status) }}
+                            </small>
+                            <small v-if="record.base_sync_error" class="detail-product-management-error">{{ record.base_sync_error }}</small>
+                            <small v-if="record.image_sync_error" class="detail-product-management-error">{{ record.image_sync_error }}</small>
                           </div>
                           <div class="detail-product-management-actions">
                             <button type="button" class="detail-v3-link-btn" @click="openProductManagement(record)">
                               打开
                             </button>
                             <button type="button" class="detail-v3-link-btn" @click="openProductManagement(record)">
-                              设图
+                              选图
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_maintain_image || productManagementUploadingID === record.id"
+                              @click="startProductManagementImageUpload(record)"
+                            >
+                              {{ productManagementUploadingID === record.id ? '上传中' : '上传 ERP 图' }}
                             </button>
                             <button
                               type="button"
@@ -525,9 +560,17 @@
                               type="button"
                               class="detail-v3-link-btn"
                               :disabled="!record.can_sync_erp"
-                              @click="syncProductManagementRecord(record)"
+                              @click="syncProductManagementBaseRecord(record)"
                             >
-                              同步
+                              同步基础
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_sync_erp || !record.image_asset_id"
+                              @click="syncProductManagementImageRecord(record)"
+                            >
+                              同步图片
                             </button>
                           </div>
                         </div>
@@ -1277,6 +1320,9 @@ const productManagementRecords = ref<ProductManagementRecord[]>([])
 const productManagementLoading = ref(false)
 const productManagementError = ref('')
 const productManagementPreviewURLs = ref<Record<number, string>>({})
+const productManagementUploadInput = ref<HTMLInputElement | null>(null)
+const productManagementUploadTarget = ref<ProductManagementRecord | null>(null)
+const productManagementUploadingID = ref<number | null>(null)
 const productManagementPreviewRecords = computed(() =>
   productManagementRecords.value.slice(0, isBatchTask.value ? 6 : 1),
 )
@@ -2745,18 +2791,78 @@ async function reparseProductManagementImage(record: ProductManagementRecord): P
   }
 }
 
-async function syncProductManagementRecord(record: ProductManagementRecord): Promise<void> {
+async function syncProductManagementBaseRecord(record: ProductManagementRecord): Promise<void> {
   try {
-    replaceProductManagementRecord(await productManagementApi.requestSync(record.id))
+    replaceProductManagementRecord(await productManagementApi.requestBaseSync(record.id))
+    flashSuccess('已提交 ERP 基础资料同步')
   } catch (err) {
-    productManagementError.value = resolveApiUserMessage(err, { fallback: '提交 ERP 同步失败' })
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '提交 ERP 基础资料同步失败' })
   }
+}
+
+async function syncProductManagementImageRecord(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceProductManagementRecord(await productManagementApi.requestImageSync(record.id))
+    flashSuccess('已提交 ERP 图片同步')
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '提交 ERP 图片同步失败' })
+  }
+}
+
+function startProductManagementImageUpload(record: ProductManagementRecord): void {
+  productManagementError.value = ''
+  productManagementUploadTarget.value = record
+  if (productManagementUploadInput.value) {
+    productManagementUploadInput.value.value = ''
+    productManagementUploadInput.value.click()
+  }
+}
+
+async function onProductManagementImagePicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  const record = productManagementUploadTarget.value
+  if (!file || !record || !task.value?.id) return
+  productManagementUploadingID.value = record.id
+  productManagementError.value = ''
+  try {
+    const uploaded = await uploadTaskFileViaAssetSession(String(task.value.id), file, {
+      asset_kind: 'erp_product_image',
+      target_sku_code: record.sku_code || undefined,
+      remark: `ERP 商品图：${record.sku_code || record.task_no || file.name}`,
+    })
+    const assetID = extractProductManagementUploadedAssetID(uploaded)
+    if (!assetID) {
+      throw new Error('上传完成但未返回资产 ID')
+    }
+    const updated = await productManagementApi.setManualImage(record.id, assetID)
+    replaceProductManagementRecord(updated)
+    flashSuccess('ERP 商品图已上传并绑定')
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '上传 ERP 商品图失败' })
+  } finally {
+    productManagementUploadingID.value = null
+    productManagementUploadTarget.value = null
+    if (input) input.value = ''
+  }
+}
+
+function extractProductManagementUploadedAssetID(uploaded: unknown): number | null {
+  const root = (uploaded && typeof uploaded === 'object' ? uploaded : {}) as Record<string, unknown>
+  const asset = (root.asset && typeof root.asset === 'object' ? root.asset : {}) as Record<string, unknown>
+  const raw = asset.id ?? asset.asset_id
+  const id = Number(raw)
+  return Number.isFinite(id) && id > 0 ? id : null
 }
 
 function formatProductManagementCost(record: ProductManagementRecord): string {
   const value = record.cost_price
   if (typeof value !== 'number' || value <= 0) return '成本待维护'
   return `￥${value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
+}
+
+function productManagementERPIID(record: ProductManagementRecord): string {
+  return record.erp_i_id?.trim() || record.product_i_id?.trim() || '未绑定 ERP 款式'
 }
 
 function productManagementPreviewURL(record: ProductManagementRecord): string {
@@ -2806,6 +2912,7 @@ function productManagementSyncStatusLabel(status: ProductSyncStatus): string {
     synced: '已同步',
     failed: '同步失败',
     cooling_down: '冷却中',
+    waiting_image: '待上传 ERP 图',
   }
   return labels[status] ?? status
 }
@@ -4430,6 +4537,13 @@ watch(taskId, (id) => {
   border-color: #bfdbfe;
   color: #111827;
 }
+.detail-product-management-file-input {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
 .detail-product-management-head {
   display: flex;
   align-items: flex-start;
@@ -4442,6 +4556,14 @@ watch(taskId, (id) => {
   color: #111827;
   font-size: 0.92rem;
 }
+.detail-product-management-hint {
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #fed7aa;
+  border-radius: 0.75rem;
+  color: #9a3412;
+  background: #fff7ed;
+}
 .detail-product-management-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -4449,7 +4571,7 @@ watch(taskId, (id) => {
 }
 .detail-product-management-item {
   display: grid;
-  grid-template-columns: 4rem minmax(0, 1fr) auto;
+  grid-template-columns: 4.5rem minmax(0, 1fr) minmax(9rem, auto);
   align-items: center;
   gap: 0.65rem;
   min-width: 0;
@@ -4461,8 +4583,8 @@ watch(taskId, (id) => {
 .detail-product-management-preview {
   display: grid;
   place-items: center;
-  width: 4rem;
-  height: 3rem;
+  width: 4.5rem;
+  height: 3.4rem;
   overflow: hidden;
   border: 1px solid #dbe3ee;
   border-radius: 0.625rem;
@@ -4499,6 +4621,21 @@ watch(taskId, (id) => {
   color: #4b5563;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.detail-product-management-success {
+  color: #047857 !important;
+  font-weight: 800;
+}
+.detail-product-management-warning {
+  color: #b45309 !important;
+  font-weight: 800;
+}
+.detail-product-management-error {
+  color: #b91c1c !important;
+  font-weight: 800;
+}
+.detail-product-management-sync {
+  color: #1e40af !important;
 }
 .detail-product-management-actions {
   display: flex;

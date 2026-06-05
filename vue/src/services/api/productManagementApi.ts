@@ -2,9 +2,11 @@ import http from '@/services/http'
 
 export type ProductImageSource =
   | 'manual'
+  | 'erp_product_image'
   | 'delivery'
   | 'derived_preview'
   | 'task_reference'
+  | 'auto_on_close'
   | 'missing'
 
 export type ProductSyncStatus =
@@ -14,6 +16,7 @@ export type ProductSyncStatus =
   | 'synced'
   | 'failed'
   | 'cooling_down'
+  | 'waiting_image'
 
 export interface ProductManagementRecord {
   id: number
@@ -21,8 +24,13 @@ export interface ProductManagementRecord {
   task_id: number
   task_sku_item_id?: number
   task_no: string
+  task_type?: string
+  source_mode?: string
   sku_code: string
   product_i_id: string
+  erp_i_id?: string
+  category_name?: string
+  product_family?: string
   product_name: string
   cost_price?: number | null
   creator_id: number
@@ -37,11 +45,19 @@ export interface ProductManagementRecord {
   image_filename?: string
   image_mime_type?: string
   image_missing_reason?: string
+  image_sync_source?: ProductImageSource
   erp_sync_status: ProductSyncStatus
+  base_sync_status?: ProductSyncStatus
+  image_sync_status?: ProductSyncStatus
   last_erp_synced_at?: string
   last_erp_checked_at?: string
+  last_base_synced_at?: string
+  last_image_synced_at?: string
   sync_cooldown_until?: string
   last_sync_error?: string
+  base_sync_error?: string
+  image_sync_error?: string
+  image_required?: boolean
   can_maintain_image: boolean
   can_cross_task_select: boolean
   can_sync_erp: boolean
@@ -68,6 +84,8 @@ export interface ProductManagementListParams {
   keyword?: string
   image_source?: ProductImageSource | ''
   sync_status?: ProductSyncStatus | ''
+  base_sync_status?: ProductSyncStatus | ''
+  image_sync_status?: ProductSyncStatus | ''
   cost_status?: 'missing' | 'ready' | ''
   issue_scope?: 'attention' | 'all'
   creator_id?: number
@@ -122,6 +140,22 @@ export const productManagementApi = {
   async requestSync(recordId: number, force = false): Promise<ProductManagementRecord> {
     const { data } = await http.post<{ data: ProductManagementRecord }>(
       `/v1/product-management/${recordId}/sync-request`,
+      { force },
+    )
+    return data.data
+  },
+
+  async requestBaseSync(recordId: number, force = false): Promise<ProductManagementRecord> {
+    const { data } = await http.post<{ data: ProductManagementRecord }>(
+      `/v1/product-management/${recordId}/base-sync-request`,
+      { force },
+    )
+    return data.data
+  },
+
+  async requestImageSync(recordId: number, force = false): Promise<ProductManagementRecord> {
+    const { data } = await http.post<{ data: ProductManagementRecord }>(
+      `/v1/product-management/${recordId}/image-sync-request`,
       { force },
     )
     return data.data

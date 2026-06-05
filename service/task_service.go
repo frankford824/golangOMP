@@ -295,6 +295,10 @@ type TaskService interface {
 
 type TaskServiceOption func(*taskService)
 
+type ProductManagementCloseSyncer interface {
+	AutoSyncImagesAfterTaskClosed(ctx context.Context, taskID int64, actorID int64) *domain.AppError
+}
+
 type taskService struct {
 	taskRepo                     repo.TaskRepo
 	procurementRepo              repo.ProcurementRepo
@@ -326,6 +330,7 @@ type taskService struct {
 	customizationPricingUserRepo customizationPricingUserReader
 	referenceFileRefsEnricher    *ReferenceFileRefsEnricher
 	blueprintRuleEngine          *blueprint.RuleEngine
+	productManagementCloseSyncer ProductManagementCloseSyncer
 }
 
 type customizationPricingUserReader interface {
@@ -485,6 +490,12 @@ func WithTaskBlueprintRuleEngine(engine *blueprint.RuleEngine) TaskServiceOption
 func WithTaskCustomizationPricingRuleRepo(ruleRepo repo.CustomizationPricingRuleRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.customizationPricingRuleRepo = ruleRepo
+	}
+}
+
+func WithTaskProductManagementCloseSyncer(syncer ProductManagementCloseSyncer) TaskServiceOption {
+	return func(s *taskService) {
+		s.productManagementCloseSyncer = syncer
 	}
 }
 
@@ -4073,6 +4084,9 @@ func (s *taskService) Close(ctx context.Context, p CloseTaskParams) (*domain.Tas
 	})
 	if txErr != nil {
 		return nil, infraError("close task tx", txErr)
+	}
+	if s.productManagementCloseSyncer != nil {
+		_ = s.productManagementCloseSyncer.AutoSyncImagesAfterTaskClosed(ctx, p.TaskID, p.OperatorID)
 	}
 
 	return s.loadTaskReadModel(ctx, p.TaskID)

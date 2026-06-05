@@ -26,6 +26,7 @@ type WarehouseAutoReleaseJob struct {
 	taskEventRepo   repo.TaskEventRepo
 	taskModuleRepo  repo.TaskModuleRepo
 	moduleEventRepo repo.TaskModuleEventRepo
+	closeSyncer     ProductManagementCloseSyncer
 	txRunner        repo.TxRunner
 	now             func() time.Time
 	logger          *log.Logger
@@ -52,6 +53,12 @@ func WithWarehouseAutoReleaseModuleRepos(moduleRepo repo.TaskModuleRepo, moduleE
 	return func(j *WarehouseAutoReleaseJob) {
 		j.taskModuleRepo = moduleRepo
 		j.moduleEventRepo = moduleEventRepo
+	}
+}
+
+func WithWarehouseAutoReleaseProductManagementCloseSyncer(syncer ProductManagementCloseSyncer) WarehouseAutoReleaseJobOption {
+	return func(j *WarehouseAutoReleaseJob) {
+		j.closeSyncer = syncer
 	}
 }
 
@@ -139,7 +146,7 @@ func (j *WarehouseAutoReleaseJob) releaseOne(ctx context.Context, taskID int64, 
 			warehouseModuleState = warehouseModule.State
 		}
 	}
-	return true, j.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := j.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		current := task.TaskStatus
 		receipt, err := j.warehouseRepo.GetByTaskID(ctx, taskID)
 		if err != nil {
@@ -264,7 +271,13 @@ func (j *WarehouseAutoReleaseJob) releaseOne(ctx context.Context, taskID int64, 
 				"remark":           "系统自动结单：仓库 30 分钟未处理",
 			}))
 		return err
-	})
+	}); err != nil {
+		return false, err
+	}
+	if j.closeSyncer != nil {
+		_ = j.closeSyncer.AutoSyncImagesAfterTaskClosed(ctx, taskID, systemActorID)
+	}
+	return true, nil
 }
 
 func (j *WarehouseAutoReleaseJob) updateWarehouseModuleState(ctx context.Context, tx repo.Tx, module *domain.TaskModule, current *domain.ModuleState, next domain.ModuleState, eventType domain.ModuleEventType, actorID *int64, payload map[string]interface{}) error {

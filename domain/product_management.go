@@ -6,9 +6,11 @@ type ProductManagementImageSource string
 
 const (
 	ProductManagementImageSourceManual         ProductManagementImageSource = "manual"
+	ProductManagementImageSourceERPProduct     ProductManagementImageSource = "erp_product_image"
 	ProductManagementImageSourceDelivery       ProductManagementImageSource = "delivery"
 	ProductManagementImageSourceDerivedPreview ProductManagementImageSource = "derived_preview"
 	ProductManagementImageSourceTaskReference  ProductManagementImageSource = "task_reference"
+	ProductManagementImageSourceAutoOnClose    ProductManagementImageSource = "auto_on_close"
 	ProductManagementImageSourceMissing        ProductManagementImageSource = "missing"
 )
 
@@ -22,12 +24,13 @@ const (
 type ProductManagementERPSyncStatus string
 
 const (
-	ProductManagementERPSyncStatusPendingSync ProductManagementERPSyncStatus = "pending_sync"
-	ProductManagementERPSyncStatusQueued      ProductManagementERPSyncStatus = "queued"
-	ProductManagementERPSyncStatusSyncing     ProductManagementERPSyncStatus = "syncing"
-	ProductManagementERPSyncStatusSynced      ProductManagementERPSyncStatus = "synced"
-	ProductManagementERPSyncStatusFailed      ProductManagementERPSyncStatus = "failed"
-	ProductManagementERPSyncStatusCoolingDown ProductManagementERPSyncStatus = "cooling_down"
+	ProductManagementERPSyncStatusPendingSync  ProductManagementERPSyncStatus = "pending_sync"
+	ProductManagementERPSyncStatusQueued       ProductManagementERPSyncStatus = "queued"
+	ProductManagementERPSyncStatusSyncing      ProductManagementERPSyncStatus = "syncing"
+	ProductManagementERPSyncStatusSynced       ProductManagementERPSyncStatus = "synced"
+	ProductManagementERPSyncStatusFailed       ProductManagementERPSyncStatus = "failed"
+	ProductManagementERPSyncStatusCoolingDown  ProductManagementERPSyncStatus = "cooling_down"
+	ProductManagementERPSyncStatusWaitingImage ProductManagementERPSyncStatus = "waiting_image"
 )
 
 type ProductManagementRecord struct {
@@ -36,8 +39,13 @@ type ProductManagementRecord struct {
 	TaskID              int64                               `json:"task_id"`
 	TaskSKUItemID       *int64                              `json:"task_sku_item_id,omitempty"`
 	TaskNo              string                              `json:"task_no"`
+	TaskType            string                              `json:"task_type,omitempty"`
+	SourceMode          string                              `json:"source_mode,omitempty"`
 	SKUCode             string                              `json:"sku_code"`
 	ProductIID          string                              `json:"product_i_id"`
+	ERPIID              string                              `json:"erp_i_id"`
+	CategoryName        string                              `json:"category_name,omitempty"`
+	ProductFamily       string                              `json:"product_family,omitempty"`
 	ProductName         string                              `json:"product_name"`
 	CostPrice           *float64                            `json:"cost_price,omitempty"`
 	CreatorID           int64                               `json:"creator_id"`
@@ -52,11 +60,19 @@ type ProductManagementRecord struct {
 	ImageFilename       string                              `json:"image_filename,omitempty"`
 	ImageMimeType       string                              `json:"image_mime_type,omitempty"`
 	ImageMissingReason  string                              `json:"image_missing_reason,omitempty"`
+	ImageSyncSource     ProductManagementImageSource        `json:"image_sync_source,omitempty"`
 	ERPSyncStatus       ProductManagementERPSyncStatus      `json:"erp_sync_status"`
+	BaseSyncStatus      ProductManagementERPSyncStatus      `json:"base_sync_status"`
+	ImageSyncStatus     ProductManagementERPSyncStatus      `json:"image_sync_status"`
 	LastERPSyncedAt     *time.Time                          `json:"last_erp_synced_at,omitempty"`
 	LastERPCheckedAt    *time.Time                          `json:"last_erp_checked_at,omitempty"`
+	LastBaseSyncedAt    *time.Time                          `json:"last_base_synced_at,omitempty"`
+	LastImageSyncedAt   *time.Time                          `json:"last_image_synced_at,omitempty"`
 	SyncCooldownUntil   *time.Time                          `json:"sync_cooldown_until,omitempty"`
 	LastSyncError       string                              `json:"last_sync_error,omitempty"`
+	BaseSyncError       string                              `json:"base_sync_error,omitempty"`
+	ImageSyncError      string                              `json:"image_sync_error,omitempty"`
+	ImageRequired       bool                                `json:"image_required"`
 	CanMaintainImage    bool                                `json:"can_maintain_image"`
 	CanCrossTaskSelect  bool                                `json:"can_cross_task_select"`
 	CanSyncERP          bool                                `json:"can_sync_erp"`
@@ -83,6 +99,10 @@ func ProductManagementImageSourceLabel(source ProductManagementImageSource) stri
 	switch source {
 	case ProductManagementImageSourceManual:
 		return "人工指定 ERP 图"
+	case ProductManagementImageSourceERPProduct:
+		return "专项 ERP 商品图"
+	case ProductManagementImageSourceAutoOnClose:
+		return "结单成品图自动同步"
 	case ProductManagementImageSourceDelivery:
 		return "当前 SKU 成品图"
 	case ProductManagementImageSourceDerivedPreview:

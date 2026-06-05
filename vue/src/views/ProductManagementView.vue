@@ -33,6 +33,8 @@
         <select v-model="filters.image_source" @change="applyFilters">
           <option value="">全部</option>
           <option value="manual">人工指定</option>
+          <option value="erp_product_image">专项 ERP 商品图</option>
+          <option value="auto_on_close">结单自动同步</option>
           <option value="delivery">SKU 成品图</option>
           <option value="derived_preview">派生预览</option>
           <option value="task_reference">任务参考图</option>
@@ -48,9 +50,22 @@
         </select>
       </label>
       <label class="pm-field">
-        <span>同步状态</span>
-        <select v-model="filters.sync_status" @change="applyFilters">
+        <span>基础资料</span>
+        <select v-model="filters.base_sync_status" @change="applyFilters">
           <option value="">全部</option>
+          <option value="pending_sync">待同步</option>
+          <option value="queued">已入队</option>
+          <option value="syncing">同步中</option>
+          <option value="cooling_down">冷却中</option>
+          <option value="failed">失败</option>
+          <option value="synced">已同步</option>
+        </select>
+      </label>
+      <label class="pm-field">
+        <span>ERP 图片</span>
+        <select v-model="filters.image_sync_status" @change="applyFilters">
+          <option value="">全部</option>
+          <option value="waiting_image">待上传</option>
           <option value="pending_sync">待同步</option>
           <option value="queued">已入队</option>
           <option value="syncing">同步中</option>
@@ -93,7 +108,8 @@
 
         <div class="pm-main-cell">
           <strong class="pm-mono">{{ record.sku_code || '-' }}</strong>
-          <small>款式 {{ record.product_i_id || '-' }}</small>
+          <small>款式 {{ productIIDLabel(record) }}</small>
+          <small v-if="record.category_name">分类 {{ record.category_name }}</small>
         </div>
 
         <div class="pm-info-cell">
@@ -113,9 +129,16 @@
         </div>
 
         <div class="pm-sync-cell">
-          <span class="pm-pill" :class="`pm-sync--${record.erp_sync_status}`">{{ syncStatusLabel(record.erp_sync_status) }}</span>
-          <small>{{ record.last_erp_synced_at ? formatDate(record.last_erp_synced_at) : '尚未同步' }}</small>
-          <small v-if="record.last_sync_error" class="pm-error-text">{{ record.last_sync_error }}</small>
+          <span class="pm-pill" :class="`pm-sync--${baseSyncStatus(record)}`">
+            基础 {{ syncStatusLabel(baseSyncStatus(record)) }}
+          </span>
+          <small>{{ record.last_base_synced_at ? formatDate(record.last_base_synced_at) : '基础资料尚未同步' }}</small>
+          <small v-if="record.base_sync_error" class="pm-error-text">{{ record.base_sync_error }}</small>
+          <span class="pm-pill" :class="`pm-sync--${imageSyncStatus(record)}`">
+            图片 {{ syncStatusLabel(imageSyncStatus(record)) }}
+          </span>
+          <small>{{ record.last_image_synced_at ? formatDate(record.last_image_synced_at) : 'ERP 图片尚未同步' }}</small>
+          <small v-if="record.image_sync_error" class="pm-error-text">{{ record.image_sync_error }}</small>
         </div>
 
         <div class="pm-actions">
@@ -126,8 +149,14 @@
           <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_maintain_image" @click="reparseImage(record)">
             重新解析
           </button>
+          <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_sync_erp" @click="requestBaseSync(record)">
+            同步基础
+          </button>
           <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp" @click="requestSync(record)">
-            同步 ERP
+            全部同步
+          </button>
+          <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp || !record.image_asset_id" @click="requestImageSync(record)">
+            同步图片
           </button>
         </div>
       </article>
@@ -209,12 +238,21 @@ import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 const router = useRouter()
 const route = useRoute()
 
-const filters = reactive<Required<Pick<ProductManagementListParams, 'keyword' | 'issue_scope' | 'image_source' | 'cost_status' | 'sync_status' | 'page' | 'page_size'>>>({
+const filters = reactive<
+  Required<
+    Pick<
+      ProductManagementListParams,
+      'keyword' | 'issue_scope' | 'image_source' | 'cost_status' | 'sync_status' | 'base_sync_status' | 'image_sync_status' | 'page' | 'page_size'
+    >
+  >
+>({
   keyword: '',
   issue_scope: 'attention',
   image_source: '',
   cost_status: '',
   sync_status: '',
+  base_sync_status: '',
+  image_sync_status: '',
   page: 1,
   page_size: 20,
 })
@@ -255,6 +293,8 @@ async function loadRecords(): Promise<void> {
       image_source: filters.image_source,
       cost_status: filters.cost_status,
       sync_status: filters.sync_status,
+      base_sync_status: filters.base_sync_status,
+      image_sync_status: filters.image_sync_status,
       page: filters.page,
       page_size: filters.page_size,
     })
@@ -336,6 +376,22 @@ async function requestSync(record: ProductManagementRecord): Promise<void> {
   }
 }
 
+async function requestBaseSync(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceRecord(await productManagementApi.requestBaseSync(record.id))
+  } catch (err) {
+    error.value = errorMessage(err)
+  }
+}
+
+async function requestImageSync(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceRecord(await productManagementApi.requestImageSync(record.id))
+  } catch (err) {
+    error.value = errorMessage(err)
+  }
+}
+
 async function syncCurrentPage(): Promise<void> {
   if (batchSyncing.value) return
   batchSyncing.value = true
@@ -366,6 +422,18 @@ function replaceRecord(next: ProductManagementRecord): void {
 
 function hasCost(record: ProductManagementRecord): boolean {
   return typeof record.cost_price === 'number' && record.cost_price > 0
+}
+
+function productIIDLabel(record: ProductManagementRecord): string {
+  return record.erp_i_id?.trim() || record.product_i_id?.trim() || '未绑定 ERP 款式'
+}
+
+function baseSyncStatus(record: ProductManagementRecord): ProductSyncStatus {
+  return record.base_sync_status || record.erp_sync_status || 'pending_sync'
+}
+
+function imageSyncStatus(record: ProductManagementRecord): ProductSyncStatus {
+  return record.image_sync_status || record.erp_sync_status || 'waiting_image'
 }
 
 function previewURLForRecord(record: ProductManagementRecord): string {
@@ -443,6 +511,7 @@ function syncStatusLabel(status: ProductSyncStatus): string {
     synced: '已同步',
     failed: '同步失败',
     cooling_down: '冷却中',
+    waiting_image: '待上传 ERP 图',
   }
   return labels[status] ?? status
 }
@@ -745,6 +814,18 @@ function errorMessage(err: unknown): string {
   background: #ede9fe;
 }
 
+.pm-source--erp_product_image {
+  border-color: #5eead4;
+  color: #0f766e;
+  background: #ccfbf1;
+}
+
+.pm-source--auto_on_close {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
 .pm-source--missing,
 .pm-sync--failed {
   border-color: #fecaca;
@@ -770,6 +851,12 @@ function errorMessage(err: unknown): string {
   border-color: #fde68a;
   color: #92400e;
   background: #fffbeb;
+}
+
+.pm-sync--waiting_image {
+  border-color: #fed7aa;
+  color: #c2410c;
+  background: #fff7ed;
 }
 
 .pm-actions {

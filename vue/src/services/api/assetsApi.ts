@@ -9,7 +9,7 @@ import axios from 'axios'
 import http from '@/services/http'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 
-export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'design_thumb'
+export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'design_thumb' | 'erp_product_image'
 
 /** POST /v1/assets/upload-sessions 请求体（新集成，不传 upload_mode） */
 export interface CreateAssetUploadSessionPayload {

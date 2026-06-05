@@ -11,6 +11,7 @@ const (
 	TaskAssetTypeDelivery    TaskAssetType = "delivery"
 	TaskAssetTypePreview     TaskAssetType = "preview"
 	TaskAssetTypeDesignThumb TaskAssetType = "design_thumb"
+	TaskAssetTypeERPProduct  TaskAssetType = "erp_product_image"
 
 	// Legacy aliases kept for backward-compatible input normalization.
 	TaskAssetTypeOriginal        TaskAssetType = "original"
@@ -32,6 +33,8 @@ func (t TaskAssetType) Canonical() TaskAssetType {
 		return TaskAssetTypePreview
 	case TaskAssetTypeDesignThumb:
 		return TaskAssetTypeDesignThumb
+	case TaskAssetTypeERPProduct:
+		return TaskAssetTypeERPProduct
 	default:
 		return ""
 	}
@@ -59,6 +62,10 @@ func (t TaskAssetType) IsPreview() bool {
 
 func (t TaskAssetType) IsDesignThumb() bool {
 	return t.Canonical() == TaskAssetTypeDesignThumb
+}
+
+func (t TaskAssetType) IsERPProductImage() bool {
+	return t.Canonical() == TaskAssetTypeERPProduct
 }
 
 func NormalizeTaskAssetType(assetType TaskAssetType) TaskAssetType {
