@@ -66,6 +66,18 @@ func erpProductShortNameTooLong(value string) bool {
 	return len(strings.TrimSpace(value)) > ERPProductShortNameMaxBytes
 }
 
+func erpProductShortNameForFiling(scene, templateKey, explicitShortName, name, iID string) string {
+	explicitShortName = strings.TrimSpace(explicitShortName)
+	if explicitShortName != "" {
+		return truncateERPShortName(explicitShortName, ERPProductShortNameMaxBytes)
+	}
+	generated := generateERPShortName(scene, templateKey, name, iID)
+	if strings.TrimSpace(generated) != "" {
+		return truncateERPShortName(generated, ERPProductShortNameMaxBytes)
+	}
+	return truncateERPShortName(firstNonEmptyString(name, iID), ERPProductShortNameMaxBytes)
+}
+
 func truncateERPShortName(value string, maxBytes int) string {
 	value = strings.TrimSpace(value)
 	if maxBytes <= 0 {

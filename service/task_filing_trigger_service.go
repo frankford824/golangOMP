@@ -409,12 +409,8 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 	if productID == "" {
 		productID = skuID
 	}
-	if shortName == "" {
-		shortName = strings.TrimSpace(detail.ProductShortName)
-	}
-	if shortName == "" {
-		shortName = name
-	}
+	iid := strings.TrimSpace(firstNonEmptyString(snapshotIID(snapshot), detail.Category, detail.CategoryName, skuID))
+	shortName = erpProductShortNameForFiling(string(task.TaskType), "", shortName, name, iid)
 	sPrice := cloneFloat64Ptr(detail.BaseSalePrice)
 	if sPrice == nil && task.SourceMode == domain.TaskSourceModeNewProduct {
 		sPrice = zeroFloat64Ptr()
@@ -423,7 +419,7 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        productID,
 		SKUID:            skuID,
-		IID:              strings.TrimSpace(firstNonEmptyString(snapshotIID(snapshot), detail.Category, detail.CategoryName, skuID)),
+		IID:              iid,
 		SKUCode:          skuCode,
 		Name:             name,
 		ProductName:      firstNonEmptyString(name, skuCode),
@@ -487,7 +483,7 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		return domain.ERPProductUpsertPayload{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "batch filing requires product_i_id", map[string]interface{}{"task_id": task.ID, "sequence_no": item.SequenceNo})
 	}
 	name := firstNonEmptyString(strings.TrimSpace(item.ProductNameSnapshot), strings.TrimSpace(task.ProductNameSnapshot), skuCode)
-	shortName := firstNonEmptyString(strings.TrimSpace(item.ProductShortName), name)
+	shortName := erpProductShortNameForFiling(string(task.TaskType), "", strings.TrimSpace(item.ProductShortName), name, iid)
 	imageURL := firstReferenceImageURL(item.ReferenceFileRefs)
 	sPrice := cloneFloat64Ptr(item.BaseSalePrice)
 	if sPrice == nil {
