@@ -553,8 +553,16 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 		args = append(args, status)
 	}
 	if status := strings.TrimSpace(filter.ImageSyncStatus); status != "" {
-		clauses = append(clauses, "image_sync_status = ?")
-		args = append(args, status)
+		if status == string(domain.ProductManagementERPSyncStatusSynced) {
+			clauses = append(clauses, "image_sync_status = ? AND last_image_synced_at IS NOT NULL")
+			args = append(args, status)
+		} else if status == string(domain.ProductManagementERPSyncStatusPendingSync) {
+			clauses = append(clauses, "(image_sync_status = ? OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL))")
+			args = append(args, status)
+		} else {
+			clauses = append(clauses, "image_sync_status = ?")
+			args = append(args, status)
+		}
 	}
 	switch strings.TrimSpace(filter.CostStatus) {
 	case "missing":
@@ -572,6 +580,7 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 			OR cost_price <= 0
 			OR base_sync_status IN ('pending_sync', 'failed', 'queued', 'cooling_down', 'syncing')
 			OR image_sync_status IN ('pending_sync', 'waiting_image', 'failed', 'queued', 'cooling_down', 'syncing')
+			OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL)
 		)`)
 	}
 	return "WHERE " + strings.Join(clauses, " AND "), args

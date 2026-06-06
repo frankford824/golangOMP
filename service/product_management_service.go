@@ -456,7 +456,55 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 		},
 	}
 	_, appErr = s.erpBridge.UpsertProduct(ctx, payload)
-	return appErr
+	if appErr != nil {
+		return appErr
+	}
+	return s.verifyERPImageReadback(ctx, record)
+}
+
+var productManagementERPImageReadbackRetryDelays = []time.Duration{
+	300 * time.Millisecond,
+	800 * time.Millisecond,
+	1500 * time.Millisecond,
+}
+
+var productManagementERPImageReadbackSleep = time.Sleep
+
+func (s *productManagementService) verifyERPImageReadback(ctx context.Context, record *domain.ProductManagementRecord) *domain.AppError {
+	if s == nil || s.erpBridge == nil || record == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片回读校验失败：同步服务未配置", nil)
+	}
+	sku := strings.TrimSpace(record.SKUCode)
+	if sku == "" {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "SKU is required for ERP image readback", nil)
+	}
+	maxAttempts := 1 + len(productManagementERPImageReadbackRetryDelays)
+	var lastMessage string
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		product, appErr := s.erpBridge.GetProductByID(ctx, sku)
+		if appErr != nil {
+			lastMessage = strings.TrimSpace(appErr.Message)
+		} else if product == nil {
+			lastMessage = "ERP 未返回该 SKU 商品资料"
+		} else {
+			imageURL := strings.TrimSpace(product.ImageURL)
+			if isAbsoluteHTTPURL(imageURL) {
+				return nil
+			}
+			if imageURL == "" {
+				lastMessage = "ERP 尚未返回商品图"
+			} else {
+				lastMessage = "ERP 返回的图片地址不是公网地址"
+			}
+		}
+		if attempt < maxAttempts {
+			productManagementERPImageReadbackSleep(productManagementERPImageReadbackRetryDelays[attempt-1])
+		}
+	}
+	if lastMessage == "" {
+		lastMessage = "ERP 图片状态未知"
+	}
+	return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片回读校验未通过："+lastMessage, nil)
 }
 
 func productManagementERPShortName(productName, productIID, skuCode string) string {
@@ -813,6 +861,9 @@ func productManagementDecoratedImageSyncStatus(record *domain.ProductManagementR
 		return record.ImageSyncStatus
 	}
 	if !patchChanged && record.ImageSyncStatus != "" {
+		if record.ImageSyncStatus == domain.ProductManagementERPSyncStatusSynced && record.LastImageSyncedAt == nil {
+			return domain.ProductManagementERPSyncStatusPendingSync
+		}
 		return record.ImageSyncStatus
 	}
 	return patchStatus

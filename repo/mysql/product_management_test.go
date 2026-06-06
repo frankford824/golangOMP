@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"workflow/repo"
 )
 
 func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.T) {
@@ -110,4 +112,27 @@ func TestProductManagementClaimQueuedSyncRecordsClaimsChildSyncStatuses(t *testi
 
 func testProductManagementNow() time.Time {
 	return time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
+}
+
+func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T) {
+	where, args := buildProductManagementWhere(repo.ProductManagementListFilter{ImageSyncStatus: "synced"})
+	if !strings.Contains(where, "image_sync_status = ? AND last_image_synced_at IS NOT NULL") {
+		t.Fatalf("synced image filter where = %s", where)
+	}
+	if len(args) != 1 || args[0] != "synced" {
+		t.Fatalf("synced image filter args = %#v", args)
+	}
+
+	where, args = buildProductManagementWhere(repo.ProductManagementListFilter{ImageSyncStatus: "pending_sync"})
+	if !strings.Contains(where, "image_sync_status = ? OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL)") {
+		t.Fatalf("pending image filter where = %s", where)
+	}
+	if len(args) != 1 || args[0] != "pending_sync" {
+		t.Fatalf("pending image filter args = %#v", args)
+	}
+
+	where, _ = buildProductManagementWhere(repo.ProductManagementListFilter{IssueScope: "attention"})
+	if !strings.Contains(where, "OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL)") {
+		t.Fatalf("attention filter where = %s", where)
+	}
 }
