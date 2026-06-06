@@ -304,9 +304,15 @@ func (r *productManagementRepo) ClaimQueuedSyncRecords(ctx context.Context, limi
 		 WHERE erp_sync_status = 'queued'
 		    OR (erp_sync_status = 'cooling_down' AND (sync_cooldown_until IS NULL OR sync_cooldown_until <= ?))
 		    OR (erp_sync_status = 'syncing' AND (last_erp_checked_at IS NULL OR last_erp_checked_at <= DATE_SUB(?, INTERVAL 10 MINUTE)))
+		    OR base_sync_status = 'queued'
+		    OR (base_sync_status = 'cooling_down' AND (sync_cooldown_until IS NULL OR sync_cooldown_until <= ?))
+		    OR (base_sync_status = 'syncing' AND (last_erp_checked_at IS NULL OR last_erp_checked_at <= DATE_SUB(?, INTERVAL 10 MINUTE)))
+		    OR image_sync_status = 'queued'
+		    OR (image_sync_status = 'cooling_down' AND (sync_cooldown_until IS NULL OR sync_cooldown_until <= ?))
+		    OR (image_sync_status = 'syncing' AND (last_erp_checked_at IS NULL OR last_erp_checked_at <= DATE_SUB(?, INTERVAL 10 MINUTE)))
 		 ORDER BY COALESCE(last_erp_checked_at, created_at), updated_at, id
 		 LIMIT ?`,
-		now, now, claimToken, now, now, now, limit,
+		now, now, claimToken, now, now, now, now, now, now, now, limit,
 	); err != nil {
 		return nil, fmt.Errorf("claim product management sync records: %w", err)
 	}
@@ -352,7 +358,10 @@ func (r *productManagementRepo) UpdateImage(ctx context.Context, tx repo.Tx, id 
 		       image_mime_type = ?,
 		       image_missing_reason = ?,
 		       image_sync_source = ?,
-		       image_sync_status = ?,
+		       image_sync_status = CASE
+		         WHEN ? = 'pending_sync' AND erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_sync_status
+		         ELSE ?
+		       END,
 		       image_sync_error = CASE WHEN ? = 'waiting_image' THEN image_missing_reason ELSE '' END,
 		       erp_sync_status = CASE WHEN erp_sync_status = 'synced' THEN 'pending_sync' ELSE erp_sync_status END
 		 WHERE id = ?`,
@@ -364,6 +373,7 @@ func (r *productManagementRepo) UpdateImage(ctx context.Context, tx repo.Tx, id 
 		strings.TrimSpace(patch.ImageMimeType),
 		strings.TrimSpace(patch.ImageMissingReason),
 		string(imageSyncSource),
+		string(imageSyncStatus),
 		string(imageSyncStatus),
 		string(imageSyncStatus),
 		id,
