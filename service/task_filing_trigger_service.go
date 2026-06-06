@@ -16,11 +16,12 @@ import (
 )
 
 type TriggerTaskFilingParams struct {
-	TaskID     int64
-	OperatorID int64
-	Remark     string
-	Source     TaskFilingTriggerSource
-	Force      bool
+	TaskID           int64
+	OperatorID       int64
+	Remark           string
+	Source           TaskFilingTriggerSource
+	Force            bool
+	TargetSKUItemIDs []int64
 }
 
 type RetryTaskFilingParams struct {
@@ -109,7 +110,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 	if selection != nil {
 		detail.ProductSelection = selection
 	}
-	payloads, missingFields, missingSummary, appErr := s.buildTaskERPBridgeFilingPayloads(ctx, task, detail, p.OperatorID, p.Remark, string(p.Source), p.Force)
+	payloads, missingFields, missingSummary, appErr := s.buildTaskERPBridgeFilingPayloads(ctx, task, detail, p.OperatorID, p.Remark, string(p.Source), p.Force, p.TargetSKUItemIDs)
 	if appErr != nil {
 		detail.FilingStatus = domain.FilingStatusFilingFailed
 		detail.FilingErrorMessage = appErr.Message
@@ -208,6 +209,13 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 		detail.LastFiledAt = &successAt
 		detail.FiledAt = &successAt
 	}
+	if isBatchNewProductTask(task) && len(p.TargetSKUItemIDs) > 0 {
+		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID)
+		if err != nil {
+			return nil, infraError("list batch sku items for targeted filing aggregate", err)
+		}
+		applyTargetedBatchFilingAggregate(detail, items, summary.ItemResults)
+	}
 	hydrateTaskDetailFilingProjection(task, detail)
 	if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, summary.LastResult, summary.LastCallLog, summary.ItemResults, attempted, ""); err != nil {
 		return nil, infraError("persist filing attempt result", err)
@@ -224,13 +232,16 @@ func (s *taskService) triggerFilingBestEffort(ctx context.Context, p TriggerTask
 	}
 }
 
-func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, operatorID int64, remark, source string, force bool) ([]taskFilingPayload, []string, string, *domain.AppError) {
+func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, operatorID int64, remark, source string, force bool, targetSKUItemIDs []int64) ([]taskFilingPayload, []string, string, *domain.AppError) {
 	if isBatchNewProductTask(task) {
 		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID)
 		if err != nil {
 			return nil, nil, "", infraError("list batch sku items for filing", err)
 		}
 		targetItems := batchSKUItemsNeedingERPFile(items)
+		if len(targetSKUItemIDs) > 0 {
+			targetItems = batchSKUItemsByID(items, targetSKUItemIDs)
+		}
 		if len(targetItems) == 0 {
 			return []taskFilingPayload{}, nil, "", nil
 		}
@@ -547,6 +558,104 @@ func batchSKUItemsNeedingERPFile(items []*domain.TaskSKUItem) []*domain.TaskSKUI
 		}
 	}
 	return targets
+}
+
+func batchSKUItemsByID(items []*domain.TaskSKUItem, targetIDs []int64) []*domain.TaskSKUItem {
+	if len(targetIDs) == 0 {
+		return []*domain.TaskSKUItem{}
+	}
+	targetSet := make(map[int64]struct{}, len(targetIDs))
+	for _, id := range targetIDs {
+		if id > 0 {
+			targetSet[id] = struct{}{}
+		}
+	}
+	if len(targetSet) == 0 {
+		return []*domain.TaskSKUItem{}
+	}
+	targets := make([]*domain.TaskSKUItem, 0, len(targetSet))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if _, ok := targetSet[item.ID]; ok {
+			targets = append(targets, item)
+		}
+	}
+	return targets
+}
+
+func applyTargetedBatchFilingAggregate(detail *domain.TaskDetail, items []*domain.TaskSKUItem, itemResults []taskFilingItemResult) {
+	if detail == nil {
+		return
+	}
+	resultByID := make(map[int64]taskFilingItemResult, len(itemResults))
+	for _, result := range itemResults {
+		if result.SKUItemID > 0 {
+			resultByID[result.SKUItemID] = result
+		}
+	}
+	allFiled := true
+	hasPending := false
+	failures := make([]string, 0)
+	var lastFiledAt *time.Time
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		status := item.FilingStatus
+		if !status.Valid() {
+			status = domain.FilingStatusPending
+		}
+		syncRequired := item.ERPSyncRequired
+		errorMessage := strings.TrimSpace(item.FilingErrorMessage)
+		if result, ok := resultByID[item.ID]; ok {
+			status = domain.FilingStatusFilingFailed
+			syncRequired = true
+			errorMessage = strings.TrimSpace(result.Failure)
+			if result.Succeeded {
+				status = domain.FilingStatusFiled
+				syncRequired = false
+				errorMessage = ""
+				lastFiledAt = result.LastFiledAt
+			} else if result.Pending {
+				status = domain.FilingStatusPending
+				errorMessage = erpBridgeCostVerificationPendingMessage(result.Result)
+			}
+		}
+		if status == domain.FilingStatusFilingFailed {
+			failures = append(failures, fmt.Sprintf("%s：%s", firstNonEmptyString(strings.TrimSpace(item.SKUCode), "SKU"), firstNonEmptyString(errorMessage, "待重新同步")))
+		}
+		if syncRequired || status != domain.FilingStatusFiled {
+			allFiled = false
+		}
+		if syncRequired || status == domain.FilingStatusPending || status == domain.FilingStatusFiling {
+			hasPending = true
+		}
+	}
+	if len(failures) > 0 {
+		detail.FilingStatus = domain.FilingStatusFilingFailed
+		detail.FilingErrorMessage = "部分SKU同步失败：" + strings.Join(failures, "；")
+		detail.ERPSyncRequired = true
+		return
+	}
+	if allFiled {
+		successAt := time.Now().UTC()
+		if lastFiledAt != nil {
+			successAt = *lastFiledAt
+		}
+		detail.FilingStatus = domain.FilingStatusFiled
+		detail.FilingErrorMessage = ""
+		detail.ERPSyncRequired = false
+		detail.LastFiledAt = &successAt
+		detail.FiledAt = &successAt
+		return
+	}
+	if hasPending {
+		detail.FilingStatus = domain.FilingStatusPending
+		detail.FilingErrorMessage = "仍有SKU等待同步"
+		detail.ERPSyncRequired = true
+	}
 }
 
 func zeroFloat64Ptr() *float64 {

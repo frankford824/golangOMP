@@ -257,6 +257,22 @@ type TaskReadModel struct {
 	CreatorName         string                   `json:"creator_name,omitempty"`
 }
 
+type TaskFilterActorOption struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Username    string     `json:"username,omitempty"`
+	DisplayName string     `json:"display_name,omitempty"`
+	Department  string     `json:"department,omitempty"`
+	Team        string     `json:"team,omitempty"`
+	TaskCount   int64      `json:"task_count"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+}
+
+type TaskFilterOptions struct {
+	Creators  []TaskFilterActorOption `json:"creators"`
+	Designers []TaskFilterActorOption `json:"designers"`
+}
+
 // TaskListItem is the frontend-oriented task list projection for STEP_05.
 type TaskListItem struct {
 	ID                           int64                        `json:"id"`

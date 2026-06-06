@@ -29,15 +29,8 @@ func TestValidateERPProductUpsertNameLength(t *testing.T) {
 
 	longShortName := strings.Repeat("短", 14)
 	appErr = validateERPProductUpsertNameLength(domain.ERPProductUpsertPayload{Name: "正常产品", ShortName: longShortName})
-	if appErr == nil {
-		t.Fatal("expected long ERP product short name to be rejected")
-	}
-	details, ok = appErr.Details.(map[string]interface{})
-	if !ok {
-		t.Fatalf("details = %#v, want map", appErr.Details)
-	}
-	if got := details["code"]; got != "erp_product_short_name_too_long" {
-		t.Fatalf("code = %#v, want erp_product_short_name_too_long", got)
+	if appErr != nil {
+		t.Fatalf("long ERP product short name should no longer be rejected: %+v", appErr)
 	}
 }
 

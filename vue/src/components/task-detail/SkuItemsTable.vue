@@ -86,7 +86,7 @@
                   class="sku-action-btn"
                   @click="$emit('edit', { item, index })"
                 >
-                  编辑
+                  编辑/成本
                 </button>
               </div>
             </td>

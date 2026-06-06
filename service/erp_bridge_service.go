@@ -1436,13 +1436,9 @@ func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) do
 		skuImmutable := true
 		payload.SKUImmutable = &skuImmutable
 	}
-	scene := taskType
-	if scene == "" {
-		scene = payload.Operation
-	}
 	autoEnabled := payload.AutoGenerateShortName == nil || *payload.AutoGenerateShortName
 	if autoEnabled && payload.ShortName == "" {
-		payload.ShortName = generateERPShortName(scene, payload.ShortNameTemplateKey, payload.Name, payload.IID)
+		payload.ShortName = firstNonEmptyString(payload.ProductName, payload.Name, payload.SKUCode, payload.IID)
 		payload.ProductShortName = payload.ShortName
 	}
 	return payload

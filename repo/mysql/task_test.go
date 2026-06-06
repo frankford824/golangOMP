@@ -375,12 +375,21 @@ func TestBuildTaskListQuerySpecKeywordIncludesTaskSkuItems(t *testing.T) {
 	if !strings.Contains(spec.whereSQL, "tsi.sku_code LIKE ?") {
 		t.Fatalf("whereSQL missing batch sku item match: %s", spec.whereSQL)
 	}
+	if !strings.Contains(spec.whereSQL, "users task_keyword_actor") {
+		t.Fatalf("whereSQL missing task actor keyword user lookup: %s", spec.whereSQL)
+	}
+	if !strings.Contains(spec.whereSQL, "task_keyword_actor.display_name LIKE ?") {
+		t.Fatalf("whereSQL missing actor display_name match: %s", spec.whereSQL)
+	}
+	if !strings.Contains(spec.whereSQL, "task_keyword_actor.username LIKE ?") {
+		t.Fatalf("whereSQL missing actor username match: %s", spec.whereSQL)
+	}
 	if strings.Contains(spec.fromSQL, "JOIN task_sku_items") {
 		t.Fatalf("fromSQL must not JOIN task_sku_items (would duplicate rows): %s", spec.fromSQL)
 	}
 
 	like := "%" + keyword + "%"
-	wantArgs := []interface{}{like, like, like, like, like, like, keyword, like}
+	wantArgs := []interface{}{like, like, like, like, like, like, keyword, like, like, like}
 	if len(spec.args) != len(wantArgs) {
 		t.Fatalf("args len = %d, want %d: %#v", len(spec.args), len(wantArgs), spec.args)
 	}
@@ -424,7 +433,7 @@ func runTaskRepoListKeywordSearchCase(t *testing.T, keyword string, wantTotal in
 
 	taskRepo := NewTaskRepo(&DB{db: db})
 	like := "%" + keyword + "%"
-	countArgs := []driver.Value{like, like, like, like, like, like, keyword, like}
+	countArgs := []driver.Value{like, like, like, like, like, like, keyword, like, like, like}
 
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
 		WithArgs(countArgs...).

@@ -764,6 +764,92 @@ func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) 
 	}
 }
 
+func TestUpdateBatchSKUItemCostOnlyRefilesTargetSKU(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			703: {
+				ID:                  703,
+				TaskNo:              "RW-20260605-A-001143",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				ProductNameSnapshot: "CPT-定制海报/暑假班",
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				IsBatchTask:         true,
+				BatchItemCount:      3,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			703: {
+				TaskID:             703,
+				Category:           "GENERAL",
+				CategoryCode:       "GENERAL",
+				CategoryName:       "通用",
+				FilingStatus:       domain.FilingStatusFilingFailed,
+				FilingErrorMessage: "部分SKU同步失败",
+				ERPSyncRequired:    true,
+				ERPSyncVersion:     2,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			703: {
+				{ID: 1001, TaskID: 703, SequenceNo: 1, SKUCode: "DZG000101", ProductNameSnapshot: "CPT-定制海报/暑假班/130*150cm", ProductIID: "定制海报", CostPrice: float64Ptr(10.725), FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true, FilingErrorMessage: "ERP频控"},
+				{ID: 1002, TaskID: 703, SequenceNo: 2, SKUCode: "DZG000102", ProductNameSnapshot: "CPT-定制海报/暑假班/150*200cm", ProductIID: "定制海报", CostPrice: float64Ptr(16.5), FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true, FilingErrorMessage: "ERP频控"},
+				{ID: 1003, TaskID: 703, SequenceNo: 3, SKUCode: "DZG000103", ProductNameSnapshot: "CPT-定制海报/暑假班/150*250cm", ProductIID: "定制海报", CostPrice: float64Ptr(20.625), FilingStatus: domain.FilingStatusFiled, ERPSyncStatus: domain.FilingStatusFiled, ERPSyncRequired: false},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	updated, appErr := svc.UpdateSKUItemCostInfo(context.Background(), UpdateTaskSKUItemCostInfoParams{
+		TaskID:                   703,
+		SKUItemID:                1002,
+		OperatorID:               1,
+		CostPrice:                float64Ptr(18.8),
+		ManualCostOverride:       true,
+		ManualCostOverrideReason: "运营单行修正成本",
+		Remark:                   "target cost sync",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateSKUItemCostInfo() unexpected error: %+v", appErr)
+	}
+	if updated.CostPrice == nil || *updated.CostPrice != 18.8 {
+		t.Fatalf("updated cost = %+v, want 18.8", updated.CostPrice)
+	}
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatalf("upsert calls = %d, want only target SKU refiled", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayload.SKUID; got != "DZG000102" {
+		t.Fatalf("upsert sku = %s, want DZG000102", got)
+	}
+	items := taskRepo.skuItems[703]
+	if items[1].FilingStatus != domain.FilingStatusFiled || items[1].ERPSyncRequired {
+		t.Fatalf("target item filing = %s required=%t, want filed false", items[1].FilingStatus, items[1].ERPSyncRequired)
+	}
+	if items[0].FilingStatus != domain.FilingStatusFilingFailed || !items[0].ERPSyncRequired {
+		t.Fatalf("non-target failed item changed: status=%s required=%t", items[0].FilingStatus, items[0].ERPSyncRequired)
+	}
+	if taskRepo.details[703].FilingStatus != domain.FilingStatusFilingFailed {
+		t.Fatalf("task detail filing_status = %s, want aggregated filing_failed", taskRepo.details[703].FilingStatus)
+	}
+	if !strings.Contains(taskRepo.details[703].FilingErrorMessage, "DZG000101") {
+		t.Fatalf("task detail filing error = %q, want remaining failed SKU", taskRepo.details[703].FilingErrorMessage)
+	}
+}
+
 func TestRetryFilingSyncsSingleSKUItemCostProjectionFromTaskDetail(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},

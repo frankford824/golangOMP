@@ -3914,6 +3914,41 @@ components:
           $ref: '#/components/schemas/UploadRequestAdvanceAction'
         remark:
           type: string
+    TaskFilterActorOption:
+      type: object
+      required: [id, name, task_count]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          description: Display label resolved from display_name, username, or user id.
+        username:
+          type: string
+        display_name:
+          type: string
+        department:
+          type: string
+        team:
+          type: string
+        task_count:
+          type: integer
+          format: int64
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+    TaskFilterOptions:
+      type: object
+      properties:
+        creators:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskFilterActorOption'
+        designers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskFilterActorOption'
     TaskListItem:
       type: object
       properties:
@@ -10851,7 +10886,7 @@ paths:
           schema: { type: boolean }
         - in: query
           name: keyword
-          description: Matches `task_no`, `sku_code`, or `product_name_snapshot`.
+          description: Matches task no, task SKU, batch SKU, product name, owner department/team, task id, and related actor display names/usernames (creator, requester, designer, current handler).
           schema: { type: string }
         - in: query
           name: owner_department
@@ -10882,6 +10917,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListResponse'
+  /v1/tasks/filter-options:
+    get:
+      summary: Get task center filter options
+      description: Returns task-derived creator and designer options for the task center advanced filters. The source is historical task actor usage, not the user-management directory, so ordinary task roles can filter by people who appear in tasks without requiring `/v1/users` access.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      responses:
+        '200':
+          description: Task filter options
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskFilterOptions'
   /v1/tasks/{id}:
     get:
       summary: Get task read model

@@ -552,6 +552,88 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 	return items, total, nil
 }
 
+func (r *taskRepo) ListFilterOptions(ctx context.Context) (*domain.TaskFilterOptions, error) {
+	creators, err := r.listTaskActorFilterOptions(ctx, "creator_id")
+	if err != nil {
+		return nil, fmt.Errorf("list task creator filter options: %w", err)
+	}
+	designers, err := r.listTaskActorFilterOptions(ctx, "designer_id")
+	if err != nil {
+		return nil, fmt.Errorf("list task designer filter options: %w", err)
+	}
+	return &domain.TaskFilterOptions{
+		Creators:  creators,
+		Designers: designers,
+	}, nil
+}
+
+func (r *taskRepo) listTaskActorFilterOptions(ctx context.Context, actorColumn string) ([]domain.TaskFilterActorOption, error) {
+	switch actorColumn {
+	case "creator_id", "designer_id":
+	default:
+		return nil, fmt.Errorf("unsupported task actor filter column %q", actorColumn)
+	}
+	query := fmt.Sprintf(`
+		SELECT actor_id,
+		       COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), CAST(actor_id AS CHAR)) AS name,
+		       COALESCE(u.username, '') AS username,
+		       COALESCE(u.display_name, '') AS display_name,
+		       COALESCE(u.department, '') AS department,
+		       COALESCE(u.team, '') AS team,
+		       COUNT(*) AS task_count,
+		       MAX(actor_tasks.updated_at) AS last_used_at
+		  FROM (
+		        SELECT t.%s AS actor_id, t.updated_at
+		          FROM tasks t
+		         WHERE t.%s IS NOT NULL AND t.%s > 0
+		       ) actor_tasks
+		  LEFT JOIN users u ON u.id = actor_tasks.actor_id
+		 GROUP BY actor_id, u.username, u.display_name, u.department, u.team
+		 ORDER BY last_used_at DESC, task_count DESC, actor_id DESC
+		 LIMIT 500`, actorColumn, actorColumn, actorColumn)
+	rows, err := r.db.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	options := make([]domain.TaskFilterActorOption, 0, 64)
+	for rows.Next() {
+		var option domain.TaskFilterActorOption
+		var username, displayName, department, team sql.NullString
+		var lastUsedAt sql.NullTime
+		if err := rows.Scan(
+			&option.ID,
+			&option.Name,
+			&username,
+			&displayName,
+			&department,
+			&team,
+			&option.TaskCount,
+			&lastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		if username.Valid {
+			option.Username = username.String
+		}
+		if displayName.Valid {
+			option.DisplayName = displayName.String
+		}
+		if department.Valid {
+			option.Department = department.String
+		}
+		if team.Valid {
+			option.Team = team.String
+		}
+		option.LastUsedAt = fromNullTime(lastUsedAt)
+		options = append(options, option)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return options, nil
+}
+
 func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
 	if len(filter.CandidateFilters) == 0 {
 		return []*domain.TaskListItem{}, nil
@@ -1476,12 +1558,21 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 			OR COALESCE(t.owner_department, '') LIKE ? OR COALESCE(t.owner_org_team, '') LIKE ? OR CAST(t.id AS CHAR) = ?
 			OR EXISTS (
 				SELECT 1
+				  FROM users task_keyword_actor
+				 WHERE task_keyword_actor.id IN (t.creator_id, t.requester_id, t.designer_id, t.current_handler_id)
+					   AND (
+						task_keyword_actor.display_name LIKE ?
+						OR task_keyword_actor.username LIKE ?
+					   )
+			)
+			OR EXISTS (
+				SELECT 1
 				  FROM task_sku_items tsi
 				 WHERE tsi.task_id = t.id
 				   AND tsi.sku_code LIKE ?
 			)
 		)`)
-		args = append(args, like, like, like, like, like, like, filter.Keyword, like)
+		args = append(args, like, like, like, like, like, like, filter.Keyword, like, like, like)
 	}
 	appendTaskDataScopeWhere(&where, &args, filter)
 

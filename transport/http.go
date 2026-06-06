@@ -256,6 +256,7 @@ func NewRouter(
 		taskGroup.POST("/batch-create/parse-excel", access(taskGroup, http.MethodPost, "/batch-create/parse-excel", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBatchExcelH.ParseUpload)
 		taskGroup.POST("", access(taskGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskH.Create)
 		taskGroup.GET("", access(taskGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.List)
+		taskGroup.GET("/filter-options", access(taskGroup, http.MethodGet, "/filter-options", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.FilterOptions)
 		taskGroup.GET("/pool", access(taskGroup, http.MethodGet, "/pool", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.Pool)
 		taskGroup.GET("/:id", access(taskGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.GetByID)
 		if predictionH != nil {
@@ -534,6 +535,7 @@ func v1R1ReservedHandler(ownerRound string) gin.HandlerFunc {
 func v1R1ContractRouteSpecs() []v1R1RouteSpec {
 	return []v1R1RouteSpec{
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks"},
+		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks/filter-options", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/filter-options"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks/:id/detail", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/101/detail"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks/pool", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/pool"},
 		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/tasks/:id/modules/:module_key/claim", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/101/modules/design/claim"},

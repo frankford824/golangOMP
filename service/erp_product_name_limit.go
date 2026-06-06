@@ -14,10 +14,6 @@ func erpProductNameLimitMessage() string {
 	return fmt.Sprintf("产品名称不能超过 %d 个字符，请精简后再提交，避免同步聚水潭失败", ERPProductNameMaxRunes)
 }
 
-func erpProductShortNameLimitMessage() string {
-	return fmt.Sprintf("ERP 简称不能超过 %d 字节，中文约 13 个字，请精简后再提交，避免同步聚水潭失败", ERPProductShortNameMaxBytes)
-}
-
 func erpProductNameLength(value string) int {
 	return utf8.RuneCountInString(strings.TrimSpace(value))
 }
@@ -37,17 +33,7 @@ func erpProductNameLengthViolation(field string, value string) map[string]interf
 func validateERPProductUpsertNameLength(payload domain.ERPProductUpsertPayload) *domain.AppError {
 	name := firstNonEmptyString(payload.Name, payload.ProductName, payload.ProductShortName, payload.SKUCode)
 	if !erpProductNameTooLong(name) {
-		shortName := firstNonEmptyString(payload.ShortName, payload.ProductShortName)
-		if !erpProductShortNameTooLong(shortName) {
-			return nil
-		}
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductShortNameLimitMessage(), map[string]interface{}{
-			"field":      "short_name",
-			"code":       "erp_product_short_name_too_long",
-			"max_length": ERPProductShortNameMaxBytes,
-			"length":     erpProductNameLength(shortName),
-			"message":    erpProductShortNameLimitMessage(),
-		})
+		return nil
 	}
 	return domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 		"field":      "name",

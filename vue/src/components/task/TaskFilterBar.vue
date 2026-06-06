@@ -127,8 +127,7 @@ import BaseDatePicker from '@/components/base/BaseDatePicker.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import TaskStatusMultiSelect from '@/components/task/TaskStatusMultiSelect.vue'
-import { useDesignerOptions } from '@/composables/useDesignerOptions'
-import { useTaskCreatorOptions } from '@/composables/useTaskCreatorOptions'
+import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import { useOrgOwnershipFilterOptions } from '@/composables/useOrgOwnershipFilterOptions'
 
 export interface TaskListFilters {
@@ -225,8 +224,7 @@ const priorityOptions: BaseSelectOption[] = [
   { label: '加急', value: 'critical' },
 ]
 
-const { creatorOptions } = useTaskCreatorOptions(true, '全部')
-const { assigneeOptions } = useDesignerOptions(true, '全部')
+const { creatorOptions, assigneeOptions } = useTaskFilterOptions(true, '全部')
 
 const warehouseStatusOptions: BaseSelectOption[] = [
   { label: '待接收', value: 'pending' },

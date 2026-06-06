@@ -508,11 +508,7 @@ func (s *productManagementService) verifyERPImageReadback(ctx context.Context, r
 }
 
 func productManagementERPShortName(productName, productIID, skuCode string) string {
-	shortName := generateERPShortName("product_management_image_sync", "", productName, productIID)
-	if strings.TrimSpace(shortName) == "" {
-		shortName = firstNonEmptyString(productName, skuCode)
-	}
-	return truncateERPShortName(shortName, ERPProductShortNameMaxBytes)
+	return strings.TrimSpace(firstNonEmptyString(productName, skuCode, productIID))
 }
 
 func productManagementStatusInFlight(status domain.ProductManagementERPSyncStatus) bool {

@@ -111,6 +111,22 @@ export interface TaskAiSummaryResponse {
   provider?: string
 }
 
+export interface TaskFilterActorOption {
+  id: number
+  name: string
+  username?: string
+  display_name?: string
+  department?: string
+  team?: string
+  task_count?: number
+  last_used_at?: string | null
+}
+
+export interface TaskFilterOptionsResponse {
+  creators?: TaskFilterActorOption[]
+  designers?: TaskFilterActorOption[]
+}
+
 // ─── 任务列表 / 详情 ──────────────────────────────────────────────────────────
 
 export const tasksApi = {
@@ -121,6 +137,14 @@ export const tasksApi = {
    */
   list: (params?: TaskListParams, signal?: AbortSignal) =>
     http.get('/v1/tasks', { params, signal }),
+
+  /**
+   * 获取任务中心筛选候选项
+   * GET /v1/tasks/filter-options
+   * 权限：已登录且可看任务中心的用户
+   */
+  filterOptions: (signal?: AbortSignal) =>
+    http.get<{ data?: TaskFilterOptionsResponse }>('/v1/tasks/filter-options', { signal }),
 
   /**
    * 任务池列表（按模块领取）

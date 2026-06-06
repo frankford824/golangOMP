@@ -982,6 +982,23 @@ func (h *TaskHandler) List(c *gin.Context) {
 	respondOKWithPagination(c, tasks, pagination)
 }
 
+// FilterOptions handles GET /v1/tasks/filter-options
+func (h *TaskHandler) FilterOptions(c *gin.Context) {
+	provider, ok := h.svc.(interface {
+		ListFilterOptions(context.Context) (*domain.TaskFilterOptions, *domain.AppError)
+	})
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "task filter options service not configured", nil))
+		return
+	}
+	options, appErr := provider.ListFilterOptions(c.Request.Context())
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, options)
+}
+
 // GetByID handles GET /v1/tasks/:id
 func (h *TaskHandler) GetByID(c *gin.Context) {
 	id, err := parseID(c)
@@ -1882,9 +1899,9 @@ func (h *TaskHandler) loadTaskAggregate(c *gin.Context, taskID int64) (*domain.T
 func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggregate *domain.TaskDetailAggregate) service.UpdateTaskBusinessInfoParams {
 	detail := aggregate.TaskDetail
 	return service.UpdateTaskBusinessInfoParams{
-		TaskID:     taskID,
-		OperatorID: operatorID,
-		SpecText:   detail.SpecText,
+		TaskID:                   taskID,
+		OperatorID:               operatorID,
+		SpecText:                 detail.SpecText,
 		Material:                 detail.Material,
 		SizeText:                 detail.SizeText,
 		Note:                     detail.Note,

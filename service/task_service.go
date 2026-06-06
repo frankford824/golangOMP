@@ -1651,6 +1651,29 @@ func (s *taskService) List(ctx context.Context, filter TaskFilter) ([]*domain.Ta
 	return s.listTasks(ctx, filter)
 }
 
+func (s *taskService) ListFilterOptions(ctx context.Context) (*domain.TaskFilterOptions, *domain.AppError) {
+	lister, ok := s.taskRepo.(interface {
+		ListFilterOptions(context.Context) (*domain.TaskFilterOptions, error)
+	})
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "task filter options repo is not configured", nil)
+	}
+	options, err := lister.ListFilterOptions(ctx)
+	if err != nil {
+		return nil, infraError("list task filter options", err)
+	}
+	if options == nil {
+		options = &domain.TaskFilterOptions{}
+	}
+	if options.Creators == nil {
+		options.Creators = []domain.TaskFilterActorOption{}
+	}
+	if options.Designers == nil {
+		options.Designers = []domain.TaskFilterActorOption{}
+	}
+	return options, nil
+}
+
 func (s *taskService) ListBoardCandidates(ctx context.Context, filter TaskFilter, presets []domain.TaskQueryFilterDefinition) ([]*domain.TaskListItem, *domain.AppError) {
 	return s.listBoardCandidates(ctx, filter, presets)
 }
@@ -2467,11 +2490,12 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	}
 	if p.TriggerFiling || productIIDChanged {
 		_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
-			TaskID:     p.TaskID,
-			OperatorID: p.OperatorID,
-			Remark:     p.Remark,
-			Source:     TaskFilingTriggerSourceBusinessInfoPatch,
-			Force:      true,
+			TaskID:           p.TaskID,
+			OperatorID:       p.OperatorID,
+			Remark:           p.Remark,
+			Source:           TaskFilingTriggerSourceBusinessInfoPatch,
+			Force:            true,
+			TargetSKUItemIDs: []int64{p.SKUItemID},
 		})
 		if filingErr != nil {
 			return nil, filingErr
@@ -2655,11 +2679,12 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 		return nil, infraError("update sku item cost info tx", txErr)
 	}
 	_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
-		TaskID:     p.TaskID,
-		OperatorID: p.OperatorID,
-		Remark:     p.Remark,
-		Source:     TaskFilingTriggerSourceBusinessInfoPatch,
-		Force:      true,
+		TaskID:           p.TaskID,
+		OperatorID:       p.OperatorID,
+		Remark:           p.Remark,
+		Source:           TaskFilingTriggerSourceBusinessInfoPatch,
+		Force:            true,
+		TargetSKUItemIDs: []int64{p.SKUItemID},
 	})
 	if filingErr != nil {
 		return nil, filingErr

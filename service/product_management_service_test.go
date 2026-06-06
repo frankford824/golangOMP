@@ -5,13 +5,12 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"workflow/domain"
 	"workflow/repo"
 )
 
-func TestProductManagementSyncRecordToERPUsesShortERPShortName(t *testing.T) {
+func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T) {
 	assetID := int64(7301)
 	versionID := int64(4395)
 	asset := erpImageProxyTestAsset(versionID, "tasks/RW-20260603-A-001080/assets/AST-0005/v1/delivery/image.jpg")
@@ -55,11 +54,8 @@ func TestProductManagementSyncRecordToERPUsesShortERPShortName(t *testing.T) {
 	if bridge.payload.ShortName == "" {
 		t.Fatal("ShortName is empty")
 	}
-	if !utf8.ValidString(bridge.payload.ShortName) {
-		t.Fatalf("ShortName is invalid UTF-8: %q", bridge.payload.ShortName)
-	}
-	if got := len(bridge.payload.ShortName); got > ERPProductShortNameMaxBytes {
-		t.Fatalf("ShortName byte length = %d, want <= %d: %q", got, ERPProductShortNameMaxBytes, bridge.payload.ShortName)
+	if bridge.payload.ShortName != productName {
+		t.Fatalf("ShortName = %q, want full product name %q", bridge.payload.ShortName, productName)
 	}
 	if bridge.payload.ProductShortName != bridge.payload.ShortName {
 		t.Fatalf("ProductShortName = %q, want ShortName %q", bridge.payload.ProductShortName, bridge.payload.ShortName)

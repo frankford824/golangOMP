@@ -127,6 +127,13 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/me/org"):                                                    "legitimate-reserved-placeholder-route",
 	knownGapKey("GET", "/v1/me/task-drafts"):                                            "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/org-move-requests"):                                         "legitimate-reserved-placeholder-route",
+	knownGapKey("GET", "/v1/predictions/assets"):                                        "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/predictions/management"):                                    "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/predictions/search"):                                        "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/predictions/task-create"):                                   "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/product-management"):                                        "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/product-management/:id/image-candidates"):                   "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/public/erp-product-images/:version_id"):                     "legitimate-binary-stream-response",
 	knownGapKey("GET", "/v1/reports/l1/cards"):                                          "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/reports/l1/module-dwell"):                                   "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/reports/l1/throughput"):                                     "tool-deref-limit-dynamic-payload-documented",
@@ -134,7 +141,10 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/task-drafts/:draft_id"):                                     "legitimate-reserved-placeholder-route",
 	knownGapKey("GET", "/v1/tasks/batch-create/template.xlsx"):                          "legitimate-binary-stream-response",
 	knownGapKey("GET", "/v1/tasks/excel-assist/template.xlsx"):                          "legitimate-binary-stream-response",
+	knownGapKey("GET", "/v1/tasks/filter-options"):                                      "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/tasks/pool"):                                                "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/tasks/:id/predictions"):                                     "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/tasks/:id/product-management"):                              "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/ws/v1"):                                                        "legitimate-reserved-placeholder-route",
 	knownGapKey("PATCH", "/v1/me"):                                                      "legitimate-reserved-placeholder-route",
 	knownGapKey("PATCH", "/v1/tasks/:id/sku-items/:sku_item_id"):                        "tool-deref-limit-dynamic-payload-documented",
@@ -149,11 +159,17 @@ var knownGapReasons = map[string]string{
 	knownGapKey("POST", "/v1/departments/:id/org-move-requests"):                        "legitimate-reserved-placeholder-route",
 	knownGapKey("POST", "/v1/me/change-password"):                                       "legitimate-reserved-placeholder-route",
 	knownGapKey("POST", "/v1/me/notifications/:id/read"):                                "legitimate-reserved-placeholder-route",
+	knownGapKey("POST", "/v1/me/notifications/read-all"):                                "legitimate-reserved-placeholder-route",
 	knownGapKey("POST", "/v1/notifications/broadcast"):                                  "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("POST", "/v1/org/departments"):                                          "tool-deref-limit-inline-route",
 	knownGapKey("POST", "/v1/org/teams"):                                                "tool-deref-limit-inline-route",
 	knownGapKey("POST", "/v1/org-move-requests/:id/approve"):                            "legitimate-reserved-placeholder-route",
 	knownGapKey("POST", "/v1/org-move-requests/:id/reject"):                             "legitimate-reserved-placeholder-route",
+	knownGapKey("POST", "/v1/product-management/:id/base-sync-request"):                 "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/product-management/:id/image"):                             "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/product-management/:id/image-sync-request"):                "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/product-management/:id/reparse-image"):                     "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/product-management/:id/sync-request"):                      "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("POST", "/v1/reports/l1/kpi-ai-analysis"):                               "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("POST", "/v1/server-logs/clean"):                                        "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("POST", "/v1/task-drafts"):                                              "tool-deref-limit-dynamic-payload-documented",
@@ -1109,6 +1125,8 @@ func respondExprs(fn *ast.FuncDecl) []respondExpr {
 				resp := responseFromPayload(call.Args[1])
 				resp.Pagination = true
 				found = append(found, resp)
+			case "respondPredictionBundle":
+				found = append(found, respondExpr{Fields: []string{"data"}, Direct: true, KnownGap: "dynamic_payload_documented"})
 			}
 			return true
 		}
