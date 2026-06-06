@@ -1063,7 +1063,7 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if !decision.Allowed {
 		return nil, taskActionDecisionAppError(TaskActionAssetUploadSessionCreate, decision)
 	}
-	if appErr := validateAuditStageUploadAssetType(task, params.AssetType); appErr != nil {
+	if appErr := validateAuditStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey); appErr != nil {
 		return nil, appErr
 	}
 	taskRef := strings.TrimSpace(task.TaskNo)
@@ -1575,7 +1575,7 @@ func inferTaskAssetUploadMode(assetType domain.TaskAssetType) (domain.DesignAsse
 	return domain.DesignAssetUploadModeMultipart, nil
 }
 
-func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType) *domain.AppError {
+func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType, ownerModuleKey string) *domain.AppError {
 	if task == nil || !isAuditStageTaskStatus(task.TaskStatus) {
 		return nil
 	}
@@ -1583,14 +1583,19 @@ func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskA
 	if normalized == domain.TaskAssetTypeSource || normalized == domain.TaskAssetTypeDelivery {
 		return nil
 	}
-	return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit-stage uploads only support source or delivery assets", map[string]interface{}{
-		"deny_code":   "audit_stage_asset_type_not_allowed",
-		"task_status": string(task.TaskStatus),
-		"asset_type":  string(assetType),
+	if normalized == domain.TaskAssetTypeReference && strings.TrimSpace(ownerModuleKey) == string(domain.ModuleKeyBasicInfo) {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit-stage uploads only support source, delivery, or basic_info reference assets", map[string]interface{}{
+		"deny_code":        "audit_stage_asset_type_not_allowed",
+		"task_status":      string(task.TaskStatus),
+		"asset_type":       string(assetType),
+		"owner_module_key": strings.TrimSpace(ownerModuleKey),
 		"allowed_asset_types": []string{
 			string(domain.TaskAssetTypeSource),
 			string(domain.TaskAssetTypeDelivery),
 		},
+		"allowed_reference_owner_module_key": string(domain.ModuleKeyBasicInfo),
 	})
 }
 

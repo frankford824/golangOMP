@@ -948,7 +948,7 @@ func TestTaskAssetCenterServiceCompletePrecreatedSessionAllowedInPendingAuditAWi
 	}
 }
 
-func TestTaskAssetCenterServiceAuditStageAllowsSourceAndDeliveryButRejectsReference(t *testing.T) {
+func TestTaskAssetCenterServiceAuditStageAllowsSourceDeliveryAndBasicInfoReference(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2092, TaskStatus: domain.TaskStatusPendingAuditA})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
@@ -995,6 +995,33 @@ func TestTaskAssetCenterServiceAuditStageAllowsSourceAndDeliveryButRejectsRefere
 	}
 	if appErr.Code != domain.ErrCodeInvalidRequest {
 		t.Fatalf("CreateMultipartUploadSession(audit reference) code = %s, want INVALID_REQUEST", appErr.Code)
+	}
+
+	referenceAssetID, err := designAssetRepo.Create(context.Background(), nil, &domain.DesignAsset{
+		TaskID:    2092,
+		AssetNo:   "AST-REF",
+		AssetType: domain.TaskAssetTypeReference,
+		CreatedBy: 934,
+	})
+	if err != nil {
+		t.Fatalf("create existing reference asset: %v", err)
+	}
+	basicInfoReference, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:         2092,
+		AssetID:        &referenceAssetID,
+		CreatedBy:      934,
+		AssetType:      domain.TaskAssetTypeReference,
+		Filename:       "audit-reference-replace.jpg",
+		ExpectedSize:   uploadRequestInt64Ptr(1024),
+		MimeType:       "image/jpeg",
+		OwnerModuleKey: string(domain.ModuleKeyBasicInfo),
+		UploadPolicy:   "replace",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession(audit basic_info reference) unexpected error: %+v", appErr)
+	}
+	if basicInfoReference == nil || basicInfoReference.Session == nil || basicInfoReference.Session.AssetID == nil || *basicInfoReference.Session.AssetID != referenceAssetID {
+		t.Fatalf("CreateMultipartUploadSession(audit basic_info reference) did not bind existing reference asset: %+v", basicInfoReference)
 	}
 }
 
