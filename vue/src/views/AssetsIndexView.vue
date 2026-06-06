@@ -199,7 +199,7 @@
               alt=""
               img-class="ac-card-apm"
               inner-img-class="ac-card-preview-img"
-              @open-full="(u) => (previewLightboxSrc = u)"
+              @open-full="(u) => openPreviewLightbox(u, previewTitleForAsset(asset))"
             />
             <AssetDownloadLink
               class="ac-card-download-fab"
@@ -454,7 +454,7 @@
                 alt=""
                 img-class="bulk-result-apm"
                 inner-img-class="bulk-result-img"
-                @open-full="(u) => (previewLightboxSrc = u)"
+                @open-full="(u) => openPreviewLightbox(u, previewTitleForAsset(result.asset))"
               />
               <span v-else class="bulk-result-empty">未命中</span>
             </div>
@@ -522,7 +522,7 @@
               :resolved-preview-url="selectedPreviewFallbackUrl"
               alt="资产预览"
               inner-img-class="preview-media-img"
-              @open-full="(u) => (previewLightboxSrc = u)"
+              @open-full="(u) => openPreviewLightbox(u, previewTitleForAsset(selectedAsset))"
             />
           </div>
           <div class="preview-actions">
@@ -680,22 +680,98 @@
       </template>
     </BaseModal>
 
-    <div
-      v-if="previewLightboxSrc"
-      class="preview-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label="大图预览"
-      @click="previewLightboxSrc = null"
-    >
-      <img :src="previewLightboxSrc" alt="资产预览大图" class="preview-lightbox-img" @click.stop />
-    </div>
+    <Teleport to="body">
+      <div
+        v-if="previewLightboxSrc"
+        class="preview-lightbox"
+        role="dialog"
+        aria-modal="true"
+        aria-label="资产图片预览"
+        @click.self="closePreviewLightbox"
+        @wheel.prevent="handlePreviewWheel"
+      >
+        <div class="preview-lightbox-toolbar" @click.stop>
+          <div class="preview-lightbox-title" :title="previewLightboxTitle || '资产预览'">
+            {{ previewLightboxTitle || '资产预览' }}
+          </div>
+          <div class="preview-lightbox-actions">
+            <button
+              type="button"
+              class="preview-lightbox-action"
+              title="缩小"
+              aria-label="缩小预览"
+              :disabled="previewLightboxZoom <= PREVIEW_ZOOM_MIN"
+              @click="zoomPreview(-0.2)"
+            >
+              <Minus :size="16" />
+            </button>
+            <button
+              type="button"
+              class="preview-lightbox-action preview-lightbox-action--wide"
+              title="重置缩放"
+              aria-label="重置缩放"
+              @click="resetPreviewZoom"
+            >
+              {{ previewLightboxZoomLabel }}
+            </button>
+            <button
+              type="button"
+              class="preview-lightbox-action"
+              title="放大"
+              aria-label="放大预览"
+              :disabled="previewLightboxZoom >= PREVIEW_ZOOM_MAX"
+              @click="zoomPreview(0.2)"
+            >
+              <Plus :size="16" />
+            </button>
+            <button
+              type="button"
+              class="preview-lightbox-action"
+              title="适应窗口"
+              aria-label="适应窗口"
+              @click="resetPreviewZoom"
+            >
+              <RotateCcw :size="16" />
+            </button>
+            <a
+              class="preview-lightbox-action"
+              title="新窗口打开"
+              aria-label="新窗口打开预览图"
+              :href="previewLightboxSrc || undefined"
+              target="_blank"
+              rel="noopener"
+            >
+              <ExternalLink :size="16" />
+            </a>
+            <button
+              type="button"
+              class="preview-lightbox-close"
+              title="关闭"
+              aria-label="关闭预览"
+              @click="closePreviewLightbox"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+        </div>
+        <div class="preview-lightbox-stage" @click.stop>
+          <img
+            :src="previewLightboxSrc"
+            :alt="previewLightboxTitle || '资产预览大图'"
+            class="preview-lightbox-img"
+            :style="previewLightboxImageStyle"
+            draggable="false"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ExternalLink, Minus, Plus, RotateCcw, X } from 'lucide-vue-next'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
@@ -759,6 +835,14 @@ let reloadTimer: ReturnType<typeof setTimeout> | null = null
 let reloadAbort: AbortController | null = null
 let reloadRequestSeq = 0
 const previewLightboxSrc = ref<string | null>(null)
+const previewLightboxTitle = ref('')
+const previewLightboxZoom = ref(1)
+const PREVIEW_ZOOM_MIN = 0.5
+const PREVIEW_ZOOM_MAX = 4
+const previewLightboxZoomLabel = computed(() => `${Math.round(previewLightboxZoom.value * 100)}%`)
+const previewLightboxImageStyle = computed(() => ({
+  transform: `scale(${previewLightboxZoom.value})`,
+}))
 const filtersExpanded = ref(false)
 const copyHint = ref('')
 const selectedModalOpen = ref(false)
@@ -1038,6 +1122,72 @@ function externalOriginPath(asset: BackendAsset): string {
 
 function assetDisplayTitle(asset: BackendAsset): string {
   return isExternalAsset(asset) ? assetFileName(asset) : businessSku(asset)
+}
+
+function previewTitleForAsset(asset: BackendAsset | null | undefined): string {
+  if (!asset) return '资产预览'
+  const sku = businessSku(asset)
+  const name = assetFileName(asset)
+  if (isExternalAsset(asset)) return name || '外部资源预览'
+  return sku && sku !== '未绑定 SKU' ? `${sku} · ${name}` : name || '资产预览'
+}
+
+function clampPreviewZoom(value: number): number {
+  return Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, Number(value.toFixed(2))))
+}
+
+function setPreviewBodyLock(locked: boolean): void {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('asset-preview-open', locked)
+}
+
+function openPreviewLightbox(url: string, title = '资产预览'): void {
+  const trimmedUrl = url.trim()
+  if (!trimmedUrl) return
+  previewLightboxSrc.value = trimmedUrl
+  previewLightboxTitle.value = title.trim() || '资产预览'
+  previewLightboxZoom.value = 1
+}
+
+function closePreviewLightbox(): void {
+  previewLightboxSrc.value = null
+  previewLightboxTitle.value = ''
+  previewLightboxZoom.value = 1
+}
+
+function zoomPreview(delta: number): void {
+  previewLightboxZoom.value = clampPreviewZoom(previewLightboxZoom.value + delta)
+}
+
+function resetPreviewZoom(): void {
+  previewLightboxZoom.value = 1
+}
+
+function handlePreviewWheel(event: WheelEvent): void {
+  zoomPreview(event.deltaY > 0 ? -0.15 : 0.15)
+}
+
+function handlePreviewKeydown(event: KeyboardEvent): void {
+  if (!previewLightboxSrc.value) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closePreviewLightbox()
+    return
+  }
+  if (event.key === '+' || event.key === '=') {
+    event.preventDefault()
+    zoomPreview(0.2)
+    return
+  }
+  if (event.key === '-') {
+    event.preventDefault()
+    zoomPreview(-0.2)
+    return
+  }
+  if (event.key === '0') {
+    event.preventDefault()
+    resetPreviewZoom()
+  }
 }
 
 function numericFileSize(asset: BackendAsset): number {
@@ -2250,7 +2400,16 @@ function openPredictionAsset(item: PredictionSuggestion): void {
   }
 }
 
+watch(
+  previewLightboxSrc,
+  (src) => {
+    setPreviewBodyLock(Boolean(src))
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
+  window.addEventListener('keydown', handlePreviewKeydown)
   if (requestedTaskId.value) {
     filters.keyword = requestedTaskId.value
   }
@@ -2272,6 +2431,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handlePreviewKeydown)
+  setPreviewBodyLock(false)
   if (reloadTimer) {
     clearTimeout(reloadTimer)
     reloadTimer = null
@@ -3463,20 +3624,114 @@ onBeforeUnmount(() => {
 .preview-lightbox {
   position: fixed;
   inset: 0;
-  z-index: 10000;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(10px);
+  z-index: 2147483000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.88);
+  color: #f8fafc;
+  cursor: default;
+  isolation: isolate;
+}
+
+.preview-lightbox-toolbar {
+  width: min(62rem, calc(100vw - 2rem));
+  min-height: 2.75rem;
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.85rem;
+  border: 1px solid rgba(226, 232, 240, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 1.25rem 3rem rgba(0, 0, 0, 0.28);
+}
+
+.preview-lightbox-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #f8fafc;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-lightbox-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 0.35rem;
+}
+
+.preview-lightbox-action,
+.preview-lightbox-close {
+  width: 2.25rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(226, 232, 240, 0.2);
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.86);
+  color: #f8fafc;
+  line-height: 1;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.preview-lightbox-action:hover,
+.preview-lightbox-close:hover {
+  border-color: rgba(147, 197, 253, 0.8);
+  background: rgba(37, 99, 235, 0.86);
+  transform: translateY(-1px);
+}
+
+.preview-lightbox-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+}
+
+.preview-lightbox-action--wide {
+  width: 4.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.preview-lightbox-close {
+  background: rgba(127, 29, 29, 0.9);
+}
+
+.preview-lightbox-stage {
+  min-height: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: zoom-out;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem;
 }
 
 .preview-lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
+  display: block;
+  max-width: min(96vw, 87.5rem);
+  max-height: calc(100vh - 6.5rem);
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.42);
+  transform-origin: center center;
+  transition: transform 0.15s ease;
+  user-select: none;
+}
+
+:global(body.asset-preview-open) {
+  overflow: hidden;
 }
 
 
