@@ -770,7 +770,10 @@ func (s *productManagementService) decorateRecords(ctx context.Context, actor do
 			continue
 		}
 		patch := s.autoImagePatchWithCache(ctx, record, assetsByTaskID)
-		s.persistAutoImagePatch(ctx, record, patch)
+		patchChanged := productManagementImagePatchChanged(record, patch)
+		if patchChanged {
+			s.persistAutoImagePatch(ctx, record, patch)
+		}
 		record.ImageSource = patch.ImageSource
 		record.ImageSelectionMode = patch.ImageSelectionMode
 		record.ImageAssetID = patch.ImageAssetID
@@ -782,13 +785,7 @@ func (s *productManagementService) decorateRecords(ctx context.Context, actor do
 		if record.ImageSyncSource == "" {
 			record.ImageSyncSource = patch.ImageSource
 		}
-		record.ImageSyncStatus = patch.ImageSyncStatus
-		if record.ImageSyncStatus == "" {
-			record.ImageSyncStatus = domain.ProductManagementERPSyncStatusWaitingImage
-			if patch.ImageAssetID != nil && *patch.ImageAssetID > 0 {
-				record.ImageSyncStatus = domain.ProductManagementERPSyncStatusPendingSync
-			}
-		}
+		record.ImageSyncStatus = productManagementDecoratedImageSyncStatus(record, patch, patchChanged)
 		record.ImageSourceLabel = domain.ProductManagementImageSourceLabel(record.ImageSource)
 		if record.ImageAssetID != nil {
 			record.ImagePreviewURL = fmt.Sprintf("/v1/assets/%d/preview", *record.ImageAssetID)
@@ -796,6 +793,29 @@ func (s *productManagementService) decorateRecords(ctx context.Context, actor do
 			record.ImagePreviewURL = ""
 		}
 	}
+}
+
+func productManagementDecoratedImageSyncStatus(record *domain.ProductManagementRecord, patch repo.ProductManagementImagePatch, patchChanged bool) domain.ProductManagementERPSyncStatus {
+	patchStatus := patch.ImageSyncStatus
+	if patchStatus == "" {
+		patchStatus = domain.ProductManagementERPSyncStatusWaitingImage
+		if patch.ImageAssetID != nil && *patch.ImageAssetID > 0 {
+			patchStatus = domain.ProductManagementERPSyncStatusPendingSync
+		}
+	}
+	if record == nil {
+		return patchStatus
+	}
+	if productManagementStatusInFlight(record.ERPSyncStatus) {
+		return record.ERPSyncStatus
+	}
+	if productManagementStatusInFlight(record.ImageSyncStatus) {
+		return record.ImageSyncStatus
+	}
+	if !patchChanged && record.ImageSyncStatus != "" {
+		return record.ImageSyncStatus
+	}
+	return patchStatus
 }
 
 func (s *productManagementService) persistAutoImagePatch(ctx context.Context, record *domain.ProductManagementRecord, patch repo.ProductManagementImagePatch) {

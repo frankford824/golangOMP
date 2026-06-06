@@ -139,6 +139,10 @@
           </span>
           <small>{{ record.last_image_synced_at ? formatDate(record.last_image_synced_at) : 'ERP 图片尚未同步' }}</small>
           <small v-if="record.image_sync_error" class="pm-error-text">{{ record.image_sync_error }}</small>
+          <div v-if="isRecordSyncing(record)" class="pm-sync-progress" aria-hidden="true">
+            <span></span>
+          </div>
+          <small v-if="syncMessageForRecord(record)" class="pm-sync-message">{{ syncMessageForRecord(record) }}</small>
         </div>
 
         <div class="pm-actions">
@@ -149,14 +153,14 @@
           <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_maintain_image" @click="reparseImage(record)">
             重新解析
           </button>
-          <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_sync_erp" @click="requestBaseSync(record)">
-            同步基础
+          <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_sync_erp || isRecordSyncing(record)" @click="requestBaseSync(record)">
+            {{ syncActionLabel(record, 'base', '同步基础') }}
           </button>
-          <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp" @click="requestSync(record)">
-            全部同步
+          <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp || isRecordSyncing(record)" @click="requestSync(record)">
+            {{ syncActionLabel(record, 'all', '全部同步') }}
           </button>
-          <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp || !record.image_asset_id" @click="requestImageSync(record)">
-            同步图片
+          <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp || !record.image_asset_id || isRecordSyncing(record)" @click="requestImageSync(record)">
+            {{ syncActionLabel(record, 'image', '同步图片') }}
           </button>
         </div>
       </article>
@@ -224,7 +228,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   productManagementApi,
@@ -234,6 +238,8 @@ import {
   type ProductSyncStatus,
 } from '@/services/api/productManagementApi'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
+
+type ProductSyncScope = 'all' | 'base' | 'image'
 
 const router = useRouter()
 const route = useRoute()
@@ -269,6 +275,9 @@ const activeRecord = ref<ProductManagementRecord | null>(null)
 const manualAssetID = ref('')
 const recordPreviewURLs = ref<Record<number, string>>({})
 const candidatePreviewURLs = ref<Record<number, string>>({})
+const syncingRecordScopes = ref<Record<number, ProductSyncScope>>({})
+const syncMessages = ref<Record<number, string>>({})
+const syncPollTokens = new Map<number, number>()
 const syncableRecords = computed(() => records.value.filter((item) => item.can_sync_erp))
 
 onMounted(() => {
@@ -281,6 +290,10 @@ onMounted(() => {
     filters.issue_scope = issueScope
   }
   void loadRecords()
+})
+
+onBeforeUnmount(() => {
+  syncPollTokens.clear()
 })
 
 async function loadRecords(): Promise<void> {
@@ -369,26 +382,28 @@ async function reparseImage(record: ProductManagementRecord): Promise<void> {
 }
 
 async function requestSync(record: ProductManagementRecord): Promise<void> {
-  try {
-    replaceRecord(await productManagementApi.requestSync(record.id))
-  } catch (err) {
-    error.value = errorMessage(err)
-  }
+  await requestRecordSync(record, 'all')
 }
 
 async function requestBaseSync(record: ProductManagementRecord): Promise<void> {
-  try {
-    replaceRecord(await productManagementApi.requestBaseSync(record.id))
-  } catch (err) {
-    error.value = errorMessage(err)
-  }
+  await requestRecordSync(record, 'base')
 }
 
 async function requestImageSync(record: ProductManagementRecord): Promise<void> {
+  await requestRecordSync(record, 'image')
+}
+
+async function requestRecordSync(record: ProductManagementRecord, scope: ProductSyncScope): Promise<void> {
+  const force = Boolean(record.can_force_override)
+  markRecordSyncing(record.id, scope, '已提交同步请求，等待 ERP 返回结果。')
   try {
-    replaceRecord(await productManagementApi.requestImageSync(record.id))
+    const next = await requestRecordSyncByScope(record.id, scope, force)
+    replaceRecord(next)
+    markRecordSyncing(next.id, scope, syncMessageFromRecord(next, scope))
+    startRecordSyncPolling(next, scope)
   } catch (err) {
     error.value = errorMessage(err)
+    markRecordSyncDone(record.id, `同步请求失败：${errorMessage(err)}`)
   }
 }
 
@@ -398,7 +413,7 @@ async function syncCurrentPage(): Promise<void> {
   error.value = ''
   try {
     for (const record of syncableRecords.value) {
-      replaceRecord(await productManagementApi.requestSync(record.id))
+      await requestRecordSync(record, 'all')
       await delay(350)
     }
   } catch (err) {
@@ -406,6 +421,62 @@ async function syncCurrentPage(): Promise<void> {
   } finally {
     batchSyncing.value = false
   }
+}
+
+async function requestRecordSyncByScope(recordId: number, scope: ProductSyncScope, force: boolean): Promise<ProductManagementRecord> {
+  if (scope === 'base') return productManagementApi.requestBaseSync(recordId, force)
+  if (scope === 'image') return productManagementApi.requestImageSync(recordId, force)
+  return productManagementApi.requestSync(recordId, force)
+}
+
+function markRecordSyncing(recordId: number, scope: ProductSyncScope, message: string): void {
+  syncingRecordScopes.value = { ...syncingRecordScopes.value, [recordId]: scope }
+  syncMessages.value = { ...syncMessages.value, [recordId]: message }
+}
+
+function markRecordSyncDone(recordId: number, message: string): void {
+  const nextScopes = { ...syncingRecordScopes.value }
+  delete nextScopes[recordId]
+  syncingRecordScopes.value = nextScopes
+  syncMessages.value = { ...syncMessages.value, [recordId]: message }
+  syncPollTokens.delete(recordId)
+}
+
+function startRecordSyncPolling(record: ProductManagementRecord, scope: ProductSyncScope): void {
+  const token = Date.now()
+  syncPollTokens.set(record.id, token)
+  void pollRecordSync(record, scope, token)
+}
+
+async function pollRecordSync(record: ProductManagementRecord, scope: ProductSyncScope, token: number): Promise<void> {
+  let current = record
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    if (syncPollTokens.get(record.id) !== token) return
+    const status = scopedSyncStatus(current, scope)
+    if (isFinalSyncStatus(status)) {
+      markRecordSyncDone(record.id, syncMessageFromRecord(current, scope))
+      return
+    }
+    markRecordSyncing(record.id, scope, syncMessageFromRecord(current, scope))
+    await delay(3000)
+    if (syncPollTokens.get(record.id) !== token) return
+    const latest = await fetchLatestRecord(current).catch(() => null)
+    if (latest) {
+      current = latest
+      replaceRecord(latest)
+    }
+  }
+  markRecordSyncDone(record.id, '已提交到后台处理，结果未及时返回，请稍后刷新查看。')
+}
+
+async function fetchLatestRecord(record: ProductManagementRecord): Promise<ProductManagementRecord | null> {
+  const result = await productManagementApi.list({
+    keyword: record.sku_code || record.task_no,
+    issue_scope: 'all',
+    page: 1,
+    page_size: 50,
+  })
+  return (result.data ?? []).find((item) => item.id === record.id) ?? null
 }
 
 function delay(ms: number): Promise<void> {
@@ -434,6 +505,69 @@ function baseSyncStatus(record: ProductManagementRecord): ProductSyncStatus {
 
 function imageSyncStatus(record: ProductManagementRecord): ProductSyncStatus {
   return record.image_sync_status || record.erp_sync_status || 'waiting_image'
+}
+
+function scopedSyncStatus(record: ProductManagementRecord, scope: ProductSyncScope): ProductSyncStatus {
+  if (scope === 'base') return baseSyncStatus(record)
+  if (scope === 'image') {
+    if (isActiveSyncStatus(record.erp_sync_status)) return record.erp_sync_status
+    return imageSyncStatus(record)
+  }
+  if (isActiveSyncStatus(record.erp_sync_status)) return record.erp_sync_status
+  const baseStatus = baseSyncStatus(record)
+  const imgStatus = imageSyncStatus(record)
+  if (isActiveSyncStatus(baseStatus)) return baseStatus
+  if (isActiveSyncStatus(imgStatus)) return imgStatus
+  if (baseStatus === 'failed' || imgStatus === 'failed') return 'failed'
+  if (baseStatus === 'waiting_image' || imgStatus === 'waiting_image') return 'waiting_image'
+  if (baseStatus === 'synced' && (!record.image_required || imgStatus === 'synced')) return 'synced'
+  return 'pending_sync'
+}
+
+function isActiveSyncStatus(status?: ProductSyncStatus): boolean {
+  return status === 'queued' || status === 'syncing' || status === 'cooling_down'
+}
+
+function isFinalSyncStatus(status: ProductSyncStatus): boolean {
+  return status === 'synced' || status === 'failed' || status === 'waiting_image'
+}
+
+function isRecordSyncing(record: ProductManagementRecord): boolean {
+  return Boolean(syncingRecordScopes.value[record.id]) || isActiveSyncStatus(scopedSyncStatus(record, 'all'))
+}
+
+function syncMessageForRecord(record: ProductManagementRecord): string {
+  const existing = syncMessages.value[record.id]
+  if (existing) return existing
+  const status = scopedSyncStatus(record, 'all')
+  if (isActiveSyncStatus(status)) return syncMessageFromStatus(status)
+  return ''
+}
+
+function syncActionLabel(record: ProductManagementRecord, scope: ProductSyncScope, fallback: string): string {
+  if (syncingRecordScopes.value[record.id] === scope) return '同步中'
+  return fallback
+}
+
+function syncMessageFromRecord(record: ProductManagementRecord, scope: ProductSyncScope): string {
+  const status = scopedSyncStatus(record, scope)
+  if (status === 'synced') {
+    if (scope === 'base') return 'ERP 基础资料已同步成功。'
+    if (scope === 'image') return 'ERP 图片已同步成功。'
+    return 'ERP 基础资料和图片已同步成功。'
+  }
+  if (status === 'failed') {
+    return firstNonEmptyString(record.image_sync_error, record.base_sync_error, record.last_sync_error, '同步失败，请查看错误信息后重试。')
+  }
+  if (status === 'waiting_image') return '缺少可同步的 ERP 商品图，请先上传或选择图片。'
+  return syncMessageFromStatus(status)
+}
+
+function syncMessageFromStatus(status: ProductSyncStatus): string {
+  if (status === 'queued') return '已进入同步队列，等待后台处理。'
+  if (status === 'syncing') return '正在同步 ERP，请稍候。'
+  if (status === 'cooling_down') return '同步请求处于冷却队列，系统会自动继续处理。'
+  return '等待同步。'
 }
 
 function previewURLForRecord(record: ProductManagementRecord): string {
@@ -514,6 +648,14 @@ function syncStatusLabel(status: ProductSyncStatus): string {
     waiting_image: '待上传 ERP 图',
   }
   return labels[status] ?? status
+}
+
+function firstNonEmptyString(...values: Array<string | undefined | null>): string {
+  for (const value of values) {
+    const text = String(value ?? '').trim()
+    if (text) return text
+  }
+  return ''
 }
 
 function errorMessage(err: unknown): string {
@@ -857,6 +999,46 @@ function errorMessage(err: unknown): string {
   border-color: #fed7aa;
   color: #c2410c;
   background: #fff7ed;
+}
+
+.pm-sync-progress {
+  position: relative;
+  width: min(13rem, 100%);
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5edf7;
+}
+
+.pm-sync-progress span {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #38bdf8);
+  animation: pm-sync-flow 1.1s ease-in-out infinite;
+}
+
+.pm-sync-message {
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
+@keyframes pm-sync-flow {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(230%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pm-sync-progress span {
+    animation: none;
+    transform: none;
+    width: 100%;
+  }
 }
 
 .pm-actions {
