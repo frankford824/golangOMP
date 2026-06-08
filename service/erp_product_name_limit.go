@@ -3,22 +3,23 @@ package service
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"workflow/domain"
 )
 
-const ERPProductNameMaxBytes = ERPProductShortNameMaxBytes
+const ERPProductNameMaxLength = ERPProductShortNameMaxLength
 
 func erpProductNameLimitMessage() string {
-	return fmt.Sprintf("产品名称会同步为聚水潭简称，不能超过 %d 字节，请精简后再提交，避免同步聚水潭失败", ERPProductNameMaxBytes)
+	return fmt.Sprintf("产品名称会同步为聚水潭简称，最多可填写 %d 个字，请精简后再提交，避免同步聚水潭失败", ERPProductNameMaxLength)
 }
 
 func erpProductNameLength(value string) int {
-	return len(strings.TrimSpace(value))
+	return utf8.RuneCountInString(strings.TrimSpace(value))
 }
 
 func erpProductNameTooLong(value string) bool {
-	return erpProductNameLength(value) > ERPProductNameMaxBytes
+	return erpProductNameLength(value) > ERPProductNameMaxLength
 }
 
 func erpProductNameLengthViolation(field string, value string) map[string]interface{} {
@@ -37,7 +38,7 @@ func validateERPProductUpsertNameLength(payload domain.ERPProductUpsertPayload) 
 	return domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 		"field":      "name",
 		"code":       "erp_product_name_too_long",
-		"max_length": ERPProductNameMaxBytes,
+		"max_length": ERPProductNameMaxLength,
 		"length":     erpProductNameLength(name),
 		"message":    erpProductNameLimitMessage(),
 	})

@@ -11,6 +11,7 @@
           placeholder="请输入产品名称"
           :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
           :hint="erpProductNameHint(localForm.productName)"
+          :error="erpProductNameError(localForm.productName)"
         />
         <p v-if="localForm.sku" class="form-hint">
           SKU：{{ localForm.sku }}（后端生成，预展示可用）
@@ -74,7 +75,7 @@ import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
-import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameHint } from '@/domain/erp-product-name'
+import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameError, erpProductNameHint } from '@/domain/erp-product-name'
 
 const props = defineProps<{
   form: TaskCreateFormModel

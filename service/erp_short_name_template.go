@@ -5,10 +5,9 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"unicode/utf8"
 )
 
-const ERPProductShortNameMaxBytes = 40
+const ERPProductShortNameMaxLength = 40
 
 type erpShortNameRuleConfig struct {
 	Enabled         bool              `json:"enabled"`
@@ -56,37 +55,30 @@ func generateERPShortName(scene, templateKey, name, iID string) string {
 	if maxLength <= 0 {
 		maxLength = 32
 	}
-	if maxLength > ERPProductShortNameMaxBytes {
-		maxLength = ERPProductShortNameMaxBytes
+	if maxLength > ERPProductShortNameMaxLength {
+		maxLength = ERPProductShortNameMaxLength
 	}
 	return truncateERPShortName(shortName, maxLength)
 }
 
 func erpProductShortNameTooLong(value string) bool {
-	return len(strings.TrimSpace(value)) > ERPProductShortNameMaxBytes
+	return len([]rune(strings.TrimSpace(value))) > ERPProductShortNameMaxLength
 }
 
 func erpProductShortNameForFiling(scene, templateKey, explicitShortName, name, iID string) string {
 	return strings.TrimSpace(firstNonEmptyString(name, explicitShortName, iID))
 }
 
-func truncateERPShortName(value string, maxBytes int) string {
+func truncateERPShortName(value string, maxLength int) string {
 	value = strings.TrimSpace(value)
-	if maxBytes <= 0 {
+	if maxLength <= 0 {
 		return ""
 	}
-	if len(value) <= maxBytes {
+	runes := []rune(value)
+	if len(runes) <= maxLength {
 		return value
 	}
-	cut := 0
-	for cut < len(value) {
-		_, size := utf8.DecodeRuneInString(value[cut:])
-		if size <= 0 || cut+size > maxBytes {
-			break
-		}
-		cut += size
-	}
-	return strings.TrimSpace(value[:cut])
+	return strings.TrimSpace(string(runes[:maxLength]))
 }
 
 func loadERPShortNameRuleConfig() erpShortNameRuleConfig {

@@ -9,12 +9,12 @@ import (
 )
 
 func TestValidateERPProductUpsertNameLength(t *testing.T) {
-	okName := strings.Repeat("A", ERPProductNameMaxBytes)
+	okName := strings.Repeat("名", ERPProductNameMaxLength)
 	if appErr := validateERPProductUpsertNameLength(domain.ERPProductUpsertPayload{Name: okName}); appErr != nil {
 		t.Fatalf("exact max length rejected: %+v", appErr)
 	}
 
-	tooLong := okName + "B"
+	tooLong := okName + "字"
 	appErr := validateERPProductUpsertNameLength(domain.ERPProductUpsertPayload{Name: tooLong})
 	if appErr == nil {
 		t.Fatal("expected long ERP product name to be rejected")
@@ -28,27 +28,48 @@ func TestValidateERPProductUpsertNameLength(t *testing.T) {
 	}
 
 	longShortName := strings.Repeat("短", 14)
-	appErr = validateERPProductUpsertNameLength(domain.ERPProductUpsertPayload{Name: "正常产品", ShortName: longShortName})
+	normalized := normalizeERPProductUpsertPayload(domain.ERPProductUpsertPayload{Name: "正常产品", ShortName: longShortName})
+	if normalized.ShortName != "正常产品" {
+		t.Fatalf("ShortName = %q, want product name", normalized.ShortName)
+	}
+	appErr = validateERPProductUpsertNameLength(normalized)
 	if appErr != nil {
-		t.Fatalf("long ERP product short name should no longer be rejected: %+v", appErr)
+		t.Fatalf("normalized ERP product short name should pass validation: %+v", appErr)
+	}
+}
+
+func TestNormalizeERPProductUpsertPayloadForcesProductNameAsShortName(t *testing.T) {
+	normalized := normalizeERPProductUpsertPayload(domain.ERPProductUpsertPayload{
+		SKUID:            "SKU-NAME-001",
+		Name:             "统一名称",
+		ProductName:      "统一名称",
+		ShortName:        "旧简称",
+		ProductShortName: "另一个旧简称",
+	})
+
+	if normalized.ShortName != "统一名称" {
+		t.Fatalf("ShortName = %q, want product name", normalized.ShortName)
+	}
+	if normalized.ProductShortName != "统一名称" {
+		t.Fatalf("ProductShortName = %q, want product name", normalized.ProductShortName)
 	}
 }
 
 func TestTruncateERPShortNameIsRuneSafe(t *testing.T) {
-	got := truncateERPShortName(strings.Repeat("中", 20), ERPProductShortNameMaxBytes)
+	got := truncateERPShortName(strings.Repeat("中", 50), ERPProductShortNameMaxLength)
 	if !utf8.ValidString(got) {
 		t.Fatalf("truncateERPShortName() returned invalid UTF-8: %q", got)
 	}
-	if len(got) > ERPProductShortNameMaxBytes {
-		t.Fatalf("byte length = %d, want <= %d", len(got), ERPProductShortNameMaxBytes)
+	if utf8.RuneCountInString(got) > ERPProductShortNameMaxLength {
+		t.Fatalf("rune length = %d, want <= %d", utf8.RuneCountInString(got), ERPProductShortNameMaxLength)
 	}
-	if utf8.RuneCountInString(got) != 13 {
-		t.Fatalf("rune length = %d, want 13", utf8.RuneCountInString(got))
+	if utf8.RuneCountInString(got) != ERPProductShortNameMaxLength {
+		t.Fatalf("rune length = %d, want %d", utf8.RuneCountInString(got), ERPProductShortNameMaxLength)
 	}
 }
 
 func TestValidateCreateTaskERPProductNameLengthBatch(t *testing.T) {
-	tooLong := strings.Repeat("B", ERPProductNameMaxBytes+1)
+	tooLong := strings.Repeat("批", ERPProductNameMaxLength+1)
 	appErr := validateCreateTaskERPProductNameLength(CreateTaskParams{
 		TaskType:     domain.TaskTypeNewProductDevelopment,
 		SourceMode:   domain.TaskSourceModeNewProduct,

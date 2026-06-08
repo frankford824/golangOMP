@@ -1388,11 +1388,12 @@ func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) do
 	if payload.ProductName == "" {
 		payload.ProductName = payload.Name
 	}
-	if payload.ShortName == "" {
-		payload.ShortName = payload.ProductShortName
-	}
-	if payload.ProductShortName == "" {
-		payload.ProductShortName = payload.ShortName
+	displayName := firstNonEmptyString(payload.Name, payload.ProductName, payload.ShortName, payload.ProductShortName, payload.SKUCode)
+	if displayName != "" {
+		payload.Name = displayName
+		payload.ProductName = displayName
+		payload.ShortName = displayName
+		payload.ProductShortName = displayName
 	}
 	if payload.SPrice == nil {
 		payload.SPrice = payload.Price

@@ -16,6 +16,7 @@
           placeholder="请输入产品名称"
           :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
           :hint="erpProductNameHint(form.productName)"
+          :error="erpProductNameError(form.productName)"
         />
         <IIdSelector
           v-model="productIIdModel"
@@ -88,6 +89,7 @@ import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import type { TaskSkuItem } from '@/domain/types/task'
 import {
   ERP_PRODUCT_NAME_MAX_LENGTH,
+  erpProductNameError,
   erpProductNameHint,
   erpProductNameLimitMessage,
   isErpProductNameTooLong,

@@ -239,7 +239,7 @@
                   <div class="field-readonly" :title="form.productName || '填写产品名称后自动同步'">
                     {{ form.productName || '填写产品名称后自动同步' }}
                   </div>
-                  <p class="field-hint">产品简称将与产品名称保持一致，并受同一长度限制。</p>
+                  <p class="field-hint">系统会把产品名称同步为 ERP 简称，两个名称保持一致。</p>
                 </div>
               </div>
             </template>

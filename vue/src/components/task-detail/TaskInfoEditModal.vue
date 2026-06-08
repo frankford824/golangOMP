@@ -24,6 +24,7 @@
             placeholder="与创建侧一致"
             :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
             :hint="erpProductNameHint(form.product_name)"
+            :error="erpProductNameError(form.product_name)"
           />
           <IIdSelector
             v-if="showField.i_id"
@@ -188,6 +189,7 @@ import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import { normalizePriorityForApi } from '@/domain/task-priority'
 import {
   ERP_PRODUCT_NAME_MAX_LENGTH,
+  erpProductNameError,
   erpProductNameHint,
   erpProductNameLimitMessage,
   isErpProductNameTooLong,

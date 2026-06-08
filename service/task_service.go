@@ -1902,7 +1902,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 				"field":      "product_name",
 				"code":       "erp_product_name_too_long",
-				"max_length": ERPProductNameMaxBytes,
+				"max_length": ERPProductNameMaxLength,
 				"length":     erpProductNameLength(productNameSnapshot),
 				"message":    erpProductNameLimitMessage(),
 			})
@@ -1922,7 +1922,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 				"field":      "product_name",
 				"code":       "erp_product_name_too_long",
-				"max_length": ERPProductNameMaxBytes,
+				"max_length": ERPProductNameMaxLength,
 				"length":     erpProductNameLength(productName),
 				"message":    erpProductNameLimitMessage(),
 			})
@@ -2450,7 +2450,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 				"field":      "product_name",
 				"code":       "erp_product_name_too_long",
-				"max_length": ERPProductNameMaxBytes,
+				"max_length": ERPProductNameMaxLength,
 				"length":     erpProductNameLength(productName),
 				"message":    erpProductNameLimitMessage(),
 			})
