@@ -234,7 +234,6 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 	seenSKU := map[string]int{}
 	for idx, rawItem := range p.BatchItems {
 		if p.TaskType == domain.TaskTypeNewProductDevelopment {
-			rawItem.ProductShortName = defaultBatchItemProductShortName(rawItem)
 			rawItem.CategoryCode = defaultBatchItemCategoryCode(p, rawItem)
 		}
 		dedupeKey, appErr := computeTaskBatchItemDedupeKey(p.TaskType, rawItem)
@@ -336,9 +335,6 @@ func (s *taskService) generateOrReserveSkuForBatchItem(ctx context.Context, task
 }
 
 func defaultBatchItemProductShortName(item CreateTaskBatchSKUItemParams) string {
-	if value := strings.TrimSpace(item.ProductShortName); value != "" {
-		return value
-	}
 	return strings.TrimSpace(item.ProductName)
 }
 

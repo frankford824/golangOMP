@@ -454,6 +454,13 @@ func (c *hybridERPBridgeClient) UpsertProduct(ctx context.Context, payload domai
 		c.logger.Info("erp_bridge_write_path_remote", zap.String("operation", "upsert"))
 		return result, nil
 	}
+	if !erpRemoteFailureAllowsLocalFallback(err) {
+		c.logger.Warn("erp_remote_upsert_failed_no_fallback",
+			zap.String("error_class", classifyERPRemoteErr(err)),
+			zap.Error(err),
+		)
+		return nil, err
+	}
 	if !c.enableFallback || c.localFallback == nil {
 		return nil, err
 	}

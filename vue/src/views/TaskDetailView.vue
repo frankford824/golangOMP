@@ -450,9 +450,9 @@
                           <dt>ERP 同步</dt>
                           <dd :class="detailErpSyncStatusToneClass">{{ detailErpSyncStatusLabel }}</dd>
                         </div>
-                        <div v-if="task.filing_error_message">
+                        <div v-if="detailErpSyncFailureMessage">
                           <dt>同步失败原因</dt>
-                          <dd class="detail-erp-sync-error">{{ task.filing_error_message }}</dd>
+                          <dd class="detail-erp-sync-error">{{ detailErpSyncFailureMessage }}</dd>
                         </div>
                       </dl>
                       <div v-if="showErpFilingRetryButton" class="detail-v3-erp-retry-row">
@@ -1165,6 +1165,7 @@ import type { BackendAsset } from '@/services/apiTypes'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { buildTimestampedZipFilename, downloadBatchAsZip, sanitizeZipEntryName } from '@/utils/batchZipDownload'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import {
   TASK_DETAIL_PRODUCT_INDEX_KEY,
@@ -2175,6 +2176,10 @@ const detailErpSyncStatusToneClass = computed(() => {
   if (tone === 'success') return 'detail-erp-sync-status--success'
   return ''
 })
+
+const detailErpSyncFailureMessage = computed(() =>
+  formatErpSyncFailureMessage(task.value?.filing_error_message ?? ''),
+)
 
 async function onErpFilingRetry() {
   const id = taskId.value

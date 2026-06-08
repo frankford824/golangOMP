@@ -35,7 +35,7 @@ func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T
 		now:        time.Now,
 	}
 
-	productName := strings.Repeat("长", 45)
+	productName := strings.Repeat("A", ERPProductNameMaxBytes)
 	appErr := svc.syncRecordToERP(context.Background(), &domain.ProductManagementRecord{
 		ID:                  1,
 		TaskNo:              "RW-20260604-A-001114",

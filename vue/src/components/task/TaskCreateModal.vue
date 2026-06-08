@@ -419,7 +419,7 @@ import type { TaskCreateFormModel, TaskKind } from '@/domain/types'
 import { canSubmitTask } from '@/domain/task-create-rules'
 import { pickFieldWhitelistViolations } from '@/domain/task-create-fields'
 import { defaultBatchTemplateValues } from '@/domain/batch-task-create'
-import { ERP_PRODUCT_NAME_MAX_LENGTH, isErpProductNameTooLong } from '@/domain/erp-product-name'
+import { erpProductNameLimitMessage, isErpProductNameTooLong } from '@/domain/erp-product-name'
 import { useTasksStore } from '@/stores/tasks'
 import { generateActionId } from '@/utils/uuid'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -1038,12 +1038,12 @@ const validationIssues = computed<string[]>(() => {
     if (taskKind.value === 'NEW_PRODUCT_DEV') {
       if (!f.category) issues.push('未选择产品款式编码')
       if (!f.productName) issues.push('未填写产品名称')
-      if (isErpProductNameTooLong(f.productName)) issues.push(`产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交`)
+      if (isErpProductNameTooLong(f.productName)) issues.push(erpProductNameLimitMessage('产品名称'))
       if (!f.designRequirement?.trim()) issues.push('未填写设计需求')
     } else if (taskKind.value === 'PURCHASE_TASK') {
       if (!f.category) issues.push('未选择产品款式编码')
       if (!f.productName) issues.push('未填写产品名称')
-      if (isErpProductNameTooLong(f.productName)) issues.push(`产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交`)
+      if (isErpProductNameTooLong(f.productName)) issues.push(erpProductNameLimitMessage('产品名称'))
       if (!f.prefillSpecText?.trim()) issues.push('未填写规格尺寸')
       if (f.purchaseQuantity == null) issues.push('未填写采购数量')
       if (f.costPriceMode === 'manual' && (f.costPriceAmount == null || Number.isNaN(f.costPriceAmount))) {
@@ -1059,7 +1059,7 @@ const validationIssues = computed<string[]>(() => {
   } else {
     if ((f.batchItems ?? []).length === 0) issues.push('请先上传并解析 Excel')
     if ((f.batchItems ?? []).some((item) => isErpProductNameTooLong(item.productName))) {
-      issues.push(`批量商品产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交`)
+      issues.push(erpProductNameLimitMessage('批量商品产品名称'))
     }
     if (excelViolations.value.length > 0) issues.push('Excel 存在行级错误，请修正后重新上传')
   }
@@ -1353,12 +1353,15 @@ async function prepareSkuPreview() {
         category: topCategoryCode || form.value.category,
         material: form.value.material,
         materialOther: form.value.materialOther,
-        productShortName: form.value.productShortName,
+        productShortName: form.value.productName,
       })
     }
 
     if (isBatch) {
-      const normalizedItems = form.value.batchItems ?? []
+      const normalizedItems = (form.value.batchItems ?? []).map((item) => ({
+        ...item,
+        productShortName: item.productName,
+      }))
       Object.assign(base, {
         skuMode: 'multiple',
         sku: null,
@@ -1567,12 +1570,15 @@ async function submit() {
       category: form.value.category,
       material: form.value.material,
       materialOther: form.value.materialOther,
-      productShortName: form.value.productShortName,
+      productShortName: form.value.productName,
     })
   }
 
   if (isBatch) {
-    const normalizedItems = form.value.batchItems ?? []
+    const normalizedItems = (form.value.batchItems ?? []).map((item) => ({
+      ...item,
+      productShortName: item.productName,
+    }))
     Object.assign(base, {
       skuMode: 'multiple',
       sku: null,

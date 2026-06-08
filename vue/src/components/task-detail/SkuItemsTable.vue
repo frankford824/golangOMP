@@ -59,7 +59,7 @@
                 <FilingStatusBadge
                   v-if="item.erp_sync_required !== false"
                   :status="resolvedSkuFilingStatus(item)"
-                  :error-message="item.filing_error_message"
+                  :error-message="skuFilingErrorMessage(item)"
                 />
                 <span v-else class="sku-sync-not-required">无需同步</span>
                 <span v-if="item.erp_sync_version != null" class="sku-sync-meta">
@@ -103,6 +103,7 @@ import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/A
 import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
 import type { TaskSkuItem } from '@/domain/types/task'
 import { skuItemStatusLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
 
 const props = defineProps<{
   items: TaskSkuItem[]
@@ -200,6 +201,10 @@ function resolvedSkuFilingStatus(item: TaskSkuItem): string | undefined {
   const skuStatus = String(item.filing_status ?? '').trim()
   if (skuStatus) return skuStatus
   return undefined
+}
+
+function skuFilingErrorMessage(item: TaskSkuItem): string {
+  return formatErpSyncFailureMessage(item.filing_error_message ?? '')
 }
 
 function formatFiledAt(value: string): string {

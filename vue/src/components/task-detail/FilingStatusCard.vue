@@ -15,9 +15,9 @@
         <span class="filing-label">缺失字段</span>
         <span class="filing-value text-amber-700">{{ props.task.missing_fields_summary_cn }}</span>
       </div>
-      <div v-if="props.task?.filing_error_message" class="filing-detail-row">
+      <div v-if="businessErrorMessage" class="filing-detail-row">
         <span class="filing-label">失败原因</span>
-        <span class="filing-value text-red-700">{{ props.task.filing_error_message }}</span>
+        <span class="filing-value text-red-700">{{ businessErrorMessage }}</span>
       </div>
       <div v-if="props.task?.last_filed_at" class="filing-detail-row">
         <span class="filing-label">最近同步时间</span>
@@ -55,6 +55,7 @@ import { tasksApi } from '@/services/api/tasksApi'
 import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import { formatDateBeijing } from '@/utils/date'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
 
 const props = defineProps<{ task: Task | null }>()
 
@@ -72,6 +73,7 @@ const hasFilingInfo = computed(() => {
 })
 
 const showRetryButton = computed(() => taskNeedsErpFilingRetry(props.task))
+const businessErrorMessage = computed(() => formatErpSyncFailureMessage(props.task?.filing_error_message ?? ''))
 
 const retrying = ref(false)
 const emit = defineEmits<{ refreshed: [] }>()

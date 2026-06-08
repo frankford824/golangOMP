@@ -743,7 +743,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		RiskFlagsJSON:         "{}",
 		ChangeRequest:         strings.TrimSpace(p.ChangeRequest),
 		DesignRequirement:     strings.TrimSpace(p.DesignRequirement),
-		ProductShortName:      strings.TrimSpace(p.ProductShortName),
+		ProductShortName:      defaultCreateTaskProductShortName(p),
 		MaterialMode:          strings.TrimSpace(p.MaterialMode),
 		Material:              materialValue,
 		MaterialOther:         strings.TrimSpace(p.MaterialOther),
@@ -1155,6 +1155,13 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 	}
 
 	return p
+}
+
+func defaultCreateTaskProductShortName(p CreateTaskParams) string {
+	if p.SourceMode == domain.TaskSourceModeExistingProduct {
+		return strings.TrimSpace(p.ProductShortName)
+	}
+	return strings.TrimSpace(firstNonEmptyString(p.ProductNameSnapshot, p.ProductShortName))
 }
 
 // validateProductSelectionByTaskType enforces field whitelist: product_selection is only allowed for existing_product.
@@ -1895,7 +1902,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 				"field":      "product_name",
 				"code":       "erp_product_name_too_long",
-				"max_length": ERPProductNameMaxRunes,
+				"max_length": ERPProductNameMaxBytes,
 				"length":     erpProductNameLength(productNameSnapshot),
 				"message":    erpProductNameLimitMessage(),
 			})
@@ -1915,7 +1922,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 				"field":      "product_name",
 				"code":       "erp_product_name_too_long",
-				"max_length": ERPProductNameMaxRunes,
+				"max_length": ERPProductNameMaxBytes,
 				"length":     erpProductNameLength(productName),
 				"message":    erpProductNameLimitMessage(),
 			})
@@ -2438,7 +2445,17 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	previousProductIID := taskSKUItemProductIID(item)
 	previousDesignRequirement := item.DesignRequirement
 	if p.ProductName != nil {
-		item.ProductNameSnapshot = strings.TrimSpace(*p.ProductName)
+		productName := strings.TrimSpace(*p.ProductName)
+		if erpProductNameTooLong(productName) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
+				"field":      "product_name",
+				"code":       "erp_product_name_too_long",
+				"max_length": ERPProductNameMaxBytes,
+				"length":     erpProductNameLength(productName),
+				"message":    erpProductNameLimitMessage(),
+			})
+		}
+		item.ProductNameSnapshot = productName
 	}
 	productIIDChanged := false
 	if p.ProductIID != nil {

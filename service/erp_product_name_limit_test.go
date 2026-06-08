@@ -9,12 +9,12 @@ import (
 )
 
 func TestValidateERPProductUpsertNameLength(t *testing.T) {
-	okName := strings.Repeat("测", ERPProductNameMaxRunes)
+	okName := strings.Repeat("A", ERPProductNameMaxBytes)
 	if appErr := validateERPProductUpsertNameLength(domain.ERPProductUpsertPayload{Name: okName}); appErr != nil {
 		t.Fatalf("exact max length rejected: %+v", appErr)
 	}
 
-	tooLong := okName + "试"
+	tooLong := okName + "B"
 	appErr := validateERPProductUpsertNameLength(domain.ERPProductUpsertPayload{Name: tooLong})
 	if appErr == nil {
 		t.Fatal("expected long ERP product name to be rejected")
@@ -48,7 +48,7 @@ func TestTruncateERPShortNameIsRuneSafe(t *testing.T) {
 }
 
 func TestValidateCreateTaskERPProductNameLengthBatch(t *testing.T) {
-	tooLong := strings.Repeat("批", ERPProductNameMaxRunes+1)
+	tooLong := strings.Repeat("B", ERPProductNameMaxBytes+1)
 	appErr := validateCreateTaskERPProductNameLength(CreateTaskParams{
 		TaskType:     domain.TaskTypeNewProductDevelopment,
 		SourceMode:   domain.TaskSourceModeNewProduct,

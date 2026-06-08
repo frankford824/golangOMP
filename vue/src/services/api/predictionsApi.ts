@@ -1,5 +1,6 @@
 import http from '@/services/http'
 import type { V1GlobalSearchScope } from '@/domain/global-search'
+import { normalizePredictionSuggestionForBusiness } from '@/utils/business-copy'
 
 export type PredictionType =
   | 'recent'
@@ -34,7 +35,7 @@ function unwrapPredictionBundle(payload: unknown): PredictionBundle {
   const root = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
   const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : root
   const suggestions = Array.isArray(data.suggestions)
-    ? (data.suggestions as PredictionSuggestion[])
+    ? (data.suggestions as PredictionSuggestion[]).map(normalizePredictionSuggestionForBusiness)
     : []
   return {
     suggestions,

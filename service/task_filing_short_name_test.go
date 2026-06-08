@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildTaskERPBridgeProductUpsertPayloadUsesProductNameAsShortName(t *testing.T) {
-	name := "菲瑶/常规kt板/端午父亲立牌/粽情父爱/47*100cm"
+	name := "KT-board-fathers-day-47x100"
 	payload, appErr := buildTaskERPBridgeProductUpsertPayload(
 		&domain.Task{
 			ID:                  1120,
@@ -46,7 +46,7 @@ func TestBuildTaskERPBridgeProductUpsertPayloadUsesProductNameAsShortName(t *tes
 }
 
 func TestBuildTaskERPBridgeProductUpsertPayloadIgnoresExplicitShortNameForFiling(t *testing.T) {
-	name := "菲瑶/常规KT板/毕业手举牌/最好的我们/6个装"
+	name := "KT-board-graduation-6pcs"
 	payload, appErr := buildTaskERPBridgeProductUpsertPayload(
 		&domain.Task{
 			ID:                  1124,
@@ -77,7 +77,7 @@ func TestBuildTaskERPBridgeProductUpsertPayloadIgnoresExplicitShortNameForFiling
 }
 
 func TestBuildBatchSKUItemERPBridgeProductUpsertPayloadUsesProductNameAsShortName(t *testing.T) {
-	name := "谷常规KT板/开槽/端午射五毒投壶筒/壁虎款/20*20*40cm"
+	name := "KT-board-dragon-boat-20x40"
 	payload, appErr := buildBatchSKUItemERPBridgeProductUpsertPayload(
 		&domain.Task{
 			ID:                  1001,

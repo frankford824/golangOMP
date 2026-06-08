@@ -186,7 +186,12 @@ import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import { normalizePriorityForApi } from '@/domain/task-priority'
-import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameHint, isErpProductNameTooLong } from '@/domain/erp-product-name'
+import {
+  ERP_PRODUCT_NAME_MAX_LENGTH,
+  erpProductNameHint,
+  erpProductNameLimitMessage,
+  isErpProductNameTooLong,
+} from '@/domain/erp-product-name'
 import { taskBeijingDateKey, toBeijingEndOfDayISO } from '@/utils/date'
 
 const props = defineProps<{
@@ -531,7 +536,7 @@ async function submit() {
   const c = form.value
   const errors: string[] = []
   if (!isBatchTask.value && isErpProductNameTooLong(c.product_name)) {
-    submitError.value = `产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交，避免同步聚水潭失败`
+    submitError.value = erpProductNameLimitMessage('产品名称')
     saving.value = false
     return
   }

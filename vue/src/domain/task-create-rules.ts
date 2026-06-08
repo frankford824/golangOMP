@@ -1,7 +1,7 @@
 import type { TaskCreateFormModel, TaskKind } from './types'
 import { hasValidRetouchRequirementDrafts } from '@/domain/retouch-requirements'
 import { endOfBeijingDayMs, taskInstantMs } from '@/utils/date'
-import { ERP_PRODUCT_NAME_MAX_LENGTH, isErpProductNameTooLong } from '@/domain/erp-product-name'
+import { erpProductNameLimitMessage, isErpProductNameTooLong } from '@/domain/erp-product-name'
 
 function dueAtMs(value: string): number {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) ? endOfBeijingDayMs(value) : taskInstantMs(value)
@@ -110,10 +110,10 @@ export function getTaskCreateCompletionHint(
     return '批量模式至少需要 2 个商品'
   }
   if (isBatchMode && form.batchItems?.some((item) => isErpProductNameTooLong(item.productName))) {
-    return `批量商品产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交`
+    return erpProductNameLimitMessage('批量商品产品名称')
   }
   if (!isBatchMode && isErpProductNameTooLong(form.productName)) {
-    return `产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交`
+    return erpProductNameLimitMessage('产品名称')
   }
 
   if (canSubmitTask(kind, form, now)) return '可提交'

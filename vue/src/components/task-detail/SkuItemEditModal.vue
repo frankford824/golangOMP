@@ -86,7 +86,12 @@ import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import type { TaskSkuItem } from '@/domain/types/task'
-import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameHint, isErpProductNameTooLong } from '@/domain/erp-product-name'
+import {
+  ERP_PRODUCT_NAME_MAX_LENGTH,
+  erpProductNameHint,
+  erpProductNameLimitMessage,
+  isErpProductNameTooLong,
+} from '@/domain/erp-product-name'
 import { tasksApi } from '@/services/api/tasksApi'
 
 const props = defineProps<{
@@ -186,7 +191,7 @@ async function submit() {
   if (!props.skuItem) return
   const skuItemID = props.skuItem.id
   if (isErpProductNameTooLong(form.value.productName)) {
-    errorText.value = `产品名称不能超过 ${ERP_PRODUCT_NAME_MAX_LENGTH} 个字符，请精简后再提交，避免同步聚水潭失败`
+    errorText.value = erpProductNameLimitMessage('产品名称')
     return
   }
   const costDraft = String(form.value.costPrice ?? '').trim()

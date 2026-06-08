@@ -69,7 +69,7 @@
           保存并刷新
         </BaseButton>
       </div>
-      <p v-if="task.filing_error_message" class="mt-1 text-red-600">{{ task.filing_error_message }}</p>
+      <p v-if="businessFilingErrorMessage" class="mt-1 text-red-600">{{ businessFilingErrorMessage }}</p>
     </div>
     <p v-if="saveError" class="mt-2 text-xs text-red-600">{{ saveError }}</p>
   </div>
@@ -88,6 +88,7 @@ import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
 
 const props = withDefaults(
   defineProps<{
@@ -145,6 +146,7 @@ const costPriceInput = ref<number | undefined>(undefined)
 const saving = ref(false)
 const filingLoading = ref(false)
 const saveError = ref('')
+const businessFilingErrorMessage = computed(() => formatErpSyncFailureMessage(props.task.filing_error_message ?? ''))
 
 function hydrateFromTask(t: Task) {
   const cat = isNewProduct(t)

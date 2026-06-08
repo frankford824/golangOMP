@@ -235,20 +235,11 @@
                 </div>
 
                 <div class="field-group">
-                  <label class="field-label">产品简称 *</label>
-                  <input
-                    v-model.trim="form.productShortName"
-                    type="text"
-                    class="field-input"
-                    placeholder="请输入产品简称"
-                    :disabled="submitting"
-                  />
-                  <p
-                    v-if="showValidationError && !form.productShortName.trim()"
-                    class="field-hint field-hint-error"
-                  >
-                    请填写产品简称
-                  </p>
+                  <label class="field-label">产品简称</label>
+                  <div class="field-readonly" :title="form.productName || '填写产品名称后自动同步'">
+                    {{ form.productName || '填写产品名称后自动同步' }}
+                  </div>
+                  <p class="field-hint">产品简称将与产品名称保持一致，并受同一长度限制。</p>
                 </div>
               </div>
             </template>
@@ -548,8 +539,7 @@ const canSubmit = computed(() => {
   return Boolean(
     form.newCategoryCode.trim() &&
       form.productName.trim() &&
-      !isErpProductNameTooLong(form.productName) &&
-      form.productShortName.trim(),
+      !isErpProductNameTooLong(form.productName),
   )
 })
 
@@ -751,7 +741,7 @@ function buildCreatePayload(): CustomizationTaskCreatePayload {
   } else {
     payload.category_code = form.newCategoryCode
     payload.product_name = form.productName
-    payload.product_short_name = form.productShortName
+    payload.product_short_name = form.productName
   }
   return payload
 }
@@ -1160,6 +1150,19 @@ async function submit() {
 .field-textarea:disabled {
   background: #f8fafc;
   cursor: not-allowed;
+}
+.field-readonly {
+  min-height: 2.05rem;
+  display: flex;
+  align-items: center;
+  border: 1px solid #d7deea;
+  border-radius: 0.58rem;
+  background: #f8fafc;
+  padding: 0.38rem 0.62rem;
+  color: #475569;
+  font-size: 0.78rem;
+  line-height: 1.2rem;
+  word-break: break-word;
 }
 .select-wrap {
   position: relative;
