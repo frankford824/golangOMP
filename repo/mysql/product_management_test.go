@@ -19,6 +19,12 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 		}
 		normalized := strings.Join(strings.Fields(actualSQL), " ")
 		required := []string{
+			"updated_at",
+			"last_sync_error = CASE",
+			"base_sync_error = CASE",
+			"VALUES(updated_at) > erp_product_sync_records.updated_at",
+			"WHEN VALUES(erp_sync_status) = 'pending_sync' AND erp_product_sync_records.erp_sync_status = 'failed'",
+			"WHEN VALUES(base_sync_status) = 'pending_sync' AND erp_product_sync_records.base_sync_status = 'failed'",
 			"WHEN erp_product_sync_records.erp_sync_status = 'synced'",
 			"NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))",
 			"THEN 'pending_sync'",
