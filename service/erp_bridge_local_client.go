@@ -193,7 +193,7 @@ func (c *localERPBridgeClient) UpsertProduct(ctx context.Context, payload domain
 	}
 
 	if c.productRepo != nil && c.txRunner != nil && productID != "" {
-		specJSON, err := json.Marshal(snapshot)
+		specJSON, err := localERPProductSnapshotJSON(snapshot, payload)
 		if err != nil {
 			return nil, fmt.Errorf("marshal local erp bridge product snapshot: %w", err)
 		}
@@ -390,9 +390,44 @@ func localERPProductFromDomain(product *domain.Product) *domain.ERPProduct {
 		ImageURL:         strings.TrimSpace(snapshot.ImageURL),
 		Price:            cloneLocalERPPrice(snapshot.Price),
 		SPrice:           cloneLocalERPPrice(snapshot.SPrice),
+		CostPrice:        localERPProductCostPriceFromSpecJSON(product.SpecJSON),
 		WMSCoID:          strings.TrimSpace(snapshot.WMSCoID),
 		Currency:         strings.TrimSpace(snapshot.Currency),
 	}
+}
+
+func localERPProductSnapshotJSON(snapshot *domain.ERPProductSelectionSnapshot, payload domain.ERPProductUpsertPayload) ([]byte, error) {
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	var mapped map[string]interface{}
+	if err := json.Unmarshal(raw, &mapped); err != nil {
+		return nil, err
+	}
+	if mapped == nil {
+		mapped = map[string]interface{}{}
+	}
+	if payload.CostPrice != nil {
+		mapped["cost_price"] = *payload.CostPrice
+		mapped["c_price"] = *payload.CostPrice
+	} else if payload.BusinessInfo != nil && payload.BusinessInfo.CostPrice != nil {
+		mapped["cost_price"] = *payload.BusinessInfo.CostPrice
+		mapped["c_price"] = *payload.BusinessInfo.CostPrice
+	}
+	return json.Marshal(mapped)
+}
+
+func localERPProductCostPriceFromSpecJSON(raw string) *float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var mapped map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &mapped); err != nil {
+		return nil
+	}
+	return firstFloatPtr(mapped, "cost_price", "c_price")
 }
 
 func cloneLocalERPPrice(price *float64) *float64 {
