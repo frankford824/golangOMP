@@ -354,6 +354,7 @@ import { getTaskOwnershipDisplay } from '@/domain/task-ownership'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
 import { getTaskCenterCardStatusLabel } from '@/domain/task-center-card-status'
+import { expandTaskListStatusFilter } from '@/domain/task-list-status-filter'
 import {
   canClaimTaskFromCenter,
   isCustomizationModuleClaimTask,
@@ -505,34 +506,6 @@ function selectedIdsAsNumericOrError(): number[] | null {
     return null
   }
   return nums
-}
-
-const STATUS_FILTER_EXPANSION: Partial<Record<LegacyTaskStatus, LegacyTaskStatus[]>> = {
-  InProgress: ['InProgress', 'Assigned'],
-  PendingAuditA: ['PendingAuditA', 'PendingAuditB'],
-  RejectedByAuditA: ['RejectedByAuditA', 'RejectedByAuditB'],
-  Outsourcing: [
-    'Outsourcing',
-    'PendingOutsourceReview',
-    'PendingCustomizationReview',
-    'PendingCustomizationProduction',
-    'PendingEffectRevision',
-    'PendingProductionTransfer',
-  ],
-  Completed: ['Completed', 'PendingClose'],
-}
-
-function expandStatusFilter(statuses: LegacyTaskStatus[]): LegacyTaskStatus[] {
-  const out = new Set<LegacyTaskStatus>()
-  for (const status of statuses) {
-    const expanded = STATUS_FILTER_EXPANSION[status]
-    if (expanded?.length) {
-      for (const item of expanded) out.add(item)
-      continue
-    }
-    out.add(status)
-  }
-  return Array.from(out)
 }
 
 const defaultTaskFilters: TaskListFilters = {
@@ -748,10 +721,10 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
     params.status = ARCHIVED_TAB_DEFAULT_STATUSES.join(',')
   }
   if (activeTab.value === 'terminated') {
-    const terminatedStatus = f.status.length ? expandStatusFilter(f.status).join(',') : 'Cancelled'
+    const terminatedStatus = f.status.length ? expandTaskListStatusFilter(f.status).join(',') : 'Cancelled'
     params.status = terminatedStatus
   } else if (f.status.length) {
-    params.status = expandStatusFilter(f.status).join(',')
+    params.status = expandTaskListStatusFilter(f.status).join(',')
   }
   if (f.taskType) {
     const map: Record<string, string> = {
