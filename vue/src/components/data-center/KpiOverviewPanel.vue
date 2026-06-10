@@ -296,6 +296,11 @@ import type { BackendUser, OperationLogEntry, WorkflowTraceEvent } from '@/servi
 import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
 import { userAccountDisplay } from '@/domain/user-display'
+import {
+  buildKpiOperationTraceEvent,
+  shouldContinueUserDirectoryLoad,
+  type KpiUserDirectoryEntry,
+} from '@/domain/data-center-kpi'
 import { Sparkles } from 'lucide-vue-next'
 
 interface L1Card {
@@ -308,15 +313,6 @@ interface L1Card {
 interface PaginationEnvelope<T> {
   data?: T[]
   pagination?: { total?: unknown }
-}
-
-interface UserDirectoryEntry {
-  id: string
-  username: string
-  name: string
-  realName: string
-  department: string
-  team: string
 }
 
 interface PersonStats {
@@ -354,9 +350,9 @@ const aiAnalysisLoading = ref(false)
 const aiAnalysisError = ref('')
 const aiAnalysis = ref<KpiAiAnalysisResponse | null>(null)
 const managementPredictions = ref<PredictionSuggestion[]>([])
-const userDirectory = ref(new Map<string, UserDirectoryEntry>())
+const userDirectory = ref(new Map<string, KpiUserDirectoryEntry>())
 const userDirectoryByUsername = computed(() => {
-  const next = new Map<string, UserDirectoryEntry>()
+  const next = new Map<string, KpiUserDirectoryEntry>()
   for (const user of userDirectory.value.values()) {
     const username = user.username.trim().toLowerCase()
     if (username) next.set(username, user)
@@ -364,7 +360,7 @@ const userDirectoryByUsername = computed(() => {
   return next
 })
 const userDirectoryByDisplayName = computed(() => {
-  const next = new Map<string, UserDirectoryEntry>()
+  const next = new Map<string, KpiUserDirectoryEntry>()
   for (const user of userDirectory.value.values()) {
     const key = normalizedPersonName(user.realName || user.name)
     if (key && !next.has(key)) next.set(key, user)
@@ -512,7 +508,7 @@ function normalizedPersonName(value: unknown): string {
   return text.toLowerCase()
 }
 
-function userDirectoryDisplayName(user: UserDirectoryEntry): string {
+function userDirectoryDisplayName(user: KpiUserDirectoryEntry): string {
   return userAccountDisplay(user.realName, user.name, user.username, `用户#${user.id}`)
 }
 
@@ -538,7 +534,7 @@ function payloadPersonName(event: WorkflowTraceEvent): string {
   ])
 }
 
-function resolveEventUser(event: WorkflowTraceEvent): UserDirectoryEntry | undefined {
+function resolveEventUser(event: WorkflowTraceEvent): KpiUserDirectoryEntry | undefined {
   const byId = event.actor_id ? userDirectory.value.get(String(event.actor_id)) : undefined
   if (byId) return byId
   const username = String(event.actor_username ?? '').trim().toLowerCase()
@@ -584,17 +580,6 @@ function eventSearchText(event: WorkflowTraceEvent): string {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
-function readPayloadNumber(payload: unknown, keys: string[]): number {
-  const record = asRecord(payload)
-  for (const key of keys) {
-    const raw = record[key]
-    if (raw === null || raw === undefined || raw === '') continue
-    const value = Number(raw)
-    if (Number.isFinite(value) && value > 0) return value
-  }
-  return 0
 }
 
 function readPayloadText(payload: unknown, keys: string[]): string {
@@ -859,69 +844,12 @@ function riskLevelLabel(value: unknown): string {
   return '待观察'
 }
 
-function isAssignmentOperation(entry: OperationLogEntry): boolean {
-  return ['task.assigned', 'task.reassigned', 'task.batch_assigned'].includes(entry.event_type)
-}
-
-function operationActorId(entry: OperationLogEntry): number | null {
-  if (isAssignmentOperation(entry)) {
-    const assignedTo = readPayloadNumber(entry.payload, ['designer_id', 'to_handler_id', 'handler_id', 'assignee_id'])
-    if (assignedTo > 0) return assignedTo
-    return null
-  }
-  if (entry.event_type === 'task.design.submitted') {
-    const designer = readPayloadNumber(entry.payload, ['designer_id', 'uploaded_by', 'operator_id'])
-    if (designer > 0) return designer
-  }
-  if (entry.event_type === 'task.audit.approved' || entry.event_type === 'task.audit.rejected') {
-    const auditor = readPayloadNumber(entry.payload, ['auditor_id', 'operator_id'])
-    if (auditor > 0) return auditor
-  }
-  if (entry.event_type === 'task.created' || entry.event_type === 'task.batch_items_created') {
-    const creator = readPayloadNumber(entry.payload, ['creator_id', 'operator_id'])
-    if (creator > 0) return creator
-  }
-  const payloadActor = readPayloadNumber(entry.payload, ['operator_id', 'creator_id', 'designer_id', 'auditor_id'])
-  if (payloadActor > 0 && !entry.actor_id) return payloadActor
-  return entry.actor_id ?? null
-}
-
-function userDirectoryEntry(id: number | null): UserDirectoryEntry | undefined {
-  return id ? userDirectory.value.get(String(id)) : undefined
-}
-
 function operationToTrace(entry: OperationLogEntry): WorkflowTraceEvent | null {
-  const createdAt = entry.created_at
-  const at = createdAt ? new Date(createdAt).getTime() : 0
-  if (!Number.isFinite(at) || at < rangeStart.value.getTime() || at > rangeEnd.value.getTime()) return null
-
-  const actorId = operationActorId(entry)
-  if (actorId === null && isAssignmentOperation(entry)) return null
-  const user = userDirectoryEntry(actorId)
-  const fallbackName = readPayloadText(entry.payload, ['designer_name', 'to_handler_name', 'creator_name', 'auditor_name'])
-  const actorUsername = user?.name || entry.actor_username || fallbackName || (actorId ? `人员#${actorId}` : '')
-  const taskID = Number(entry.reference_id)
-  return {
-    id: Number(entry.log_id) || at,
-    event_id: `operation:${entry.source}:${entry.log_id}`,
-    event_source: 'system',
-    event_type: 'user_action',
-    action: entry.event_type,
-    actor_id: actorId,
-    actor_username: actorUsername,
-    actor_source: entry.actor_type,
-    actor_department: user?.department || '',
-    actor_team: user?.team || '',
-    route_method: '',
-    route_path: '',
-    resource_type: entry.reference_type,
-    resource_id: entry.reference_id,
-    task_id: Number.isFinite(taskID) && taskID > 0 ? taskID : null,
-    outcome: entry.status === 'failed' ? 'failed' : 'succeeded',
-    payload: entry.payload,
-    occurred_at: createdAt,
-    created_at: createdAt,
-  }
+  return buildKpiOperationTraceEvent(entry, {
+    rangeStartMs: rangeStart.value.getTime(),
+    rangeEndMs: rangeEnd.value.getTime(),
+    resolveUserById: (id) => (id ? userDirectory.value.get(String(id)) : undefined),
+  })
 }
 
 function dedupeEvents(source: WorkflowTraceEvent[]): WorkflowTraceEvent[] {
@@ -938,8 +866,8 @@ function dedupeEvents(source: WorkflowTraceEvent[]): WorkflowTraceEvent[] {
 
 async function loadUserDirectory() {
   try {
-    const next = new Map<string, UserDirectoryEntry>()
-    const pageSize = 500
+    const next = new Map<string, KpiUserDirectoryEntry>()
+    const pageSize = 100
     for (let page = 1; page <= 20; page += 1) {
       const res = await usersApi.list({ page, page_size: pageSize })
       const body = res.data as PaginationEnvelope<BackendUser> | BackendUser[]
@@ -958,7 +886,12 @@ async function loadUserDirectory() {
       }
       const totalRaw = Array.isArray(body) ? list.length : body?.pagination?.total
       const total = typeof totalRaw === 'number' ? totalRaw : Number(totalRaw)
-      if (list.length < pageSize || (Number.isFinite(total) && next.size >= total)) break
+      if (!shouldContinueUserDirectoryLoad({
+        receivedCount: list.length,
+        requestedPageSize: pageSize,
+        totalLoaded: next.size,
+        total,
+      })) break
     }
     userDirectory.value = next
   } catch {
@@ -966,7 +899,7 @@ async function loadUserDirectory() {
       const res = await usersApi.getDesigners({ workflowLane: 'all' })
       const body = res.data as { data?: unknown } | unknown[]
       const list = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : []
-      const next = new Map<string, UserDirectoryEntry>()
+      const next = new Map<string, KpiUserDirectoryEntry>()
       for (const raw of list) {
         const record = asRecord(raw)
         const id = String(record.id ?? '').trim()
@@ -1073,7 +1006,8 @@ async function load() {
             }),
           ])
           const parsed = parseTraceResponse(traceRes.data as PaginationEnvelope<WorkflowTraceEvent> | WorkflowTraceEvent[])
-          events.value = taskEvents.length ? taskEvents : parsed.items
+          // 人员绩效只按任务工作流事件统计；trace 仅用于链路覆盖量参考。
+          events.value = taskEvents
           traceTotal.value = parsed.total
         })(),
       )
