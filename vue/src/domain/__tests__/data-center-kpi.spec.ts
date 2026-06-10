@@ -4,6 +4,7 @@ import {
   kpiOperationActorDisplayName,
   kpiOperationActorId,
   shouldContinueUserDirectoryLoad,
+  summarizeKpiDesignLifecycle,
   type KpiUserDirectoryEntry,
 } from '@/domain/data-center-kpi'
 import type { OperationLogEntry } from '@/services/apiTypes'
@@ -91,5 +92,92 @@ describe('data-center kpi operation parsing', () => {
         total: 131,
       }),
     ).toBe(false)
+  })
+})
+
+describe('data-center design lifecycle statistics', () => {
+  it('excludes work transferred to another designer from the original designer completion denominator', () => {
+    const stats = summarizeKpiDesignLifecycle([
+      { taskKey: '100', actorKey: 'designer:a', at: 1000, kind: 'assignment', priorityWeight: 3 },
+      { taskKey: '100', actorKey: 'designer:b', at: 2000, kind: 'assignment', priorityWeight: 2 },
+      { taskKey: '100', actorKey: 'designer:b', at: 3000, kind: 'submission' },
+    ])
+
+    expect(stats.get('designer:a')).toMatchObject({
+      designClaims: 1,
+      designCompletedClaims: 0,
+      designTransferredOut: 1,
+      designInHandClaims: 0,
+    })
+    expect(stats.get('designer:b')).toMatchObject({
+      designClaims: 1,
+      designCompletedClaims: 1,
+      designTransferredOut: 0,
+      designInHandClaims: 0,
+    })
+  })
+
+  it('counts only same-designer submissions as completed assigned design work', () => {
+    const stats = summarizeKpiDesignLifecycle([
+      { taskKey: '101', actorKey: 'designer:a', at: 1000, kind: 'assignment', deadlineMs: 5000 },
+      { taskKey: '101', actorKey: 'designer:a', at: 3000, kind: 'submission' },
+    ])
+
+    expect(stats.get('designer:a')).toMatchObject({
+      designClaims: 1,
+      designCompletedClaims: 1,
+      designDeadlineCompletions: 1,
+      designOnTimeCompletions: 1,
+      designTransferredOut: 0,
+      designInHandClaims: 0,
+    })
+    expect(stats.get('designer:a')?.claimToSubmitMs).toEqual([2000])
+  })
+
+  it('keeps active unsubmitted assignments as current in-hand workload', () => {
+    const stats = summarizeKpiDesignLifecycle([
+      { taskKey: '102', actorKey: 'designer:a', at: 1000, kind: 'assignment', priorityWeight: 4 },
+    ])
+
+    expect(stats.get('designer:a')).toMatchObject({
+      designClaims: 1,
+      designCompletedClaims: 0,
+      designInHandClaims: 1,
+      priorityInHandClaims: 1,
+    })
+  })
+
+  it('excludes assignments that already left the design stage without a same-designer submit', () => {
+    const stats = summarizeKpiDesignLifecycle([
+      {
+        taskKey: '103',
+        actorKey: 'designer:a',
+        at: 1000,
+        kind: 'assignment',
+        inactiveWithoutSubmit: true,
+      },
+    ])
+
+    expect(stats.get('designer:a')).toMatchObject({
+      designClaims: 1,
+      designCompletedClaims: 0,
+      designClosedWithoutSubmit: 1,
+      designInHandClaims: 0,
+    })
+  })
+
+  it('does not double count repeated assignment events to the same current designer', () => {
+    const stats = summarizeKpiDesignLifecycle([
+      { taskKey: '104', actorKey: 'designer:a', at: 1000, kind: 'assignment', priorityWeight: 2 },
+      { taskKey: '104', actorKey: 'designer:a', at: 1500, kind: 'assignment', priorityWeight: 4 },
+      { taskKey: '104', actorKey: 'designer:a', at: 2500, kind: 'submission' },
+    ])
+
+    expect(stats.get('designer:a')).toMatchObject({
+      designClaims: 1,
+      designCompletedClaims: 1,
+      priorityClaims: 0,
+      priorityScore: 2,
+    })
   })
 })

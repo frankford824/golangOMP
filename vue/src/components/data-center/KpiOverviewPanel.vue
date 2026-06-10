@@ -109,17 +109,20 @@
           <section class="role-card">
             <div class="role-header">
               <h4>设计人员</h4>
-              <span>派给本人 → 本人提交</span>
+              <span>派入 - 转出/终止 = 有效派入</span>
             </div>
             <div class="table-scroll">
-              <table class="kpi-table">
+              <table class="kpi-table kpi-table--design">
                 <thead>
                   <tr>
                     <th>用户姓名</th>
-                    <th>派入任务</th>
-                    <th>重点任务</th>
-                    <th>设计完成</th>
-                    <th>按时完成</th>
+                    <th>派入</th>
+                    <th>转出/终止</th>
+                    <th>当前在手</th>
+                    <th>重点在手</th>
+                    <th>本人提交</th>
+                    <th>有效完成</th>
+                    <th>按时</th>
                     <th>平均完成</th>
                     <th>打回率</th>
                   </tr>
@@ -131,8 +134,11 @@
                       <small>{{ orgText(row) }}</small>
                     </td>
                     <td>{{ row.designClaims }}</td>
-                    <td>{{ row.priorityClaims }}</td>
-                    <td>{{ percentLabel(row.designCompletedClaims, row.designClaims) }}</td>
+                    <td>{{ designExcludedClaims(row) }}</td>
+                    <td>{{ row.designInHandClaims }}</td>
+                    <td>{{ row.priorityInHandClaims }}</td>
+                    <td>{{ row.designCompletedClaims }}</td>
+                    <td>{{ percentLabel(row.designCompletedClaims, designEffectiveClaims(row)) }}</td>
                     <td>{{ percentLabel(row.designOnTimeCompletions, row.designDeadlineCompletions) }}</td>
                     <td>{{ durationLabel(row.avgClaimToSubmitMs) }}</td>
                     <td :class="{ danger: row.designRejects > 0 }">
@@ -304,7 +310,9 @@ import { usePermissionsStore } from '@/stores/permissions'
 import { userAccountDisplay } from '@/domain/user-display'
 import {
   buildKpiOperationTraceEvent,
+  summarizeKpiDesignLifecycle,
   shouldContinueUserDirectoryLoad,
+  type KpiDesignLifecycleEvent,
   type KpiUserDirectoryEntry,
 } from '@/domain/data-center-kpi'
 import { Sparkles } from 'lucide-vue-next'
@@ -334,9 +342,13 @@ interface PersonStats {
   designClaims: number
   designSubmits: number
   designCompletedClaims: number
+  designTransferredOut: number
+  designClosedWithoutSubmit: number
+  designInHandClaims: number
   designDeadlineCompletions: number
   designOnTimeCompletions: number
   priorityClaims: number
+  priorityInHandClaims: number
   priorityScore: number
   designRejects: number
   claimToSubmitMs: number[]
@@ -454,6 +466,9 @@ const auditorRows = computed(() =>
 const summaryMetrics = computed(() => {
   const taskCreates = sum(people.value, (row) => row.taskCreates)
   const claims = sum(people.value, (row) => row.designClaims)
+  const excludedClaims = sum(people.value, (row) => designExcludedClaims(row))
+  const inHandClaims = sum(people.value, (row) => row.designInHandClaims)
+  const effectiveClaims = sum(people.value, (row) => designEffectiveClaims(row))
   const completedClaims = sum(people.value, (row) => row.designCompletedClaims)
   const deadlineCompletions = sum(people.value, (row) => row.designDeadlineCompletions)
   const onTimeCompletions = sum(people.value, (row) => row.designOnTimeCompletions)
@@ -471,7 +486,14 @@ const summaryMetrics = computed(() => {
       hint: '同一运营连续发起间隔',
     },
     { key: 'design_claims', label: '设计派入任务', value: claims, hint: '运营或主管指派给设计' },
-    { key: 'design_completion', label: '设计完成率', value: percentLabel(completedClaims, claims), hint: '本人提交设计 / 派入任务' },
+    { key: 'design_excluded', label: '转出/终止任务', value: excludedClaims, hint: '后续改派或已离开设计阶段' },
+    { key: 'design_in_hand', label: '设计当前在手', value: inHandClaims, hint: '仍需当前设计处理' },
+    {
+      key: 'design_completion',
+      label: '设计有效完成率',
+      value: percentLabel(completedClaims, effectiveClaims),
+      hint: '本人提交 / 有效派入',
+    },
     {
       key: 'design_on_time',
       label: '按时完成率',
@@ -564,6 +586,30 @@ function eventDeadlineMs(event: WorkflowTraceEvent): number {
   if (!value) return 0
   const ms = new Date(value).getTime()
   return Number.isFinite(ms) && ms > 0 ? ms : 0
+}
+
+function inactiveDesignAssignment(event: WorkflowTraceEvent): boolean {
+  const status = readPayloadText(event.payload, ['task_status', 'status']).toLowerCase()
+  if (!status) return false
+  if (
+    status.includes('audit') ||
+    status.includes('warehouse') ||
+    status.includes('completed') ||
+    status.includes('cancelled') ||
+    status.includes('canceled') ||
+    status.includes('closed') ||
+    status.includes('archived') ||
+    status.includes('审核') ||
+    status.includes('仓库') ||
+    status.includes('完成') ||
+    status.includes('取消') ||
+    status.includes('关闭') ||
+    status.includes('终止') ||
+    status.includes('归档')
+  ) {
+    return true
+  }
+  return false
 }
 
 function normalizedPersonName(value: unknown): string {
@@ -717,17 +763,39 @@ function looksLike(row: PersonStats, keyword: string): boolean {
 }
 
 function hasDesignActivity(row: PersonStats): boolean {
-  return row.designClaims > 0 || row.designSubmits > 0 || row.designRejects > 0
+  return (
+    row.designClaims > 0 ||
+    row.designSubmits > 0 ||
+    row.designRejects > 0 ||
+    row.designTransferredOut > 0 ||
+    row.designClosedWithoutSubmit > 0 ||
+    row.designInHandClaims > 0
+  )
+}
+
+function designExcludedClaims(row: PersonStats): number {
+  return row.designTransferredOut + row.designClosedWithoutSubmit
+}
+
+function designEffectiveClaims(row: PersonStats): number {
+  return Math.max(0, row.designClaims - designExcludedClaims(row))
 }
 
 function designCompletionRate(row: PersonStats): number {
-  return row.designClaims > 0 ? row.designCompletedClaims / row.designClaims : 0
+  const effectiveClaims = designEffectiveClaims(row)
+  return effectiveClaims > 0 ? row.designCompletedClaims / effectiveClaims : 0
 }
 
 function designRiskScore(row: PersonStats): number {
-  const completionGap = row.designClaims - row.designCompletedClaims
+  const completionGap = designEffectiveClaims(row) - row.designCompletedClaims
   const lateGap = row.designDeadlineCompletions - row.designOnTimeCompletions
-  return row.priorityClaims * 10 + Math.max(0, completionGap) * 3 + Math.max(0, lateGap) * 2 + row.designRejects
+  return (
+    row.priorityInHandClaims * 12 +
+    row.designInHandClaims * 4 +
+    Math.max(0, completionGap) * 2 +
+    Math.max(0, lateGap) * 2 +
+    row.designRejects
+  )
 }
 
 function emptyStats(event: WorkflowTraceEvent): PersonStats {
@@ -745,9 +813,13 @@ function emptyStats(event: WorkflowTraceEvent): PersonStats {
     designClaims: 0,
     designSubmits: 0,
     designCompletedClaims: 0,
+    designTransferredOut: 0,
+    designClosedWithoutSubmit: 0,
+    designInHandClaims: 0,
     designDeadlineCompletions: 0,
     designOnTimeCompletions: 0,
     priorityClaims: 0,
+    priorityInHandClaims: 0,
     priorityScore: 0,
     designRejects: 0,
     claimToSubmitMs: [],
@@ -776,10 +848,8 @@ function mergePersonMeta(stat: PersonStats, event: WorkflowTraceEvent) {
 function buildStats(source: WorkflowTraceEvent[]): PersonStats[] {
   const sorted = [...source].sort((a, b) => eventAt(a) - eventAt(b))
   const byActor = new Map<string, PersonStats>()
-  const currentAssignmentByTask = new Map<
-    string,
-    { actor: string; at: number; deadlineMs: number; completed: boolean }
-  >()
+  const designLifecycleEvents: KpiDesignLifecycleEvent[] = []
+  const designAssignmentActors = new Set<string>()
   const lastDesignSubmitByTask = new Map<string, { actor: string; at: number }>()
 
   for (const event of sorted) {
@@ -797,36 +867,24 @@ function buildStats(source: WorkflowTraceEvent[]): PersonStats[] {
       if (at > 0) stat.createTimes.push(at)
     }
     if (isDesignClaim(event)) {
-      stat.designClaims += 1
       const priority = eventPriority(event)
-      const priorityScore = priorityWeight(priority)
-      stat.priorityScore += priorityScore
-      if (priorityScore >= priorityWeight('high')) stat.priorityClaims += 1
+      designAssignmentActors.add(key)
       if (taskKey && at > 0) {
-        currentAssignmentByTask.set(taskKey, {
-          actor: key,
+        designLifecycleEvents.push({
+          taskKey,
+          actorKey: key,
           at,
           deadlineMs: eventDeadlineMs(event),
-          completed: false,
+          priorityWeight: priorityWeight(priority),
+          inactiveWithoutSubmit: inactiveDesignAssignment(event),
+          kind: 'assignment',
         })
       }
     }
     if (isDesignSubmit(event)) {
-      let completedAssignedWork = false
       if (taskKey && at > 0) {
-        const claim = currentAssignmentByTask.get(taskKey)
-        if (claim && claim.actor === key && at > claim.at && !claim.completed) {
-          claim.completed = true
-          completedAssignedWork = true
-          stat.designCompletedClaims += 1
-          stat.claimToSubmitMs.push(at - claim.at)
-          if (claim.deadlineMs > 0) {
-            stat.designDeadlineCompletions += 1
-            if (at <= claim.deadlineMs) stat.designOnTimeCompletions += 1
-          }
-          currentAssignmentByTask.delete(taskKey)
-        }
-        if (completedAssignedWork || looksLike(stat, '设计') || stat.designClaims > 0) {
+        designLifecycleEvents.push({ taskKey, actorKey: key, at, kind: 'submission' })
+        if (looksLike(stat, '设计') || designAssignmentActors.has(key)) {
           stat.designSubmits += 1
           lastDesignSubmitByTask.set(taskKey, { actor: key, at })
         }
@@ -850,6 +908,23 @@ function buildStats(source: WorkflowTraceEvent[]): PersonStats[] {
         if (submit && at > submit.at) stat.auditMs.push(at - submit.at)
       }
     }
+  }
+
+  const lifecycleStats = summarizeKpiDesignLifecycle(designLifecycleEvents)
+  for (const [key, lifecycle] of lifecycleStats.entries()) {
+    const stat = byActor.get(key)
+    if (!stat) continue
+    stat.designClaims = lifecycle.designClaims
+    stat.designCompletedClaims = lifecycle.designCompletedClaims
+    stat.designTransferredOut = lifecycle.designTransferredOut
+    stat.designClosedWithoutSubmit = lifecycle.designClosedWithoutSubmit
+    stat.designInHandClaims = lifecycle.designInHandClaims
+    stat.designDeadlineCompletions = lifecycle.designDeadlineCompletions
+    stat.designOnTimeCompletions = lifecycle.designOnTimeCompletions
+    stat.priorityClaims = lifecycle.priorityClaims
+    stat.priorityInHandClaims = lifecycle.priorityInHandClaims
+    stat.priorityScore = lifecycle.priorityScore
+    stat.claimToSubmitMs = lifecycle.claimToSubmitMs
   }
 
   for (const stat of byActor.values()) {
@@ -1461,6 +1536,9 @@ onMounted(load)
   border-collapse: collapse;
   min-width: 42rem;
 }
+.kpi-table--design {
+  min-width: 56rem;
+}
 .kpi-table th,
 .kpi-table td {
   padding: 0.58rem 0.75rem;
@@ -1477,15 +1555,28 @@ onMounted(load)
   color: #64748b;
   font-weight: 600;
 }
+.kpi-table th:not(:first-child),
+.kpi-table td:not(:first-child) {
+  text-align: right;
+}
+.kpi-table th:first-child,
+.kpi-table td:first-child {
+  min-width: 9rem;
+  max-width: 14rem;
+}
 .kpi-table td strong {
   display: block;
   color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kpi-table td small {
   display: block;
   margin-top: 0.15rem;
   font-size: 0.6875rem;
   color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .danger {
   color: #dc2626;
@@ -1703,6 +1794,9 @@ onMounted(load)
   }
   .kpi-table {
     min-width: 34rem;
+  }
+  .kpi-table--design {
+    min-width: 60rem;
   }
 }
 @media (max-width: 720px) {

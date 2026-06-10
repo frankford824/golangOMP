@@ -23,8 +23,131 @@ export interface UserDirectoryPageState {
   total: number
 }
 
+export interface KpiDesignLifecycleEvent {
+  taskKey: string
+  actorKey: string
+  at: number
+  kind: 'assignment' | 'submission'
+  deadlineMs?: number
+  priorityWeight?: number
+  inactiveWithoutSubmit?: boolean
+}
+
+export interface KpiDesignLifecycleStats {
+  designClaims: number
+  designCompletedClaims: number
+  designTransferredOut: number
+  designClosedWithoutSubmit: number
+  designInHandClaims: number
+  designDeadlineCompletions: number
+  designOnTimeCompletions: number
+  priorityClaims: number
+  priorityInHandClaims: number
+  priorityScore: number
+  claimToSubmitMs: number[]
+}
+
 export function isKpiAssignmentOperation(entry: Pick<OperationLogEntry, 'event_type'>): boolean {
   return ['task.assigned', 'task.reassigned', 'task.batch_assigned'].includes(entry.event_type)
+}
+
+export function emptyKpiDesignLifecycleStats(): KpiDesignLifecycleStats {
+  return {
+    designClaims: 0,
+    designCompletedClaims: 0,
+    designTransferredOut: 0,
+    designClosedWithoutSubmit: 0,
+    designInHandClaims: 0,
+    designDeadlineCompletions: 0,
+    designOnTimeCompletions: 0,
+    priorityClaims: 0,
+    priorityInHandClaims: 0,
+    priorityScore: 0,
+    claimToSubmitMs: [],
+  }
+}
+
+export function summarizeKpiDesignLifecycle(
+  events: KpiDesignLifecycleEvent[],
+): Map<string, KpiDesignLifecycleStats> {
+  interface AssignmentState {
+    actorKey: string
+    at: number
+    deadlineMs: number
+    priorityWeight: number
+    inactiveWithoutSubmit: boolean
+  }
+
+  const stats = new Map<string, KpiDesignLifecycleStats>()
+  const currentByTask = new Map<string, AssignmentState>()
+
+  const statFor = (actorKey: string) => {
+    const existing = stats.get(actorKey)
+    if (existing) return existing
+    const next = emptyKpiDesignLifecycleStats()
+    stats.set(actorKey, next)
+    return next
+  }
+  const markTransferredOut = (assignment: AssignmentState) => {
+    statFor(assignment.actorKey).designTransferredOut += 1
+  }
+
+  const sorted = events
+    .filter((event) => event.taskKey && event.actorKey && Number.isFinite(event.at) && event.at > 0)
+    .sort((a, b) => a.at - b.at)
+
+  for (const event of sorted) {
+    if (event.kind === 'assignment') {
+      const current = currentByTask.get(event.taskKey)
+      if (current) {
+        if (current.actorKey === event.actorKey) {
+          current.deadlineMs = event.deadlineMs || current.deadlineMs
+          current.priorityWeight = Math.max(current.priorityWeight, event.priorityWeight || current.priorityWeight)
+          current.inactiveWithoutSubmit = Boolean(event.inactiveWithoutSubmit)
+          continue
+        }
+        markTransferredOut(current)
+      }
+
+      const priority = Number(event.priorityWeight || 0)
+      const stat = statFor(event.actorKey)
+      stat.designClaims += 1
+      stat.priorityScore += priority
+      if (priority >= 3) stat.priorityClaims += 1
+      currentByTask.set(event.taskKey, {
+        actorKey: event.actorKey,
+        at: event.at,
+        deadlineMs: Number(event.deadlineMs || 0),
+        priorityWeight: priority,
+        inactiveWithoutSubmit: Boolean(event.inactiveWithoutSubmit),
+      })
+      continue
+    }
+
+    const current = currentByTask.get(event.taskKey)
+    if (!current || current.actorKey !== event.actorKey || event.at <= current.at) continue
+
+    const stat = statFor(current.actorKey)
+    stat.designCompletedClaims += 1
+    stat.claimToSubmitMs.push(event.at - current.at)
+    if (current.deadlineMs > 0) {
+      stat.designDeadlineCompletions += 1
+      if (event.at <= current.deadlineMs) stat.designOnTimeCompletions += 1
+    }
+    currentByTask.delete(event.taskKey)
+  }
+
+  for (const assignment of currentByTask.values()) {
+    const stat = statFor(assignment.actorKey)
+    if (assignment.inactiveWithoutSubmit) {
+      stat.designClosedWithoutSubmit += 1
+    } else {
+      stat.designInHandClaims += 1
+      if (assignment.priorityWeight >= 3) stat.priorityInHandClaims += 1
+    }
+  }
+
+  return stats
 }
 
 export function kpiOperationActorId(entry: OperationLogEntry): number | null {
