@@ -15,8 +15,11 @@ func NewKPIAnalysisRepo(db *DB) repo.KPIAnalysisRepo { return &kpiAnalysisRepo{d
 
 func (r *kpiAnalysisRepo) ListTaskEvents(ctx context.Context, filter repo.KPIAnalysisFilter) ([]domain.KPIAnalysisEvent, error) {
 	limit := filter.Limit
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 {
 		limit = 300
+	}
+	if limit > 5000 {
+		limit = 5000
 	}
 	query := `
 		SELECT
@@ -28,6 +31,9 @@ func (r *kpiAnalysisRepo) ListTaskEvents(ctx context.Context, filter repo.KPIAna
 		  COALESCE(CAST(t.task_type AS CHAR), ''),
 		  COALESCE(CAST(t.business_lane AS CHAR), ''),
 		  COALESCE(td.category_name, ''),
+		  COALESCE(CAST(t.task_status AS CHAR), ''),
+		  COALESCE(CAST(t.priority AS CHAR), ''),
+		  t.deadline_at,
 		  tel.event_type,
 		  tel.operator_id,
 		  COALESCE(NULLIF(u.display_name, ''), u.username, ''),
@@ -62,6 +68,7 @@ func (r *kpiAnalysisRepo) ListTaskEvents(ctx context.Context, filter repo.KPIAna
 	for rows.Next() {
 		var item domain.KPIAnalysisEvent
 		var operatorID sql.NullInt64
+		var deadlineAt sql.NullTime
 		var payload string
 		if err := rows.Scan(
 			&item.ID,
@@ -72,6 +79,9 @@ func (r *kpiAnalysisRepo) ListTaskEvents(ctx context.Context, filter repo.KPIAna
 			&item.TaskType,
 			&item.BusinessLane,
 			&item.CategoryName,
+			&item.TaskStatus,
+			&item.Priority,
+			&deadlineAt,
 			&item.EventType,
 			&operatorID,
 			&item.OperatorName,
@@ -85,6 +95,10 @@ func (r *kpiAnalysisRepo) ListTaskEvents(ctx context.Context, filter repo.KPIAna
 		if operatorID.Valid {
 			id := operatorID.Int64
 			item.OperatorID = &id
+		}
+		if deadlineAt.Valid {
+			deadline := deadlineAt.Time
+			item.DeadlineAt = &deadline
 		}
 		if payload != "" {
 			item.Payload = []byte(payload)

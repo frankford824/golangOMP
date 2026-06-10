@@ -1,10 +1,10 @@
-# V1 API 速查表(225 path · 一行一条)
+# V1 API 速查表(226 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 225 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 226 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -234,3 +234,4 @@
 | GET | `/v1/reports/l1/cards` | Get L1 report cards | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/throughput` | Get L1 throughput report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/module-dwell` | Get L1 module dwell report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
+| GET | `/v1/reports/l1/kpi-events` | Get enriched KPI task events | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |

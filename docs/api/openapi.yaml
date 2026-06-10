@@ -7546,6 +7546,63 @@ components:
           type: number
           nullable: true
           description: Change vs previous period; null when no baseline available.
+    KPIAnalysisEvent:
+      type: object
+      description: Enriched task workflow event used by the data-center KPI page. The event actor remains the actual operator; assignment target ids are carried in payload.
+      properties:
+        id:
+          type: string
+        task_id:
+          type: integer
+          format: int64
+        task_no:
+          type: string
+        sku_code:
+          type: string
+        product_name:
+          type: string
+        task_type:
+          type: string
+        business_lane:
+          type: string
+        category_name:
+          type: string
+        task_status:
+          type: string
+        priority:
+          type: string
+          enum: [low, normal, high, critical]
+        deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+        event_type:
+          type: string
+          enum:
+            - task.created
+            - task.batch_items_created
+            - task.assigned
+            - task.reassigned
+            - task.batch_assigned
+            - task.design.submitted
+            - task.audit.approved
+            - task.audit.rejected
+        operator_id:
+          type: integer
+          format: int64
+          nullable: true
+        operator_name:
+          type: string
+        operator_department:
+          type: string
+        operator_team:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
     AssetReasonRequest:
       type: object
       description: "Source: V1_ASSET_OWNERSHIP §5.4 (delete) / §7.3 (archive). R4-SA-A."
@@ -16943,6 +17000,62 @@ paths:
                         samples:
                           type: integer
                           description: Number of dwell samples used for the aggregation.
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: |
+            Forbidden. `deny_code=reports_super_admin_only`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/reports/l1/kpi-events:
+    get:
+      summary: Get enriched KPI task events
+      description: |
+        Returns task workflow events enriched with task priority, status and deadline for the KPI/data-center page.
+        RBAC: super_admin only. This endpoint is read-only and does not perform AI analysis.
+      tags: [Reports, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-D
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+        allowed_roles: [super_admin]
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date }
+          description: Start of the report window (inclusive, ISO 8601 date).
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date }
+          description: End of the report window (inclusive, ISO 8601 date).
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+          description: Maximum number of events to return. Defaults to 2000.
+      responses:
+        '200':
+          description: Enriched KPI task events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KPIAnalysisEvent'
         '401':
           description: Unauthenticated
           content:

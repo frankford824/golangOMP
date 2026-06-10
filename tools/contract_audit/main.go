@@ -135,6 +135,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/product-management/:id/image-candidates"):                   "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/public/erp-product-images/:version_id"):                     "legitimate-binary-stream-response",
 	knownGapKey("GET", "/v1/reports/l1/cards"):                                          "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("GET", "/v1/reports/l1/kpi-events"):                                     "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/reports/l1/module-dwell"):                                   "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/reports/l1/throughput"):                                     "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/search"):                                                    "tool-deref-limit-dynamic-payload-documented",

@@ -7,6 +7,7 @@ export interface KpiUserDirectoryEntry {
   realName: string
   department: string
   team: string
+  lastLoginAt?: string
 }
 
 export interface KpiOperationTraceOptions {
@@ -33,7 +34,7 @@ export function kpiOperationActorId(entry: OperationLogEntry): number | null {
     return null
   }
   if (entry.event_type === 'task.design.submitted') {
-    const designer = readPayloadNumber(entry.payload, ['designer_id', 'uploaded_by', 'operator_id'])
+    const designer = readPayloadNumber(entry.payload, ['uploaded_by', 'operator_id', 'designer_id'])
     if (designer > 0) return designer
   }
   if (entry.event_type === 'task.audit.approved' || entry.event_type === 'task.audit.rejected') {
@@ -117,7 +118,7 @@ function kpiOperationPayloadPersonName(entry: OperationLogEntry): string {
     return readPayloadText(entry.payload, ['designer_name', 'to_handler_name', 'assignee_name', 'handler_name'])
   }
   if (entry.event_type === 'task.design.submitted') {
-    return readPayloadText(entry.payload, ['designer_name', 'operator_name', 'uploaded_by_name'])
+    return readPayloadText(entry.payload, ['uploaded_by_name', 'operator_name', 'designer_name'])
   }
   if (entry.event_type === 'task.audit.approved' || entry.event_type === 'task.audit.rejected') {
     return readPayloadText(entry.payload, ['auditor_name', 'operator_name'])

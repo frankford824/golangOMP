@@ -61,6 +61,22 @@ func (h *ReportL1Handler) ModuleDwell(c *gin.Context) {
 	c.JSON(200, gin.H{"data": data})
 }
 
+func (h *ReportL1Handler) KPIEvents(c *gin.Context) {
+	from, to, _, _, appErr := parseReportRange(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	limit, _ := parseInt(c.Query("limit"))
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.KPIEvents(c.Request.Context(), actor, reportl1svc.KPIEventsParams{From: from.UTC(), To: to.UTC(), Limit: limit})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, gin.H{"data": data})
+}
+
 func (h *ReportL1Handler) KPIAIAnalysis(c *gin.Context) {
 	var req struct {
 		From string `json:"from"`

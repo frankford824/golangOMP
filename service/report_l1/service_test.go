@@ -57,6 +57,9 @@ func TestReportL1ServiceRBAC(t *testing.T) {
 	if _, appErr := svc.ModuleDwell(context.Background(), reportActor(domain.RoleMember), from, to, nil, nil); denyCode(appErr) != domain.ErrDenyCodeReportsSuperAdminOnly {
 		t.Fatalf("dwell deny=%+v", appErr)
 	}
+	if _, appErr := svc.KPIEvents(context.Background(), reportActor(domain.RoleMember), KPIEventsParams{From: from, To: to}); denyCode(appErr) != domain.ErrDenyCodeReportsSuperAdminOnly {
+		t.Fatalf("kpi events deny=%+v", appErr)
+	}
 }
 
 func TestReportL1ServiceDateRange(t *testing.T) {
@@ -68,6 +71,9 @@ func TestReportL1ServiceDateRange(t *testing.T) {
 	}
 	if _, appErr := svc.ModuleDwell(context.Background(), reportActor(domain.RoleSuperAdmin), from, to, nil, nil); appErr == nil || appErr.Code != CodeInvalidDateRange {
 		t.Fatalf("dwell appErr=%+v", appErr)
+	}
+	if _, appErr := svc.KPIEvents(context.Background(), reportActor(domain.RoleSuperAdmin), KPIEventsParams{From: from, To: to}); appErr == nil || appErr.Code != CodeInvalidDateRange {
+		t.Fatalf("kpi events appErr=%+v", appErr)
 	}
 }
 
@@ -116,6 +122,24 @@ func TestKPIAIAnalysisFallsBackWhenGeneratorFails(t *testing.T) {
 	}
 	if analysis.Headline == "" || analysis.Overview == "" || len(analysis.Highlights) == 0 {
 		t.Fatalf("fallback missing readable content: %+v", analysis)
+	}
+}
+
+func TestKPIEventsPassThrough(t *testing.T) {
+	from := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	kpiRepo := &stubKPIAnalysisRepo{
+		events: []domain.KPIAnalysisEvent{
+			{TaskID: 1, TaskNo: "RW-1", EventType: "task.assigned", Priority: "critical", CreatedAt: from.Add(time.Hour)},
+		},
+	}
+	svc := NewService(&stubReportRepo{}, WithKPIAnalysisRepo(kpiRepo))
+
+	events, appErr := svc.KPIEvents(context.Background(), reportActor(domain.RoleSuperAdmin), KPIEventsParams{From: from, To: from, Limit: 5000})
+	if appErr != nil {
+		t.Fatalf("appErr=%+v", appErr)
+	}
+	if len(events) != 1 || events[0].Priority != "critical" {
+		t.Fatalf("events=%+v", events)
 	}
 }
 

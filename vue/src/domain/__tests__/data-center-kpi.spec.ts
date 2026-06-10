@@ -60,6 +60,17 @@ describe('data-center kpi operation parsing', () => {
     expect(kpiOperationActorDisplayName(entry, 228, undefined)).toBe('王亚琳')
   })
 
+  it('attributes design submit completion to the actual submitter before designer payload fallback', () => {
+    const entry = operation({
+      event_type: 'task.design.submitted',
+      actor_id: 274,
+      actor_username: '运营甲',
+      payload: { designer_id: 228, uploaded_by: 274, operator_id: 274 },
+    })
+
+    expect(kpiOperationActorId(entry)).toBe(274)
+  })
+
   it('continues loading the user directory when backend page size is capped but total is not reached', () => {
     expect(
       shouldContinueUserDirectoryLoad({

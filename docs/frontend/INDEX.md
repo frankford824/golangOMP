@@ -93,9 +93,9 @@
 | Excel 批量创建 | [V1_API_BATCH.md](V1_API_BATCH.md) | 2 |
 | ERP 与业务字典 | [V1_API_ERP.md](V1_API_ERP.md) | 28 |
 | 搜索 | [V1_API_SEARCH.md](V1_API_SEARCH.md) | 3 |
-| L1 报表 | [V1_API_REPORTS.md](V1_API_REPORTS.md) | 3 |
+| L1 报表 | [V1_API_REPORTS.md](V1_API_REPORTS.md) | 4 |
 | WebSocket | [V1_API_WS.md](V1_API_WS.md) | 0 个 `/v1` path + `/ws/v1` |
-| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 225 |
+| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 226 |
 
 ## §6 联调硬门
 

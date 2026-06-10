@@ -24,6 +24,12 @@ type KPIAIAnalysisParams struct {
 	To   time.Time
 }
 
+type KPIEventsParams struct {
+	From  time.Time
+	To    time.Time
+	Limit int
+}
+
 type kpiAnalysisEvidence struct {
 	Period       kpiAnalysisPeriod       `json:"period"`
 	Metrics      kpiAnalysisMetrics      `json:"metrics"`
@@ -128,6 +134,37 @@ func (s *Service) KPIAIAnalysis(ctx context.Context, actor domain.RequestActor, 
 		analysis.Evidence = []string{}
 	}
 	return analysis, nil
+}
+
+func (s *Service) KPIEvents(ctx context.Context, actor domain.RequestActor, params KPIEventsParams) ([]domain.KPIAnalysisEvent, *domain.AppError) {
+	if err := s.requireSuperAdmin(ctx, actor, "/v1/reports/l1/kpi-events"); err != nil {
+		return nil, err
+	}
+	if params.From.IsZero() || params.To.IsZero() || params.From.After(params.To) {
+		return nil, domain.NewAppError(CodeInvalidDateRange, "from must be before or equal to to", nil)
+	}
+	if s.kpiAnalysisRepo == nil {
+		return nil, domain.NewAppError(CodeAIAnalysisNotConfigured, "KPI 事件服务尚未配置", nil)
+	}
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 2000
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	events, err := s.kpiAnalysisRepo.ListTaskEvents(ctx, repo.KPIAnalysisFilter{
+		From:  params.From,
+		To:    params.To.AddDate(0, 0, 1),
+		Limit: limit,
+	})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if events == nil {
+		events = []domain.KPIAnalysisEvent{}
+	}
+	return events, nil
 }
 
 func fallbackKPIAnalysis(evidence kpiAnalysisEvidence, cause error) *aiagent.KPIAnalysis {

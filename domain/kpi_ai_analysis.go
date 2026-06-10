@@ -14,6 +14,9 @@ type KPIAnalysisEvent struct {
 	TaskType           string          `json:"task_type,omitempty"`
 	BusinessLane       string          `json:"business_lane,omitempty"`
 	CategoryName       string          `json:"category_name,omitempty"`
+	TaskStatus         string          `json:"task_status,omitempty"`
+	Priority           string          `json:"priority,omitempty"`
+	DeadlineAt         *time.Time      `json:"deadline_at,omitempty"`
 	EventType          string          `json:"event_type"`
 	OperatorID         *int64          `json:"operator_id,omitempty"`
 	OperatorName       string          `json:"operator_name,omitempty"`

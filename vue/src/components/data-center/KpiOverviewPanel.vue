@@ -87,6 +87,7 @@
                     <th>任务单量</th>
                     <th>活跃天数</th>
                     <th>平均发起间隔</th>
+                    <th>最近登录</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -98,6 +99,7 @@
                     <td>{{ row.taskCreates }}</td>
                     <td>{{ row.activeDays.size }}</td>
                     <td>{{ durationLabel(row.avgCreateIntervalMs) }}</td>
+                    <td>{{ shortDateTime(row.lastLoginAt) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -107,16 +109,18 @@
           <section class="role-card">
             <div class="role-header">
               <h4>设计人员</h4>
-              <span>接单与质量</span>
+              <span>派给本人 → 本人提交</span>
             </div>
             <div class="table-scroll">
               <table class="kpi-table">
                 <thead>
                   <tr>
                     <th>用户姓名</th>
-                    <th>接单</th>
-                    <th>接单完成率</th>
-                    <th>平均完成时间</th>
+                    <th>派入任务</th>
+                    <th>重点任务</th>
+                    <th>设计完成</th>
+                    <th>按时完成</th>
+                    <th>平均完成</th>
                     <th>打回率</th>
                   </tr>
                 </thead>
@@ -127,7 +131,9 @@
                       <small>{{ orgText(row) }}</small>
                     </td>
                     <td>{{ row.designClaims }}</td>
-                    <td>{{ percentLabel(row.designSubmits, row.designClaims) }}</td>
+                    <td>{{ row.priorityClaims }}</td>
+                    <td>{{ percentLabel(row.designCompletedClaims, row.designClaims) }}</td>
+                    <td>{{ percentLabel(row.designOnTimeCompletions, row.designDeadlineCompletions) }}</td>
                     <td>{{ durationLabel(row.avgClaimToSubmitMs) }}</td>
                     <td :class="{ danger: row.designRejects > 0 }">
                       {{ percentLabel(row.designRejects, row.designSubmits) }}
@@ -290,7 +296,7 @@ import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import { logsApi } from '@/services/api/logsApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { reportsApi } from '@/services/api/reportsApi'
-import type { KpiAiAnalysisResponse } from '@/services/api/reportsApi'
+import type { KpiAiAnalysisResponse, KpiTaskEvent } from '@/services/api/reportsApi'
 import { usersApi } from '@/services/api/usersApi'
 import type { BackendUser, OperationLogEntry, WorkflowTraceEvent } from '@/services/apiTypes'
 import { usePermission } from '@/composables/usePermission'
@@ -320,12 +326,18 @@ interface PersonStats {
   name: string
   department: string
   team: string
+  lastLoginAt?: string
   activeDays: Set<string>
   taskCreates: number
   createTimes: number[]
   avgCreateIntervalMs: number
   designClaims: number
   designSubmits: number
+  designCompletedClaims: number
+  designDeadlineCompletions: number
+  designOnTimeCompletions: number
+  priorityClaims: number
+  priorityScore: number
   designRejects: number
   claimToSubmitMs: number[]
   avgClaimToSubmitMs: number
@@ -423,8 +435,9 @@ const designerRows = computed(() =>
     .filter((row) => hasDesignActivity(row))
     .sort(
       (a, b) =>
+        designRiskScore(b) - designRiskScore(a) ||
+        b.priorityScore - a.priorityScore ||
         b.designClaims - a.designClaims ||
-        b.designSubmits - a.designSubmits ||
         designCompletionRate(b) - designCompletionRate(a) ||
         a.designRejects - b.designRejects ||
         a.name.localeCompare(b.name, 'zh-Hans-CN'),
@@ -441,6 +454,9 @@ const auditorRows = computed(() =>
 const summaryMetrics = computed(() => {
   const taskCreates = sum(people.value, (row) => row.taskCreates)
   const claims = sum(people.value, (row) => row.designClaims)
+  const completedClaims = sum(people.value, (row) => row.designCompletedClaims)
+  const deadlineCompletions = sum(people.value, (row) => row.designDeadlineCompletions)
+  const onTimeCompletions = sum(people.value, (row) => row.designOnTimeCompletions)
   const submits = sum(people.value, (row) => row.designSubmits)
   const designRejects = sum(people.value, (row) => row.designRejects)
   const auditDecisions = sum(people.value, (row) => row.auditDecisions)
@@ -454,8 +470,14 @@ const summaryMetrics = computed(() => {
       value: durationLabel(avg(people.value.map((row) => row.avgCreateIntervalMs).filter(Boolean))),
       hint: '同一运营连续发起间隔',
     },
-    { key: 'design_claims', label: '设计接单', value: claims, hint: '接单动作' },
-    { key: 'design_completion', label: '接单完成率', value: percentLabel(submits, claims), hint: '提交设计 / 接单' },
+    { key: 'design_claims', label: '设计派入任务', value: claims, hint: '运营或主管指派给设计' },
+    { key: 'design_completion', label: '设计完成率', value: percentLabel(completedClaims, claims), hint: '本人提交设计 / 派入任务' },
+    {
+      key: 'design_on_time',
+      label: '按时完成率',
+      value: percentLabel(onTimeCompletions, deadlineCompletions),
+      hint: '提交时间不晚于任务截止',
+    },
     {
       key: 'design_reject_rate',
       label: '设计打回率',
@@ -496,6 +518,52 @@ function eventAt(event: WorkflowTraceEvent): number {
 function eventDay(event: WorkflowTraceEvent): string {
   const ms = eventAt(event)
   return ms > 0 ? dateOnly(new Date(ms)) : ''
+}
+
+function shortDateTime(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return '从未登录'
+  const ms = new Date(raw).getTime()
+  if (!Number.isFinite(ms) || ms <= 0) return '从未登录'
+  const d = new Date(ms)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const currentYear = new Date().getFullYear()
+  return y === currentYear ? `${m}/${day} ${hh}:${mm}` : `${y}/${m}/${day} ${hh}:${mm}`
+}
+
+function eventPriority(event: WorkflowTraceEvent): string {
+  const value = readPayloadText(event.payload, ['task_priority', 'priority'])
+  const normalized = value.toLowerCase()
+  if (['critical', 'urgent', 'high', 'normal', 'medium', 'low'].includes(normalized)) return normalized
+  return 'normal'
+}
+
+function priorityWeight(priority: string): number {
+  switch (priority) {
+    case 'critical':
+    case 'urgent':
+      return 4
+    case 'high':
+      return 3
+    case 'normal':
+    case 'medium':
+      return 2
+    case 'low':
+      return 1
+    default:
+      return 2
+  }
+}
+
+function eventDeadlineMs(event: WorkflowTraceEvent): number {
+  const value = readPayloadText(event.payload, ['deadline_at', 'due_at'])
+  if (!value) return 0
+  const ms = new Date(value).getTime()
+  return Number.isFinite(ms) && ms > 0 ? ms : 0
 }
 
 function normalizedPersonName(value: unknown): string {
@@ -653,7 +721,13 @@ function hasDesignActivity(row: PersonStats): boolean {
 }
 
 function designCompletionRate(row: PersonStats): number {
-  return row.designClaims > 0 ? row.designSubmits / row.designClaims : 0
+  return row.designClaims > 0 ? row.designCompletedClaims / row.designClaims : 0
+}
+
+function designRiskScore(row: PersonStats): number {
+  const completionGap = row.designClaims - row.designCompletedClaims
+  const lateGap = row.designDeadlineCompletions - row.designOnTimeCompletions
+  return row.priorityClaims * 10 + Math.max(0, completionGap) * 3 + Math.max(0, lateGap) * 2 + row.designRejects
 }
 
 function emptyStats(event: WorkflowTraceEvent): PersonStats {
@@ -663,12 +737,18 @@ function emptyStats(event: WorkflowTraceEvent): PersonStats {
     name: actorName(event),
     department: event.actor_department || user?.department || '',
     team: event.actor_team || user?.team || '',
+    lastLoginAt: user?.lastLoginAt,
     activeDays: new Set<string>(),
     taskCreates: 0,
     createTimes: [],
     avgCreateIntervalMs: 0,
     designClaims: 0,
     designSubmits: 0,
+    designCompletedClaims: 0,
+    designDeadlineCompletions: 0,
+    designOnTimeCompletions: 0,
+    priorityClaims: 0,
+    priorityScore: 0,
     designRejects: 0,
     claimToSubmitMs: [],
     avgClaimToSubmitMs: 0,
@@ -690,12 +770,16 @@ function mergePersonMeta(stat: PersonStats, event: WorkflowTraceEvent) {
   const team = String(event.actor_team || user?.team || '').trim()
   if (!stat.department && department) stat.department = department
   if (!stat.team && team) stat.team = team
+  if (!stat.lastLoginAt && user?.lastLoginAt) stat.lastLoginAt = user.lastLoginAt
 }
 
 function buildStats(source: WorkflowTraceEvent[]): PersonStats[] {
   const sorted = [...source].sort((a, b) => eventAt(a) - eventAt(b))
   const byActor = new Map<string, PersonStats>()
-  const lastClaimByTask = new Map<string, { actor: string; at: number }>()
+  const currentAssignmentByTask = new Map<
+    string,
+    { actor: string; at: number; deadlineMs: number; completed: boolean }
+  >()
   const lastDesignSubmitByTask = new Map<string, { actor: string; at: number }>()
 
   for (const event of sorted) {
@@ -714,14 +798,38 @@ function buildStats(source: WorkflowTraceEvent[]): PersonStats[] {
     }
     if (isDesignClaim(event)) {
       stat.designClaims += 1
-      if (taskKey && at > 0) lastClaimByTask.set(taskKey, { actor: key, at })
+      const priority = eventPriority(event)
+      const priorityScore = priorityWeight(priority)
+      stat.priorityScore += priorityScore
+      if (priorityScore >= priorityWeight('high')) stat.priorityClaims += 1
+      if (taskKey && at > 0) {
+        currentAssignmentByTask.set(taskKey, {
+          actor: key,
+          at,
+          deadlineMs: eventDeadlineMs(event),
+          completed: false,
+        })
+      }
     }
     if (isDesignSubmit(event)) {
-      stat.designSubmits += 1
+      let completedAssignedWork = false
       if (taskKey && at > 0) {
-        const claim = lastClaimByTask.get(taskKey)
-        if (claim && claim.actor === key && at > claim.at) stat.claimToSubmitMs.push(at - claim.at)
-        lastDesignSubmitByTask.set(taskKey, { actor: key, at })
+        const claim = currentAssignmentByTask.get(taskKey)
+        if (claim && claim.actor === key && at > claim.at && !claim.completed) {
+          claim.completed = true
+          completedAssignedWork = true
+          stat.designCompletedClaims += 1
+          stat.claimToSubmitMs.push(at - claim.at)
+          if (claim.deadlineMs > 0) {
+            stat.designDeadlineCompletions += 1
+            if (at <= claim.deadlineMs) stat.designOnTimeCompletions += 1
+          }
+          currentAssignmentByTask.delete(taskKey)
+        }
+        if (completedAssignedWork || looksLike(stat, '设计') || stat.designClaims > 0) {
+          stat.designSubmits += 1
+          lastDesignSubmitByTask.set(taskKey, { actor: key, at })
+        }
       }
     }
     if (isAuditApprove(event) || isAuditReject(event)) {
@@ -805,6 +913,11 @@ function parseOperationResponse(body: PaginationEnvelope<OperationLogEntry> | Op
   return { items, total: Number.isFinite(total) ? total : items.length }
 }
 
+function parseKpiEventResponse(body: { data?: KpiTaskEvent[] } | KpiTaskEvent[] | undefined): KpiTaskEvent[] {
+  if (Array.isArray(body)) return body
+  return Array.isArray(body?.data) ? body.data : []
+}
+
 function parseUserList(body: PaginationEnvelope<BackendUser> | BackendUser[] | undefined): BackendUser[] {
   if (Array.isArray(body)) return body
   return Array.isArray(body?.data) ? body.data : []
@@ -852,6 +965,43 @@ function operationToTrace(entry: OperationLogEntry): WorkflowTraceEvent | null {
   })
 }
 
+function kpiReportEventToTrace(entry: KpiTaskEvent): WorkflowTraceEvent | null {
+  const payload = mergeKpiEventPayload(entry)
+  const operation: OperationLogEntry = {
+    source: 'task_event',
+    log_id: String(entry.id ?? ''),
+    reference_type: 'task',
+    reference_id: String(entry.task_id ?? ''),
+    event_type: String(entry.event_type ?? ''),
+    summary: 'Task workflow event',
+    actor_id: entry.operator_id ?? null,
+    actor_username: String(entry.operator_name ?? '').trim(),
+    actor_type: 'session_actor',
+    payload,
+    created_at: String(entry.created_at ?? ''),
+  }
+  const trace = operationToTrace(operation)
+  if (!trace) return null
+  if (trace.actor_id === (entry.operator_id ?? null)) {
+    if (!trace.actor_department && entry.operator_department) trace.actor_department = entry.operator_department
+    if (!trace.actor_team && entry.operator_team) trace.actor_team = entry.operator_team
+  }
+  trace.sku_code = entry.sku_code || trace.sku_code
+  return trace
+}
+
+function mergeKpiEventPayload(entry: KpiTaskEvent): Record<string, unknown> {
+  const payload = { ...asRecord(entry.payload) }
+  if (entry.priority && payload.priority === undefined) payload.priority = entry.priority
+  if (entry.priority && payload.task_priority === undefined) payload.task_priority = entry.priority
+  if (entry.deadline_at && payload.deadline_at === undefined) payload.deadline_at = entry.deadline_at
+  if (entry.task_status && payload.task_status === undefined) payload.task_status = entry.task_status
+  if (entry.task_no && payload.task_no === undefined) payload.task_no = entry.task_no
+  if (entry.product_name && payload.product_name === undefined) payload.product_name = entry.product_name
+  if (entry.task_type && payload.task_type === undefined) payload.task_type = entry.task_type
+  return payload
+}
+
 function dedupeEvents(source: WorkflowTraceEvent[]): WorkflowTraceEvent[] {
   const seen = new Set<string>()
   const out: WorkflowTraceEvent[] = []
@@ -882,6 +1032,7 @@ async function loadUserDirectory() {
           name: userAccountDisplay(user.real_name, user.name, user.display_name, user.username, `用户#${id}`),
           department: String(user.department ?? '').trim(),
           team: String(user.team ?? '').trim(),
+          lastLoginAt: String(user.last_login_at ?? '').trim(),
         })
       }
       const totalRaw = Array.isArray(body) ? list.length : body?.pagination?.total
@@ -911,6 +1062,7 @@ async function loadUserDirectory() {
           name: userAccountDisplay(record.real_name, record.name, record.display_name, record.username, `人员#${id}`),
           department: '',
           team: '',
+          lastLoginAt: String(record.last_login_at ?? '').trim(),
         })
       }
       userDirectory.value = next
@@ -948,6 +1100,19 @@ async function loadAIAnalysis() {
 }
 
 async function fetchTaskOperationEvents(): Promise<WorkflowTraceEvent[]> {
+  try {
+    const res = await reportsApi.l1KpiEvents({
+      from: dateOnly(rangeStart.value),
+      to: dateOnly(rangeEnd.value),
+      limit: 5000,
+    })
+    const parsed = parseKpiEventResponse(res.data as { data?: KpiTaskEvent[] } | KpiTaskEvent[])
+    const reportEvents = parsed.map(kpiReportEventToTrace).filter(Boolean) as WorkflowTraceEvent[]
+    if (reportEvents.length) return dedupeEvents(reportEvents)
+  } catch {
+    // Older backends do not expose the enriched report event feed; keep the existing log fallback.
+  }
+
   const maxPages = rangeDays.value <= 7 ? 3 : rangeDays.value <= 14 ? 5 : 8
   const collected: WorkflowTraceEvent[] = []
 

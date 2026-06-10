@@ -57,6 +57,27 @@ export interface KpiAiAnalysisResponse {
   provider?: string
 }
 
+export interface KpiTaskEvent {
+  id: string
+  task_id: number
+  task_no?: string
+  sku_code?: string
+  product_name?: string
+  task_type?: string
+  business_lane?: string
+  category_name?: string
+  task_status?: string
+  priority?: string
+  deadline_at?: string
+  event_type: string
+  operator_id?: number | null
+  operator_name?: string
+  operator_department?: string
+  operator_team?: string
+  payload?: Record<string, unknown> | unknown
+  created_at: string
+}
+
 export const reportsApi = {
   /** GET /v1/reports/l1/cards */
   l1Cards: (signal?: AbortSignal) => http.get('/v1/reports/l1/cards', { signal }),
@@ -68,6 +89,10 @@ export const reportsApi = {
   /** GET /v1/reports/l1/module-dwell */
   l1ModuleDwell: (params: L1ReportRangeParams, signal?: AbortSignal) =>
     http.get('/v1/reports/l1/module-dwell', { params, signal }),
+
+  /** GET /v1/reports/l1/kpi-events */
+  l1KpiEvents: (params: Pick<L1ReportRangeParams, 'from' | 'to'> & { limit?: number }, signal?: AbortSignal) =>
+    http.get<{ data?: KpiTaskEvent[] }>('/v1/reports/l1/kpi-events', { params, signal }),
 
   /** POST /v1/reports/l1/kpi-ai-analysis */
   kpiAiAnalysis: (params: Pick<L1ReportRangeParams, 'from' | 'to'>, signal?: AbortSignal) =>

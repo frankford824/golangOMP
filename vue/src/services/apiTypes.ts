@@ -69,6 +69,7 @@ export interface BackendUser {
   frontend_access: FrontendAccess
   mobile?: string
   email?: string
+  last_login_at?: string
 }
 
 /** POST /v1/auth/login 响应 */
