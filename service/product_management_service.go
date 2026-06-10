@@ -21,6 +21,7 @@ type ProductManagementService interface {
 	RequestBaseSync(ctx context.Context, actor domain.RequestActor, recordID int64, force bool) (*domain.ProductManagementRecord, *domain.AppError)
 	RequestImageSync(ctx context.Context, actor domain.RequestActor, recordID int64, force bool) (*domain.ProductManagementRecord, *domain.AppError)
 	AutoSyncImagesAfterTaskClosed(ctx context.Context, taskID int64, actorID int64) *domain.AppError
+	RefreshReadModelNow(ctx context.Context) *domain.AppError
 	ProcessQueuedERPSync(ctx context.Context, limit int) (int, *domain.AppError)
 }
 
@@ -375,6 +376,17 @@ func (s *productManagementService) refreshReadModel(ctx context.Context) *domain
 		return infraAppError("refresh product management read model", err)
 	}
 	s.lastRefresh = now
+	return nil
+}
+
+func (s *productManagementService) RefreshReadModelNow(ctx context.Context) *domain.AppError {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+
+	if err := s.records.RefreshReadModel(ctx); err != nil {
+		return infraAppError("refresh product management read model", err)
+	}
+	s.lastRefresh = s.now()
 	return nil
 }
 

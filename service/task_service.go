@@ -297,6 +297,7 @@ type TaskServiceOption func(*taskService)
 
 type ProductManagementCloseSyncer interface {
 	AutoSyncImagesAfterTaskClosed(ctx context.Context, taskID int64, actorID int64) *domain.AppError
+	RefreshReadModelNow(ctx context.Context) *domain.AppError
 }
 
 type taskService struct {

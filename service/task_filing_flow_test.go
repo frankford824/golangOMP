@@ -999,6 +999,82 @@ func TestRetryFilingBatchMultiSKUDoesNotReportTopLevelIIDMissingOnReadbackNotFou
 	}
 }
 
+func TestRetryFilingRefreshesProductManagementProjection(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		upsertResult: &domain.ERPProductUpsertResult{
+			Status:  "succeeded",
+			Message: "ok",
+			CostVerification: &domain.ERPCostVerificationResult{
+				Status: "matched",
+			},
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			976: {
+				ID:                  976,
+				TaskNo:              "RW-976",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				TaskStatus:          domain.TaskStatusInProgress,
+				IsBatchTask:         true,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+				SKUCode:             "CGG000076",
+				PrimarySKUCode:      "CGG000076",
+				ProductNameSnapshot: "batch task",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			976: {
+				TaskID:       976,
+				FilingStatus: domain.FilingStatusPending,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			976: {
+				{ID: 1976, TaskID: 976, SequenceNo: 1, SKUCode: "CGG000076", ProductNameSnapshot: "A", ProductIID: "常规海报", CostPrice: float64Ptr(12.3)},
+			},
+		},
+	}
+	productManagement := &productManagementCloseSyncerStub{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+		WithTaskProductManagementCloseSyncer(productManagement),
+	).(*taskService)
+
+	view, appErr := svc.RetryFiling(context.Background(), RetryTaskFilingParams{TaskID: 976, OperatorID: 1})
+	if appErr != nil {
+		t.Fatalf("RetryFiling() unexpected error: %+v", appErr)
+	}
+	if view.FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("filing_status = %s, want filed", view.FilingStatus)
+	}
+	if productManagement.refreshCalls != 1 {
+		t.Fatalf("product management refresh calls = %d, want 1", productManagement.refreshCalls)
+	}
+}
+
+type productManagementCloseSyncerStub struct {
+	refreshCalls int
+}
+
+func (s *productManagementCloseSyncerStub) AutoSyncImagesAfterTaskClosed(context.Context, int64, int64) *domain.AppError {
+	return nil
+}
+
+func (s *productManagementCloseSyncerStub) RefreshReadModelNow(context.Context) *domain.AppError {
+	s.refreshCalls++
+	return nil
+}
+
 func TestRetryFilingBatchMultiSKUReportsSKUScopedIIDMissing(t *testing.T) {
 	taskRepo := &prdTaskRepo{
 		tasks: map[int64]*domain.Task{
@@ -1758,7 +1834,7 @@ func TestRetouchTaskFilingProjectionDoesNotRequireERPSync(t *testing.T) {
 	}
 }
 
-func TestBatchNewProductFilingPayloadUsesPerSKUReferenceImage(t *testing.T) {
+func TestBatchNewProductFilingPayloadUsesOnlyPublicPerSKUReferenceImage(t *testing.T) {
 	task := &domain.Task{
 		ID:                  77,
 		TaskNo:              "RW-BATCH-77",
@@ -1776,13 +1852,13 @@ func TestBatchNewProductFilingPayloadUsesPerSKUReferenceImage(t *testing.T) {
 		ProductNameSnapshot: "Batch A",
 		ProductIID:          "I-1001",
 		ReferenceFileRefs: []domain.ReferenceFileRef{
-			{AssetID: "ref-a", DownloadURL: strPtr("/v1/assets/files/ref-a.jpg")},
+			{AssetID: "ref-a", DownloadURL: strPtr("https://cdn.example.com/ref-a.jpg")},
 		},
 	}, 11, "", string(TaskFilingTriggerSourceCreate))
 	if appErr != nil {
 		t.Fatalf("build payload unexpected error: %+v", appErr)
 	}
-	if payload.Pic != "/v1/assets/files/ref-a.jpg" || payload.PicBig != "/v1/assets/files/ref-a.jpg" || payload.SKUPic != "/v1/assets/files/ref-a.jpg" {
+	if payload.Pic != "https://cdn.example.com/ref-a.jpg" || payload.PicBig != "https://cdn.example.com/ref-a.jpg" || payload.SKUPic != "https://cdn.example.com/ref-a.jpg" {
 		t.Fatalf("payload image fields = pic:%q pic_big:%q sku_pic:%q", payload.Pic, payload.PicBig, payload.SKUPic)
 	}
 
@@ -1799,7 +1875,66 @@ func TestBatchNewProductFilingPayloadUsesPerSKUReferenceImage(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("build payload storage key unexpected error: %+v", appErr)
 	}
-	if payload.SKUPic != "/v1/assets/files/tasks/ref-b.jpg" {
-		t.Fatalf("payload sku_pic = %q, want storage key file route", payload.SKUPic)
+	if payload.Pic != "" || payload.PicBig != "" || payload.SKUPic != "" {
+		t.Fatalf("relative asset routes must not be sent to ERP image fields: pic=%q pic_big=%q sku_pic=%q", payload.Pic, payload.PicBig, payload.SKUPic)
+	}
+}
+
+func TestBatchNewProductFilingPayloadFallsBackCategoryNameToProductIID(t *testing.T) {
+	payload, appErr := buildBatchSKUItemERPBridgeProductUpsertPayload(
+		&domain.Task{
+			ID:                  78,
+			TaskNo:              "RW-BATCH-78",
+			TaskType:            domain.TaskTypeNewProductDevelopment,
+			SourceMode:          domain.TaskSourceModeNewProduct,
+			SKUCode:             "SKU-C",
+			ProductNameSnapshot: "Batch C",
+			IsBatchTask:         true,
+		},
+		&domain.TaskDetail{TaskID: 78},
+		&domain.TaskSKUItem{
+			TaskID:              78,
+			SequenceNo:          1,
+			SKUCode:             "SKU-C",
+			ProductNameSnapshot: "Batch C",
+			ProductIID:          "河南kt板",
+			CategoryCode:        "GENERAL",
+		},
+		11,
+		"",
+		string(TaskFilingTriggerSourceCreate),
+	)
+	if appErr != nil {
+		t.Fatalf("build payload unexpected error: %+v", appErr)
+	}
+	if payload.CategoryName != "河南kt板" {
+		t.Fatalf("CategoryName = %q, want product_i_id fallback", payload.CategoryName)
+	}
+	if payload.CategoryCode != "" {
+		t.Fatalf("CategoryCode = %q, want GENERAL omitted from ERP payload", payload.CategoryCode)
+	}
+	if payload.BusinessInfo == nil || payload.BusinessInfo.CategoryName != "河南kt板" {
+		t.Fatalf("BusinessInfo.CategoryName = %+v, want product_i_id fallback", payload.BusinessInfo)
+	}
+	if payload.BusinessInfo == nil || payload.BusinessInfo.CategoryCode != "" {
+		t.Fatalf("BusinessInfo.CategoryCode = %+v, want GENERAL omitted from ERP payload", payload.BusinessInfo)
+	}
+}
+
+func TestDefaultBatchItemCategoryCodePrefersProductIIDAndNeverFallsBackGeneral(t *testing.T) {
+	got := defaultBatchItemCategoryCode(
+		CreateTaskParams{CategoryCode: "GENERAL", ProductIID: "常规kt板"},
+		CreateTaskBatchSKUItemParams{CategoryCode: "GENERAL", ProductIID: "河南kt板"},
+	)
+	if got != "河南kt板" {
+		t.Fatalf("defaultBatchItemCategoryCode() = %q, want item product_i_id", got)
+	}
+
+	got = defaultBatchItemCategoryCode(
+		CreateTaskParams{CategoryCode: "GENERAL"},
+		CreateTaskBatchSKUItemParams{CategoryCode: "GENERAL"},
+	)
+	if got != "" {
+		t.Fatalf("defaultBatchItemCategoryCode() = %q, want empty instead of GENERAL fallback", got)
 	}
 }

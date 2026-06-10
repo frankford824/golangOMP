@@ -339,12 +339,15 @@ func defaultBatchItemProductShortName(item CreateTaskBatchSKUItemParams) string 
 }
 
 func defaultBatchItemCategoryCode(p CreateTaskParams, item CreateTaskBatchSKUItemParams) string {
-	for _, value := range []string{item.CategoryCode, p.CategoryCode, p.ProductIID, "GENERAL"} {
+	for _, value := range []string{item.ProductIID, item.CategoryCode, p.ProductIID, p.CategoryCode} {
 		if normalized := strings.TrimSpace(value); normalized != "" {
+			if strings.EqualFold(normalized, "GENERAL") {
+				continue
+			}
 			return normalized
 		}
 	}
-	return "GENERAL"
+	return ""
 }
 
 func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p CreateTaskParams, task *domain.Task, detail *domain.TaskDetail, items []*taskBatchItemBuild) (int64, error) {

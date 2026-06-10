@@ -31,9 +31,10 @@ const (
 )
 
 var erpBridgeCostReadbackRetryDelays = []time.Duration{
-	200 * time.Millisecond,
-	500 * time.Millisecond,
-	1000 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
 }
 
 // erpBridgeCostReadbackSleep is invoked between cost readback not-found retries; tests may replace it with a no-op.

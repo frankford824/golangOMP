@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -421,6 +422,8 @@ func buildTaskERPBridgeProductUpsertPayload(task *domain.Task, detail *domain.Ta
 		productID = skuID
 	}
 	iid := strings.TrimSpace(firstNonEmptyString(snapshotIID(snapshot), detail.Category, detail.CategoryName, skuID))
+	categoryCode = erpCategoryCodeForFiling(categoryCode)
+	categoryName = erpCategoryNameForFiling(categoryName, iid)
 	shortName = erpProductShortNameForFiling(string(task.TaskType), "", shortName, name, iid)
 	sPrice := cloneFloat64Ptr(detail.BaseSalePrice)
 	if sPrice == nil && task.SourceMode == domain.TaskSourceModeNewProduct {
@@ -496,6 +499,9 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 	name := firstNonEmptyString(strings.TrimSpace(item.ProductNameSnapshot), strings.TrimSpace(task.ProductNameSnapshot), skuCode)
 	shortName := erpProductShortNameForFiling(string(task.TaskType), "", strings.TrimSpace(item.ProductShortName), name, iid)
 	imageURL := firstReferenceImageURL(item.ReferenceFileRefs)
+	categoryName := firstNonEmptyString(strings.TrimSpace(detail.CategoryName), strings.TrimSpace(detail.Category), iid, strings.TrimSpace(item.CategoryCode))
+	categoryCode := erpCategoryCodeForFiling(item.CategoryCode)
+	categoryName = erpCategoryNameForFiling(categoryName, iid)
 	sPrice := cloneFloat64Ptr(item.BaseSalePrice)
 	if sPrice == nil {
 		sPrice = zeroFloat64Ptr()
@@ -512,8 +518,8 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		Pic:              imageURL,
 		PicBig:           imageURL,
 		SKUPic:           imageURL,
-		CategoryCode:     strings.TrimSpace(item.CategoryCode),
-		CategoryName:     strings.TrimSpace(detail.CategoryName),
+		CategoryCode:     categoryCode,
+		CategoryName:     categoryName,
 		SPrice:           sPrice,
 		CostPrice:        erpCostPriceForFiling(item.CostPrice),
 		Remark:           strings.TrimSpace(remark),
@@ -530,8 +536,8 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 		},
 		BusinessInfo: &domain.ERPTaskBusinessInfoSnapshot{
 			Category:     iid,
-			CategoryCode: strings.TrimSpace(item.CategoryCode),
-			CategoryName: strings.TrimSpace(detail.CategoryName),
+			CategoryCode: categoryCode,
+			CategoryName: categoryName,
 			SpecText:     strings.TrimSpace(detail.SpecText),
 			Material:     strings.TrimSpace(detail.Material),
 			SizeText:     strings.TrimSpace(detail.SizeText),
@@ -667,6 +673,22 @@ func erpCostPriceForFiling(value *float64) *float64 {
 	return cloneFloat64Ptr(value)
 }
 
+func erpCategoryCodeForFiling(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.EqualFold(value, "GENERAL") {
+		return ""
+	}
+	return value
+}
+
+func erpCategoryNameForFiling(categoryName, iid string) string {
+	categoryName = strings.TrimSpace(categoryName)
+	if categoryName == "" || strings.EqualFold(categoryName, "GENERAL") {
+		return strings.TrimSpace(iid)
+	}
+	return categoryName
+}
+
 func firstFloat64Ptr(values ...*float64) *float64 {
 	for _, value := range values {
 		if value != nil {
@@ -680,19 +702,28 @@ func firstReferenceImageURL(refs []domain.ReferenceFileRef) string {
 	for _, ref := range domain.NormalizeReferenceFileRefs(refs) {
 		if ref.DownloadURL != nil {
 			if value := strings.TrimSpace(*ref.DownloadURL); value != "" {
-				return value
+				if isPublicERPImageURL(value) {
+					return value
+				}
 			}
 		}
 		if ref.URL != nil {
 			if value := strings.TrimSpace(*ref.URL); value != "" {
-				return value
+				if isPublicERPImageURL(value) {
+					return value
+				}
 			}
-		}
-		if value := strings.TrimSpace(ref.StorageKey); value != "" {
-			return "/v1/assets/files/" + strings.TrimLeft(value, "/")
 		}
 	}
 	return ""
+}
+
+func isPublicERPImageURL(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	return (parsed.Scheme == "http" || parsed.Scheme == "https") && strings.TrimSpace(parsed.Host) != ""
 }
 
 func (s *taskService) loadTaskAndDetailForFiling(ctx context.Context, taskID int64) (*domain.Task, *domain.TaskDetail, *domain.AppError) {
@@ -727,7 +758,7 @@ func (s *taskService) persistTaskFilingState(
 	attempted bool,
 	skippedReason string,
 ) error {
-	return s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
 			return err
 		}
@@ -785,7 +816,20 @@ func (s *taskService) persistTaskFilingState(
 			"erp_filing_items":          buildERPBridgeFilingItemEventPayload(itemResults),
 		}))
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	s.refreshProductManagementReadModelAfterFiling(ctx, task)
+	return nil
+}
+
+func (s *taskService) refreshProductManagementReadModelAfterFiling(ctx context.Context, task *domain.Task) {
+	if s == nil || task == nil || s.productManagementCloseSyncer == nil {
+		return
+	}
+	if appErr := s.productManagementCloseSyncer.RefreshReadModelNow(ctx); appErr != nil {
+		log.Printf("product_management_read_model_refresh_after_filing_failed task_id=%d err=%s", task.ID, appErr.Message)
+	}
 }
 
 func (s *taskService) syncSingleSKUItemCostProjectionFromDetail(ctx context.Context, tx repo.Tx, task *domain.Task, detail *domain.TaskDetail) error {
