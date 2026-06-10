@@ -46,13 +46,20 @@ type kpiAnalysisPeriod struct {
 }
 
 type kpiAnalysisMetrics struct {
-	TaskCreates    int `json:"task_creates"`
-	DesignClaims   int `json:"design_claims"`
-	DesignSubmits  int `json:"design_submits"`
-	AuditApproves  int `json:"audit_approves"`
-	AuditRejects   int `json:"audit_rejects"`
-	FinalAssets    int `json:"final_assets"`
-	ReferenceFiles int `json:"reference_files"`
+	TaskCreates            int `json:"task_creates"`
+	DesignClaims           int `json:"design_claims"`
+	DesignSubmits          int `json:"design_submits"`
+	AuditApproves          int `json:"audit_approves"`
+	AuditRejects           int `json:"audit_rejects"`
+	CustomizationReviews   int `json:"customization_reviews"`
+	WarehouseReceives      int `json:"warehouse_receives"`
+	WarehouseCompletions   int `json:"warehouse_completions"`
+	WarehouseRejects       int `json:"warehouse_rejects"`
+	ClosedTasks            int `json:"closed_tasks"`
+	FinalAssets            int `json:"final_assets"`
+	ReferenceFiles         int `json:"reference_files"`
+	SourceFiles            int `json:"source_files"`
+	PreviewDerivativeFiles int `json:"preview_derivative_files"`
 }
 
 type kpiAnalysisPerson struct {
@@ -169,7 +176,7 @@ func (s *Service) KPIEvents(ctx context.Context, actor domain.RequestActor, para
 
 func fallbackKPIAnalysis(evidence kpiAnalysisEvidence, cause error) *aiagent.KPIAnalysis {
 	metrics := evidence.Metrics
-	overview := fmt.Sprintf("%s 至 %s：系统记录任务创建 %d 条，设计接单 %d 次，设计提交 %d 次，审核通过 %d 次，审核打回 %d 次，最终成品图 %d 个。AI 深度解读暂时不可用，当前先展示系统统计分析。",
+	overview := fmt.Sprintf("%s 至 %s：系统记录任务创建 %d 条，设计接单 %d 次，设计提交 %d 次，审核通过 %d 次，审核打回 %d 次，定制处理 %d 次，仓库完成 %d 次，最终成品图 %d 个。AI 深度解读暂时不可用，当前先展示系统统计分析。",
 		evidence.Period.From,
 		evidence.Period.To,
 		metrics.TaskCreates,
@@ -177,6 +184,8 @@ func fallbackKPIAnalysis(evidence kpiAnalysisEvidence, cause error) *aiagent.KPI
 		metrics.DesignSubmits,
 		metrics.AuditApproves,
 		metrics.AuditRejects,
+		metrics.CustomizationReviews,
+		metrics.WarehouseCompletions,
 		metrics.FinalAssets,
 	)
 	highlights := []aiagent.KPIAnalysisHighlight{
@@ -186,6 +195,7 @@ func fallbackKPIAnalysis(evidence kpiAnalysisEvidence, cause error) *aiagent.KPI
 		{Title: "审核通过", Value: fmt.Sprintf("%d", metrics.AuditApproves), Note: fmt.Sprintf("审核通过率 %s", fallbackRate(metrics.AuditApproves, metrics.AuditApproves+metrics.AuditRejects))},
 		{Title: "审核打回", Value: fmt.Sprintf("%d", metrics.AuditRejects), Note: "用于观察返工压力"},
 		{Title: "最终成品图", Value: fmt.Sprintf("%d", metrics.FinalAssets), Note: "按最终成品图资产记录统计"},
+		{Title: "仓库完成", Value: fmt.Sprintf("%d", metrics.WarehouseCompletions), Note: "按仓库完成动作统计"},
 	}
 
 	lines := append([]string{}, evidence.Evidence...)
@@ -360,23 +370,39 @@ func buildKPIAnalysisEvidence(from, to time.Time, events []domain.KPIAnalysisEve
 		case "task.audit.rejected":
 			metrics.AuditRejects++
 			person.AuditRejects++
+		case "task.customization.reviewed":
+			metrics.CustomizationReviews++
+		case "task.warehouse.received":
+			metrics.WarehouseReceives++
+		case "task.warehouse.completed":
+			metrics.WarehouseCompletions++
+		case "task.warehouse.rejected":
+			metrics.WarehouseRejects++
+		case "task.closed":
+			metrics.ClosedTasks++
 		}
 	}
 
 	recentAssets := make([]kpiAnalysisAsset, 0, min(len(assets), 15))
 	for _, asset := range assets {
-		if asset.AssetType == "final" {
+		if isFinalAssetType(asset.AssetType) {
 			metrics.FinalAssets++
 		}
 		if asset.AssetType == "reference" {
 			metrics.ReferenceFiles++
+		}
+		if asset.AssetType == "source" {
+			metrics.SourceFiles++
+		}
+		if asset.AssetType == "preview" || asset.AssetType == "design_thumb" {
+			metrics.PreviewDerivativeFiles++
 		}
 		uploader := strings.TrimSpace(asset.UploadedByName)
 		if uploader == "" && asset.UploadedBy > 0 {
 			uploader = fmt.Sprintf("人员#%d", asset.UploadedBy)
 		}
 		person := ensurePerson(people, uploader, "设计", "", "")
-		if asset.AssetType == "final" {
+		if isFinalAssetType(asset.AssetType) {
 			person.FinalAssets++
 		}
 		if task := ensureTaskFromAsset(tasks, asset); task != nil {
@@ -409,7 +435,7 @@ func buildKPIAnalysisEvidence(from, to time.Time, events []domain.KPIAnalysisEve
 		Evidence: []string{
 			fmt.Sprintf("%s 至 %s 任务关键动作 %d 条", from.Format("2006-01-02"), to.Format("2006-01-02"), len(events)),
 			fmt.Sprintf("设计相关资产记录 %d 条，其中最终成品图 %d 条", len(assets), metrics.FinalAssets),
-			fmt.Sprintf("创建 %d 条、设计提交 %d 条、审核通过 %d 条、审核打回 %d 条", metrics.TaskCreates, metrics.DesignSubmits, metrics.AuditApproves, metrics.AuditRejects),
+			fmt.Sprintf("创建 %d 条、设计提交 %d 条、审核通过 %d 条、审核打回 %d 条、仓库完成 %d 条", metrics.TaskCreates, metrics.DesignSubmits, metrics.AuditApproves, metrics.AuditRejects, metrics.WarehouseCompletions),
 		},
 		GeneratedAt: time.Now().UTC(),
 	}
@@ -588,6 +614,12 @@ func eventRole(eventType string) string {
 		return "设计"
 	case "task.audit.approved", "task.audit.rejected":
 		return "审核"
+	case "task.customization.reviewed":
+		return "定制"
+	case "task.warehouse.received", "task.warehouse.completed", "task.warehouse.rejected":
+		return "仓库"
+	case "task.closed":
+		return "运营"
 	default:
 		return ""
 	}
@@ -607,6 +639,16 @@ func eventLabel(eventType string) string {
 		return "审核通过"
 	case "task.audit.rejected":
 		return "审核打回"
+	case "task.customization.reviewed":
+		return "定制处理完成"
+	case "task.warehouse.received":
+		return "仓库接收"
+	case "task.warehouse.completed":
+		return "仓库完成"
+	case "task.warehouse.rejected":
+		return "仓库退回"
+	case "task.closed":
+		return "任务结单"
 	default:
 		return eventType
 	}
@@ -616,6 +658,14 @@ func assetTypeLabel(assetType string) string {
 	switch assetType {
 	case "reference":
 		return "参考图"
+	case "source":
+		return "源文件"
+	case "preview":
+		return "预览图"
+	case "design_thumb":
+		return "设计缩略图"
+	case "delivery":
+		return "最终成品图"
 	case "draft":
 		return "设计稿"
 	case "revised":
@@ -629,8 +679,12 @@ func assetTypeLabel(assetType string) string {
 	}
 }
 
+func isFinalAssetType(assetType string) bool {
+	return assetType == "delivery" || assetType == "final"
+}
+
 func joinRoles(roles map[string]struct{}) string {
-	order := []string{"运营", "设计", "审核"}
+	order := []string{"运营", "设计", "审核", "定制", "仓库"}
 	var out []string
 	for _, role := range order {
 		if _, ok := roles[role]; ok {

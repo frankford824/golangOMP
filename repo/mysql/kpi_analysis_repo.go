@@ -52,10 +52,15 @@ func (r *kpiAnalysisRepo) ListTaskEvents(ctx context.Context, filter repo.KPIAna
 		    'task.assigned',
 		    'task.reassigned',
 		    'task.batch_assigned',
-		    'task.design.submitted',
-		    'task.audit.approved',
-		    'task.audit.rejected'
-		  )
+		  'task.design.submitted',
+		  'task.audit.approved',
+		  'task.audit.rejected',
+		  'task.customization.reviewed',
+		  'task.warehouse.received',
+		  'task.warehouse.completed',
+		  'task.warehouse.rejected',
+		  'task.closed'
+		)
 		ORDER BY tel.created_at DESC
 		LIMIT ?`
 	rows, err := r.db.db.QueryContext(ctx, query, filter.From, filter.To, limit)
@@ -110,8 +115,11 @@ func (r *kpiAnalysisRepo) ListTaskEvents(ctx context.Context, filter repo.KPIAna
 
 func (r *kpiAnalysisRepo) ListTaskAssets(ctx context.Context, filter repo.KPIAnalysisFilter) ([]domain.KPIAnalysisAsset, error) {
 	limit := filter.Limit
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 {
 		limit = 200
+	}
+	if limit > 5000 {
+		limit = 5000
 	}
 	query := `
 		SELECT
@@ -131,7 +139,18 @@ func (r *kpiAnalysisRepo) ListTaskAssets(ctx context.Context, filter repo.KPIAna
 		JOIN tasks t ON t.id = ta.task_id
 		LEFT JOIN users u ON u.id = ta.uploaded_by
 		WHERE ta.created_at >= ? AND ta.created_at < ?
-		  AND ta.asset_type IN ('reference', 'draft', 'revised', 'final', 'outsource_return')
+		  AND ta.asset_type IN (
+		    'reference',
+		    'source',
+		    'preview',
+		    'design_thumb',
+		    'delivery',
+		    'draft',
+		    'revised',
+		    'final',
+		    'outsource_return',
+		    'erp_product_image'
+		  )
 		ORDER BY ta.created_at DESC
 		LIMIT ?`
 	rows, err := r.db.db.QueryContext(ctx, query, filter.From, filter.To, limit)

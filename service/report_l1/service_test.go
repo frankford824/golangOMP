@@ -3,6 +3,7 @@ package report_l1
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,9 +107,10 @@ func TestKPIAIAnalysisFallsBackWhenGeneratorFails(t *testing.T) {
 			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", EventType: "task.created", OperatorName: "运营甲", CreatedAt: from.Add(time.Hour)},
 			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", EventType: "task.design.submitted", OperatorName: "设计甲", CreatedAt: from.Add(2 * time.Hour)},
 			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", EventType: "task.audit.rejected", OperatorName: "审核甲", CreatedAt: from.Add(3 * time.Hour)},
+			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", EventType: "task.warehouse.completed", OperatorName: "仓库甲", CreatedAt: from.Add(4 * time.Hour)},
 		},
 		assets: []domain.KPIAnalysisAsset{
-			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", AssetType: "final", OriginalName: "final.psd", UploadedByName: "设计甲", CreatedAt: from.Add(2 * time.Hour)},
+			{TaskID: 1, TaskNo: "RW-1", ProductName: "测试任务", AssetType: "delivery", OriginalName: "delivery.psd", UploadedByName: "设计甲", CreatedAt: from.Add(2 * time.Hour)},
 		},
 	}
 	svc := NewService(&stubReportRepo{}, WithKPIAnalysisRepo(kpiRepo), WithKPIAnalysisGenerator(failingKPIAnalysisGenerator{}))
@@ -122,6 +124,12 @@ func TestKPIAIAnalysisFallsBackWhenGeneratorFails(t *testing.T) {
 	}
 	if analysis.Headline == "" || analysis.Overview == "" || len(analysis.Highlights) == 0 {
 		t.Fatalf("fallback missing readable content: %+v", analysis)
+	}
+	if !strings.Contains(analysis.Overview, "仓库完成 1 次") {
+		t.Fatalf("fallback overview missing warehouse completion metric: %s", analysis.Overview)
+	}
+	if !strings.Contains(analysis.Overview, "最终成品图 1 个") {
+		t.Fatalf("fallback overview did not count delivery as final asset: %s", analysis.Overview)
 	}
 }
 
