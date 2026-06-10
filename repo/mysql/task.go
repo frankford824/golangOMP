@@ -882,6 +882,21 @@ func (r *taskRepo) UpdatePriority(ctx context.Context, tx repo.Tx, id int64, pri
 	return nil
 }
 
+func (r *taskRepo) UpdateDeadline(ctx context.Context, tx repo.Tx, id int64, deadlineAt *time.Time) error {
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx,
+		`UPDATE tasks SET deadline_at = ? WHERE id = ?`,
+		toNullTime(deadlineAt), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update task deadline: %w", err)
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *taskRepo) UpdateProductBinding(ctx context.Context, tx repo.Tx, task *domain.Task) error {
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx,

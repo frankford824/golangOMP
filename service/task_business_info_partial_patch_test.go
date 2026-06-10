@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"workflow/domain"
 )
@@ -125,9 +126,9 @@ func TestUpdateBusinessInfoRejectsExplicitInvalidCategoryCode(t *testing.T) {
 	})
 
 	_, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
-		TaskID:       taskID,
-		OperatorID:   1,
-		CategoryCode: "BOGUS_CAT",
+		TaskID:        taskID,
+		OperatorID:    1,
+		CategoryCode:  "BOGUS_CAT",
 		ApplyCategory: true,
 	})
 	if appErr == nil {
@@ -180,6 +181,68 @@ func TestUpdateBusinessInfoPriorityOnly(t *testing.T) {
 	}
 	if taskRepo.tasks[taskID].Priority != domain.TaskPriorityHigh {
 		t.Fatalf("priority = %q, want high", taskRepo.tasks[taskID].Priority)
+	}
+}
+
+func TestUpdateBusinessInfoDeadlineOnly(t *testing.T) {
+	const taskID int64 = 9107
+	originalDeadline := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
+	updatedDeadline := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			taskID: {
+				ID:                  taskID,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "SKU-DUE-1",
+				ProductNameSnapshot: "Deadline Task",
+				TaskStatus:          domain.TaskStatusPendingAssign,
+				Priority:            domain.TaskPriorityNormal,
+				DeadlineAt:          &originalDeadline,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			taskID: {
+				TaskID:                   taskID,
+				CategoryCode:             "BOGUS_CAT",
+				CostPrice:                float64Ptr(12.3),
+				ManualCostOverride:       true,
+				ManualCostOverrideReason: "warehouse maintained",
+			},
+		},
+	}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	_, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:                   taskID,
+		OperatorID:               1,
+		CostPrice:                float64Ptr(12.3),
+		ManualCostOverride:       true,
+		ManualCostOverrideReason: "warehouse maintained",
+		DeadlineAt:               &updatedDeadline,
+		DeadlineAtSet:            true,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.tasks[taskID].DeadlineAt == nil || !taskRepo.tasks[taskID].DeadlineAt.Equal(updatedDeadline) {
+		t.Fatalf("deadline_at = %+v, want %s", taskRepo.tasks[taskID].DeadlineAt, updatedDeadline)
+	}
+	if got := taskRepo.details[taskID].CostPrice; got == nil || *got != 12.3 {
+		t.Fatalf("cost_price changed to %+v, want 12.3", got)
+	}
+	if !taskRepo.details[taskID].ManualCostOverride {
+		t.Fatal("manual_cost_override changed to false")
 	}
 }
 

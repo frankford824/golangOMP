@@ -142,8 +142,10 @@ type UpdateTaskBusinessInfoParams struct {
 	TriggerFiling            bool
 	// FiledAt is kept for backward compatibility only.
 	// New clients should use TriggerFiling.
-	FiledAt *time.Time
-	Remark  string
+	FiledAt       *time.Time
+	DeadlineAt    *time.Time
+	DeadlineAtSet bool
+	Remark        string
 	// ApplyCategory gates category_id/category/category_code resolution. Partial product-info
 	// and cost-info patches must leave this false unless the request body changed category fields.
 	ApplyCategory bool
@@ -1939,6 +1941,9 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		}
 		task.Priority = normalized
 	}
+	if p.DeadlineAtSet {
+		task.DeadlineAt = cloneTimePtr(p.DeadlineAt)
+	}
 
 	if productIID := strings.TrimSpace(p.ProductIID); productIID != "" {
 		detail.Category = productIID
@@ -2204,6 +2209,15 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				return err
 			}
 		}
+		if p.DeadlineAtSet {
+			updater, ok := s.taskRepo.(taskDeadlineUpdater)
+			if !ok {
+				return fmt.Errorf("task deadline updater is not configured")
+			}
+			if err := updater.UpdateDeadline(ctx, tx, task.ID, task.DeadlineAt); err != nil {
+				return err
+			}
+		}
 		if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
 			return err
 		}
@@ -2270,6 +2284,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				"filing_status":               detail.FilingStatus,
 				"filing_error_message":        detail.FilingErrorMessage,
 				"filed_at":                    detail.FiledAt,
+				"deadline_at":                 task.DeadlineAt,
 				"remark":                      p.Remark,
 			},
 		)
@@ -2403,6 +2418,10 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 
 type taskSKUItemCostInfoUpdater interface {
 	UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error
+}
+
+type taskDeadlineUpdater interface {
+	UpdateDeadline(ctx context.Context, tx repo.Tx, id int64, deadlineAt *time.Time) error
 }
 
 type taskSKUItemBusinessInfoUpdater interface {

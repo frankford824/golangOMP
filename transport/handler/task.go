@@ -208,6 +208,8 @@ type updateTaskBusinessInfoReq struct {
 	ProductNameSnapshot      string                   `json:"product_name_snapshot"`
 	IID                      string                   `json:"i_id"`
 	ProductIID               string                   `json:"product_i_id"`
+	DeadlineAt               *string                  `json:"deadline_at"`
+	DueAt                    *string                  `json:"due_at"`
 	Category                 string                   `json:"category"`
 	CategoryID               *int64                   `json:"category_id"`
 	CategoryCode             string                   `json:"category_code"`
@@ -227,9 +229,9 @@ type updateTaskBusinessInfoReq struct {
 	CostRuleID               *int64                   `json:"cost_rule_id"`
 	CostRuleName             string                   `json:"cost_rule_name"`
 	CostRuleSource           string                   `json:"cost_rule_source"`
-	ManualCostOverride       bool                     `json:"manual_cost_override"`
+	ManualCostOverride       *bool                    `json:"manual_cost_override"`
 	ManualCostOverrideReason string                   `json:"manual_cost_override_reason"`
-	TriggerFiling            bool                     `json:"trigger_filing"`
+	TriggerFiling            *bool                    `json:"trigger_filing"`
 	FiledAt                  *string                  `json:"filed_at"`
 	Remark                   string                   `json:"remark"`
 	Priority                 *string                  `json:"priority"`
@@ -1023,8 +1025,14 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 	}
 
 	var req updateTaskBusinessInfoReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+
+	deadlineAt, deadlineAtSet, appErr := parseBusinessInfoDeadline(c)
+	if appErr != nil {
+		respondError(c, appErr)
 		return
 	}
 
@@ -1053,41 +1061,87 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		base = buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
 	}
 
-	updateParams := service.UpdateTaskBusinessInfoParams{
-		TaskID:                   taskID,
-		OperatorID:               operatorID,
-		ProductName:              firstNonEmptyTrimmed(req.ProductName, req.ProductNameSnapshot),
-		ProductIID:               firstNonEmptyTrimmed(req.IID, req.ProductIID),
-		Category:                 req.Category,
-		CategoryID:               req.CategoryID,
-		CategoryCode:             req.CategoryCode,
-		ApplyCategory:            strings.TrimSpace(req.Category) != "" || req.CategoryID != nil || strings.TrimSpace(req.CategoryCode) != "",
-		SpecText:                 req.SpecText,
-		Material:                 req.Material,
-		SizeText:                 req.SizeText,
-		CraftText:                req.CraftText,
-		Width:                    req.Width,
-		Height:                   req.Height,
-		Area:                     req.Area,
-		Quantity:                 req.Quantity,
-		Process:                  req.Process,
-		ProductSelection:         req.ProductSelection.toDomain(),
-		Note:                     base.Note,
-		ChangeRequest:            req.ChangeRequest,
-		DesignRequirement:        req.DesignRequirement,
-		ReferenceFileRefs:        base.ReferenceFileRefs,
-		ReferenceLink:            base.ReferenceLink,
-		CostPrice:                req.CostPrice,
-		CostRuleID:               req.CostRuleID,
-		CostRuleIDExplicit:       req.CostRuleID != nil,
-		CostRuleName:             req.CostRuleName,
-		CostRuleSource:           req.CostRuleSource,
-		ManualCostOverride:       req.ManualCostOverride,
-		ManualCostOverrideReason: req.ManualCostOverrideReason,
-		TriggerFiling:            req.TriggerFiling,
-		FiledAt:                  filedAt,
-		Remark:                   req.Remark,
+	updateParams := base
+	updateParams.TaskID = taskID
+	updateParams.OperatorID = operatorID
+	if productName := firstNonEmptyTrimmed(req.ProductName, req.ProductNameSnapshot); productName != "" {
+		updateParams.ProductName = productName
 	}
+	if productIID := firstNonEmptyTrimmed(req.IID, req.ProductIID); productIID != "" {
+		updateParams.ProductIID = productIID
+	}
+	if deadlineAtSet {
+		updateParams.DeadlineAt = deadlineAt
+		updateParams.DeadlineAtSet = true
+	}
+	if strings.TrimSpace(req.Category) != "" || req.CategoryID != nil || strings.TrimSpace(req.CategoryCode) != "" {
+		updateParams.Category = req.Category
+		updateParams.CategoryID = req.CategoryID
+		updateParams.CategoryCode = req.CategoryCode
+		updateParams.ApplyCategory = true
+	}
+	if strings.TrimSpace(req.SpecText) != "" {
+		updateParams.SpecText = req.SpecText
+	}
+	if strings.TrimSpace(req.Material) != "" {
+		updateParams.Material = req.Material
+	}
+	if strings.TrimSpace(req.SizeText) != "" {
+		updateParams.SizeText = req.SizeText
+	}
+	if strings.TrimSpace(req.CraftText) != "" {
+		updateParams.CraftText = req.CraftText
+	}
+	if req.Width != nil {
+		updateParams.Width = req.Width
+	}
+	if req.Height != nil {
+		updateParams.Height = req.Height
+	}
+	if req.Area != nil {
+		updateParams.Area = req.Area
+	}
+	if req.Quantity != nil {
+		updateParams.Quantity = req.Quantity
+	}
+	if strings.TrimSpace(req.Process) != "" {
+		updateParams.Process = req.Process
+	}
+	if req.ProductSelection != nil {
+		updateParams.ProductSelection = req.ProductSelection.toDomain()
+	}
+	if strings.TrimSpace(req.ChangeRequest) != "" {
+		updateParams.ChangeRequest = req.ChangeRequest
+	}
+	if strings.TrimSpace(req.DesignRequirement) != "" {
+		updateParams.DesignRequirement = req.DesignRequirement
+	}
+	if req.CostPrice != nil {
+		updateParams.CostPrice = req.CostPrice
+	}
+	if req.CostRuleID != nil {
+		updateParams.CostRuleID = req.CostRuleID
+		updateParams.CostRuleIDExplicit = true
+	}
+	if strings.TrimSpace(req.CostRuleName) != "" {
+		updateParams.CostRuleName = req.CostRuleName
+	}
+	if strings.TrimSpace(req.CostRuleSource) != "" {
+		updateParams.CostRuleSource = req.CostRuleSource
+	}
+	if req.ManualCostOverride != nil {
+		updateParams.ManualCostOverride = *req.ManualCostOverride
+	}
+	if strings.TrimSpace(req.ManualCostOverrideReason) != "" {
+		updateParams.ManualCostOverrideReason = req.ManualCostOverrideReason
+	}
+	if req.TriggerFiling != nil {
+		updateParams.TriggerFiling = *req.TriggerFiling
+	}
+	if filedAt != nil {
+		updateParams.FiledAt = filedAt
+	}
+	updateParams.Remark = req.Remark
 	if req.Priority != nil {
 		normalized, appErr := validateCreateTaskPriority(*req.Priority)
 		if appErr != nil {
@@ -1103,6 +1157,45 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		return
 	}
 	respondOK(c, detail)
+}
+
+func parseBusinessInfoDeadline(c *gin.Context) (*time.Time, bool, *domain.AppError) {
+	rawBodyValue, ok := c.Get(gin.BodyBytesKey)
+	if !ok {
+		return nil, false, nil
+	}
+	rawBody, ok := rawBodyValue.([]byte)
+	if !ok || len(rawBody) == 0 {
+		return nil, false, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &fields); err != nil {
+		return nil, false, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil)
+	}
+	for _, name := range []string{"deadline_at", "due_at"} {
+		raw, exists := fields[name]
+		if !exists {
+			continue
+		}
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+			return nil, true, nil
+		}
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, true, domain.NewAppError(domain.ErrCodeInvalidRequest, "deadline_at/due_at must be RFC3339", nil)
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, true, nil
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return nil, true, domain.NewAppError(domain.ErrCodeInvalidRequest, "deadline_at/due_at must be RFC3339", nil)
+		}
+		return &parsed, true, nil
+	}
+	return nil, false, nil
 }
 
 func (h *TaskHandler) GetFilingStatus(c *gin.Context) {
@@ -1898,7 +1991,7 @@ func (h *TaskHandler) loadTaskAggregate(c *gin.Context, taskID int64) (*domain.T
 
 func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggregate *domain.TaskDetailAggregate) service.UpdateTaskBusinessInfoParams {
 	detail := aggregate.TaskDetail
-	return service.UpdateTaskBusinessInfoParams{
+	params := service.UpdateTaskBusinessInfoParams{
 		TaskID:                   taskID,
 		OperatorID:               operatorID,
 		SpecText:                 detail.SpecText,
@@ -1925,6 +2018,10 @@ func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggreg
 		TriggerFiling:            false,
 		FiledAt:                  detail.FiledAt,
 	}
+	if aggregate.Task != nil {
+		params.DeadlineAt = aggregate.Task.DeadlineAt
+	}
+	return params
 }
 
 func firstInt64(primary, fallback *int64) *int64 {

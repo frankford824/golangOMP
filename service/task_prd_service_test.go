@@ -4260,6 +4260,13 @@ func (r *prdTaskRepo) UpdatePriority(_ context.Context, _ repo.Tx, id int64, pri
 	return nil
 }
 
+func (r *prdTaskRepo) UpdateDeadline(_ context.Context, _ repo.Tx, id int64, deadlineAt *time.Time) error {
+	if r.tasks[id] != nil {
+		r.tasks[id].DeadlineAt = cloneTimePtr(deadlineAt)
+	}
+	return nil
+}
+
 func (r *prdTaskRepo) UpdateDetailBusinessInfo(_ context.Context, _ repo.Tx, detail *domain.TaskDetail) error {
 	r.details[detail.TaskID] = detail
 	return nil
