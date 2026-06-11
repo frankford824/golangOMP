@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"workflow/domain"
+	"workflow/repo"
 )
+
+const deliveryUploadPreparedBatchWindow = 2 * time.Hour
 
 func (s *taskAssetCenterService) requireScopedBatchAsset(ctx context.Context, taskID int64, assetType domain.TaskAssetType, targetSKUCode string) *domain.AppError {
 	if assetType.IsReference() {
@@ -28,9 +32,16 @@ func (s *taskAssetCenterService) requireScopedBatchAsset(ctx context.Context, ta
 	return nil
 }
 
-func (s *taskAssetCenterService) shouldAdvanceTaskToPendingAuditA(ctx context.Context, task *domain.Task, completedScopeSKU string) (bool, *domain.AppError) {
+func (s *taskAssetCenterService) shouldAdvanceTaskToPendingAuditA(ctx context.Context, task *domain.Task, completedScopeSKU string, currentRequest *domain.UploadRequest) (bool, *domain.AppError) {
 	if task == nil {
 		return false, domain.NewAppError(domain.ErrCodeInvalidRequest, "task is required", nil)
+	}
+	hasOpenPeerSession, appErr := s.hasOtherPreparedDeliveryUploadSession(ctx, task.ID, currentRequest)
+	if appErr != nil {
+		return false, appErr
+	}
+	if hasOpenPeerSession {
+		return false, nil
 	}
 	items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID)
 	if err != nil {
@@ -77,6 +88,75 @@ func (s *taskAssetCenterService) shouldAdvanceTaskToPendingAuditA(ctx context.Co
 		}
 	}
 	return true, nil
+}
+
+func (s *taskAssetCenterService) hasOtherPreparedDeliveryUploadSession(ctx context.Context, taskID int64, currentRequest *domain.UploadRequest) (bool, *domain.AppError) {
+	if currentRequest == nil || !uploadRequestAssetTypeIsDelivery(currentRequest) {
+		return false, nil
+	}
+	ownerType := domain.AssetOwnerTypeTask
+	assetType := domain.TaskAssetTypeDelivery
+	status := domain.UploadRequestStatusRequested
+	ownerID := taskID
+	for page := 1; ; page++ {
+		requests, total, err := s.uploadRequestRepo.List(ctx, repo.UploadRequestListFilter{
+			OwnerType:     &ownerType,
+			OwnerID:       &ownerID,
+			TaskAssetType: &assetType,
+			Status:        &status,
+			Page:          page,
+			PageSize:      100,
+		})
+		if err != nil {
+			return false, infraError("list pending delivery upload sessions", err)
+		}
+		for _, candidate := range requests {
+			if isSamePreparedDeliveryBatchPeer(currentRequest, candidate) {
+				return true, nil
+			}
+		}
+		if len(requests) == 0 || int64(page*100) >= total {
+			return false, nil
+		}
+	}
+}
+
+func uploadRequestAssetTypeIsDelivery(request *domain.UploadRequest) bool {
+	if request == nil || request.TaskAssetType == nil {
+		return false
+	}
+	return domain.NormalizeTaskAssetType(*request.TaskAssetType).IsDelivery()
+}
+
+func isSamePreparedDeliveryBatchPeer(current, candidate *domain.UploadRequest) bool {
+	if current == nil || candidate == nil {
+		return false
+	}
+	if strings.TrimSpace(candidate.RequestID) == "" || strings.TrimSpace(candidate.RequestID) == strings.TrimSpace(current.RequestID) {
+		return false
+	}
+	if !uploadRequestAssetTypeIsDelivery(candidate) {
+		return false
+	}
+	if candidate.Status != domain.UploadRequestStatusRequested {
+		return false
+	}
+	if candidate.SessionStatus == domain.DesignAssetSessionStatusCancelled ||
+		candidate.SessionStatus == domain.DesignAssetSessionStatusExpired ||
+		candidate.SessionStatus == domain.DesignAssetSessionStatusCompleted {
+		return false
+	}
+	if current.CreatedBy > 0 && candidate.CreatedBy > 0 && current.CreatedBy != candidate.CreatedBy {
+		return false
+	}
+	if current.CreatedAt.IsZero() || candidate.CreatedAt.IsZero() {
+		return true
+	}
+	diff := current.CreatedAt.Sub(candidate.CreatedAt)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= deliveryUploadPreparedBatchWindow
 }
 
 func countScopedSKUItems(items []*domain.TaskSKUItem) int {

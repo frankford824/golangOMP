@@ -2006,6 +2006,160 @@ func TestTaskAssetCenterServiceCompleteSourceThenDeliverySeriallyWithout500(t *t
 	}
 }
 
+func TestTaskAssetCenterServiceRetouchDeliveryBatchCompletesAfterLastPreparedSession(t *testing.T) {
+	designerID := int64(701)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:               2060,
+		TaskNo:           "T-2060",
+		TaskType:         domain.TaskTypeRetouchTask,
+		TaskStatus:       domain.TaskStatusInProgress,
+		DesignerID:       &designerID,
+		CurrentHandlerID: &designerID,
+	})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	taskEventRepo := &step04TaskEventRepo{}
+	storageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+	svc.nowFn = func() time.Time {
+		return time.Date(2026, 6, 9, 13, 33, 5, 0, time.UTC)
+	}
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       designerID,
+		Roles:    []domain.Role{domain.RoleDesigner},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	firstSession, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       2060,
+		CreatedBy:    designerID,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "main-01.jpg",
+		ExpectedSize: uploadRequestInt64Ptr(1024),
+		MimeType:     "image/jpeg",
+		FileHash:     "main-01-hash",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession(first) unexpected error: %+v", appErr)
+	}
+	secondSession, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       2060,
+		CreatedBy:    designerID,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "main-02.jpg",
+		ExpectedSize: uploadRequestInt64Ptr(1024),
+		MimeType:     "image/jpeg",
+		FileHash:     "main-02-hash",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession(second) unexpected error: %+v", appErr)
+	}
+
+	if _, appErr = svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID:      2060,
+		SessionID:   firstSession.Session.ID,
+		CompletedBy: designerID,
+		FileHash:    "main-01-hash",
+	}); appErr != nil {
+		t.Fatalf("CompleteUploadSession(first) unexpected error: %+v", appErr)
+	}
+	if got := taskRepo.tasks[2060].TaskStatus; got != domain.TaskStatusInProgress {
+		t.Fatalf("task status after first delivery = %s, want InProgress", got)
+	}
+
+	if _, appErr = svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID:      2060,
+		SessionID:   secondSession.Session.ID,
+		CompletedBy: designerID,
+		FileHash:    "main-02-hash",
+	}); appErr != nil {
+		t.Fatalf("CompleteUploadSession(second) unexpected error: %+v", appErr)
+	}
+	if got := taskRepo.tasks[2060].TaskStatus; got != domain.TaskStatusCompleted {
+		t.Fatalf("task status after last delivery = %s, want Completed", got)
+	}
+	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventAssetVersionCreated) != 2 {
+		t.Fatalf("asset version created events = %+v, want 2", taskEventRepo.events)
+	}
+	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventDesignSubmitted) != 1 {
+		t.Fatalf("design submitted events = %+v, want 1", taskEventRepo.events)
+	}
+}
+
+func TestTaskAssetCenterServiceCompletesLegacyRetouchSessionAfterPrematureCompleted(t *testing.T) {
+	designerID := int64(702)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         2061,
+		TaskNo:     "T-2061",
+		TaskType:   domain.TaskTypeRetouchTask,
+		TaskStatus: domain.TaskStatusCompleted,
+		DesignerID: &designerID,
+	})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	taskEventRepo := &step04TaskEventRepo{}
+	storageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+
+	assetType := domain.TaskAssetTypeDelivery
+	now := time.Date(2026, 6, 9, 13, 33, 5, 0, time.UTC)
+	uploadRequestRepo.requests["legacy-retouch-session"] = &domain.UploadRequest{
+		RequestID:       "legacy-retouch-session",
+		OwnerType:       domain.AssetOwnerTypeTask,
+		OwnerID:         2061,
+		TaskID:          2061,
+		TaskAssetType:   &assetType,
+		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
+		UploadMode:      domain.DesignAssetUploadModeMultipart,
+		RefType:         domain.AssetStorageRefTypeTaskAssetObject,
+		FileName:        "main-02.jpg",
+		MimeType:        "image/jpeg",
+		ExpectedSize:    uploadRequestInt64Ptr(2048),
+		Status:          domain.UploadRequestStatusRequested,
+		SessionStatus:   domain.DesignAssetSessionStatusCreated,
+		RemoteUploadID:  "remote-legacy-retouch-session",
+		StorageProvider: domain.DesignAssetStorageProviderOSS,
+		CreatedBy:       designerID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["legacy-retouch-session"])
+
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       designerID,
+		Roles:    []domain.Role{domain.RoleDesigner},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	result, appErr := svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID:      2061,
+		SessionID:   "legacy-retouch-session",
+		CompletedBy: designerID,
+		FileHash:    "main-02-hash",
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession(legacy retouch) unexpected error: %+v", appErr)
+	}
+	if result == nil || result.Version == nil || result.Asset == nil {
+		t.Fatalf("CompleteUploadSession(legacy retouch) result = %+v", result)
+	}
+	if got := taskRepo.tasks[2061].TaskStatus; got != domain.TaskStatusCompleted {
+		t.Fatalf("task status after legacy completion = %s, want Completed", got)
+	}
+	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventAssetVersionCreated) != 1 {
+		t.Fatalf("asset version created events = %+v, want 1", taskEventRepo.events)
+	}
+}
+
 func TestTaskAssetCenterServiceCompleteUploadSessionMapsTaskAssetVersionDuplicateToConflict(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2054, TaskStatus: domain.TaskStatusInProgress})
 	designAssetRepo := newStep67DesignAssetRepo()

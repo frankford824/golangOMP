@@ -735,7 +735,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			}
 			switch task.TaskStatus {
 			case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusPendingCustomizationProduction:
-				advance, gateErr := s.shouldAdvanceTaskToPendingAuditA(ctx, task, scopeSKUCode)
+				advance, gateErr := s.shouldAdvanceTaskToPendingAuditA(ctx, task, scopeSKUCode, request)
 				if gateErr != nil {
 					return fmt.Errorf("check design submit gate: %w", gateErr)
 				}
@@ -1397,7 +1397,16 @@ func allowPostTransitionUploadSessionComplete(
 	if strings.TrimSpace(decision.DenyCode) != "task_status_not_actionable" {
 		return false
 	}
-	if task == nil || task.TaskStatus != domain.TaskStatusPendingAuditA {
+	if task == nil {
+		return false
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingAuditA:
+	case domain.TaskStatusCompleted:
+		if task.TaskType != domain.TaskTypeRetouchTask {
+			return false
+		}
+	default:
 		return false
 	}
 	if !isPrecreatedCompletableUploadSession(request) {

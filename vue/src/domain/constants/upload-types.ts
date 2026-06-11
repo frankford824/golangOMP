@@ -14,6 +14,9 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   'bmp',
   'gif',
   'svg',
+  'zip',
+  'rar',
+  '7z',
 ] as const
 
 export const INLINE_PREVIEWABLE_EXTENSIONS = [

@@ -288,7 +288,7 @@ const props = withDefaults(
     getDeliveryRemarkSuffixBySku: undefined,
     resolveStagingTargetSku: undefined,
     submitButtonLabel: '',
-    uploadButtonLabel: '上传本次设计稿（可多选）',
+    uploadButtonLabel: '上传本次稿件（可多选/压缩包）',
     submitHintIdle: '',
   },
 )
