@@ -555,7 +555,7 @@ func main() {
 			service.WithWarehouseAutoReleaseProductManagementCloseSyncer(productManagementSvc),
 		)
 		if err := cronInst.Add("warehouse-auto-release", releaseSpec, func(ctx context.Context) error {
-			_, appErr := autoReleaseJob.Run(ctx, service.WarehouseAutoReleaseOptions{
+			result, appErr := autoReleaseJob.Run(ctx, service.WarehouseAutoReleaseOptions{
 				Limit:         envInt("WAREHOUSE_AUTO_RELEASE_LIMIT", 100),
 				GracePeriod:   time.Duration(envInt("WAREHOUSE_AUTO_RELEASE_GRACE_MINUTES", 30)) * time.Minute,
 				SystemActorID: int64(envInt("WAREHOUSE_AUTO_RELEASE_SYSTEM_ACTOR_ID", 0)),
@@ -563,6 +563,12 @@ func main() {
 			if appErr != nil {
 				return fmt.Errorf("%s: %s", appErr.Code, appErr.Message)
 			}
+			logger.Info("cron warehouse-auto-release run",
+				zap.Int("scanned", result.Scanned),
+				zap.Int("released", result.Released),
+				zap.Int("skipped", result.Skipped),
+				zap.Time("cutoff", result.Cutoff),
+			)
 			return nil
 		}); err != nil {
 			logger.Fatal("cron warehouse-auto-release add failed", zap.Error(err))

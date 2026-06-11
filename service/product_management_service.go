@@ -218,7 +218,11 @@ func (s *productManagementService) ProcessQueuedERPSync(ctx context.Context, lim
 		if productManagementStatusInFlight(record.ImageSyncStatus) {
 			didWork = true
 			if appErr := s.syncImageRecordToERP(ctx, record); appErr != nil {
-				s.markProductManagementImageSyncFailed(ctx, record, appErr.Message)
+				if isProductManagementERPImageSyncRetryable(appErr) {
+					s.markProductManagementImageSyncRetrying(ctx, record, appErr.Message)
+				} else {
+					s.markProductManagementImageSyncFailed(ctx, record, appErr.Message)
+				}
 			} else {
 				s.markProductManagementImageSyncSucceeded(ctx, record)
 			}
@@ -308,6 +312,10 @@ func (s *productManagementService) AutoSyncImagesAfterTaskClosed(ctx context.Con
 		}
 		if appErr := s.syncImageRecordToERP(ctx, record); appErr != nil {
 			msg := truncateProductManagementSyncError(appErr.Message)
+			if isProductManagementERPImageSyncRetryable(appErr) {
+				s.markProductManagementImageSyncRetrying(ctx, record, msg)
+				continue
+			}
 			s.markProductManagementImageSyncFailed(ctx, record, msg)
 			_ = s.appendProductManagementTaskEventInTx(ctx, record, domain.TaskEventERPImageAutoSyncFailed, actorID, fmt.Sprintf("ERP 图片自动同步失败：SKU %s，%s", strings.TrimSpace(record.SKUCode), msg), msg)
 			continue
@@ -438,40 +446,55 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	if record == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "product management record is required", nil)
 	}
-	if strings.TrimSpace(record.SKUCode) == "" {
+	skuCode := strings.TrimSpace(record.SKUCode)
+	if skuCode == "" {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "SKU is required for ERP image sync", nil)
 	}
 	imageURL, appErr := s.resolveERPImageURL(ctx, record)
 	if appErr != nil {
 		return appErr
 	}
-	productName := firstNonEmptyString(strings.TrimSpace(record.ProductName), strings.TrimSpace(record.SKUCode))
-	productIID := firstNonEmptyString(strings.TrimSpace(record.ERPIID), strings.TrimSpace(record.ProductIID))
-	shortName := productManagementERPShortName(productName, productIID, record.SKUCode)
-	payload := domain.ERPProductUpsertPayload{
-		ProductID:        strings.TrimSpace(record.SKUCode),
-		SKUID:            strings.TrimSpace(record.SKUCode),
-		SKUCode:          strings.TrimSpace(record.SKUCode),
-		IID:              productIID,
-		Name:             productName,
-		ProductName:      productName,
-		ShortName:        shortName,
-		ProductShortName: shortName,
-		Pic:              imageURL,
-		PicBig:           imageURL,
-		SKUPic:           imageURL,
-		Operation:        "product_management_image_sync",
-		Source:           "product_management",
+	productIID, lookupErr := s.resolveProductManagementStyleIID(ctx, record)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	payload := domain.ERPItemStyleUpdatePayload{
+		SKUID:     skuCode,
+		IID:       productIID,
+		Pic:       imageURL,
+		PicBig:    imageURL,
+		SKUPic:    imageURL,
+		Operation: "product_management_image_sync",
+		Source:    "product_management",
 		TaskContext: &domain.ERPTaskFilingContext{
 			TaskNo: strings.TrimSpace(record.TaskNo),
 			Remark: fmt.Sprintf("产品管理同步 ERP 图片，图片来源：%s", domain.ProductManagementImageSourceLabel(record.ImageSource)),
 		},
 	}
-	_, appErr = s.erpBridge.UpsertProduct(ctx, payload)
+	_, appErr = s.erpBridge.UpdateItemStyle(ctx, payload)
 	if appErr != nil {
 		return appErr
 	}
 	return s.verifyERPImageReadback(ctx, record)
+}
+
+func (s *productManagementService) resolveProductManagementStyleIID(ctx context.Context, record *domain.ProductManagementRecord) (string, *domain.AppError) {
+	if s == nil || s.erpBridge == nil {
+		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步服务未配置，无法确认 SKU 是否已建档", nil)
+	}
+	skuCode := strings.TrimSpace(record.SKUCode)
+	product, appErr := s.erpBridge.GetProductByID(ctx, skuCode)
+	if appErr != nil {
+		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步前未找到该 SKU："+appErr.Message, nil)
+	}
+	productIID := firstNonEmptyString(strings.TrimSpace(record.ERPIID), strings.TrimSpace(record.ProductIID))
+	if product != nil {
+		productIID = firstNonEmptyString(productIID, strings.TrimSpace(product.IID))
+	}
+	if productIID == "" {
+		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步缺少款式编码，请先确认该 SKU 已在聚水潭建档", nil)
+	}
+	return productIID, nil
 }
 
 var productManagementERPImageReadbackRetryDelays = []time.Duration{
@@ -517,6 +540,27 @@ func (s *productManagementService) verifyERPImageReadback(ctx context.Context, r
 		lastMessage = "ERP 图片状态未知"
 	}
 	return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片回读校验未通过："+lastMessage, nil)
+}
+
+func isProductManagementERPImageReadbackPending(appErr *domain.AppError) bool {
+	if appErr == nil {
+		return false
+	}
+	msg := strings.TrimSpace(appErr.Message)
+	if !strings.HasPrefix(msg, "ERP 图片回读校验未通过：") {
+		return false
+	}
+	return strings.Contains(msg, "ERP 尚未返回商品图") || strings.Contains(msg, "ERP 返回的图片地址不是公网地址")
+}
+
+func isProductManagementERPImageSyncRetryable(appErr *domain.AppError) bool {
+	if appErr == nil {
+		return false
+	}
+	if isProductManagementERPImageReadbackPending(appErr) {
+		return true
+	}
+	return strings.Contains(strings.TrimSpace(appErr.Message), "upstream business rejected request")
 }
 
 func productManagementERPShortName(productName, productIID, skuCode string) string {
@@ -746,6 +790,25 @@ func (s *productManagementService) markProductManagementImageSyncFailed(ctx cont
 			ImageStatus:       status,
 			LastERPCheckedAt:  &now,
 			SyncCooldownUntil: cooldown,
+			LastSyncError:     msg,
+			ImageSyncError:    msg,
+		})
+	})
+}
+
+func (s *productManagementService) markProductManagementImageSyncRetrying(ctx context.Context, record *domain.ProductManagementRecord, message string) {
+	if record == nil {
+		return
+	}
+	now := s.now()
+	retryAt := now.Add(5 * time.Minute)
+	msg := truncateProductManagementSyncError(message)
+	_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		return s.records.UpdateImageSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
+			Status:            domain.ProductManagementERPSyncStatusCoolingDown,
+			ImageStatus:       domain.ProductManagementERPSyncStatusCoolingDown,
+			LastERPCheckedAt:  &now,
+			SyncCooldownUntil: &retryAt,
 			LastSyncError:     msg,
 			ImageSyncError:    msg,
 		})

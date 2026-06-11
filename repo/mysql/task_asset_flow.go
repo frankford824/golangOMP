@@ -142,7 +142,47 @@ func (r *taskAssetRepo) ListWarehouseAutoReleaseCandidates(ctx context.Context, 
 		           AND ta.cleaned_at IS NULL
 		           AND COALESCE(ta.flow_review_status, '') <> ?
 		   )
-		 ORDER BY t.updated_at ASC, t.id ASC
+		   AND (
+		        (
+		          EXISTS (
+		            SELECT 1
+		              FROM task_sku_items tsi_ready
+		             WHERE tsi_ready.task_id = t.id
+		          )
+		          AND NOT EXISTS (
+		            SELECT 1
+		              FROM task_sku_items tsi_block
+		             WHERE tsi_block.task_id = t.id
+		               AND NOT (
+		                 tsi_block.filing_status = ?
+		                 AND COALESCE(tsi_block.erp_sync_status, tsi_block.filing_status) = ?
+		                 AND COALESCE(tsi_block.erp_sync_required, 0) = 0
+		               )
+		          )
+		        )
+		        OR (
+		          NOT EXISTS (
+		            SELECT 1
+		              FROM task_sku_items tsi_legacy
+		             WHERE tsi_legacy.task_id = t.id
+		          )
+		          AND EXISTS (
+		            SELECT 1
+		              FROM erp_product_sync_records pm_ready
+		             WHERE pm_ready.task_id = t.id
+		               AND COALESCE(pm_ready.sku_code, '') <> ''
+		               AND pm_ready.erp_sync_status = ?
+		          )
+		          AND NOT EXISTS (
+		            SELECT 1
+		              FROM erp_product_sync_records pm_block
+		             WHERE pm_block.task_id = t.id
+		               AND COALESCE(pm_block.sku_code, '') <> ''
+		               AND COALESCE(pm_block.erp_sync_status, '') <> ?
+		          )
+		        )
+		   )
+		 ORDER BY t.updated_at DESC, t.id DESC
 		 LIMIT ?`,
 		string(domain.TaskStatusPendingWarehouseReceive), string(domain.TaskStatusPendingProductionTransfer), string(domain.TaskStatusPendingClose),
 		string(domain.TaskTypeOriginalProductDevelopment), string(domain.TaskTypeNewProductDevelopment), string(domain.TaskTypeCustomerCustomization), string(domain.TaskTypeRegularCustomization),
@@ -151,6 +191,8 @@ func (r *taskAssetRepo) ListWarehouseAutoReleaseCandidates(ctx context.Context, 
 		string(domain.TaskAssetTypeDelivery), string(domain.TaskAssetTypeDraft), string(domain.TaskAssetTypeRevised), string(domain.TaskAssetTypeFinal), string(domain.TaskAssetTypeOutsourceReturn),
 		string(domain.TaskAssetTypeDelivery), string(domain.TaskAssetTypeDraft), string(domain.TaskAssetTypeRevised), string(domain.TaskAssetTypeFinal), string(domain.TaskAssetTypeOutsourceReturn),
 		string(domain.TaskAssetFlowReviewStatusApproved),
+		string(domain.FilingStatusFiled), string(domain.FilingStatusFiled),
+		string(domain.ProductManagementERPSyncStatusSynced), string(domain.ProductManagementERPSyncStatusSynced),
 		limit)
 	if err != nil {
 		return nil, fmt.Errorf("list warehouse auto release candidates: %w", err)

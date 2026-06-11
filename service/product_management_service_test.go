@@ -63,9 +63,12 @@ func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T
 }
 
 type productManagementERPBridgeCapture struct {
-	payload         domain.ERPProductUpsertPayload
-	readbackProduct *domain.ERPProduct
-	readbackErr     *domain.AppError
+	payload          domain.ERPProductUpsertPayload
+	upsertCalls      int
+	itemStylePayload domain.ERPItemStyleUpdatePayload
+	itemStyleCalls   int
+	readbackProduct  *domain.ERPProduct
+	readbackErr      *domain.AppError
 }
 
 func (s *productManagementERPBridgeCapture) SearchProducts(context.Context, domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError) {
@@ -102,11 +105,14 @@ func (s *productManagementERPBridgeCapture) EnsureLocalProduct(context.Context, 
 
 func (s *productManagementERPBridgeCapture) UpsertProduct(_ context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError) {
 	s.payload = payload
+	s.upsertCalls++
 	return &domain.ERPProductUpsertResult{Status: "accepted"}, nil
 }
 
-func (s *productManagementERPBridgeCapture) UpdateItemStyle(context.Context, domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, *domain.AppError) {
-	return nil, nil
+func (s *productManagementERPBridgeCapture) UpdateItemStyle(_ context.Context, payload domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, *domain.AppError) {
+	s.itemStylePayload = payload
+	s.itemStyleCalls++
+	return &domain.ERPItemStyleUpdateResult{Status: "accepted"}, nil
 }
 
 func (s *productManagementERPBridgeCapture) ShelveProductsBatch(context.Context, domain.ERPProductBatchMutationPayload) (*domain.ERPProductBatchMutationResult, *domain.AppError) {
@@ -144,6 +150,76 @@ func TestProductManagementVerifyERPImageReadbackRejectsNonPublicImage(t *testing
 	}
 	if !strings.Contains(appErr.Message, "不是公网地址") {
 		t.Fatalf("verifyERPImageReadback() message = %q", appErr.Message)
+	}
+}
+
+func TestProductManagementSyncImageUsesItemStyleUpdateWithoutProductNames(t *testing.T) {
+	assetID := int64(7302)
+	versionID := int64(4396)
+	asset := erpImageProxyTestAsset(versionID, "tasks/RW-20260603-A-001081/assets/AST-0006/v1/delivery/image.jpg")
+	asset.AssetID = &assetID
+	signer := NewERPImageProxySigner(ERPImageProxyConfig{
+		PublicBaseURL: "https://yongbo.cloud",
+		SigningSecret: "proxy-secret",
+		TokenTTL:      time.Hour,
+	})
+	bridge := &productManagementERPBridgeCapture{
+		readbackProduct: &domain.ERPProduct{
+			SKUCode:  "NSAC000001",
+			IID:      "定制亚克力",
+			ImageURL: "https://images-erp.sursung.com/prod/erp/ItemSku/NSAC000001.jpg",
+		},
+	}
+	svc := &productManagementService{
+		assetSearch: productManagementAssetSearchStub{
+			versionRow: &repo.TaskAssetSearchRow{Asset: asset},
+		},
+		imageProxy: signer,
+		erpBridge:  bridge,
+		now:        time.Now,
+	}
+
+	longHistoricalName := strings.Repeat("旧", ERPProductNameMaxLength+5)
+	appErr := svc.syncImageRecordToERP(context.Background(), &domain.ProductManagementRecord{
+		ID:                  2,
+		TaskNo:              "RW-20260604-A-001115",
+		SKUCode:             "NSAC000001",
+		ProductName:         longHistoricalName,
+		ImageAssetID:        &assetID,
+		ImageAssetVersionID: &versionID,
+	})
+	if appErr != nil {
+		t.Fatalf("syncImageRecordToERP() appErr = %+v", appErr)
+	}
+	if bridge.upsertCalls != 0 {
+		t.Fatalf("image sync used UpsertProduct %d times, want 0", bridge.upsertCalls)
+	}
+	if bridge.itemStyleCalls != 1 {
+		t.Fatalf("UpdateItemStyle calls = %d, want 1", bridge.itemStyleCalls)
+	}
+	if bridge.itemStylePayload.Name != "" || bridge.itemStylePayload.ShortName != "" {
+		t.Fatalf("image style payload should not carry names: %+v", bridge.itemStylePayload)
+	}
+	if bridge.itemStylePayload.SKUID != "NSAC000001" || bridge.itemStylePayload.IID != "定制亚克力" {
+		t.Fatalf("image style payload identifiers = sku:%q iid:%q", bridge.itemStylePayload.SKUID, bridge.itemStylePayload.IID)
+	}
+	if bridge.itemStylePayload.Pic == "" || bridge.itemStylePayload.PicBig == "" || bridge.itemStylePayload.SKUPic == "" {
+		t.Fatalf("image style payload missing image fields: %+v", bridge.itemStylePayload)
+	}
+}
+
+func TestProductManagementERPImageReadbackPendingClassification(t *testing.T) {
+	pending := domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片回读校验未通过：ERP 尚未返回商品图", nil)
+	if !isProductManagementERPImageReadbackPending(pending) {
+		t.Fatal("expected missing image readback to be classified as pending")
+	}
+	notFound := domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片回读校验未通过：Resource not found.", nil)
+	if isProductManagementERPImageReadbackPending(notFound) {
+		t.Fatal("resource not found must stay a hard failure")
+	}
+	transient := domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步前未找到该 SKU：erp bridge upstream business rejected request", nil)
+	if !isProductManagementERPImageSyncRetryable(transient) {
+		t.Fatal("upstream business rejection should be retried")
 	}
 }
 
