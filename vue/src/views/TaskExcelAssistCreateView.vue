@@ -109,7 +109,7 @@
                         :key="`${err.column}-${err.code}`"
                         class="err-tag"
                       >
-                        {{ err.column }} · {{ err.message || err.code }}
+                        {{ formatBatchViolationMessage(err) }}
                       </span>
                       <span v-if="previewRowErrors(idx + 1).length === 0">—</span>
                     </td>
@@ -320,7 +320,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 import { useTeamOptions } from '@/composables/useTeamOptions'
 import { useActorOwnerScope } from '@/composables/useActorOwnerScope'
 import { useAuth } from '@/composables/useAuth'
-import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
+import { formatBatchViolationMessage, type BatchPreviewRow, type BatchViolation } from '@/services/api/batchSkuApi'
 import type { SingleTaskExcelDraft, ExcelAssistViolation } from '@/services/api/excelAssistApi'
 import type { Task } from '@/domain/types/task'
 import type { TaskBatchItem } from '@/domain/types'

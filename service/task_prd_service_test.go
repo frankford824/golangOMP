@@ -3854,6 +3854,7 @@ func TestTaskServiceCreateBatchRejectsDuplicateDedupeKey(t *testing.T) {
 				ProductName:       "Same Name",
 				ProductShortName:  "Same Short",
 				CategoryCode:      "LIGHTBOX",
+				ProductIID:        "POSTER",
 				MaterialMode:      string(domain.MaterialModePreset),
 				DesignRequirement: "same",
 				VariantJSON:       json.RawMessage(`{"color":"blue"}`),
@@ -3862,14 +3863,69 @@ func TestTaskServiceCreateBatchRejectsDuplicateDedupeKey(t *testing.T) {
 				ProductName:       "Same Name",
 				ProductShortName:  "Same Short",
 				CategoryCode:      "LIGHTBOX",
+				ProductIID:        "POSTER",
 				MaterialMode:      string(domain.MaterialModePreset),
-				DesignRequirement: "different text ignored in dedupe",
+				DesignRequirement: "same",
 				VariantJSON:       json.RawMessage(`{"color":"blue"}`),
 			},
 		},
 	})
 	if appErr == nil {
 		t.Fatal("Create() expected duplicate dedupe_key error")
+	}
+}
+
+func TestTaskServiceCreateBatchAllowsSameStyleWithDifferentDesignRequirement(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
+			iidOptions: []*domain.ERPIIDOption{
+				{IID: "常规海报", Label: "常规海报"},
+			},
+		}),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:     domain.TaskTypeNewProductDevelopment,
+		SourceMode:   domain.TaskSourceModeNewProduct,
+		CreatorID:    9,
+		OwnerTeam:    domain.AllValidTeams()[0],
+		DeadlineAt:   timePtr(),
+		BatchSKUMode: "multiple",
+		BatchItems: []CreateTaskBatchSKUItemParams{
+			{
+				ProductName:       "常规海报/升学宴//5条",
+				ProductIID:        "常规海报",
+				DesignRequirement: "参考图1的色调，文字改成升学宴的主题，尺寸参考第二张图的",
+			},
+			{
+				ProductName:       "常规海报/升学宴//5条",
+				ProductIID:        "常规海报",
+				DesignRequirement: "参考图1的色调，文字改成升学宴的主题，尺寸和参考图二一样，元素稍微改动一点",
+			},
+			{
+				ProductName:       "常规海报/升学宴//5条",
+				ProductIID:        "常规海报",
+				DesignRequirement: "参考图1的色调，尺寸等比例缩小一些，元素稍微改动一点",
+			},
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.BatchItemCount != 3 {
+		t.Fatalf("Create() batch_item_count = %d, want 3", task.BatchItemCount)
+	}
+	if got := len(taskRepo.skuItems[task.ID]); got != 3 {
+		t.Fatalf("task_sku_items len = %d, want 3", got)
 	}
 }
 

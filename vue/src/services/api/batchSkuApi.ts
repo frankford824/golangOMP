@@ -37,6 +37,27 @@ export interface BatchSkuParseResult {
   violations?: BatchViolation[]
 }
 
+export function formatBatchViolationMessage(err: BatchViolation): string {
+  const column = err.column?.trim()
+  const fallback = err.message || err.code || '请检查这一行'
+  if (err.code === 'duplicate_batch_item') {
+    return err.message || '这一行和前面某一行内容重复，请删除重复行或修改产品信息/设计要求'
+  }
+  if (err.code === 'missing_required_field') {
+    return column ? `${column} 未填写` : '必填内容未填写'
+  }
+  if (err.code === 'invalid_i_id') {
+    return column ? `${column} 未匹配到系统中的款式编码` : '产品款式编码未匹配到系统中的可选项'
+  }
+  if (err.code === 'conflicting_product_i_id_columns') {
+    return '产品款式编码与商品编码两列不一致，请保留一致内容后重新上传'
+  }
+  if (err.code === 'invalid_variant_json') {
+    return column ? `${column} 格式不正确` : '变体信息格式不正确'
+  }
+  return column ? `${column}：${fallback}` : fallback
+}
+
 /** 合并后端可能使用的字段名（`product_i_id` / `i_id` / camelCase），避免解析预览与创建透传丢失款式编码。 */
 export function normalizeBatchPreviewRow(row: unknown): BatchPreviewRow {
   if (!row || typeof row !== 'object') return {}

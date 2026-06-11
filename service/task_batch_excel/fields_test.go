@@ -114,6 +114,36 @@ func TestParseValidExcel(t *testing.T) {
 	}
 }
 
+func TestParseExcelAllowsSameProductStyleWithDifferentDesignRequirement(t *testing.T) {
+	content := testWorkbookRows(t, domain.TaskTypeNewProductDevelopment, []map[string]string{
+		{
+			"product_name":       "常规海报/升学宴//5条",
+			"product_i_id":       "常规海报",
+			"design_requirement": "参考图1的色调，文字改成升学宴的主题，尺寸参考第二张图的",
+		},
+		{
+			"product_name":       "常规海报/升学宴//5条",
+			"product_i_id":       "常规海报",
+			"design_requirement": "参考图1的色调，文字改成升学宴的主题，尺寸和参考图二一样，元素稍微改动一点",
+		},
+		{
+			"product_name":       "常规海报/升学宴//5条",
+			"product_i_id":       "常规海报",
+			"design_requirement": "参考图1的色调，尺寸等比例缩小一些，元素稍微改动一点",
+		},
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v, want none", result.Violations)
+	}
+	if len(result.Preview) != 3 {
+		t.Fatalf("preview len = %d, want 3", len(result.Preview))
+	}
+}
+
 func TestParseExcelUploadsEmbeddedReferenceImagesAndValidatesIID(t *testing.T) {
 	content := testWorkbookWithImage(t, "IID-OK")
 	uploader := &parseReferenceUploaderStub{}
@@ -269,6 +299,19 @@ func expectedTemplateHeaders(taskType domain.TaskType) []string {
 
 func testWorkbook(t *testing.T, taskType domain.TaskType, mutate func(map[string]string)) []byte {
 	t.Helper()
+	rows := make([]map[string]string, 0, 2)
+	for row := 2; row <= 3; row++ {
+		values := validRowValues(taskType, row-1)
+		if mutate != nil {
+			mutate(values)
+		}
+		rows = append(rows, values)
+	}
+	return testWorkbookRows(t, taskType, rows)
+}
+
+func testWorkbookRows(t *testing.T, taskType domain.TaskType, rowValues []map[string]string) []byte {
+	t.Helper()
 	fields, _ := FieldsForTaskType(taskType)
 	f := excelize.NewFile()
 	defer f.Close()
@@ -277,11 +320,8 @@ func testWorkbook(t *testing.T, taskType domain.TaskType, mutate func(map[string
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		_ = f.SetCellValue(itemsSheet, cell, field.Column)
 	}
-	for row := 2; row <= 3; row++ {
-		values := validRowValues(taskType, row-1)
-		if mutate != nil {
-			mutate(values)
-		}
+	for i, values := range rowValues {
+		row := i + 2
 		for i, field := range fields {
 			cell, _ := excelize.CoordinatesToCellName(i+1, row)
 			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])

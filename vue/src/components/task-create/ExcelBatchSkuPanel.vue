@@ -134,7 +134,7 @@
               </td>
               <td>
                 <span v-for="err in rowErrors(idx + 1)" :key="err.column + err.code" class="err-tag">
-                  {{ err.column }} · {{ err.message || err.code }}
+                  {{ batchViolationText(err) }}
                 </span>
                 <span v-if="rowErrors(idx + 1).length === 0">—</span>
               </td>
@@ -150,7 +150,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { batchSkuApi, normalizeBatchPreviewRow } from '@/services/api/batchSkuApi'
+import { batchSkuApi, formatBatchViolationMessage, normalizeBatchPreviewRow } from '@/services/api/batchSkuApi'
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import {
@@ -288,6 +288,10 @@ function onExcelPaste(event: ClipboardEvent): void {
 
 function isImage(mimeType: string): boolean {
   return mimeType.startsWith('image/')
+}
+
+function batchViolationText(err: Violation): string {
+  return formatBatchViolationMessage(err)
 }
 
 async function parseFile(): Promise<void> {

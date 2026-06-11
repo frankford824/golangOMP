@@ -127,7 +127,7 @@
                             :key="`${err.column}-${err.code}`"
                             class="batch-err-tag"
                           >
-                            {{ err.column }} · {{ err.message || err.code }}
+                            {{ formatBatchViolationMessage(err) }}
                           </span>
                           <span v-if="previewRowErrors(idx + 1).length === 0">—</span>
                         </td>
@@ -454,7 +454,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useActorOwnerScope } from '@/composables/useActorOwnerScope'
 import { tasksApi } from '@/services/api/tasksApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
-import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
+import { formatBatchViolationMessage, type BatchPreviewRow, type BatchViolation } from '@/services/api/batchSkuApi'
 import { getBeijingDateString, nowISO, taskBeijingDateKey, taskBeijingHour, toBeijingHourISO } from '@/utils/date'
 import { humanizeTaskCreateFields, humanizeViolationCode } from '@/domain/task-create-fields'
 import { normalizePriorityForApi } from '@/domain/task-priority'

@@ -204,7 +204,7 @@ func ValidateBatchTaskCreateRequest(p CreateTaskParams) *domain.AppError {
 		if appErr != nil {
 			addViolation(prefix+".variant_json", "invalid_variant_json", appErr.Message)
 		} else if prev, ok := seenDedupe[dedupeKey]; ok {
-			addViolation(prefix, "duplicate_batch_item", fmt.Sprintf("batch item duplicates batch_items[%d] within the same request", prev))
+			addViolation(prefix, "duplicate_batch_item", fmt.Sprintf("第 %d 行与第 %d 行内容重复，请删除重复行或调整产品信息/设计要求", idx+2, prev+2))
 		} else {
 			seenDedupe[dedupeKey] = idx
 		}
@@ -606,23 +606,33 @@ func computeTaskBatchItemDedupeKey(taskType domain.TaskType, item CreateTaskBatc
 		return "", appErr
 	}
 	payload := struct {
-		TaskType         domain.TaskType `json:"task_type"`
-		ProductName      string          `json:"product_name"`
-		ProductShortName string          `json:"product_short_name,omitempty"`
-		CategoryCode     string          `json:"category_code,omitempty"`
-		MaterialMode     string          `json:"material_mode,omitempty"`
-		CostPriceMode    string          `json:"cost_price_mode,omitempty"`
-		Quantity         *int64          `json:"quantity,omitempty"`
-		VariantJSON      string          `json:"variant_json,omitempty"`
+		TaskType          domain.TaskType `json:"task_type"`
+		ProductName       string          `json:"product_name"`
+		ProductShortName  string          `json:"product_short_name,omitempty"`
+		DesignRequirement string          `json:"design_requirement,omitempty"`
+		CategoryCode      string          `json:"category_code,omitempty"`
+		ProductIID        string          `json:"product_i_id,omitempty"`
+		MaterialMode      string          `json:"material_mode,omitempty"`
+		NewSKU            string          `json:"new_sku,omitempty"`
+		PurchaseSKU       string          `json:"purchase_sku,omitempty"`
+		CostPriceMode     string          `json:"cost_price_mode,omitempty"`
+		Quantity          *int64          `json:"quantity,omitempty"`
+		BaseSalePrice     *float64        `json:"base_sale_price,omitempty"`
+		VariantJSON       string          `json:"variant_json,omitempty"`
 	}{
-		TaskType:         taskType,
-		ProductName:      strings.TrimSpace(item.ProductName),
-		ProductShortName: strings.TrimSpace(item.ProductShortName),
-		CategoryCode:     strings.TrimSpace(item.CategoryCode),
-		MaterialMode:     strings.TrimSpace(item.MaterialMode),
-		CostPriceMode:    strings.TrimSpace(item.CostPriceMode),
-		Quantity:         cloneInt64Ptr(item.Quantity),
-		VariantJSON:      string(variantJSON),
+		TaskType:          taskType,
+		ProductName:       strings.TrimSpace(item.ProductName),
+		ProductShortName:  strings.TrimSpace(item.ProductShortName),
+		DesignRequirement: strings.TrimSpace(item.DesignRequirement),
+		CategoryCode:      strings.TrimSpace(item.CategoryCode),
+		ProductIID:        strings.TrimSpace(item.ProductIID),
+		MaterialMode:      strings.TrimSpace(item.MaterialMode),
+		NewSKU:            strings.TrimSpace(item.NewSKU),
+		PurchaseSKU:       strings.TrimSpace(item.PurchaseSKU),
+		CostPriceMode:     strings.TrimSpace(item.CostPriceMode),
+		Quantity:          cloneInt64Ptr(item.Quantity),
+		BaseSalePrice:     cloneFloat64Ptr(item.BaseSalePrice),
+		VariantJSON:       string(variantJSON),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
