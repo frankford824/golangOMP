@@ -756,6 +756,16 @@ func resolveERPBridgeCategoryConstraint(filter domain.ERPProductSearchFilter, ca
 }
 
 func (s *erpBridgeService) searchERPBridgeProducts(ctx context.Context, normalized domain.ERPProductSearchFilter, catalog *erpBridgeCategoryCatalog, constraint *erpBridgeCategoryConstraint) (*domain.ERPProductListResponse, *domain.AppError) {
+	if shouldSearchERPBridgeLocalReplicaFirst(normalized) {
+		localItems, appErr := s.searchERPBridgeProductsFromLocalReplica(ctx, normalized, catalog, constraint)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if localItems != nil {
+			return localItems, nil
+		}
+	}
+
 	if needsERPBridgeLocalRefinement(normalized, constraint) {
 		return s.searchERPBridgeProductsWithLocalRefinement(ctx, normalized, catalog, constraint)
 	}
@@ -774,6 +784,7 @@ func (s *erpBridgeService) searchERPBridgeProducts(ctx context.Context, normaliz
 		items.Items = []*domain.ERPProduct{}
 	}
 	items.Items = prepareERPProducts(items.Items, catalog)
+	s.cacheERPBridgeProducts(ctx, items.Items)
 	if items.Pagination.Page <= 0 {
 		items.Pagination.Page = normalized.Page
 	}
@@ -791,6 +802,70 @@ func (s *erpBridgeService) searchERPBridgeProducts(ctx context.Context, normaliz
 		}
 	}
 	return items, nil
+}
+
+func (s *erpBridgeService) cacheERPBridgeProducts(ctx context.Context, items []*domain.ERPProduct) {
+	if s.productRepo == nil || s.txRunner == nil || len(items) == 0 {
+		return
+	}
+	products := make([]*domain.Product, 0, len(items))
+	now := time.Now().UTC()
+	for _, item := range items {
+		product := localProductFromERPBridgeProduct(item, now)
+		if product != nil {
+			products = append(products, product)
+		}
+	}
+	if len(products) == 0 {
+		return
+	}
+	_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		_, err := s.productRepo.UpsertBatch(ctx, tx, products)
+		return err
+	})
+}
+
+func localProductFromERPBridgeProduct(item *domain.ERPProduct, now time.Time) *domain.Product {
+	if item == nil {
+		return nil
+	}
+	erpProductID := firstNonEmptyString(item.ProductID, item.SKUID, item.SKUCode)
+	skuCode := firstNonEmptyString(item.SKUCode, item.SKUID, erpProductID)
+	productName := firstNonEmptyString(item.ProductName, item.Name, item.ShortName, skuCode)
+	if erpProductID == "" || skuCode == "" || productName == "" {
+		return nil
+	}
+	snapshot := normalizeERPProductSelectionSnapshot(&domain.ERPProductSelectionSnapshot{
+		ProductID:        erpProductID,
+		SKUID:            item.SKUID,
+		IID:              item.IID,
+		SKUCode:          skuCode,
+		Name:             item.Name,
+		ProductName:      productName,
+		ShortName:        item.ShortName,
+		CategoryID:       item.CategoryID,
+		CategoryCode:     firstNonEmptyString(item.CategoryCode, item.CategoryID),
+		CategoryName:     item.CategoryName,
+		ProductShortName: item.ProductShortName,
+		ImageURL:         item.ImageURL,
+		Price:            item.Price,
+		SPrice:           item.SPrice,
+		WMSCoID:          item.WMSCoID,
+		Currency:         item.Currency,
+	})
+	specJSON := "{}"
+	if b, err := json.Marshal(snapshot); err == nil {
+		specJSON = string(b)
+	}
+	return &domain.Product{
+		ERPProductID:    erpProductID,
+		SKUCode:         skuCode,
+		ProductName:     productName,
+		Category:        firstNonEmptyString(item.CategoryName, item.CategoryCode, item.CategoryID),
+		SpecJSON:        specJSON,
+		Status:          "active",
+		SourceUpdatedAt: &now,
+	}
 }
 
 func (s *erpBridgeService) searchERPBridgeProductsFromLocalReplica(ctx context.Context, normalized domain.ERPProductSearchFilter, catalog *erpBridgeCategoryCatalog, constraint *erpBridgeCategoryConstraint) (*domain.ERPProductListResponse, *domain.AppError) {
@@ -1004,6 +1079,10 @@ func stabilizeERPProductPagination(meta *domain.PaginationMeta, itemCount int) {
 
 func needsERPBridgeLocalRefinement(normalized domain.ERPProductSearchFilter, constraint *erpBridgeCategoryConstraint) bool {
 	return strings.TrimSpace(normalized.SKUCode) != "" || constraint != nil
+}
+
+func shouldSearchERPBridgeLocalReplicaFirst(normalized domain.ERPProductSearchFilter) bool {
+	return normalized.QueryMode == "keyword" && strings.TrimSpace(normalized.Q) != ""
 }
 
 func shouldFallbackERPBridgeKeywordTimeout(err error, normalized domain.ERPProductSearchFilter) bool {
@@ -1274,11 +1353,11 @@ func normalizeERPProductSearchFilter(filter domain.ERPProductSearchFilter) domai
 		normalized.Q = normalized.Keyword
 	}
 	switch {
-	case normalized.Q != "":
-		normalized.QueryMode = "keyword"
 	case normalized.SKUCode != "":
 		normalized.Q = normalized.SKUCode
 		normalized.QueryMode = "sku_code"
+	case normalized.Q != "":
+		normalized.QueryMode = "keyword"
 	case normalized.CategoryID != "" || normalized.CategoryName != "":
 		normalized.QueryMode = "category_auxiliary"
 	default:
@@ -1294,6 +1373,30 @@ func normalizeERPProductSearchFilter(filter domain.ERPProductSearchFilter) domai
 		normalized.PageSize = 100
 	}
 	return normalized
+}
+
+func isERPBridgeSkuLikeKeyword(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 3 {
+		return false
+	}
+	hasLetter := false
+	hasDigit := false
+	for _, r := range value {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case r >= 'a' && r <= 'z':
+			hasLetter = true
+		case r >= 'A' && r <= 'Z':
+			hasLetter = true
+		case r == '-' || r == '_':
+			continue
+		default:
+			return false
+		}
+	}
+	return hasLetter && hasDigit
 }
 
 func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) domain.ERPProductUpsertPayload {

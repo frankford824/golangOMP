@@ -192,7 +192,7 @@ func Load() (*Config, error) {
 		},
 		ERP: ERPSyncConfig{
 			Enabled:    mustParseBool(getEnv("ERP_SYNC_ENABLED", "true")),
-			Interval:   mustParseDuration(getEnv("ERP_SYNC_INTERVAL", "5m")),
+			Interval:   mustParseDuration(getEnv("ERP_SYNC_INTERVAL", "1h")),
 			SourceMode: getEnv("ERP_SYNC_SOURCE_MODE", "stub"),
 			StubFile:   getEnv("ERP_SYNC_STUB_FILE", "config/erp_products_stub.json"),
 			Timeout:    mustParseDuration(getEnv("ERP_SYNC_TIMEOUT", "30s")),

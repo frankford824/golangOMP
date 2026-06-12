@@ -172,6 +172,33 @@ func TestERPBridgeClientSearchProductsUsesCodeLikeIDAsSKUCodeFallback(t *testing
 	}
 }
 
+func TestJSTSkuQueryBizFilterSplitsNameAndSKUKeyword(t *testing.T) {
+	const productName = "常规kt板/毕业手举牌/粉黄青春不打烊梦想启航/6个装"
+	nameBiz := buildJSTSkuQueryBizFilter(domain.ERPProductSearchFilter{
+		Q:        productName,
+		Page:     1,
+		PageSize: 20,
+	})
+	if got := nameBiz["name"]; got != productName {
+		t.Fatalf("name keyword mapped to name = %#v", got)
+	}
+	if _, exists := nameBiz["sku_ids"]; exists {
+		t.Fatalf("name keyword must not be mapped to sku_ids: %#v", nameBiz)
+	}
+
+	skuBiz := buildJSTSkuQueryBizFilter(domain.ERPProductSearchFilter{
+		Q:        "CGD000003",
+		Page:     1,
+		PageSize: 20,
+	})
+	if got := skuBiz["sku_ids"]; got != "CGD000003" {
+		t.Fatalf("sku keyword mapped to sku_ids = %#v", got)
+	}
+	if _, exists := skuBiz["name"]; exists {
+		t.Fatalf("sku keyword must not be mapped to name: %#v", skuBiz)
+	}
+}
+
 func TestERPBridgeClientParsesDetailAndCategories(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -674,6 +701,44 @@ func TestERPBridgeServiceSearchProductsFallsBackToLocalReplicaWhenRemoteKeywordE
 	}
 	if resp.NormalizedFilters == nil || resp.NormalizedFilters.QueryMode != "keyword" {
 		t.Fatalf("SearchProducts() normalized filters = %+v", resp.NormalizedFilters)
+	}
+}
+
+func TestERPBridgeServiceSearchProductsCachesRemoteNameResult(t *testing.T) {
+	const productName = "常规kt板/毕业手举牌/粉黄青春不打烊梦想启航/6个装"
+	client := &erpBridgeClientStub{
+		searchResponses: map[string]*domain.ERPProductListResponse{
+			"page=1&q=" + productName: {
+				Items: []*domain.ERPProduct{
+					{
+						ProductID:    "HSC99999",
+						SKUID:        "HSC99999",
+						SKUCode:      "HSC99999",
+						ProductName:  productName,
+						CategoryName: "常规kt板",
+					},
+				},
+				Pagination: domain.PaginationMeta{Page: 1, PageSize: 20, Total: 1},
+			},
+		},
+		categories: []*domain.ERPCategory{},
+	}
+	productRepo := &erpBridgeProductRepoStub{products: map[string]*domain.Product{}}
+	svc := NewERPBridgeService(client, productRepo, erpBridgeTxRunner{})
+
+	resp, appErr := svc.SearchProducts(context.Background(), domain.ERPProductSearchFilter{
+		Q:        productName,
+		Page:     1,
+		PageSize: 20,
+	})
+	if appErr != nil {
+		t.Fatalf("SearchProducts() appErr = %+v", appErr)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].SKUCode != "HSC99999" {
+		t.Fatalf("SearchProducts() items = %+v", resp.Items)
+	}
+	if got := productRepo.products["HSC99999"]; got == nil || got.ProductName != productName {
+		t.Fatalf("remote name result was not cached: %+v", got)
 	}
 }
 

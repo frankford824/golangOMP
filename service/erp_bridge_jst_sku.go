@@ -200,14 +200,18 @@ func buildJSTSkuQueryBizFilter(filter domain.ERPProductSearchFilter) map[string]
 	}
 	skuKey := strings.TrimSpace(filter.SKUCode)
 	if skuKey == "" {
-		skuKey = strings.TrimSpace(filter.Q)
+		candidate := firstNonEmptyString(strings.TrimSpace(filter.Q), strings.TrimSpace(filter.Keyword))
+		if isERPBridgeSkuLikeKeyword(candidate) {
+			skuKey = candidate
+		}
 	}
-	if skuKey == "" {
-		skuKey = strings.TrimSpace(filter.Keyword)
-	}
-	if skuKey != "" {
+	nameKey := strings.TrimSpace(firstNonEmptyString(filter.Q, filter.Keyword))
+	switch {
+	case skuKey != "":
 		biz["sku_ids"] = skuKey
-	} else {
+	case nameKey != "":
+		biz["name"] = nameKey
+	default:
 		end := time.Now()
 		begin := end.AddDate(0, 0, -6)
 		biz["modified_begin"] = begin.Format("2006-01-02 15:04:05")

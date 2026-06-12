@@ -29,7 +29,7 @@ func (p *JSTOpenWebProductProvider) FetchProducts(ctx context.Context) ([]domain
 	}
 	const maxPages = 200
 	const pageSize = 50
-	const pageThrottle = 500 * time.Millisecond
+	const pageThrottle = 1500 * time.Millisecond
 	const rateLimitRetries = 3
 	seen := make(map[string]struct{})
 	var records []domain.ERPProductRecord
@@ -44,6 +44,9 @@ func (p *JSTOpenWebProductProvider) FetchProducts(ctx context.Context) ([]domain
 				break
 			}
 			if !isJSTOpenWebRateLimited(err) || attempt >= rateLimitRetries {
+				if isJSTOpenWebRateLimited(err) && len(records) > 0 {
+					return records, nil
+				}
 				return records, err
 			}
 			if err := sleepWithContext(ctx, time.Duration(attempt)*3*time.Second); err != nil {
