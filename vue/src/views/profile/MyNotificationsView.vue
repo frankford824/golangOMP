@@ -208,7 +208,6 @@ import {
   UserPlus,
   Users,
 } from 'lucide-vue-next'
-import { useWebSocket } from '@/composables/useWebSocket'
 import { formatNotification } from '@/domain/notification-text'
 import { notificationsApi } from '@/services/api/notificationsApi'
 import { usersApi } from '@/services/api/usersApi'
@@ -295,6 +294,8 @@ function displayContent(item: NotificationItem): string {
 function displayType(item: NotificationItem): string {
   if (item.notification_type === 'system_broadcast') return '系统广播'
   if (item.notification_type === 'task_assigned_to_me') return '任务分配'
+  if (item.notification_type === 'task_pending_audit') return '待审核'
+  if (item.notification_type === 'task_closed') return '已结单'
   if (item.notification_type === 'task_rejected') return '任务驳回'
   if (item.notification_type === 'task_cancelled') return '任务取消'
   return '系统通知'
@@ -434,16 +435,6 @@ function errorMessage(err: unknown, fallback: string): string {
   const message = data.message ?? data.error ?? root.message
   return typeof message === 'string' && message.trim() ? message : fallback
 }
-
-useWebSocket({
-  onMessage(event) {
-    if (event.type === 'notification_arrived') {
-      notificationsStore.applyUnreadCount(event.payload.unread_count)
-      void notificationsStore.load()
-    }
-  },
-  onFallbackPoll: notificationsStore.load,
-})
 
 onMounted(() => {
   void notificationsStore.load()

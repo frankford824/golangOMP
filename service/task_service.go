@@ -334,10 +334,15 @@ type taskService struct {
 	referenceFileRefsEnricher    *ReferenceFileRefsEnricher
 	blueprintRuleEngine          *blueprint.RuleEngine
 	productManagementCloseSyncer ProductManagementCloseSyncer
+	notifications                taskNotificationService
 }
 
 type customizationPricingUserReader interface {
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
+}
+
+type taskNotificationService interface {
+	CreateNotification(ctx context.Context, tx repo.Tx, userID int64, ntype domain.NotificationType, payload json.RawMessage) (*domain.Notification, error)
 }
 
 const (
@@ -499,6 +504,12 @@ func WithTaskCustomizationPricingRuleRepo(ruleRepo repo.CustomizationPricingRule
 func WithTaskProductManagementCloseSyncer(syncer ProductManagementCloseSyncer) TaskServiceOption {
 	return func(s *taskService) {
 		s.productManagementCloseSyncer = syncer
+	}
+}
+
+func WithTaskNotificationService(notifications taskNotificationService) TaskServiceOption {
+	return func(s *taskService) {
+		s.notifications = notifications
 	}
 }
 
@@ -4134,15 +4145,31 @@ func (s *taskService) Close(ctx context.Context, p CloseTaskParams) (*domain.Tas
 		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, nil); err != nil {
 			return err
 		}
-		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventClosed, &p.OperatorID,
+		if _, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventClosed, &p.OperatorID,
 			taskTransitionEventPayload(task, task.TaskStatus, domain.TaskStatusCompleted, task.CurrentHandlerID, nil, map[string]interface{}{
 				"main_status":      string(workflow.MainStatus),
 				"sub_status":       workflow.SubStatus,
 				"remark":           p.Remark,
 				"warehouse_status": warehouseStatusValue(receipt),
 			}),
-		)
-		return err
+		); err != nil {
+			return err
+		}
+		if s.notifications != nil && task.CreatorID > 0 {
+			_, err := s.notifications.CreateNotification(ctx, tx, task.CreatorID, domain.NotificationTypeTaskClosed, mustJSON(map[string]interface{}{
+				"task_id":          task.ID,
+				"task_no":          task.TaskNo,
+				"creator_id":       task.CreatorID,
+				"designer_id":      task.DesignerID,
+				"closed_by":        p.OperatorID,
+				"remark":           p.Remark,
+				"warehouse_status": warehouseStatusValue(receipt),
+			}))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if txErr != nil {
 		return nil, infraError("close task tx", txErr)

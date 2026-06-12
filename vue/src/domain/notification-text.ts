@@ -5,6 +5,8 @@ import type {
   SystemBroadcastPayload,
   TaskAssignedPayload,
   TaskCancelledPayload,
+  TaskClosedPayload,
+  TaskPendingAuditPayload,
   TaskRejectedPayload,
 } from '@/services/v1Types'
 
@@ -41,6 +43,22 @@ export function formatNotification(
       return {
         title: '任务被驳回',
         content: reason ? `${task}被驳回：${reason}` : `${task}被驳回`,
+      }
+    }
+    case 'task_pending_audit': {
+      const p = safePayload as unknown as TaskPendingAuditPayload
+      const team = String(p.team_name ?? p.pool_team_code ?? '').trim()
+      return {
+        title: '任务待审核',
+        content: team ? `${task}设计完成，等待 ${team} 审核` : `${task}设计完成，等待审核`,
+      }
+    }
+    case 'task_closed': {
+      const p = safePayload as unknown as TaskClosedPayload
+      const actor = String(p.closed_by_name ?? '').trim()
+      return {
+        title: '任务已结单',
+        content: actor ? `${task}已由 ${actor} 结单` : `${task}已结单`,
       }
     }
     case 'claim_conflict': {

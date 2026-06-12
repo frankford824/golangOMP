@@ -45,6 +45,7 @@ import (
 	"workflow/service/task_pool"
 	tasksingleexcel "workflow/service/task_single_excel"
 	wsservice "workflow/service/websocket"
+	wecombotsvc "workflow/service/wecombot"
 	"workflow/transport"
 	"workflow/transport/handler"
 	transportws "workflow/transport/ws"
@@ -301,6 +302,21 @@ func main() {
 		InternalToken:           cfg.UploadService.InternalToken,
 		StorageProvider:         cfg.UploadService.StorageProvider,
 	})
+	wsHub := wsservice.NewHub(logger.Named("websocket"))
+	wecomSender := wecombotsvc.NewSender(wecombotsvc.Config{
+		Enabled:       cfg.WeCom.AiBotEnabled,
+		BotID:         cfg.WeCom.AiBotBotID,
+		Secret:        cfg.WeCom.AiBotSecret,
+		DefaultChatID: cfg.WeCom.AiBotDefaultChatID,
+		WSURL:         cfg.WeCom.AiBotWSURL,
+		QueueSize:     cfg.WeCom.AiBotQueueSize,
+	}, logger.Named("wecom_aibot"))
+	wecomNotifier := notificationsvc.NewWeComNotifier(wecomSender, taskRepo, userRepo, logger.Named("wecom_notification"))
+	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"),
+		notificationsvc.WithUserRepo(userRepo),
+		notificationsvc.WithTaskRepo(taskRepo),
+		notificationsvc.WithTxRunner(mdb),
+		notificationsvc.WithExternalNotifier(wecomNotifier))
 	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
 		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
 		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
@@ -324,7 +340,8 @@ func main() {
 		service.WithTaskScopeUserRepo(userRepo),
 		service.WithTaskBlueprintRuleEngine(blueprintRules),
 		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
-		service.WithTaskProductManagementCloseSyncer(productManagementSvc))
+		service.WithTaskProductManagementCloseSyncer(productManagementSvc),
+		service.WithTaskNotificationService(notificationSvc))
 	taskBoardSvc := service.NewTaskBoardService(taskSvc)
 	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
 	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
@@ -385,10 +402,6 @@ func main() {
 		service.WithWarehouseCustomizationJobRepo(customizationJobRepo),
 		service.WithWarehouseFilingTrigger(taskSvc))
 	operationLogSvc := service.NewOperationLogService(taskEventRepo, exportJobEventRepo, integrationCallLogRepo)
-	wsHub := wsservice.NewHub(logger.Named("websocket"))
-	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"),
-		notificationsvc.WithUserRepo(userRepo),
-		notificationsvc.WithTxRunner(mdb))
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
 	blueprintRules.SetNotificationGenerator(notificationGen)
 	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,
@@ -504,6 +517,9 @@ func main() {
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	workers.NewGroup(db, rdb, logger, erpSyncSvc, productManagementSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	if wecomSender.Start(workerCtx) {
+		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
+	}
 	startExternalAssetRefresh(workerCtx, externalAssetSvc, logger.Named("external_assets"))
 	logger.Info("background workers started")
 
@@ -562,6 +578,7 @@ func main() {
 			log.New(os.Stderr, "[WAREHOUSE-AUTO-RELEASE-CRON] ", log.LstdFlags),
 			service.WithWarehouseAutoReleaseModuleRepos(taskModuleRepo, taskModuleEventRepo),
 			service.WithWarehouseAutoReleaseProductManagementCloseSyncer(productManagementSvc),
+			service.WithWarehouseAutoReleaseNotificationService(notificationSvc),
 		)
 		if err := cronInst.Add("warehouse-auto-release", releaseSpec, func(ctx context.Context) error {
 			result, appErr := autoReleaseJob.Run(ctx, service.WarehouseAutoReleaseOptions{

@@ -27,6 +27,7 @@ type WarehouseAutoReleaseJob struct {
 	taskModuleRepo  repo.TaskModuleRepo
 	moduleEventRepo repo.TaskModuleEventRepo
 	closeSyncer     ProductManagementCloseSyncer
+	notifications   taskNotificationService
 	txRunner        repo.TxRunner
 	now             func() time.Time
 	logger          *log.Logger
@@ -59,6 +60,12 @@ func WithWarehouseAutoReleaseModuleRepos(moduleRepo repo.TaskModuleRepo, moduleE
 func WithWarehouseAutoReleaseProductManagementCloseSyncer(syncer ProductManagementCloseSyncer) WarehouseAutoReleaseJobOption {
 	return func(j *WarehouseAutoReleaseJob) {
 		j.closeSyncer = syncer
+	}
+}
+
+func WithWarehouseAutoReleaseNotificationService(notifications taskNotificationService) WarehouseAutoReleaseJobOption {
+	return func(j *WarehouseAutoReleaseJob) {
+		j.notifications = notifications
 	}
 }
 
@@ -264,13 +271,30 @@ func (j *WarehouseAutoReleaseJob) releaseOne(ctx context.Context, taskID int64, 
 		if !updated {
 			return fmt.Errorf("task status changed before auto close")
 		}
-		_, err = j.taskEventRepo.Append(ctx, tx, taskID, domain.TaskEventClosed, actorPtr,
+		if _, err := j.taskEventRepo.Append(ctx, tx, taskID, domain.TaskEventClosed, actorPtr,
 			taskTransitionEventPayload(task, domain.TaskStatusPendingClose, domain.TaskStatusCompleted, task.CurrentHandlerID, nil, map[string]interface{}{
 				"auto_release":     true,
 				"warehouse_status": string(domain.WarehouseReceiptStatusCompleted),
 				"remark":           "系统自动结单：仓库 30 分钟未处理",
+			})); err != nil {
+			return err
+		}
+		if j.notifications != nil && task.CreatorID > 0 {
+			_, err := j.notifications.CreateNotification(ctx, tx, task.CreatorID, domain.NotificationTypeTaskClosed, mustJSON(map[string]interface{}{
+				"task_id":          task.ID,
+				"task_no":          task.TaskNo,
+				"creator_id":       task.CreatorID,
+				"designer_id":      task.DesignerID,
+				"closed_by":        systemActorID,
+				"auto_release":     true,
+				"warehouse_status": string(domain.WarehouseReceiptStatusCompleted),
+				"remark":           "系统自动结单：仓库 30 分钟未处理",
 			}))
-		return err
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return false, err
 	}

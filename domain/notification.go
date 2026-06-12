@@ -11,6 +11,7 @@ const (
 	NotificationTypeTaskAssignedToMe NotificationType = "task_assigned_to_me"
 	NotificationTypeTaskRejected     NotificationType = "task_rejected"
 	NotificationTypeTaskPendingAudit NotificationType = "task_pending_audit"
+	NotificationTypeTaskClosed       NotificationType = "task_closed"
 	NotificationTypeClaimConflict    NotificationType = "claim_conflict"
 	NotificationTypePoolReassigned   NotificationType = "pool_reassigned"
 	NotificationTypeTaskCancelled    NotificationType = "task_cancelled"
@@ -22,6 +23,7 @@ func (t NotificationType) Valid() bool {
 	case NotificationTypeTaskAssignedToMe,
 		NotificationTypeTaskRejected,
 		NotificationTypeTaskPendingAudit,
+		NotificationTypeTaskClosed,
 		NotificationTypeClaimConflict,
 		NotificationTypePoolReassigned,
 		NotificationTypeTaskCancelled,

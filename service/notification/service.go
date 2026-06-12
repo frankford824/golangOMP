@@ -25,11 +25,17 @@ type Broadcaster interface {
 type Service struct {
 	notifications repo.NotificationRepo
 	users         repo.UserRepo
+	tasks         repo.TaskRepo
 	txRunner      repo.TxRunner
 	logs          repo.PermissionLogRepo
 	hub           Broadcaster
+	external      ExternalNotifier
 	now           func() time.Time
 	logger        *zap.Logger
+}
+
+type ExternalNotifier interface {
+	Notify(ctx context.Context, n domain.Notification)
 }
 
 type ServiceOption func(*Service)
@@ -40,9 +46,21 @@ func WithUserRepo(users repo.UserRepo) ServiceOption {
 	}
 }
 
+func WithTaskRepo(tasks repo.TaskRepo) ServiceOption {
+	return func(s *Service) {
+		s.tasks = tasks
+	}
+}
+
 func WithTxRunner(txRunner repo.TxRunner) ServiceOption {
 	return func(s *Service) {
 		s.txRunner = txRunner
+	}
+}
+
+func WithExternalNotifier(notifier ExternalNotifier) ServiceOption {
+	return func(s *Service) {
+		s.external = notifier
 	}
 }
 
@@ -275,21 +293,81 @@ func (s *Service) CreateNotification(ctx context.Context, tx repo.Tx, userID int
 	if !json.Valid(payload) {
 		payload = json.RawMessage(`{}`)
 	}
+	payload = s.enrichPayload(ctx, userID, ntype, payload)
 	n, err := s.notifications.Create(ctx, tx, &domain.Notification{UserID: userID, NotificationType: ntype, Payload: payload})
 	if err != nil {
 		return nil, err
 	}
-	if s.hub != nil {
+	if s.hub != nil || s.external != nil {
 		registerAfterCommit(tx, func() {
-			unread, _ := s.notifications.UnreadCount(context.Background(), userID)
-			s.hub.BroadcastToUser(userID, domain.NewWebSocketEvent(domain.WebSocketEventNotificationArrived, map[string]interface{}{
-				"notification_id":   n.ID,
-				"notification_type": string(n.NotificationType),
-				"unread_count":      unread,
-			}))
+			if s.hub != nil {
+				unread, _ := s.notifications.UnreadCount(context.Background(), userID)
+				s.hub.BroadcastToUser(userID, domain.NewWebSocketEvent(domain.WebSocketEventNotificationArrived, map[string]interface{}{
+					"notification_id":   n.ID,
+					"notification_type": string(n.NotificationType),
+					"unread_count":      unread,
+				}))
+			}
+			if s.external != nil {
+				s.external.Notify(context.Background(), *n)
+			}
 		})
 	}
 	return n, nil
+}
+
+func (s *Service) enrichPayload(ctx context.Context, userID int64, ntype domain.NotificationType, payload json.RawMessage) json.RawMessage {
+	p := payloadMap(payload)
+	taskID := payloadInt64(p, "task_id")
+	if taskID > 0 && s.tasks != nil {
+		if task, err := s.tasks.GetByID(ctx, taskID); err == nil && task != nil {
+			if strings.TrimSpace(payloadString(p, "task_no")) == "" && strings.TrimSpace(task.TaskNo) != "" {
+				p["task_no"] = task.TaskNo
+			}
+			if payloadInt64(p, "creator_id") == 0 && task.CreatorID > 0 {
+				p["creator_id"] = task.CreatorID
+			}
+			if payloadInt64(p, "designer_id") == 0 && task.DesignerID != nil {
+				p["designer_id"] = *task.DesignerID
+			}
+		}
+	}
+	if ntype == domain.NotificationTypeTaskAssignedToMe && payloadInt64(p, "assigned_to_id") == 0 && userID > 0 {
+		p["assigned_to_id"] = userID
+	}
+	s.enrichUserName(ctx, p, "creator_id", "creator_name")
+	s.enrichUserName(ctx, p, "designer_id", "designer_name")
+	s.enrichUserName(ctx, p, "assigned_to_id", "assigned_to_name")
+	s.enrichUserName(ctx, p, "assigned_by", "assigned_by_name")
+	s.enrichUserName(ctx, p, "closed_by", "closed_by_name")
+	s.enrichUserName(ctx, p, "cancelled_by", "cancelled_by_name")
+	return mustRaw(p)
+}
+
+func (s *Service) enrichUserName(ctx context.Context, p map[string]interface{}, idKey, nameKey string) {
+	if s.users == nil || strings.TrimSpace(payloadString(p, nameKey)) != "" {
+		return
+	}
+	userID := payloadInt64(p, idKey)
+	if userID <= 0 {
+		return
+	}
+	if name, err := s.userDisplayName(ctx, userID); err == nil && name != "" {
+		p[nameKey] = name
+	}
+}
+
+func (s *Service) userDisplayName(ctx context.Context, userID int64) (string, error) {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil || user == nil {
+		return "", err
+	}
+	for _, candidate := range []string{user.DisplayName, user.Name, user.RealName, user.Username} {
+		if name := strings.TrimSpace(candidate); name != "" {
+			return name, nil
+		}
+	}
+	return fmt.Sprintf("用户%d", userID), nil
 }
 
 func (s *Service) recordDenied(ctx context.Context, actor domain.RequestActor, id int64) {

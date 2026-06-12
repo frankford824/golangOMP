@@ -30,9 +30,19 @@ type Config struct {
 	ExternalAssets ExternalAssetsConfig
 	AssetCleanup   AssetCleanupConfig
 	AI             AIConfig
+	WeCom          WeComConfig
 	Log            LogConfig
 	Auth           domain.AuthSettings
 	FrontendAccess domain.FrontendAccessSettings
+}
+
+type WeComConfig struct {
+	AiBotEnabled       bool
+	AiBotBotID         string
+	AiBotSecret        string
+	AiBotDefaultChatID string
+	AiBotWSURL         string
+	AiBotQueueSize     int
 }
 
 type AIConfig struct {
@@ -294,6 +304,14 @@ func Load() (*Config, error) {
 			MaxTokens:       mustParseInt(getEnv("AI_AGENT_MAX_TOKENS", "900")),
 			RateLimitWindow: mustParseDuration(getEnv("AI_AGENT_RATE_LIMIT_WINDOW", "5h")),
 			RateLimitMax:    mustParseInt(getEnv("AI_AGENT_RATE_LIMIT_MAX_CALLS", "800")),
+		},
+		WeCom: WeComConfig{
+			AiBotEnabled:       mustParseBool(getEnv("WECOM_AIBOT_ENABLED", "false")),
+			AiBotBotID:         getEnv("WECOM_AIBOT_BOT_ID", ""),
+			AiBotSecret:        getEnv("WECOM_AIBOT_SECRET", ""),
+			AiBotDefaultChatID: getEnv("WECOM_AIBOT_DEFAULT_CHAT_ID", ""),
+			AiBotWSURL:         getEnv("WECOM_AIBOT_WS_URL", "wss://openws.work.weixin.qq.com"),
+			AiBotQueueSize:     mustParseInt(getEnv("WECOM_AIBOT_QUEUE_SIZE", "200")),
 		},
 		Log: LogConfig{
 			Level: getEnv("LOG_LEVEL", "info"),

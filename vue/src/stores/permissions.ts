@@ -12,6 +12,7 @@ import { RoleEnum, DataScopeEnum, PermissionEnum } from '@/types'
 import { authApi } from '@/services/api/authApi'
 import { setToken, clearToken } from '@/services/http'
 import { useNotificationsStore } from '@/stores/notifications.store'
+import { useRealtimeStore } from '@/stores/realtime.store'
 import { useTasksStore } from '@/stores/tasks'
 import type { BackendUser, FrontendAccess, LoginResponse } from '@/services/apiTypes'
 
@@ -310,6 +311,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
     )
     void authApi.refreshAssetCookie().catch(() => undefined)
     void useNotificationsStore().load().catch(() => undefined)
+    useRealtimeStore().start()
   }
 
   /**
@@ -440,6 +442,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
   function logout() {
     void authApi.logout().catch(() => undefined)
     clearToken()
+    useRealtimeStore().stop()
     useNotificationsStore().reset()
     currentUser.value = null
     menus.value = []
