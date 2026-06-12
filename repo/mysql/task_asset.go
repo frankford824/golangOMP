@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -80,6 +81,21 @@ func (r *taskAssetRepo) GetByID(ctx context.Context, id int64) (*domain.TaskAsse
 		FROM task_assets ta
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
 		WHERE ta.id = ?`, id)
+	return scanTaskAsset(row)
+}
+
+func (r *taskAssetRepo) GetByStorageKey(ctx context.Context, storageKey string) (*domain.TaskAsset, error) {
+	key := strings.TrimSpace(storageKey)
+	if key == "" {
+		return nil, nil
+	}
+	row := r.db.db.QueryRowContext(ctx, `
+		SELECT `+taskAssetSelectCols+`
+		FROM task_assets ta
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ta.storage_key = ? OR asr.ref_key = ?
+		ORDER BY ta.created_at DESC
+		LIMIT 1`, key, key)
 	return scanTaskAsset(row)
 }
 

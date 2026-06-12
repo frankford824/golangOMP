@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,16 @@ const (
 	workflowReadinessHeader  = "X-Workflow-API-Readiness"
 	workflowRolesHeader      = "X-Workflow-Required-Roles"
 )
+
+// debugActorHeadersEnabled gates X-Debug-Actor-* identity injection. It is
+// disabled by default so production deployments cannot be impersonated via
+// headers; set AUTH_ALLOW_DEBUG_HEADERS=true only in local/dev environments.
+var debugActorHeadersEnabled = envBoolEnabled("AUTH_ALLOW_DEBUG_HEADERS")
+
+func envBoolEnabled(key string) bool {
+	enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	return enabled
+}
 
 type RequestActorResolver interface {
 	ResolveRequestActor(ctx context.Context, bearerToken string) (*domain.RequestActor, *domain.AppError)
@@ -63,7 +74,7 @@ func injectRequestActorWithFallback(resolver RequestActorResolver, enableSystemF
 			}
 		}
 
-		if !domain.IsSessionBackedRequestActor(actor) {
+		if debugActorHeadersEnabled && !domain.IsSessionBackedRequestActor(actor) {
 			if actorID, ok := parseHeaderInt64(c.GetHeader(debugActorIDHeader)); ok && actorID > 0 {
 				actor.ID = actorID
 				actor.Source = domain.RequestActorSourceDebugHeader

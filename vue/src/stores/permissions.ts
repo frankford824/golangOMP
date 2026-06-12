@@ -308,6 +308,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
       String(user.display_name ?? user.displayName ?? user.username ?? ''),
       normalizeFrontendAccess(access),
     )
+    void authApi.refreshAssetCookie().catch(() => undefined)
     void useNotificationsStore().load().catch(() => undefined)
   }
 
@@ -437,6 +438,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
   }
 
   function logout() {
+    void authApi.logout().catch(() => undefined)
     clearToken()
     useNotificationsStore().reset()
     currentUser.value = null

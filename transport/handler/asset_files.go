@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -27,12 +28,25 @@ type AssetFilesHandler struct {
 	ossPresigner         assetFilesOSSPresigner
 	erpImageAssetRepo    repo.TaskAssetRepo
 	erpImageSigner       *service.ERPImageProxySigner
+	accessTaskRepo       repo.TaskRepo
+	accessTaskAssetRepo  AssetFilesTaskAssetRepo
+	accessStorageRefRepo AssetFilesStorageRefRepo
+	accessUserRepo       repo.UserRepo
 	httpClient           *http.Client
 	logger               *zap.Logger
 }
 
 type assetFilesOSSPresigner interface {
 	PresignPreviewURL(objectKey string) *service.OSSDirectDownloadInfo
+}
+
+type AssetFilesTaskAssetRepo interface {
+	GetByID(ctx context.Context, id int64) (*domain.TaskAsset, error)
+	GetByStorageKey(ctx context.Context, storageKey string) (*domain.TaskAsset, error)
+}
+
+type AssetFilesStorageRefRepo interface {
+	GetByRefKey(ctx context.Context, refKey string) (*domain.AssetStorageRef, error)
 }
 
 // NewAssetFilesHandler creates a handler that proxies file requests to the OSS-backed upload service.
@@ -62,6 +76,125 @@ func (h *AssetFilesHandler) SetERPImageProxy(assetRepo repo.TaskAssetRepo, signe
 	h.erpImageSigner = signer
 }
 
+func (h *AssetFilesHandler) SetFileAccessPolicy(taskRepo repo.TaskRepo, assetRepo AssetFilesTaskAssetRepo, storageRefRepo AssetFilesStorageRefRepo, userRepo repo.UserRepo) {
+	if h == nil {
+		return
+	}
+	h.accessTaskRepo = taskRepo
+	h.accessTaskAssetRepo = assetRepo
+	h.accessStorageRefRepo = storageRefRepo
+	h.accessUserRepo = userRepo
+}
+
+func (h *AssetFilesHandler) authorizeStorageKeyAccess(ctx context.Context, storageKey string) *domain.AppError {
+	if h == nil || h.accessTaskRepo == nil || h.accessTaskAssetRepo == nil || h.accessStorageRefRepo == nil {
+		return nil
+	}
+	storageKey = strings.TrimSpace(storageKey)
+	if storageKey == "" {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "Asset storage path is required.", nil)
+	}
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || !domain.IsSessionBackedRequestActor(actor) {
+		return domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil)
+	}
+	if asset, err := h.accessTaskAssetRepo.GetByStorageKey(ctx, storageKey); err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify asset file access.", nil)
+	} else if asset != nil {
+		return h.authorizeTaskAssetAccess(ctx, asset)
+	}
+	ref, err := h.accessStorageRefRepo.GetByRefKey(ctx, storageKey)
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify asset file access.", nil)
+	}
+	if ref == nil {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+			"deny_code": "asset_file_scope_denied",
+		})
+	}
+	return h.authorizeStorageRefAccess(ctx, actor, ref)
+}
+
+func (h *AssetFilesHandler) authorizeTaskAssetAccess(ctx context.Context, asset *domain.TaskAsset) *domain.AppError {
+	if asset == nil || asset.TaskID <= 0 {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+			"deny_code": "asset_file_scope_denied",
+		})
+	}
+	task, err := h.accessTaskRepo.GetByID(ctx, asset.TaskID)
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify asset file access.", nil)
+	}
+	if task == nil {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+			"deny_code": "asset_file_task_not_found",
+		})
+	}
+	return service.AuthorizeTaskReadDetail(ctx, task, h.accessUserRepo)
+}
+
+func (h *AssetFilesHandler) authorizeStorageRefAccess(ctx context.Context, actor domain.RequestActor, ref *domain.AssetStorageRef) *domain.AppError {
+	if ref == nil {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+			"deny_code": "asset_file_scope_denied",
+		})
+	}
+	switch ref.OwnerType {
+	case domain.AssetOwnerTypeTask:
+		return h.authorizeTaskAccess(ctx, ref.OwnerID)
+	case domain.AssetOwnerTypeTaskAsset:
+		assetID := ref.OwnerID
+		if ref.AssetID != nil && *ref.AssetID > 0 {
+			assetID = *ref.AssetID
+		}
+		asset, err := h.accessTaskAssetRepo.GetByID(ctx, assetID)
+		if err != nil {
+			return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify asset file access.", nil)
+		}
+		return h.authorizeTaskAssetAccess(ctx, asset)
+	case domain.AssetOwnerTypeTaskCreateReference:
+		if actor.ID == ref.OwnerID || assetFilePrivilegedActor(actor) {
+			return nil
+		}
+	case domain.AssetOwnerTypeExportJob, domain.AssetOwnerTypeOutsource, domain.AssetOwnerTypeWarehouse:
+		if actor.ID == ref.OwnerID || assetFilePrivilegedActor(actor) {
+			return nil
+		}
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+		"deny_code":  "asset_file_scope_denied",
+		"owner_type": ref.OwnerType,
+	})
+}
+
+func (h *AssetFilesHandler) authorizeTaskAccess(ctx context.Context, taskID int64) *domain.AppError {
+	if taskID <= 0 {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+			"deny_code": "asset_file_scope_denied",
+		})
+	}
+	task, err := h.accessTaskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify asset file access.", nil)
+	}
+	if task == nil {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+			"deny_code": "asset_file_task_not_found",
+		})
+	}
+	return service.AuthorizeTaskReadDetail(ctx, task, h.accessUserRepo)
+}
+
+func assetFilePrivilegedActor(actor domain.RequestActor) bool {
+	return domain.ActorHasAnyRole(actor, []domain.Role{
+		domain.RoleAdmin,
+		domain.RoleSuperAdmin,
+		domain.RoleOps,
+		domain.RoleERP,
+		domain.RoleWarehouse,
+	})
+}
+
 // ServeFile handles GET /v1/assets/files/:path where path is the OSS object key or file id.
 func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 	pathParam := c.Param("path")
@@ -72,6 +205,16 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 	storageKey := strings.TrimPrefix(pathParam, "/")
 	traceID := domain.TraceIDFromContext(c.Request.Context())
 	downloadFilename := strings.TrimSpace(c.Query(service.DownloadFilenameQueryParam))
+	if appErr := h.authorizeStorageKeyAccess(c.Request.Context(), storageKey); appErr != nil {
+		h.logger.Warn("asset_files_proxy_access_denied",
+			zap.String("trace_id", traceID),
+			zap.String("storage_key", storageKey),
+			zap.String("code", appErr.Code),
+			zap.String("message", appErr.Message),
+		)
+		respondError(c, appErr)
+		return
+	}
 	upstreamURL, err := domain.BuildAbsoluteEscapedURLPath(h.uploadServiceBaseURL, "/files", storageKey)
 	if err != nil {
 		h.logger.Warn("asset_files_proxy_upstream_url_invalid",

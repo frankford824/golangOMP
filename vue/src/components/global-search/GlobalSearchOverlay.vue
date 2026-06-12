@@ -321,11 +321,34 @@ function close(): void {
   emit('update:open', false)
 }
 
+const HTML_ESCAPE_MAP: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch] ?? ch)
+}
+
+// 先按原文切分匹配段，再对每段做 HTML 转义，避免后端返回内容经 v-html 注入。
 function highlight(text: string): string {
   const key = keyword.value.trim()
-  if (!key) return text
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return text.replace(new RegExp(escaped, 'gi'), (match) => `<mark class="bg-amber-100">${match}</mark>`)
+  if (!key) return escapeHtml(text)
+  const escapedPattern = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(escapedPattern, 'gi')
+  let out = ''
+  let last = 0
+  for (const match of text.matchAll(re)) {
+    const idx = match.index ?? 0
+    out += escapeHtml(text.slice(last, idx))
+    out += `<mark class="bg-amber-100">${escapeHtml(match[0])}</mark>`
+    last = idx + match[0].length
+  }
+  out += escapeHtml(text.slice(last))
+  return out
 }
 
 function isNavigable(groupKey: string): boolean {

@@ -457,6 +457,15 @@ func main() {
 	assetUploadH := handler.NewAssetUploadHandler(assetUploadSvc)
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
 	assetFilesH.SetERPImageProxy(taskAssetRepo, erpImageProxySigner)
+	assetFilesTaskAssetRepo, ok := taskAssetRepo.(handler.AssetFilesTaskAssetRepo)
+	if !ok {
+		logger.Fatal("task asset repo does not support asset file access checks")
+	}
+	assetFilesStorageRefRepo, ok := assetStorageRefRepo.(handler.AssetFilesStorageRefRepo)
+	if !ok {
+		logger.Fatal("asset storage ref repo does not support asset file access checks")
+	}
+	assetFilesH.SetFileAccessPolicy(taskRepo, assetFilesTaskAssetRepo, assetFilesStorageRefRepo, userRepo)
 	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
 	taskAISummaryH := handler.NewTaskAISummaryHandler(taskAISummarySvc)

@@ -180,7 +180,9 @@ func Load() (*Config, error) {
 			WriteTimeout: mustParseDuration(getEnv("SERVER_WRITE_TIMEOUT", "30s")),
 		},
 		MySQL: MySQLConfig{
-			DSN:             getEnv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local"),
+			// No default DSN: shipping a built-in root:password fallback is a
+			// credential risk, so deployments must set MYSQL_DSN explicitly.
+			DSN:             getEnv("MYSQL_DSN", ""),
 			MaxOpenConns:    mustParseInt(getEnv("MYSQL_MAX_OPEN_CONNS", "25")),
 			MaxIdleConns:    mustParseInt(getEnv("MYSQL_MAX_IDLE_CONNS", "10")),
 			ConnMaxLifetime: mustParseDuration(getEnv("MYSQL_CONN_MAX_LIFETIME", "5m")),
@@ -300,17 +302,71 @@ func Load() (*Config, error) {
 		FrontendAccess: frontendAccess,
 	}
 	if cfg.MySQL.DSN == "" {
-		return nil, fmt.Errorf("MYSQL_DSN is required")
+		return nil, fmt.Errorf("MYSQL_DSN is required (no built-in default; set the environment variable explicitly)")
 	}
 	return cfg, nil
 }
 
+// Known credential placeholders from auth_identity.example.json. They must
+// never appear in a production identity config loaded from disk.
+const (
+	exampleSuperAdminPassword        = "ChangeMeAdmin123"
+	bootstrapSuperAdminPassword      = "520520Abc"
+	allowBootstrapCredentialsEnvName = "AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS"
+	exampleDepartmentAdminKey        = "CHANGE_ME_ADMIN_KEY"
+)
+
 func loadAuthSettings(path string) (domain.AuthSettings, error) {
 	settings := domain.AuthSettings{}
-	if err := unmarshalConfigFile(path, embeddedAuthSettings, &settings); err != nil {
-		return domain.AuthSettings{}, fmt.Errorf("load auth settings: %w", err)
+	raw, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil && len(raw) > 0:
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("load auth settings: %w", err)
+		}
+		if err := rejectExampleCredentials(settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("auth settings %q: %w", path, err)
+		}
+	case mustParseBool(getEnv("AUTH_ALLOW_EMBEDDED_SETTINGS", "false")):
+		// Dev/test escape hatch: the embedded example contains placeholder
+		// credentials and must never silently seed a production deployment.
+		if err := json.Unmarshal(embeddedAuthSettings, &settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("load embedded auth settings: %w", err)
+		}
+		if err := rejectExampleCredentials(settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("embedded auth settings: %w", err)
+		}
+	default:
+		return domain.AuthSettings{}, fmt.Errorf(
+			"auth settings file %q is missing or empty; set AUTH_SETTINGS_FILE to a real identity config (the embedded example fallback is disabled unless AUTH_ALLOW_EMBEDDED_SETTINGS=true)",
+			path,
+		)
 	}
 	return settings, validateAuthSettings(settings)
+}
+
+func rejectExampleCredentials(settings domain.AuthSettings) error {
+	allowBootstrap := mustParseBool(getEnv(allowBootstrapCredentialsEnvName, "false"))
+	for _, entry := range settings.SuperAdmins {
+		switch entry.Password {
+		case exampleSuperAdminPassword, bootstrapSuperAdminPassword:
+			if allowBootstrap {
+				continue
+			}
+			return fmt.Errorf("super admin %q still uses the example default password; change it before starting the server", entry.Username)
+		}
+	}
+	for department, keys := range settings.DepartmentAdminKeys {
+		for _, key := range keys {
+			if key == exampleDepartmentAdminKey {
+				if allowBootstrap {
+					continue
+				}
+				return fmt.Errorf("department %q still uses the example admin key placeholder; change it before starting the server", department)
+			}
+		}
+	}
+	return nil
 }
 
 func loadFrontendAccessSettings(path string) (domain.FrontendAccessSettings, error) {

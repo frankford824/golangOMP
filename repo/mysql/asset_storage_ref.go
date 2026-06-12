@@ -89,6 +89,23 @@ func (r *assetStorageRefRepo) GetByRefID(ctx context.Context, refID string) (*do
 	return ref, nil
 }
 
+func (r *assetStorageRefRepo) GetByRefKey(ctx context.Context, refKey string) (*domain.AssetStorageRef, error) {
+	row := r.db.db.QueryRowContext(ctx, `
+		SELECT `+assetStorageRefSelectCols+`
+		FROM asset_storage_refs
+		WHERE ref_key = ?
+		ORDER BY created_at DESC
+		LIMIT 1`, strings.TrimSpace(refKey))
+	ref, err := scanAssetStorageRef(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get asset storage ref by key: %w", err)
+	}
+	return ref, nil
+}
+
 func (r *assetStorageRefRepo) UpdateStatus(ctx context.Context, tx repo.Tx, refID string, status domain.AssetStorageRefStatus) error {
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx, `

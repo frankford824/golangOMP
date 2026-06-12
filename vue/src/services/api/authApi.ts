@@ -57,6 +57,20 @@ export const authApi = {
     http.put<void>('/v1/auth/password', payload, { signal }),
 
   /**
+   * 刷新资源文件代理使用的 HttpOnly Cookie。
+   * POST /v1/auth/asset-cookie
+   */
+  refreshAssetCookie: (signal?: AbortSignal) =>
+    http.post<void>('/v1/auth/asset-cookie', undefined, { signal }),
+
+  /**
+   * 清理服务端资源文件 Cookie。
+   * POST /v1/auth/logout
+   */
+  logout: (signal?: AbortSignal) =>
+    http.post<void>('/v1/auth/logout', undefined, { signal }),
+
+  /**
    * 路由权限目录
    * GET /v1/access-rules
    */

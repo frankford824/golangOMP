@@ -12,6 +12,42 @@ import (
 	"workflow/domain"
 )
 
+// Transport tests exercise the debug-header identity path, which is disabled
+// by default in production builds.
+func init() {
+	debugActorHeadersEnabled = true
+}
+
+func TestDebugActorHeadersDisabledByDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	debugActorHeadersEnabled = false
+	t.Cleanup(func() { debugActorHeadersEnabled = true })
+
+	router := gin.New()
+	router.Use(injectRequestActor(nil))
+	router.GET("/whoami", func(c *gin.Context) {
+		actor, ok := domain.RequestActorFromContext(c.Request.Context())
+		if !ok {
+			t.Fatalf("request actor missing from context")
+		}
+		c.JSON(http.StatusOK, actor)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
+	req.Header.Set(debugActorIDHeader, "42")
+	req.Header.Set(debugActorRolesHeader, "Admin")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	var actor domain.RequestActor
+	if err := json.Unmarshal(rec.Body.Bytes(), &actor); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if actor.ID != 0 || actor.Source != domain.RequestActorSourceAnonymous || len(actor.Roles) != 0 {
+		t.Fatalf("actor = %+v, want anonymous actor without roles", actor)
+	}
+}
+
 type legacyRoleGuardRouteCase struct {
 	name                   string
 	method                 string

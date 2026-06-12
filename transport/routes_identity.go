@@ -30,6 +30,10 @@ func registerV1IdentityRoutes(
 		authGroup.POST("/login", authH.Login)
 		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodGet, joinRoutePath(authGroup.BasePath(), "/me"), domain.APIReadinessReadyForFrontend))
 		authGroup.GET("/me", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), authH.Me)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPost, joinRoutePath(authGroup.BasePath(), "/asset-cookie"), domain.APIReadinessReadyForFrontend))
+		authGroup.POST("/asset-cookie", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), authH.RefreshAssetCookie)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPost, joinRoutePath(authGroup.BasePath(), "/logout"), domain.APIReadinessReadyForFrontend))
+		authGroup.POST("/logout", authH.Logout)
 		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPut, joinRoutePath(authGroup.BasePath(), "/password"), domain.APIReadinessReadyForFrontend))
 		authGroup.PUT("/password", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), authH.ChangePassword)
 	}

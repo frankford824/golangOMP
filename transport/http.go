@@ -127,21 +127,22 @@ func NewRouter(
 		}
 	}
 
-	// SKU endpoints
+	// SKU endpoints (legacy surface; reads require login, writes require Ops/Admin)
 	skuGroup := v1.Group("/sku")
 	{
-		skuGroup.GET("/list", skuH.List)
-		skuGroup.POST("", skuH.Create)
-		skuGroup.GET("/:id", skuH.GetByID)
-		skuGroup.GET("/:id/sync_status", skuH.SyncStatus) // sequence-gap recovery
-		skuGroup.POST("/preview_code", skuH.PreviewCode)
+		skuGroup.GET("/list", access(skuGroup, http.MethodGet, "/list", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), skuH.List)
+		skuGroup.POST("", access(skuGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), skuH.Create)
+		skuGroup.GET("/:id", access(skuGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), skuH.GetByID)
+		skuGroup.GET("/:id/sync_status", access(skuGroup, http.MethodGet, "/:id/sync_status", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), skuH.SyncStatus) // sequence-gap recovery
+		skuGroup.POST("/preview_code", access(skuGroup, http.MethodPost, "/preview_code", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), skuH.PreviewCode)
 	}
 
 	// Audit (idempotent via action_id)
-	v1.POST("/audit", withDeprecatedRoute("/v1/tasks/{id}/audit/*", "candidate_for_v1_0_removal"), auditH.Submit)
+	v1.POST("/audit", access(v1, http.MethodPost, "/audit", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin), withDeprecatedRoute("/v1/tasks/{id}/audit/*", "candidate_for_v1_0_removal"), auditH.Submit)
 
-	// NAS Agent endpoints
+	// NAS Agent endpoints (machine-to-machine; pre-shared token via AGENT_API_TOKEN)
 	agentGroup := v1.Group("/agent")
+	agentGroup.Use(withAgentTokenAuth())
 	{
 		agentGroup.POST("/sync", agentH.Sync)
 		agentGroup.POST("/pull_job", agentH.PullJob)
@@ -152,16 +153,16 @@ func NewRouter(
 	// Incident endpoints
 	incidentGroup := v1.Group("/incidents")
 	{
-		incidentGroup.GET("", incidentH.List)
-		incidentGroup.POST("/:id/assign", incidentH.Assign)
-		incidentGroup.POST("/:id/resolve", incidentH.Resolve)
+		incidentGroup.GET("", access(incidentGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), incidentH.List)
+		incidentGroup.POST("/:id/assign", access(incidentGroup, http.MethodPost, "/:id/assign", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), incidentH.Assign)
+		incidentGroup.POST("/:id/resolve", access(incidentGroup, http.MethodPost, "/:id/resolve", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), incidentH.Resolve)
 	}
 
 	// Policy endpoints (Admin-protected on Update)
 	policyGroup := v1.Group("/policies")
 	{
-		policyGroup.GET("", policyH.List)
-		policyGroup.PUT("/:id", policyH.Update)
+		policyGroup.GET("", access(policyGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), policyH.List)
+		policyGroup.PUT("/:id", access(policyGroup, http.MethodPut, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleAdmin), policyH.Update)
 	}
 
 	// V7: Product (ERP master data)
@@ -367,8 +368,10 @@ func NewRouter(
 		assetGroup.GET("/upload-sessions/:session_id", access(assetGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.GetAssetUploadSession)
 		assetGroup.POST("/upload-sessions/:session_id/complete", access(assetGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CompleteAssetUploadSession)
 		assetGroup.POST("/upload-sessions/:session_id/cancel", access(assetGroup, http.MethodPost, "/upload-sessions/:session_id/cancel", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CancelAssetUploadSession)
-		// GET /v1/assets/files/* — compatibility proxy fallback for OSS-backed business file bytes
-		assetGroup.GET("/files/*path", assetFilesH.ServeFile)
+		// GET /v1/assets/files/* — compatibility proxy fallback for OSS-backed business file bytes.
+		// Browser-native loads (<img>) authenticate via login-issued HttpOnly
+		// cookie; header-based sessions pass through.
+		assetGroup.GET("/files/*path", withAssetFileTokenFallback(actorResolver), access(assetGroup, http.MethodGet, "/files/*path", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), assetFilesH.ServeFile)
 		assetGroup.GET("/upload-requests", access(assetGroup, http.MethodGet, "/upload-requests", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.ListUploadRequests)
 		assetGroup.POST("/upload-requests", access(assetGroup, http.MethodPost, "/upload-requests", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.CreateUploadRequest)
 		assetGroup.GET("/upload-requests/:id", access(assetGroup, http.MethodGet, "/upload-requests/:id", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.GetUploadRequest)

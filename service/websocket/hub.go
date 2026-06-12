@@ -64,7 +64,7 @@ func (h *Hub) Unregister(c *Connection) {
 			}
 		}
 	}
-	close(c.send)
+	c.closeSend()
 }
 
 func (h *Hub) BroadcastToUser(userID int64, event domain.WebSocketEvent) {

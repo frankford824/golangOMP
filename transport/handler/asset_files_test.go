@@ -172,6 +172,80 @@ func TestAssetFilesHandlerServeFileRedirectsToOSSDirectOnUpstream404(t *testing.
 	}
 }
 
+func TestAssetFilesHandlerServeFileRejectsUnknownStorageKeyWhenAccessPolicyConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstreamCalled := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		t.Fatalf("upstream must not be called for unauthorized storage key")
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	h := NewAssetFilesHandler(upstream.URL, "oss-token", "oss", zap.NewNop())
+	h.SetFileAccessPolicy(
+		assetFilesTaskRepoStub{},
+		assetFilesTaskAssetRepoStub{},
+		assetFilesStorageRefRepoStub{},
+		nil,
+	)
+	router.GET("/v1/assets/files/*path", h.ServeFile)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/files/tasks/secret/file.png", nil)
+	req = req.WithContext(domain.WithRequestActor(req.Context(), assetFilesSessionActor()))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 body=%s", rec.Code, rec.Body.String())
+	}
+	if upstreamCalled {
+		t.Fatal("upstream was called for unauthorized storage key")
+	}
+}
+
+func TestAssetFilesHandlerServeFileAllowsAuthorizedTaskAssetStorageKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const storageKey = "tasks/RW-1/assets/AST-1/v1/delivery/file.png"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.EscapedPath(); got != "/files/"+storageKey {
+			t.Fatalf("upstream path = %q, want /files/%s", got, storageKey)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	h := NewAssetFilesHandler(upstream.URL, "oss-token", "oss", zap.NewNop())
+	h.SetFileAccessPolicy(
+		assetFilesTaskRepoStub{tasks: map[int64]*domain.Task{101: {ID: 101}}},
+		assetFilesTaskAssetRepoStub{
+			assetsByKey: map[string]*domain.TaskAsset{
+				storageKey: {ID: 501, TaskID: 101},
+			},
+		},
+		assetFilesStorageRefRepoStub{},
+		nil,
+	)
+	router.GET("/v1/assets/files/*path", h.ServeFile)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/files/"+storageKey, nil)
+	req = req.WithContext(domain.WithRequestActor(req.Context(), assetFilesSessionActor()))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "ok" {
+		t.Fatalf("body = %q, want ok", rec.Body.String())
+	}
+}
+
 type assetFilesPresignerStub struct {
 	urls map[string]string
 }
@@ -262,7 +336,8 @@ func TestAssetFilesHandlerServeERPProductImageRejectsInvalidSignature(t *testing
 }
 
 type assetFilesTaskAssetRepoStub struct {
-	assets map[int64]*domain.TaskAsset
+	assets      map[int64]*domain.TaskAsset
+	assetsByKey map[string]*domain.TaskAsset
 }
 
 func (r assetFilesTaskAssetRepoStub) Create(context.Context, repo.Tx, *domain.TaskAsset) (int64, error) {
@@ -271,6 +346,10 @@ func (r assetFilesTaskAssetRepoStub) Create(context.Context, repo.Tx, *domain.Ta
 
 func (r assetFilesTaskAssetRepoStub) GetByID(_ context.Context, id int64) (*domain.TaskAsset, error) {
 	return r.assets[id], nil
+}
+
+func (r assetFilesTaskAssetRepoStub) GetByStorageKey(_ context.Context, storageKey string) (*domain.TaskAsset, error) {
+	return r.assetsByKey[storageKey], nil
 }
 
 func (r assetFilesTaskAssetRepoStub) ListByTaskID(context.Context, int64) ([]*domain.TaskAsset, error) {
@@ -287,6 +366,88 @@ func (r assetFilesTaskAssetRepoStub) NextVersionNo(context.Context, repo.Tx, int
 
 func (r assetFilesTaskAssetRepoStub) NextAssetVersionNo(context.Context, repo.Tx, int64) (int, error) {
 	return 0, nil
+}
+
+type assetFilesStorageRefRepoStub struct {
+	refsByKey map[string]*domain.AssetStorageRef
+}
+
+func (r assetFilesStorageRefRepoStub) GetByRefKey(_ context.Context, refKey string) (*domain.AssetStorageRef, error) {
+	return r.refsByKey[refKey], nil
+}
+
+type assetFilesTaskRepoStub struct {
+	tasks map[int64]*domain.Task
+}
+
+func (r assetFilesTaskRepoStub) Create(context.Context, repo.Tx, *domain.Task, *domain.TaskDetail) (int64, error) {
+	return 0, nil
+}
+
+func (r assetFilesTaskRepoStub) CreateSKUItems(context.Context, repo.Tx, []*domain.TaskSKUItem) error {
+	return nil
+}
+
+func (r assetFilesTaskRepoStub) GetByID(_ context.Context, id int64) (*domain.Task, error) {
+	return r.tasks[id], nil
+}
+
+func (r assetFilesTaskRepoStub) GetDetailByTaskID(context.Context, int64) (*domain.TaskDetail, error) {
+	return nil, nil
+}
+
+func (r assetFilesTaskRepoStub) GetSKUItemBySKUCode(context.Context, string) (*domain.TaskSKUItem, error) {
+	return nil, nil
+}
+
+func (r assetFilesTaskRepoStub) ListSKUItemsByTaskID(context.Context, int64) ([]*domain.TaskSKUItem, error) {
+	return nil, nil
+}
+
+func (r assetFilesTaskRepoStub) List(context.Context, repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
+	return nil, 0, nil
+}
+
+func (r assetFilesTaskRepoStub) ListBoardCandidates(context.Context, repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
+	return nil, nil
+}
+
+func (r assetFilesTaskRepoStub) UpdateDetailBusinessInfo(context.Context, repo.Tx, *domain.TaskDetail) error {
+	return nil
+}
+
+func (r assetFilesTaskRepoStub) UpdatePriority(context.Context, repo.Tx, int64, domain.TaskPriority) error {
+	return nil
+}
+
+func (r assetFilesTaskRepoStub) UpdateProductBinding(context.Context, repo.Tx, *domain.Task) error {
+	return nil
+}
+
+func (r assetFilesTaskRepoStub) UpdateStatus(context.Context, repo.Tx, int64, domain.TaskStatus) error {
+	return nil
+}
+
+func (r assetFilesTaskRepoStub) UpdateDesigner(context.Context, repo.Tx, int64, *int64) error {
+	return nil
+}
+
+func (r assetFilesTaskRepoStub) UpdateHandler(context.Context, repo.Tx, int64, *int64) error {
+	return nil
+}
+
+func (r assetFilesTaskRepoStub) UpdateCustomizationState(context.Context, repo.Tx, int64, *int64, string, string) error {
+	return nil
+}
+
+func assetFilesSessionActor() domain.RequestActor {
+	return domain.RequestActor{
+		ID:       1,
+		Username: "admin",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	}
 }
 
 func TestAssetFilesHandlerServeFileEscapesStorageKeyPath(t *testing.T) {

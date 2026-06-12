@@ -270,8 +270,10 @@ func (s *identityService) SyncConfiguredAuth(ctx context.Context) *domain.AppErr
 		if username == "" {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "configured super admin username is required", nil)
 		}
-		if appErr := s.validatePassword(entry.Password, "configured super admin password"); appErr != nil {
-			return appErr
+		if strings.TrimSpace(entry.Password) != "" {
+			if appErr := s.validatePassword(entry.Password, "configured super admin password"); appErr != nil {
+				return appErr
+			}
 		}
 		if appErr := s.validateDepartment(entry.Department); appErr != nil {
 			return appErr
@@ -2583,10 +2585,6 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 	if appErr := s.ensureUniqueIdentity(ctx, entry.Username, entry.Mobile, existingUserID(existing)); appErr != nil {
 		return appErr
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(entry.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return infraError("hash configured super admin password", err)
-	}
 	roles, appErr := s.resolveConfiguredSuperAdminRoles(entry)
 	if appErr != nil {
 		return appErr
@@ -2609,6 +2607,13 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 	}
 	now := time.Now().UTC()
 	if existing == nil {
+		if strings.TrimSpace(entry.Password) == "" {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "configured super admin password is required when creating a new config-managed admin", nil)
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(entry.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return infraError("hash configured super admin password", err)
+		}
 		user := &domain.User{
 			Username:           entry.Username,
 			DisplayName:        strings.TrimSpace(entry.DisplayName),
@@ -2666,12 +2671,22 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 		}
 		roles = mergeRoles(currentRoles, roles)
 	}
+	var passwordHash string
+	if strings.TrimSpace(entry.Password) != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(entry.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return infraError("hash configured super admin password", err)
+		}
+		passwordHash = string(hash)
+	}
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := s.userRepo.Update(ctx, tx, existing); err != nil {
 			return err
 		}
-		if err := s.userRepo.UpdatePassword(ctx, tx, existing.ID, string(hash), now); err != nil {
-			return err
+		if passwordHash != "" {
+			if err := s.userRepo.UpdatePassword(ctx, tx, existing.ID, passwordHash, now); err != nil {
+				return err
+			}
 		}
 		return s.userRepo.ReplaceRoles(ctx, tx, existing.ID, roles)
 	}); err != nil {
