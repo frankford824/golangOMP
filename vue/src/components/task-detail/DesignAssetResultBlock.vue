@@ -62,7 +62,7 @@
               >
                 V{{ v.rootVersionNo ?? 1 }}
                 <span v-if="isAuditReplacementVersion(v)" class="version-replace-tag">替换</span>
-                <span v-if="versionTotalFileCount(v) > 1" class="version-file-count">{{ versionTotalFileCount(v) }}图</span>
+                <span v-if="versionTotalFileCount(v) > 1" class="version-file-count">{{ versionTotalFileCount(v) }}文件</span>
                 <span v-if="isVersionUnavailable(v)" class="version-unavailable-tag">不可看</span>
               </button>
             </div>

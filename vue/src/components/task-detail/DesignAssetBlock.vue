@@ -145,7 +145,7 @@
           >
             V{{ v.rootVersionNo ?? 1 }}
             <span v-if="isAuditReplacementVersion(v)" class="version-replace-tag">替换</span>
-            <span v-if="versionTotalFileCount(v) > 1" class="version-file-count">{{ versionTotalFileCount(v) }}图</span>
+            <span v-if="versionTotalFileCount(v) > 1" class="version-file-count">{{ versionTotalFileCount(v) }}文件</span>
             <span v-if="isVersionUnavailable(v)" class="version-unavailable-tag">不可看</span>
           </button>
         </div>
@@ -258,6 +258,10 @@ import { resolveBackendPreviewAssetId } from '@/domain/asset-access'
 import {
   downloadHrefForAssetPreviewSlot,
 } from '@/domain/task-asset-preview-slot'
+import {
+  isTaskAssetVersionUnavailable,
+  preferredTaskAssetVersionIndex,
+} from '@/domain/task-asset-version-selection'
 import AssetDownloadLink from '@/components/media/AssetDownloadLink.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
 import { versionTotalFileCount } from '@/utils/task-ui-labels'
@@ -486,6 +490,7 @@ const getDeliveryRemarkSuffixBySkuForPanel = computed((): ((skuCode: string) => 
 
 const activeVersionIdx = ref(0)
 const activeFileIdx = ref(0)
+const hasManualActiveVersionSelection = ref(false)
 const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
 
 /** 后端资产列表（GET /v1/tasks/{id}/assets） */
@@ -604,8 +609,6 @@ onMounted(() => bindBackendAssetsObserver())
 onBeforeUnmount(() => disconnectBackendAssetsObserver())
 
 watch(() => task.value?.id, (id) => {
-  activeVersionIdx.value = 0
-  activeFileIdx.value = 0
   disconnectBackendAssetsObserver()
   if (id) bindBackendAssetsObserver()
 })
@@ -749,15 +752,8 @@ function flatIndexOfVersion(v: TaskAssetVersion): number {
   return scopedAssetVersions.value.findIndex((x) => x.id === v.id)
 }
 
-function versionHasUsableFile(v: TaskAssetVersion): boolean {
-  const hasPreviewable = Array.isArray(v.fileRefs) && v.fileRefs.some((u) => Boolean(u?.trim()))
-  if (hasPreviewable) return true
-  return Boolean(v.nonPreviewFiles?.some((item) => Boolean(item.url?.trim())))
-}
-
 function isVersionUnavailable(v: TaskAssetVersion): boolean {
-  if (versionTotalFileCount(v) <= 0) return true
-  return !versionHasUsableFile(v)
+  return isTaskAssetVersionUnavailable(v)
 }
 
 /**
@@ -775,36 +771,41 @@ function isAuditReplacementVersion(v: TaskAssetVersion): boolean {
 function activateVersion(nextIdx: number) {
   const next = scopedAssetVersions.value[nextIdx]
   if (!next || isVersionUnavailable(next)) return
+  hasManualActiveVersionSelection.value = true
   activeVersionIdx.value = nextIdx
   activeFileIdx.value = 0
 }
 
-watch(
-  () => scopedAssetVersions.value.length,
-  (n) => {
-    if (activeVersionIdx.value >= n) activeVersionIdx.value = Math.max(0, n - 1)
-  },
-)
+function selectPreferredActiveVersion(versions = scopedAssetVersions.value) {
+  const preferredIdx = preferredTaskAssetVersionIndex(versions, isVersionUnavailable)
+  activeVersionIdx.value = preferredIdx >= 0 ? preferredIdx : 0
+  activeFileIdx.value = 0
+}
 
 watch(
   () => [task.value?.id, productIdxCtx?.productIndex.value] as const,
   () => {
-    activeVersionIdx.value = 0
-    activeFileIdx.value = 0
+    hasManualActiveVersionSelection.value = false
+    selectPreferredActiveVersion()
   },
+  { immediate: true },
 )
 
 watch(
   () => scopedAssetVersions.value,
   (versions) => {
-    if (!versions.length) return
+    if (!versions.length) {
+      activeVersionIdx.value = 0
+      activeFileIdx.value = 0
+      return
+    }
+    if (!hasManualActiveVersionSelection.value || activeVersionIdx.value >= versions.length) {
+      selectPreferredActiveVersion(versions)
+      return
+    }
     const current = versions[activeVersionIdx.value]
     if (current && !isVersionUnavailable(current)) return
-    const firstAvailableIdx = versions.findIndex((v) => !isVersionUnavailable(v))
-    if (firstAvailableIdx >= 0) {
-      activeVersionIdx.value = firstAvailableIdx
-      activeFileIdx.value = 0
-    }
+    selectPreferredActiveVersion(versions)
   },
   { immediate: true },
 )
@@ -897,10 +898,8 @@ async function onDeliveryPanelSuccess() {
   await loadBackendAssets()
   const tid = task.value.id
   await tasksStore.loadTaskById(tid)
-  // 时间线只展示 delivery 根；跳转到新上传那版 = 过滤后的最后一个
-  const n = scopedAssetVersions.value.length
-  activeVersionIdx.value = Math.max(0, n - 1)
-  activeFileIdx.value = 0
+  hasManualActiveVersionSelection.value = false
+  selectPreferredActiveVersion()
 }
 </script>
 
