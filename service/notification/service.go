@@ -335,6 +335,16 @@ func (s *Service) enrichPayload(ctx context.Context, userID int64, ntype domain.
 	if ntype == domain.NotificationTypeTaskAssignedToMe && payloadInt64(p, "assigned_to_id") == 0 && userID > 0 {
 		p["assigned_to_id"] = userID
 	}
+	if teamName := payloadString(p, "team_name"); looksTechnical(teamName) {
+		if label := businessTeamLabel(payloadString(p, "pool_team_code", "team_code", "target_team_code", "team_name")); label != "" {
+			p["team_name"] = label
+		}
+	}
+	if moduleName := payloadString(p, "module_name"); looksTechnical(moduleName) {
+		if label := businessModuleLabel(payloadString(p, "module_key", "module_name")); label != "" {
+			p["module_name"] = label
+		}
+	}
 	s.enrichUserName(ctx, p, "creator_id", "creator_name")
 	s.enrichUserName(ctx, p, "designer_id", "designer_name")
 	s.enrichUserName(ctx, p, "assigned_to_id", "assigned_to_name")

@@ -75,16 +75,16 @@ func (n *WeComNotifier) format(ctx context.Context, notification domain.Notifica
 	case domain.NotificationTypeTaskAssignedToMe:
 		creator := firstNonEmpty(payloadString(p, "creator_name"), n.nameByID(ctx, payloadInt64(p, "creator_id")), payloadString(p, "assigned_by_name"), n.nameByID(ctx, payloadInt64(p, "assigned_by")), "未知")
 		assignee := firstNonEmpty(payloadString(p, "assigned_to_name"), n.nameByID(ctx, payloadInt64(p, "assigned_to_id")), payloadString(p, "designer_name"), n.nameByID(ctx, payloadInt64(p, "designer_id")), "未指定")
-		return fmt.Sprintf("新任务 | %s\n创建: %s  指派: %s", taskLabel, creator, assignee),
+		return fmt.Sprintf("新任务 | %s\n创建人: %s  负责人: %s", taskLabel, creator, assignee),
 			fmt.Sprintf("%s:%d:%d", notification.NotificationType, taskID, notification.UserID), true
 	case domain.NotificationTypeTaskPendingAudit:
 		designer := firstNonEmpty(payloadString(p, "designer_name"), n.nameByID(ctx, payloadInt64(p, "designer_id")), "设计")
-		auditTarget := firstNonEmpty(payloadString(p, "team_name"), payloadString(p, "pool_team_code"), "审核池")
-		return fmt.Sprintf("待审核 | %s\n完成: %s  审核: %s", taskLabel, designer, auditTarget),
+		auditTarget := firstNonEmpty(displayTeamLabel(payloadString(p, "pool_team_code"), payloadString(p, "team_name")), "审核组")
+		return fmt.Sprintf("待审核 | %s\n设计师: %s  下一步: %s审核", taskLabel, designer, auditTarget),
 			fmt.Sprintf("%s:%d:%s", notification.NotificationType, taskID, payloadString(p, "pool_team_code")), true
 	case domain.NotificationTypeTaskClosed:
 		operator := firstNonEmpty(payloadString(p, "closed_by_name"), n.nameByID(ctx, payloadInt64(p, "closed_by")), "系统")
-		return fmt.Sprintf("已结单 | %s\n操作: %s", taskLabel, operator),
+		return fmt.Sprintf("已结单 | %s\n结单人: %s", taskLabel, operator),
 			fmt.Sprintf("%s:%d", notification.NotificationType, taskID), true
 	default:
 		return "", "", false
