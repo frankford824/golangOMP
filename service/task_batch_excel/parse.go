@@ -5,7 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -20,6 +25,8 @@ import (
 const (
 	maxEmbeddedReferenceImagesPerRow = 5
 	maxEmbeddedReferenceImageBytes   = 20 * 1024 * 1024
+	defaultExcelRowHeightPoints      = 15
+	defaultExcelRowHeightPixels      = 20
 )
 
 type parseService struct {
@@ -275,32 +282,23 @@ func extractEmbeddedReferenceImages(f *excelize.File, dataSheet string) (map[int
 	}
 	out := make(map[int][]embeddedReferenceImage)
 	for _, cell := range cells {
-		_, row, err := excelize.CellNameToCoordinates(cell)
+		_, anchorRow, err := excelize.CellNameToCoordinates(cell)
 		if err != nil {
 			return nil, excelAppError("read embedded reference image anchor", err)
 		}
-		if row <= 1 {
+		if anchorRow <= 1 {
 			continue
 		}
 		pictures, err := f.GetPictures(dataSheet, cell)
 		if err != nil {
 			return nil, excelAppError("read embedded reference image bytes", err)
 		}
-		if len(out[row])+len(pictures) > maxEmbeddedReferenceImagesPerRow {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "too many reference images in one Excel row", map[string]interface{}{
-				"violations": []ParseViolation{{
-					Row:     row,
-					Column:  "参考图",
-					Code:    "too_many_reference_images",
-					Message: fmt.Sprintf("one row can contain at most %d reference images", maxEmbeddedReferenceImagesPerRow),
-				}},
-			})
-		}
 		for _, pic := range pictures {
 			if len(pic.File) == 0 {
 				continue
 			}
 			if len(pic.File) > maxEmbeddedReferenceImageBytes {
+				row := visualPictureRow(f, dataSheet, anchorRow, pic)
 				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "embedded reference image is too large", map[string]interface{}{
 					"violations": []ParseViolation{{
 						Row:     row,
@@ -311,6 +309,20 @@ func extractEmbeddedReferenceImages(f *excelize.File, dataSheet string) (map[int
 				})
 			}
 			extension := normalizePictureExtension(pic.Extension, pic.File)
+			row := visualPictureRow(f, dataSheet, anchorRow, pic)
+			if row <= 1 {
+				continue
+			}
+			if len(out[row]) >= maxEmbeddedReferenceImagesPerRow {
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "too many reference images in one Excel row", map[string]interface{}{
+					"violations": []ParseViolation{{
+						Row:     row,
+						Column:  "参考图",
+						Code:    "too_many_reference_images",
+						Message: fmt.Sprintf("one row can contain at most %d reference images", maxEmbeddedReferenceImagesPerRow),
+					}},
+				})
+			}
 			out[row] = append(out[row], embeddedReferenceImage{
 				Cell:      cell,
 				Row:       row,
@@ -322,6 +334,44 @@ func extractEmbeddedReferenceImages(f *excelize.File, dataSheet string) (map[int
 		}
 	}
 	return out, nil
+}
+
+func visualPictureRow(f *excelize.File, sheet string, anchorRow int, pic excelize.Picture) int {
+	if anchorRow <= 0 || len(pic.File) == 0 {
+		return anchorRow
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(pic.File))
+	if err != nil || cfg.Height <= 0 {
+		return anchorRow
+	}
+	scaleY := 1.0
+	offsetY := 0
+	if pic.Format != nil {
+		if pic.Format.ScaleY > 0 {
+			scaleY = pic.Format.ScaleY
+		}
+		if pic.Format.OffsetY > 0 {
+			offsetY = pic.Format.OffsetY
+		}
+	}
+	centerY := float64(offsetY) + float64(cfg.Height)*scaleY/2
+	row := anchorRow
+	for rowHeight := excelRowHeightPixels(f, sheet, row); rowHeight > 0 && centerY >= rowHeight; rowHeight = excelRowHeightPixels(f, sheet, row) {
+		centerY -= rowHeight
+		row++
+	}
+	return row
+}
+
+func excelRowHeightPixels(f *excelize.File, sheet string, row int) float64 {
+	height, err := f.GetRowHeight(sheet, row)
+	if err != nil || height <= 0 {
+		return defaultExcelRowHeightPixels
+	}
+	if math.Abs(height-defaultExcelRowHeightPoints) < 0.01 {
+		return defaultExcelRowHeightPixels
+	}
+	return math.Ceil(4.0 / 3.4 * height)
 }
 
 func (s *parseService) validateProductIIDs(ctx context.Context, items []service.CreateTaskBatchSKUItemParams, itemRows []int, lookup ERPIIDLookup) ([]ParseViolation, *domain.AppError) {

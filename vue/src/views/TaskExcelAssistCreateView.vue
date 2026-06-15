@@ -85,23 +85,68 @@
                     <td class="cell-ellipsis">{{ row.design_requirement || '—' }}</td>
                     <td>{{ row.product_i_id || '—' }}</td>
                     <td>
-                      <div v-if="row.reference_file_refs?.length" class="ref-thumbs">
-                        <span
-                          v-for="ref in row.reference_file_refs"
-                          :key="ref.ref_id"
-                          class="ref-thumb-item"
-                          :title="ref.filename"
+                      <div class="row-ref-editor">
+                        <input
+                          :ref="(el) => setBatchReferenceInput(idx, el)"
+                          type="file"
+                          class="hidden-input"
+                          :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                          multiple
+                          :disabled="batchRefUploadingRow === idx"
+                          @change="handleBatchReferenceUpload(idx, $event)"
+                        />
+                        <div v-if="row.reference_file_refs?.length" class="ref-thumbs">
+                          <span
+                            v-for="(ref, refIdx) in row.reference_file_refs"
+                            :key="ref.ref_id || `${idx}-${refIdx}`"
+                            class="ref-thumb-item"
+                            :title="ref.filename"
+                          >
+                            <img
+                              v-if="isImageMime(ref.mime_type)"
+                              :src="ref.download_url"
+                              :alt="ref.filename"
+                              class="ref-thumb-img"
+                            />
+                            <span v-else class="ref-thumb-file">{{ ref.filename }}</span>
+                            <span class="ref-thumb-actions">
+                              <button
+                                type="button"
+                                class="ref-action"
+                                :disabled="idx === 0 || batchRefUploadingRow != null"
+                                @click="moveBatchReference(idx, refIdx, -1)"
+                              >
+                                上移
+                              </button>
+                              <button
+                                type="button"
+                                class="ref-action"
+                                :disabled="idx >= previewRows.length - 1 || batchRefUploadingRow != null"
+                                @click="moveBatchReference(idx, refIdx, 1)"
+                              >
+                                下移
+                              </button>
+                              <button
+                                type="button"
+                                class="ref-action ref-action-danger"
+                                :disabled="batchRefUploadingRow != null"
+                                @click="removeBatchReference(idx, refIdx)"
+                              >
+                                删除
+                              </button>
+                            </span>
+                          </span>
+                        </div>
+                        <span v-else class="empty-ref-text">未上传</span>
+                        <button
+                          type="button"
+                          class="ref-upload-btn"
+                          :disabled="batchRefUploadingRow != null"
+                          @click="openBatchReferenceUpload(idx)"
                         >
-                          <img
-                            v-if="isImageMime(ref.mime_type)"
-                            :src="ref.download_url"
-                            :alt="ref.filename"
-                            class="ref-thumb-img"
-                          />
-                          <span v-else class="ref-thumb-file">{{ ref.filename }}</span>
-                        </span>
+                          {{ batchRefUploadingRow === idx ? '上传中...' : '补传参考图' }}
+                        </button>
                       </div>
-                      <span v-else>—</span>
                     </td>
                     <td>
                       <span
@@ -117,6 +162,8 @@
                 </tbody>
               </table>
             </div>
+            <p v-if="batchRefAdjustStatus" class="batch-ref-status">{{ batchRefAdjustStatus }}</p>
+            <p v-if="batchRefAdjustError" class="batch-ref-error">{{ batchRefAdjustError }}</p>
           </section>
 
           <section v-if="flow === 'purchase_single' && purchaseDraft" class="preview-section">
@@ -320,10 +367,11 @@ import { usePermissionsStore } from '@/stores/permissions'
 import { useTeamOptions } from '@/composables/useTeamOptions'
 import { useActorOwnerScope } from '@/composables/useActorOwnerScope'
 import { useAuth } from '@/composables/useAuth'
-import { formatBatchViolationMessage, type BatchPreviewRow, type BatchViolation } from '@/services/api/batchSkuApi'
+import { formatBatchViolationMessage, type BatchPreviewRow, type BatchViolation, type ReferenceFileRef as BatchReferenceFileRef } from '@/services/api/batchSkuApi'
 import type { SingleTaskExcelDraft, ExcelAssistViolation } from '@/services/api/excelAssistApi'
 import type { Task } from '@/domain/types/task'
 import type { TaskBatchItem } from '@/domain/types'
+import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import {
   canSubmitExcelAssistBatch,
   canSubmitExcelAssistOriginalSingle,
@@ -345,6 +393,14 @@ import {
   taskBeijingHour,
   toBeijingHourISO,
 } from '@/utils/date'
+import { formatUploadFailureMessage } from '@/utils/upload-errors'
+import {
+  REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
+  REFERENCE_UPLOAD_MAX_FILE_SIZE_MB,
+  isAcceptableReferenceFile,
+  referenceFileTooLargeMessage,
+} from '@/domain/constants/reference-upload'
+import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
 
 const EXCEL_ASSIST_TASK_TYPE = 'new_product_development' as const
 
@@ -368,6 +424,10 @@ const flow = ref<ExcelAssistFlow>('new_batch')
 const previewRows = ref<BatchPreviewRow[]>([])
 const violations = ref<BatchViolation[]>([])
 const batchItems = ref<TaskBatchItem[]>([])
+const batchReferenceInputs = ref<Record<number, HTMLInputElement | null>>({})
+const batchRefUploadingRow = ref<number | null>(null)
+const batchRefAdjustStatus = ref('')
+const batchRefAdjustError = ref('')
 
 const singleDraft = ref<SingleTaskExcelDraft | null>(null)
 const singleViolations = ref<ExcelAssistViolation[]>([])
@@ -523,6 +583,9 @@ function resetBatchExcelState() {
   previewRows.value = []
   violations.value = []
   batchItems.value = []
+  batchRefAdjustStatus.value = ''
+  batchRefAdjustError.value = ''
+  batchReferenceInputs.value = {}
 }
 
 function resetSingleExcelState() {
@@ -551,9 +614,9 @@ function resetAllExcelState() {
 function onBatchExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchViolation[] }) {
   previewRows.value = payload.preview
   violations.value = payload.violations
-  batchItems.value = mapExcelPreviewToBatchItems(EXCEL_ASSIST_TASK_TYPE, payload.preview, {
-    skuCodeType: 'regular',
-  })
+  syncBatchItemsFromPreview()
+  batchRefAdjustStatus.value = ''
+  batchRefAdjustError.value = ''
   submitError.value = ''
 }
 
@@ -610,6 +673,118 @@ function previewRowErrors(row: number): BatchViolation[] {
 
 function isImageMime(mimeType: string): boolean {
   return mimeType.startsWith('image/')
+}
+
+function syncBatchItemsFromPreview() {
+  batchItems.value = mapExcelPreviewToBatchItems(EXCEL_ASSIST_TASK_TYPE, previewRows.value, {
+    skuCodeType: 'regular',
+  })
+}
+
+function setBatchReferenceInput(index: number, el: unknown) {
+  batchReferenceInputs.value[index] = el instanceof HTMLInputElement ? el : null
+}
+
+function batchRowReferenceRefs(index: number): BatchReferenceFileRef[] {
+  return [...(previewRows.value[index]?.reference_file_refs ?? [])]
+}
+
+function updateBatchRowReferenceRefs(index: number, refs: BatchReferenceFileRef[]) {
+  previewRows.value = previewRows.value.map((row, idx) =>
+    idx === index
+      ? { ...row, reference_file_refs: refs.length > 0 ? refs : undefined }
+      : row,
+  )
+  syncBatchItemsFromPreview()
+}
+
+function openBatchReferenceUpload(index: number) {
+  batchRefAdjustError.value = ''
+  batchReferenceInputs.value[index]?.click()
+}
+
+async function handleBatchReferenceUpload(index: number, event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  if (!files.length) return
+  if (batchRefUploadingRow.value != null) return
+  batchRefAdjustStatus.value = ''
+  batchRefAdjustError.value = ''
+
+  const oversized = files.filter((f) => f.size > REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES)
+  const unsupported = files.filter((f) => !isAllowedUploadFile(f.name))
+  const validFiles = files.filter(
+    (f) =>
+      isAllowedUploadFile(f.name) &&
+      isAcceptableReferenceFile(f) &&
+      f.size <= REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
+  )
+  const errors: string[] = []
+  if (oversized.length > 0) {
+    errors.push(
+      oversized.length === 1
+        ? referenceFileTooLargeMessage(oversized[0]?.name)
+        : `有 ${oversized.length} 个文件超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB，已拒绝上传`,
+    )
+  }
+  if (unsupported.length > 0) {
+    errors.push(
+      unsupported.length === 1
+        ? `不支持的文件类型：${unsupported[0]?.name ?? ''}`
+        : `有 ${unsupported.length} 个文件类型不受支持，已拒绝上传`,
+    )
+  }
+  if (errors.length > 0) {
+    batchRefAdjustError.value = errors.join('；')
+  }
+  if (!validFiles.length) return
+
+  batchRefUploadingRow.value = index
+  try {
+    const refs = batchRowReferenceRefs(index)
+    for (const file of validFiles) {
+      const uploaded = await uploadReferenceFileRef(file)
+      refs.push(uploaded as unknown as BatchReferenceFileRef)
+    }
+    updateBatchRowReferenceRefs(index, refs)
+    batchRefAdjustStatus.value = `第 ${index + 1} 行已补传 ${validFiles.length} 个参考图`
+  } catch (err) {
+    batchRefAdjustError.value = formatUploadFailureMessage('reference_upload', err)
+  } finally {
+    batchRefUploadingRow.value = null
+  }
+}
+
+function removeBatchReference(rowIndex: number, refIndex: number) {
+  const refs = batchRowReferenceRefs(rowIndex)
+  if (refIndex < 0 || refIndex >= refs.length) return
+  refs.splice(refIndex, 1)
+  updateBatchRowReferenceRefs(rowIndex, refs)
+  batchRefAdjustStatus.value = `已从第 ${rowIndex + 1} 行移除参考图`
+  batchRefAdjustError.value = ''
+}
+
+function moveBatchReference(rowIndex: number, refIndex: number, offset: -1 | 1) {
+  const targetIndex = rowIndex + offset
+  if (targetIndex < 0 || targetIndex >= previewRows.value.length) return
+  const sourceRefs = batchRowReferenceRefs(rowIndex)
+  if (refIndex < 0 || refIndex >= sourceRefs.length) return
+  const [ref] = sourceRefs.splice(refIndex, 1)
+  const targetRefs = batchRowReferenceRefs(targetIndex)
+  targetRefs.push(ref)
+  previewRows.value = previewRows.value.map((row, idx) => {
+    if (idx === rowIndex) {
+      return { ...row, reference_file_refs: sourceRefs.length > 0 ? sourceRefs : undefined }
+    }
+    if (idx === targetIndex) {
+      return { ...row, reference_file_refs: targetRefs }
+    }
+    return row
+  })
+  syncBatchItemsFromPreview()
+  batchRefAdjustStatus.value = `参考图已移动到第 ${targetIndex + 1} 行`
+  batchRefAdjustError.value = ''
 }
 
 function resolveOwnerDepartmentForSubmit(): string | undefined {
@@ -932,12 +1107,32 @@ onMounted(() => {
 .ref-thumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
+  gap: 0.35rem;
+}
+
+.row-ref-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 190px;
+}
+
+.hidden-input {
+  display: none;
+}
+
+.ref-thumb-item {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: flex-start;
+  max-width: 88px;
 }
 
 .ref-thumb-img {
-  width: 36px;
-  height: 36px;
+  width: 56px;
+  height: 56px;
   object-fit: cover;
   border-radius: 4px;
   border: 1px solid var(--color-border, #e5e7eb);
@@ -946,6 +1141,60 @@ onMounted(() => {
 .ref-thumb-file {
   font-size: 0.7rem;
   color: var(--color-text-secondary, #6b7280);
+}
+
+.ref-thumb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.ref-action,
+.ref-upload-btn {
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 4px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-secondary, #4b5563);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  padding: 0.16rem 0.3rem;
+  cursor: pointer;
+}
+
+.ref-action:disabled,
+.ref-upload-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ref-action-danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.ref-upload-btn {
+  align-self: flex-start;
+  color: var(--color-primary, #2563eb);
+  border-color: color-mix(in srgb, var(--color-primary, #2563eb) 35%, #d1d5db);
+}
+
+.empty-ref-text {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.batch-ref-status,
+.batch-ref-error {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.batch-ref-status {
+  color: #047857;
+}
+
+.batch-ref-error {
+  color: #b91c1c;
 }
 
 .err-tag {

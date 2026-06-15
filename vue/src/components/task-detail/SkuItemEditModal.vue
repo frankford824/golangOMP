@@ -34,7 +34,15 @@
 
       <div class="sku-edit-refs">
         <p class="sku-edit-section-title">行级参考图</p>
-        <AssetThumbStrip :items="referenceThumbs" empty-text="未上传" size="sm" />
+        <ReferenceUploadPanel
+          v-model="skuReferenceRefs"
+          :task-id="taskId"
+          :target-sku-code="skuItem?.skuCode"
+          owner-module-key="basic_info"
+          upload-policy="append_only"
+          compact
+        />
+        <p v-if="refsChanged" class="sku-edit-ref-hint">参考图变更后，保存时会同步当前子项资料。</p>
       </div>
 
       <div class="sku-edit-cost">
@@ -84,7 +92,7 @@ import BaseModal from '@/components/base/BaseModal.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
-import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
+import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import type { TaskSkuItem } from '@/domain/types/task'
 import {
@@ -119,6 +127,8 @@ const form = ref({
   remark: '',
 })
 const initialCostDraft = ref('')
+const skuReferenceRefs = ref<(Record<string, unknown> | string)[]>([])
+const initialReferenceRefsDraft = ref('[]')
 
 const productIIdModel = computed({
   get: () => form.value.productIId ?? '',
@@ -127,21 +137,7 @@ const productIIdModel = computed({
   },
 })
 
-const referenceThumbs = computed((): AssetThumbItem[] => {
-  const refs = props.skuItem?.referenceFileRefs ?? []
-  return refs
-    .map((ref, idx) => {
-      const src = String(ref.download_url ?? '').trim()
-      if (!src) return null
-      return {
-        key: `sku-edit-ref-${props.skuItem?.id ?? props.skuItem?.skuCode ?? 'row'}-${idx}`,
-        src,
-        alt: String(ref.filename ?? `参考图 ${idx + 1}`),
-        label: String(ref.filename ?? `参考图 ${idx + 1}`),
-      }
-    })
-    .filter((row) => row != null) as AssetThumbItem[]
-})
+const refsChanged = computed(() => referenceRefsDraftKey(skuReferenceRefs.value) !== initialReferenceRefsDraft.value)
 
 const currentCostText = computed(() => {
   const cost = numericCost(props.skuItem?.costPrice)
@@ -166,6 +162,8 @@ watch(
       remark: '',
     }
     initialCostDraft.value = form.value.costPrice
+    skuReferenceRefs.value = [...(props.skuItem.referenceFileRefs ?? [])] as (Record<string, unknown> | string)[]
+    initialReferenceRefsDraft.value = referenceRefsDraftKey(skuReferenceRefs.value)
     errorText.value = ''
   },
   { immediate: true },
@@ -187,6 +185,10 @@ function normalizedCostDraft(value: string): string {
   const amount = Number(trimmed)
   if (!Number.isFinite(amount)) return trimmed
   return String(amount)
+}
+
+function referenceRefsDraftKey(refs: (Record<string, unknown> | string)[]): string {
+  return JSON.stringify(refs ?? [])
 }
 
 async function submit() {
@@ -215,8 +217,8 @@ async function submit() {
     product_name: form.value.productName.trim() || null,
     product_i_id: form.value.productIId.trim() || null,
     design_requirement: form.value.designRequirement.trim() || null,
-    reference_file_refs: props.skuItem.referenceFileRefs ?? [],
-    trigger_filing: form.value.triggerFiling === true || undefined,
+    reference_file_refs: skuReferenceRefs.value,
+    trigger_filing: form.value.triggerFiling === true || refsChanged.value || undefined,
     remark: form.value.remark.trim() || undefined,
   }
   try {
@@ -266,6 +268,22 @@ async function submit() {
   font-size: 0.75rem;
   font-weight: 700;
   color: #475467;
+}
+
+.sku-edit-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  border: 1px solid #eaecf0;
+  border-radius: 0.75rem;
+  background: #fff;
+  padding: 0.75rem;
+}
+
+.sku-edit-ref-hint {
+  margin: 0;
+  color: #047857;
+  font-size: 0.75rem;
 }
 
 .sku-edit-cost {

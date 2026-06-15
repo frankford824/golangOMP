@@ -172,6 +172,30 @@ func TestParseExcelUploadsEmbeddedReferenceImagesAndValidatesIID(t *testing.T) {
 	}
 }
 
+func TestParseExcelAssignsReferenceImageByVisualCenterRow(t *testing.T) {
+	content := testWorkbookWithImageCenteredInNextRow(t)
+	uploader := &parseReferenceUploaderStub{}
+	result, appErr := NewParseServiceWithDependencies(uploader, nil).Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content), WithActorID(42))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v, want none", result.Violations)
+	}
+	if len(result.Preview) != 2 {
+		t.Fatalf("preview len = %d, want 2", len(result.Preview))
+	}
+	if len(result.Preview[0].ReferenceFileRefs) != 0 {
+		t.Fatalf("row 2 reference_file_refs = %+v, want none", result.Preview[0].ReferenceFileRefs)
+	}
+	if len(result.Preview[1].ReferenceFileRefs) != 1 {
+		t.Fatalf("row 3 reference_file_refs = %+v, want 1", result.Preview[1].ReferenceFileRefs)
+	}
+	if len(uploader.filenames) != 1 || uploader.filenames[0] != "batch-row-3-reference-1.png" {
+		t.Fatalf("uploaded filenames = %+v, want batch-row-3-reference-1.png", uploader.filenames)
+	}
+}
+
 func TestParseExcelRejectsInvalidIIDBeforeUploadingImages(t *testing.T) {
 	content := testWorkbookWithImage(t, "BAD-IID")
 	uploader := &parseReferenceUploaderStub{}
@@ -367,6 +391,41 @@ func testWorkbookWithImage(t *testing.T, iid string) []byte {
 	return buf.Bytes()
 }
 
+func testWorkbookWithImageCenteredInNextRow(t *testing.T) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+	_ = f.SetRowHeight(itemsSheet, 2, 17)
+	_ = f.SetRowHeight(itemsSheet, 3, 17)
+	for i, field := range fields {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(itemsSheet, cell, field.Column)
+	}
+	for row := 2; row <= 3; row++ {
+		values := validRowValues(domain.TaskTypeNewProductDevelopment, row-1)
+		for i, field := range fields {
+			cell, _ := excelize.CoordinatesToCellName(i+1, row)
+			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
+		}
+	}
+	if err := f.AddPictureFromBytes(itemsSheet, "D2", &excelize.Picture{
+		Extension: ".png",
+		File:      solidPNG(20, 20),
+		Format: &excelize.GraphicOptions{
+			OffsetY: 12,
+		},
+	}); err != nil {
+		t.Fatalf("AddPictureFromBytes: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
 func testWorkbookWithCustomHeaderColumns(
 	t *testing.T,
 	taskType domain.TaskType,
@@ -542,11 +601,13 @@ func appErrorHasCode(appErr *domain.AppError, code string) bool {
 type parseReferenceUploaderStub struct {
 	calls     int
 	createdBy int64
+	filenames []string
 }
 
 func (s *parseReferenceUploaderStub) UploadFile(_ context.Context, params service.UploadTaskReferenceFileParams) (*domain.ReferenceFileRef, *domain.AppError) {
 	s.calls++
 	s.createdBy = params.CreatedBy
+	s.filenames = append(s.filenames, params.Filename)
 	ref := domain.ReferenceFileRef{
 		AssetID:         "asset-from-excel",
 		RefID:           "asset-from-excel",
@@ -577,8 +638,19 @@ func (s *parseIIDLookupStub) ListIIDs(_ context.Context, filter domain.ERPIIDLis
 }
 
 func tinyPNG() []byte {
+	return solidPNG(1, 1)
+}
+
+func solidPNG(width, height int) []byte {
 	img := image.NewNRGBA(image.Rect(0, 0, 1, 1))
-	img.Set(0, 0, color.NRGBA{R: 255, A: 255})
+	if width > 0 && height > 0 {
+		img = image.NewNRGBA(image.Rect(0, 0, width, height))
+	}
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			img.Set(x, y, color.NRGBA{R: 255, A: 255})
+		}
+	}
 	var buf bytes.Buffer
 	_ = png.Encode(&buf, img)
 	return buf.Bytes()

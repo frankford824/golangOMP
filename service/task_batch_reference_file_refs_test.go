@@ -160,6 +160,98 @@ func TestTaskServiceCreateBatchMergesItemLevelReferenceFileRefsWithValidation(t 
 	}
 }
 
+func TestTaskServiceUpdateSKUItemInfoRefreshesBatchTaskReferenceSummary(t *testing.T) {
+	topRef := domain.ReferenceFileRef{AssetID: "task-top", RefID: "task-top", Filename: "task-top.png"}
+	oldA := domain.ReferenceFileRef{AssetID: "old-a", RefID: "old-a", Filename: "old-a.png"}
+	newA := domain.ReferenceFileRef{AssetID: "new-a", RefID: "new-a", Filename: "new-a.png"}
+	itemB := domain.ReferenceFileRef{AssetID: "item-b", RefID: "item-b", Filename: "item-b.png"}
+	detailRefsJSON, err := json.Marshal([]domain.ReferenceFileRef{topRef, oldA, itemB})
+	if err != nil {
+		t.Fatalf("marshal detail refs: %v", err)
+	}
+
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			950: {
+				ID:             950,
+				TaskNo:         "RW-BATCH-REF-950",
+				TaskType:       domain.TaskTypeNewProductDevelopment,
+				TaskStatus:     domain.TaskStatusPendingAuditA,
+				IsBatchTask:    true,
+				BatchItemCount: 2,
+				BatchMode:      domain.TaskBatchModeMultiSKU,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			950: {
+				TaskID:                950,
+				ReferenceFileRefsJSON: string(detailRefsJSON),
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			950: {
+				{
+					ID:                  951,
+					TaskID:              950,
+					SequenceNo:          1,
+					SKUCode:             "SKU-A",
+					ProductNameSnapshot: "商品 A",
+					DesignRequirement:   "旧需求",
+					ReferenceFileRefs:   []domain.ReferenceFileRef{oldA},
+				},
+				{
+					ID:                  952,
+					TaskID:              950,
+					SequenceNo:          2,
+					SKUCode:             "SKU-B",
+					ProductNameSnapshot: "商品 B",
+					DesignRequirement:   "需求 B",
+					ReferenceFileRefs:   []domain.ReferenceFileRef{itemB},
+				},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	_, appErr := svc.UpdateSKUItemInfo(context.Background(), UpdateTaskSKUItemInfoParams{
+		TaskID:               950,
+		SKUItemID:            951,
+		OperatorID:           9,
+		ReferenceFileRefs:    []domain.ReferenceFileRef{newA},
+		ReferenceFileRefsSet: true,
+		Remark:               "修正子项参考图",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateSKUItemInfo() unexpected error: %+v", appErr)
+	}
+
+	summary := domain.ParseReferenceFileRefsJSON(taskRepo.details[950].ReferenceFileRefsJSON)
+	seen := map[string]bool{}
+	for _, ref := range summary {
+		seen[ref.CanonicalID()] = true
+	}
+	for _, want := range []string{"task-top", "new-a", "item-b"} {
+		if !seen[want] {
+			t.Fatalf("summary missing %q: %+v", want, summary)
+		}
+	}
+	if seen["old-a"] {
+		t.Fatalf("summary still contains removed old item ref: %+v", summary)
+	}
+	if got := taskRepo.skuItems[950][0].ReferenceFileRefs; len(got) != 1 || got[0].CanonicalID() != "new-a" {
+		t.Fatalf("sku item refs = %+v, want new-a", got)
+	}
+}
+
 func TestTaskReadModelReferenceFileRefsAlwaysSlice(t *testing.T) {
 	taskRepo := &prdTaskRepo{
 		tasks: map[int64]*domain.Task{

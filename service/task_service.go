@@ -2466,6 +2466,16 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
 		return nil, appErr
 	}
+	var detail *domain.TaskDetail
+	if p.ReferenceFileRefsSet {
+		detail, err = s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
+		if err != nil {
+			return nil, infraError("get task detail for sku item reference update", err)
+		}
+		if detail == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task detail record missing", nil)
+		}
+	}
 	items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
 	if err != nil {
 		return nil, infraError("list task sku items for sku item update", err)
@@ -2485,6 +2495,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	previousProductName := item.ProductNameSnapshot
 	previousProductIID := taskSKUItemProductIID(item)
 	previousDesignRequirement := item.DesignRequirement
+	previousReferenceFileRefs := domain.NormalizeReferenceFileRefs(item.ReferenceFileRefs)
 	if p.ProductName != nil {
 		productName := strings.TrimSpace(*p.ProductName)
 		if erpProductNameTooLong(productName) {
@@ -2515,6 +2526,10 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	if p.ReferenceFileRefsSet {
 		item.ReferenceFileRefs = domain.NormalizeReferenceFileRefs(p.ReferenceFileRefs)
 	}
+	if p.ReferenceFileRefsSet && detail != nil {
+		detailRefs := buildBatchTaskReferenceFileRefsAfterSKUItemUpdate(detail, previousReferenceFileRefs, items, item)
+		detail.ReferenceFileRefsJSON = referenceFileRefsJSON(detailRefs)
+	}
 
 	updater, ok := s.taskRepo.(taskSKUItemBusinessInfoUpdater)
 	if !ok {
@@ -2523,6 +2538,11 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := updater.UpdateSKUItemBusinessInfo(ctx, tx, item); err != nil {
 			return err
+		}
+		if p.ReferenceFileRefsSet && detail != nil {
+			if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
+				return err
+			}
 		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventSKUItemUpdated, &p.OperatorID,
 			mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
@@ -2569,6 +2589,54 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		}
 	}
 	return item, nil
+}
+
+func buildBatchTaskReferenceFileRefsAfterSKUItemUpdate(detail *domain.TaskDetail, previousItemRefs []domain.ReferenceFileRef, items []*domain.TaskSKUItem, updatedItem *domain.TaskSKUItem) []domain.ReferenceFileRef {
+	if detail == nil {
+		return nil
+	}
+	previousItemRefIDs := make(map[string]struct{}, len(previousItemRefs))
+	for _, ref := range domain.NormalizeReferenceFileRefs(previousItemRefs) {
+		if refID := strings.TrimSpace(ref.CanonicalID()); refID != "" {
+			previousItemRefIDs[refID] = struct{}{}
+		}
+	}
+
+	merged := make([]domain.ReferenceFileRef, 0)
+	for _, ref := range domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON) {
+		refID := strings.TrimSpace(ref.CanonicalID())
+		if refID == "" {
+			continue
+		}
+		if _, wasOwnedByUpdatedItem := previousItemRefIDs[refID]; wasOwnedByUpdatedItem {
+			continue
+		}
+		merged = append(merged, ref)
+	}
+
+	for _, existing := range items {
+		if existing == nil {
+			continue
+		}
+		if updatedItem != nil && existing.ID == updatedItem.ID {
+			merged = append(merged, updatedItem.ReferenceFileRefs...)
+			continue
+		}
+		merged = append(merged, existing.ReferenceFileRefs...)
+	}
+	return domain.NormalizeReferenceFileRefs(merged)
+}
+
+func referenceFileRefsJSON(refs []domain.ReferenceFileRef) string {
+	normalized := domain.NormalizeReferenceFileRefs(refs)
+	if len(normalized) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }
 
 func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKUItemCostInfoParams) (*domain.TaskSKUItem, *domain.AppError) {
