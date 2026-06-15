@@ -586,6 +586,7 @@
                   v-if="isBatchTask && batchSkuItems.length > 0"
                   :items="batchSkuItems"
                   :filing-status="task.filing_status ?? null"
+                  :can-edit="canEditSkuItemInfo"
                   :can-upload-design="canDirectSkuDesignUpload"
                   :upload-design-label="skuUploadDesignLabel"
                   :disabled-upload-title="skuUploadDisabledTitle"
@@ -2229,6 +2230,13 @@ const canUploadReferenceFromOps = computed(() => {
   }
   return isLegacyTaskStatusInDesignerEditablePhase(task.value)
 })
+const canEditSkuItemInfo = computed(() => {
+  if (!task.value || !hasTaskScopeAccess.value) return false
+  return canMaintainTaskProductInfoAtAnyStage(
+    (roles) => permissionsStore.hasAnyRole(roles),
+    hasTaskScopeAccess.value,
+  )
+})
 function detailUploadTargetEnabled(target: DetailUploadTarget | null): boolean {
   if (target === 'reference') return canUploadReferenceFromOps.value
   if (target === 'audit-source' || target === 'audit-delivery') {
@@ -2314,6 +2322,11 @@ function openBasicEdit() {
 }
 
 function openSkuItemEdit(payload: { item: TaskSkuItem; index: number }) {
+  if (!canEditSkuItemInfo.value) {
+    actionError.value = '当前账号不可维护子项商品资料'
+    return
+  }
+  actionError.value = ''
   editingSkuItem.value = payload.item
   skuItemEditOpen.value = true
 }
@@ -2345,7 +2358,7 @@ async function onSkuItemEditSaved() {
   const id = taskId.value
   if (!id || isTempId.value) return
   await tasksStore.loadTaskById(id)
-  flashSuccess('SKU 子项已更新')
+  flashSuccess('子项商品资料已更新')
 }
 
 function dismissCreateBanner() {

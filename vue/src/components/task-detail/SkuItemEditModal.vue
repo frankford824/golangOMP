@@ -1,7 +1,7 @@
 <template>
   <BaseModal
     :model-value="modelValue"
-    title="编辑SKU子项"
+    title="编辑子项商品资料"
     :show-confirm="false"
     cancel-text="关闭"
     panel-class="max-w-[min(760px,94vw)]"
@@ -39,7 +39,7 @@
 
       <div class="sku-edit-cost">
         <div class="sku-edit-cost-head">
-          <p class="sku-edit-section-title">SKU 成本</p>
+          <p class="sku-edit-section-title">子项成本</p>
           <span class="sku-edit-cost-current">{{ currentCostText }}</span>
         </div>
         <div class="sku-edit-grid">
@@ -220,25 +220,10 @@ async function submit() {
     remark: form.value.remark.trim() || undefined,
   }
   try {
-    try {
-      if (typeof skuItemID === 'number') {
-        await tasksApi.patchSkuItem(props.taskId, skuItemID, payload)
-      } else {
-        throw new Error('missing_sku_item_id')
-      }
-    } catch {
-      // 后端尚未开放 sku-items PATCH 时，降级为任务级接口。
-      await tasksApi.patchProductInfo(props.taskId, {
-        product_name: payload.product_name,
-        i_id: payload.product_i_id,
-        trigger_filing: payload.trigger_filing,
-        remark: payload.remark,
-      })
-      await tasksApi.patchBusinessInfo(props.taskId, {
-        design_requirement: payload.design_requirement,
-        remark: payload.remark,
-      })
+    if (typeof skuItemID !== 'number') {
+      throw new Error('缺少子项 ID，无法维护子项商品资料')
     }
+    await tasksApi.patchSkuItem(props.taskId, skuItemID, payload)
 
     if (shouldPatchCost) {
       await tasksApi.patchSkuItemCostInfo(props.taskId, skuItemID as number, {

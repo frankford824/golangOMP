@@ -520,6 +520,131 @@ func TestNewProductCreateExplicitSyncERPFalseSkipsCreateFiling(t *testing.T) {
 	}
 }
 
+func TestBatchNewProductCreateExplicitSyncERPFalseSkipsCreateFiling(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions: []*domain.ERPIIDOption{
+			{IID: "I-1001", Label: "I-1001"},
+			{IID: "I-1002", Label: "I-1002"},
+		},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "ok"},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:           domain.TaskTypeNewProductDevelopment,
+		SourceMode:         domain.TaskSourceModeNewProduct,
+		CreatorID:          11,
+		OwnerTeam:          domain.AllValidTeams()[0],
+		DeadlineAt:         timePtr(),
+		BatchSKUMode:       "multiple",
+		SyncERPOnCreateSet: true,
+		SyncERPOnCreate:    false,
+		BatchItems: []CreateTaskBatchSKUItemParams{
+			{
+				ProductName:       "Batch Opt-out A",
+				DesignRequirement: "draw A",
+				ProductIID:        "I-1001",
+				CostPrice:         float64Ptr(5.1),
+			},
+			{
+				ProductName:       "Batch Opt-out B",
+				DesignRequirement: "draw B",
+				ProductIID:        "I-1002",
+				CostPrice:         float64Ptr(6.2),
+			},
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if bridgeStub.upsertCalls != 0 {
+		t.Fatalf("upsert calls after batch create = %d, want 0", bridgeStub.upsertCalls)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusNotFiled {
+		t.Fatalf("filing_status after batch create = %s, want not_filed", taskRepo.details[task.ID].FilingStatus)
+	}
+	for _, item := range taskRepo.skuItems[task.ID] {
+		if item.FilingStatus != domain.FilingStatusNotFiled {
+			t.Fatalf("sku item filing_status = %s, want not_filed", item.FilingStatus)
+		}
+	}
+}
+
+func TestBatchSKUItemInfoCanBeUpdatedAfterAuditStarted(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			1373: {
+				ID:             1373,
+				TaskNo:         "RW-20260611-A-001370",
+				TaskType:       domain.TaskTypeNewProductDevelopment,
+				TaskStatus:     domain.TaskStatusPendingAuditA,
+				IsBatchTask:    true,
+				BatchItemCount: 3,
+				BatchMode:      domain.TaskBatchModeMultiSKU,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			1373: {TaskID: 1373},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			1373: {
+				{
+					ID:                  1371,
+					TaskID:              1373,
+					SequenceNo:          1,
+					SKUCode:             "CGO000137",
+					ProductNameSnapshot: "常规海报/升学宴//5条",
+					DesignRequirement:   "旧需求",
+					VariantJSON:         []byte(`{"product_i_id":"常规海报"}`),
+					FilingStatus:        domain.FilingStatusFiled,
+					ERPSyncStatus:       domain.FilingStatusFiled,
+				},
+			},
+		},
+	}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+	)
+
+	name := "常规海报/升学宴/更新后/5条"
+	iid := "常规海报"
+	requirement := "更新后的设计要求"
+	updated, appErr := svc.UpdateSKUItemInfo(context.Background(), UpdateTaskSKUItemInfoParams{
+		TaskID:            1373,
+		SKUItemID:         1371,
+		OperatorID:        11,
+		ProductName:       &name,
+		ProductIID:        &iid,
+		DesignRequirement: &requirement,
+		Remark:            "维护子项商品资料",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateSKUItemInfo() unexpected error: %+v", appErr)
+	}
+	if updated.ProductNameSnapshot != name || updated.DesignRequirement != requirement || taskSKUItemProductIID(updated) != iid {
+		t.Fatalf("updated sku item = %+v product_i_id=%q", updated, taskSKUItemProductIID(updated))
+	}
+}
+
 func TestBatchNewProductCreateSyncAllowsMissingCost(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions: []*domain.ERPIIDOption{

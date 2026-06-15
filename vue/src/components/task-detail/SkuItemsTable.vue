@@ -84,9 +84,11 @@
                 <button
                   type="button"
                   class="sku-action-btn"
+                  :disabled="!canEdit"
+                  :title="canEdit ? '' : disabledEditTitle"
                   @click="$emit('edit', { item, index })"
                 >
-                  编辑/成本
+                  编辑资料/成本
                 </button>
               </div>
             </td>
@@ -108,6 +110,7 @@ import { formatErpSyncFailureMessage } from '@/utils/business-copy'
 const props = defineProps<{
   items: TaskSkuItem[]
   filingStatus?: string | null
+  canEdit?: boolean
   canUploadDesign?: boolean
   uploadDesignLabel?: string
   disabledUploadTitle?: string
@@ -119,8 +122,10 @@ defineEmits<{
 }>()
 
 const canUploadDesign = computed(() => props.canUploadDesign !== false)
+const canEdit = computed(() => props.canEdit !== false)
 const uploadDesignLabel = computed(() => props.uploadDesignLabel || '上传设计稿')
 const disabledUploadTitle = computed(() => props.disabledUploadTitle || '当前状态不可上传设计稿')
+const disabledEditTitle = computed(() => '当前账号不可维护子项商品资料')
 
 const filingStatusLabel = computed(() => {
   const raw = String(props.filingStatus ?? '').trim()
