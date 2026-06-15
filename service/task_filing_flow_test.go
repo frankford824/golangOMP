@@ -473,6 +473,53 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 	}
 }
 
+func TestNewProductCreateExplicitSyncERPFalseSkipsCreateFiling(t *testing.T) {
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "ok"},
+	}
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           11,
+		OwnerTeam:           domain.AllValidTeams()[0],
+		DeadlineAt:          timePtr(),
+		TopLevelNewSKU:      "NEW-SKU-OPT-OUT",
+		ProductNameSnapshot: "Opt-out New Product",
+		DesignRequirement:   "draw opt-out",
+		CategoryCode:        "LIGHTBOX",
+		MaterialMode:        string(domain.MaterialModePreset),
+		Material:            "铝型材",
+		ProductIID:          "定制海报",
+		CostPriceMode:       string(domain.CostPriceModeManual),
+		CostPrice:           float64Ptr(12.3),
+		SyncERPOnCreateSet:  true,
+		SyncERPOnCreate:     false,
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if bridgeStub.upsertCalls != 0 {
+		t.Fatalf("upsert calls after create = %d, want 0", bridgeStub.upsertCalls)
+	}
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusNotFiled {
+		t.Fatalf("filing_status after create = %s, want not_filed", taskRepo.details[task.ID].FilingStatus)
+	}
+}
+
 func TestBatchNewProductCreateSyncAllowsMissingCost(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions: []*domain.ERPIIDOption{

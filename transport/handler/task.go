@@ -93,7 +93,7 @@ type createTaskReq struct {
 	Quantity          *int64   `json:"quantity"`
 	BaseSalePrice     *float64 `json:"base_sale_price"`
 	ReferenceLink     string   `json:"reference_link"`
-	SyncERPOnCreate   bool     `json:"sync_erp_on_create"`
+	SyncERPOnCreate   *bool    `json:"sync_erp_on_create"`
 
 	// Purchase task fields
 	PurchaseSKU    string `json:"purchase_sku"`
@@ -879,7 +879,8 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		SKUCodeType:         domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
 		TopLevelNewSKU:      req.NewSKU,
 		TopLevelPurchaseSKU: req.PurchaseSKU,
-		SyncERPOnCreate:     req.SyncERPOnCreate,
+		SyncERPOnCreate:     req.SyncERPOnCreate != nil && *req.SyncERPOnCreate,
+		SyncERPOnCreateSet:  req.SyncERPOnCreate != nil,
 	}
 	if len(req.RetouchRequirements) > 0 {
 		params.RetouchRequirements = make([]domain.CreateRetouchRequirementItem, 0, len(req.RetouchRequirements))
@@ -2016,7 +2017,6 @@ func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggreg
 		ManualCostOverride:       detail.ManualCostOverride,
 		ManualCostOverrideReason: detail.ManualCostOverrideReason,
 		TriggerFiling:            false,
-		FiledAt:                  detail.FiledAt,
 	}
 	if aggregate.Task != nil {
 		params.DeadlineAt = aggregate.Task.DeadlineAt

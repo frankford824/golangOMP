@@ -94,6 +94,7 @@ type CreateTaskParams struct {
 	TopLevelNewSKU      string
 	TopLevelPurchaseSKU string
 	SyncERPOnCreate     bool
+	SyncERPOnCreateSet  bool
 
 	// retouch_task structured requirement lines (Phase 1A text only).
 	RetouchRequirements []domain.CreateRetouchRequirementItem
@@ -968,14 +969,23 @@ func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, 
 		return nil, infraError("re-read created task", err)
 	}
 	s.formalizeTaskCreateReferenceAssetsBestEffort(ctx, p, newID)
-	s.triggerFilingBestEffort(ctx, TriggerTaskFilingParams{
-		TaskID:     newID,
-		OperatorID: p.CreatorID,
-		Remark:     p.Remark,
-		Source:     TaskFilingTriggerSourceCreate,
-		Force:      p.SyncERPOnCreate,
-	}, "task_create_auto_policy")
+	if shouldTriggerFilingAfterTaskCreate(p) {
+		s.triggerFilingBestEffort(ctx, TriggerTaskFilingParams{
+			TaskID:     newID,
+			OperatorID: p.CreatorID,
+			Remark:     p.Remark,
+			Source:     TaskFilingTriggerSourceCreate,
+			Force:      p.SyncERPOnCreate,
+		}, "task_create_auto_policy")
+	}
 	return created, nil
+}
+
+func shouldTriggerFilingAfterTaskCreate(p CreateTaskParams) bool {
+	if p.SyncERPOnCreateSet {
+		return p.SyncERPOnCreate
+	}
+	return true
 }
 
 func (s *taskService) formalizeTaskCreateReferenceAssetsBestEffort(ctx context.Context, p CreateTaskParams, taskID int64) {

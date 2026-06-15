@@ -1,4 +1,5 @@
 import type { Task, LegacyTaskStatus } from './types/task'
+import { RoleEnum } from '@/types'
 import { TaskTypeEnum, normalizeTaskType } from './enums/task-type'
 import {
   DesignSubStatusEnum,
@@ -32,6 +33,22 @@ const WAREHOUSE_ELIGIBLE_LEGACY_STATUSES: readonly LegacyTaskStatus[] = [
   'PendingAuditB',
   'Outsourcing',
   'PendingOutsourceReview',
+] as const
+
+export const TASK_PRODUCT_INFO_MAINTAINER_ROLES = [
+  RoleEnum.OPS,
+  RoleEnum.WAREHOUSE,
+  'Admin',
+  'SuperAdmin',
+  RoleEnum.SUPER_ADMIN,
+  'HRAdmin',
+  RoleEnum.HR_ADMIN,
+  'RoleAdmin',
+  'DepartmentAdmin',
+  RoleEnum.DEPT_ADMIN,
+  'TeamLead',
+  RoleEnum.GROUP_LEADER,
+  'DesignDirector',
 ] as const
 
 // ─── 任务分型判断 ──────────────────────────────────────────────────────────────
@@ -257,6 +274,16 @@ export function isLegacyTaskStatusInDesignerEditablePhase(task: Task): boolean {
     s === 'RejectedByAuditA' ||
     s === 'RejectedByAuditB'
   )
+}
+
+/**
+ * 商品/ERP 基础资料维护不受设计、审核、仓库节点限制；流程范围仍由详情页的数据范围判断兜底。
+ */
+export function canMaintainTaskProductInfoAtAnyStage(
+  hasAnyRole: (roles: readonly string[]) => boolean,
+  hasTaskScopeAccess: boolean,
+): boolean {
+  return hasTaskScopeAccess && hasAnyRole(TASK_PRODUCT_INFO_MAINTAINER_ROLES)
 }
 
 /**

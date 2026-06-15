@@ -4,6 +4,7 @@ import { enrichTaskDomainFields } from '@/domain/mappers/task-mappers'
 import {
   canAssign,
   canAssignCustomizationArtOperator,
+  canMaintainTaskProductInfoAtAnyStage,
   canReassignDesigner,
   isInCustomizationArtReassignmentPhase,
 } from '@/domain/task-actions'
@@ -78,6 +79,25 @@ describe('canAssignCustomizationArtOperator', () => {
     })
     expect(canAssign(customizationOnly)).toBe(true)
     expect(canAssign(task)).toBe(true)
+  })
+})
+
+describe('canMaintainTaskProductInfoAtAnyStage', () => {
+  it('allows product info maintenance for ops after audit starts when task is in scope', () => {
+    expect(canMaintainTaskProductInfoAtAnyStage((roles) => roles.includes('ops'), true)).toBe(true)
+  })
+
+  it('allows product info maintenance for backend management role names', () => {
+    expect(canMaintainTaskProductInfoAtAnyStage((roles) => roles.includes('DepartmentAdmin'), true)).toBe(true)
+    expect(canMaintainTaskProductInfoAtAnyStage((roles) => roles.includes('TeamLead'), true)).toBe(true)
+  })
+
+  it('keeps product info maintenance hidden outside task scope', () => {
+    expect(canMaintainTaskProductInfoAtAnyStage((roles) => roles.includes('ops'), false)).toBe(false)
+  })
+
+  it('does not grant product info maintenance to designers', () => {
+    expect(canMaintainTaskProductInfoAtAnyStage((roles) => roles.includes('designer'), true)).toBe(false)
   })
 })
 

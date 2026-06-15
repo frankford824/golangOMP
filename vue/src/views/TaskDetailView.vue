@@ -1126,6 +1126,7 @@ import {
   isInDesignerReassignmentPhase,
   isCustomizationTask as isCustomizationTaskByDomain,
   isLegacyTaskStatusInDesignerEditablePhase,
+  canMaintainTaskProductInfoAtAnyStage,
   taskHasRecordedDesignOutput,
   taskHasAssignee,
 } from '@/domain/task-actions'
@@ -2204,6 +2205,14 @@ const canEditBasicInfo = computed(
     // 运营维护入口以 basic_info.allowed_actions 为准，不与通用 task.edit 绑定：
     // Ops 创建人常具备 update_basic_info 投影但无 task.edit，强绑会导致「编辑信息 / 重传参考图」误隐藏。
     if (!task.value || !hasTaskScopeAccess.value) return false
+    if (
+      canMaintainTaskProductInfoAtAnyStage(
+        (roles) => permissionsStore.hasAnyRole(roles),
+        hasTaskScopeAccess.value,
+      )
+    ) {
+      return true
+    }
     if (hasModuleActionProjection(basicInfoModuleSummary.value)) {
       return hasModuleAction(basicInfoModuleSummary.value, [
         'update_basic_info',
@@ -2213,7 +2222,13 @@ const canEditBasicInfo = computed(
     return isLegacyTaskStatusInDesignerEditablePhase(task.value)
   },
 )
-const canUploadReferenceFromOps = computed(() => canEditBasicInfo.value)
+const canUploadReferenceFromOps = computed(() => {
+  if (!task.value || !hasTaskScopeAccess.value) return false
+  if (hasModuleActionProjection(basicInfoModuleSummary.value)) {
+    return hasModuleAction(basicInfoModuleSummary.value, ['update_reference_files'])
+  }
+  return isLegacyTaskStatusInDesignerEditablePhase(task.value)
+})
 function detailUploadTargetEnabled(target: DetailUploadTarget | null): boolean {
   if (target === 'reference') return canUploadReferenceFromOps.value
   if (target === 'audit-source' || target === 'audit-delivery') {

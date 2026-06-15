@@ -68,6 +68,51 @@ func TestTaskHandlerCreateBindsERPProductSnapshotFromJSON(t *testing.T) {
 	}
 }
 
+func TestTaskHandlerCreateBindsExplicitSyncERPOnCreateFalse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	taskSvc := &taskServiceCaptureStub{
+		createResult: &domain.Task{ID: 1},
+	}
+	handler := NewTaskHandler(taskSvc, nil, nil)
+	router.POST("/v1/tasks", handler.Create)
+
+	body := map[string]interface{}{
+		"task_type":          "new_product_development",
+		"source_mode":        "new_product",
+		"creator_id":         9,
+		"owner_team":         "总经办组",
+		"due_at":             "2026-03-20T00:00:00Z",
+		"category_code":      "LIGHTBOX",
+		"material_mode":      "preset",
+		"material":           "铝型材",
+		"product_name":       "New Lightbox",
+		"product_short_name": "Lightbox",
+		"design_requirement": "need design",
+		"new_sku":            "NEW-SKU-001",
+		"sync_erp_on_create": false,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /v1/tasks code = %d, want 201 body=%s", rec.Code, rec.Body.String())
+	}
+	if !taskSvc.createParams.SyncERPOnCreateSet {
+		t.Fatal("SyncERPOnCreateSet = false, want true for explicit sync_erp_on_create:false")
+	}
+	if taskSvc.createParams.SyncERPOnCreate {
+		t.Fatal("SyncERPOnCreate = true, want false")
+	}
+}
+
 func TestTaskHandlerCreateAcceptsStringProductIDAsERPFacadeKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -122,6 +167,7 @@ func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *test
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	originalDeadline := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
+	originalFiledAt := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
 	costPrice := 12.3
 	taskSvc := &taskServiceCaptureStub{}
 	detailSvc := &taskDetailAggregateCaptureStub{
@@ -135,6 +181,7 @@ func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *test
 				CostPrice:                &costPrice,
 				ManualCostOverride:       true,
 				ManualCostOverrideReason: "warehouse maintained",
+				FiledAt:                  &originalFiledAt,
 			},
 		},
 	}
@@ -167,6 +214,9 @@ func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *test
 	}
 	if !params.ManualCostOverride || params.ManualCostOverrideReason != "warehouse maintained" {
 		t.Fatalf("manual override = %t / %q", params.ManualCostOverride, params.ManualCostOverrideReason)
+	}
+	if params.FiledAt != nil {
+		t.Fatalf("filed_at = %+v, want nil when request omits filed_at", params.FiledAt)
 	}
 }
 
