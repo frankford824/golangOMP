@@ -89,7 +89,7 @@
                 type="button"
                 class="reference-thumb-btn"
                 :title="file.fileName"
-                @click="openReferencePreview(file)"
+                @click="openReferencePreview(item, file)"
               >
                 <img
                   :src="file.previewSrc"
@@ -181,6 +181,11 @@
 import { computed, inject, ref } from 'vue'
 import FileIconFallback from '@/components/base/FileIconFallback.vue'
 import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
+import {
   buildRetouchBatchDownloadPlan,
   countRetouchDownloadableAttachments,
   resolveRetouchBatchZipPrefix,
@@ -198,14 +203,12 @@ import {
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
-const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
-
 const props = defineProps<{
   requirements: RetouchRequirement[]
   taskTitle?: string
 }>()
 
-const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 const downloadingKeys = ref(new Set<string>())
 const downloadErrorByRequirement = ref(new Map<number, string>())
@@ -319,8 +322,31 @@ function handleDownloadSource(file: RetouchSourceFileDisplayItem) {
   })
 }
 
-function openReferencePreview(file: RetouchReferenceDisplayItem) {
-  if (file.previewSrc) openLightbox(file.previewSrc)
+function referencePreviewGallery(item: RetouchRequirement): ImagePreviewLightboxItem[] {
+  return referenceItems(item)
+    .map((file, index) => {
+      const src = file.previewSrc?.trim()
+      if (!src) return null
+      const title = file.fileName || `参考图 ${index + 1}`
+      return {
+        src,
+        title,
+        alt: title,
+        downloadUrl: file.downloadUrl || src,
+      }
+    })
+    .filter((row) => row != null) as ImagePreviewLightboxItem[]
+}
+
+function openReferencePreview(item: RetouchRequirement, file: RetouchReferenceDisplayItem) {
+  if (!file.previewSrc) return
+  const gallery = referencePreviewGallery(item)
+  const index = Math.max(0, gallery.findIndex((row) => row.src === file.previewSrc))
+  openLightbox(file.previewSrc, {
+    title: file.fileName || `需求 ${requirementIndex(item) + 1} 参考图`,
+    items: gallery,
+    index,
+  })
 }
 
 function requirementDownloadableCount(item: RetouchRequirement): number {

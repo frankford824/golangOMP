@@ -99,7 +99,7 @@
             :key="'sref-' + i"
             type="button"
             class="sub-ref-thumb-btn"
-            @click="subRefLightbox = ref"
+            @click="openSubReferencePreview(i)"
           >
             <img :src="ref" :alt="`子项参考图 ${i + 1}`" class="sub-ref-thumb-img" @error="onSubRefImageError(ref)" />
           </button>
@@ -108,9 +108,6 @@
       </div>
     </div>
 
-    <div v-if="subRefLightbox" class="sub-ref-lightbox" @click="subRefLightbox = null">
-      <img :src="subRefLightbox" alt="参考图大图" class="sub-ref-lightbox-img" />
-    </div>
   </section>
 </template>
 
@@ -121,11 +118,17 @@ import type { Task, TaskSkuItem } from '@/domain/types/task'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import { useTasksStore } from '@/stores/tasks'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
 
 const injected = inject<ComputedRef<Task | null>>(TASK_DETAIL_KEY)
 if (!injected) throw new Error('[TaskSkuItemsBlock] 必须在 TaskDetailView 内使用')
 
 const taskRef = injected
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 const tasksStore = useTasksStore()
 
 const task = computed(() => taskRef.value!)
@@ -133,7 +136,6 @@ const items = computed<TaskSkuItem[]>(() => task.value.skuItems ?? [])
 const totalItems = computed(() => items.value.length)
 
 const currentIndex = ref(0)
-const subRefLightbox = ref<string | null>(null)
 
 const currentDisplayIndex = computed(() => (totalItems.value === 0 ? 0 : currentIndex.value + 1))
 
@@ -176,6 +178,15 @@ const subItemReferenceRefs = computed((): ReferenceFileRef[] => currentItem.valu
 const subItemReferenceUrls = computed(() =>
   subItemReferenceRefs.value.map((r) => r.download_url ?? '').filter(Boolean),
 )
+const subItemReferencePreviewItems = computed((): ImagePreviewLightboxItem[] =>
+  subItemReferenceRefs.value
+    .map((refObj, index) => {
+      const src = String(refObj.download_url ?? '').trim()
+      const title = refObj.filename?.trim() || `子项参考图 ${index + 1}`
+      return src ? { src, title, alt: title, downloadUrl: src } : null
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[],
+)
 const retriedRefIds = ref(new Set<string>())
 
 function onSubRefImageError(url: string) {
@@ -185,6 +196,16 @@ function onSubRefImageError(url: string) {
   if (retriedRefIds.value.has(key)) return
   retriedRefIds.value.add(key)
   tasksStore.refreshReferenceUrls(task.value.id)
+}
+
+function openSubReferencePreview(index: number) {
+  const item = subItemReferencePreviewItems.value[index]
+  if (!item?.src) return
+  openLightbox(item.src, {
+    title: item.title,
+    items: subItemReferencePreviewItems.value,
+    index,
+  })
 }
 
 const attributeRows = computed(() => {
@@ -506,21 +527,4 @@ watch(
   font-size: 0.8125rem;
   color: #94a3b8;
 }
-.sub-ref-lightbox {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.72);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  cursor: zoom-out;
-}
-.sub-ref-lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 6px;
-}
 </style>
-

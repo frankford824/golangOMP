@@ -32,7 +32,7 @@
           img-class="thumb-media-shell"
           inner-img-class="thumb-img"
           :defer-until-visible="true"
-          @open-full="openLightbox"
+          @open-full="(url) => openThumbPreview(item, url)"
         />
         <span v-else class="thumb-placeholder">
           {{ item.extension ? item.extension.toUpperCase() : (item.label || '文件') }}
@@ -45,6 +45,11 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
 
 export type AssetThumbItem = {
   key: string
@@ -56,8 +61,6 @@ export type AssetThumbItem = {
   label?: string
   unavailable?: boolean
 }
-
-const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
 const props = withDefaults(
   defineProps<{
@@ -135,7 +138,35 @@ const normalizedItems = computed(() =>
     .filter((item) => item.key.trim().length > 0),
 )
 
-const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
+
+function thumbGalleryItems(activeKey: string, activeSrc: string): ImagePreviewLightboxItem[] {
+  const out = normalizedItems.value
+    .filter((item) => !item.unavailable && item.imageLike && (item.src || item.key === activeKey))
+    .map((item) => ({
+      src: item.key === activeKey ? activeSrc : item.src,
+      title: item.label || item.alt,
+      alt: item.alt,
+      downloadUrl: item.downloadUrl || item.src,
+    }))
+    .filter((item) => item.src.trim().length > 0)
+  if (!out.some((item) => item.src === activeSrc)) {
+    out.unshift({ src: activeSrc, title: activeSrc, alt: activeSrc, downloadUrl: activeSrc })
+  }
+  return out
+}
+
+function openThumbPreview(item: AssetThumbItem, src: string) {
+  const url = String(src ?? '').trim()
+  if (!url) return
+  const items = thumbGalleryItems(item.key, url)
+  const index = Math.max(0, items.findIndex((row) => row.src === url))
+  openLightbox(url, {
+    title: item.label || item.alt,
+    items,
+    index,
+  })
+}
 
 function onThumbClick(item: AssetThumbItem) {
   emit('select', item.key)
@@ -146,7 +177,7 @@ function onThumbClick(item: AssetThumbItem) {
     window.open(openHref, '_blank', 'noopener')
     return
   }
-  if (item.src) openLightbox(item.src)
+  if (item.src) openThumbPreview(item, item.src)
 }
 </script>
 

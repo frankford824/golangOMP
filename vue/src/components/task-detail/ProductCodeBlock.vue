@@ -37,7 +37,7 @@
         <div
           class="product-thumb-wrap"
           :class="{ 'cursor-zoom-in': showImage && !imageLoadFailed }"
-          @click="showImage && !imageLoadFailed ? (lightboxSrc = task.productImageUrl!) : null"
+          @click="openProductImage"
         >
           <img
             v-if="showImage && !imageLoadFailed"
@@ -49,9 +49,6 @@
           <span v-else class="product-thumb-placeholder">无图</span>
         </div>
         <span class="product-thumb-label">原产品图</span>
-      </div>
-      <div v-if="lightboxSrc" class="lightbox-overlay" @click="lightboxSrc = null">
-        <img :src="lightboxSrc" alt="原产品图大图" class="lightbox-img" />
       </div>
       <dl class="info-grid" :class="{ 'info-grid--compact': compactLayout }">
         <div class="info-row">
@@ -94,7 +91,7 @@
             class="main-ref-hero-btn"
             :class="{ 'main-ref-hero-btn--failed': activeRefUrl && refLoadFailedSet.has(activeRefUrl) }"
             :title="'放大查看参考图 ' + (activeRefIdx + 1)"
-            @click="activeRefUrl && !refLoadFailedSet.has(activeRefUrl) && (lightboxSrc = activeRefUrl)"
+            @click="openCurrentReferencePreview"
           >
             <img
               v-if="activeRefUrl && !refLoadFailedSet.has(activeRefUrl)"
@@ -133,9 +130,6 @@
           </div>
         </div>
         <p v-else class="main-ref-empty">暂无参考图</p>
-      </div>
-      <div v-if="lightboxSrc" class="lightbox-overlay" @click="lightboxSrc = null">
-        <img :src="lightboxSrc" alt="参考图大图" class="lightbox-img" @click.stop />
       </div>
       <dl class="info-grid" :class="{ 'info-grid--compact': compactLayout }">
         <div class="info-row">
@@ -278,6 +272,11 @@ import { materialModeLabelCn, skuItemStatusLabelCn } from '@/domain/mappers/read
 import { useCategoryOptions } from '@/composables/useCategoryOptions'
 import { useTasksStore } from '@/stores/tasks'
 import { tasksApi } from '@/services/api/tasksApi'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
 
 withDefaults(
   defineProps<{
@@ -291,9 +290,9 @@ const injected = inject<ComputedRef<Task | null>>(TASK_DETAIL_KEY)
 if (!injected) throw new Error('[ProductCodeBlock] 必须在 TaskDetailView 内使用')
 
 const productCtx = inject(TASK_DETAIL_PRODUCT_INDEX_KEY, null)
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 const task = computed(() => injected.value!)
-const lightboxSrc = ref<string | null>(null)
 const imageLoadFailed = ref(false)
 const showImage = computed(() => !!task.value?.productImageUrl)
 
@@ -339,6 +338,15 @@ const skuCostError = ref('')
 const showReferenceBlock = computed(() => isNewProduct.value)
 const currentReferenceRefs = computed((): ReferenceFileRef[] => currentRow.value?.referenceFileRefs ?? [])
 const currentReferenceUrls = computed(() => currentReferenceRefs.value.map((r) => r.download_url ?? '').filter(Boolean))
+const currentReferencePreviewItems = computed((): ImagePreviewLightboxItem[] =>
+  currentReferenceRefs.value
+    .map((refObj, index) => {
+      const src = String(refObj.download_url ?? '').trim()
+      const title = refObj.filename?.trim() || `参考图 ${index + 1}`
+      return src ? { src, title, alt: title, downloadUrl: src } : null
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[],
+)
 
 const refLoadFailedSet = ref(new Set<string>())
 const retriedRefIds = ref(new Set<string>())
@@ -355,6 +363,26 @@ function onRefImageError(url: string) {
   if (!key || retriedRefIds.value.has(key)) return
   retriedRefIds.value.add(key)
   tasksStore.refreshReferenceUrls(task.value.id)
+}
+
+function openProductImage() {
+  const src = task.value.productImageUrl?.trim()
+  if (!showImage.value || imageLoadFailed.value || !src) return
+  openLightbox(src, {
+    title: '原产品图',
+    items: [{ src, title: '原产品图', alt: '原产品图', downloadUrl: src }],
+    index: 0,
+  })
+}
+
+function openCurrentReferencePreview() {
+  const src = activeRefUrl.value
+  if (!src || refLoadFailedSet.value.has(src)) return
+  openLightbox(src, {
+    title: `参考图 ${activeRefIdx.value + 1}`,
+    items: currentReferencePreviewItems.value,
+    index: activeRefIdx.value,
+  })
 }
 
 /** 与「设计工作台」一致：多参考图时主预览 + 底部缩略条切换 */
@@ -941,21 +969,5 @@ dd {
   color: rgb(100 116 139);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-.lightbox-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  cursor: zoom-out;
-}
-.lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 6px;
 }
 </style>

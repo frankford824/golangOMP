@@ -1101,9 +1101,12 @@
       :sku-item="editingSkuItem"
       @saved="onSkuItemEditSaved"
     />
-    <div v-if="lightboxSrc" class="lightbox-overlay" @click="lightboxSrc = null">
-      <img :src="lightboxSrc" alt="预览大图" class="lightbox-img" @click.stop />
-    </div>
+    <ImagePreviewLightbox
+      v-model="lightboxOpen"
+      :items="lightboxItems"
+      :initial-index="lightboxInitialIndex"
+      fallback-title="预览大图"
+    />
   </div>
 </template>
 
@@ -1250,12 +1253,16 @@ import SkuItemsTable from '@/components/task-detail/SkuItemsTable.vue'
 import SkuItemEditModal from '@/components/task-detail/SkuItemEditModal.vue'
 import DesignAssetBlock from '@/components/task-detail/DesignAssetBlock.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
+import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightboxOptions,
+} from '@/components/media/imagePreviewLightbox'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { warehouseBlockingReasonLine } from '@/utils/warehouse-blocking'
 import type { TaskAiSummaryResponse } from '@/services/api/tasksApi'
 // v0.5 对齐：FRONTEND_ALIGNMENT_v0.5.md 第 D 节，任务详情内指派弹窗使用 GET /v1/users/designers
-
-const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
 /** 与 /me `frontend_access.actions` 对齐：审核岗可能仅有细粒度 key（如 task.audit.review），未带历史 PermissionEnum `task:audit`。 */
 const AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS = [
@@ -1931,13 +1938,35 @@ const activeDetailUploadTarget = ref<DetailUploadTarget | null>(null)
 
 // provide：让所有子区块无需 props 直接注入 task
 provide(TASK_DETAIL_KEY, task)
-const lightboxSrc = ref<string | null>(null)
-function openLightbox(src: string) {
+const lightboxOpen = ref(false)
+const lightboxItems = ref<ImagePreviewLightboxItem[]>([])
+const lightboxInitialIndex = ref(0)
+
+function normalizeLightboxItems(src: string, options?: OpenImagePreviewLightboxOptions): ImagePreviewLightboxItem[] {
+  const fallbackTitle = options?.title?.trim() || '预览大图'
+  const normalized = (options?.items ?? [])
+    .map((item) => ({
+      ...item,
+      src: String(item.src ?? '').trim(),
+      title: String(item.title ?? '').trim(),
+      alt: String(item.alt ?? '').trim(),
+      downloadUrl: String(item.downloadUrl ?? '').trim(),
+    }))
+    .filter((item) => item.src.length > 0)
+  if (normalized.length > 0) return normalized
+  return [{ src, title: fallbackTitle, alt: fallbackTitle, downloadUrl: src }]
+}
+
+function openLightbox(src: string, options?: OpenImagePreviewLightboxOptions) {
   const url = String(src ?? '').trim()
   if (!url) return
-  lightboxSrc.value = url
+  const items = normalizeLightboxItems(url, options)
+  const requestedIndex = typeof options?.index === 'number' ? options.index : items.findIndex((item) => item.src === url)
+  lightboxItems.value = items
+  lightboxInitialIndex.value = Math.max(0, requestedIndex >= 0 ? requestedIndex : 0)
+  lightboxOpen.value = true
 }
-provide(OPEN_LIGHTBOX_KEY, openLightbox)
+provide(IMAGE_PREVIEW_LIGHTBOX_KEY, openLightbox)
 
 const detailProductIndex = ref(0)
 const productIndexContext: TaskDetailProductIndexContext = {
@@ -5348,29 +5377,6 @@ watch(taskId, (id) => {
 .banner-dismiss:hover {
   opacity: 1;
 }
-.lightbox-overlay {
-  --lightbox-header-height: 64px;
-  --lightbox-margin: 12px;
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: calc(var(--lightbox-header-height) + var(--lightbox-margin));
-  bottom: 0;
-  padding: var(--lightbox-margin);
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  z-index: 9999;
-  cursor: zoom-out;
-  overflow: auto;
-}
-.lightbox-img {
-  max-width: calc(100vw - (var(--lightbox-margin) * 2));
-  max-height: calc(100vh - var(--lightbox-header-height) - (var(--lightbox-margin) * 2));
-  object-fit: contain;
-  border-radius: 6px;
-}
 .batch-sku-switcher {
   display: flex;
   align-items: center;
@@ -5726,10 +5732,6 @@ watch(taskId, (id) => {
     animation: none !important;
     transition: none !important;
   }
-}
-
-.lightbox-overlay {
-  background: rgba(0, 0, 0, 0.84);
 }
 
 .batch-sku-tab--active,

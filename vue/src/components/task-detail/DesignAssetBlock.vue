@@ -55,7 +55,7 @@
       :is-audit-replacement-version="isAuditReplacementVersion"
       @activate-version="activateVersion"
       @open-lightbox="openLightbox"
-      @open-shared-version="(v) => openLightbox(v.fileRefs?.[0] ?? '')"
+      @open-shared-version="openSharedVersionPreview"
     />
 
     <template v-else>
@@ -109,7 +109,7 @@
           :key="'shared-ver-' + v.id"
           type="button"
           class="shared-asset-chip"
-          @click="openLightbox(v.fileRefs?.[0] ?? '')"
+          @click="openSharedVersionPreview(v)"
         >
           共享 V{{ v.rootVersionNo ?? i + 1 }} · {{ versionTotalFileCount(v) }} 文件
         </button>
@@ -264,6 +264,11 @@ import {
 } from '@/domain/task-asset-version-selection'
 import AssetDownloadLink from '@/components/media/AssetDownloadLink.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
 import { versionTotalFileCount } from '@/utils/task-ui-labels'
 import {
   activeSkuCodeForSelection,
@@ -278,8 +283,6 @@ import {
 } from '@/domain/task-batch-assets'
 import { taskDesignerDisplayName } from '@/domain/task-actors'
 import { referenceFileRefDedupeKey } from '@/domain/mappers/reference-file-refs'
-
-const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
 const injected = inject<ComputedRef<Task | null>>(TASK_DETAIL_KEY)
 if (!injected) throw new Error('[DesignAssetBlock] 必须在 TaskDetailView 内使用')
@@ -491,7 +494,7 @@ const getDeliveryRemarkSuffixBySkuForPanel = computed((): ((skuCode: string) => 
 const activeVersionIdx = ref(0)
 const activeFileIdx = ref(0)
 const hasManualActiveVersionSelection = ref(false)
-const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 /** 后端资产列表（GET /v1/tasks/{id}/assets） */
 const backendAssets = ref<BackendAsset[]>([])
@@ -845,13 +848,31 @@ const activeVersionThumbItems = computed((): AssetThumbItem[] => {
   return [...previews, ...sources]
 })
 
+function versionPreviewItems(version: TaskAssetVersion | null | undefined): ImagePreviewLightboxItem[] {
+  return (version?.fileRefs ?? [])
+    .map((src, index) => {
+      const url = String(src ?? '').trim()
+      const title = `版本图 ${index + 1}`
+      return url ? { src: url, title, alt: title, downloadUrl: url } : null
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[]
+}
+
+function openSharedVersionPreview(version: TaskAssetVersion) {
+  const items = versionPreviewItems(version)
+  if (!items.length) return
+  openLightbox(items[0].src, {
+    title: items[0].title,
+    items,
+    index: 0,
+  })
+}
+
 function onActiveVersionThumbSelect(key: string) {
   if (key.startsWith('preview-')) {
     const next = Number(key.slice('preview-'.length))
     if (Number.isFinite(next)) {
       activeFileIdx.value = Math.max(0, next)
-      const src = activeVersion.value?.fileRefs?.[activeFileIdx.value] ?? ''
-      if (src) openLightbox(src)
     }
     return
   }

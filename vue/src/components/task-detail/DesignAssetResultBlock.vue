@@ -109,7 +109,7 @@
                 img-class="manuscript-preview-media"
                 inner-img-class="manuscript-preview-img"
                 :defer-until-visible="true"
-                @open-full="onPreviewClick"
+                @open-full="(src) => onPreviewClick(card, src)"
               />
             </button>
             <button
@@ -117,7 +117,7 @@
               type="button"
               class="manuscript-card-visual manuscript-card-visual--image"
               :title="card.label"
-              @click="onPreviewClick(card.previewSrc!)"
+              @click="onPreviewClick(card, card.previewSrc!)"
             >
               <img :src="card.previewSrc" :alt="card.label" loading="lazy" />
             </button>
@@ -150,6 +150,10 @@ import type { TaskAssetVersion } from '@/domain/types/task'
 import AssetDownloadLink from '@/components/media/AssetDownloadLink.vue'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
+import type {
+  ImagePreviewLightboxItem,
+  OpenImagePreviewLightboxOptions,
+} from '@/components/media/imagePreviewLightbox'
 import { formatDateTimeBeijingOffsetAware } from '@/utils/date'
 import {
   downloadHrefForAssetPreviewSlot,
@@ -196,7 +200,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   activateVersion: [index: number]
-  openLightbox: [src: string]
+  openLightbox: [src: string, options?: OpenImagePreviewLightboxOptions]
   openSharedVersion: [version: TaskAssetVersion]
 }>()
 
@@ -269,8 +273,32 @@ function onActivateVersion(index: number) {
   emit('activateVersion', index)
 }
 
-function onPreviewClick(src: string) {
-  emit('openLightbox', src)
+function manuscriptPreviewGallery(activeCard: ManuscriptCard, activeSrc: string): ImagePreviewLightboxItem[] {
+  const out = manuscriptCards.value
+    .filter((card) => card.previewSrc || card.previewFallbackSrc || card.key === activeCard.key)
+    .map((card) => ({
+      src: card.key === activeCard.key ? activeSrc : (card.previewSrc || card.previewFallbackSrc || ''),
+      title: card.label,
+      alt: card.label,
+      downloadUrl: card.downloadHref || card.previewSrc || card.previewFallbackSrc || '',
+    }))
+    .filter((item) => item.src.trim().length > 0)
+  if (!out.some((item) => item.src === activeSrc)) {
+    out.unshift({ src: activeSrc, title: activeCard.label, alt: activeCard.label, downloadUrl: activeSrc })
+  }
+  return out
+}
+
+function onPreviewClick(card: ManuscriptCard, src: string) {
+  const url = String(src ?? '').trim()
+  if (!url) return
+  const items = manuscriptPreviewGallery(card, url)
+  const index = Math.max(0, items.findIndex((item) => item.src === url))
+  emit('openLightbox', url, {
+    title: card.label,
+    items,
+    index,
+  })
 }
 
 function onSharedVersionClick(version: TaskAssetVersion) {
