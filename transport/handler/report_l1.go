@@ -114,6 +114,46 @@ func (h *ReportL1Handler) KPIAIAnalysis(c *gin.Context) {
 }
 
 func (h *ReportL1Handler) BusinessTrendPilotAnalysis(c *gin.Context) {
+	params, appErr := parseBusinessTrendAnalysisParams(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.BusinessTrendPilotAnalysis(c.Request.Context(), actor, params)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, gin.H{"data": data})
+}
+
+func (h *ReportL1Handler) StartBusinessTrendDeepAnalysis(c *gin.Context) {
+	params, appErr := parseBusinessTrendAnalysisParams(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.StartBusinessTrendDeepAnalysis(c.Request.Context(), actor, params)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(202, gin.H{"data": data})
+}
+
+func (h *ReportL1Handler) GetBusinessTrendDeepAnalysisJob(c *gin.Context) {
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.GetBusinessTrendDeepAnalysisJob(c.Request.Context(), actor, c.Param("job_id"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, gin.H{"data": data})
+}
+
+func parseBusinessTrendAnalysisParams(c *gin.Context) (reportl1svc.BusinessTrendAnalysisParams, *domain.AppError) {
 	var req struct {
 		From    string   `json:"from"`
 		To      string   `json:"to"`
@@ -122,8 +162,7 @@ func (h *ReportL1Handler) BusinessTrendPilotAnalysis(c *gin.Context) {
 	}
 	if c.Request.ContentLength != 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
-			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "请求格式不正确", nil))
-			return
+			return reportl1svc.BusinessTrendAnalysisParams{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "请求格式不正确", nil)
 		}
 	}
 	if strings.TrimSpace(req.From) == "" {
@@ -137,26 +176,18 @@ func (h *ReportL1Handler) BusinessTrendPilotAnalysis(c *gin.Context) {
 	}
 	from, err := time.Parse("2006-01-02", strings.TrimSpace(req.From))
 	if err != nil {
-		respondError(c, domain.NewAppError(reportl1svc.CodeInvalidDateRange, "invalid from date", nil))
-		return
+		return reportl1svc.BusinessTrendAnalysisParams{}, domain.NewAppError(reportl1svc.CodeInvalidDateRange, "invalid from date", nil)
 	}
 	to, err := time.Parse("2006-01-02", strings.TrimSpace(req.To))
 	if err != nil {
-		respondError(c, domain.NewAppError(reportl1svc.CodeInvalidDateRange, "invalid to date", nil))
-		return
+		return reportl1svc.BusinessTrendAnalysisParams{}, domain.NewAppError(reportl1svc.CodeInvalidDateRange, "invalid to date", nil)
 	}
-	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	data, appErr := h.svc.BusinessTrendPilotAnalysis(c.Request.Context(), actor, reportl1svc.BusinessTrendAnalysisParams{
+	return reportl1svc.BusinessTrendAnalysisParams{
 		From:    from.UTC(),
 		To:      to.UTC(),
 		Mode:    req.Mode,
 		Sources: req.Sources,
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	c.JSON(200, gin.H{"data": data})
+	}, nil
 }
 
 func parseReportRange(c *gin.Context) (time.Time, time.Time, *int64, *string, *domain.AppError) {

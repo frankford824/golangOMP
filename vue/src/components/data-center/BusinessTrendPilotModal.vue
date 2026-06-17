@@ -26,6 +26,7 @@
               :key="item.value"
               type="button"
               :class="{ active: rangeDays === item.value }"
+              :disabled="loading || deepBusy"
               @click="rangeDays = item.value"
             >
               {{ item.label }}
@@ -35,10 +36,10 @@
         <div class="control-group">
           <span class="control-label">范围</span>
           <div class="segmented segmented--wide">
-            <button type="button" :class="{ active: mode === 'internal' }" @click="mode = 'internal'">
+            <button type="button" :class="{ active: mode === 'internal' }" :disabled="loading || deepBusy" @click="mode = 'internal'">
               仅内部任务
             </button>
-            <button type="button" :class="{ active: mode === 'external' }" @click="mode = 'external'">
+            <button type="button" :class="{ active: mode === 'external' }" :disabled="loading || deepBusy" @click="mode = 'external'">
               内部 + 免费热点
             </button>
           </div>
@@ -46,6 +47,16 @@
         <BaseButton variant="primary" size="sm" :loading="loading" @click="generate">
           <Sparkles class="button-icon" aria-hidden="true" />
           生成分析
+        </BaseButton>
+        <BaseButton
+          variant="secondary"
+          size="sm"
+          :loading="deepStarting || deepBusy"
+          :disabled="loading || !result"
+          @click="startDeepAnalysis"
+        >
+          <Sparkles class="button-icon" aria-hidden="true" />
+          深度分析
         </BaseButton>
       </div>
 
@@ -59,6 +70,16 @@
           <strong>{{ source.source }}</strong>
           <small>{{ sourceStatusText(source) }}</small>
         </span>
+      </div>
+
+      <div v-if="deepJob || deepError" class="deep-status" :class="`deep-status--${deepStatusClass}`">
+        <div>
+          <strong>{{ deepStatusTitle }}</strong>
+          <p>{{ deepStatusMessage }}</p>
+        </div>
+        <BaseButton v-if="deepJob?.status === 'failed'" variant="secondary" size="sm" @click="startDeepAnalysis">
+          重试
+        </BaseButton>
       </div>
 
       <div v-if="loading" class="trend-loading" role="status">
@@ -182,16 +203,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Sparkles } from 'lucide-vue-next'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import {
   reportsApi,
+  type BusinessTrendDeepAnalysisJob,
   type BusinessTrendEvidenceSample,
   type BusinessTrendHotspot,
   type BusinessTrendMatch,
+  type BusinessTrendPilotParams,
   type BusinessTrendPilotResponse,
 } from '@/services/api/reportsApi'
 
@@ -225,7 +248,12 @@ const activeTab = ref<TrendTab>('hotspots')
 const loading = ref(false)
 const error = ref('')
 const result = ref<BusinessTrendPilotResponse | null>(null)
+const deepStarting = ref(false)
+const deepError = ref('')
+const deepJob = ref<BusinessTrendDeepAnalysisJob | null>(null)
 let currentController: AbortController | null = null
+let deepController: AbortController | null = null
+let deepPollTimer: number | null = null
 
 const rangeStart = computed(() => {
   const d = new Date()
@@ -252,20 +280,36 @@ const confidenceLabel = computed(() => {
   if (confidenceLevel.value === 'low') return '继续观察'
   return '可参考'
 })
+const deepBusy = computed(() => deepJob.value?.status === 'queued' || deepJob.value?.status === 'running')
+const deepStatusClass = computed(() => {
+  if (deepJob.value?.status === 'succeeded') return 'done'
+  if (deepJob.value?.status === 'failed' || deepError.value) return 'failed'
+  return 'running'
+})
+const deepStatusTitle = computed(() => {
+  if (deepJob.value?.status === 'succeeded') return '深度分析已完成'
+  if (deepJob.value?.status === 'failed' || deepError.value) return '深度分析暂时不可用'
+  if (deepJob.value?.status === 'queued') return '深度分析已开始'
+  return '正在深度分析'
+})
+const deepStatusMessage = computed(() => {
+  if (deepError.value) return deepError.value
+  if (deepJob.value?.analysis && deepJob.value.status === 'succeeded') return '已更新为深度业务判断。'
+  return deepJob.value?.message || '正在结合近期任务与可用热点做判断。'
+})
 
 async function generate() {
   currentController?.abort()
+  stopDeepPolling()
   const controller = new AbortController()
   currentController = controller
   loading.value = true
   error.value = ''
+  deepError.value = ''
+  deepJob.value = null
   try {
     const res = await reportsApi.businessTrendPilotAnalysis(
-      {
-        from: dateOnly(rangeStart.value),
-        to: dateOnly(rangeEnd.value),
-        mode: mode.value,
-      },
+      currentTrendParams(),
       controller.signal,
     )
     const parsed = parseBusinessTrendResponse(res.data as { data?: BusinessTrendPilotResponse } | BusinessTrendPilotResponse)
@@ -283,9 +327,118 @@ async function generate() {
   }
 }
 
+async function startDeepAnalysis() {
+  if (loading.value || deepBusy.value || !result.value) return
+  stopDeepPolling()
+  const controller = new AbortController()
+  deepController = controller
+  deepStarting.value = true
+  deepError.value = ''
+  try {
+    const res = await reportsApi.startBusinessTrendDeepAnalysis(currentTrendParams(), controller.signal)
+    const job = parseBusinessTrendJobResponse(res.data as { data?: BusinessTrendDeepAnalysisJob } | BusinessTrendDeepAnalysisJob)
+    if (!job?.job_id) throw new Error('深度分析暂未开始，请稍后重试')
+    deepJob.value = job
+    if (job.status === 'succeeded') {
+      applyDeepAnalysis(job)
+      return
+    }
+    if (job.status === 'failed') {
+      markDeepFailed(job.error_message || job.message || '深度分析暂时不可用，基础分析仍可使用')
+      return
+    }
+    scheduleDeepPoll(job.job_id)
+  } catch (e) {
+    if (controller.signal.aborted) return
+    markDeepFailed(e instanceof Error ? e.message : '深度分析暂时不可用，基础分析仍可使用')
+  } finally {
+    if (deepController === controller) {
+      deepController = null
+    }
+    deepStarting.value = false
+  }
+}
+
+function scheduleDeepPoll(jobId: string, delay = 1500) {
+  if (deepPollTimer) window.clearTimeout(deepPollTimer)
+  deepPollTimer = window.setTimeout(() => {
+    void pollDeepJob(jobId)
+  }, delay)
+}
+
+async function pollDeepJob(jobId: string) {
+  const controller = new AbortController()
+  deepController = controller
+  try {
+    const res = await reportsApi.getBusinessTrendDeepAnalysisJob(jobId, controller.signal)
+    const job = parseBusinessTrendJobResponse(res.data as { data?: BusinessTrendDeepAnalysisJob } | BusinessTrendDeepAnalysisJob)
+    if (!job) throw new Error('深度分析状态暂时不可读')
+    deepJob.value = job
+    if (job.status === 'succeeded') {
+      applyDeepAnalysis(job)
+      return
+    }
+    if (job.status === 'failed') {
+      markDeepFailed(job.error_message || job.message || '深度分析暂时不可用，基础分析仍可使用')
+      return
+    }
+    scheduleDeepPoll(job.job_id)
+  } catch (e) {
+    if (controller.signal.aborted) return
+    markDeepFailed(e instanceof Error ? e.message : '深度分析状态暂时不可读，基础分析仍可使用')
+  } finally {
+    if (deepController === controller) {
+      deepController = null
+    }
+  }
+}
+
+function applyDeepAnalysis(job: BusinessTrendDeepAnalysisJob) {
+  if (job.analysis) {
+    result.value = job.analysis
+    activeTab.value = 'directions'
+  }
+}
+
+function markDeepFailed(message: string) {
+  deepError.value = message
+  if (deepJob.value) {
+    deepJob.value = {
+      ...deepJob.value,
+      status: 'failed',
+      message,
+      error_message: message,
+      updated_at: new Date().toISOString(),
+    }
+  }
+}
+
+function stopDeepPolling() {
+  if (deepPollTimer) {
+    window.clearTimeout(deepPollTimer)
+    deepPollTimer = null
+  }
+  deepController?.abort()
+  deepController = null
+}
+
+function currentTrendParams(): BusinessTrendPilotParams {
+  return {
+    from: dateOnly(rangeStart.value),
+    to: dateOnly(rangeEnd.value),
+    mode: mode.value,
+  }
+}
+
 function parseBusinessTrendResponse(payload: { data?: BusinessTrendPilotResponse } | BusinessTrendPilotResponse | undefined): BusinessTrendPilotResponse | null {
   if (!payload) return null
   if ('headline' in payload || 'overview' in payload) return payload as BusinessTrendPilotResponse
+  return payload.data ?? null
+}
+
+function parseBusinessTrendJobResponse(payload: { data?: BusinessTrendDeepAnalysisJob } | BusinessTrendDeepAnalysisJob | undefined): BusinessTrendDeepAnalysisJob | null {
+  if (!payload) return null
+  if ('job_id' in payload || 'status' in payload) return payload as BusinessTrendDeepAnalysisJob
   return payload.data ?? null
 }
 
@@ -327,7 +480,18 @@ function riskLevelText(level?: string): string {
 
 onBeforeUnmount(() => {
   currentController?.abort()
+  stopDeepPolling()
 })
+
+watch(
+  () => props.modelValue,
+  (open) => {
+    if (!open) {
+      currentController?.abort()
+      stopDeepPolling()
+    }
+  },
+)
 </script>
 
 <style scoped>
@@ -446,6 +610,11 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 
+.segmented button:disabled {
+  cursor: not-allowed;
+  color: #94a3b8;
+}
+
 .button-icon {
   margin-right: 0.3rem;
   width: 0.9rem;
@@ -491,6 +660,49 @@ onBeforeUnmount(() => {
 
 .source-pill--skipped {
   background: #f8fafc;
+}
+
+.deep-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+  background: #eff6ff;
+  padding: 0.65rem 0.75rem;
+}
+
+.deep-status strong {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #1e3a8a;
+}
+
+.deep-status p {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.deep-status--done {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.deep-status--done strong {
+  color: #15803d;
+}
+
+.deep-status--failed {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.deep-status--failed strong {
+  color: #b91c1c;
 }
 
 .trend-loading,

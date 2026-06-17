@@ -18,6 +18,7 @@ type Service struct {
 	businessTrendGenerator     BusinessTrendAnalysisGenerator
 	businessTrendProviders     []TrendProvider
 	businessTrendProviderNames []string
+	businessTrendJobs          *businessTrendDeepJobStore
 	auditLog                   repo.PermissionLogRepo
 }
 
@@ -51,7 +52,7 @@ func WithBusinessTrendProviders(providers []TrendProvider, expectedNames []strin
 }
 
 func NewService(repo repo.ReportL1Repo, opts ...Option) *Service {
-	s := &Service{repo: repo}
+	s := &Service{repo: repo, businessTrendJobs: newBusinessTrendDeepJobStore()}
 	for _, opt := range opts {
 		opt(s)
 	}

@@ -52,13 +52,25 @@ func (s *Service) BusinessTrendPilotAnalysis(ctx context.Context, actor domain.R
 	if err := s.requireSuperAdmin(ctx, actor, "/v1/reports/business-trends/pilot-analysis"); err != nil {
 		return nil, err
 	}
-	if params.From.IsZero() || params.To.IsZero() || params.From.After(params.To) {
-		return nil, domain.NewAppError(CodeInvalidDateRange, "from must be before or equal to to", nil)
+	if appErr := s.validateBusinessTrendAnalysisParams(params); appErr != nil {
+		return nil, appErr
 	}
 	if s.businessTrendRepo == nil {
 		return nil, domain.NewAppError(CodeBusinessTrendNotConfigured, "业务热点分析服务尚未配置", nil)
 	}
 
+	evidence, err := s.collectBusinessTrendEvidence(ctx, params)
+	return fallbackBusinessTrendAnalysis(evidence, err), nil
+}
+
+func (s *Service) validateBusinessTrendAnalysisParams(params BusinessTrendAnalysisParams) *domain.AppError {
+	if params.From.IsZero() || params.To.IsZero() || params.From.After(params.To) {
+		return domain.NewAppError(CodeInvalidDateRange, "from must be before or equal to to", nil)
+	}
+	return nil
+}
+
+func (s *Service) collectBusinessTrendEvidence(ctx context.Context, params BusinessTrendAnalysisParams) (businessTrendEvidence, error) {
 	tasks, err := s.businessTrendRepo.ListRecentTaskTexts(ctx, repo.BusinessTrendFilter{
 		From:           params.From,
 		To:             params.To.AddDate(0, 0, 1),
@@ -84,7 +96,7 @@ func (s *Service) BusinessTrendPilotAnalysis(ctx context.Context, actor domain.R
 			},
 			GeneratedAt: time.Now().UTC(),
 		}
-		return fallbackBusinessTrendAnalysis(evidence, err), nil
+		return evidence, err
 	}
 
 	internal := buildBusinessTrendInternalEvidence(tasks)
@@ -106,8 +118,7 @@ func (s *Service) BusinessTrendPilotAnalysis(ctx context.Context, actor domain.R
 		SourceStatuses: statuses,
 		GeneratedAt:    time.Now().UTC(),
 	}
-
-	return fallbackBusinessTrendAnalysis(evidence, nil), nil
+	return evidence, nil
 }
 
 func (s *Service) fetchBusinessTrendExternal(ctx context.Context, mode string, requestedSources []string, keywords []string) ([]TrendExternalItem, []aiagent.BusinessTrendSourceStatus) {

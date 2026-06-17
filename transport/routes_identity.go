@@ -73,6 +73,10 @@ func registerV1IdentityRoutes(
 		v1.POST("/reports/l1/kpi-ai-analysis", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), reportL1H.KPIAIAnalysis)
 		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPost, "/v1/reports/business-trends/pilot-analysis", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin))
 		v1.POST("/reports/business-trends/pilot-analysis", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), reportL1H.BusinessTrendPilotAnalysis)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPost, "/v1/reports/business-trends/deep-analysis-jobs", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin))
+		v1.POST("/reports/business-trends/deep-analysis-jobs", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), reportL1H.StartBusinessTrendDeepAnalysis)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodGet, "/v1/reports/business-trends/deep-analysis-jobs/:job_id", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin))
+		v1.GET("/reports/business-trends/deep-analysis-jobs/:job_id", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), reportL1H.GetBusinessTrendDeepAnalysisJob)
 	}
 	if notificationH != nil {
 		v1.GET("/me/notifications", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.MyList)

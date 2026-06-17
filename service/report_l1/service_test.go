@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,10 @@ type failingBusinessTrendGenerator struct{}
 
 type countingBusinessTrendGenerator struct {
 	calls int
+}
+
+type successfulBusinessTrendGenerator struct {
+	calls int32
 }
 
 func (s *stubReportRepo) GetCards(context.Context) ([]domain.L1Card, error) { return s.cards, nil }
@@ -70,6 +75,23 @@ func (failingBusinessTrendGenerator) GenerateBusinessTrendAnalysis(context.Conte
 func (g *countingBusinessTrendGenerator) GenerateBusinessTrendAnalysis(context.Context, any) (*aiagent.BusinessTrendAnalysis, error) {
 	g.calls++
 	return nil, errors.New("business trend pilot should not call AI synchronously")
+}
+
+func (g *successfulBusinessTrendGenerator) GenerateBusinessTrendAnalysis(context.Context, any) (*aiagent.BusinessTrendAnalysis, error) {
+	atomic.AddInt32(&g.calls, 1)
+	return &aiagent.BusinessTrendAnalysis{
+		Headline: "AI 深度分析完成",
+		Overview: "已结合任务样本生成深度业务判断",
+		BusinessDirections: []aiagent.BusinessTrendDirection{{
+			Title:           "毕业季物料",
+			Reason:          "近期任务集中出现毕业季拍照道具",
+			SuggestedAction: "整理毕业季套版与主图素材",
+			Priority:        "high",
+		}},
+		Confidence: "high",
+		Model:      "test-model",
+		Provider:   "test-provider",
+	}, nil
 }
 
 func TestReportL1ServiceRBAC(t *testing.T) {
@@ -261,6 +283,70 @@ func TestBusinessTrendPilotReturnsWithoutSynchronousAI(t *testing.T) {
 	}
 	if analysis == nil || analysis.Provider != "system_fallback" || len(analysis.InternalHotspots) == 0 {
 		t.Fatalf("analysis=%+v", analysis)
+	}
+}
+
+func TestBusinessTrendDeepAnalysisJobRunsAsync(t *testing.T) {
+	from := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	generator := &successfulBusinessTrendGenerator{}
+	trendRepo := &stubBusinessTrendRepo{
+		tasks: []domain.BusinessTrendTaskText{
+			{
+				ID:                1,
+				TaskNo:            "RW-20260610-A-000003",
+				ProductShortName:  "毕业手举牌",
+				DesignRequirement: "毕业拍照活动用",
+				CreatedAt:         from.Add(time.Hour),
+			},
+		},
+	}
+	svc := NewService(&stubReportRepo{},
+		WithBusinessTrendRepo(trendRepo),
+		WithBusinessTrendGenerator(generator),
+	)
+
+	job, appErr := svc.StartBusinessTrendDeepAnalysis(context.Background(), reportActor(domain.RoleSuperAdmin), BusinessTrendAnalysisParams{From: from, To: from, Mode: "internal"})
+	if appErr != nil {
+		t.Fatalf("appErr=%+v", appErr)
+	}
+	if job == nil || job.JobID == "" || job.Status != BusinessTrendDeepJobQueued {
+		t.Fatalf("job=%+v", job)
+	}
+
+	var finished *BusinessTrendDeepAnalysisJob
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		current, appErr := svc.GetBusinessTrendDeepAnalysisJob(context.Background(), reportActor(domain.RoleSuperAdmin), job.JobID)
+		if appErr != nil {
+			t.Fatalf("get appErr=%+v", appErr)
+		}
+		if current.Status == BusinessTrendDeepJobSucceeded {
+			finished = current
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if finished == nil {
+		current, _ := svc.GetBusinessTrendDeepAnalysisJob(context.Background(), reportActor(domain.RoleSuperAdmin), job.JobID)
+		t.Fatalf("job did not finish: %+v", current)
+	}
+	if finished.Analysis == nil || finished.Analysis.Headline != "AI 深度分析完成" {
+		t.Fatalf("finished=%+v", finished)
+	}
+	if atomic.LoadInt32(&generator.calls) != 1 {
+		t.Fatalf("generator calls=%d", atomic.LoadInt32(&generator.calls))
+	}
+}
+
+func TestBusinessTrendDeepAnalysisRequiresGenerator(t *testing.T) {
+	from := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	svc := NewService(&stubReportRepo{},
+		WithBusinessTrendRepo(&stubBusinessTrendRepo{}),
+	)
+
+	_, appErr := svc.StartBusinessTrendDeepAnalysis(context.Background(), reportActor(domain.RoleSuperAdmin), BusinessTrendAnalysisParams{From: from, To: from, Mode: "internal"})
+	if appErr == nil || appErr.Code != CodeBusinessTrendDeepAnalysisUnavailable {
+		t.Fatalf("appErr=%+v", appErr)
 	}
 }
 

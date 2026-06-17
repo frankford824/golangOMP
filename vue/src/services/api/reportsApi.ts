@@ -135,6 +135,16 @@ export interface BusinessTrendPilotResponse {
   generated_at?: string
 }
 
+export interface BusinessTrendDeepAnalysisJob {
+  job_id: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | string
+  message?: string
+  analysis?: BusinessTrendPilotResponse
+  error_message?: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface BusinessTrendPilotParams {
   from: string
   to: string
@@ -170,5 +180,19 @@ export const reportsApi = {
     http.post<{ data?: BusinessTrendPilotResponse }>('/v1/reports/business-trends/pilot-analysis', params, {
       signal,
       timeout: 120_000,
+    }),
+
+  /** POST /v1/reports/business-trends/deep-analysis-jobs */
+  startBusinessTrendDeepAnalysis: (params: BusinessTrendPilotParams, signal?: AbortSignal) =>
+    http.post<{ data?: BusinessTrendDeepAnalysisJob }>('/v1/reports/business-trends/deep-analysis-jobs', params, {
+      signal,
+      timeout: 20_000,
+    }),
+
+  /** GET /v1/reports/business-trends/deep-analysis-jobs/:job_id */
+  getBusinessTrendDeepAnalysisJob: (jobId: string, signal?: AbortSignal) =>
+    http.get<{ data?: BusinessTrendDeepAnalysisJob }>(`/v1/reports/business-trends/deep-analysis-jobs/${encodeURIComponent(jobId)}`, {
+      signal,
+      timeout: 20_000,
     }),
 }
