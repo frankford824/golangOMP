@@ -107,15 +107,7 @@ func (s *Service) BusinessTrendPilotAnalysis(ctx context.Context, actor domain.R
 		GeneratedAt:    time.Now().UTC(),
 	}
 
-	if s.businessTrendGenerator == nil {
-		return fallbackBusinessTrendAnalysis(evidence, nil), nil
-	}
-	analysis, err := s.businessTrendGenerator.GenerateBusinessTrendAnalysis(ctx, evidence)
-	if err != nil || analysis == nil || strings.TrimSpace(analysis.RawText) != "" {
-		return fallbackBusinessTrendAnalysis(evidence, err), nil
-	}
-	mergeBusinessTrendFallbackContent(analysis, evidence)
-	return analysis, nil
+	return fallbackBusinessTrendAnalysis(evidence, nil), nil
 }
 
 func (s *Service) fetchBusinessTrendExternal(ctx context.Context, mode string, requestedSources []string, keywords []string) ([]TrendExternalItem, []aiagent.BusinessTrendSourceStatus) {

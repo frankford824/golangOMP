@@ -32,6 +32,10 @@ type failingKPIAnalysisGenerator struct{}
 
 type failingBusinessTrendGenerator struct{}
 
+type countingBusinessTrendGenerator struct {
+	calls int
+}
+
 func (s *stubReportRepo) GetCards(context.Context) ([]domain.L1Card, error) { return s.cards, nil }
 func (s *stubReportRepo) GetThroughput(context.Context, repo.ReportL1Filter) ([]domain.L1ThroughputPoint, error) {
 	return s.throughput, nil
@@ -61,6 +65,11 @@ func (failingKPIAnalysisGenerator) GenerateKPIAnalysis(context.Context, any) (*a
 
 func (failingBusinessTrendGenerator) GenerateBusinessTrendAnalysis(context.Context, any) (*aiagent.BusinessTrendAnalysis, error) {
 	return nil, errors.New("provider timeout")
+}
+
+func (g *countingBusinessTrendGenerator) GenerateBusinessTrendAnalysis(context.Context, any) (*aiagent.BusinessTrendAnalysis, error) {
+	g.calls++
+	return nil, errors.New("business trend pilot should not call AI synchronously")
 }
 
 func TestReportL1ServiceRBAC(t *testing.T) {
@@ -220,6 +229,38 @@ func TestBusinessTrendPilotFallsBackWithBatchItemSignals(t *testing.T) {
 	}
 	if analysis.SourceStatuses[0].Source != "内部任务" || analysis.SourceStatuses[0].Status != "used" {
 		t.Fatalf("first source status=%+v", analysis.SourceStatuses[0])
+	}
+}
+
+func TestBusinessTrendPilotReturnsWithoutSynchronousAI(t *testing.T) {
+	from := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	generator := &countingBusinessTrendGenerator{}
+	trendRepo := &stubBusinessTrendRepo{
+		tasks: []domain.BusinessTrendTaskText{
+			{
+				ID:                1,
+				TaskNo:            "RW-20260610-A-000002",
+				ProductShortName:  "毕业手举牌",
+				DesignRequirement: "毕业拍照活动用",
+				Remark:            "毕业季拍照道具",
+				CreatedAt:         from.Add(time.Hour),
+			},
+		},
+	}
+	svc := NewService(&stubReportRepo{},
+		WithBusinessTrendRepo(trendRepo),
+		WithBusinessTrendGenerator(generator),
+	)
+
+	analysis, appErr := svc.BusinessTrendPilotAnalysis(context.Background(), reportActor(domain.RoleSuperAdmin), BusinessTrendAnalysisParams{From: from, To: from, Mode: "internal"})
+	if appErr != nil {
+		t.Fatalf("appErr=%+v", appErr)
+	}
+	if generator.calls != 0 {
+		t.Fatalf("business trend pilot called AI generator %d times", generator.calls)
+	}
+	if analysis == nil || analysis.Provider != "system_fallback" || len(analysis.InternalHotspots) == 0 {
+		t.Fatalf("analysis=%+v", analysis)
 	}
 }
 
