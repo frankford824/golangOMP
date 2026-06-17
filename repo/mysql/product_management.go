@@ -638,7 +638,7 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 		clauses = append(clauses, "creator_id = ?")
 		args = append(args, *filter.CreatorID)
 	}
-	if strings.TrimSpace(filter.IssueScope) == "attention" {
+	if shouldApplyProductManagementAttentionScope(filter) {
 		clauses = append(clauses, `(
 			cost_price IS NULL
 			OR cost_price <= 0
@@ -648,6 +648,15 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 		)`)
 	}
 	return "WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func shouldApplyProductManagementAttentionScope(filter repo.ProductManagementListFilter) bool {
+	if strings.TrimSpace(filter.IssueScope) != "attention" {
+		return false
+	}
+	return strings.TrimSpace(filter.SyncStatus) != string(domain.ProductManagementERPSyncStatusSynced) &&
+		strings.TrimSpace(filter.BaseSyncStatus) != string(domain.ProductManagementERPSyncStatusSynced) &&
+		strings.TrimSpace(filter.ImageSyncStatus) != string(domain.ProductManagementERPSyncStatusSynced)
 }
 
 func scanProductManagementRows(rows *sql.Rows, total int64) ([]*domain.ProductManagementRecord, int64, error) {

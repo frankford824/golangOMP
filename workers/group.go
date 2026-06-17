@@ -51,7 +51,11 @@ func (g *Group) Start(ctx context.Context) {
 	if g.erpEnabled && g.erpSyncSvc != nil {
 		go NewERPSyncWorker(g.erpSyncSvc, g.logger, g.erpInterval).Run(ctx)
 	}
-	if g.productMgmt != nil {
-		go NewProductManagementSyncWorker(g.productMgmt, g.logger, 15*time.Second, 10).Run(ctx)
+	if g.shouldStartProductManagementSyncWorker() {
+		go NewProductManagementSyncWorker(g.productMgmt, g.logger, 30*time.Second, 2).Run(ctx)
 	}
+}
+
+func (g *Group) shouldStartProductManagementSyncWorker() bool {
+	return g.erpEnabled && g.productMgmt != nil
 }

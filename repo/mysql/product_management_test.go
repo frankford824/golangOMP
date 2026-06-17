@@ -142,3 +142,42 @@ func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T
 		t.Fatalf("attention filter where = %s", where)
 	}
 }
+
+func TestProductManagementWhereSyncedStatusSkipsAttentionScope(t *testing.T) {
+	cases := []struct {
+		name         string
+		filter       repo.ProductManagementListFilter
+		wantFragment string
+	}{
+		{
+			name:         "overall synced",
+			filter:       repo.ProductManagementListFilter{IssueScope: "attention", SyncStatus: "synced"},
+			wantFragment: "erp_sync_status = ?",
+		},
+		{
+			name:         "base synced",
+			filter:       repo.ProductManagementListFilter{IssueScope: "attention", BaseSyncStatus: "synced"},
+			wantFragment: "base_sync_status = ?",
+		},
+		{
+			name:         "image synced",
+			filter:       repo.ProductManagementListFilter{IssueScope: "attention", ImageSyncStatus: "synced"},
+			wantFragment: "image_sync_status = ? AND last_image_synced_at IS NOT NULL",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, args := buildProductManagementWhere(tc.filter)
+			if !strings.Contains(where, tc.wantFragment) {
+				t.Fatalf("where missing status fragment %q: %s", tc.wantFragment, where)
+			}
+			if strings.Contains(where, "cost_price IS NULL") || strings.Contains(where, "base_sync_status IN") || strings.Contains(where, "image_sync_status IN") {
+				t.Fatalf("synced status filter must not include attention scope: %s", where)
+			}
+			if len(args) != 1 || args[0] != "synced" {
+				t.Fatalf("args = %#v", args)
+			}
+		})
+	}
+}

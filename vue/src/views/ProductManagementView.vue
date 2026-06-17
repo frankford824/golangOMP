@@ -297,6 +297,7 @@ onBeforeUnmount(() => {
 })
 
 async function loadRecords(): Promise<void> {
+  normalizeIssueScopeForExplicitSuccessFilter()
   loading.value = true
   error.value = ''
   try {
@@ -326,6 +327,13 @@ async function loadRecords(): Promise<void> {
 function applyFilters(): void {
   filters.page = 1
   void loadRecords()
+}
+
+function normalizeIssueScopeForExplicitSuccessFilter(): void {
+  if (filters.issue_scope !== 'attention') return
+  if (filters.sync_status === 'synced' || filters.base_sync_status === 'synced' || filters.image_sync_status === 'synced') {
+    filters.issue_scope = 'all'
+  }
 }
 
 function changePage(page: number): void {

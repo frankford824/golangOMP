@@ -520,6 +520,35 @@ func TestERPBridgeServiceEnsureLocalProductMergesExistingSnapshot(t *testing.T) 
 	}
 }
 
+func TestAdaptERPProductReadsJSTImageFields(t *testing.T) {
+	product := adaptERPProduct(map[string]interface{}{
+		"sku_id":  "CGK000181",
+		"i_id":    "10001",
+		"name":    "ERP Product",
+		"sku_pic": "https://img.example.com/sku.jpg",
+		"pic_big": "https://img.example.com/big.jpg",
+	})
+	if product == nil {
+		t.Fatal("adaptERPProduct() = nil")
+	}
+	if product.ImageURL != "https://img.example.com/sku.jpg" {
+		t.Fatalf("ImageURL = %q, want sku_pic", product.ImageURL)
+	}
+
+	product = adaptERPProduct(map[string]interface{}{
+		"sku_id":  "CGK000182",
+		"i_id":    "10002",
+		"name":    "ERP Product",
+		"pic_big": "https://img.example.com/big.jpg",
+	})
+	if product == nil {
+		t.Fatal("adaptERPProduct() with pic_big = nil")
+	}
+	if product.ImageURL != "https://img.example.com/big.jpg" {
+		t.Fatalf("ImageURL = %q, want pic_big", product.ImageURL)
+	}
+}
+
 func TestERPBridgeServiceSearchProductsRejectsUnknownCategory(t *testing.T) {
 	client := &erpBridgeClientStub{
 		searchResponses: map[string]*domain.ERPProductListResponse{

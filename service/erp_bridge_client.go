@@ -1010,7 +1010,7 @@ func adaptERPProduct(root interface{}) *domain.ERPProduct {
 		CategoryCode:     firstString(mapped, "category_code", "categoryCode", "cat_code", "class_code"),
 		CategoryName:     firstString(mapped, "category_name", "category", "cat_name", "category_full_name", "class_name"),
 		ProductShortName: firstString(mapped, "product_short_name", "productShortName", "short_name", "shortName", "short_title", "shortTitle", "simple_name"),
-		ImageURL:         firstString(mapped, "image_url", "image", "main_image", "cover", "cover_url", "pic_url", "pic", "thumbnail", "thumb", "imageUrl"),
+		ImageURL:         firstString(mapped, "sku_pic", "skuPic", "pic_big", "picBig", "image_url", "image", "main_image", "cover", "cover_url", "pic_url", "pic", "thumbnail", "thumb", "imageUrl"),
 		Price:            firstFloatPtr(mapped, "price", "sale_price", "sales_price", "market_price", "unit_price", "amount", "min_price", "retail_price"),
 		SPrice:           firstFloatPtr(mapped, "s_price", "sale_price", "sales_price", "price"),
 		CostPrice:        firstFloatPtr(mapped, "cost_price", "c_price"),

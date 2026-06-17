@@ -18,10 +18,10 @@ type ProductManagementSyncWorker struct {
 
 func NewProductManagementSyncWorker(svc service.ProductManagementService, logger *zap.Logger, interval time.Duration, limit int) *ProductManagementSyncWorker {
 	if interval <= 0 {
-		interval = 15 * time.Second
+		interval = 30 * time.Second
 	}
 	if limit <= 0 {
-		limit = 10
+		limit = 2
 	}
 	return &ProductManagementSyncWorker{
 		svc:      svc,
