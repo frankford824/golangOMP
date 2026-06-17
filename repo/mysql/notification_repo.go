@@ -17,10 +17,14 @@ type notificationRepo struct{ db *DB }
 func NewNotificationRepo(db *DB) repo.NotificationRepo { return &notificationRepo{db: db} }
 
 func (r *notificationRepo) Create(ctx context.Context, tx repo.Tx, n *domain.Notification) (*domain.Notification, error) {
+	createdAt := n.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
 	res, err := Unwrap(tx).ExecContext(ctx, `
-		INSERT INTO notifications (user_id, notification_type, payload, is_read, read_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		n.UserID, string(n.NotificationType), jsonOrObject(n.Payload), n.IsRead, toNullTime(n.ReadAt))
+		INSERT INTO notifications (user_id, notification_type, payload, is_read, read_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		n.UserID, string(n.NotificationType), jsonOrObject(n.Payload), n.IsRead, toNullTime(n.ReadAt), createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert notification: %w", err)
 	}
