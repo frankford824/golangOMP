@@ -204,8 +204,8 @@ func (c *AnthropicCompatibleClient) GenerateBusinessTrendAnalysis(ctx context.Co
 		return nil, fmt.Errorf("marshal business trend evidence: %w", err)
 	}
 	maxTokens := c.cfg.MaxTokens
-	if maxTokens < 1800 {
-		maxTokens = 1800
+	if maxTokens < 2600 {
+		maxTokens = 2600
 	}
 	body := anthropicMessageRequest{
 		Model:       c.cfg.Model,

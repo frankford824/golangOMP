@@ -149,8 +149,8 @@ func TestAnthropicBusinessTrendAnalysisUsesTokenFloor(t *testing.T) {
 		if body.Thinking == nil || body.Thinking.Type != "disabled" {
 			t.Fatalf("thinking config = %+v, want disabled", body.Thinking)
 		}
-		if body.MaxTokens < 1800 {
-			t.Fatalf("max_tokens=%d, want at least 1800", body.MaxTokens)
+		if body.MaxTokens < 2600 {
+			t.Fatalf("max_tokens=%d, want at least 2600", body.MaxTokens)
 		}
 		writeAnthropicText(t, w, `{"headline":"毕业季物料升温","overview":"内部任务集中在毕业季手举牌。","internal_hotspots":[],"external_matches":[],"business_directions":[],"risks":[],"source_statuses":[],"evidence_samples":[],"confidence":"medium"}`)
 	}))

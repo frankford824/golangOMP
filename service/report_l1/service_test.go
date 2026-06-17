@@ -25,6 +25,7 @@ type stubKPIAnalysisRepo struct {
 
 type stubBusinessTrendRepo struct {
 	tasks []domain.BusinessTrendTaskText
+	err   error
 }
 
 type failingKPIAnalysisGenerator struct{}
@@ -48,6 +49,9 @@ func (s *stubKPIAnalysisRepo) ListTaskAssets(context.Context, repo.KPIAnalysisFi
 }
 
 func (s *stubBusinessTrendRepo) ListRecentTaskTexts(context.Context, repo.BusinessTrendFilter) ([]domain.BusinessTrendTaskText, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
 	return s.tasks, nil
 }
 
@@ -216,6 +220,28 @@ func TestBusinessTrendPilotFallsBackWithBatchItemSignals(t *testing.T) {
 	}
 	if analysis.SourceStatuses[0].Source != "内部任务" || analysis.SourceStatuses[0].Status != "used" {
 		t.Fatalf("first source status=%+v", analysis.SourceStatuses[0])
+	}
+}
+
+func TestBusinessTrendPilotRepoErrorReturnsReadableFallback(t *testing.T) {
+	from := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	svc := NewService(&stubReportRepo{},
+		WithBusinessTrendRepo(&stubBusinessTrendRepo{err: errors.New("database unavailable")}),
+		WithBusinessTrendGenerator(failingBusinessTrendGenerator{}),
+	)
+
+	analysis, appErr := svc.BusinessTrendPilotAnalysis(context.Background(), reportActor(domain.RoleSuperAdmin), BusinessTrendAnalysisParams{From: from, To: from, Mode: "internal"})
+	if appErr != nil {
+		t.Fatalf("appErr=%+v", appErr)
+	}
+	if analysis == nil || analysis.Provider != "system_fallback" {
+		t.Fatalf("analysis=%+v", analysis)
+	}
+	if len(analysis.SourceStatuses) == 0 || analysis.SourceStatuses[0].Status != "failed" {
+		t.Fatalf("source statuses=%+v", analysis.SourceStatuses)
+	}
+	if !strings.Contains(analysis.Overview, "暂无可分析任务") {
+		t.Fatalf("overview=%s", analysis.Overview)
 	}
 }
 

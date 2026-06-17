@@ -66,7 +66,25 @@ func (s *Service) BusinessTrendPilotAnalysis(ctx context.Context, actor domain.R
 		BatchItemLimit: 600,
 	})
 	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		evidence := businessTrendEvidence{
+			Period: kpiAnalysisPeriod{
+				From: params.From.Format("2006-01-02"),
+				To:   params.To.Format("2006-01-02"),
+			},
+			Mode: normalizeBusinessTrendMode(params.Mode),
+			Internal: businessTrendInternalEvidence{
+				TotalTasks: 0,
+				Keywords:   []string{},
+				Hotspots:   []aiagent.BusinessTrendHotspot{},
+				Samples:    []aiagent.BusinessTrendEvidence{},
+			},
+			ExternalItems: []TrendExternalItem{},
+			SourceStatuses: []aiagent.BusinessTrendSourceStatus{
+				{Source: "内部任务", Status: "failed", Message: "内部任务暂时不可读，本次无法生成完整判断"},
+			},
+			GeneratedAt: time.Now().UTC(),
+		}
+		return fallbackBusinessTrendAnalysis(evidence, err), nil
 	}
 
 	internal := buildBusinessTrendInternalEvidence(tasks)
@@ -454,6 +472,12 @@ func fallbackBusinessRisks(evidence businessTrendEvidence) []aiagent.BusinessTre
 	risks := []aiagent.BusinessTrendRisk{}
 	if evidence.Internal.TotalTasks < 5 {
 		risks = append(risks, aiagent.BusinessTrendRisk{Level: "medium", Title: "内部样本偏少", Reason: "本周期任务量较少，趋势判断需要继续观察"})
+	}
+	for _, status := range evidence.SourceStatuses {
+		if status.Source == "内部任务" && status.Status == "failed" {
+			risks = append(risks, aiagent.BusinessTrendRisk{Level: "high", Title: "内部任务暂时不可读", Reason: "本次无法读取近期任务，请稍后重试或联系管理员查看服务状态"})
+			break
+		}
 	}
 	if len(evidence.ExternalItems) == 0 {
 		risks = append(risks, aiagent.BusinessTrendRisk{Level: "low", Title: "外部热点样本不足", Reason: "外部来源未启用或暂不可用，本次主要参考内部任务"})
