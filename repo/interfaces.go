@@ -788,6 +788,17 @@ type KPIAnalysisFilter struct {
 	Limit int
 }
 
+type BusinessTrendRepo interface {
+	ListRecentTaskTexts(ctx context.Context, filter BusinessTrendFilter) ([]domain.BusinessTrendTaskText, error)
+}
+
+type BusinessTrendFilter struct {
+	From           time.Time
+	To             time.Time
+	Limit          int
+	BatchItemLimit int
+}
+
 // OutsourceListFilter for paginated outsource order queries.
 type OutsourceListFilter struct {
 	TaskID   *int64

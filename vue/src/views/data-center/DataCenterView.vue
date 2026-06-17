@@ -5,7 +5,13 @@
         <h2 class="page-title">数据中心</h2>
         <p class="page-subtitle">导出、业务追踪、绩效与排查</p>
       </div>
-      <BaseButton variant="secondary" size="sm" @click="refreshToken++">刷新当前页</BaseButton>
+      <div class="page-header-actions">
+        <BaseButton v-if="canKpi" variant="secondary" size="sm" @click="businessTrendPilotOpen = true">
+          <Sparkles class="button-icon" aria-hidden="true" />
+          业务热点 AI 试验
+        </BaseButton>
+        <BaseButton variant="secondary" size="sm" @click="refreshToken++">刷新当前页</BaseButton>
+      </div>
     </div>
 
     <BaseEmptyState
@@ -58,14 +64,18 @@
         />
       </section>
     </template>
+
+    <BusinessTrendPilotModal v-model="businessTrendPilotOpen" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Sparkles } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
+import BusinessTrendPilotModal from '@/components/data-center/BusinessTrendPilotModal.vue'
 import KpiOverviewPanel from '@/components/data-center/KpiOverviewPanel.vue'
 import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -87,6 +97,7 @@ const { can } = usePermission()
 
 const refreshToken = ref(0)
 const activeTab = ref<DataCenterTab>('kpi')
+const businessTrendPilotOpen = ref(false)
 
 const canExport = computed(() => can('export.tasks') || permissionsStore.hasMenu('export_center'))
 const canTrace = computed(() => can('logs.view') || permissionsStore.hasMenu('logs_center'))
@@ -169,6 +180,17 @@ watch(
   gap: 1rem;
   padding: 0.125rem 0.125rem 0;
 }
+.page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.button-icon {
+  margin-right: 0.3rem;
+  width: 0.9rem;
+  height: 0.9rem;
+}
 .page-title {
   margin: 0;
   font-size: 1rem;
@@ -240,6 +262,15 @@ watch(
   .page-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .page-header-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .page-header-actions :deep(button) {
+    flex: 1 1 9rem;
   }
 }
 </style>

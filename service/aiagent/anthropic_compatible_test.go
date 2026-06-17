@@ -29,6 +29,20 @@ func TestParseTaskSummaryTextFromFencedJSON(t *testing.T) {
 	}
 }
 
+func TestParseBusinessTrendAnalysisTextFromFencedJSON(t *testing.T) {
+	raw := "```json\n{\"headline\":\"毕业季物料升温\",\"overview\":\"内部任务集中在毕业季手举牌。\",\"internal_hotspots\":[{\"topic\":\"毕业季\",\"count\":3,\"signal\":\"任务集中\",\"keywords\":[\"毕业季\"],\"task_samples\":[\"RW-1 毕业手举牌\"]}],\"external_matches\":[],\"business_directions\":[],\"risks\":[],\"source_statuses\":[{\"source\":\"内部任务\",\"status\":\"used\",\"message\":\"已读取任务\",\"items\":3}],\"evidence_samples\":[],\"confidence\":\"medium\"}\n```"
+	got, err := ParseBusinessTrendAnalysisText(raw)
+	if err != nil {
+		t.Fatalf("ParseBusinessTrendAnalysisText() error = %v", err)
+	}
+	if got.Headline != "毕业季物料升温" || len(got.InternalHotspots) != 1 {
+		t.Fatalf("analysis=%+v", got)
+	}
+	if len(got.SourceStatuses) != 1 || got.SourceStatuses[0].Status != "used" {
+		t.Fatalf("source statuses=%+v", got.SourceStatuses)
+	}
+}
+
 func TestMessagesURL(t *testing.T) {
 	got := messagesURL("https://api.minimaxi.com/anthropic/")
 	want := "https://api.minimaxi.com/anthropic/v1/messages"
@@ -120,6 +134,43 @@ func TestAnthropicClientLogsSanitizedProviderFailure(t *testing.T) {
 		!strings.Contains(dump, "non_2xx") ||
 		!strings.Contains(dump, "rate_limit_error") {
 		t.Fatalf("missing sanitized failure metadata: %s", dump)
+	}
+}
+
+func TestAnthropicBusinessTrendAnalysisUsesTokenFloor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int                      `json:"max_tokens"`
+			Thinking  *anthropicThinkingConfig `json:"thinking"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.Thinking == nil || body.Thinking.Type != "disabled" {
+			t.Fatalf("thinking config = %+v, want disabled", body.Thinking)
+		}
+		if body.MaxTokens < 1800 {
+			t.Fatalf("max_tokens=%d, want at least 1800", body.MaxTokens)
+		}
+		writeAnthropicText(t, w, `{"headline":"毕业季物料升温","overview":"内部任务集中在毕业季手举牌。","internal_hotspots":[],"external_matches":[],"business_directions":[],"risks":[],"source_statuses":[],"evidence_samples":[],"confidence":"medium"}`)
+	}))
+	defer server.Close()
+
+	client := NewAnthropicCompatibleClient(Config{
+		Enabled:   true,
+		BaseURL:   server.URL,
+		APIKey:    "secret-api-key",
+		Model:     "MiniMax-M3",
+		Timeout:   time.Second,
+		MaxTokens: 900,
+	}, zap.NewNop())
+
+	analysis, err := client.GenerateBusinessTrendAnalysis(context.Background(), map[string]string{"topic": "毕业季"})
+	if err != nil {
+		t.Fatalf("GenerateBusinessTrendAnalysis() error=%v", err)
+	}
+	if analysis.Headline != "毕业季物料升温" {
+		t.Fatalf("analysis=%+v", analysis)
 	}
 }
 

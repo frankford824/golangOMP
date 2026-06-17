@@ -78,6 +78,70 @@ export interface KpiTaskEvent {
   created_at: string
 }
 
+export interface BusinessTrendHotspot {
+  topic: string
+  count: number
+  signal?: string
+  keywords?: string[]
+  task_samples?: string[]
+}
+
+export interface BusinessTrendMatch {
+  topic: string
+  source: string
+  signal?: string
+  business_meaning?: string
+  evidence?: string[]
+}
+
+export interface BusinessTrendDirection {
+  title: string
+  reason?: string
+  suggested_action?: string
+  priority?: 'high' | 'medium' | 'low' | string
+}
+
+export interface BusinessTrendRisk {
+  level?: 'high' | 'medium' | 'low' | string
+  title: string
+  reason?: string
+}
+
+export interface BusinessTrendSourceStatus {
+  source: string
+  status: 'used' | 'skipped' | 'failed' | string
+  message: string
+  items?: number
+}
+
+export interface BusinessTrendEvidenceSample {
+  task_no?: string
+  task_name?: string
+  source?: string
+  note: string
+  created_at?: string
+}
+
+export interface BusinessTrendPilotResponse {
+  headline: string
+  overview: string
+  internal_hotspots?: BusinessTrendHotspot[]
+  external_matches?: BusinessTrendMatch[]
+  business_directions?: BusinessTrendDirection[]
+  risks?: BusinessTrendRisk[]
+  source_statuses?: BusinessTrendSourceStatus[]
+  evidence_samples?: BusinessTrendEvidenceSample[]
+  confidence?: 'high' | 'medium' | 'low' | string
+  generated_at?: string
+}
+
+export interface BusinessTrendPilotParams {
+  from: string
+  to: string
+  mode: 'internal' | 'external'
+  sources?: string[]
+}
+
 export const reportsApi = {
   /** GET /v1/reports/l1/cards */
   l1Cards: (signal?: AbortSignal) => http.get('/v1/reports/l1/cards', { signal }),
@@ -97,6 +161,13 @@ export const reportsApi = {
   /** POST /v1/reports/l1/kpi-ai-analysis */
   kpiAiAnalysis: (params: Pick<L1ReportRangeParams, 'from' | 'to'>, signal?: AbortSignal) =>
     http.post<{ data?: KpiAiAnalysisResponse }>('/v1/reports/l1/kpi-ai-analysis', params, {
+      signal,
+      timeout: 120_000,
+    }),
+
+  /** POST /v1/reports/business-trends/pilot-analysis */
+  businessTrendPilotAnalysis: (params: BusinessTrendPilotParams, signal?: AbortSignal) =>
+    http.post<{ data?: BusinessTrendPilotResponse }>('/v1/reports/business-trends/pilot-analysis', params, {
       signal,
       timeout: 120_000,
     }),

@@ -195,6 +195,60 @@ func (c *AnthropicCompatibleClient) GenerateKPIAnalysis(ctx context.Context, evi
 	return analysis, nil
 }
 
+func (c *AnthropicCompatibleClient) GenerateBusinessTrendAnalysis(ctx context.Context, evidence any) (*BusinessTrendAnalysis, error) {
+	if !c.Ready() {
+		return nil, errors.New("ai analysis provider is not configured")
+	}
+	payload, err := json.Marshal(evidence)
+	if err != nil {
+		return nil, fmt.Errorf("marshal business trend evidence: %w", err)
+	}
+	maxTokens := c.cfg.MaxTokens
+	if maxTokens < 1800 {
+		maxTokens = 1800
+	}
+	body := anthropicMessageRequest{
+		Model:       c.cfg.Model,
+		MaxTokens:   maxTokens,
+		Temperature: 0.2,
+		System:      businessTrendAnalysisSystemPrompt,
+		Thinking:    disabledThinkingConfig(),
+		Messages: []anthropicMessage{{
+			Role:    "user",
+			Content: "请基于下面这份内部任务与外部热点证据，生成公司业务调整建议。证据 JSON：\n" + string(payload),
+		}},
+	}
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ai request: %w", err)
+	}
+
+	respBody, err := c.doMessagesRequest(ctx, "business_trend_analysis", rawBody, len(payload), maxTokens)
+	if err != nil {
+		return nil, err
+	}
+	text, err := extractAnthropicText(respBody)
+	if err != nil {
+		c.logAIResponseIssue("business_trend_analysis", "extract_text", len(respBody), err)
+		return nil, err
+	}
+	analysis, err := ParseBusinessTrendAnalysisText(text)
+	if err != nil {
+		c.logAIResponseIssue("business_trend_analysis", "parse_json", len(respBody), err)
+		analysis = &BusinessTrendAnalysis{
+			Headline:   "AI 已返回内容，但未能结构化",
+			Overview:   truncateForError(strings.TrimSpace(text), 420),
+			RawText:    strings.TrimSpace(text),
+			Confidence: "low",
+		}
+	}
+	normalizeBusinessTrendAnalysis(analysis)
+	analysis.GeneratedAt = time.Now()
+	analysis.Model = c.cfg.Model
+	analysis.Provider = c.cfg.Provider
+	return analysis, nil
+}
+
 func (c *AnthropicCompatibleClient) doMessagesRequest(ctx context.Context, scene string, rawBody []byte, evidenceBytes, maxTokens int) ([]byte, error) {
 	startedAt := time.Now()
 	fields := c.aiLogFields(scene, rawBody, evidenceBytes, maxTokens)
@@ -523,6 +577,29 @@ JSON 结构必须是：
   "confidence": "high|medium|low"
 }`
 
+const businessTrendAnalysisSystemPrompt = `你是公司业务热点分析助手。请只基于用户给出的内部任务证据和外部热点证据，不要编造。
+
+输出要求：
+1. 面向运营、设计和管理者，全部使用业务用户视角中文，不输出接口名、JSON 字段名、token、provider、API、错误码。
+2. 必须区分“内部任务正在做什么”和“外部热点能否印证”，外部证据不足时要明确写“本次主要基于内部任务判断”。
+3. 重点回答：近期产品热点、可尝试的业务方向、需要规避的风险。
+4. 任务编号和任务名称可作为证据，但不要泄露技术字段或原始请求。
+5. 只输出一个 JSON 对象，不要 Markdown，不要代码块。
+6. 严格控长：internal_hotspots 最多 8 条；external_matches 最多 6 条；business_directions 最多 6 条；risks 最多 5 条；source_statuses 最多 8 条；evidence_samples 最多 8 条。
+
+JSON 结构必须是：
+{
+  "headline": "一句话总判断",
+  "overview": "2到4句话，说明近期业务热点和判断依据",
+  "internal_hotspots": [{"topic":"热点主题","count":3,"signal":"内部任务信号","keywords":["关键词"],"task_samples":["任务编号 任务名"]}],
+  "external_matches": [{"topic":"匹配主题","source":"来源名称","signal":"外部信号","business_meaning":"对公司业务的意义","evidence":["证据摘要"]}],
+  "business_directions": [{"title":"方向名称","reason":"为什么值得关注","suggested_action":"建议动作","priority":"high|medium|low"}],
+  "risks": [{"level":"high|medium|low","title":"风险点","reason":"原因"}],
+  "source_statuses": [{"source":"来源名称","status":"used|skipped|failed","message":"业务化说明","items":0}],
+  "evidence_samples": [{"task_no":"任务编号","task_name":"任务名称","source":"内部任务/外部热点","note":"证据摘要","created_at":"YYYY-MM-DD"}],
+  "confidence": "high|medium|low"
+}`
+
 func messagesURL(baseURL string) string {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if strings.HasSuffix(base, "/v1/messages") {
@@ -612,6 +689,19 @@ func ParseKPIAnalysisText(text string) (*KPIAnalysis, error) {
 	return &analysis, nil
 }
 
+func ParseBusinessTrendAnalysisText(text string) (*BusinessTrendAnalysis, error) {
+	candidate := extractJSONObject(text)
+	if candidate == "" {
+		return nil, errors.New("ai response does not contain a json object")
+	}
+	var analysis BusinessTrendAnalysis
+	if err := json.Unmarshal([]byte(candidate), &analysis); err != nil {
+		return nil, err
+	}
+	normalizeBusinessTrendAnalysis(&analysis)
+	return &analysis, nil
+}
+
 func normalizeKPIAnalysis(analysis *KPIAnalysis) {
 	if analysis == nil {
 		return
@@ -660,6 +750,69 @@ func normalizeKPIAnalysis(analysis *KPIAnalysis) {
 	}
 	analysis.Headline = truncateForError(analysis.Headline, 180)
 	analysis.Overview = truncateForError(analysis.Overview, 520)
+}
+
+func normalizeBusinessTrendAnalysis(analysis *BusinessTrendAnalysis) {
+	if analysis == nil {
+		return
+	}
+	if analysis.InternalHotspots == nil {
+		analysis.InternalHotspots = []BusinessTrendHotspot{}
+	}
+	if analysis.ExternalMatches == nil {
+		analysis.ExternalMatches = []BusinessTrendMatch{}
+	}
+	if analysis.BusinessDirections == nil {
+		analysis.BusinessDirections = []BusinessTrendDirection{}
+	}
+	if analysis.Risks == nil {
+		analysis.Risks = []BusinessTrendRisk{}
+	}
+	if analysis.SourceStatuses == nil {
+		analysis.SourceStatuses = []BusinessTrendSourceStatus{}
+	}
+	if analysis.EvidenceSamples == nil {
+		analysis.EvidenceSamples = []BusinessTrendEvidence{}
+	}
+	if strings.TrimSpace(analysis.Headline) == "" {
+		analysis.Headline = "业务热点分析已生成"
+	}
+	if strings.TrimSpace(analysis.Overview) == "" {
+		analysis.Overview = analysis.Headline
+	}
+	if len(analysis.InternalHotspots) > 8 {
+		analysis.InternalHotspots = analysis.InternalHotspots[:8]
+	}
+	if len(analysis.ExternalMatches) > 6 {
+		analysis.ExternalMatches = analysis.ExternalMatches[:6]
+	}
+	if len(analysis.BusinessDirections) > 6 {
+		analysis.BusinessDirections = analysis.BusinessDirections[:6]
+	}
+	if len(analysis.Risks) > 5 {
+		analysis.Risks = analysis.Risks[:5]
+	}
+	if len(analysis.SourceStatuses) > 8 {
+		analysis.SourceStatuses = analysis.SourceStatuses[:8]
+	}
+	if len(analysis.EvidenceSamples) > 8 {
+		analysis.EvidenceSamples = analysis.EvidenceSamples[:8]
+	}
+	for i := range analysis.InternalHotspots {
+		if len(analysis.InternalHotspots[i].Keywords) > 6 {
+			analysis.InternalHotspots[i].Keywords = analysis.InternalHotspots[i].Keywords[:6]
+		}
+		if len(analysis.InternalHotspots[i].TaskSamples) > 3 {
+			analysis.InternalHotspots[i].TaskSamples = analysis.InternalHotspots[i].TaskSamples[:3]
+		}
+	}
+	for i := range analysis.ExternalMatches {
+		if len(analysis.ExternalMatches[i].Evidence) > 4 {
+			analysis.ExternalMatches[i].Evidence = analysis.ExternalMatches[i].Evidence[:4]
+		}
+	}
+	analysis.Headline = truncateForError(analysis.Headline, 180)
+	analysis.Overview = truncateForError(analysis.Overview, 620)
 }
 
 func normalizeTaskSummary(summary *TaskSummary) {

@@ -30,6 +30,7 @@ type Config struct {
 	ExternalAssets ExternalAssetsConfig
 	AssetCleanup   AssetCleanupConfig
 	AI             AIConfig
+	BusinessTrend  BusinessTrendConfig
 	WeCom          WeComConfig
 	Log            LogConfig
 	Auth           domain.AuthSettings
@@ -55,6 +56,20 @@ type AIConfig struct {
 	MaxTokens       int
 	RateLimitWindow time.Duration
 	RateLimitMax    int
+}
+
+type BusinessTrendConfig struct {
+	ChinaHotURL         string
+	ApifyToken          string
+	ApifyBaseURL        string
+	ApifyDouyinHotActor string
+	ApifyDouyinActor    string
+	ApifyRedNoteActor   string
+	Apify1688Actor      string
+	ApifyTaobaoActor    string
+	Timeout             time.Duration
+	MaxExternalKeywords int
+	MaxExternalItems    int
 }
 
 type OSSDirectConfig struct {
@@ -304,6 +319,19 @@ func Load() (*Config, error) {
 			MaxTokens:       mustParseInt(getEnv("AI_AGENT_MAX_TOKENS", "900")),
 			RateLimitWindow: mustParseDuration(getEnv("AI_AGENT_RATE_LIMIT_WINDOW", "5h")),
 			RateLimitMax:    mustParseInt(getEnv("AI_AGENT_RATE_LIMIT_MAX_CALLS", "800")),
+		},
+		BusinessTrend: BusinessTrendConfig{
+			ChinaHotURL:         getEnv("BUSINESS_TREND_CHINA_HOT_URL", ""),
+			ApifyToken:          getEnv("APIFY_TOKEN", ""),
+			ApifyBaseURL:        getEnv("BUSINESS_TREND_APIFY_BASE_URL", "https://api.apify.com"),
+			ApifyDouyinHotActor: getEnv("BUSINESS_TREND_APIFY_DOUYIN_HOT_ACTOR", "zen-studio/douyin-hot-search-scraper"),
+			ApifyDouyinActor:    getEnv("BUSINESS_TREND_APIFY_DOUYIN_SEARCH_ACTOR", "zen-studio/douyin-search-scraper"),
+			ApifyRedNoteActor:   getEnv("BUSINESS_TREND_APIFY_REDNOTE_SEARCH_ACTOR", "zen-studio/rednote-search-scraper"),
+			Apify1688Actor:      getEnv("BUSINESS_TREND_APIFY_1688_ACTOR", "automation-lab/1688-scraper"),
+			ApifyTaobaoActor:    getEnv("BUSINESS_TREND_APIFY_TAOBAO_ACTOR", "zen-studio/taobao-detail-scraper"),
+			Timeout:             mustParseDuration(getEnv("BUSINESS_TREND_EXTERNAL_TIMEOUT", "20s")),
+			MaxExternalKeywords: mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_KEYWORDS", "8")),
+			MaxExternalItems:    mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_ITEMS", "24")),
 		},
 		WeCom: WeComConfig{
 			AiBotEnabled:       mustParseBool(getEnv("WECOM_AIBOT_ENABLED", "false")),

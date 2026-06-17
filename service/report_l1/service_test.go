@@ -23,7 +23,13 @@ type stubKPIAnalysisRepo struct {
 	assets []domain.KPIAnalysisAsset
 }
 
+type stubBusinessTrendRepo struct {
+	tasks []domain.BusinessTrendTaskText
+}
+
 type failingKPIAnalysisGenerator struct{}
+
+type failingBusinessTrendGenerator struct{}
 
 func (s *stubReportRepo) GetCards(context.Context) ([]domain.L1Card, error) { return s.cards, nil }
 func (s *stubReportRepo) GetThroughput(context.Context, repo.ReportL1Filter) ([]domain.L1ThroughputPoint, error) {
@@ -41,7 +47,15 @@ func (s *stubKPIAnalysisRepo) ListTaskAssets(context.Context, repo.KPIAnalysisFi
 	return s.assets, nil
 }
 
+func (s *stubBusinessTrendRepo) ListRecentTaskTexts(context.Context, repo.BusinessTrendFilter) ([]domain.BusinessTrendTaskText, error) {
+	return s.tasks, nil
+}
+
 func (failingKPIAnalysisGenerator) GenerateKPIAnalysis(context.Context, any) (*aiagent.KPIAnalysis, error) {
+	return nil, errors.New("provider timeout")
+}
+
+func (failingBusinessTrendGenerator) GenerateBusinessTrendAnalysis(context.Context, any) (*aiagent.BusinessTrendAnalysis, error) {
 	return nil, errors.New("provider timeout")
 }
 
@@ -61,6 +75,9 @@ func TestReportL1ServiceRBAC(t *testing.T) {
 	if _, appErr := svc.KPIEvents(context.Background(), reportActor(domain.RoleMember), KPIEventsParams{From: from, To: to}); denyCode(appErr) != domain.ErrDenyCodeReportsSuperAdminOnly {
 		t.Fatalf("kpi events deny=%+v", appErr)
 	}
+	if _, appErr := svc.BusinessTrendPilotAnalysis(context.Background(), reportActor(domain.RoleMember), BusinessTrendAnalysisParams{From: from, To: to}); denyCode(appErr) != domain.ErrDenyCodeReportsSuperAdminOnly {
+		t.Fatalf("business trend deny=%+v", appErr)
+	}
 }
 
 func TestReportL1ServiceDateRange(t *testing.T) {
@@ -75,6 +92,9 @@ func TestReportL1ServiceDateRange(t *testing.T) {
 	}
 	if _, appErr := svc.KPIEvents(context.Background(), reportActor(domain.RoleSuperAdmin), KPIEventsParams{From: from, To: to}); appErr == nil || appErr.Code != CodeInvalidDateRange {
 		t.Fatalf("kpi events appErr=%+v", appErr)
+	}
+	if _, appErr := svc.BusinessTrendPilotAnalysis(context.Background(), reportActor(domain.RoleSuperAdmin), BusinessTrendAnalysisParams{From: from, To: to}); appErr == nil || appErr.Code != CodeInvalidDateRange {
+		t.Fatalf("business trend appErr=%+v", appErr)
 	}
 }
 
@@ -148,6 +168,54 @@ func TestKPIEventsPassThrough(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Priority != "critical" {
 		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestBusinessTrendPilotFallsBackWithBatchItemSignals(t *testing.T) {
+	from := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	trendRepo := &stubBusinessTrendRepo{
+		tasks: []domain.BusinessTrendTaskText{
+			{
+				ID:                1,
+				TaskNo:            "RW-20260610-A-000001",
+				ProductName:       "活动物料",
+				ProductShortName:  "毕业季拍照手举牌",
+				DesignRequirement: "做毕业季合影用的手举牌和 KT 板",
+				Remark:            "毕业季活动物料",
+				CreatedAt:         from.Add(time.Hour),
+				BatchItems: []domain.BusinessTrendTaskSKUItem{
+					{TaskID: 1, SequenceNo: 1, ProductName: "毕业手举牌", DesignRequirement: "毕业拍照道具"},
+					{TaskID: 1, SequenceNo: 2, ProductName: "毕业 KT 板", DesignRequirement: "毕业季背景板"},
+				},
+			},
+		},
+	}
+	svc := NewService(&stubReportRepo{},
+		WithBusinessTrendRepo(trendRepo),
+		WithBusinessTrendGenerator(failingBusinessTrendGenerator{}),
+		WithBusinessTrendProviders(nil, []string{trendSourceChinaHot, trendSourceApify}),
+	)
+
+	analysis, appErr := svc.BusinessTrendPilotAnalysis(context.Background(), reportActor(domain.RoleSuperAdmin), BusinessTrendAnalysisParams{From: from, To: from, Mode: "external"})
+	if appErr != nil {
+		t.Fatalf("appErr=%+v", appErr)
+	}
+	if analysis == nil || analysis.Provider != "system_fallback" {
+		t.Fatalf("analysis=%+v", analysis)
+	}
+	topics := make([]string, 0, len(analysis.InternalHotspots))
+	for _, hotspot := range analysis.InternalHotspots {
+		topics = append(topics, hotspot.Topic)
+	}
+	joined := strings.Join(topics, ",")
+	if !strings.Contains(joined, "毕业季") || !strings.Contains(joined, "手举牌") {
+		t.Fatalf("hotspots did not include batch item signals: %v", topics)
+	}
+	if len(analysis.SourceStatuses) < 3 {
+		t.Fatalf("source statuses missing internal/skipped entries: %+v", analysis.SourceStatuses)
+	}
+	if analysis.SourceStatuses[0].Source != "内部任务" || analysis.SourceStatuses[0].Status != "used" {
+		t.Fatalf("first source status=%+v", analysis.SourceStatuses[0])
 	}
 }
 

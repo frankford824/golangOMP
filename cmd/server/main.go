@@ -152,6 +152,7 @@ func main() {
 	predictionRepo := mysqlrepo.NewPredictionRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
 	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
+	businessTrendRepo := mysqlrepo.NewBusinessTrendRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
 
 	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
@@ -437,10 +438,26 @@ func main() {
 		RateLimitMax:    cfg.AI.RateLimitMax,
 		RateLimiter:     aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
 	}, logger.Named("ai_agent"))
+	trendProviders, expectedTrendSources := reportl1svc.NewDefaultTrendProviders(reportl1svc.TrendProviderConfig{
+		ChinaHotURL:         cfg.BusinessTrend.ChinaHotURL,
+		ApifyToken:          cfg.BusinessTrend.ApifyToken,
+		ApifyBaseURL:        cfg.BusinessTrend.ApifyBaseURL,
+		ApifyDouyinHotActor: cfg.BusinessTrend.ApifyDouyinHotActor,
+		ApifyDouyinActor:    cfg.BusinessTrend.ApifyDouyinActor,
+		ApifyRedNoteActor:   cfg.BusinessTrend.ApifyRedNoteActor,
+		Apify1688Actor:      cfg.BusinessTrend.Apify1688Actor,
+		ApifyTaobaoActor:    cfg.BusinessTrend.ApifyTaobaoActor,
+		Timeout:             cfg.BusinessTrend.Timeout,
+		MaxExternalKeywords: cfg.BusinessTrend.MaxExternalKeywords,
+		MaxExternalItems:    cfg.BusinessTrend.MaxExternalItems,
+	}, logger.Named("business_trends"))
 	reportL1Svc := reportl1svc.NewService(reportL1Repo,
 		reportl1svc.WithPermissionLogRepo(permissionLogRepo),
 		reportl1svc.WithKPIAnalysisRepo(kpiAnalysisRepo),
-		reportl1svc.WithKPIAnalysisGenerator(aiSummaryClient))
+		reportl1svc.WithKPIAnalysisGenerator(aiSummaryClient),
+		reportl1svc.WithBusinessTrendRepo(businessTrendRepo),
+		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
+		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
 	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
 
 	skuH := handler.NewSKUHandler(skuSvc)
