@@ -114,15 +114,7 @@ function formatDate(iso: string) {
 
 .cell-mono {
   white-space: nowrap;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--yb-font-data);
   font-weight: 600;
   color: #0f172a;
 }

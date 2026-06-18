@@ -757,7 +757,7 @@ onMounted(() => {
   color: #b91c1c;
 }
 .cell-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-family: var(--yb-font-data);
 }
 .detail-grid,
 .version-grid {

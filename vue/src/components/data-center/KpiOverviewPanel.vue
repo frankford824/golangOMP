@@ -1301,9 +1301,7 @@ onMounted(load)
   flex-direction: column;
   gap: 0.75rem;
   color: #0f172a;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--yb-font-text);
   letter-spacing: 0;
 }
 .panel-header,

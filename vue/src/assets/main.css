@@ -1,3 +1,43 @@
+@font-face {
+  font-family: 'YB Source Han Sans';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: block;
+  src: url('@fontpkg/source-han-sans-cn-vf/SourceHanSansCN-VF.ttf.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'YB JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'YB JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'YB JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 300;
+  font-display: block;
+  src: url('@fontsource/material-symbols-outlined/files/material-symbols-outlined-latin-300-normal.woff2') format('woff2');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -35,7 +75,7 @@
 body {
   margin: 0;
   min-height: 100dvh;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--yb-font-text);
   color: rgb(var(--color-text));
   background: rgb(var(--color-surface));
 }
@@ -55,7 +95,20 @@ a:hover {
 
 /* Material Symbols */
 .material-symbols-outlined {
+  display: inline-block;
+  direction: ltr;
+  font-family: 'Material Symbols Outlined';
+  font-size: 24px;
+  font-style: normal;
+  font-weight: 300;
+  letter-spacing: normal;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
   font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Card - 浅色实底卡片 */
@@ -114,12 +167,10 @@ a:hover {
 /* Apple Music token names retained for legacy references; values map to light admin system. */
 :root {
   color-scheme: light;
-  --yb-font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC',
-    'Microsoft YaHei', 'Segoe UI', sans-serif;
-  --yb-font-text: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC',
-    'Microsoft YaHei', 'Segoe UI', sans-serif;
-  --yb-font-data: 'SF Mono', 'IBM Plex Mono', 'Cascadia Code', Consolas, 'Liberation Mono',
-    monospace;
+  --yb-font-display: 'YB Source Han Sans';
+  --yb-font-text: 'YB Source Han Sans';
+  --yb-font-data: 'YB JetBrains Mono', 'YB Source Han Sans';
+  --yb-font-mono: 'YB JetBrains Mono', 'YB Source Han Sans';
   --yb-music-bg: #f5f6f8;
   --yb-music-bg-2: #f3f4f6;
   --yb-music-plum: #f9fafb;
@@ -172,7 +223,11 @@ body {
   font-family: var(--yb-font-text);
   color: var(--yb-music-text);
   background: var(--yb-music-bg);
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
   text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 ::selection {
@@ -281,6 +336,9 @@ body {
 #app .batch-sku-tab {
   font-family: var(--yb-font-data);
   font-variant-numeric: tabular-nums;
+  font-feature-settings:
+    'tnum' 1,
+    'zero' 1;
 }
 
 #app input,

@@ -1986,7 +1986,7 @@ onMounted(() => {
 .time-cell { width: 9.5rem; white-space: nowrap; }
 .strong { color: #111827; font-weight: 700; }
 .muted { margin-top: 0.18rem; color: #6b7280; font-size: 0.7rem; line-height: 1.35; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mono { font-family: var(--yb-font-data); }
 .object-chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; max-width: 18rem; }
 .object-chip {
   display: inline-flex;
@@ -2036,7 +2036,7 @@ onMounted(() => {
   background: #f9fafb;
   color: #111827;
   border-radius: 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--yb-font-data);
   white-space: pre-wrap;
   word-break: break-all;
 }

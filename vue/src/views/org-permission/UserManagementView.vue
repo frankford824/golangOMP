@@ -982,7 +982,7 @@ onMounted(() => {
 
 .td-mono {
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.8125rem;
   color: #27272a;
 }

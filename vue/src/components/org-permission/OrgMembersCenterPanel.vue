@@ -159,7 +159,7 @@ function joinedText(u: OrgUser) {
   color: #475569;
 }
 .mono {
-  font-family: ui-monospace, monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.6875rem;
 }
 .roles {

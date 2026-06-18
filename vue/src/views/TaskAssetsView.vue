@@ -471,7 +471,7 @@ onMounted(() => {
   background: #eef2ff;
 }
 .cell-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-family: var(--yb-font-data);
 }
 .action-muted {
   font-size: 0.75rem;

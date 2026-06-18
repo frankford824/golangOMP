@@ -2975,7 +2975,7 @@ onBeforeUnmount(() => {
 .ac-card-meta {
   font-size: 13px;
   color: var(--ac-sec);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--yb-font-data);
 }
 
 .ac-mono {
@@ -3138,7 +3138,7 @@ onBeforeUnmount(() => {
 }
 
 .cell-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-family: var(--yb-font-data);
 }
 
 .detail-grid,
@@ -3348,7 +3348,7 @@ onBeforeUnmount(() => {
   background: #fff;
   color: var(--ac-text, #1d1d1f);
   padding: 0.85rem 0.95rem;
-  font-family: var(--yb-font-mono, "SF Mono", Consolas, monospace);
+  font-family: var(--yb-font-data);
   font-size: 0.88rem;
   line-height: 1.7;
   outline: none;
@@ -3990,7 +3990,7 @@ onBeforeUnmount(() => {
 
 .ac-business-key {
   color: #64748b;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--yb-font-text);
   font-size: 0.72rem;
   font-weight: 700;
 }

@@ -4672,7 +4672,7 @@ watch(taskId, (id) => {
 .detail-product-management-meta strong {
   overflow: hidden;
   color: #111827;
-  font-family: "SF Mono", "IBM Plex Mono", Consolas, monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.82rem;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -5409,7 +5409,7 @@ watch(taskId, (id) => {
   color: #475467;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--yb-font-data);
   letter-spacing: 0.01em;
 }
 .batch-sku-tab:hover {

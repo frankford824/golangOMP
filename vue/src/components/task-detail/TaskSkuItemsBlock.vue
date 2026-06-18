@@ -384,7 +384,7 @@ watch(
   color: #0f172a;
 }
 .core-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.75rem;
 }
 .attr-grid {

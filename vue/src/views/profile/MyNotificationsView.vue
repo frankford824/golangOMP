@@ -1113,7 +1113,7 @@ onMounted(() => {
 
 .notif-summary strong {
   color: #111827;
-  font-family: 'SF Mono', 'IBM Plex Mono', Consolas, monospace;
+  font-family: var(--yb-font-data);
 }
 
 .notif-empty,

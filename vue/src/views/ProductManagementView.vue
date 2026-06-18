@@ -889,7 +889,7 @@ function errorMessage(err: unknown): string {
 
 .pm-mono,
 .pm-cost-cell {
-  font-family: "SF Mono", "IBM Plex Mono", Consolas, monospace;
+  font-family: var(--yb-font-data);
 }
 
 .pm-main-cell strong,

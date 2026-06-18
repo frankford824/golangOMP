@@ -33,22 +33,28 @@ const props = withDefaults(
 
 const chartRef = ref<HTMLDivElement | null>(null)
 let chart: ECharts | null = null
+const chartFontFamily = 'YB Source Han Sans'
 
 const option = computed<EChartsCoreOption>(() => {
   const data = props.series.filter((d) => d.value > 0)
   if (!data.length) {
     return {
+      textStyle: { fontFamily: chartFontFamily },
       title: {
         text: '暂无数据',
         left: 'center',
         top: 'middle',
-        textStyle: { color: '#94a3b8', fontSize: 13, fontWeight: 400 },
+        textStyle: { color: '#94a3b8', fontFamily: chartFontFamily, fontSize: 13, fontWeight: 400 },
       },
     }
   }
   return {
     color: ['#5470C6', '#91CC75', '#FAC858', '#EE6666', '#73C0DE'],
-    tooltip: { trigger: 'item' as const },
+    textStyle: { fontFamily: chartFontFamily },
+    tooltip: {
+      trigger: 'item' as const,
+      textStyle: { fontFamily: chartFontFamily },
+    },
     legend: {
       type: 'scroll' as const,
       orient: 'horizontal' as const,
@@ -56,7 +62,7 @@ const option = computed<EChartsCoreOption>(() => {
       bottom: 0,
       itemWidth: 10,
       itemHeight: 10,
-      textStyle: { color: '#475569', fontSize: 10 },
+      textStyle: { color: '#475569', fontFamily: chartFontFamily, fontSize: 10 },
     },
     series: [
       {

@@ -503,7 +503,15 @@ function customizationWarehouseSubLabel(
   border: 1px solid #e5e7eb;
   border-radius: 999px;
   background: #f9fafb;
+  font-family: var(--yb-font-text);
   box-shadow: none;
+}
+
+.workflow-progress--naive :deep(.n-step),
+.workflow-progress--naive :deep(.n-step-content),
+.workflow-progress--naive :deep(.n-step-content-header__title),
+.workflow-progress--naive :deep(.n-step-content__description) {
+  font-family: var(--yb-font-text) !important;
 }
 
 .workflow-progress--naive :deep(.n-step) {

@@ -36,9 +36,11 @@ const props = withDefaults(
 
 const chartRef = ref<HTMLDivElement | null>(null)
 let chart: ECharts | null = null
+const chartFontFamily = 'YB Source Han Sans'
 
 const option = computed<EChartsCoreOption>(() => ({
   color: ['#6f8cff', '#8ee27f', '#ff6b6b'],
+  textStyle: { fontFamily: chartFontFamily },
   grid: { left: 8, right: 8, top: 36, bottom: 8, containLabel: true },
   tooltip: {
     trigger: 'axis' as const,
@@ -49,7 +51,7 @@ const option = computed<EChartsCoreOption>(() => ({
     padding: [10, 12],
     textStyle: {
       color: '#dce6ff',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif',
+      fontFamily: chartFontFamily,
       fontSize: 12,
       fontWeight: 600,
     },
@@ -60,19 +62,19 @@ const option = computed<EChartsCoreOption>(() => ({
     type: 'scroll' as const,
     top: 0,
     left: 'center',
-    textStyle: { color: '#aab5cc', fontSize: 10 },
+    textStyle: { color: '#aab5cc', fontFamily: chartFontFamily, fontSize: 10 },
   },
   xAxis: {
     type: 'category' as const,
     data: props.labels,
     axisLine: { lineStyle: { color: 'rgba(220, 230, 255, 0.42)' } },
-    axisLabel: { color: 'rgba(220, 230, 255, 0.56)', fontSize: 10, interval: 0 },
+    axisLabel: { color: 'rgba(220, 230, 255, 0.56)', fontFamily: chartFontFamily, fontSize: 10, interval: 0 },
   },
   yAxis: {
     type: 'value' as const,
     minInterval: 1,
     splitLine: { lineStyle: { color: 'rgba(220, 230, 255, 0.18)' } },
-    axisLabel: { color: 'rgba(220, 230, 255, 0.62)', fontSize: 10 },
+    axisLabel: { color: 'rgba(220, 230, 255, 0.62)', fontFamily: chartFontFamily, fontSize: 10 },
   },
   series: [
     { name: '新建', type: 'bar' as const, data: props.created, barMaxWidth: 16 },

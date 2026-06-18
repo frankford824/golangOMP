@@ -1264,7 +1264,7 @@ watch(totalPages, (value) => {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 800;
-  font-family: Manrope, sans-serif;
+  font-family: var(--yb-font-display);
   color: rgb(28 25 23);
 }
 .toolbar {
@@ -1388,7 +1388,7 @@ watch(totalPages, (value) => {
   font-weight: 600;
   font-size: 0.75rem;
   color: rgb(51 65 85);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--yb-font-data);
   letter-spacing: 0.01em;
 }
 .card-product {

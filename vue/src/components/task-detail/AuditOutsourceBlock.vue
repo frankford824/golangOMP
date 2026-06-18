@@ -829,7 +829,7 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
   color: rgb(15 23 42);
 }
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-family: var(--yb-font-data);
 }
 .job-status-pill {
   display: inline-flex;

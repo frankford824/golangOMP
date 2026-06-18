@@ -341,7 +341,7 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-td--mono {
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.75rem;
   letter-spacing: 0.01em;
 }

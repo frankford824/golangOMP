@@ -727,7 +727,7 @@ onMounted(load)
   margin: 0;
   font-size: clamp(1.5rem, 2.4vw, 2rem);
   font-weight: 800;
-  font-family: Manrope, sans-serif;
+  font-family: var(--yb-font-display);
   letter-spacing: -0.01em;
   color: #111827;
   text-shadow: none;
@@ -823,7 +823,7 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: Manrope, sans-serif;
+  font-family: var(--yb-font-display);
   font-size: 0.8125rem;
   font-weight: 800;
 }
@@ -847,7 +847,7 @@ onMounted(load)
 }
 .empty-step-title {
   margin: 0;
-  font-family: Manrope, sans-serif;
+  font-family: var(--yb-font-display);
   font-size: 0.9375rem;
   font-weight: 700;
   color: #111827;
