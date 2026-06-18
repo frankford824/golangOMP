@@ -152,13 +152,13 @@ export interface ProductManagementComboTreeResponse extends ProductManagementLis
 }
 
 export const productManagementApi = {
-  async list(params: ProductManagementListParams): Promise<ProductManagementListResponse> {
-    const { data } = await http.get<ProductManagementListResponse>('/v1/product-management', { params })
+  async list(params: ProductManagementListParams, signal?: AbortSignal): Promise<ProductManagementListResponse> {
+    const { data } = await http.get<ProductManagementListResponse>('/v1/product-management', { params, signal })
     return data
   },
 
-  async listComboTree(params: ProductManagementListParams): Promise<ProductManagementComboTreeResponse> {
-    const { data } = await http.get<ProductManagementComboTreeResponse>('/v1/product-management/combo-tree', { params })
+  async listComboTree(params: ProductManagementListParams, signal?: AbortSignal): Promise<ProductManagementComboTreeResponse> {
+    const { data } = await http.get<ProductManagementComboTreeResponse>('/v1/product-management/combo-tree', { params, signal })
     return data
   },
 

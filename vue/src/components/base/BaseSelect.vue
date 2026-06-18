@@ -86,6 +86,12 @@
               >
                 无匹配结果
               </p>
+              <p
+                v-else-if="hiddenOptionCount > 0"
+                class="px-3 py-2 text-center text-xs text-slate-500"
+              >
+                还有 {{ hiddenOptionCount }} 项，请输入关键字缩小范围
+              </p>
             </div>
           </template>
           <template v-else>
@@ -146,6 +152,7 @@ const props = withDefaults(
      */
     filterable?: boolean
     filterPlaceholder?: string
+    maxDisplayedOptions?: number
   }>(),
   {
     disabled: false,
@@ -153,6 +160,7 @@ const props = withDefaults(
     clearValue: '',
     filterable: false,
     filterPlaceholder: '输入关键字筛选',
+    maxDisplayedOptions: 160,
   },
 )
 
@@ -168,8 +176,9 @@ const panelEl = ref<HTMLElement | null>(null)
 const filterInputRef = ref<HTMLInputElement | null>(null)
 const filterQuery = ref('')
 const panelStyle = ref<Record<string, string>>({})
+let positionFrame: number | null = null
 
-const displayedOptions = computed(() => {
+const filteredOptions = computed(() => {
   if (!props.filterable) return props.options
   const q = filterQuery.value.trim().toLowerCase()
   if (!q) return props.options
@@ -179,6 +188,16 @@ const displayedOptions = computed(() => {
     return label.includes(q) || val.includes(q)
   })
 })
+
+const displayedOptions = computed(() => {
+  if (!props.filterable) return props.options
+  const max = Math.max(20, props.maxDisplayedOptions)
+  return filteredOptions.value.slice(0, max)
+})
+
+const hiddenOptionCount = computed(() =>
+  props.filterable ? Math.max(0, filteredOptions.value.length - displayedOptions.value.length) : 0,
+)
 
 const selectedLabel = computed(() => {
   const match = props.options.find((opt) => opt.value === props.modelValue)
@@ -239,6 +258,14 @@ function updatePanelPosition() {
   }
 }
 
+function schedulePanelPositionUpdate() {
+  if (positionFrame != null) return
+  positionFrame = window.requestAnimationFrame(() => {
+    positionFrame = null
+    updatePanelPosition()
+  })
+}
+
 function selectOption(value: string | number) {
   emit('update:modelValue', value)
   close()
@@ -255,7 +282,7 @@ function handleClickOutside(e: MouseEvent) {
 
 function handleViewportChange() {
   if (!open.value) return
-  updatePanelPosition()
+  schedulePanelPositionUpdate()
 }
 
 onMounted(() => {
@@ -270,6 +297,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleViewportChange)
   window.removeEventListener('scroll', handleViewportChange, true)
   window.removeEventListener('layout-change', handleViewportChange)
+  if (positionFrame != null) {
+    window.cancelAnimationFrame(positionFrame)
+    positionFrame = null
+  }
 })
 
 watch(open, async (value) => {
@@ -279,7 +310,7 @@ watch(open, async (value) => {
   }
   filterQuery.value = ''
   await nextTick()
-  updatePanelPosition()
+  schedulePanelPositionUpdate()
   if (props.filterable) {
     filterInputRef.value?.focus()
   }
@@ -289,7 +320,7 @@ watch(filterQuery, () => {
   if (!open.value || !props.filterable) return
   emit('filter-change', filterQuery.value)
   void nextTick(() => {
-    updatePanelPosition()
+    schedulePanelPositionUpdate()
   })
 })
 </script>

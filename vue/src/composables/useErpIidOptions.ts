@@ -75,20 +75,28 @@ export function useErpIidOptions() {
   const loading = ref(false)
   const items = ref<ErpIidOption[]>(ERP_IID_PRESETS.slice())
   const lastSourceMode = ref<SourceMode>('fallback')
+  let seq = 0
+  let activeAbort: AbortController | null = null
 
   async function loadIids(keyword = ''): Promise<void> {
+    activeAbort?.abort()
+    const requestSeq = ++seq
     const cacheKey = keyword.trim().toLowerCase()
     if (!cacheKey) {
       const presets = ERP_IID_PRESETS.slice()
       items.value = presets
       lastSourceMode.value = 'fallback'
       optionCache.set(cacheKey, presets)
+      loading.value = false
       return
     }
     if (optionCache.has(cacheKey)) {
       items.value = optionCache.get(cacheKey) ?? []
+      loading.value = false
       return
     }
+    const abortController = new AbortController()
+    activeAbort = abortController
     loading.value = true
     try {
       const q = keyword.trim()
@@ -97,7 +105,8 @@ export function useErpIidOptions() {
         q,
         page: 1,
         page_size: PAGE_SIZE,
-      })
+      }, abortController.signal)
+      if (abortController.signal.aborted || requestSeq !== seq) return
       const firstPayload = unwrapErpIidsPayload(first.data)
       const normalized = firstPayload.rows
         .map((row) => normalizeErpIidItem((row ?? {}) as Record<string, unknown>))
@@ -114,6 +123,7 @@ export function useErpIidOptions() {
       items.value = fallback
       optionCache.set(cacheKey, fallback)
     } catch (error) {
+      if (abortController.signal.aborted || requestSeq !== seq) return
       // eslint-disable-next-line no-console
       console.warn('[useErpIidOptions] GET /v1/erp/iids failed, fallback to local presets', error)
       const fallback = filterPresets(keyword)
@@ -121,7 +131,12 @@ export function useErpIidOptions() {
       items.value = fallback
       optionCache.set(cacheKey, fallback)
     } finally {
-      loading.value = false
+      if (activeAbort === abortController) {
+        activeAbort = null
+      }
+      if (requestSeq === seq) {
+        loading.value = false
+      }
     }
   }
 

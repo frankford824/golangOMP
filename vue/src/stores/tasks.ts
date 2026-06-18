@@ -1355,6 +1355,8 @@ export const useTasksStore = defineStore('tasks', () => {
    */
   const initialized = ref(false)
   let queuedForceRefreshParams: TaskListParams | undefined
+  let taskListAbort: AbortController | null = null
+  let taskListSeq = 0
 
   const list = computed(() => items.value)
   /** 非 append 的列表拉取成功并整表替换 items 后递增；单条 loadTaskById 不递增。供设计工作台在整表刷新后重建「待设计」快照 */
@@ -1373,8 +1375,11 @@ export const useTasksStore = defineStore('tasks', () => {
 
   /** 方案 B：服务端分页 + 搜索。拉取任务列表（append 逻辑在 fetchAndApplyTaskList）
    * 后端 TaskListResponse: { data: [...], pagination: { total, page, page_size } } */
-  async function loadTaskList(params: TaskListParams = {}): Promise<{ items: Task[]; total: number }> {
-    const res = await tasksApi.list(params)
+  async function loadTaskList(
+    params: TaskListParams = {},
+    signal?: AbortSignal,
+  ): Promise<{ items: Task[]; total: number }> {
+    const res = await tasksApi.list(params, signal)
     const data = res?.data
     const body = (typeof data === 'object' && data !== null) ? data : {}
     const rawItems = Array.isArray(body.data)
@@ -1400,11 +1405,19 @@ export const useTasksStore = defineStore('tasks', () => {
     options?: { append?: boolean },
   ) {
     const isAppend = options?.append === true
-    if (loading.value && !isAppend) return
+    const requestSeq = isAppend ? taskListSeq : taskListSeq + 1
+    let abortController: AbortController | null = null
+    if (!isAppend) {
+      taskListAbort?.abort()
+      taskListSeq = requestSeq
+      abortController = new AbortController()
+      taskListAbort = abortController
+    }
     if (!isAppend) loading.value = true
     loadError.value = null
     try {
-      const { items: tasks, total } = await loadTaskList(params)
+      const { items: tasks, total } = await loadTaskList(params, abortController?.signal)
+      if (abortController?.signal.aborted || (!isAppend && requestSeq !== taskListSeq)) return
       lastListQueryParams.value = { ...params }
       listTotal.value = total
       if (isAppend) {
@@ -1418,10 +1431,15 @@ export const useTasksStore = defineStore('tasks', () => {
       }
       initialized.value = true
     } catch (e) {
+      if (abortController?.signal.aborted || (!isAppend && requestSeq !== taskListSeq)) return
       loadError.value = e instanceof Error ? e.message : '加载任务列表失败'
       throw e
     } finally {
       if (!isAppend) {
+        if (taskListAbort === abortController) {
+          taskListAbort = null
+        }
+        if (requestSeq !== taskListSeq) return
         loading.value = false
         // 无论本次加载由谁触发，只要期间有 forceRefresh 排队，都在此统一补跑，避免刷新请求被吞掉。
         if (queuedForceRefreshParams) {

@@ -476,6 +476,7 @@ const {
 })
 const listActionError = ref('')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let listActionSeq = 0
 
 const canBatchAssign = computed(
   () =>
@@ -990,15 +991,19 @@ async function goToPage(p: number) {
   if (targetPage === page.value && tasksStore.list.length > 0) return
   page.value = targetPage
   saveState()
-  if (refreshingList.value) return
+  const seq = ++listActionSeq
   refreshingList.value = true
   listActionError.value = ''
   try {
     await tasksStore.loadTaskListForView(buildListParams({ page: targetPage }))
   } catch (error) {
-    listActionError.value = error instanceof Error ? error.message : '加载失败'
+    if (seq === listActionSeq) {
+      listActionError.value = error instanceof Error ? error.message : '加载失败'
+    }
   } finally {
-    refreshingList.value = false
+    if (seq === listActionSeq) {
+      refreshingList.value = false
+    }
   }
 }
 
@@ -1013,7 +1018,7 @@ function jumpToPage() {
 
 /** 方案 B：服务端分页 + 搜索，统一走 loadTaskListForView */
 async function refreshList(_force?: boolean) {
-  if (refreshingList.value) return
+  const seq = ++listActionSeq
   refreshingList.value = true
   listActionError.value = ''
   try {
@@ -1021,9 +1026,13 @@ async function refreshList(_force?: boolean) {
     saveState()
     await tasksStore.loadTaskListForView(buildListParams({ page: 1 }))
   } catch (error) {
-    listActionError.value = error instanceof Error ? error.message : '刷新任务列表失败'
+    if (seq === listActionSeq) {
+      listActionError.value = error instanceof Error ? error.message : '刷新任务列表失败'
+    }
   } finally {
-    refreshingList.value = false
+    if (seq === listActionSeq) {
+      refreshingList.value = false
+    }
   }
 }
 
@@ -1038,6 +1047,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  listActionSeq += 1
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
 })
 

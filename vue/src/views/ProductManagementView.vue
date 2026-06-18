@@ -325,6 +325,7 @@ import {
 } from '@/services/api/productManagementApi'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import { mapWithConcurrency } from '@/utils/batchZipDownload'
 
 type ProductSyncScope = 'all' | 'base' | 'image'
 type ProductManagementDisplayScope = 'combo' | 'single' | 'all'
@@ -371,6 +372,11 @@ const syncingRecordScopes = ref<Record<number, ProductSyncScope>>({})
 const syncMessages = ref<Record<number, string>>({})
 const expandedComboGroups = ref<Record<string, boolean>>({})
 const syncPollTokens = new Map<number, number>()
+const PREVIEW_RESOLVE_CONCURRENCY = 4
+let loadRecordsAbort: AbortController | null = null
+let loadRecordsSeq = 0
+let recordPreviewResolveSeq = 0
+let candidatePreviewResolveSeq = 0
 const syncableRecords = computed(() => records.value.filter((item) => item.can_sync_erp))
 const totalPages = computed(() => Math.max(1, Math.ceil((pagination.total || 0) / Math.max(1, pagination.page_size || filters.page_size))))
 const remainingPages = computed(() => Math.max(0, totalPages.value - pagination.page))
@@ -434,11 +440,19 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  loadRecordsAbort?.abort()
+  loadRecordsAbort = null
+  recordPreviewResolveSeq += 1
+  candidatePreviewResolveSeq += 1
   syncPollTokens.clear()
 })
 
 async function loadRecords(): Promise<void> {
   normalizeIssueScopeForExplicitSuccessFilter()
+  loadRecordsAbort?.abort()
+  const requestSeq = ++loadRecordsSeq
+  const abortController = new AbortController()
+  loadRecordsAbort = abortController
   loading.value = true
   error.value = ''
   try {
@@ -453,7 +467,8 @@ async function loadRecords(): Promise<void> {
       image_sync_status: filters.image_sync_status,
       page: filters.page,
       page_size: filters.page_size,
-    })
+    }, abortController.signal)
+    if (abortController.signal.aborted || requestSeq !== loadRecordsSeq) return
     records.value = result.data ?? []
     comboGroups.value = result.groups ?? []
     comboSyncSummary.value = result.combo_sync_summary ?? null
@@ -463,9 +478,15 @@ async function loadRecords(): Promise<void> {
     pagination.total = result.pagination?.total ?? records.value.length
     void resolveRecordPreviewURLs(records.value)
   } catch (err) {
+    if (abortController.signal.aborted || requestSeq !== loadRecordsSeq) return
     error.value = errorMessage(err)
   } finally {
-    loading.value = false
+    if (loadRecordsAbort === abortController) {
+      loadRecordsAbort = null
+    }
+    if (requestSeq === loadRecordsSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -789,27 +810,31 @@ function previewLoadableForCandidate(candidate: ProductImageCandidate): boolean 
 }
 
 async function resolveRecordPreviewURLs(items: ProductManagementRecord[]): Promise<void> {
+  const seq = ++recordPreviewResolveSeq
   const next = { ...recordPreviewURLs.value }
-  await Promise.all(
-    items.map(async (item) => {
+  await mapWithConcurrency(items, PREVIEW_RESOLVE_CONCURRENCY, async (item) => {
+    if (seq !== recordPreviewResolveSeq) return
       const assetID = item.image_asset_id ?? assetIDFromPreviewPath(item.image_preview_url)
       const url = await resolveAssetPreviewURL(assetID, item.image_preview_url)
+    if (seq !== recordPreviewResolveSeq) return
       if (url) next[item.id] = url
       else delete next[item.id]
-    }),
-  )
+  })
+  if (seq !== recordPreviewResolveSeq) return
   recordPreviewURLs.value = next
 }
 
 async function resolveCandidatePreviewURLs(items: ProductImageCandidate[]): Promise<void> {
+  const seq = ++candidatePreviewResolveSeq
   const next = { ...candidatePreviewURLs.value }
-  await Promise.all(
-    items.map(async (item) => {
+  await mapWithConcurrency(items, PREVIEW_RESOLVE_CONCURRENCY, async (item) => {
+    if (seq !== candidatePreviewResolveSeq) return
       const url = await resolveAssetPreviewURL(item.asset_id, item.preview_url)
+    if (seq !== candidatePreviewResolveSeq) return
       if (url) next[item.asset_id] = url
       else delete next[item.asset_id]
-    }),
-  )
+  })
+  if (seq !== candidatePreviewResolveSeq) return
   candidatePreviewURLs.value = next
 }
 

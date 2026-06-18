@@ -56,6 +56,8 @@
                     :src="row.imageUrl"
                     alt="产品图片"
                     class="thumb-img"
+                    loading="lazy"
+                    decoding="async"
                     @error="onImageError($event)"
                   />
                   <div v-else class="thumb-placeholder">无图</div>
@@ -103,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import type { Product } from '@/types'
 import { useProductsStore } from '@/stores/products'
 import BaseModal from '@/components/base/BaseModal.vue'
@@ -142,6 +144,13 @@ watch(keyword, (kw) => {
     productsStore.loadProducts({ keyword: trimmed || undefined, page: 1 })
     debounceTimer = null
   }, DEBOUNCE_MS)
+})
+
+onBeforeUnmount(() => {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
 })
 
 function selectRow(row: Product) {

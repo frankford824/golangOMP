@@ -589,7 +589,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, defineComponent, h, type PropType } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onMounted, defineComponent, h, type PropType } from 'vue'
 import { logsApi } from '@/services/api/logsApi'
 import type {
   OperationLogEntry,
@@ -817,6 +817,19 @@ const jsonModalBody = ref('')
 
 const serverItems = computed(() => serverData.value.items)
 const serverTotalPages = computed(() => Math.max(1, Math.ceil(serverData.value.total / serverPageSize)))
+
+let traceAbort: AbortController | null = null
+let traceSeq = 0
+let traceAnalysisAbort: AbortController | null = null
+let traceAnalysisSeq = 0
+let traceStatsAbort: AbortController | null = null
+let traceStatsSeq = 0
+let operationAbort: AbortController | null = null
+let operationSeq = 0
+let permissionAbort: AbortController | null = null
+let permissionSeq = 0
+let serverAbort: AbortController | null = null
+let serverSeq = 0
 
 const OP_SOURCE_LABEL: Record<OperationLogEntry['source'], string> = {
   task_event: '任务',
@@ -1129,43 +1142,75 @@ function rankTraceEvents(
 
 async function loadTraceEvents() {
   if (!canView.value) return
+  traceAbort?.abort()
+  const seq = ++traceSeq
+  const abortController = new AbortController()
+  traceAbort = abortController
   traceLoading.value = true
   traceError.value = ''
   try {
-    const res = await logsApi.traceEvents(buildTraceParams(tracePage.value))
+    const res = await logsApi.traceEvents(buildTraceParams(tracePage.value), abortController.signal)
+    if (abortController.signal.aborted || seq !== traceSeq) return
     const body = res?.data as PaginationEnvelope<WorkflowTraceEvent> | undefined
     traceData.value = unpackPaginated(body)
   } catch (e) {
+    if (abortController.signal.aborted || seq !== traceSeq) return
     traceError.value = e instanceof Error ? e.message : '加载业务追踪失败'
   } finally {
-    traceLoading.value = false
+    if (traceAbort === abortController) {
+      traceAbort = null
+    }
+    if (seq === traceSeq) {
+      traceLoading.value = false
+    }
   }
 }
 
 async function loadTraceAnalysis() {
   if (!canView.value) return
+  traceAnalysisAbort?.abort()
+  const seq = ++traceAnalysisSeq
+  const abortController = new AbortController()
+  traceAnalysisAbort = abortController
   analysisLoading.value = true
   try {
-    const res = await logsApi.traceEvents(buildTraceParams(1, 100))
+    const res = await logsApi.traceEvents(buildTraceParams(1, 100), abortController.signal)
+    if (abortController.signal.aborted || seq !== traceAnalysisSeq) return
     const body = res?.data as PaginationEnvelope<WorkflowTraceEvent> | undefined
     traceAnalysisData.value = unpackPaginated(body)
   } catch {
+    if (abortController.signal.aborted || seq !== traceAnalysisSeq) return
     traceAnalysisData.value = { items: [], total: 0 }
   } finally {
-    analysisLoading.value = false
+    if (traceAnalysisAbort === abortController) {
+      traceAnalysisAbort = null
+    }
+    if (seq === traceAnalysisSeq) {
+      analysisLoading.value = false
+    }
   }
 }
 
 async function loadTraceStats() {
   if (!canView.value) return
+  traceStatsAbort?.abort()
+  const seq = ++traceStatsSeq
+  const abortController = new AbortController()
+  traceStatsAbort = abortController
   try {
     const params = buildTraceParams(1, 1)
     delete params.outcome
-    const res = await logsApi.traceEvents({ ...params, outcome: 'failed' })
+    const res = await logsApi.traceEvents({ ...params, outcome: 'failed' }, abortController.signal)
+    if (abortController.signal.aborted || seq !== traceStatsSeq) return
     const body = res?.data as PaginationEnvelope<WorkflowTraceEvent> | undefined
     traceFailedTotal.value = parsePaginationTotal(body?.pagination) ?? 0
   } catch {
+    if (abortController.signal.aborted || seq !== traceStatsSeq) return
     traceFailedTotal.value = 0
+  } finally {
+    if (traceStatsAbort === abortController) {
+      traceStatsAbort = null
+    }
   }
 }
 
@@ -1371,6 +1416,10 @@ function resolveOperationLogTotal(
 
 async function loadOperationLogs() {
   if (!canView.value) return
+  operationAbort?.abort()
+  const seq = ++operationSeq
+  const abortController = new AbortController()
+  operationAbort = abortController
   opLoading.value = true
   opError.value = ''
   try {
@@ -1388,7 +1437,8 @@ async function loadOperationLogs() {
     }
 
     let pageToFetch = opPage.value
-    let res = await logsApi.operationLogs(buildParams(pageToFetch))
+    let res = await logsApi.operationLogs(buildParams(pageToFetch), abortController.signal)
+    if (abortController.signal.aborted || seq !== operationSeq) return
     let body = res?.data as PaginationEnvelope<OperationLogEntry> | undefined
     let items = Array.isArray(body?.data) ? body.data : []
     let total = resolveOperationLogTotal(
@@ -1402,7 +1452,8 @@ async function loadOperationLogs() {
 
     if (pageToFetch > maxPage) {
       pageToFetch = maxPage
-      res = await logsApi.operationLogs(buildParams(pageToFetch))
+      res = await logsApi.operationLogs(buildParams(pageToFetch), abortController.signal)
+      if (abortController.signal.aborted || seq !== operationSeq) return
       body = res?.data as typeof body
       items = Array.isArray(body?.data) ? body.data : []
       total = resolveOperationLogTotal(
@@ -1421,29 +1472,53 @@ async function loadOperationLogs() {
       opPage.value = pageToFetch
     }
   } catch (e) {
+    if (abortController.signal.aborted || seq !== operationSeq) return
     opError.value = e instanceof Error ? e.message : '加载操作记录失败'
   } finally {
-    opLoading.value = false
+    if (operationAbort === abortController) {
+      operationAbort = null
+    }
+    if (seq === operationSeq) {
+      opLoading.value = false
+    }
   }
 }
 
 async function loadPermissionLogs() {
   if (!canView.value) return
+  permissionAbort?.abort()
+  const seq = ++permissionSeq
+  const abortController = new AbortController()
+  permissionAbort = abortController
   permLoading.value = true
   permError.value = ''
   try {
-    const res = await logsApi.permissionLogs({ page: permPage.value, page_size: permPageSize })
+    const res = await logsApi.permissionLogs(
+      { page: permPage.value, page_size: permPageSize },
+      abortController.signal,
+    )
+    if (abortController.signal.aborted || seq !== permissionSeq) return
     const httpBody = res?.data as PaginationEnvelope<PermissionLog> | undefined
     permData.value = unpackPaginated(httpBody)
   } catch (e) {
+    if (abortController.signal.aborted || seq !== permissionSeq) return
     permError.value = e instanceof Error ? e.message : '加载权限变更失败'
   } finally {
-    permLoading.value = false
+    if (permissionAbort === abortController) {
+      permissionAbort = null
+    }
+    if (seq === permissionSeq) {
+      permLoading.value = false
+    }
   }
 }
 
 async function loadServerLogs() {
   if (!canViewServerLogs.value) return
+  serverAbort?.abort()
+  const seq = ++serverSeq
+  const abortController = new AbortController()
+  serverAbort = abortController
   serverLoading.value = true
   serverError.value = ''
   try {
@@ -1461,15 +1536,22 @@ async function loadServerLogs() {
       const until = beijingDateTimeLocalToISO(serverUntil.value)
       if (until) params.until = until
     }
-    const res = await logsApi.serverLogs(params)
+    const res = await logsApi.serverLogs(params, abortController.signal)
+    if (abortController.signal.aborted || seq !== serverSeq) return
     const body = res?.data
     const items = Array.isArray(body) ? body : (body?.data ?? body?.items ?? [])
     const total = typeof body?.pagination?.total === 'number' ? body.pagination.total : items.length
     serverData.value = { items, total }
   } catch (e) {
+    if (abortController.signal.aborted || seq !== serverSeq) return
     serverError.value = e instanceof Error ? e.message : '加载服务器日志失败'
   } finally {
-    serverLoading.value = false
+    if (serverAbort === abortController) {
+      serverAbort = null
+    }
+    if (seq === serverSeq) {
+      serverLoading.value = false
+    }
   }
 }
 
@@ -1523,6 +1605,27 @@ watch(opPage, () => {
 })
 watch(permPage, loadPermissionLogs)
 watch(serverPage, loadServerLogs)
+
+onBeforeUnmount(() => {
+  traceSeq += 1
+  traceAnalysisSeq += 1
+  traceStatsSeq += 1
+  operationSeq += 1
+  permissionSeq += 1
+  serverSeq += 1
+  traceAbort?.abort()
+  traceAnalysisAbort?.abort()
+  traceStatsAbort?.abort()
+  operationAbort?.abort()
+  permissionAbort?.abort()
+  serverAbort?.abort()
+  traceAbort = null
+  traceAnalysisAbort = null
+  traceStatsAbort = null
+  operationAbort = null
+  permissionAbort = null
+  serverAbort = null
+})
 
 onMounted(() => {
   refreshActiveTab()

@@ -268,7 +268,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usersApi } from '@/services/api/usersApi'
 import {
@@ -358,6 +358,8 @@ const selectedRoleCodes = ref<string[]>([])
 const membershipForm = ref<{ department: string; team: string }>({ department: '', team: '' })
 const membershipSubmitting = ref(false)
 const roleOptions = ref<RoleOption[]>([])
+let listAbort: AbortController | null = null
+let listSeq = 0
 
 const page = ref(1)
 const pageSize = ref(20)
@@ -483,6 +485,10 @@ async function loadRoleOptions() {
 }
 
 async function loadUsers() {
+  listAbort?.abort()
+  const seq = ++listSeq
+  const abortController = new AbortController()
+  listAbort = abortController
   listLoading.value = true
   listError.value = ''
   try {
@@ -501,7 +507,8 @@ async function loadUsers() {
       ...(roleFilter.value ? { role: roleFilter.value } : {}),
       ...(deptScope ? { department: deptScope } : departmentFilter.value ? { department: departmentFilter.value } : {}),
       ...(teamFilter.value ? { team: teamFilter.value } : {}),
-    })
+    }, abortController.signal)
+    if (abortController.signal.aborted || seq !== listSeq) return
     const data = res?.data
     const list = Array.isArray(data?.data) ? data.data : []
     const p = (data?.pagination ?? {}) as Record<string, unknown>
@@ -514,9 +521,15 @@ async function loadUsers() {
       page_size: typeof p.page_size === 'number' ? p.page_size : pageSize.value,
     }
   } catch (e) {
+    if (abortController.signal.aborted || seq !== listSeq) return
     listError.value = e instanceof Error ? e.message : '加载用户列表失败'
   } finally {
-    listLoading.value = false
+    if (listAbort === abortController) {
+      listAbort = null
+    }
+    if (seq === listSeq) {
+      listLoading.value = false
+    }
   }
 }
 
@@ -744,6 +757,12 @@ onMounted(() => {
   void Promise.all([loadRoleOptions(), loadOrgOptions()]).then(() => {
     void loadUsers()
   })
+})
+
+onBeforeUnmount(() => {
+  listSeq += 1
+  listAbort?.abort()
+  listAbort = null
 })
 </script>
 

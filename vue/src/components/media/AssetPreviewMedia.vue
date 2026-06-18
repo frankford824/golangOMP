@@ -39,6 +39,7 @@
         class="apm-img"
         :class="innerImgClass"
         loading="lazy"
+        decoding="async"
         @click.stop="onOpenFull"
       />
     </template>
