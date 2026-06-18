@@ -114,15 +114,32 @@
           :class="{ 'is-expanded': isComboGroupExpanded(group), 'is-static': group.group_type !== 'combo' }"
           @click="toggleComboGroup(group)"
         >
-          <span v-if="group.group_type === 'combo' && group.pic_url" class="pm-combo-thumb">
-            <img :src="group.pic_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
+          <span v-if="group.group_type === 'combo'" class="pm-combo-thumb" :class="{ 'is-missing': !group.pic_url }">
+            <img v-if="group.pic_url" :src="group.pic_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
+            <span v-else>父级图</span>
           </span>
-          <div>
-            <p class="pm-combo-kicker">{{ group.group_type === 'combo' ? '组合装' : '单品 SKU' }}</p>
-            <strong>{{ groupTitle(group) }}</strong>
-            <small v-if="group.group_type === 'combo'">{{ groupSubtitle(group) }}</small>
+          <div class="pm-combo-primary">
+            <p class="pm-combo-kicker">{{ group.group_type === 'combo' ? '组合装父级' : '单品 SKU' }}</p>
+            <strong>
+              <span class="pm-combo-code">{{ groupTitle(group) }}</span>
+              <span v-if="group.group_type === 'combo' && comboParentName(group)" class="pm-combo-name">{{ comboParentName(group) }}</span>
+            </strong>
+            <small v-if="group.group_type === 'combo'">{{ groupSubtitle(group) || '聚水潭组合装父级资料暂无更多字段' }}</small>
+            <span v-if="group.group_type === 'combo' && group.properties_value" class="pm-combo-properties">{{ group.properties_value }}</span>
           </div>
           <span class="pm-combo-meta">
+            <span v-if="group.group_type === 'combo'" class="pm-combo-field">
+              <b>款式</b>
+              {{ comboParentStyle(group) }}
+            </span>
+            <span v-if="group.group_type === 'combo'" class="pm-combo-field">
+              <b>品牌/分类</b>
+              {{ comboParentCategory(group) }}
+            </span>
+            <span v-if="group.group_type === 'combo'" class="pm-combo-field">
+              <b>成本/售价</b>
+              {{ comboParentPrice(group) }}
+            </span>
             <span class="pm-combo-count">{{ group.children.length }} 个系统 SKU</span>
             <span v-if="group.group_type === 'combo'" class="pm-combo-toggle">
               {{ isComboGroupExpanded(group) ? '收起' : '展开' }}
@@ -844,22 +861,41 @@ function groupTitle(group: ProductManagementComboGroup): string {
 }
 
 function groupSubtitle(group: ProductManagementComboGroup): string {
-  const name = firstNonEmptyString(group.combo_name, group.combo_short_name)
-  const brand = firstNonEmptyString(group.brand)
-  const vcName = firstNonEmptyString(group.vc_name)
   const entityID = firstNonEmptyString(group.entity_sku_id)
-  const iid = firstNonEmptyString(group.erp_i_id)
   const synced = group.last_synced_at ? `同步 ${formatDate(group.last_synced_at)}` : ''
   return [
-    name,
-    brand ? `品牌 ${brand}` : '',
-    vcName ? `分类 ${vcName}` : '',
     entityID ? `实体 ${entityID}` : '',
-    iid ? `款式 ${iid}` : '',
     synced,
   ]
     .filter(Boolean)
     .join(' · ')
+}
+
+function comboParentName(group: ProductManagementComboGroup): string {
+  return firstNonEmptyString(group.combo_name, group.combo_short_name)
+}
+
+function comboParentStyle(group: ProductManagementComboGroup): string {
+  return firstNonEmptyString(group.erp_i_id, group.entity_sku_id, '未绑定 ERP 款式')
+}
+
+function comboParentCategory(group: ProductManagementComboGroup): string {
+  const brand = firstNonEmptyString(group.brand)
+  const vcName = firstNonEmptyString(group.vc_name)
+  if (brand && vcName) return `${brand} / ${vcName}`
+  return firstNonEmptyString(brand, vcName, '未返回品牌分类')
+}
+
+function comboParentPrice(group: ProductManagementComboGroup): string {
+  const cost = formatNullablePrice(group.cost_price)
+  const sale = formatNullablePrice(group.sale_price)
+  if (cost && sale) return `${cost} / ${sale}`
+  return firstNonEmptyString(cost, sale, '未返回价格')
+}
+
+function formatNullablePrice(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return ''
+  return `￥${value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
 }
 
 function syncStatusLabel(status: ProductSyncStatus): string {
@@ -1143,11 +1179,11 @@ function errorMessage(err: unknown): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 18px;
   border: 0;
   border-bottom: 1px solid #e8eef8;
-  padding: 0.85rem 1rem;
-  background: #f8fafc;
+  padding: 1rem;
+  background: linear-gradient(90deg, #eef6ff 0%, #f8fafc 42%, #ffffff 100%);
   text-align: left;
   cursor: pointer;
   transition:
@@ -1169,23 +1205,24 @@ function errorMessage(err: unknown): string {
   cursor: default;
 }
 
-.pm-combo-header > div {
+.pm-combo-primary {
   display: grid;
   flex: 1 1 auto;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
 .pm-combo-thumb {
   display: grid;
-  flex: 0 0 58px;
+  flex: 0 0 92px;
   place-items: center;
-  width: 58px;
-  height: 42px;
+  width: 92px;
+  height: 66px;
   overflow: hidden;
-  border: 1px solid #dbeafe;
-  border-radius: 0.625rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
   background: #ffffff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
 }
 
 .pm-combo-thumb img {
@@ -1195,11 +1232,38 @@ function errorMessage(err: unknown): string {
   object-fit: contain;
 }
 
+.pm-combo-thumb.is-missing {
+  border-style: dashed;
+  color: #64748b;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .pm-combo-header strong {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   overflow: hidden;
   color: #0f172a;
   font-size: 15px;
   font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-combo-code {
+  flex: 0 0 auto;
+  color: #0f172a;
+  font-family: var(--yb-font-data);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.pm-combo-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #1e293b;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1211,9 +1275,40 @@ function errorMessage(err: unknown): string {
   white-space: nowrap;
 }
 
+.pm-combo-properties {
+  display: block;
+  overflow: hidden;
+  max-width: 68rem;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pm-combo-kicker {
   margin: 0;
   color: #2563eb;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.pm-combo-field {
+  display: grid;
+  gap: 2px;
+  min-width: 7rem;
+  max-width: 13rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.75rem;
+  padding: 7px 10px;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.pm-combo-field b {
+  color: #64748b;
   font-size: 11px;
   font-weight: 900;
 }
@@ -1231,9 +1326,12 @@ function errorMessage(err: unknown): string {
 
 .pm-combo-meta {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 0 min(48%, 680px);
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .pm-combo-toggle {
