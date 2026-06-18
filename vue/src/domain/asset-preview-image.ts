@@ -111,7 +111,7 @@ async function fetchSameOriginPreview(url: string): Promise<CachedMaterializedPr
     const blob = res.data
     if (!(blob instanceof Blob)) return undefined
     const type = (blob.type || '').toLowerCase()
-    if (type && !type.startsWith('image/')) return undefined
+    if (!isRenderablePreviewBlob(type, url)) return undefined
     const objectUrl = URL.createObjectURL(blob)
     return {
       displaySrc: objectUrl,
@@ -121,6 +121,30 @@ async function fetchSameOriginPreview(url: string): Promise<CachedMaterializedPr
       lastUsedAt: Date.now(),
     }
   })
+}
+
+function isRenderablePreviewBlob(contentType: string, url: string): boolean {
+  if (contentType.startsWith('image/')) return true
+  if (contentType && contentType !== 'application/octet-stream' && contentType !== 'binary/octet-stream') {
+    return false
+  }
+  return previewURLHasImageExtension(url)
+}
+
+function previewURLHasImageExtension(raw: string): boolean {
+  let pathname = raw.trim()
+  try {
+    pathname = new URL(pathname, window.location.origin).pathname
+  } catch {
+    pathname = pathname.split(/[?#]/, 1)[0] ?? pathname
+  }
+  let decoded = pathname
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    decoded = pathname
+  }
+  return /\.(?:jpe?g|png|webp|gif|bmp|svg)$/i.test(decoded.toLowerCase())
 }
 
 export async function materializePreviewImageUrl(
