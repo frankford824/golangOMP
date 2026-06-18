@@ -181,13 +181,14 @@ export function retouchRequirementReferenceRefsToDisplayItems(
   const out: RetouchReferenceDisplayItem[] = []
   refs.forEach((ref, index) => {
     const previewSrc = trimField(ref.download_url)
-    if (!previewSrc) return
+    const assetId = parseNumericAssetId(ref.asset_id ?? ref.ref_id)
+    if (!previewSrc && !assetId) return
     const fileName = trimField(ref.filename) || `参考图 ${index + 1}`
     const fileSize =
       typeof ref.file_size === 'number' && Number.isFinite(ref.file_size) ? ref.file_size : undefined
     out.push({
       key: `${keyPrefix}-${index}-${previewSrc}`,
-      assetId: parseNumericAssetId(ref.asset_id ?? ref.ref_id),
+      assetId,
       fileName,
       previewSrc,
       downloadUrl: previewSrc,
@@ -206,6 +207,7 @@ export function retouchRequirementReferenceRefsToThumbItems(
   return retouchRequirementReferenceRefsToDisplayItems(refs, keyPrefix).map((item) => ({
     key: item.key,
     src: item.previewSrc,
+    previewAssetId: item.assetId,
     alt: item.fileName,
     label: item.fileName,
     downloadUrl: item.downloadUrl,

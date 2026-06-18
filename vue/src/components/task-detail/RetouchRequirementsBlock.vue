@@ -91,11 +91,15 @@
                 :title="file.fileName"
                 @click="openReferencePreview(item, file)"
               >
-                <img
-                  :src="file.previewSrc"
+                <AssetPreviewMedia
+                  :asset-id="file.assetId || null"
+                  :resolved-preview-url="file.previewSrc"
+                  :fallback-src="file.previewSrc"
                   :alt="file.fileName"
-                  class="reference-thumb-img"
-                  loading="lazy"
+                  img-class="reference-thumb-media"
+                  inner-img-class="reference-thumb-img"
+                  :defer-until-visible="true"
+                  @open-full="(url, context) => openReferencePreview(item, file, url, context)"
                 />
               </button>
               <div class="reference-card-meta">
@@ -136,12 +140,16 @@
           <ul v-if="sourceItems(item).length > 0" class="source-file-list">
             <li v-for="file in sourceItems(item)" :key="file.key" class="source-file-item">
               <div class="source-file-thumb">
-                <img
+                <AssetPreviewMedia
                   v-if="file.imagePreviewUrl"
-                  :src="file.imagePreviewUrl"
+                  :asset-id="file.previewAssetId || file.assetId || null"
+                  :resolved-preview-url="file.imagePreviewUrl"
+                  :fallback-src="file.imagePreviewUrl"
                   :alt="file.fileName"
-                  class="source-thumb-img"
-                  loading="lazy"
+                  img-class="source-thumb-media"
+                  inner-img-class="source-thumb-img"
+                  :defer-until-visible="true"
+                  @open-full="(url, context) => openSourcePreview(item, file, url, context)"
                 />
                 <FileIconFallback
                   v-else
@@ -180,6 +188,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import FileIconFallback from '@/components/base/FileIconFallback.vue'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import {
   IMAGE_PREVIEW_LIGHTBOX_KEY,
   type ImagePreviewLightboxItem,
@@ -330,20 +339,98 @@ function referencePreviewGallery(item: RetouchRequirement): ImagePreviewLightbox
       const title = file.fileName || `参考图 ${index + 1}`
       return {
         src,
+        previewAssetId: file.assetId,
+        resolvedPreviewUrl: src,
+        fallbackSrc: src,
         title,
         alt: title,
+        preferredFilename: title,
         downloadUrl: file.downloadUrl || src,
       }
     })
     .filter((row) => row != null) as ImagePreviewLightboxItem[]
 }
 
-function openReferencePreview(item: RetouchRequirement, file: RetouchReferenceDisplayItem) {
-  if (!file.previewSrc) return
+function openReferencePreview(
+  item: RetouchRequirement,
+  file: RetouchReferenceDisplayItem,
+  url?: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
+  const activeUrl = String(url || file.previewSrc || '').trim()
+  if (!activeUrl && !file.assetId) return
   const gallery = referencePreviewGallery(item)
-  const index = Math.max(0, gallery.findIndex((row) => row.src === file.previewSrc))
-  openLightbox(file.previewSrc, {
+  const index = Math.max(0, gallery.findIndex((row) => row.src === file.previewSrc || row.previewAssetId === file.assetId))
+  if (gallery[index]) {
+    gallery[index] = {
+      ...gallery[index],
+      src: activeUrl || gallery[index].src,
+      previewAssetId: context?.assetId || gallery[index].previewAssetId,
+      fallbackAssetId: context?.fallbackAssetId || gallery[index].fallbackAssetId,
+      fallbackSrc: context?.fallbackSrc || gallery[index].fallbackSrc,
+      resolvedPreviewUrl: context?.resolvedPreviewUrl || gallery[index].resolvedPreviewUrl,
+    }
+  }
+  openLightbox(activeUrl, {
     title: file.fileName || `需求 ${requirementIndex(item) + 1} 参考图`,
+    items: gallery,
+    index,
+  })
+}
+
+function sourcePreviewGallery(item: RetouchRequirement): ImagePreviewLightboxItem[] {
+  return sourceItems(item)
+    .map((file, index) => {
+      const src = file.imagePreviewUrl?.trim() || ''
+      const previewAssetId = file.previewAssetId || file.assetId
+      if (!src && !previewAssetId) return null
+      const title = file.fileName || `素材 ${index + 1}`
+      return {
+        src,
+        previewAssetId,
+        resolvedPreviewUrl: src || undefined,
+        fallbackSrc: src || undefined,
+        title,
+        alt: title,
+        preferredFilename: title,
+        downloadUrl: file.downloadUrl || src,
+      }
+    })
+    .filter((row) => row != null) as ImagePreviewLightboxItem[]
+}
+
+function openSourcePreview(
+  item: RetouchRequirement,
+  file: RetouchSourceFileDisplayItem,
+  url: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
+  const activeUrl = url.trim()
+  if (!activeUrl && !file.previewAssetId && !file.assetId) return
+  const gallery = sourcePreviewGallery(item)
+  const index = Math.max(0, gallery.findIndex((row) => row.previewAssetId === (file.previewAssetId || file.assetId) || row.src === file.imagePreviewUrl))
+  if (gallery[index]) {
+    gallery[index] = {
+      ...gallery[index],
+      src: activeUrl || gallery[index].src,
+      previewAssetId: context?.assetId || gallery[index].previewAssetId,
+      fallbackAssetId: context?.fallbackAssetId || gallery[index].fallbackAssetId,
+      fallbackSrc: context?.fallbackSrc || gallery[index].fallbackSrc,
+      resolvedPreviewUrl: context?.resolvedPreviewUrl || gallery[index].resolvedPreviewUrl,
+    }
+  }
+  openLightbox(activeUrl, {
+    title: file.fileName || '素材图',
     items: gallery,
     index,
   })
@@ -642,11 +729,22 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   aspect-ratio: 1;
 }
 
+.reference-thumb-media,
+.reference-thumb-btn :deep(.reference-thumb-media),
+.reference-thumb-btn :deep(.apm),
 .reference-thumb-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.reference-thumb-btn :deep(.apm-placeholder),
+.reference-thumb-btn :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.25rem;
 }
 
 .reference-card-meta {
@@ -702,11 +800,22 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   background: #f8fafc;
 }
 
+.source-thumb-media,
+.source-file-thumb :deep(.source-thumb-media),
+.source-file-thumb :deep(.apm),
 .source-thumb-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.source-file-thumb :deep(.apm-placeholder),
+.source-file-thumb :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.2rem;
 }
 
 .source-file-meta {

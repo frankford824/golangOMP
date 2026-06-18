@@ -15,24 +15,18 @@
         role="listitem"
         @click="onThumbClick(item)"
       >
-        <img
-          v-if="item.src && !item.previewAssetId && !item.unavailable && item.imageLike"
-          :src="item.src"
-          :alt="item.alt"
-          class="thumb-img"
-          loading="lazy"
-        />
         <AssetPreviewMedia
-          v-else-if="item.previewAssetId && !item.unavailable && item.imageLike"
+          v-if="!item.unavailable && item.imageLike"
           class="thumb-media"
-          :asset-id="item.previewAssetId"
+          :asset-id="item.previewAssetId || null"
           :fallback-asset-id="item.fallbackAssetId || null"
           :fallback-src="item.src || null"
+          :resolved-preview-url="item.previewAssetId ? null : (item.src || null)"
           :alt="item.alt"
           img-class="thumb-media-shell"
           inner-img-class="thumb-img"
           :defer-until-visible="true"
-          @open-full="(url) => openThumbPreview(item, url)"
+          @open-full="(url, context) => openThumbPreview(item, url, context)"
         />
         <span v-else class="thumb-placeholder">
           {{ item.extension ? item.extension.toUpperCase() : (item.label || '文件') }}
@@ -141,29 +135,66 @@ const normalizedItems = computed(() =>
 const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 function thumbGalleryItems(activeKey: string, activeSrc: string): ImagePreviewLightboxItem[] {
-  const out = normalizedItems.value
-    .filter((item) => !item.unavailable && item.imageLike && (item.src || item.key === activeKey))
+  const out: ImagePreviewLightboxItem[] = normalizedItems.value
+    .filter(
+      (item) =>
+        !item.unavailable &&
+        item.imageLike &&
+        (item.src || item.previewAssetId || item.fallbackAssetId || item.key === activeKey),
+    )
     .map((item) => ({
       src: item.key === activeKey ? activeSrc : item.src,
+      previewAssetId: item.previewAssetId || undefined,
+      fallbackAssetId: item.fallbackAssetId || undefined,
+      fallbackSrc: item.src || undefined,
+      resolvedPreviewUrl: item.previewAssetId ? undefined : item.src || undefined,
       title: item.label || item.alt,
       alt: item.alt,
+      preferredFilename: item.label || item.alt,
       downloadUrl: item.downloadUrl || item.src,
     }))
-    .filter((item) => item.src.trim().length > 0)
+    .filter((item) => item.src.trim().length > 0 || item.previewAssetId || item.fallbackAssetId)
   if (!out.some((item) => item.src === activeSrc)) {
-    out.unshift({ src: activeSrc, title: activeSrc, alt: activeSrc, downloadUrl: activeSrc })
+    out.unshift({
+      src: activeSrc,
+      fallbackSrc: activeSrc,
+      resolvedPreviewUrl: activeSrc,
+      title: activeSrc,
+      alt: activeSrc,
+      preferredFilename: activeSrc,
+      downloadUrl: activeSrc,
+    })
   }
   return out
 }
 
-function openThumbPreview(item: AssetThumbItem, src: string) {
+function openThumbPreview(
+  item: AssetThumbItem,
+  src: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
   const url = String(src ?? '').trim()
   if (!url) return
   const items = thumbGalleryItems(item.key, url)
   const index = Math.max(0, items.findIndex((row) => row.src === url))
   openLightbox(url, {
     title: item.label || item.alt,
-    items,
+    items: items.map((row, rowIndex) =>
+      rowIndex === index
+        ? {
+            ...row,
+            previewAssetId: context?.assetId || row.previewAssetId,
+            fallbackAssetId: context?.fallbackAssetId || row.fallbackAssetId,
+            fallbackSrc: context?.fallbackSrc || row.fallbackSrc,
+            resolvedPreviewUrl: context?.resolvedPreviewUrl || row.resolvedPreviewUrl,
+          }
+        : row,
+    ),
     index,
   })
 }
@@ -177,7 +208,9 @@ function onThumbClick(item: AssetThumbItem) {
     window.open(openHref, '_blank', 'noopener')
     return
   }
-  if (item.src) openThumbPreview(item, item.src)
+  if (item.src || item.previewAssetId || item.fallbackAssetId) {
+    openThumbPreview(item, item.src || '')
+  }
 }
 </script>
 

@@ -1066,13 +1066,19 @@ function normalizePreviewLightboxItems(
     .map((item) => ({
       ...item,
       src: String(item.src ?? '').trim(),
+      previewAssetId: String(item.previewAssetId ?? '').trim(),
+      fallbackAssetId: String(item.fallbackAssetId ?? '').trim(),
+      fallbackSrc: String(item.fallbackSrc ?? '').trim(),
+      resolvedPreviewUrl: String(item.resolvedPreviewUrl ?? '').trim(),
       title: String(item.title ?? '').trim(),
       alt: String(item.alt ?? '').trim(),
       downloadUrl: String(item.downloadUrl ?? '').trim(),
     }))
-    .filter((item) => item.src.length > 0)
+    .filter((item) =>
+      Boolean(item.src || item.previewAssetId || item.fallbackAssetId || item.fallbackSrc || item.resolvedPreviewUrl || item.downloadUrl),
+    )
   if (normalized.length > 0) return normalized
-  return [{ src: url, title, alt: title, downloadUrl: url }]
+  return url ? [{ src: url, title, alt: title, downloadUrl: url }] : []
 }
 
 function openPreviewLightbox(
@@ -1082,9 +1088,9 @@ function openPreviewLightbox(
   index?: number,
 ): void {
   const trimmedUrl = url.trim()
-  if (!trimmedUrl) return
   const trimmedTitle = title.trim() || '资产预览'
   const normalizedItems = normalizePreviewLightboxItems(trimmedUrl, trimmedTitle, items)
+  if (!trimmedUrl && normalizedItems.length === 0) return
   const fallbackIndex = normalizedItems.findIndex((item) => item.src === trimmedUrl)
   previewLightboxSrc.value = trimmedUrl
   previewLightboxTitle.value = trimmedTitle
@@ -1101,9 +1107,19 @@ function closePreviewLightbox(): void {
 
 function assetPreviewLightboxItem(asset: BackendAsset, resolvedUrl?: string): ImagePreviewLightboxItem | null {
   const src = String(resolvedUrl || listCardResolvedPreviewUrl(asset) || '').trim()
-  if (!src) return null
+  const previewAssetId = assetResourceId(asset)
+  if (!src && !previewAssetId) return null
   const title = previewTitleForAsset(asset)
-  return { src, title, alt: title, downloadUrl: src }
+  return {
+    src,
+    previewAssetId,
+    resolvedPreviewUrl: src || undefined,
+    fallbackSrc: src || undefined,
+    title,
+    alt: title,
+    preferredFilename: title,
+    downloadUrl: src,
+  }
 }
 
 function assetPreviewGallery(

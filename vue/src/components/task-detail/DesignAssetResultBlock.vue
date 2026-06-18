@@ -10,7 +10,7 @@
           <AssetThumbStrip
             :items="referenceThumbItems"
             empty-text="暂无参考图"
-            size="sm"
+            size="md"
           />
         </div>
       </div>
@@ -109,7 +109,7 @@
                 img-class="manuscript-preview-media"
                 inner-img-class="manuscript-preview-img"
                 :defer-until-visible="true"
-                @open-full="(src) => onPreviewClick(card, src)"
+                @open-full="(src, context) => onPreviewClick(card, src, context)"
               />
             </button>
             <button
@@ -119,7 +119,15 @@
               :title="card.label"
               @click="onPreviewClick(card, card.previewSrc!)"
             >
-              <img :src="card.previewSrc" :alt="card.label" loading="lazy" />
+              <AssetPreviewMedia
+                :resolved-preview-url="card.previewSrc"
+                :fallback-src="card.previewSrc"
+                :alt="card.label"
+                img-class="manuscript-preview-media"
+                inner-img-class="manuscript-preview-img"
+                :defer-until-visible="true"
+                @open-full="(src, context) => onPreviewClick(card, src, context)"
+              />
             </button>
             <div
               v-else
@@ -274,29 +282,60 @@ function onActivateVersion(index: number) {
 }
 
 function manuscriptPreviewGallery(activeCard: ManuscriptCard, activeSrc: string): ImagePreviewLightboxItem[] {
-  const out = manuscriptCards.value
-    .filter((card) => card.previewSrc || card.previewFallbackSrc || card.key === activeCard.key)
+  const out: ImagePreviewLightboxItem[] = manuscriptCards.value
+    .filter((card) => card.previewSrc || card.previewFallbackSrc || card.previewAssetId || card.key === activeCard.key)
     .map((card) => ({
       src: card.key === activeCard.key ? activeSrc : (card.previewSrc || card.previewFallbackSrc || ''),
+      previewAssetId: card.previewAssetId,
+      fallbackSrc: card.previewFallbackSrc || card.previewSrc,
+      resolvedPreviewUrl: card.previewSrc,
       title: card.label,
       alt: card.label,
+      preferredFilename: card.label,
       downloadUrl: card.downloadHref || card.previewSrc || card.previewFallbackSrc || '',
     }))
-    .filter((item) => item.src.trim().length > 0)
+    .filter((item) => item.src.trim().length > 0 || item.previewAssetId)
   if (!out.some((item) => item.src === activeSrc)) {
-    out.unshift({ src: activeSrc, title: activeCard.label, alt: activeCard.label, downloadUrl: activeSrc })
+    out.unshift({
+      src: activeSrc,
+      fallbackSrc: activeSrc,
+      resolvedPreviewUrl: activeSrc,
+      title: activeCard.label,
+      alt: activeCard.label,
+      preferredFilename: activeCard.label,
+      downloadUrl: activeSrc,
+    })
   }
   return out
 }
 
-function onPreviewClick(card: ManuscriptCard, src: string) {
+function onPreviewClick(
+  card: ManuscriptCard,
+  src: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
   const url = String(src ?? '').trim()
   if (!url) return
   const items = manuscriptPreviewGallery(card, url)
   const index = Math.max(0, items.findIndex((item) => item.src === url))
   emit('openLightbox', url, {
     title: card.label,
-    items,
+    items: items.map((item, rowIndex) =>
+      rowIndex === index
+        ? {
+            ...item,
+            previewAssetId: context?.assetId || item.previewAssetId,
+            fallbackAssetId: context?.fallbackAssetId || item.fallbackAssetId,
+            fallbackSrc: context?.fallbackSrc || item.fallbackSrc,
+            resolvedPreviewUrl: context?.resolvedPreviewUrl || item.resolvedPreviewUrl,
+          }
+        : item,
+    ),
     index,
   })
 }
@@ -396,8 +435,8 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 
 .manuscript-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
-  gap: 0.625rem;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.75rem;
 }
 
 .manuscript-card {
@@ -413,7 +452,7 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 
 .manuscript-card-visual {
   width: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 4 / 3;
   border-radius: 0.375rem;
   overflow: hidden;
   border: none;
@@ -429,8 +468,9 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 .manuscript-preview-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
+  background: #fff;
 }
 
 .manuscript-card-visual--image :deep(.manuscript-preview-media) {
@@ -448,7 +488,7 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 .manuscript-card-visual--image :deep(.manuscript-preview-media .apm-img) {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .manuscript-card-visual--image :deep(.manuscript-preview-media .apm-placeholder),

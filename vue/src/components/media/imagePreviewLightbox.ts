@@ -2,9 +2,14 @@ import type { InjectionKey } from 'vue'
 
 export type ImagePreviewLightboxItem = {
   src: string
+  previewAssetId?: string
+  fallbackAssetId?: string
+  fallbackSrc?: string
+  resolvedPreviewUrl?: string
   title?: string
   alt?: string
   downloadUrl?: string
+  preferredFilename?: string
 }
 
 export type OpenImagePreviewLightboxOptions = {

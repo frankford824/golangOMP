@@ -99,8 +99,16 @@
 
       <article v-for="record in records" :key="record.id" class="pm-row">
         <div class="pm-image-cell">
-          <div class="pm-preview" :class="{ 'pm-preview--missing': !previewURLForRecord(record) }">
-            <img v-if="previewURLForRecord(record)" :src="previewURLForRecord(record)" :alt="record.sku_code" loading="lazy" />
+          <div class="pm-preview" :class="{ 'pm-preview--missing': !previewLoadableForRecord(record) }">
+            <AssetPreviewMedia
+              v-if="previewLoadableForRecord(record)"
+              :asset-id="assetIDForRecord(record) || null"
+              :resolved-preview-url="previewURLForRecord(record) || null"
+              :fallback-src="directPreviewURL(record.image_preview_url) || null"
+              :alt="record.sku_code"
+              img-class="pm-preview-apm"
+              inner-img-class="pm-preview-img"
+            />
             <span v-else>{{ record.image_missing_reason || 'ERP 图片待补充' }}</span>
           </div>
           <span class="pm-pill" :class="`pm-source--${record.image_source}`">{{ record.image_source_label }}</span>
@@ -211,11 +219,14 @@
             class="pm-candidate"
             @click="setManualImage(candidate.asset_id)"
           >
-            <img
-              v-if="previewURLForCandidate(candidate)"
-              :src="previewURLForCandidate(candidate)"
+            <AssetPreviewMedia
+              v-if="previewLoadableForCandidate(candidate)"
+              :asset-id="assetIDForCandidate(candidate)"
+              :resolved-preview-url="previewURLForCandidate(candidate) || null"
+              :fallback-src="directPreviewURL(candidate.preview_url) || null"
               :alt="candidate.file_name"
-              loading="lazy"
+              img-class="pm-candidate-apm"
+              inner-img-class="pm-candidate-img"
             />
             <span v-else>无预览</span>
             <strong>{{ candidate.file_name }}</strong>
@@ -238,6 +249,7 @@ import {
   type ProductSyncStatus,
 } from '@/services/api/productManagementApi'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 
 type ProductSyncScope = 'all' | 'base' | 'image'
 
@@ -586,6 +598,24 @@ function previewURLForCandidate(candidate: ProductImageCandidate): string {
   return candidatePreviewURLs.value[candidate.asset_id] || directPreviewURL(candidate.preview_url) || ''
 }
 
+function assetIDForRecord(record: ProductManagementRecord): string | undefined {
+  const raw = record.image_asset_id ?? assetIDFromPreviewPath(record.image_preview_url)
+  const id = Number(raw)
+  return Number.isSafeInteger(id) && id > 0 ? String(id) : undefined
+}
+
+function assetIDForCandidate(candidate: ProductImageCandidate): string {
+  return String(candidate.asset_id)
+}
+
+function previewLoadableForRecord(record: ProductManagementRecord): boolean {
+  return Boolean(assetIDForRecord(record) || previewURLForRecord(record))
+}
+
+function previewLoadableForCandidate(candidate: ProductImageCandidate): boolean {
+  return Boolean(assetIDForCandidate(candidate) || previewURLForCandidate(candidate))
+}
+
 async function resolveRecordPreviewURLs(items: ProductManagementRecord[]): Promise<void> {
   const next = { ...recordPreviewURLs.value }
   await Promise.all(
@@ -876,11 +906,23 @@ function errorMessage(err: unknown): string {
   text-align: center;
 }
 
-.pm-preview img {
+.pm-preview :deep(.pm-preview-apm),
+.pm-preview :deep(.apm),
+.pm-preview :deep(.apm-img),
+.pm-preview :deep(.pm-preview-img) {
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #ffffff;
+}
+
+.pm-preview :deep(.apm-placeholder),
+.pm-preview :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.25rem;
 }
 
 .pm-preview--missing {
@@ -1120,13 +1162,33 @@ function errorMessage(err: unknown): string {
   background: #f8fbff;
 }
 
-.pm-candidate img {
+.pm-candidate :deep(.pm-candidate-apm),
+.pm-candidate :deep(.apm) {
   width: 100%;
   aspect-ratio: 4 / 3;
+}
+
+.pm-candidate :deep(.apm-img),
+.pm-candidate :deep(.pm-candidate-img) {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+}
+
+.pm-candidate :deep(.pm-candidate-apm),
+.pm-candidate :deep(.apm-placeholder),
+.pm-candidate :deep(.apm-empty) {
   border: 1px solid #e5e7eb;
   border-radius: 0.75rem;
   background: #f8fafc;
+}
+
+.pm-candidate :deep(.apm-placeholder),
+.pm-candidate :deep(.apm-empty) {
+  min-height: 0;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  padding: 0.25rem;
 }
 
 .pm-candidate strong {

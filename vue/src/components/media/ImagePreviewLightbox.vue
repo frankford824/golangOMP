@@ -76,13 +76,25 @@
           >
             <RotateCcw :size="16" />
           </button>
+          <button
+            type="button"
+            class="image-preview-action"
+            title="下载"
+            aria-label="下载当前图片"
+            :disabled="downloading || !activeItem"
+            @click="downloadActive"
+          >
+            <Download :size="16" />
+          </button>
           <a
             class="image-preview-action"
+            :class="{ 'image-preview-action--disabled': !activeOpenHref }"
             title="新窗口打开"
             aria-label="新窗口打开预览图"
-            :href="activeItem.downloadUrl || activeItem.src"
+            :href="activeOpenHref || '#'"
             target="_blank"
             rel="noopener"
+            @click="onOpenLinkClick"
           >
             <ExternalLink :size="16" />
           </a>
@@ -119,13 +131,31 @@
       >
         <ChevronRight :size="24" />
       </button>
-      <div class="image-preview-stage" @click.stop>
+      <div
+        class="image-preview-stage"
+        @click.self="close"
+        @pointerdown="onStagePointerDown"
+        @pointerup="onStagePointerUp"
+        @touchstart.passive="onStageTouchStart"
+        @touchmove.prevent="onStageTouchMove"
+        @touchend="onStageTouchEnd"
+      >
+        <div v-if="activePhase === 'loading'" class="image-preview-state" role="status">
+          加载预览...
+        </div>
+        <div v-else-if="activePhase === 'error'" class="image-preview-state image-preview-state--error" role="alert">
+          <span>{{ activeError }}</span>
+          <button type="button" class="image-preview-retry" @click.stop="loadActiveItem">重试</button>
+        </div>
         <img
-          :src="activeItem.src"
+          v-else-if="activeDisplaySrc"
+          :src="activeDisplaySrc"
           :alt="activeItem.alt || activeTitle"
           class="image-preview-img"
           :style="imageStyle"
           draggable="false"
+          @click.stop
+          @dblclick.stop="toggleZoom"
         />
       </div>
     </div>
@@ -137,6 +167,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ChevronLeft,
   ChevronRight,
+  Download,
   ExternalLink,
   Minus,
   Plus,
@@ -144,6 +175,13 @@ import {
   X,
 } from 'lucide-vue-next'
 import type { ImagePreviewLightboxItem } from './imagePreviewLightbox'
+import { fetchAssetPreviewMeta } from '@/domain/asset-access'
+import {
+  materializePreviewImageUrl,
+  revokeMaterializedPreviewImage,
+  type MaterializedPreviewImage,
+} from '@/domain/asset-preview-image'
+import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 4
@@ -170,21 +208,40 @@ const emit = defineEmits<{
 
 const activeIndex = ref(0)
 const zoom = ref(1)
+const activeDisplaySrc = ref('')
+const activePhase = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+const activeError = ref('预览加载失败')
+const downloading = ref(false)
+const pointerStart = ref<{ id: number; x: number; y: number; t: number } | null>(null)
+const pinchStart = ref<{ distance: number; zoom: number } | null>(null)
+
+let activeMaterializedImage: MaterializedPreviewImage | null = null
+let loadSeq = 0
 
 const displayItems = computed(() =>
   (props.items ?? [])
     .map((item) => ({
       ...item,
       src: String(item.src ?? '').trim(),
+      previewAssetId: String(item.previewAssetId ?? '').trim(),
+      fallbackAssetId: String(item.fallbackAssetId ?? '').trim(),
+      fallbackSrc: String(item.fallbackSrc ?? '').trim(),
+      resolvedPreviewUrl: String(item.resolvedPreviewUrl ?? '').trim(),
       title: String(item.title ?? '').trim(),
       alt: String(item.alt ?? '').trim(),
       downloadUrl: String(item.downloadUrl ?? '').trim(),
+      preferredFilename: String(item.preferredFilename ?? '').trim(),
     }))
-    .filter((item) => item.src.length > 0),
+    .filter(itemHasLoadableSource),
 )
 
 const activeItem = computed(() => displayItems.value[activeIndex.value] ?? null)
 const activeTitle = computed(() => activeItem.value?.title || props.fallbackTitle)
+const activeOpenHref = computed(() => {
+  const item = activeItem.value
+  if (!item) return ''
+  return item.downloadUrl || item.fallbackSrc || item.resolvedPreviewUrl || item.src
+})
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
 const imageStyle = computed(() => ({
   transform: `scale(${zoom.value})`,
@@ -200,6 +257,94 @@ function clampIndex(value: number): number {
 
 function clampZoom(value: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Number(value.toFixed(2))))
+}
+
+function itemHasLoadableSource(item: ImagePreviewLightboxItem): boolean {
+  return Boolean(
+    item.src ||
+      item.previewAssetId ||
+      item.fallbackAssetId ||
+      item.fallbackSrc ||
+      item.resolvedPreviewUrl ||
+      item.downloadUrl,
+  )
+}
+
+function itemSignature(item: ImagePreviewLightboxItem): string {
+  return [
+    item.src,
+    item.previewAssetId,
+    item.fallbackAssetId,
+    item.fallbackSrc,
+    item.resolvedPreviewUrl,
+    item.downloadUrl,
+  ].join('\x1f')
+}
+
+function clearActiveMaterializedImage() {
+  revokeMaterializedPreviewImage(activeMaterializedImage)
+  activeMaterializedImage = null
+}
+
+function setActiveImage(image: MaterializedPreviewImage) {
+  clearActiveMaterializedImage()
+  activeMaterializedImage = image
+  activeDisplaySrc.value = image.displaySrc
+  activePhase.value = 'ready'
+}
+
+function uniqueNonEmpty(values: Array<string | undefined>): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const value of values) {
+    const text = String(value ?? '').trim()
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    out.push(text)
+  }
+  return out
+}
+
+async function resolveActiveImage(item: ImagePreviewLightboxItem): Promise<MaterializedPreviewImage | undefined> {
+  if (item.src.startsWith('blob:') || item.src.startsWith('data:')) {
+    return materializePreviewImageUrl(item.src)
+  }
+  for (const assetId of uniqueNonEmpty([item.previewAssetId, item.fallbackAssetId])) {
+    const meta = await fetchAssetPreviewMeta(assetId).catch(() => null)
+    if (meta?.status === 'ok' && meta.displayUrl) {
+      const image = await materializePreviewImageUrl(meta.displayUrl)
+      if (image) return image
+    }
+  }
+  for (const url of uniqueNonEmpty([item.resolvedPreviewUrl, item.src, item.fallbackSrc, item.downloadUrl])) {
+    const image = await materializePreviewImageUrl(url)
+    if (image) return image
+  }
+  return undefined
+}
+
+async function loadActiveItem() {
+  const item = activeItem.value
+  const my = ++loadSeq
+  clearActiveMaterializedImage()
+  activeDisplaySrc.value = ''
+  if (!props.modelValue || !item) {
+    activePhase.value = 'idle'
+    return
+  }
+  activePhase.value = 'loading'
+  activeError.value = '预览加载中'
+  const image = await resolveActiveImage(item)
+  if (my !== loadSeq) {
+    revokeMaterializedPreviewImage(image)
+    return
+  }
+  if (image) {
+    setActiveImage(image)
+    return
+  }
+  activeError.value = '当前图片暂时无法预览'
+  activePhase.value = 'error'
 }
 
 function close() {
@@ -218,6 +363,10 @@ function zoomBy(delta: number) {
 
 function resetZoom() {
   zoom.value = 1
+}
+
+function toggleZoom() {
+  zoom.value = zoom.value > 1 ? 1 : 2
 }
 
 function handleWheel(event: WheelEvent) {
@@ -257,25 +406,106 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+function onOpenLinkClick(event: MouseEvent) {
+  if (activeOpenHref.value) return
+  event.preventDefault()
+}
+
+async function downloadActive() {
+  const item = activeItem.value
+  if (!item || downloading.value) return
+  downloading.value = true
+  const result = await downloadAssetFileWithOriginalFilename({
+    assetId: item.previewAssetId || item.fallbackAssetId || undefined,
+    downloadUrl: item.downloadUrl || item.fallbackSrc || item.resolvedPreviewUrl || item.src || undefined,
+    preferredFilename: item.preferredFilename || item.title || item.alt || 'image',
+  })
+  downloading.value = false
+  if (!result.ok) {
+    window.alert(result.message ?? '下载失败，请稍后重试')
+  }
+}
+
+function onStagePointerDown(event: PointerEvent) {
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  pointerStart.value = {
+    id: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    t: Date.now(),
+  }
+}
+
+function onStagePointerUp(event: PointerEvent) {
+  const start = pointerStart.value
+  pointerStart.value = null
+  if (!start || start.id !== event.pointerId) return
+  const dx = event.clientX - start.x
+  const dy = event.clientY - start.y
+  const dt = Date.now() - start.t
+  if (dt > 900 || Math.abs(dx) < 52 || Math.abs(dy) > 90) return
+  if (dx < 0) step(1)
+  else step(-1)
+}
+
+function touchDistance(touches: TouchList): number {
+  if (touches.length < 2) return 0
+  const a = touches[0]
+  const b = touches[1]
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+}
+
+function onStageTouchStart(event: TouchEvent) {
+  if (event.touches.length !== 2) return
+  pinchStart.value = {
+    distance: touchDistance(event.touches),
+    zoom: zoom.value,
+  }
+}
+
+function onStageTouchMove(event: TouchEvent) {
+  const start = pinchStart.value
+  if (!start || event.touches.length !== 2 || start.distance <= 0) return
+  const next = start.zoom * (touchDistance(event.touches) / start.distance)
+  zoom.value = clampZoom(next)
+}
+
+function onStageTouchEnd(event: TouchEvent) {
+  if (event.touches.length < 2) pinchStart.value = null
+}
+
 function setBodyLock(locked: boolean) {
   if (typeof document === 'undefined') return
   document.body.classList.toggle('asset-preview-open', locked)
 }
 
 watch(
-  () => [props.modelValue, props.initialIndex, displayItems.value.map((item) => item.src).join('|')] as const,
+  () => [props.modelValue, props.initialIndex, displayItems.value.map(itemSignature).join('|')] as const,
   ([open, index]) => {
     if (!open) return
     activeIndex.value = clampIndex(index)
     resetZoom()
+    void loadActiveItem()
   },
   { immediate: true },
 )
 
-watch(activeIndex, () => resetZoom())
+watch(activeIndex, () => {
+  resetZoom()
+  void loadActiveItem()
+})
 watch(
   () => props.modelValue,
-  (open) => setBodyLock(open),
+  (open) => {
+    setBodyLock(open)
+    if (open) void loadActiveItem()
+    else {
+      ++loadSeq
+      clearActiveMaterializedImage()
+      activeDisplaySrc.value = ''
+      activePhase.value = 'idle'
+    }
+  },
   { immediate: true },
 )
 
@@ -285,6 +515,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
+  clearActiveMaterializedImage()
   setBodyLock(false)
 })
 </script>
@@ -378,6 +609,7 @@ onBeforeUnmount(() => {
 }
 
 .image-preview-action:disabled,
+.image-preview-action--disabled,
 .image-preview-nav:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -410,6 +642,7 @@ onBeforeUnmount(() => {
   overflow: auto;
   overscroll-behavior: contain;
   padding: 0.25rem 3.5rem;
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .image-preview-img {
@@ -423,6 +656,35 @@ onBeforeUnmount(() => {
   transform-origin: center center;
   transition: transform 0.15s ease;
   user-select: none;
+}
+
+.image-preview-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-width: min(24rem, calc(100vw - 3rem));
+  min-height: 8rem;
+  border: 1px solid rgba(226, 232, 240, 0.2);
+  border-radius: 8px;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.84);
+  color: #e2e8f0;
+  font-size: 0.875rem;
+}
+
+.image-preview-state--error {
+  color: #fecaca;
+}
+
+.image-preview-retry {
+  border: 1px solid rgba(254, 202, 202, 0.42);
+  border-radius: 8px;
+  padding: 0.35rem 0.75rem;
+  background: rgba(127, 29, 29, 0.72);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 
 .image-preview-nav {
@@ -452,22 +714,27 @@ onBeforeUnmount(() => {
 
 @media (max-width: 720px) {
   .image-preview-lightbox {
-    padding: 0.75rem;
+    gap: 0.5rem;
+    padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right))
+      max(0.75rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
   }
 
   .image-preview-toolbar {
     width: 100%;
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem;
   }
 
   .image-preview-actions {
-    width: 100%;
+    width: auto;
+    max-width: 58vw;
     overflow-x: auto;
+    padding-bottom: 0.05rem;
   }
 
   .image-preview-stage {
-    padding: 0.25rem 0;
+    padding: 0;
   }
 
   .image-preview-nav {
@@ -481,6 +748,27 @@ onBeforeUnmount(() => {
 
   .image-preview-nav--next {
     right: 0.5rem;
+  }
+
+  .image-preview-title-wrap {
+    flex: 1 1 auto;
+  }
+
+  .image-preview-action,
+  .image-preview-close {
+    width: 2.35rem;
+    height: 2.35rem;
+  }
+
+  .image-preview-action--wide {
+    width: 3.4rem;
+    font-size: 0.72rem;
+  }
+
+  .image-preview-img {
+    max-width: 100vw;
+    max-height: calc(100dvh - 5.5rem);
+    border-radius: 4px;
   }
 }
 </style>

@@ -36,7 +36,7 @@ const ALLOWED_UPLOAD_EXTENSION_SET = new Set<string>(ALLOWED_UPLOAD_EXTENSIONS)
 const INLINE_PREVIEWABLE_EXTENSION_SET = new Set<string>(INLINE_PREVIEWABLE_EXTENSIONS)
 const BITMAP_DELIVERY_EXTENSION_SET = new Set<string>(BITMAP_DELIVERY_EXTENSIONS)
 
-export const UPLOAD_ACCEPT_ATTRIBUTE = ALLOWED_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(',')
+export const UPLOAD_ACCEPT_ATTRIBUTE = ['image/*', ...ALLOWED_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`)].join(',')
 
 export function getUploadFileExtension(filename: string): string {
   const trimmed = filename.trim()

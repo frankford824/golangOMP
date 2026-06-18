@@ -189,10 +189,13 @@ function toThumbItems(item: TaskSkuItem): AssetThumbItem[] {
   return refs
     .map((ref, idx) => {
       const src = String(ref.download_url ?? '').trim()
-      if (!src) return null
+      const previewAssetId = String(ref.asset_id ?? ref.ref_id ?? '').trim() || undefined
+      if (!src && !previewAssetId) return null
       return {
         key: `sku-ref-${item.id ?? item.skuCode ?? 'row'}-${idx}`,
         src,
+        previewAssetId,
+        downloadUrl: src,
         alt: String(ref.filename ?? `参考图 ${idx + 1}`),
         label: String(ref.filename ?? `图 ${idx + 1}`),
       }

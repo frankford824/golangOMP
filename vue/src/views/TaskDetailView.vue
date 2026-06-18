@@ -348,7 +348,7 @@
                         v-if="opsReferenceThumbItems.length > 0"
                         :items="opsReferenceThumbItems"
                         empty-text="暂无参考图"
-                        size="sm"
+                        size="md"
                       />
                       <div
                         v-if="
@@ -476,7 +476,7 @@
                         ref="productManagementUploadInput"
                         class="detail-product-management-file-input"
                         type="file"
-                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif"
                         @change="onProductManagementImagePicked"
                       />
                       <div class="detail-product-management-head">
@@ -501,13 +501,17 @@
                         >
                           <div
                             class="detail-product-management-preview"
-                            :class="{ 'is-missing': !productManagementPreviewURL(record) }"
+                            :class="{ 'is-missing': !productManagementPreviewLoadable(record) }"
                           >
-                            <img
-                              v-if="productManagementPreviewURL(record)"
-                              :src="productManagementPreviewURL(record)"
+                            <AssetPreviewMedia
+                              v-if="productManagementPreviewLoadable(record)"
+                              :asset-id="productManagementPreviewAssetID(record) || null"
+                              :resolved-preview-url="productManagementPreviewURL(record) || null"
+                              :fallback-src="directProductManagementPreviewURL(record.image_preview_url) || null"
                               :alt="record.sku_code"
-                              loading="lazy"
+                              img-class="detail-product-management-apm"
+                              inner-img-class="detail-product-management-img"
+                              @open-full="(url, context) => openProductManagementImagePreview(record, url, context)"
                             />
                             <span v-else>待补图</span>
                           </div>
@@ -823,7 +827,7 @@
                         <input
                           ref="auditDeliveryUploadInputRef"
                           type="file"
-                          accept=".jpg,.jpeg,.png,.webp"
+                          accept="image/*,.jpg,.jpeg,.png,.webp"
                           multiple
                           class="detail-v3-hidden-file-input"
                           @change="(event) => handleAuditAssetUpload(event, 'delivery')"
@@ -1253,6 +1257,7 @@ import SkuItemsTable from '@/components/task-detail/SkuItemsTable.vue'
 import SkuItemEditModal from '@/components/task-detail/SkuItemEditModal.vue'
 import DesignAssetBlock from '@/components/task-detail/DesignAssetBlock.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
 import {
   IMAGE_PREVIEW_LIGHTBOX_KEY,
@@ -1698,16 +1703,24 @@ function referenceRefsToThumbItems(
   return refs
     .map((ref, index) => {
       const src = String(ref?.download_url ?? '').trim()
-      if (!src) return null
+      const previewAssetId = referenceRefPreviewAssetId(ref)
+      if (!src && !previewAssetId) return null
       const filename = String(ref?.filename ?? '').trim()
       return {
-        key: `${keyPrefix}-${index}-${src}`,
+        key: `${keyPrefix}-${index}-${src || previewAssetId}`,
         src,
+        previewAssetId,
+        downloadUrl: src,
         alt: filename || `${labelFallback} ${index + 1}`,
         label: filename || `${labelFallback} ${index + 1}`,
       }
     })
     .filter((row) => row != null) as AssetThumbItem[]
+}
+
+function referenceRefPreviewAssetId(ref: ReferenceFileRef): string | undefined {
+  const id = String(ref.asset_id ?? ref.ref_id ?? '').trim()
+  return id || undefined
 }
 
 /** 任务详情 GET /v1/tasks/{id}/assets 中的 reference，用于合并运营侧顶部参考图展示 */
@@ -1900,6 +1913,7 @@ const auditPendingThumbItems = computed((): AssetThumbItem[] => {
       .map((src, index) => ({
         key: `${version.id}-audit-${index}`,
         src,
+        downloadUrl: src,
         alt: `${versionPrefix} 稿件 ${index + 1}`,
         label: `${versionPrefix} 图 ${index + 1}`,
       }))
@@ -1948,19 +1962,25 @@ function normalizeLightboxItems(src: string, options?: OpenImagePreviewLightboxO
     .map((item) => ({
       ...item,
       src: String(item.src ?? '').trim(),
+      previewAssetId: String(item.previewAssetId ?? '').trim(),
+      fallbackAssetId: String(item.fallbackAssetId ?? '').trim(),
+      fallbackSrc: String(item.fallbackSrc ?? '').trim(),
+      resolvedPreviewUrl: String(item.resolvedPreviewUrl ?? '').trim(),
       title: String(item.title ?? '').trim(),
       alt: String(item.alt ?? '').trim(),
       downloadUrl: String(item.downloadUrl ?? '').trim(),
     }))
-    .filter((item) => item.src.length > 0)
+    .filter((item) =>
+      Boolean(item.src || item.previewAssetId || item.fallbackAssetId || item.fallbackSrc || item.resolvedPreviewUrl || item.downloadUrl),
+    )
   if (normalized.length > 0) return normalized
-  return [{ src, title: fallbackTitle, alt: fallbackTitle, downloadUrl: src }]
+  return src ? [{ src, title: fallbackTitle, alt: fallbackTitle, downloadUrl: src }] : []
 }
 
 function openLightbox(src: string, options?: OpenImagePreviewLightboxOptions) {
   const url = String(src ?? '').trim()
-  if (!url) return
   const items = normalizeLightboxItems(url, options)
+  if (!url && items.length === 0) return
   const requestedIndex = typeof options?.index === 'number' ? options.index : items.findIndex((item) => item.src === url)
   lightboxItems.value = items
   lightboxInitialIndex.value = Math.max(0, requestedIndex >= 0 ? requestedIndex : 0)
@@ -2929,6 +2949,72 @@ function productManagementERPIID(record: ProductManagementRecord): string {
 
 function productManagementPreviewURL(record: ProductManagementRecord): string {
   return productManagementPreviewURLs.value[record.id] || directProductManagementPreviewURL(record.image_preview_url) || ''
+}
+
+function productManagementPreviewAssetID(record: ProductManagementRecord): string | undefined {
+  const raw = record.image_asset_id ?? productManagementAssetIDFromPreviewPath(record.image_preview_url)
+  const id = Number(raw)
+  return Number.isSafeInteger(id) && id > 0 ? String(id) : undefined
+}
+
+function productManagementPreviewLoadable(record: ProductManagementRecord): boolean {
+  return Boolean(productManagementPreviewAssetID(record) || productManagementPreviewURL(record))
+}
+
+function productManagementLightboxItems(activeRecord?: ProductManagementRecord): ImagePreviewLightboxItem[] {
+  return productManagementPreviewRecords.value
+    .map((record) => {
+      const src = record.id === activeRecord?.id ? '' : productManagementPreviewURL(record)
+      const assetId = productManagementPreviewAssetID(record)
+      if (!src && !assetId) return null
+      const title = record.sku_code || record.task_no || 'ERP 商品图'
+      return {
+        src,
+        previewAssetId: assetId,
+        resolvedPreviewUrl: src || undefined,
+        fallbackSrc: directProductManagementPreviewURL(record.image_preview_url) || undefined,
+        title,
+        alt: title,
+        preferredFilename: title,
+        downloadUrl: src || directProductManagementPreviewURL(record.image_preview_url) || '',
+      }
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[]
+}
+
+function openProductManagementImagePreview(
+  record: ProductManagementRecord,
+  url: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+): void {
+  const activeUrl = url.trim()
+  if (!activeUrl) return
+  const title = record.sku_code || record.task_no || 'ERP 商品图'
+  const items = productManagementLightboxItems(record)
+  const index = Math.max(0, items.findIndex((item) => item.previewAssetId === productManagementPreviewAssetID(record)))
+  const activeItem: ImagePreviewLightboxItem = {
+    src: activeUrl,
+    previewAssetId: context?.assetId || productManagementPreviewAssetID(record),
+    fallbackAssetId: context?.fallbackAssetId,
+    fallbackSrc: context?.fallbackSrc || directProductManagementPreviewURL(record.image_preview_url) || undefined,
+    resolvedPreviewUrl: context?.resolvedPreviewUrl || productManagementPreviewURL(record) || undefined,
+    title,
+    alt: title,
+    preferredFilename: title,
+    downloadUrl: productManagementPreviewURL(record) || activeUrl,
+  }
+  const nextItems = items.length > 0 ? [...items] : [activeItem]
+  nextItems[Math.min(index, nextItems.length - 1)] = activeItem
+  openLightbox(activeUrl, {
+    title,
+    items: nextItems,
+    index,
+  })
 }
 
 async function resolveProductManagementPreviewURLs(items: ProductManagementRecord[]): Promise<void> {
@@ -4633,7 +4719,7 @@ watch(taskId, (id) => {
 }
 .detail-product-management-item {
   display: grid;
-  grid-template-columns: 4.5rem minmax(0, 1fr) minmax(9rem, auto);
+  grid-template-columns: 5.75rem minmax(0, 1fr) minmax(9rem, auto);
   align-items: center;
   gap: 0.65rem;
   min-width: 0;
@@ -4645,8 +4731,8 @@ watch(taskId, (id) => {
 .detail-product-management-preview {
   display: grid;
   place-items: center;
-  width: 4.5rem;
-  height: 3.4rem;
+  width: 5.75rem;
+  height: 4.5rem;
   overflow: hidden;
   border: 1px solid #dbe3ee;
   border-radius: 0.625rem;
@@ -4655,11 +4741,22 @@ watch(taskId, (id) => {
   font-size: 0.75rem;
   font-weight: 800;
 }
-.detail-product-management-preview img {
+.detail-product-management-preview :deep(.detail-product-management-apm),
+.detail-product-management-preview :deep(.apm),
+.detail-product-management-preview :deep(.apm-img),
+.detail-product-management-preview :deep(.detail-product-management-img) {
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #ffffff;
+}
+.detail-product-management-preview :deep(.apm-placeholder),
+.detail-product-management-preview :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.25rem;
 }
 .detail-product-management-preview.is-missing {
   border-style: dashed;

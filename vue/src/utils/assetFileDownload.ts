@@ -3,6 +3,8 @@
  * Reuses naming sanitization aligned with batch zip downloads.
  */
 import { fetchAssetDownloadMetaResolved } from '@/domain/asset-access'
+import { isSameOriginPreviewUrl } from '@/domain/asset-preview-image'
+import http from '@/services/http'
 import { sanitizeZipEntryName } from '@/utils/batchZipDownload'
 
 export interface DownloadAssetFileOptions {
@@ -63,6 +65,14 @@ export function triggerBrowserFileDownload(blob: Blob, filename: string) {
 }
 
 async function fetchBlobFromUrl(downloadUrl: string, signal?: AbortSignal): Promise<Blob> {
+  if (isSameOriginPreviewUrl(downloadUrl)) {
+    const response = await http.get<Blob>(downloadUrl, { responseType: 'blob', signal })
+    const blob = response.data
+    if (!(blob instanceof Blob)) {
+      throw new Error('下载失败')
+    }
+    return blob
+  }
   const response = await fetch(downloadUrl, { credentials: 'omit', mode: 'cors', signal })
   if (!response.ok) {
     throw new Error(`下载失败（HTTP ${response.status}）`)

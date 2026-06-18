@@ -36,15 +36,16 @@
       <div v-if="task.productSource === 'existing'" class="product-thumb-row">
         <div
           class="product-thumb-wrap"
-          :class="{ 'cursor-zoom-in': showImage && !imageLoadFailed }"
-          @click="openProductImage"
+          :class="{ 'cursor-zoom-in': showImage }"
         >
-          <img
-            v-if="showImage && !imageLoadFailed"
-            :src="task.productImageUrl"
+          <AssetPreviewMedia
+            v-if="showImage"
+            :resolved-preview-url="task.productImageUrl || null"
+            :fallback-src="task.productImageUrl || null"
             alt="原产品图"
-            class="product-thumb-img"
-            @error="onImageError"
+            img-class="product-thumb-media"
+            inner-img-class="product-thumb-img"
+            @open-full="(url, context) => openProductImage(url, context)"
           />
           <span v-else class="product-thumb-placeholder">无图</span>
         </div>
@@ -89,16 +90,18 @@
           <button
             type="button"
             class="main-ref-hero-btn"
-            :class="{ 'main-ref-hero-btn--failed': activeRefUrl && refLoadFailedSet.has(activeRefUrl) }"
             :title="'放大查看参考图 ' + (activeRefIdx + 1)"
-            @click="openCurrentReferencePreview"
+            @click="() => openCurrentReferencePreview()"
           >
-            <img
-              v-if="activeRefUrl && !refLoadFailedSet.has(activeRefUrl)"
-              :src="activeRefUrl"
+            <AssetPreviewMedia
+              v-if="activeReferenceRef"
+              :asset-id="activeReferenceAssetId || null"
+              :resolved-preview-url="activeRefUrl || null"
+              :fallback-src="activeRefUrl || null"
               :alt="`参考图 ${activeRefIdx + 1}`"
-              class="main-ref-hero-img"
-              @error="onRefImageError(activeRefUrl!)"
+              img-class="main-ref-hero-media"
+              inner-img-class="main-ref-hero-img"
+              @open-full="(url, context) => openCurrentReferencePreview(url, context)"
             />
             <span v-else class="main-ref-hero-placeholder">参考图加载失败</span>
           </button>
@@ -118,12 +121,15 @@
               :class="{ 'main-ref-strip-btn-active': i === activeRefIdx }"
               @click="activeRefIdx = i"
             >
-              <img
-                v-if="!refLoadFailedSet.has(refUrl)"
-                :src="refUrl"
+              <AssetPreviewMedia
+                v-if="currentReferenceDisplayRefs[i]"
+                :asset-id="referencePreviewAssetId(currentReferenceDisplayRefs[i]) || null"
+                :resolved-preview-url="refUrl || null"
+                :fallback-src="refUrl || null"
                 :alt="`参考 ${i + 1}`"
-                class="main-ref-strip-img"
-                @error="onRefImageError(refUrl)"
+                img-class="main-ref-strip-media"
+                inner-img-class="main-ref-strip-img"
+                @open-full="activeRefIdx = i"
               />
               <span v-else class="main-ref-strip-placeholder">{{ i + 1 }}</span>
             </button>
@@ -272,6 +278,7 @@ import { materialModeLabelCn, skuItemStatusLabelCn } from '@/domain/mappers/read
 import { useCategoryOptions } from '@/composables/useCategoryOptions'
 import { useTasksStore } from '@/stores/tasks'
 import { tasksApi } from '@/services/api/tasksApi'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import {
   IMAGE_PREVIEW_LIGHTBOX_KEY,
   type ImagePreviewLightboxItem,
@@ -293,7 +300,6 @@ const productCtx = inject(TASK_DETAIL_PRODUCT_INDEX_KEY, null)
 const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 const task = computed(() => injected.value!)
-const imageLoadFailed = ref(false)
 const showImage = computed(() => !!task.value?.productImageUrl)
 
 const isOriginal = computed(
@@ -337,50 +343,92 @@ const skuCostError = ref('')
 
 const showReferenceBlock = computed(() => isNewProduct.value)
 const currentReferenceRefs = computed((): ReferenceFileRef[] => currentRow.value?.referenceFileRefs ?? [])
-const currentReferenceUrls = computed(() => currentReferenceRefs.value.map((r) => r.download_url ?? '').filter(Boolean))
+const currentReferenceDisplayRefs = computed(() =>
+  currentReferenceRefs.value.filter((r) => String(r.download_url ?? '').trim() || referencePreviewAssetId(r)),
+)
+const currentReferenceUrls = computed(() =>
+  currentReferenceDisplayRefs.value.map((r) => String(r.download_url ?? '').trim()),
+)
 const currentReferencePreviewItems = computed((): ImagePreviewLightboxItem[] =>
-  currentReferenceRefs.value
+  currentReferenceDisplayRefs.value
     .map((refObj, index) => {
       const src = String(refObj.download_url ?? '').trim()
       const title = refObj.filename?.trim() || `参考图 ${index + 1}`
-      return src ? { src, title, alt: title, downloadUrl: src } : null
+      const previewAssetId = referencePreviewAssetId(refObj)
+      return src || previewAssetId
+        ? {
+            src,
+            previewAssetId,
+            resolvedPreviewUrl: src || undefined,
+            fallbackSrc: src || undefined,
+            title,
+            alt: title,
+            preferredFilename: title,
+            downloadUrl: src,
+          }
+        : null
     })
     .filter((item) => item != null) as ImagePreviewLightboxItem[],
 )
 
-const refLoadFailedSet = ref(new Set<string>())
-const retriedRefIds = ref(new Set<string>())
-
-function refKey(refObj: ReferenceFileRef): string {
-  return refObj.asset_id ?? refObj.download_url ?? ''
+function referencePreviewAssetId(refObj: ReferenceFileRef | undefined): string | undefined {
+  const id = String(refObj?.asset_id ?? refObj?.ref_id ?? '').trim()
+  return id || undefined
 }
 
-function onRefImageError(url: string) {
-  refLoadFailedSet.value.add(url)
-  const refObj = currentReferenceRefs.value.find((r) => r.download_url === url)
-  if (!refObj) return
-  const key = refKey(refObj)
-  if (!key || retriedRefIds.value.has(key)) return
-  retriedRefIds.value.add(key)
-  tasksStore.refreshReferenceUrls(task.value.id)
-}
-
-function openProductImage() {
-  const src = task.value.productImageUrl?.trim()
-  if (!showImage.value || imageLoadFailed.value || !src) return
+function openProductImage(
+  url?: string,
+  context?: {
+    resolvedPreviewUrl?: string
+    fallbackSrc?: string
+  },
+) {
+  const src = String(url || task.value.productImageUrl || '').trim()
+  if (!showImage.value || !src) return
   openLightbox(src, {
     title: '原产品图',
-    items: [{ src, title: '原产品图', alt: '原产品图', downloadUrl: src }],
+    items: [
+      {
+        src,
+        resolvedPreviewUrl: context?.resolvedPreviewUrl || task.value.productImageUrl || undefined,
+        fallbackSrc: context?.fallbackSrc || task.value.productImageUrl || undefined,
+        title: '原产品图',
+        alt: '原产品图',
+        preferredFilename: '原产品图',
+        downloadUrl: task.value.productImageUrl || src,
+      },
+    ],
     index: 0,
   })
 }
 
-function openCurrentReferencePreview() {
-  const src = activeRefUrl.value
-  if (!src || refLoadFailedSet.value.has(src)) return
+function openCurrentReferencePreview(
+  url?: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
+  const src = String(url || activeRefUrl.value || '').trim()
+  if (!src && !activeReferenceAssetId.value) return
+  const items = currentReferencePreviewItems.value
+  const activeItem = items[activeRefIdx.value]
+  const nextItems = items.length ? [...items] : []
+  if (activeItem) {
+    nextItems[activeRefIdx.value] = {
+      ...activeItem,
+      src: src || activeItem.src,
+      previewAssetId: context?.assetId || activeItem.previewAssetId,
+      fallbackAssetId: context?.fallbackAssetId || activeItem.fallbackAssetId,
+      fallbackSrc: context?.fallbackSrc || activeItem.fallbackSrc,
+      resolvedPreviewUrl: context?.resolvedPreviewUrl || activeItem.resolvedPreviewUrl,
+    }
+  }
   openLightbox(src, {
     title: `参考图 ${activeRefIdx.value + 1}`,
-    items: currentReferencePreviewItems.value,
+    items: nextItems,
     index: activeRefIdx.value,
   })
 }
@@ -393,14 +441,14 @@ const activeRefUrl = computed((): string | null => {
   const i = Math.min(Math.max(0, activeRefIdx.value), urls.length - 1)
   return urls[i] ?? null
 })
+const activeReferenceRef = computed(() => currentReferenceDisplayRefs.value[activeRefIdx.value] ?? null)
+const activeReferenceAssetId = computed(() => referencePreviewAssetId(activeReferenceRef.value ?? undefined))
 
 watch(
   () =>
     [task.value?.id, safeProductIndex.value, currentReferenceUrls.value.join('|')] as const,
   () => {
     activeRefIdx.value = 0
-    refLoadFailedSet.value = new Set()
-    retriedRefIds.value = new Set()
   },
 )
 
@@ -523,16 +571,6 @@ function productTabTitle(row: TaskParallelProductRow): string {
   return `${sku} · ${name} · ${filing} · ${req}`
 }
 
-function onImageError() {
-  imageLoadFailed.value = true
-}
-
-watch(
-  () => [task.value?.id, task.value?.productImageUrl] as const,
-  () => {
-    imageLoadFailed.value = false
-  },
-)
 </script>
 
 <style scoped>
@@ -728,9 +766,10 @@ watch(
   flex-direction: column;
   gap: 0.75rem;
 }
-/* 任务详情紧凑模式：主预览高度与设计资产区接近 */
-.product-new-body--compact.product-new-body--has-ref .main-ref-hero-img {
-  max-height: min(32vh, 280px);
+/* 任务详情紧凑模式：提高参考图优先级，避免关键图片被压成小缩略图 */
+.product-new-body--compact.product-new-body--has-ref .main-ref-hero-img,
+.product-new-body--compact.product-new-body--has-ref :deep(.main-ref-hero-img) {
+  max-height: min(46vh, 420px);
 }
 @media (min-width: 720px) {
   .product-new-body--compact.product-new-body--has-ref {
@@ -740,9 +779,9 @@ watch(
     gap: 0.65rem 1rem;
   }
   .product-new-body--compact.product-new-body--has-ref .main-sku-ref-block {
-    flex: 0 0 min(40%, 17.5rem);
-    min-width: 11rem;
-    max-width: 19rem;
+    flex: 0 0 min(52%, 32rem);
+    min-width: 18rem;
+    max-width: 36rem;
     width: 100%;
     margin-bottom: 0;
   }
@@ -854,7 +893,7 @@ dd {
   display: block;
   width: 100%;
   padding: 0;
-  min-height: 10rem;
+  min-height: 14rem;
   border: 2px solid rgb(203 213 225);
   border-radius: 0.75rem;
   background: rgb(248 250 252);
@@ -869,11 +908,24 @@ dd {
 .main-ref-hero-img {
   width: 100%;
   height: 100%;
-  min-height: 10rem;
-  max-height: min(40vh, 360px);
+  min-height: 14rem;
+  max-height: min(52vh, 480px);
   object-fit: contain;
   display: block;
   background: rgb(248 250 252);
+}
+.main-ref-hero-media,
+.main-ref-hero-btn :deep(.main-ref-hero-media),
+.main-ref-hero-btn :deep(.apm) {
+  width: 100%;
+  height: 100%;
+  min-height: 14rem;
+}
+.main-ref-hero-btn :deep(.apm-placeholder),
+.main-ref-hero-btn :deep(.apm-empty) {
+  min-height: 14rem;
+  border: 0;
+  border-radius: 0;
 }
 .main-ref-hero-btn--failed {
   cursor: default;
@@ -893,8 +945,8 @@ dd {
   gap: 0.5rem;
 }
 .main-ref-strip-btn {
-  width: 3rem;
-  height: 3rem;
+  width: 3.75rem;
+  height: 3.75rem;
   padding: 0;
   border-radius: 0.5rem;
   border: 2px solid rgb(226 232 240);
@@ -916,6 +968,20 @@ dd {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.main-ref-strip-media,
+.main-ref-strip-btn :deep(.main-ref-strip-media),
+.main-ref-strip-btn :deep(.apm) {
+  width: 100%;
+  height: 100%;
+}
+.main-ref-strip-btn :deep(.apm-placeholder),
+.main-ref-strip-btn :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem;
 }
 .main-ref-strip-placeholder {
   display: flex;
@@ -959,6 +1025,20 @@ dd {
   height: 100%;
   object-fit: cover;
 }
+.product-thumb-media,
+.product-thumb-wrap :deep(.product-thumb-media),
+.product-thumb-wrap :deep(.apm) {
+  width: 100%;
+  height: 100%;
+}
+.product-thumb-wrap :deep(.apm-placeholder),
+.product-thumb-wrap :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem;
+}
 .product-thumb-placeholder {
   font-size: 0.75rem;
   color: rgb(148 163 184);
@@ -969,5 +1049,35 @@ dd {
   color: rgb(100 116 139);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+@media (max-width: 719px) {
+  .product-new-body--compact.product-new-body--has-ref .main-sku-ref-block {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .main-ref-hero-btn,
+  .main-ref-hero-img,
+  .main-ref-hero-media,
+  .main-ref-hero-btn :deep(.apm) {
+    min-height: min(62vw, 22rem);
+  }
+
+  .main-ref-hero-img {
+    max-height: min(64vh, 520px);
+  }
+
+  .main-ref-film-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .main-ref-strip-btn {
+    width: 4rem;
+    height: 4rem;
+  }
 }
 </style>
