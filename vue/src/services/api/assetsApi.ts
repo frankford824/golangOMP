@@ -248,6 +248,32 @@ export interface AssetSearchResponse {
   size: number
 }
 
+export type AssetBatchSearchStatus = 'matched' | 'not_found' | 'error'
+
+export interface AssetBatchSearchPayload {
+  terms: string[]
+  format_filter?: 'jpg_png' | 'jpg' | 'png' | 'webp' | 'image' | 'design' | 'pdf' | 'archive' | 'all'
+  asset_kind?: 'auto' | 'all' | 'delivery' | 'reference' | 'source' | 'preview' | 'other'
+}
+
+export interface AssetBatchSearchResult {
+  term: string
+  status: AssetBatchSearchStatus
+  message: string
+  candidates: number
+  asset?: BackendAsset
+}
+
+export interface AssetBatchSearchManifest {
+  results: AssetBatchSearchResult[]
+  matched_count: number
+  failed_count: number
+}
+
+export interface AssetBatchSearchResponse {
+  data?: AssetBatchSearchManifest
+}
+
 export interface AssetBatchDownloadPayload {
   asset_ids: number[]
   naming_mode?: 'original' | 'business'
@@ -389,6 +415,11 @@ export const assetsApi = {
   searchAssets: (params?: AssetSearchQuery, signal?: AbortSignal) =>
     http.get<AssetSearchResponse>('/v1/assets/search', {
       params,
+      signal,
+    }),
+
+  batchSearchAssets: (payload: AssetBatchSearchPayload, signal?: AbortSignal) =>
+    http.post<AssetBatchSearchResponse>('/v1/assets/search/batch', payload, {
       signal,
     }),
 

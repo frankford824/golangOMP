@@ -156,6 +156,12 @@ type cancelTaskAssetUploadSessionReq struct {
 	Remark      string `json:"remark"`
 }
 
+type batchGlobalAssetSearchReq struct {
+	Terms        []string `json:"terms"`
+	FormatFilter string   `json:"format_filter"`
+	AssetKind    string   `json:"asset_kind"`
+}
+
 func (h *TaskAssetCenterHandler) BatchDownloadTaskReferenceAssets(c *gin.Context) {
 	taskID, err := parseID(c)
 	if err != nil {
@@ -251,6 +257,28 @@ func (h *TaskAssetCenterHandler) SearchGlobalAssets(c *gin.Context) {
 		"page":  result.Page,
 		"size":  result.Size,
 	})
+}
+
+func (h *TaskAssetCenterHandler) BatchSearchGlobalAssets(c *gin.Context) {
+	if h.globalSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+		return
+	}
+	var req batchGlobalAssetSearchReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.globalSvc.BatchSearch(c.Request.Context(), assetcenter.BatchSearchRequest{
+		Terms:        req.Terms,
+		FormatFilter: req.FormatFilter,
+		AssetKind:    req.AssetKind,
+	})
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *TaskAssetCenterHandler) GetGlobalAsset(c *gin.Context) {

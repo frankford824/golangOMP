@@ -116,19 +116,40 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 	)`}
 	var args []interface{}
 	if query.Keyword != "" {
-		like := "%" + strings.TrimSpace(query.Keyword) + "%"
-		clauses = append(clauses, `(
-			CAST(ta.asset_id AS CHAR) LIKE ?
-			OR CAST(ta.task_id AS CHAR) LIKE ?
-			OR t.sku_code LIKE ?
-			OR t.primary_sku_code LIKE ?
-			OR ta.scope_sku_code LIKE ?
-			OR ta.file_name LIKE ?
-			OR ta.original_filename LIKE ?
-			OR t.task_no LIKE ?
-			OR t.product_name_snapshot LIKE ?
-		)`)
-		args = append(args, like, like, like, like, like, like, like, like, like)
+		kw := normalizeSearchKeyword(query.Keyword)
+		keywordClauses := []string{
+			"ta.file_name LIKE ?",
+			"ta.original_filename LIKE ?",
+			"t.product_name_snapshot LIKE ?",
+		}
+		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like}
+		if kw.HasInt64 {
+			keywordClauses = append(keywordClauses, "ta.asset_id = ?", "ta.id = ?", "ta.task_id = ?")
+			keywordArgs = append(keywordArgs, kw.Int64, kw.Int64, kw.Int64)
+		}
+		if kw.IsCode {
+			keywordClauses = append(keywordClauses,
+				"t.sku_code = ?",
+				"t.primary_sku_code = ?",
+				"ta.scope_sku_code = ?",
+				"t.task_no = ?",
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				"ta.scope_sku_code LIKE ?",
+				"t.task_no LIKE ?",
+			)
+			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
+		} else {
+			keywordClauses = append(keywordClauses,
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				"ta.scope_sku_code LIKE ?",
+				"t.task_no LIKE ?",
+			)
+			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+		}
+		clauses = append(clauses, "("+strings.Join(keywordClauses, " OR ")+")")
+		args = append(args, keywordArgs...)
 	}
 	if query.ModuleKey != "" {
 		clauses = append(clauses, `ta.source_module_key = ?`)

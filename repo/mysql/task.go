@@ -1567,11 +1567,13 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 		}
 	}
 	if filter.Keyword != "" {
-		like := "%" + filter.Keyword + "%"
-		where = append(where, `(
-			t.task_no LIKE ? OR t.sku_code LIKE ? OR t.product_name_snapshot LIKE ? OR t.owner_team LIKE ?
-			OR COALESCE(t.owner_department, '') LIKE ? OR COALESCE(t.owner_org_team, '') LIKE ? OR CAST(t.id AS CHAR) = ?
-			OR EXISTS (
+		kw := normalizeSearchKeyword(filter.Keyword)
+		keywordClauses := []string{
+			"t.product_name_snapshot LIKE ?",
+			"t.owner_team LIKE ?",
+			"COALESCE(t.owner_department, '') LIKE ?",
+			"COALESCE(t.owner_org_team, '') LIKE ?",
+			`EXISTS (
 				SELECT 1
 				  FROM users task_keyword_actor
 				 WHERE task_keyword_actor.id IN (t.creator_id, t.requester_id, t.designer_id, t.current_handler_id)
@@ -1579,15 +1581,45 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 						task_keyword_actor.display_name LIKE ?
 						OR task_keyword_actor.username LIKE ?
 					   )
+			)`,
+		}
+		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like}
+		if kw.HasInt64 {
+			keywordClauses = append(keywordClauses, "t.id = ?")
+			keywordArgs = append(keywordArgs, kw.Int64)
+		}
+		if kw.IsCode {
+			keywordClauses = append(keywordClauses,
+				"t.task_no = ?",
+				"t.sku_code = ?",
+				"t.primary_sku_code = ?",
+				"t.task_no LIKE ?",
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				`EXISTS (
+					SELECT 1
+					  FROM task_sku_items tsi
+					 WHERE tsi.task_id = t.id
+					   AND (tsi.sku_code = ? OR tsi.sku_code LIKE ?)
+				)`,
 			)
-			OR EXISTS (
-				SELECT 1
-				  FROM task_sku_items tsi
-				 WHERE tsi.task_id = t.id
-				   AND tsi.sku_code LIKE ?
+			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper, kw.Upper+"%")
+		} else {
+			keywordClauses = append(keywordClauses,
+				"t.task_no LIKE ?",
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				`EXISTS (
+					SELECT 1
+					  FROM task_sku_items tsi
+					 WHERE tsi.task_id = t.id
+					   AND tsi.sku_code LIKE ?
+				)`,
 			)
-		)`)
-		args = append(args, like, like, like, like, like, like, filter.Keyword, like, like, like)
+			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+		}
+		where = append(where, "("+strings.Join(keywordClauses, " OR ")+")")
+		args = append(args, keywordArgs...)
 	}
 	appendTaskDataScopeWhere(&where, &args, filter)
 

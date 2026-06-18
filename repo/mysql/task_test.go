@@ -372,8 +372,11 @@ func TestBuildTaskListQuerySpecKeywordIncludesTaskSkuItems(t *testing.T) {
 	if !strings.Contains(spec.whereSQL, "task_sku_items tsi") {
 		t.Fatalf("whereSQL missing task_sku_items: %s", spec.whereSQL)
 	}
+	if !strings.Contains(spec.whereSQL, "tsi.sku_code = ?") {
+		t.Fatalf("whereSQL missing exact batch sku item match: %s", spec.whereSQL)
+	}
 	if !strings.Contains(spec.whereSQL, "tsi.sku_code LIKE ?") {
-		t.Fatalf("whereSQL missing batch sku item match: %s", spec.whereSQL)
+		t.Fatalf("whereSQL missing prefix batch sku item match: %s", spec.whereSQL)
 	}
 	if !strings.Contains(spec.whereSQL, "users task_keyword_actor") {
 		t.Fatalf("whereSQL missing task actor keyword user lookup: %s", spec.whereSQL)
@@ -389,13 +392,9 @@ func TestBuildTaskListQuerySpecKeywordIncludesTaskSkuItems(t *testing.T) {
 	}
 
 	like := "%" + keyword + "%"
-	wantArgs := []interface{}{like, like, like, like, like, like, keyword, like, like, like}
-	if len(spec.args) != len(wantArgs) {
-		t.Fatalf("args len = %d, want %d: %#v", len(spec.args), len(wantArgs), spec.args)
-	}
-	for i, want := range wantArgs {
-		if spec.args[i] != want {
-			t.Fatalf("args[%d] = %#v, want %#v", i, spec.args[i], want)
+	for _, want := range []interface{}{like, keyword, keyword + "%"} {
+		if !containsInterfaceArg(spec.args, want) {
+			t.Fatalf("args missing %#v: %#v", want, spec.args)
 		}
 	}
 }
@@ -433,7 +432,13 @@ func runTaskRepoListKeywordSearchCase(t *testing.T, keyword string, wantTotal in
 
 	taskRepo := NewTaskRepo(&DB{db: db})
 	like := "%" + keyword + "%"
-	countArgs := []driver.Value{like, like, like, like, like, like, keyword, like, like, like}
+	prefix := keyword + "%"
+	countArgs := []driver.Value{
+		like, like, like, like, like, like,
+		keyword, keyword, keyword,
+		prefix, prefix, prefix,
+		keyword, prefix,
+	}
 
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
 		WithArgs(countArgs...).
@@ -467,6 +472,15 @@ func runTaskRepoListKeywordSearchCase(t *testing.T, keyword string, wantTotal in
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock.ExpectationsWereMet() = %v", err)
 	}
+}
+
+func containsInterfaceArg(args []interface{}, want interface{}) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func newTaskListItemSQLMockRow(t *testing.T) *sqlmock.Rows {

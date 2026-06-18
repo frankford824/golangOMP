@@ -715,7 +715,6 @@ import {
   type AssetExcelPackageFailure,
   type AssetExcelPackageItem,
   type AssetExcelPackageRow,
-  type AssetSearchQuery,
   type AssetKind,
 } from '@/services/api/assetsApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
@@ -942,6 +941,9 @@ const replacementTargetId = computed(() =>
 
 const EXCEL_PACKAGE_CONCURRENCY = 4
 const bulkSearchResults = ref<BulkSearchResult[]>([])
+let bulkSearchRunSeq = 0
+let bulkSearchAbort: AbortController | null = null
+const bulkSearchTermCache = new Map<string, BulkSearchResult>()
 const bulkSearchTermCount = computed(() => parseBulkSearchTerms(bulkSearchInput.value).length)
 const bulkSearchMatchedResults = computed(() => bulkSearchResults.value.filter((item) => item.status === 'matched' && item.asset))
 const bulkSearchMatchedAssets = computed(() => bulkSearchMatchedResults.value.map((item) => item.asset!).filter(Boolean))
@@ -973,6 +975,7 @@ watch(
 watch(
   () => [bulkSearchFilters.format, bulkSearchFilters.assetKind],
   () => {
+    bulkSearchTermCache.clear()
     if (!bulkSearchResults.value.length && !bulkSearchStatus.value && !bulkSearchError.value) return
     bulkSearchResults.value = []
     bulkSearchError.value = ''
@@ -1365,24 +1368,6 @@ function fileFormatLabel(asset: BackendAsset): string {
   return '文件'
 }
 
-const BULK_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tif', 'tiff'])
-const BULK_DESIGN_EXTENSIONS = new Set(['psd', 'psb', 'ai', 'cdr', 'eps', 'sketch', 'fig', 'xd'])
-const BULK_ARCHIVE_EXTENSIONS = new Set(['zip', 'rar', '7z', 'tar', 'gz'])
-
-function assetFileExtension(asset: BackendAsset): string {
-  const label = fileFormatLabel(asset).trim().toLowerCase()
-  if (label && label !== '文件') return label === 'jpeg' ? 'jpg' : label
-  const name = assetFileName(asset)
-  const match = /\.([a-z0-9]{2,8})(?:$|[?#])/i.exec(name)
-  const ext = match?.[1]?.toLowerCase() ?? ''
-  return ext === 'jpeg' ? 'jpg' : ext
-}
-
-function assetMimeType(asset: BackendAsset): string {
-  const record = asset as Record<string, unknown>
-  return String(record.mime_type ?? record.content_type ?? '').trim().toLowerCase()
-}
-
 function toSelectedAssetSummary(asset: BackendAsset): SelectedAssetSummary {
   const id = assetResourceId(asset)
   return {
@@ -1482,134 +1467,72 @@ function parseBulkSearchTerms(raw: string): string[] {
 }
 
 function clearBulkSearch() {
+  bulkSearchAbort?.abort()
+  bulkSearchAbort = null
+  bulkSearchRunSeq += 1
+  bulkSearchTermCache.clear()
   bulkSearchInput.value = ''
   bulkSearchResults.value = []
   bulkSearchStatus.value = ''
   bulkSearchError.value = ''
 }
 
-function matchesBulkSearchFormat(asset: BackendAsset): boolean {
-  const ext = assetFileExtension(asset)
-  const mime = assetMimeType(asset)
-  const selected = bulkSearchFilters.format
-  if (selected === 'all') return true
-  if (selected === 'jpg_png') return ext === 'jpg' || ext === 'png' || mime === 'image/jpeg' || mime === 'image/png'
-  if (selected === 'jpg') return ext === 'jpg' || mime === 'image/jpeg'
-  if (selected === 'png') return ext === 'png' || mime === 'image/png'
-  if (selected === 'webp') return ext === 'webp' || mime === 'image/webp'
-  if (selected === 'image') return BULK_IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/')
-  if (selected === 'design') return BULK_DESIGN_EXTENSIONS.has(ext)
-  if (selected === 'pdf') return ext === 'pdf' || mime === 'application/pdf'
-  if (selected === 'archive') {
-    return BULK_ARCHIVE_EXTENSIONS.has(ext) || mime.includes('zip') || mime.includes('rar') || mime.includes('7z')
+function bulkSearchCacheKey(term: string): string {
+  return `${bulkSearchFilters.format}|${bulkSearchFilters.assetKind}|${term}`
+}
+
+function normalizeBulkSearchResult(term: string, raw: unknown): BulkSearchResult {
+  const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const status = String(record.status ?? '').trim() as BulkSearchResultStatus
+  const safeStatus: BulkSearchResultStatus =
+    status === 'matched' || status === 'not_found' || status === 'error' ? status : 'error'
+  const asset = record.asset && typeof record.asset === 'object' ? (record.asset as BackendAsset) : undefined
+  return {
+    term,
+    status: safeStatus,
+    message: String(record.message ?? (safeStatus === 'matched' ? '已匹配' : '未找到匹配资产')),
+    candidates: Number(record.candidates ?? 0) || 0,
+    ...(asset ? { asset } : {}),
   }
-  return true
 }
 
-function matchesBulkSearchAssetKind(asset: BackendAsset): boolean {
-  const selected = bulkSearchFilters.assetKind
-  if (selected === 'auto' || selected === 'all') return true
-  const kind = rawAssetKind(asset)
-  if (selected === 'preview') return kind === 'preview' || kind === 'design_thumb'
-  if (selected === 'other') return !['delivery', 'reference', 'source', 'preview', 'design_thumb'].includes(kind)
-  return kind === selected
-}
-
-function isBulkSearchCandidateAsset(asset: BackendAsset): boolean {
-  return matchesBulkSearchFormat(asset) && matchesBulkSearchAssetKind(asset)
-}
-
-function bulkSearchAssetScore(asset: BackendAsset, term: string): number {
-  const record = asset as Record<string, unknown>
-  const normalizedTerm = term.toUpperCase()
-  const title = cardTitle(asset).toUpperCase()
-  const scopeSKU = String(record.scope_sku_code ?? '').trim().toUpperCase()
-  const skuCode = String(record.sku_code ?? '').trim().toUpperCase()
-  const primarySKU = String(record.primary_sku_code ?? '').trim().toUpperCase()
-  const taskNo = String(record.task_no ?? '').trim().toUpperCase()
-  const taskID = String(asset.task_id ?? '').trim().toUpperCase()
-  const productName = String(record.product_name ?? record.product_name_snapshot ?? '').trim().toUpperCase()
-  const kind = String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? '').trim().toLowerCase()
-
-  let score = 0
-  if (scopeSKU === normalizedTerm) score += 140
-  if (skuCode === normalizedTerm || primarySKU === normalizedTerm) score += 120
-  if (taskNo === normalizedTerm) score += 130
-  if (taskID === normalizedTerm) score += 110
-  if (title.includes(normalizedTerm)) score += 80
-  if (productName.includes(normalizedTerm)) score += 45
-
-  if (kind === 'delivery') score += 60
-  else if (kind === 'preview') score += 42
-  else if (kind === 'design_thumb') score += 34
-  else if (kind === 'reference') score += 18
-
-  if (score === 0 && title) score += 1
-  return score
-}
-
-function chooseBulkSearchAsset(term: string, assetsForTerm: BackendAsset[]): BackendAsset | undefined {
-  const candidates = assetsForTerm.filter(isBulkSearchCandidateAsset)
-  candidates.sort((a, b) => {
-    const diff = bulkSearchAssetScore(b, term) - bulkSearchAssetScore(a, term)
-    if (diff !== 0) return diff
-    const at = Date.parse(String((a as Record<string, unknown>).created_at ?? '')) || 0
-    const bt = Date.parse(String((b as Record<string, unknown>).created_at ?? '')) || 0
-    return bt - at
-  })
-  return candidates[0]
-}
-
-function bulkSearchBackendFormatCategory(): AssetSearchQuery['format_category'] | undefined {
-  const selected = bulkSearchFilters.format
-  if (selected === 'jpg_png' || selected === 'jpg' || selected === 'png' || selected === 'webp' || selected === 'image') return 'image'
-  if (selected === 'design' || selected === 'pdf' || selected === 'archive') return selected
-  return undefined
-}
-
-function bulkSearchNoMatchMessage(totalRows: number): string {
-  if (!totalRows) return '未找到匹配资产'
-  return `找到了资产，但没有符合「${bulkSearchFormatFilterLabel.value} / ${bulkSearchAssetKindFilterLabel.value}」的可下载资源`
-}
-
-async function searchBulkAssetTerm(term: string): Promise<BulkSearchResult> {
-  try {
-    const formatCategory = bulkSearchBackendFormatCategory()
-    const res = await assetsApi.searchAssets({
-      keyword: term,
-      source: 'system',
-      page: 1,
-      size: 80,
-      is_archived: 'false',
-      task_status: 'all',
-      ...(formatCategory ? { format_category: formatCategory } : {}),
-    })
-    const rows = Array.isArray(res.data?.data) ? res.data.data : []
-    const candidateRows = rows.filter(isBulkSearchCandidateAsset)
-    const asset = chooseBulkSearchAsset(term, rows)
-    if (!asset) {
-      return {
-        term,
-        status: 'not_found',
-        message: bulkSearchNoMatchMessage(rows.length),
-        candidates: candidateRows.length,
-      }
+async function searchBulkAssetTerms(terms: string[], signal?: AbortSignal): Promise<BulkSearchResult[]> {
+  const missingTerms: string[] = []
+  for (const term of terms) {
+    if (!bulkSearchTermCache.has(bulkSearchCacheKey(term))) {
+      missingTerms.push(term)
     }
-    return {
-      term,
-      status: 'matched',
-      message: '已匹配',
-      candidates: candidateRows.length,
-      asset,
+  }
+  if (missingTerms.length) {
+    const response = await assetsApi.batchSearchAssets({
+      terms: missingTerms,
+      format_filter: bulkSearchFilters.format,
+      asset_kind: bulkSearchFilters.assetKind,
+    }, signal)
+    if (signal?.aborted) {
+      throw new DOMException('aborted', 'AbortError')
     }
-  } catch (err) {
+    const resultRows = Array.isArray(response.data?.data?.results) ? response.data.data.results : []
+    const resultByTerm = new Map(resultRows.map((item) => [String(item.term ?? '').toUpperCase(), item]))
+    for (const term of missingTerms) {
+      const result = normalizeBulkSearchResult(term, resultByTerm.get(term) ?? {
+        status: 'error',
+        message: '后端未返回该关键词的搜索结果',
+        candidates: 0,
+      })
+      bulkSearchTermCache.set(bulkSearchCacheKey(term), result)
+    }
+  }
+  return terms.map((term) => {
+    const cached = bulkSearchTermCache.get(bulkSearchCacheKey(term))
+    if (cached) return cached
     return {
       term,
       status: 'error',
-      message: resolveApiUserMessage(err, { fallback: '搜索失败' }),
+      message: '未生成搜索结果',
       candidates: 0,
     }
-  }
+  })
 }
 
 async function runBulkAssetSearch() {
@@ -1627,19 +1550,27 @@ async function runBulkAssetSearch() {
     return
   }
 
+  const runSeq = ++bulkSearchRunSeq
+  bulkSearchAbort?.abort()
+  const abortController = new AbortController()
+  bulkSearchAbort = abortController
   bulkSearchRunning.value = true
-  let completed = 0
   try {
-    const results = await mapWithConcurrency(terms, 4, async (term) => {
-      const result = await searchBulkAssetTerm(term)
-      completed += 1
-      bulkSearchStatus.value = `正在搜索 ${completed}/${terms.length}`
-      return result
-    })
+    bulkSearchStatus.value = `正在批量搜索 ${terms.length} 项`
+    const results = await searchBulkAssetTerms(terms, abortController.signal)
+    if (abortController.signal.aborted || runSeq !== bulkSearchRunSeq) return
     bulkSearchResults.value = results
     bulkSearchStatus.value = `已生成明细：命中 ${results.filter((item) => item.status === 'matched').length} 项，未命中 ${results.filter((item) => item.status !== 'matched').length} 项`
+  } catch (err) {
+    if (abortController.signal.aborted || runSeq !== bulkSearchRunSeq) return
+    bulkSearchError.value = resolveApiUserMessage(err, { fallback: '批量搜索失败，请稍后重试' })
   } finally {
-    bulkSearchRunning.value = false
+    if (bulkSearchAbort === abortController) {
+      bulkSearchAbort = null
+    }
+    if (runSeq === bulkSearchRunSeq) {
+      bulkSearchRunning.value = false
+    }
   }
 }
 
@@ -2392,6 +2323,9 @@ onBeforeUnmount(() => {
   reloadAbort = null
   assetPredictionAbort?.abort()
   assetPredictionAbort = null
+  bulkSearchAbort?.abort()
+  bulkSearchAbort = null
+  bulkSearchRunSeq += 1
   clearSelectedAssets()
 })
 </script>

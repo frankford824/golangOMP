@@ -7745,6 +7745,55 @@ components:
           type: string
           format: date-time
           nullable: true
+    AssetBatchSearchRequest:
+      type: object
+      required: [terms]
+      properties:
+        terms:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: string
+          description: SKU codes or task numbers, one logical search term per item.
+        format_filter:
+          type: string
+          enum: [jpg_png, jpg, png, webp, image, design, pdf, archive, all]
+          default: jpg_png
+          description: UI-facing format filter. The server maps this to a coarse DB format category first, then applies exact extension/MIME filtering.
+        asset_kind:
+          type: string
+          enum: [auto, all, delivery, reference, source, preview, other]
+          default: auto
+          description: UI-facing asset role filter. `auto` keeps all roles but ranks delivery assets first.
+    AssetBatchSearchResult:
+      type: object
+      required: [term, status, message, candidates]
+      properties:
+        term:
+          type: string
+        status:
+          type: string
+          enum: [matched, not_found, error]
+        message:
+          type: string
+        candidates:
+          type: integer
+          description: Number of assets matching the requested format and role filters for this term.
+        asset:
+          $ref: '#/components/schemas/AssetDetail'
+    AssetBatchSearchResponse:
+      type: object
+      required: [results, matched_count, failed_count]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetBatchSearchResult'
+        matched_count:
+          type: integer
+        failed_count:
+          type: integer
 paths:
   /v1/auth/register:
     post:
@@ -15881,6 +15930,50 @@ paths:
                     type: integer
                   size:
                     type: integer
+  /v1/assets/search/batch:
+    post:
+      summary: Batch search assets by SKU or task number
+      description: Batch asset search for the asset management bulk-download dialog. It returns one ranked asset candidate per input term and avoids issuing one HTTP request per SKU/task number.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-A
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetBatchSearchRequest'
+      responses:
+        '200':
+          description: Batch asset search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetBatchSearchResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/assets/{asset_id}/versions/{version_id}/download:
     get:
       summary: Download a specific asset version

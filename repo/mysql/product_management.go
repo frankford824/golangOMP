@@ -591,30 +591,55 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 	args := make([]interface{}, 0, 12)
 	keyword := strings.TrimSpace(filter.Keyword)
 	if keyword != "" {
-		like := "%" + keyword + "%"
-		clauses = append(clauses, `(
-			sku_code LIKE ?
-			OR task_no LIKE ?
-			OR product_i_id LIKE ?
-			OR erp_i_id LIKE ?
-			OR product_name LIKE ?
-			OR category_name LIKE ?
-			OR creator_name LIKE ?
-			OR CAST(creator_id AS CHAR) = ?
-			OR EXISTS (
+		kw := normalizeSearchKeyword(keyword)
+		keywordClauses := []string{
+			"product_name LIKE ?",
+			"category_name LIKE ?",
+			"creator_name LIKE ?",
+		}
+		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like}
+		if kw.HasInt64 {
+			keywordClauses = append(keywordClauses, "creator_id = ?")
+			keywordArgs = append(keywordArgs, kw.Int64)
+		}
+		if kw.IsCode {
+			keywordClauses = append(keywordClauses,
+				"sku_code = ?",
+				"task_no = ?",
+				"product_i_id = ?",
+				"erp_i_id = ?",
+				"sku_code LIKE ?",
+				"task_no LIKE ?",
+				"product_i_id LIKE ?",
+				"erp_i_id LIKE ?",
+			)
+			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
+		} else {
+			keywordClauses = append(keywordClauses,
+				"sku_code LIKE ?",
+				"task_no LIKE ?",
+				"product_i_id LIKE ?",
+				"erp_i_id LIKE ?",
+			)
+			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+		}
+		keywordClauses = append(keywordClauses, `EXISTS (
 			  SELECT 1
 			    FROM omp_sku_combo_relations rel
 				    LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
 				   WHERE rel.child_sku_code = erp_product_sync_records.sku_code COLLATE utf8mb4_0900_ai_ci
 			     AND (
-			       rel.combo_sku_code LIKE ?
+			       rel.combo_sku_code = ?
+			       OR COALESCE(rec.erp_i_id, '') = ?
+			       OR rel.combo_sku_code LIKE ?
+			       OR COALESCE(rec.erp_i_id, '') LIKE ?
 			       OR rec.name LIKE ?
 			       OR rec.short_name LIKE ?
-			       OR rec.erp_i_id LIKE ?
 			     )
-			)
-		)`)
-		args = append(args, like, like, like, like, like, like, like, keyword, like, like, like, like)
+			)`)
+		keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Like, kw.Like)
+		clauses = append(clauses, "("+strings.Join(keywordClauses, " OR ")+")")
+		args = append(args, keywordArgs...)
 	}
 	if source := strings.TrimSpace(filter.ImageSource); source != "" {
 		clauses = append(clauses, "image_source = ?")

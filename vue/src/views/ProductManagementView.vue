@@ -839,23 +839,42 @@ async function resolveCandidatePreviewURLs(items: ProductImageCandidate[]): Prom
 }
 
 async function resolveAssetPreviewURL(assetID?: number | null, fallback?: string): Promise<string> {
+  const fallbackAssetID = assetID ?? assetIDFromPreviewPath(fallback)
   const direct = directPreviewURL(fallback)
   if (direct) return direct
-  if (!assetID || assetID <= 0) return ''
-  const result = await fetchAssetPreviewMeta(String(assetID)).catch(() => null)
+  if (!fallbackAssetID || fallbackAssetID <= 0) return ''
+  const result = await fetchAssetPreviewMeta(String(fallbackAssetID)).catch(() => null)
   return result?.status === 'ok' && result.displayUrl ? result.displayUrl : ''
 }
 
 function directPreviewURL(raw?: string): string {
   const value = String(raw ?? '').trim()
   if (!value) return ''
+  if (isAssetPreviewMetaURL(value)) return ''
   if (/^(https?:|data:|blob:)/i.test(value)) return value
-  if (/^\/v1\/assets\/\d+\/preview\b/i.test(value)) return value
   return ''
 }
 
+function isAssetPreviewMetaURL(raw: string): boolean {
+  const value = raw.trim()
+  if (!value) return false
+  try {
+    const url = new URL(value, window.location.origin)
+    return /^\/v1\/assets\/\d+\/preview\b/i.test(url.pathname)
+  } catch {
+    return /^\/v1\/assets\/\d+\/preview\b/i.test(value)
+  }
+}
+
 function assetIDFromPreviewPath(raw?: string): number | undefined {
-  const match = String(raw ?? '').match(/\/v1\/assets\/(\d+)\/preview\b/)
+  const value = String(raw ?? '').trim()
+  let path = value
+  try {
+    path = new URL(value, window.location.origin).pathname
+  } catch {
+    path = value
+  }
+  const match = path.match(/\/v1\/assets\/(\d+)\/preview\b/)
   if (!match) return undefined
   const id = Number(match[1])
   return Number.isSafeInteger(id) && id > 0 ? id : undefined

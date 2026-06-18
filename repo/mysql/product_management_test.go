@@ -149,17 +149,21 @@ func TestProductManagementWhereSearchesComboRelations(t *testing.T) {
 		"FROM omp_sku_combo_relations rel",
 		"LEFT JOIN omp_sku_combo_records rec",
 		"rel.child_sku_code = erp_product_sync_records.sku_code COLLATE utf8mb4_0900_ai_ci",
+		"rel.combo_sku_code = ?",
+		"COALESCE(rec.erp_i_id, '') = ?",
 		"rel.combo_sku_code LIKE ?",
 		"rec.name LIKE ?",
 		"rec.short_name LIKE ?",
-		"rec.erp_i_id LIKE ?",
 	} {
 		if !strings.Contains(where, fragment) {
 			t.Fatalf("where missing %q: %s", fragment, where)
 		}
 	}
-	if len(args) != 12 {
-		t.Fatalf("args len = %d, want 12; args = %#v", len(args), args)
+	if got, wantMin := len(args), 17; got < wantMin {
+		t.Fatalf("args len = %d, want at least %d; args = %#v", got, wantMin, args)
+	}
+	if !containsStringArg(args, "COMBO001") || !containsStringArg(args, "COMBO001%") {
+		t.Fatalf("args missing exact/prefix combo search values: %#v", args)
 	}
 }
 

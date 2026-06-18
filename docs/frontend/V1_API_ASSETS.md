@@ -11,7 +11,7 @@
 
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
-- 本文件覆盖 `17` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `18` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/assets
 
@@ -966,6 +966,71 @@ Content-Type: `application/json`
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/assets/upload-requests/<id>/advance \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/search/batch
+
+### 简介
+支持方法: POST。
+
+- `POST`: Batch asset search for the asset management bulk-download dialog. It returns one ranked asset candidate per input term and avoids issuing one HTTP request per SKU/task number.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `terms` | array<string> | 是 | SKU codes or task numbers, one logical search term per item. |
+| `format_filter` | enum(jpg_png/jpg/png/webp/image/design/pdf/archive/all) | 否 | UI-facing format filter. The server maps this to a coarse DB format category first, then applies exact extension/MIME filtering. |
+| `asset_kind` | enum(auto/all/delivery/reference/source/preview/other) | 否 | UI-facing asset role filter. `auto` keeps all roles but ranks delivery assets first. |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "results": [
+      "..."
+    ],
+    "matched_count": 123,
+    "failed_count": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetBatchSearchResponse | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Authentication required |
+| 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/search/batch \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'

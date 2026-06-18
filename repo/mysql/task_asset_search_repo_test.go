@@ -15,11 +15,11 @@ func TestBuildTaskAssetSearchWhereKeywordCoversPlannedFields(t *testing.T) {
 	where, args := buildTaskAssetSearchWhere(query)
 
 	for _, expected := range []string{
-		"CAST(ta.asset_id AS CHAR) LIKE ?",
-		"CAST(ta.task_id AS CHAR) LIKE ?",
+		"t.sku_code = ?",
+		"t.primary_sku_code = ?",
+		"ta.scope_sku_code = ?",
+		"t.task_no = ?",
 		"t.sku_code LIKE ?",
-		"t.primary_sku_code LIKE ?",
-		"ta.scope_sku_code LIKE ?",
 		"ta.file_name LIKE ?",
 		"ta.original_filename LIKE ?",
 	} {
@@ -31,19 +31,16 @@ func TestBuildTaskAssetSearchWhereKeywordCoversPlannedFields(t *testing.T) {
 	if got, want := strings.Count(where, "?"), len(args); got != want {
 		t.Fatalf("placeholder count = %d, args count = %d", got, want)
 	}
-	if got, wantMin := len(args), 9; got < wantMin {
+	if got, wantMin := len(args), 11; got < wantMin {
 		t.Fatalf("args len = %d, want at least %d", got, wantMin)
 	}
 
 	wantLike := "%ABC-123%"
-	for i, arg := range args[:9] {
-		got, ok := arg.(string)
-		if !ok {
-			t.Fatalf("args[%d] type = %T, want string", i, arg)
-		}
-		if got != wantLike {
-			t.Fatalf("args[%d] = %q, want %q", i, got, wantLike)
-		}
+	if !containsStringArg(args, wantLike) {
+		t.Fatalf("args missing fuzzy fallback %q: %#v", wantLike, args)
+	}
+	if !containsStringArg(args, "ABC-123") || !containsStringArg(args, "ABC-123%") {
+		t.Fatalf("args missing exact/prefix code matches: %#v", args)
 	}
 }
 
@@ -55,14 +52,11 @@ func TestBuildTaskAssetSearchWhereKeywordWithTaskStatusKeepsArgsAligned(t *testi
 
 	where, args := buildTaskAssetSearchWhere(query)
 
-	if !strings.Contains(where, "CAST(ta.asset_id AS CHAR) LIKE ?") {
-		t.Fatalf("where clause missing asset_id keyword match: %s", where)
+	if !strings.Contains(where, "ta.asset_id = ?") {
+		t.Fatalf("where clause missing exact asset_id keyword match: %s", where)
 	}
-	if !strings.Contains(where, "CAST(ta.task_id AS CHAR) LIKE ?") {
-		t.Fatalf("where clause missing task_id keyword match: %s", where)
-	}
-	if !strings.Contains(where, "t.sku_code LIKE ?") {
-		t.Fatalf("where clause missing sku_code keyword match: %s", where)
+	if !strings.Contains(where, "ta.task_id = ?") {
+		t.Fatalf("where clause missing exact task_id keyword match: %s", where)
 	}
 	if !strings.Contains(where, "ta.original_filename LIKE ?") {
 		t.Fatalf("where clause missing original_filename keyword match: %s", where)
