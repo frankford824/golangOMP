@@ -570,6 +570,7 @@ func scanComboRelationWithRecord(scanner comboRelationScanner) (*domain.OMPSKUCo
 			CreatedAt:      recCreated.Time,
 			UpdatedAt:      recUpdated.Time,
 		}
+		domain.HydrateOMPSKUComboRecordDerived(item.Record)
 	}
 	return &item, nil
 }

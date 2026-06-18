@@ -90,7 +90,12 @@ func TestProductManagementComboGroupsPreserveRecordOrder(t *testing.T) {
 			relations: []*domain.OMPSKUComboRelationWithRecord{
 				{
 					Relation: domain.OMPSKUComboRelation{ComboSKUCode: "COMBO-A", ChildSKUCode: "SKU-A", Quantity: 2},
-					Record:   &domain.OMPSKUComboRecord{ComboSKUCode: "COMBO-A", Name: "组合 A", LastSyncedAt: now},
+					Record: &domain.OMPSKUComboRecord{
+						ComboSKUCode:   "COMBO-A",
+						Name:           "组合 A",
+						LastSyncedAt:   now,
+						RawPayloadJSON: []byte(`{"pic":"https://img.example.com/combo-a.png","brand":"品牌A","vc_name":"组合分类","properties_value":"组合属性","weight":1.5,"sku_qty":2,"created":"2026-06-18 10:00:00","enty_sku_id":"ENTITY-A"}`),
+					},
 				},
 				{
 					Relation: domain.OMPSKUComboRelation{ComboSKUCode: "COMBO-Z", ChildSKUCode: "SKU-Z", Quantity: 1},
@@ -119,6 +124,15 @@ func TestProductManagementComboGroupsPreserveRecordOrder(t *testing.T) {
 	}
 	if got := groups[1].Children[0].Quantity; got != 2 {
 		t.Fatalf("second combo quantity = %v, want 2", got)
+	}
+	if got := groups[1].PicURL; got != "https://img.example.com/combo-a.png" {
+		t.Fatalf("second combo pic = %q, want raw payload pic", got)
+	}
+	if got := groups[1].Brand; got != "品牌A" {
+		t.Fatalf("second combo brand = %q, want 品牌A", got)
+	}
+	if got := groups[1].EntitySKUID; got != "ENTITY-A" {
+		t.Fatalf("second combo entity sku id = %q, want ENTITY-A", got)
 	}
 }
 

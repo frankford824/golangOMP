@@ -1088,12 +1088,21 @@ func (s *productManagementService) productManagementComboGroups(ctx context.Cont
 					Children:     []domain.ProductManagementComboChild{},
 				}
 				if rel.Record != nil {
+					domain.HydrateOMPSKUComboRecordDerived(rel.Record)
 					group.ComboName = strings.TrimSpace(rel.Record.Name)
 					group.ComboShortName = strings.TrimSpace(rel.Record.ShortName)
 					group.ERPIID = strings.TrimSpace(rel.Record.ERPIID)
+					group.EntitySKUID = strings.TrimSpace(rel.Record.EntitySKUID)
+					group.PicURL = strings.TrimSpace(rel.Record.PicURL)
+					group.Brand = strings.TrimSpace(rel.Record.Brand)
+					group.VCName = strings.TrimSpace(rel.Record.VCName)
+					group.Properties = strings.TrimSpace(rel.Record.Properties)
 					group.Enabled = rel.Record.Enabled
 					group.CostPrice = rel.Record.CostPrice
 					group.SalePrice = rel.Record.SalePrice
+					group.Weight = rel.Record.Weight
+					group.SKUQty = rel.Record.SKUQty
+					group.ERPCreatedAt = rel.Record.ERPCreatedAt
 					group.ModifiedAt = rel.Record.ModifiedAt
 					if !rel.Record.LastSyncedAt.IsZero() {
 						group.LastSyncedAt = &rel.Record.LastSyncedAt

@@ -14,9 +14,17 @@ func TestDecodeJSTCombineSKUList(t *testing.T) {
 	        "sku_id": "COMBO001",
 	        "name": "组合装一",
 	        "i_id": "IID001",
+	        "enty_sku_id": "ENTITY001",
+	        "pic": "https://img.example.com/combo001.png",
+	        "brand": "品牌A",
+	        "vc_name": "组合分类",
+	        "properties_value": "颜色:蓝色;规格:2件",
 	        "enabled": true,
 	        "cost_price": "12.50",
 	        "sale_price": "29.90",
+	        "weight": "1.25",
+	        "sku_qty": 2,
+	        "created": "2026-06-17 09:30:00",
 	        "modified": "2026-06-18 10:00:00",
 	        "items": [
 	          {"src_sku_id": "SKU001", "qty": 2},
@@ -39,6 +47,15 @@ func TestDecodeJSTCombineSKUList(t *testing.T) {
 	}
 	if item.CostPrice == nil || *item.CostPrice != 12.5 {
 		t.Fatalf("cost = %#v", item.CostPrice)
+	}
+	if item.EntitySKUID != "ENTITY001" || item.PicURL != "https://img.example.com/combo001.png" || item.Brand != "品牌A" || item.VCName != "组合分类" {
+		t.Fatalf("combo parent fields = %#v", item)
+	}
+	if item.Weight == nil || *item.Weight != 1.25 || item.SKUQty == nil || *item.SKUQty != 2 {
+		t.Fatalf("combo numeric parent fields = weight %#v sku_qty %#v", item.Weight, item.SKUQty)
+	}
+	if item.ERPCreatedAt == nil {
+		t.Fatal("erp created time was not parsed")
 	}
 	if len(item.Children) != 2 || item.Children[0].SKUCode != "SKU001" || item.Children[0].Quantity != 2 || item.Children[1].Quantity != 3 {
 		t.Fatalf("children = %#v", item.Children)

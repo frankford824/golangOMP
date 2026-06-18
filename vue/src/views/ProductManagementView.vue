@@ -23,7 +23,7 @@
       </label>
       <label class="pm-field">
         <span>显示范围</span>
-        <select v-model="filters.display_scope" @change="resetExpandedGroups">
+        <select v-model="filters.display_scope" @change="applyDisplayScope">
           <option value="combo">组合装</option>
           <option value="single">单品 SKU</option>
           <option value="all">全部</option>
@@ -114,6 +114,9 @@
           :class="{ 'is-expanded': isComboGroupExpanded(group), 'is-static': group.group_type !== 'combo' }"
           @click="toggleComboGroup(group)"
         >
+          <span v-if="group.group_type === 'combo' && group.pic_url" class="pm-combo-thumb">
+            <img :src="group.pic_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
+          </span>
           <div>
             <p class="pm-combo-kicker">{{ group.group_type === 'combo' ? '组合装' : '单品 SKU' }}</p>
             <strong>{{ groupTitle(group) }}</strong>
@@ -212,18 +215,35 @@
     </section>
 
     <footer class="pm-pagination">
-      <button type="button" class="pm-btn pm-btn--ghost" :disabled="filters.page <= 1 || loading" @click="changePage(filters.page - 1)">
-        上一页
-      </button>
-      <span>第 {{ filters.page }} 页</span>
-      <button
-        type="button"
-        class="pm-btn pm-btn--ghost"
-        :disabled="records.length < filters.page_size || loading"
-        @click="changePage(filters.page + 1)"
-      >
-        下一页
-      </button>
+      <div class="pm-pagination-info">
+        <strong>第 {{ pagination.page }} / {{ totalPages }} 页</strong>
+        <span>剩余 {{ remainingPages }} 页 · 共 {{ pagination.total }} 条 · 每页 {{ pagination.page_size }} 条</span>
+      </div>
+      <div class="pm-pagination-actions">
+        <button type="button" class="pm-page-btn pm-page-btn--wide" :disabled="!hasPreviousPage || loading" @click="changePage(1)">
+          首页
+        </button>
+        <button type="button" class="pm-page-btn pm-page-btn--wide" :disabled="!hasPreviousPage || loading" @click="changePage(filters.page - 1)">
+          上一页
+        </button>
+        <button
+          v-for="page in visiblePageNumbers"
+          :key="page"
+          type="button"
+          class="pm-page-btn"
+          :class="{ 'is-active': page === pagination.page }"
+          :disabled="loading || page === pagination.page"
+          @click="changePage(page)"
+        >
+          {{ page }}
+        </button>
+        <button type="button" class="pm-page-btn pm-page-btn--wide" :disabled="!hasNextPage || loading" @click="changePage(filters.page + 1)">
+          下一页
+        </button>
+        <button type="button" class="pm-page-btn pm-page-btn--wide" :disabled="!hasNextPage || loading" @click="changePage(totalPages)">
+          末页
+        </button>
+      </div>
     </footer>
 
     <div v-if="candidateModalOpen" class="pm-modal-mask" @click.self="closeCandidates">
@@ -306,7 +326,7 @@ const route = useRoute()
 const filters = reactive<ProductManagementLocalFilters>({
   keyword: '',
   display_scope: 'combo',
-  issue_scope: 'attention',
+  issue_scope: 'all',
   image_source: '',
   cost_status: '',
   sync_status: '',
@@ -335,6 +355,22 @@ const syncMessages = ref<Record<number, string>>({})
 const expandedComboGroups = ref<Record<string, boolean>>({})
 const syncPollTokens = new Map<number, number>()
 const syncableRecords = computed(() => records.value.filter((item) => item.can_sync_erp))
+const totalPages = computed(() => Math.max(1, Math.ceil((pagination.total || 0) / Math.max(1, pagination.page_size || filters.page_size))))
+const remainingPages = computed(() => Math.max(0, totalPages.value - pagination.page))
+const hasPreviousPage = computed(() => pagination.page > 1)
+const hasNextPage = computed(() => pagination.page < totalPages.value)
+const visiblePageNumbers = computed(() => {
+  const total = totalPages.value
+  const current = Math.min(Math.max(1, pagination.page), total)
+  const size = 5
+  const start = Math.max(1, Math.min(current - Math.floor(size / 2), total - size + 1))
+  const end = Math.min(total, start + size - 1)
+  const pages: number[] = []
+  for (let page = start; page <= end; page += 1) {
+    pages.push(page)
+  }
+  return pages
+})
 const visibleGroups = computed<ProductManagementComboGroup[]>(() => {
   if (filters.display_scope === 'single') {
     return records.value.map(productManagementSingleGroup)
@@ -421,6 +457,11 @@ function applyFilters(): void {
   void loadRecords()
 }
 
+function applyDisplayScope(): void {
+  resetExpandedGroups()
+  applyFilters()
+}
+
 function normalizeIssueScopeForExplicitSuccessFilter(): void {
   if (filters.issue_scope !== 'attention') return
   if (filters.sync_status === 'synced' || filters.base_sync_status === 'synced' || filters.image_sync_status === 'synced') {
@@ -429,7 +470,7 @@ function normalizeIssueScopeForExplicitSuccessFilter(): void {
 }
 
 function changePage(page: number): void {
-  filters.page = Math.max(1, page)
+  filters.page = Math.min(Math.max(1, page), totalPages.value)
   void loadRecords()
 }
 
@@ -804,9 +845,21 @@ function groupTitle(group: ProductManagementComboGroup): string {
 
 function groupSubtitle(group: ProductManagementComboGroup): string {
   const name = firstNonEmptyString(group.combo_name, group.combo_short_name)
+  const brand = firstNonEmptyString(group.brand)
+  const vcName = firstNonEmptyString(group.vc_name)
+  const entityID = firstNonEmptyString(group.entity_sku_id)
   const iid = firstNonEmptyString(group.erp_i_id)
   const synced = group.last_synced_at ? `同步 ${formatDate(group.last_synced_at)}` : ''
-  return [name, iid ? `款式 ${iid}` : '', synced].filter(Boolean).join(' · ')
+  return [
+    name,
+    brand ? `品牌 ${brand}` : '',
+    vcName ? `分类 ${vcName}` : '',
+    entityID ? `实体 ${entityID}` : '',
+    iid ? `款式 ${iid}` : '',
+    synced,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function syncStatusLabel(status: ProductSyncStatus): string {
@@ -974,13 +1027,91 @@ function errorMessage(err: unknown): string {
   font-size: 12px;
 }
 
-.pm-summary,
-.pm-pagination {
+.pm-summary {
   display: flex;
   align-items: center;
   gap: 16px;
   margin: 0.8rem 0;
   color: #4b5563;
+}
+
+.pm-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0.9rem 0 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.875rem;
+  color: #4b5563;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.pm-pagination-info {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pm-pagination-info strong {
+  color: #111827;
+  font-weight: 900;
+}
+
+.pm-pagination-info span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.pm-pagination-actions {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.pm-page-btn {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.625rem;
+  padding: 0 10px;
+  color: #374151;
+  background: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.pm-page-btn:hover:not(:disabled) {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.pm-page-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.pm-page-btn.is-active {
+  border-color: #2563eb;
+  color: #ffffff;
+  background: #2563eb;
+  opacity: 1;
+}
+
+.pm-page-btn--wide {
+  min-width: 4rem;
 }
 
 .pm-error,
@@ -1040,8 +1171,28 @@ function errorMessage(err: unknown): string {
 
 .pm-combo-header > div {
   display: grid;
+  flex: 1 1 auto;
   gap: 4px;
   min-width: 0;
+}
+
+.pm-combo-thumb {
+  display: grid;
+  flex: 0 0 58px;
+  place-items: center;
+  width: 58px;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 0.625rem;
+  background: #ffffff;
+}
+
+.pm-combo-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .pm-combo-header strong {
@@ -1465,6 +1616,15 @@ function errorMessage(err: unknown): string {
     align-items: flex-start;
   }
 
+  .pm-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pm-pagination-actions {
+    justify-content: flex-start;
+  }
+
   .pm-combo-meta {
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -1504,6 +1664,16 @@ function errorMessage(err: unknown): string {
 
   .pm-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pm-combo-header {
+    flex-wrap: wrap;
+  }
+
+  .pm-combo-thumb {
+    flex-basis: 64px;
+    width: 64px;
+    height: 46px;
   }
 
   .pm-preview {

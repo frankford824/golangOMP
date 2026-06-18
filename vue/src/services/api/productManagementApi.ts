@@ -117,9 +117,17 @@ export interface ProductManagementComboGroup {
   combo_name?: string
   combo_short_name?: string
   erp_i_id?: string
+  entity_sku_id?: string
+  pic_url?: string
+  brand?: string
+  vc_name?: string
+  properties_value?: string
   enabled?: boolean | null
   cost_price?: number | null
   sale_price?: number | null
+  weight?: number | null
+  sku_qty?: number | null
+  erp_created_at?: string
   modified_at?: string
   last_synced_at?: string
   children: ProductManagementComboChild[]
