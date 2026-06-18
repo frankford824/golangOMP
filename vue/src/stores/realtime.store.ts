@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { formatNotification } from '@/domain/notification-text'
+import { authApi } from '@/services/api/authApi'
 import { V1SocketClient, type V1WsEventDetail } from '@/services/ws/v1Socket'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
 
@@ -18,7 +19,9 @@ export const useRealtimeStore = defineStore('realtime', () => {
       onMessage: (event) => void handleMessage(event),
       onFallbackPoll: () => void notificationsStore.load(),
     })
-    client.connect()
+    void authApi.refreshAssetCookie()
+      .catch(() => undefined)
+      .finally(() => client?.connect())
     started.value = true
   }
 

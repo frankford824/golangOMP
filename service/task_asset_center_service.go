@@ -367,6 +367,23 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 		if info != nil {
 			return info, nil
 		}
+		if isDerivedPreviewGenerationCandidate(asset.CurrentVersion) {
+			actorID := asset.CurrentVersion.UploadedBy
+			if actorID <= 0 {
+				actorID = asset.CreatedBy
+			}
+			if err := s.ensureDerivedPreviewAssets(ctx, asset.TaskID, asset.ID, actorID); err != nil {
+				log.Printf("source_preview_derive_on_demand_failed task_id=%d source_asset_id=%d error=%v", asset.TaskID, asset.ID, err)
+			} else {
+				info, resolveErr = s.resolveDerivedPreviewInfo(ctx, asset)
+				if resolveErr != nil {
+					return nil, resolveErr
+				}
+				if info != nil {
+					return info, nil
+				}
+			}
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "asset preview is not available", map[string]interface{}{
 			"asset_id": asset.ID,
 		})
