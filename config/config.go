@@ -149,6 +149,7 @@ type ERPRemoteConfig struct {
 	SyncLogsPath             string
 	GetCompanyUsersPath      string
 	SkuQueryPath             string
+	CombineSKUQueryPath      string
 	OpenWebCharset           string
 	OpenWebVersion           string
 	Timeout                  time.Duration
@@ -239,6 +240,7 @@ func Load() (*Config, error) {
 			SyncLogsPath:             getEnv("ERP_REMOTE_SYNC_LOGS_PATH", "/v1/erp/sync-logs"),
 			GetCompanyUsersPath:      getEnv("ERP_REMOTE_GET_COMPANY_USERS_PATH", "/open/webapi/userapi/company/getcompanyusers"),
 			SkuQueryPath:             getEnv("ERP_REMOTE_SKU_QUERY_PATH", "/open/sku/query"),
+			CombineSKUQueryPath:      getEnv("ERP_REMOTE_COMBINE_SKU_QUERY_PATH", "/open/combine/sku/query"),
 			OpenWebCharset:           getEnv("ERP_REMOTE_OPENWEB_CHARSET", "utf-8"),
 			OpenWebVersion:           getEnv("ERP_REMOTE_OPENWEB_VERSION", "2"),
 			Timeout:                  mustParseDuration(getEnv("ERP_REMOTE_TIMEOUT", "15s")),

@@ -181,6 +181,18 @@ type ProductManagementRepo interface {
 	UpdateImageSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
 }
 
+type SKUComboRepo interface {
+	UpsertComboRecord(ctx context.Context, tx Tx, record *domain.OMPSKUComboRecord) error
+	UpsertComboRelation(ctx context.Context, tx Tx, relation *domain.OMPSKUComboRelation) error
+	DeleteStaleComboRelations(ctx context.Context, tx Tx, comboSKUCode string, source string, currentChildSKUs []string) error
+	ListRelationsByChildSKUs(ctx context.Context, childSKUs []string) ([]*domain.OMPSKUComboRelationWithRecord, error)
+	GetLatestSyncState(ctx context.Context) (*domain.OMPSKUComboSyncState, error)
+	EnsureNextSyncWindow(ctx context.Context, now time.Time, windowSize time.Duration) (*domain.OMPSKUComboSyncState, error)
+	ClaimSyncState(ctx context.Context, tx Tx, id int64, now time.Time) (bool, error)
+	MarkSyncStateSuccess(ctx context.Context, tx Tx, id int64, nextPage int, processed int, finished bool, now time.Time) error
+	MarkSyncStateFailed(ctx context.Context, tx Tx, id int64, message string, nextRetryAt time.Time) error
+}
+
 type CategoryRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.Category, error)
 	GetByCode(ctx context.Context, code string) (*domain.Category, error)

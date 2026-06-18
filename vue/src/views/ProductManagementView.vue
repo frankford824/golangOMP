@@ -22,6 +22,14 @@
         />
       </label>
       <label class="pm-field">
+        <span>显示范围</span>
+        <select v-model="filters.display_scope" @change="resetExpandedGroups">
+          <option value="combo">组合装</option>
+          <option value="single">单品 SKU</option>
+          <option value="all">全部</option>
+        </select>
+      </label>
+      <label class="pm-field">
         <span>关注范围</span>
         <select v-model="filters.issue_scope" @change="applyFilters">
           <option value="attention">待处理优先</option>
@@ -83,6 +91,8 @@
     <div class="pm-summary">
       <span>当前共 <b>{{ pagination.total }}</b> 条</span>
       <span>当前页 <b>{{ records.length }}</b> 条</span>
+      <span>显示 <b>{{ visibleGroups.length }}</b> 个{{ displayScopeLabel }}</span>
+      <span v-if="comboSyncSummaryText" class="pm-combo-sync">{{ comboSyncSummaryText }}</span>
       <span v-if="error" class="pm-error">{{ error }}</span>
     </div>
 
@@ -97,83 +107,107 @@
         <span>操作</span>
       </div>
 
-      <article v-for="record in records" :key="record.id" class="pm-row">
-        <div class="pm-image-cell">
-          <div class="pm-preview" :class="{ 'pm-preview--missing': !previewLoadableForRecord(record) }">
-            <AssetPreviewMedia
-              v-if="previewLoadableForRecord(record)"
-              :asset-id="assetIDForRecord(record) || null"
-              :resolved-preview-url="previewURLForRecord(record) || null"
-              :fallback-src="directPreviewURL(record.image_preview_url) || null"
-              :alt="record.sku_code"
-              img-class="pm-preview-apm"
-              inner-img-class="pm-preview-img"
-            />
-            <span v-else>{{ record.image_missing_reason || 'ERP 图片待补充' }}</span>
+      <section v-for="group in visibleGroups" :key="group.group_key" class="pm-combo-group" :class="`pm-combo-group--${group.group_type}`">
+        <button
+          type="button"
+          class="pm-combo-header"
+          :class="{ 'is-expanded': isComboGroupExpanded(group), 'is-static': group.group_type !== 'combo' }"
+          @click="toggleComboGroup(group)"
+        >
+          <div>
+            <p class="pm-combo-kicker">{{ group.group_type === 'combo' ? '组合装' : '单品 SKU' }}</p>
+            <strong>{{ groupTitle(group) }}</strong>
+            <small v-if="group.group_type === 'combo'">{{ groupSubtitle(group) }}</small>
           </div>
-          <span class="pm-pill" :class="`pm-source--${record.image_source}`">{{ record.image_source_label }}</span>
-        </div>
-
-        <div class="pm-main-cell">
-          <strong class="pm-mono">{{ record.sku_code || '-' }}</strong>
-          <small>款式 {{ productIIDLabel(record) }}</small>
-          <small v-if="record.category_name">分类 {{ record.category_name }}</small>
-        </div>
-
-        <div class="pm-info-cell">
-          <strong>{{ record.product_name || '未命名商品' }}</strong>
-          <button type="button" class="pm-link" @click="openTask(record.task_id)">
-            {{ record.task_no || `任务 ${record.task_id}` }}
-          </button>
-        </div>
-
-        <div class="pm-cost-cell" :class="{ 'is-missing': !hasCost(record) }">
-          {{ formatCost(record.cost_price) }}
-        </div>
-
-        <div class="pm-info-cell">
-          <strong>{{ record.creator_name || `用户 ${record.creator_id}` }}</strong>
-          <small>{{ formatDate(record.task_created_at) }}</small>
-        </div>
-
-        <div class="pm-sync-cell">
-          <span class="pm-pill" :class="`pm-sync--${baseSyncStatus(record)}`">
-            基础 {{ syncStatusLabel(baseSyncStatus(record)) }}
+          <span class="pm-combo-meta">
+            <span class="pm-combo-count">{{ group.children.length }} 个系统 SKU</span>
+            <span v-if="group.group_type === 'combo'" class="pm-combo-toggle">
+              {{ isComboGroupExpanded(group) ? '收起' : '展开' }}
+            </span>
           </span>
-          <small>{{ record.last_base_synced_at ? formatDate(record.last_base_synced_at) : '基础资料尚未同步' }}</small>
-          <small v-if="record.base_sync_error" class="pm-error-text">{{ record.base_sync_error }}</small>
-          <span class="pm-pill" :class="`pm-sync--${imageSyncStatus(record)}`">
-            图片 {{ syncStatusLabel(imageSyncStatus(record)) }}
-          </span>
-          <small>{{ record.last_image_synced_at ? formatDate(record.last_image_synced_at) : 'ERP 图片尚未同步' }}</small>
-          <small v-if="record.image_sync_error" class="pm-error-text">{{ record.image_sync_error }}</small>
-          <div v-if="isRecordSyncing(record)" class="pm-sync-progress" aria-hidden="true">
-            <span></span>
-          </div>
-          <small v-if="syncMessageForRecord(record)" class="pm-sync-message">{{ syncMessageForRecord(record) }}</small>
-        </div>
+        </button>
 
-        <div class="pm-actions">
-          <button type="button" class="pm-btn pm-btn--small" @click="openTask(record.task_id)">打开任务</button>
-          <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_maintain_image" @click="openCandidates(record)">
-            选图
-          </button>
-          <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_maintain_image" @click="reparseImage(record)">
-            重新解析
-          </button>
-          <button type="button" class="pm-btn pm-btn--small" :disabled="!record.can_sync_erp || isRecordSyncing(record)" @click="requestBaseSync(record)">
-            {{ syncActionLabel(record, 'base', '同步基础') }}
-          </button>
-          <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp || isRecordSyncing(record)" @click="requestSync(record)">
-            {{ syncActionLabel(record, 'all', '全部同步') }}
-          </button>
-          <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!record.can_sync_erp || !record.image_asset_id || isRecordSyncing(record)" @click="requestImageSync(record)">
-            {{ syncActionLabel(record, 'image', '同步图片') }}
-          </button>
-        </div>
-      </article>
+        <template v-if="shouldShowGroupChildren(group)">
+          <article v-for="child in group.children" :key="`${group.group_key}:${child.record.id}`" class="pm-row">
+            <div class="pm-image-cell">
+              <div class="pm-preview" :class="{ 'pm-preview--missing': !previewLoadableForRecord(child.record) }">
+                <AssetPreviewMedia
+                  v-if="previewLoadableForRecord(child.record)"
+                  :asset-id="assetIDForRecord(child.record) || null"
+                  :resolved-preview-url="previewURLForRecord(child.record) || null"
+                  :fallback-src="directPreviewURL(child.record.image_preview_url) || null"
+                  :alt="child.record.sku_code"
+                  img-class="pm-preview-apm"
+                  inner-img-class="pm-preview-img"
+                />
+                <span v-else>{{ child.record.image_missing_reason || 'ERP 图片待补充' }}</span>
+              </div>
+              <span class="pm-pill" :class="`pm-source--${child.record.image_source}`">{{ child.record.image_source_label }}</span>
+            </div>
 
-      <div v-if="!loading && records.length === 0" class="pm-empty">暂无符合条件的产品记录。</div>
+            <div class="pm-main-cell">
+              <strong class="pm-mono">{{ child.record.sku_code || '-' }}</strong>
+              <small>款式 {{ productIIDLabel(child.record) }}</small>
+              <small v-if="group.group_type === 'combo'">组合数量 {{ formatQuantity(child.quantity) }}</small>
+              <small v-if="child.record.category_name">分类 {{ child.record.category_name }}</small>
+            </div>
+
+            <div class="pm-info-cell">
+              <strong>{{ child.record.product_name || '未命名商品' }}</strong>
+              <button type="button" class="pm-link" @click="openTask(child.record.task_id)">
+                {{ child.record.task_no || `任务 ${child.record.task_id}` }}
+              </button>
+            </div>
+
+            <div class="pm-cost-cell" :class="{ 'is-missing': !hasCost(child.record) }">
+              {{ formatCost(child.record.cost_price) }}
+            </div>
+
+            <div class="pm-info-cell">
+              <strong>{{ child.record.creator_name || `用户 ${child.record.creator_id}` }}</strong>
+              <small>{{ formatDate(child.record.task_created_at) }}</small>
+            </div>
+
+            <div class="pm-sync-cell">
+              <span class="pm-pill" :class="`pm-sync--${baseSyncStatus(child.record)}`">
+                基础 {{ syncStatusLabel(baseSyncStatus(child.record)) }}
+              </span>
+              <small>{{ child.record.last_base_synced_at ? formatDate(child.record.last_base_synced_at) : '基础资料尚未同步' }}</small>
+              <small v-if="child.record.base_sync_error" class="pm-error-text">{{ child.record.base_sync_error }}</small>
+              <span class="pm-pill" :class="`pm-sync--${imageSyncStatus(child.record)}`">
+                图片 {{ syncStatusLabel(imageSyncStatus(child.record)) }}
+              </span>
+              <small>{{ child.record.last_image_synced_at ? formatDate(child.record.last_image_synced_at) : 'ERP 图片尚未同步' }}</small>
+              <small v-if="child.record.image_sync_error" class="pm-error-text">{{ child.record.image_sync_error }}</small>
+              <div v-if="isRecordSyncing(child.record)" class="pm-sync-progress" aria-hidden="true">
+                <span></span>
+              </div>
+              <small v-if="syncMessageForRecord(child.record)" class="pm-sync-message">{{ syncMessageForRecord(child.record) }}</small>
+            </div>
+
+            <div class="pm-actions">
+              <button type="button" class="pm-btn pm-btn--small" @click="openTask(child.record.task_id)">打开任务</button>
+              <button type="button" class="pm-btn pm-btn--small" :disabled="!child.record.can_maintain_image" @click="openCandidates(child.record)">
+                选图
+              </button>
+              <button type="button" class="pm-btn pm-btn--small" :disabled="!child.record.can_maintain_image" @click="reparseImage(child.record)">
+                重新解析
+              </button>
+              <button type="button" class="pm-btn pm-btn--small" :disabled="!child.record.can_sync_erp || isRecordSyncing(child.record)" @click="requestBaseSync(child.record)">
+                {{ syncActionLabel(child.record, 'base', '同步基础') }}
+              </button>
+              <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!child.record.can_sync_erp || isRecordSyncing(child.record)" @click="requestSync(child.record)">
+                {{ syncActionLabel(child.record, 'all', '全部同步') }}
+              </button>
+              <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!child.record.can_sync_erp || !child.record.image_asset_id || isRecordSyncing(child.record)" @click="requestImageSync(child.record)">
+                {{ syncActionLabel(child.record, 'image', '同步图片') }}
+              </button>
+            </div>
+          </article>
+        </template>
+      </section>
+
+      <div v-if="!loading && visibleGroups.length === 0" class="pm-empty">{{ emptyMessage }}</div>
     </section>
 
     <footer class="pm-pagination">
@@ -244,6 +278,8 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   productManagementApi,
   type ProductImageCandidate,
+  type ProductManagementComboGroup,
+  type ProductManagementComboSyncSummary,
   type ProductManagementListParams,
   type ProductManagementRecord,
   type ProductSyncStatus,
@@ -252,19 +288,22 @@ import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 
 type ProductSyncScope = 'all' | 'base' | 'image'
+type ProductManagementDisplayScope = 'combo' | 'single' | 'all'
+type ProductManagementLocalFilters = Required<
+  Pick<
+    ProductManagementListParams,
+    'keyword' | 'issue_scope' | 'image_source' | 'cost_status' | 'sync_status' | 'base_sync_status' | 'image_sync_status' | 'page' | 'page_size'
+  >
+> & {
+  display_scope: ProductManagementDisplayScope
+}
 
 const router = useRouter()
 const route = useRoute()
 
-const filters = reactive<
-  Required<
-    Pick<
-      ProductManagementListParams,
-      'keyword' | 'issue_scope' | 'image_source' | 'cost_status' | 'sync_status' | 'base_sync_status' | 'image_sync_status' | 'page' | 'page_size'
-    >
-  >
->({
+const filters = reactive<ProductManagementLocalFilters>({
   keyword: '',
+  display_scope: 'combo',
   issue_scope: 'attention',
   image_source: '',
   cost_status: '',
@@ -276,6 +315,8 @@ const filters = reactive<
 })
 
 const records = ref<ProductManagementRecord[]>([])
+const comboGroups = ref<ProductManagementComboGroup[]>([])
+const comboSyncSummary = ref<ProductManagementComboSyncSummary | null>(null)
 const pagination = reactive({ page: 1, page_size: 20, total: 0 })
 const loading = ref(false)
 const error = ref('')
@@ -289,8 +330,41 @@ const recordPreviewURLs = ref<Record<number, string>>({})
 const candidatePreviewURLs = ref<Record<number, string>>({})
 const syncingRecordScopes = ref<Record<number, ProductSyncScope>>({})
 const syncMessages = ref<Record<number, string>>({})
+const expandedComboGroups = ref<Record<string, boolean>>({})
 const syncPollTokens = new Map<number, number>()
 const syncableRecords = computed(() => records.value.filter((item) => item.can_sync_erp))
+const visibleGroups = computed<ProductManagementComboGroup[]>(() => {
+  if (filters.display_scope === 'single') {
+    return records.value.map(productManagementSingleGroup)
+  }
+  const groups = comboGroups.value ?? []
+  if (filters.display_scope === 'combo') {
+    return groups.filter((group) => group.group_type === 'combo')
+  }
+  return groups
+})
+const displayScopeLabel = computed(() => {
+  if (filters.display_scope === 'combo') return '组合装'
+  if (filters.display_scope === 'single') return '单品 SKU'
+  return '条目'
+})
+const emptyMessage = computed(() => {
+  if (records.value.length === 0) return '暂无符合条件的产品记录。'
+  if (filters.display_scope === 'combo') return '当前页暂无组合装条目，可切换为单品 SKU 或全部查看。'
+  if (filters.display_scope === 'single') return '当前页暂无单品 SKU 条目。'
+  return '暂无可展示的产品条目。'
+})
+const comboSyncSummaryText = computed(() => {
+  const state = comboSyncSummary.value
+  if (!state) return ''
+  if (state.status === 'failed') {
+    return `组合关系同步延迟：${state.last_error || '等待自动重试'}`
+  }
+  if (state.last_success_at) {
+    return `组合关系最近同步 ${formatDate(state.last_success_at)}`
+  }
+  return '组合关系正在建立本地缓存'
+})
 
 onMounted(() => {
   const keyword = route.query.keyword
@@ -313,7 +387,7 @@ async function loadRecords(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const result = await productManagementApi.list({
+    const result = await productManagementApi.listComboTree({
       keyword: filters.keyword,
       issue_scope: filters.issue_scope,
       image_source: filters.image_source,
@@ -325,6 +399,9 @@ async function loadRecords(): Promise<void> {
       page_size: filters.page_size,
     })
     records.value = result.data ?? []
+    comboGroups.value = result.groups ?? []
+    comboSyncSummary.value = result.combo_sync_summary ?? null
+    resetExpandedGroups()
     pagination.page = result.pagination?.page ?? filters.page
     pagination.page_size = result.pagination?.page_size ?? filters.page_size
     pagination.total = result.pagination?.total ?? records.value.length
@@ -351,6 +428,36 @@ function normalizeIssueScopeForExplicitSuccessFilter(): void {
 function changePage(page: number): void {
   filters.page = Math.max(1, page)
   void loadRecords()
+}
+
+function productManagementSingleGroup(record: ProductManagementRecord): ProductManagementComboGroup {
+  return {
+    group_key: `single:${record.id}`,
+    group_type: 'single',
+    children: [{ record, quantity: 1 }],
+  }
+}
+
+function resetExpandedGroups(): void {
+  expandedComboGroups.value = {}
+}
+
+function isComboGroupExpanded(group: ProductManagementComboGroup): boolean {
+  if (group.group_type !== 'combo') return true
+  return Boolean(expandedComboGroups.value[group.group_key])
+}
+
+function shouldShowGroupChildren(group: ProductManagementComboGroup): boolean {
+  if (group.group_type !== 'combo') return true
+  return isComboGroupExpanded(group)
+}
+
+function toggleComboGroup(group: ProductManagementComboGroup): void {
+  if (group.group_type !== 'combo') return
+  expandedComboGroups.value = {
+    ...expandedComboGroups.value,
+    [group.group_key]: !expandedComboGroups.value[group.group_key],
+  }
 }
 
 function openTask(taskId: number): void {
@@ -508,6 +615,10 @@ function replaceRecord(next: ProductManagementRecord): void {
   if (idx >= 0) {
     records.value.splice(idx, 1, next)
   }
+  comboGroups.value = comboGroups.value.map((group) => ({
+    ...group,
+    children: group.children.map((child) => (child.record.id === next.id ? { ...child, record: next } : child)),
+  }))
   void resolveRecordPreviewURLs([next])
 }
 
@@ -675,6 +786,25 @@ function formatDate(value?: string): string {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
+function formatQuantity(value?: number): string {
+  const qty = typeof value === 'number' && value > 0 ? value : 1
+  return qty.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
+}
+
+function groupTitle(group: ProductManagementComboGroup): string {
+  if (group.group_type !== 'combo') {
+    return group.children[0]?.record.sku_code || '单品 SKU'
+  }
+  return firstNonEmptyString(group.combo_sku_code, group.combo_name, '未命名组合装')
+}
+
+function groupSubtitle(group: ProductManagementComboGroup): string {
+  const name = firstNonEmptyString(group.combo_name, group.combo_short_name)
+  const iid = firstNonEmptyString(group.erp_i_id)
+  const synced = group.last_synced_at ? `同步 ${formatDate(group.last_synced_at)}` : ''
+  return [name, iid ? `款式 ${iid}` : '', synced].filter(Boolean).join(' · ')
+}
+
 function syncStatusLabel(status: ProductSyncStatus): string {
   const labels: Record<ProductSyncStatus, string> = {
     pending_sync: '待同步',
@@ -754,11 +884,15 @@ function errorMessage(err: unknown): string {
 
 .pm-filters {
   display: grid;
-  grid-template-columns: minmax(18rem, 2fr) repeat(4, minmax(8rem, 1fr)) auto;
+  grid-template-columns: minmax(18rem, 2fr) repeat(6, minmax(8rem, 1fr)) auto auto;
   gap: 0.75rem;
   margin-top: 0.85rem;
   padding: 0.9rem;
   border-radius: 0.875rem;
+}
+
+.pm-filters > .pm-btn {
+  align-self: end;
 }
 
 .pm-field {
@@ -850,9 +984,118 @@ function errorMessage(err: unknown): string {
   color: #dc2626;
 }
 
+.pm-combo-sync {
+  color: #2563eb;
+  font-weight: 800;
+}
+
 .pm-table-shell {
   overflow: hidden;
   border-radius: 1rem;
+}
+
+.pm-combo-group {
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.pm-combo-group--combo {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.055), #ffffff 42%);
+}
+
+.pm-combo-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  border-bottom: 1px solid #e8eef8;
+  padding: 0.85rem 1rem;
+  background: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.pm-combo-header:hover:not(.is-static) {
+  background: #eef6ff;
+}
+
+.pm-combo-header:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.18);
+  outline-offset: -3px;
+}
+
+.pm-combo-header.is-static {
+  cursor: default;
+}
+
+.pm-combo-header > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pm-combo-header strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-combo-header small {
+  overflow: hidden;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-combo-kicker {
+  margin: 0;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.pm-combo-count {
+  flex: 0 0 auto;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.pm-combo-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-combo-toggle {
+  flex: 0 0 auto;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: #475569;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.pm-combo-header.is-expanded .pm-combo-toggle {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #dbeafe;
 }
 
 .pm-table-head,
@@ -873,7 +1116,7 @@ function errorMessage(err: unknown): string {
 
 .pm-row {
   padding: 0.9rem 1rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #edf2f7;
   background: #ffffff;
 }
 
@@ -1212,6 +1455,15 @@ function errorMessage(err: unknown): string {
 
   .pm-table-head {
     display: none;
+  }
+
+  .pm-combo-header {
+    align-items: flex-start;
+  }
+
+  .pm-combo-meta {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .pm-row {

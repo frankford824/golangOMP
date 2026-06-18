@@ -70,9 +70,35 @@ func TestHybridERPBridgeUpsertDoesNotFallbackOnOpenWebBusinessError(t *testing.T
 	}
 }
 
+func TestHybridERPBridgeQueryCombineSKUsDoesNotFallbackToLocal(t *testing.T) {
+	t.Parallel()
+	remoteErr := &erpBridgeHTTPError{StatusCode: http.StatusBadGateway, Retryable: true}
+	remote := &hybridERPBridgeTestClient{queryCombineErr: remoteErr}
+	local := &hybridERPBridgeTestClient{
+		queryCombineResult: &domain.JSTCombineSKUListResponse{
+			Items: []domain.JSTCombineSKUItem{{ComboSKUCode: "COMBO-LOCAL"}},
+		},
+	}
+	client := NewHybridERPBridgeClient(local, remote, true, zap.NewNop())
+
+	_, err := client.QueryCombineSKUs(context.Background(), domain.JSTCombineSKUFilter{PageIndex: 1, PageSize: 50})
+	if err == nil {
+		t.Fatal("QueryCombineSKUs() expected remote error")
+	}
+	if !errors.As(err, &remoteErr) {
+		t.Fatalf("QueryCombineSKUs() err = %v, want remote error", err)
+	}
+	if local.queryCombineCalls != 0 {
+		t.Fatalf("local fallback combine calls = %d, want 0", local.queryCombineCalls)
+	}
+}
+
 type hybridERPBridgeTestClient struct {
-	upsertErr   error
-	upsertCalls int
+	upsertErr          error
+	upsertCalls        int
+	queryCombineErr    error
+	queryCombineResult *domain.JSTCombineSKUListResponse
+	queryCombineCalls  int
 }
 
 func (c *hybridERPBridgeTestClient) SearchProducts(context.Context, domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, error) {
@@ -81,6 +107,20 @@ func (c *hybridERPBridgeTestClient) SearchProducts(context.Context, domain.ERPPr
 
 func (c *hybridERPBridgeTestClient) GetProductByID(context.Context, string) (*domain.ERPProduct, error) {
 	return nil, nil
+}
+
+func (c *hybridERPBridgeTestClient) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	c.queryCombineCalls++
+	if c.queryCombineErr != nil {
+		return nil, c.queryCombineErr
+	}
+	if c.queryCombineResult != nil {
+		return c.queryCombineResult, nil
+	}
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, nil
 }
 
 func (c *hybridERPBridgeTestClient) ListCategories(context.Context) ([]*domain.ERPCategory, error) {

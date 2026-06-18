@@ -143,6 +143,26 @@ func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T
 	}
 }
 
+func TestProductManagementWhereSearchesComboRelations(t *testing.T) {
+	where, args := buildProductManagementWhere(repo.ProductManagementListFilter{Keyword: "COMBO001"})
+	for _, fragment := range []string{
+		"FROM omp_sku_combo_relations rel",
+		"LEFT JOIN omp_sku_combo_records rec",
+		"rel.child_sku_code = erp_product_sync_records.sku_code COLLATE utf8mb4_0900_ai_ci",
+		"rel.combo_sku_code LIKE ?",
+		"rec.name LIKE ?",
+		"rec.short_name LIKE ?",
+		"rec.erp_i_id LIKE ?",
+	} {
+		if !strings.Contains(where, fragment) {
+			t.Fatalf("where missing %q: %s", fragment, where)
+		}
+	}
+	if len(args) != 12 {
+		t.Fatalf("args len = %d, want 12; args = %#v", len(args), args)
+	}
+}
+
 func TestProductManagementWhereSyncedStatusSkipsAttentionScope(t *testing.T) {
 	cases := []struct {
 		name         string

@@ -385,6 +385,13 @@ func (s *erpBridgeSelectionBinderStub) GetProductByID(context.Context, string) (
 	return nil, nil
 }
 
+func (s *erpBridgeSelectionBinderStub) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError) {
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, nil
+}
+
 func (s *erpBridgeSelectionBinderStub) ListCategories(context.Context) ([]*domain.ERPCategory, *domain.AppError) {
 	return nil, nil
 }

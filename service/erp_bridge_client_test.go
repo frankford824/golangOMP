@@ -912,6 +912,13 @@ func (s *erpBridgeClientStub) GetProductByID(_ context.Context, id string) (*dom
 	return nil, nil
 }
 
+func (s *erpBridgeClientStub) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, nil
+}
+
 func (s *erpBridgeClientStub) ListCategories(context.Context) ([]*domain.ERPCategory, error) {
 	if s.categoryErr != nil {
 		return nil, s.categoryErr

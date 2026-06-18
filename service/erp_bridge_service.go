@@ -45,6 +45,7 @@ type ERPBridgeService interface {
 	SearchProducts(ctx context.Context, filter domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError)
 	ListIIDs(ctx context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError)
 	GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, *domain.AppError)
+	QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError)
 	ListCategories(ctx context.Context) ([]*domain.ERPCategory, *domain.AppError)
 	ListWarehouses(ctx context.Context) ([]domain.ERPWarehouse, *domain.AppError)
 	ListSyncLogs(ctx context.Context, filter domain.ERPSyncLogFilter) (*domain.ERPSyncLogListResponse, *domain.AppError)
@@ -203,6 +204,31 @@ func (s *erpBridgeService) GetProductByID(ctx context.Context, id string) (*doma
 		}
 	}
 	return prepareERPProduct(product, catalog), nil
+}
+
+func (s *erpBridgeService) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError) {
+	if s.client == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
+	}
+	filter.PageIndex = normalizePositiveInt(filter.PageIndex, 1)
+	filter.PageSize = normalizePositiveInt(filter.PageSize, 50)
+	if filter.PageSize > 50 {
+		filter.PageSize = 50
+	}
+	result, err := s.client.QueryCombineSKUs(ctx, filter)
+	if err != nil {
+		return nil, mapERPBridgeError("query jst combine skus", err)
+	}
+	if result == nil {
+		result = &domain.JSTCombineSKUListResponse{
+			Items:      []domain.JSTCombineSKUItem{},
+			Pagination: buildPaginationMeta(filter.PageIndex, filter.PageSize, 0),
+		}
+	}
+	if result.Items == nil {
+		result.Items = []domain.JSTCombineSKUItem{}
+	}
+	return result, nil
 }
 
 func (s *erpBridgeService) ListCategories(ctx context.Context) ([]*domain.ERPCategory, *domain.AppError) {

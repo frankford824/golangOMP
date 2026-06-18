@@ -99,6 +99,7 @@ func main() {
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
 	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
+	skuComboRepo := mysqlrepo.NewSKUComboRepo(mdb)
 	procurementRepo := mysqlrepo.NewProcurementRepo(mdb)
 	taskCostOverrideEventRepo := mysqlrepo.NewTaskCostOverrideEventRepo(mdb)
 	taskCostOverrideReviewRepo := mysqlrepo.NewTaskCostOverrideReviewRepo(mdb)
@@ -237,7 +238,9 @@ func main() {
 		service.WithProductManagementERPBridge(erpBridgeSvc),
 		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
 		service.WithProductManagementERPImageProxy(erpImageProxySigner),
-		service.WithProductManagementTaskEventRepo(taskEventRepo))
+		service.WithProductManagementTaskEventRepo(taskEventRepo),
+		service.WithProductManagementSKUComboRepo(skuComboRepo))
+	skuComboSyncSvc := service.NewSKUComboSyncService(erpBridgeSvc, skuComboRepo, mdb)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
@@ -443,7 +446,7 @@ func main() {
 
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
-	workers.NewGroup(db, rdb, logger, erpSyncSvc, productManagementSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	workers.NewGroup(db, rdb, logger, erpSyncSvc, productManagementSvc, skuComboSyncSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
 	if wecomSender.Start(workerCtx) {
 		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
 	}

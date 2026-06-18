@@ -42,6 +42,11 @@ func jstExtractSkuRows(payload []byte) ([]map[string]interface{}, int64, error) 
 	if v := firstInt64ish(root, "data_count", "total"); v > 0 && int64(len(rows)) < v {
 		total = v
 	}
+	if pagination, ok := root["pagination"].(map[string]interface{}); ok {
+		if v := firstInt64ish(pagination, "total"); v > 0 && int64(len(rows)) < v {
+			total = v
+		}
+	}
 	return rows, total, nil
 }
 
@@ -49,7 +54,7 @@ func jstCollectSkuRows(node map[string]interface{}) []map[string]interface{} {
 	if node == nil {
 		return nil
 	}
-	for _, key := range []string{"datas", "items", "skus", "list", "data_list"} {
+	for _, key := range []string{"datas", "items", "skus", "list", "data_list", "data"} {
 		if raw, ok := node[key]; ok {
 			if arr, ok := raw.([]interface{}); ok {
 				out := make([]map[string]interface{}, 0, len(arr))
@@ -83,6 +88,10 @@ func firstInt64ish(m map[string]interface{}, keys ...string) int64 {
 			return x
 		case int:
 			return int64(x)
+		case json.Number:
+			if n, err := x.Int64(); err == nil {
+				return n
+			}
 		case string:
 			if n, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64); err == nil {
 				return n

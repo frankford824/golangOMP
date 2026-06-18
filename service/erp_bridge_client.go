@@ -23,6 +23,7 @@ import (
 type ERPBridgeClient interface {
 	SearchProducts(ctx context.Context, filter domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, error)
 	GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, error)
+	QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error)
 	ListCategories(ctx context.Context) ([]*domain.ERPCategory, error)
 	ListSyncLogs(ctx context.Context, filter domain.ERPSyncLogFilter) (*domain.ERPSyncLogListResponse, error)
 	GetSyncLogByID(ctx context.Context, id string) (*domain.ERPSyncLog, error)
@@ -166,6 +167,31 @@ func (c *erpBridgeClient) GetProductByID(ctx context.Context, id string) (*domai
 		return nil, err
 	}
 	return decodeERPProduct(payload)
+}
+
+func (c *erpBridgeClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	query := url.Values{}
+	if strings.TrimSpace(filter.SKUIDs) != "" {
+		query.Set("sku_ids", strings.TrimSpace(filter.SKUIDs))
+	}
+	if strings.TrimSpace(filter.ModifiedBegin) != "" {
+		query.Set("modified_begin", strings.TrimSpace(filter.ModifiedBegin))
+	}
+	if strings.TrimSpace(filter.ModifiedEnd) != "" {
+		query.Set("modified_end", strings.TrimSpace(filter.ModifiedEnd))
+	}
+	if filter.PageIndex > 0 {
+		query.Set("page_index", strconv.Itoa(filter.PageIndex))
+		query.Set("page", strconv.Itoa(filter.PageIndex))
+	}
+	if filter.PageSize > 0 {
+		query.Set("page_size", strconv.Itoa(filter.PageSize))
+	}
+	payload, err := c.doGET(ctx, "/v1/erp/combine-skus", query)
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSTCombineSKUList(payload, filter.PageIndex, filter.PageSize)
 }
 
 func (c *erpBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {

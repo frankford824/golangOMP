@@ -134,6 +134,13 @@ func (s *erpBridgeServiceStub) GetProductByID(context.Context, string) (*domain.
 	return s.product, s.appErr
 }
 
+func (s *erpBridgeServiceStub) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError) {
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, s.appErr
+}
+
 func (s *erpBridgeServiceStub) ListCategories(context.Context) ([]*domain.ERPCategory, *domain.AppError) {
 	return s.categories, s.appErr
 }

@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS erp_product_sync_records (
   KEY idx_erp_product_sync_records_sync_status (erp_sync_status),
   KEY idx_erp_product_sync_records_sync_claim (sync_claim_token),
   KEY idx_erp_product_sync_records_task_created (task_created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 INSERT IGNORE INTO erp_product_sync_records (
   record_key, task_id, task_sku_item_id, task_no, sku_code, product_i_id,

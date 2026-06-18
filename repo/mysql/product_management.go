@@ -601,8 +601,20 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 			OR category_name LIKE ?
 			OR creator_name LIKE ?
 			OR CAST(creator_id AS CHAR) = ?
+			OR EXISTS (
+			  SELECT 1
+			    FROM omp_sku_combo_relations rel
+				    LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
+				   WHERE rel.child_sku_code = erp_product_sync_records.sku_code COLLATE utf8mb4_0900_ai_ci
+			     AND (
+			       rel.combo_sku_code LIKE ?
+			       OR rec.name LIKE ?
+			       OR rec.short_name LIKE ?
+			       OR rec.erp_i_id LIKE ?
+			     )
+			)
 		)`)
-		args = append(args, like, like, like, like, like, like, like, keyword)
+		args = append(args, like, like, like, like, like, like, like, keyword, like, like, like, like)
 	}
 	if source := strings.TrimSpace(filter.ImageSource); source != "" {
 		clauses = append(clauses, "image_source = ?")

@@ -128,6 +128,10 @@ func (c *localERPBridgeClient) GetProductByID(ctx context.Context, id string) (*
 	return nil, nil
 }
 
+func (c *localERPBridgeClient) QueryCombineSKUs(_ context.Context, _ domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	return nil, fmt.Errorf("%w: jst combine sku query requires OpenWeb remote client", ErrERPRemoteOpenWebAuthRequired)
+}
+
 func (c *localERPBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
 	if c.categoryRepo == nil {
 		return []*domain.ERPCategory{}, nil

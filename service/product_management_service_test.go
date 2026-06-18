@@ -69,6 +69,9 @@ type productManagementERPBridgeCapture struct {
 	itemStyleCalls   int
 	readbackProduct  *domain.ERPProduct
 	readbackErr      *domain.AppError
+	combineResponse  *domain.JSTCombineSKUListResponse
+	combineErr       *domain.AppError
+	combineCalls     int
 }
 
 func (s *productManagementERPBridgeCapture) SearchProducts(context.Context, domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError) {
@@ -81,6 +84,20 @@ func (s *productManagementERPBridgeCapture) ListIIDs(context.Context, domain.ERP
 
 func (s *productManagementERPBridgeCapture) GetProductByID(context.Context, string) (*domain.ERPProduct, *domain.AppError) {
 	return s.readbackProduct, s.readbackErr
+}
+
+func (s *productManagementERPBridgeCapture) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError) {
+	s.combineCalls++
+	if s.combineErr != nil {
+		return nil, s.combineErr
+	}
+	if s.combineResponse != nil {
+		return s.combineResponse, nil
+	}
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, nil
 }
 
 func (s *productManagementERPBridgeCapture) ListCategories(context.Context) ([]*domain.ERPCategory, *domain.AppError) {

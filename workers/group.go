@@ -13,13 +13,14 @@ import (
 
 // Group manages all background workers (spec §4.1).
 type Group struct {
-	db          *sql.DB
-	rdb         *redis.Client
-	logger      *zap.Logger
-	erpSyncSvc  service.ERPSyncService
-	productMgmt service.ProductManagementService
-	erpEnabled  bool
-	erpInterval time.Duration
+	db           *sql.DB
+	rdb          *redis.Client
+	logger       *zap.Logger
+	erpSyncSvc   service.ERPSyncService
+	productMgmt  service.ProductManagementService
+	skuComboSync service.SKUComboSyncService
+	erpEnabled   bool
+	erpInterval  time.Duration
 }
 
 func NewGroup(
@@ -28,17 +29,19 @@ func NewGroup(
 	logger *zap.Logger,
 	erpSyncSvc service.ERPSyncService,
 	productMgmt service.ProductManagementService,
+	skuComboSync service.SKUComboSyncService,
 	erpEnabled bool,
 	erpInterval time.Duration,
 ) *Group {
 	return &Group{
-		db:          db,
-		rdb:         rdb,
-		logger:      logger,
-		erpSyncSvc:  erpSyncSvc,
-		productMgmt: productMgmt,
-		erpEnabled:  erpEnabled,
-		erpInterval: erpInterval,
+		db:           db,
+		rdb:          rdb,
+		logger:       logger,
+		erpSyncSvc:   erpSyncSvc,
+		productMgmt:  productMgmt,
+		skuComboSync: skuComboSync,
+		erpEnabled:   erpEnabled,
+		erpInterval:  erpInterval,
 	}
 }
 
@@ -54,8 +57,15 @@ func (g *Group) Start(ctx context.Context) {
 	if g.shouldStartProductManagementSyncWorker() {
 		go NewProductManagementSyncWorker(g.productMgmt, g.logger, 30*time.Second, 2).Run(ctx)
 	}
+	if g.shouldStartSKUComboSyncWorker() {
+		go NewSKUComboSyncWorker(g.skuComboSync, g.logger, time.Minute).Run(ctx)
+	}
 }
 
 func (g *Group) shouldStartProductManagementSyncWorker() bool {
 	return g.erpEnabled && g.productMgmt != nil
+}
+
+func (g *Group) shouldStartSKUComboSyncWorker() bool {
+	return g.erpEnabled && g.skuComboSync != nil
 }

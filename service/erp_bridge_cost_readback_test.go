@@ -49,6 +49,13 @@ func (c *erpBridgeReadbackSequenceClient) GetProductByID(_ context.Context, id s
 	return step.product, step.err
 }
 
+func (c *erpBridgeReadbackSequenceClient) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, nil
+}
+
 func (c *erpBridgeReadbackSequenceClient) ListCategories(context.Context) ([]*domain.ERPCategory, error) {
 	return []*domain.ERPCategory{}, nil
 }
@@ -235,6 +242,9 @@ func (c *erpBridgeUpsertFailureClient) SearchProducts(ctx context.Context, filte
 }
 func (c *erpBridgeUpsertFailureClient) GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, error) {
 	return c.inner.GetProductByID(ctx, id)
+}
+func (c *erpBridgeUpsertFailureClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	return c.inner.QueryCombineSKUs(ctx, filter)
 }
 func (c *erpBridgeUpsertFailureClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
 	return c.inner.ListCategories(ctx)

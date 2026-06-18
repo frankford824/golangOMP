@@ -36,6 +36,24 @@ func (h *ProductManagementHandler) List(c *gin.Context) {
 	respondOKWithPagination(c, items, meta)
 }
 
+func (h *ProductManagementHandler) ListComboTree(c *gin.Context) {
+	if h == nil || h.svc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "product management service is not configured", nil))
+		return
+	}
+	filter, appErr := parseProductManagementListFilter(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.ListComboTree(c.Request.Context(), filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, result)
+}
+
 func (h *ProductManagementHandler) ListByTaskID(c *gin.Context) {
 	if h == nil || h.svc == nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "product management service is not configured", nil))

@@ -68,6 +68,20 @@ func (h *ERPBridgeHandler) GetProductByID(c *gin.Context) {
 	respondOK(c, product)
 }
 
+func (h *ERPBridgeHandler) QueryCombineSKUs(c *gin.Context) {
+	filter, appErr := parseJSTCombineSKUFilter(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.QueryCombineSKUs(c.Request.Context(), filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, result.Items, result.Pagination)
+}
+
 func parseERPIIDListFilter(c *gin.Context) (domain.ERPIIDListFilter, *domain.AppError) {
 	filter := domain.ERPIIDListFilter{
 		Q:        strings.TrimSpace(c.Query("q")),
@@ -92,6 +106,40 @@ func parseERPIIDListFilter(c *gin.Context) (domain.ERPIIDListFilter, *domain.App
 		filter.PageSize = n
 	}
 	return filter, nil
+}
+
+func parseJSTCombineSKUFilter(c *gin.Context) (domain.JSTCombineSKUFilter, *domain.AppError) {
+	filter := domain.JSTCombineSKUFilter{
+		SKUIDs:        strings.TrimSpace(c.Query("sku_ids")),
+		ModifiedBegin: strings.TrimSpace(c.Query("modified_begin")),
+		ModifiedEnd:   strings.TrimSpace(c.Query("modified_end")),
+		PageIndex:     1,
+		PageSize:      50,
+	}
+	if raw := strings.TrimSpace(firstNonEmptyQuery(c, "page_index", "page")); raw != "" {
+		n, err := parseInt(raw)
+		if err != nil {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_index must be an integer", nil)
+		}
+		filter.PageIndex = n
+	}
+	if raw := strings.TrimSpace(c.Query("page_size")); raw != "" {
+		n, err := parseInt(raw)
+		if err != nil {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_size must be an integer", nil)
+		}
+		filter.PageSize = n
+	}
+	return filter, nil
+}
+
+func firstNonEmptyQuery(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(c.Query(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (h *ERPBridgeHandler) ListCategories(c *gin.Context) {

@@ -104,9 +104,52 @@ export interface ProductManagementListResponse {
   pagination: ProductManagementPagination
 }
 
+export interface ProductManagementComboChild {
+  record: ProductManagementRecord
+  quantity: number
+}
+
+export interface ProductManagementComboGroup {
+  group_key: string
+  group_type: 'combo' | 'single'
+  combo_sku_code?: string
+  combo_name?: string
+  combo_short_name?: string
+  erp_i_id?: string
+  enabled?: boolean | null
+  cost_price?: number | null
+  sale_price?: number | null
+  modified_at?: string
+  last_synced_at?: string
+  children: ProductManagementComboChild[]
+}
+
+export interface ProductManagementComboSyncSummary {
+  id: number
+  window_begin: string
+  window_end: string
+  page_index: number
+  page_size: number
+  status: string
+  last_success_at?: string
+  next_retry_at?: string
+  last_error?: string
+  processed_items: number
+}
+
+export interface ProductManagementComboTreeResponse extends ProductManagementListResponse {
+  groups: ProductManagementComboGroup[]
+  combo_sync_summary?: ProductManagementComboSyncSummary
+}
+
 export const productManagementApi = {
   async list(params: ProductManagementListParams): Promise<ProductManagementListResponse> {
     const { data } = await http.get<ProductManagementListResponse>('/v1/product-management', { params })
+    return data
+  },
+
+  async listComboTree(params: ProductManagementListParams): Promise<ProductManagementComboTreeResponse> {
+    const { data } = await http.get<ProductManagementComboTreeResponse>('/v1/product-management/combo-tree', { params })
     return data
   },
 

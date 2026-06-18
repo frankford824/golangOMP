@@ -34,6 +34,7 @@ type ERPRemoteClientConfig struct {
 	SyncLogsPath             string
 	GetCompanyUsersPath      string
 	SkuQueryPath             string
+	CombineSKUQueryPath      string
 	OpenWebCharset           string
 	OpenWebVersion           string
 	Timeout                  time.Duration
@@ -63,6 +64,7 @@ type remoteERPBridgeClient struct {
 	syncLogsPath             string
 	getCompanyUsersPath      string
 	skuQueryPath             string
+	combineSKUQueryPath      string
 	openWebCharset           string
 	openWebVersion           string
 	httpClient               *http.Client
@@ -242,6 +244,7 @@ func NewRemoteERPBridgeClient(cfg ERPRemoteClientConfig) (ERPBridgeClient, error
 		syncLogsPath:             normalizeERPRemotePath(syncLogsPath),
 		getCompanyUsersPath:      normalizeERPRemotePath(getCompanyUsersPath),
 		skuQueryPath:             normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.SkuQueryPath), "/open/sku/query")),
+		combineSKUQueryPath:      normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.CombineSKUQueryPath), "/open/combine/sku/query")),
 		openWebCharset:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebCharset), "utf-8"),
 		openWebVersion:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebVersion), "2"),
 		httpClient:               &http.Client{Timeout: timeout},
@@ -393,6 +396,20 @@ func (c *hybridERPBridgeClient) GetProductByID(ctx context.Context, id string) (
 		return nil, fmt.Errorf("local fallback erp bridge client is unavailable")
 	}
 	return c.localFallback.GetProductByID(ctx, id)
+}
+
+func (c *hybridERPBridgeClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	if c.remote != nil {
+		result, err := c.remote.QueryCombineSKUs(ctx, filter)
+		if err == nil {
+			return result, nil
+		}
+		return nil, err
+	}
+	if c.localFallback == nil {
+		return nil, fmt.Errorf("local fallback erp bridge client is unavailable")
+	}
+	return c.localFallback.QueryCombineSKUs(ctx, filter)
 }
 
 func (c *hybridERPBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
@@ -657,6 +674,21 @@ func (c *remoteERPBridgeClient) GetProductByID(ctx context.Context, id string) (
 		return items[0], nil
 	}
 	return nil, &erpBridgeRemoteProductNotFoundError{QueryID: id}
+}
+
+func (c *remoteERPBridgeClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	if !strings.EqualFold(strings.TrimSpace(c.authMode), "openweb") {
+		return nil, fmt.Errorf("%w: remote erp combine sku query requires ERP_REMOTE_AUTH_MODE=openweb", ErrERPRemoteOpenWebAuthRequired)
+	}
+	raw, err := json.Marshal(filter)
+	if err != nil {
+		return nil, fmt.Errorf("marshal jst combine sku filter: %w", err)
+	}
+	respBody, err := c.doRequestWithRetry(ctx, http.MethodPost, c.combineSKUQueryPath, nil, raw, "jst_combine_sku_query")
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSTCombineSKUList(respBody, filter.PageIndex, filter.PageSize)
 }
 
 func (c *remoteERPBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
@@ -1486,6 +1518,12 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			"page_size":  "50",
 			"sku_ids":    id,
 		}, nil
+	case "jst_combine_sku_query":
+		var filter domain.JSTCombineSKUFilter
+		if err := json.Unmarshal(rawBody, &filter); err != nil {
+			return nil, fmt.Errorf("decode jst combine sku query filter: %w", err)
+		}
+		return buildJSTCombineSKUQueryBizFilter(filter), nil
 	default:
 		trimmed := strings.TrimSpace(string(rawBody))
 		if trimmed == "" {

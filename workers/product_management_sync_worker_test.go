@@ -34,10 +34,33 @@ func TestGroupShouldStartProductManagementSyncWorkerRequiresERPEnabled(t *testin
 	}
 }
 
+func TestGroupShouldStartSKUComboSyncWorkerRequiresERPEnabled(t *testing.T) {
+	svc := skuComboSyncServiceStub{}
+	if (&Group{erpEnabled: false, skuComboSync: svc}).shouldStartSKUComboSyncWorker() {
+		t.Fatal("sku combo worker must not start when ERP sync is disabled")
+	}
+	if (&Group{erpEnabled: true}).shouldStartSKUComboSyncWorker() {
+		t.Fatal("sku combo worker must not start without service")
+	}
+	if !(&Group{erpEnabled: true, skuComboSync: svc}).shouldStartSKUComboSyncWorker() {
+		t.Fatal("sku combo worker should start when ERP sync is enabled and service exists")
+	}
+}
+
+type skuComboSyncServiceStub struct{}
+
+func (skuComboSyncServiceStub) ProcessNextPage(context.Context) (int, *domain.AppError) {
+	return 0, nil
+}
+
 type productManagementServiceStub struct{}
 
 func (productManagementServiceStub) List(context.Context, repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, domain.PaginationMeta, *domain.AppError) {
 	return nil, domain.PaginationMeta{}, nil
+}
+
+func (productManagementServiceStub) ListComboTree(context.Context, repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError) {
+	return &domain.ProductManagementComboTreeResponse{}, nil
 }
 
 func (productManagementServiceStub) GetByTaskID(context.Context, int64) ([]*domain.ProductManagementRecord, *domain.AppError) {

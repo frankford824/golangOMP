@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -13,6 +16,7 @@ import (
 
 type ProductManagementService interface {
 	List(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, domain.PaginationMeta, *domain.AppError)
+	ListComboTree(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError)
 	GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, *domain.AppError)
 	ListImageCandidates(ctx context.Context, actor domain.RequestActor, recordID int64) ([]*domain.ProductManagementImageCandidate, *domain.AppError)
 	ReparseImage(ctx context.Context, actor domain.RequestActor, recordID int64) (*domain.ProductManagementRecord, *domain.AppError)
@@ -32,6 +36,7 @@ type productManagementService struct {
 	taskAssets   repo.TaskAssetRepo
 	assetSearch  repo.TaskAssetSearchRepo
 	taskEvents   repo.TaskEventRepo
+	skuCombos    repo.SKUComboRepo
 	txRunner     repo.TxRunner
 	erpBridge    ERPBridgeService
 	ossDirect    *OSSDirectService
@@ -85,6 +90,12 @@ func WithProductManagementTaskEventRepo(taskEvents repo.TaskEventRepo) ProductMa
 	}
 }
 
+func WithProductManagementSKUComboRepo(skuCombos repo.SKUComboRepo) ProductManagementServiceOption {
+	return func(s *productManagementService) {
+		s.skuCombos = skuCombos
+	}
+}
+
 func (s *productManagementService) List(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, domain.PaginationMeta, *domain.AppError) {
 	if appErr := s.refreshReadModel(ctx); appErr != nil {
 		return nil, domain.PaginationMeta{}, appErr
@@ -97,6 +108,35 @@ func (s *productManagementService) List(ctx context.Context, filter repo.Product
 	s.decorateRecords(ctx, actor, items)
 	page, pageSize := normalizeProductManagementPage(filter.Page, filter.PageSize)
 	return items, domain.PaginationMeta{Page: page, PageSize: pageSize, Total: total}, nil
+}
+
+func (s *productManagementService) ListComboTree(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError) {
+	items, meta, appErr := s.List(ctx, filter)
+	if appErr != nil {
+		return nil, appErr
+	}
+	groups := s.productManagementComboGroups(ctx, items)
+	var summary *domain.OMPSKUComboSyncState
+	if s.skuCombos != nil {
+		state, err := s.skuCombos.GetLatestSyncState(ctx)
+		if err != nil {
+			if isMySQLTableMissing(err) {
+				return &domain.ProductManagementComboTreeResponse{
+					Groups:     productManagementSingleGroups(items),
+					Data:       items,
+					Pagination: meta,
+				}, nil
+			}
+			return nil, infraAppError("get product management combo sync state", err)
+		}
+		summary = state
+	}
+	return &domain.ProductManagementComboTreeResponse{
+		Groups:      groups,
+		Data:        items,
+		Pagination:  meta,
+		SyncSummary: summary,
+	}, nil
 }
 
 func (s *productManagementService) GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, *domain.AppError) {
@@ -912,6 +952,138 @@ func (s *productManagementService) decorateRecords(ctx context.Context, actor do
 			record.ImagePreviewURL = ""
 		}
 	}
+}
+
+func (s *productManagementService) productManagementComboGroups(ctx context.Context, records []*domain.ProductManagementRecord) []domain.ProductManagementComboGroup {
+	if len(records) == 0 {
+		return []domain.ProductManagementComboGroup{}
+	}
+	if s.skuCombos == nil {
+		return productManagementSingleGroups(records)
+	}
+	skus := make([]string, 0, len(records))
+	seenSKU := make(map[string]struct{})
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		sku := strings.TrimSpace(record.SKUCode)
+		if sku == "" {
+			continue
+		}
+		key := strings.ToUpper(sku)
+		if _, ok := seenSKU[key]; !ok {
+			seenSKU[key] = struct{}{}
+			skus = append(skus, sku)
+		}
+	}
+	if len(skus) == 0 {
+		return productManagementSingleGroups(records)
+	}
+	relations, err := s.skuCombos.ListRelationsByChildSKUs(ctx, skus)
+	if err != nil {
+		return productManagementSingleGroups(records)
+	}
+	relationsByChild := make(map[string][]*domain.OMPSKUComboRelationWithRecord)
+	for _, rel := range relations {
+		if rel == nil {
+			continue
+		}
+		childKey := strings.ToUpper(strings.TrimSpace(rel.Relation.ChildSKUCode))
+		if childKey == "" {
+			continue
+		}
+		relationsByChild[childKey] = append(relationsByChild[childKey], rel)
+	}
+	groupMap := make(map[string]*domain.ProductManagementComboGroup)
+	groups := make([]domain.ProductManagementComboGroup, 0, len(records))
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		childKey := strings.ToUpper(strings.TrimSpace(record.SKUCode))
+		rels := relationsByChild[childKey]
+		if len(rels) == 0 {
+			groups = append(groups, productManagementSingleGroup(record))
+			continue
+		}
+		addedToCombo := false
+		for _, rel := range rels {
+			if rel == nil {
+				continue
+			}
+			comboCode := strings.TrimSpace(rel.Relation.ComboSKUCode)
+			if comboCode == "" {
+				continue
+			}
+			groupKey := "combo:" + strings.ToUpper(comboCode)
+			group := groupMap[groupKey]
+			if group == nil {
+				group = &domain.ProductManagementComboGroup{
+					GroupKey:     groupKey,
+					GroupType:    "combo",
+					ComboSKUCode: comboCode,
+					Children:     []domain.ProductManagementComboChild{},
+				}
+				if rel.Record != nil {
+					group.ComboName = strings.TrimSpace(rel.Record.Name)
+					group.ComboShortName = strings.TrimSpace(rel.Record.ShortName)
+					group.ERPIID = strings.TrimSpace(rel.Record.ERPIID)
+					group.Enabled = rel.Record.Enabled
+					group.CostPrice = rel.Record.CostPrice
+					group.SalePrice = rel.Record.SalePrice
+					group.ModifiedAt = rel.Record.ModifiedAt
+					if !rel.Record.LastSyncedAt.IsZero() {
+						group.LastSyncedAt = &rel.Record.LastSyncedAt
+					}
+				}
+				groupMap[groupKey] = group
+				groups = append(groups, *group)
+			}
+			qty := rel.Relation.Quantity
+			if qty <= 0 {
+				qty = 1
+			}
+			group.Children = append(group.Children, domain.ProductManagementComboChild{Record: record, Quantity: qty})
+			addedToCombo = true
+		}
+		if !addedToCombo {
+			groups = append(groups, productManagementSingleGroup(record))
+		}
+	}
+	for idx := range groups {
+		if groups[idx].GroupType != "combo" {
+			continue
+		}
+		if group := groupMap[groups[idx].GroupKey]; group != nil {
+			groups[idx] = *group
+		}
+	}
+	return groups
+}
+
+func productManagementSingleGroups(records []*domain.ProductManagementRecord) []domain.ProductManagementComboGroup {
+	groups := make([]domain.ProductManagementComboGroup, 0, len(records))
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		groups = append(groups, productManagementSingleGroup(record))
+	}
+	return groups
+}
+
+func productManagementSingleGroup(record *domain.ProductManagementRecord) domain.ProductManagementComboGroup {
+	return domain.ProductManagementComboGroup{
+		GroupKey:  fmt.Sprintf("single:%d", record.ID),
+		GroupType: "single",
+		Children:  []domain.ProductManagementComboChild{{Record: record, Quantity: 1}},
+	}
+}
+
+func isMySQLTableMissing(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1146
 }
 
 func productManagementDecoratedImageSyncStatus(record *domain.ProductManagementRecord, patch repo.ProductManagementImagePatch, patchChanged bool) domain.ProductManagementERPSyncStatus {
