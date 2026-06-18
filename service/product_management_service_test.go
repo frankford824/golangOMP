@@ -62,6 +62,135 @@ func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T
 	}
 }
 
+func TestProductManagementComboScopePaginatesComboGroups(t *testing.T) {
+	now := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
+	records := []*domain.ProductManagementRecord{
+		productManagementTestRecord(1, "SKU-A", now),
+		productManagementTestRecord(2, "SKU-B", now),
+		productManagementTestRecord(3, "SKU-C", now),
+	}
+	svc := &productManagementService{
+		records: &productManagementRecordRepoFake{items: records},
+		skuCombos: &skuComboRepoFake{
+			relations: []*domain.OMPSKUComboRelationWithRecord{
+				{
+					Relation: domain.OMPSKUComboRelation{ComboSKUCode: "COMBO-1", ChildSKUCode: "SKU-A", Quantity: 2},
+					Record:   &domain.OMPSKUComboRecord{ComboSKUCode: "COMBO-1", Name: "组合 1", LastSyncedAt: now},
+				},
+				{
+					Relation: domain.OMPSKUComboRelation{ComboSKUCode: "COMBO-1", ChildSKUCode: "SKU-B", Quantity: 1},
+					Record:   &domain.OMPSKUComboRecord{ComboSKUCode: "COMBO-1", Name: "组合 1", LastSyncedAt: now},
+				},
+				{
+					Relation: domain.OMPSKUComboRelation{ComboSKUCode: "COMBO-2", ChildSKUCode: "SKU-C", Quantity: 1},
+					Record:   &domain.OMPSKUComboRecord{ComboSKUCode: "COMBO-2", Name: "组合 2", LastSyncedAt: now},
+				},
+			},
+		},
+		now: func() time.Time { return now },
+	}
+
+	result, appErr := svc.ListComboTree(context.Background(), repo.ProductManagementListFilter{
+		DisplayScope: "combo",
+		Page:         1,
+		PageSize:     1,
+	})
+	if appErr != nil {
+		t.Fatalf("ListComboTree() appErr = %+v", appErr)
+	}
+	if result.Pagination.Total != 2 {
+		t.Fatalf("combo total = %d, want 2", result.Pagination.Total)
+	}
+	if len(result.Groups) != 1 || result.Groups[0].GroupKey != "combo:COMBO-1" {
+		t.Fatalf("groups = %#v, want first combo group", result.Groups)
+	}
+	if len(result.Groups[0].Children) != 2 {
+		t.Fatalf("first combo child count = %d, want 2", len(result.Groups[0].Children))
+	}
+	if len(result.Data) != 2 {
+		t.Fatalf("page data count = %d, want combo child count 2", len(result.Data))
+	}
+}
+
+func productManagementTestRecord(id int64, sku string, now time.Time) *domain.ProductManagementRecord {
+	return &domain.ProductManagementRecord{
+		ID:                 id,
+		RecordKey:          sku,
+		TaskID:             100 + id,
+		TaskNo:             "RW-TEST",
+		SKUCode:            sku,
+		ProductName:        sku + " product",
+		CreatorID:          1,
+		CreatorName:        "tester",
+		TaskCreatedAt:      now,
+		ImageSource:        domain.ProductManagementImageSourceManual,
+		ImageSelectionMode: domain.ProductManagementImageSelectionManual,
+		ERPSyncStatus:      domain.ProductManagementERPSyncStatusPendingSync,
+		BaseSyncStatus:     domain.ProductManagementERPSyncStatusPendingSync,
+		ImageSyncStatus:    domain.ProductManagementERPSyncStatusWaitingImage,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+}
+
+type productManagementRecordRepoFake struct {
+	items []*domain.ProductManagementRecord
+}
+
+func (f *productManagementRecordRepoFake) RefreshReadModel(context.Context) error { return nil }
+
+func (f *productManagementRecordRepoFake) List(_ context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, int64, error) {
+	page, pageSize := normalizeProductManagementPage(filter.Page, filter.PageSize)
+	start := (page - 1) * pageSize
+	if start >= len(f.items) {
+		return []*domain.ProductManagementRecord{}, int64(len(f.items)), nil
+	}
+	end := start + pageSize
+	if end > len(f.items) {
+		end = len(f.items)
+	}
+	return f.items[start:end], int64(len(f.items)), nil
+}
+
+func (f *productManagementRecordRepoFake) GetByID(_ context.Context, id int64) (*domain.ProductManagementRecord, error) {
+	for _, item := range f.items {
+		if item != nil && item.ID == id {
+			return item, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *productManagementRecordRepoFake) GetByTaskID(_ context.Context, taskID int64) ([]*domain.ProductManagementRecord, error) {
+	var out []*domain.ProductManagementRecord
+	for _, item := range f.items {
+		if item != nil && item.TaskID == taskID {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (f *productManagementRecordRepoFake) ClaimQueuedSyncRecords(context.Context, int, string, time.Time) ([]*domain.ProductManagementRecord, error) {
+	return nil, nil
+}
+
+func (f *productManagementRecordRepoFake) UpdateImage(context.Context, repo.Tx, int64, repo.ProductManagementImagePatch) error {
+	return nil
+}
+
+func (f *productManagementRecordRepoFake) UpdateSyncStatus(context.Context, repo.Tx, int64, repo.ProductManagementSyncPatch) error {
+	return nil
+}
+
+func (f *productManagementRecordRepoFake) UpdateBaseSyncStatus(context.Context, repo.Tx, int64, repo.ProductManagementSyncPatch) error {
+	return nil
+}
+
+func (f *productManagementRecordRepoFake) UpdateImageSyncStatus(context.Context, repo.Tx, int64, repo.ProductManagementSyncPatch) error {
+	return nil
+}
+
 type productManagementERPBridgeCapture struct {
 	payload          domain.ERPProductUpsertPayload
 	upsertCalls      int

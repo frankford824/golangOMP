@@ -169,6 +169,7 @@ func (h *ProductManagementHandler) requestSyncByScope(c *gin.Context, scope stri
 func parseProductManagementListFilter(c *gin.Context) (repo.ProductManagementListFilter, *domain.AppError) {
 	filter := repo.ProductManagementListFilter{
 		Keyword:         strings.TrimSpace(c.Query("keyword")),
+		DisplayScope:    strings.TrimSpace(c.Query("display_scope")),
 		ImageSource:     strings.TrimSpace(c.Query("image_source")),
 		SyncStatus:      strings.TrimSpace(c.Query("sync_status")),
 		BaseSyncStatus:  strings.TrimSpace(c.Query("base_sync_status")),

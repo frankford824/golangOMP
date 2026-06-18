@@ -132,6 +132,7 @@ type ProductRepo interface {
 
 type ProductManagementListFilter struct {
 	Keyword         string
+	DisplayScope    string
 	ImageSource     string
 	SyncStatus      string
 	BaseSyncStatus  string

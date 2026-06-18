@@ -111,25 +111,21 @@ func (s *productManagementService) List(ctx context.Context, filter repo.Product
 }
 
 func (s *productManagementService) ListComboTree(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError) {
+	displayScope := normalizeProductManagementDisplayScope(filter.DisplayScope)
+	if displayScope == "combo" {
+		return s.listComboTreeByComboGroups(ctx, filter)
+	}
 	items, meta, appErr := s.List(ctx, filter)
 	if appErr != nil {
 		return nil, appErr
 	}
 	groups := s.productManagementComboGroups(ctx, items)
-	var summary *domain.OMPSKUComboSyncState
-	if s.skuCombos != nil {
-		state, err := s.skuCombos.GetLatestSyncState(ctx)
-		if err != nil {
-			if isMySQLTableMissing(err) {
-				return &domain.ProductManagementComboTreeResponse{
-					Groups:     productManagementSingleGroups(items),
-					Data:       items,
-					Pagination: meta,
-				}, nil
-			}
-			return nil, infraAppError("get product management combo sync state", err)
-		}
-		summary = state
+	if displayScope == "single" {
+		groups = productManagementSingleGroups(items)
+	}
+	summary, appErr := s.productManagementComboSyncSummary(ctx)
+	if appErr != nil {
+		return nil, appErr
 	}
 	return &domain.ProductManagementComboTreeResponse{
 		Groups:      groups,
@@ -137,6 +133,72 @@ func (s *productManagementService) ListComboTree(ctx context.Context, filter rep
 		Pagination:  meta,
 		SyncSummary: summary,
 	}, nil
+}
+
+func (s *productManagementService) listComboTreeByComboGroups(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError) {
+	if appErr := s.refreshReadModel(ctx); appErr != nil {
+		return nil, appErr
+	}
+	items, appErr := s.collectProductManagementRecordsForGrouping(ctx, filter)
+	if appErr != nil {
+		return nil, appErr
+	}
+	actor, _ := domain.RequestActorFromContext(ctx)
+	s.decorateRecords(ctx, actor, items)
+	groups := s.productManagementComboGroups(ctx, items)
+	comboGroups := make([]domain.ProductManagementComboGroup, 0, len(groups))
+	for _, group := range groups {
+		if group.GroupType == "combo" {
+			comboGroups = append(comboGroups, group)
+		}
+	}
+	page, pageSize := normalizeProductManagementPage(filter.Page, filter.PageSize)
+	pagedGroups := paginateProductManagementComboGroups(comboGroups, page, pageSize)
+	data := productManagementRecordsFromComboGroups(pagedGroups)
+	summary, appErr := s.productManagementComboSyncSummary(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return &domain.ProductManagementComboTreeResponse{
+		Groups:      pagedGroups,
+		Data:        data,
+		Pagination:  domain.PaginationMeta{Page: page, PageSize: pageSize, Total: int64(len(comboGroups))},
+		SyncSummary: summary,
+	}, nil
+}
+
+func (s *productManagementService) collectProductManagementRecordsForGrouping(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, *domain.AppError) {
+	const scanPageSize = 100
+	const maxScanRecords = 5000
+	filter.Page = 1
+	filter.PageSize = scanPageSize
+	items := make([]*domain.ProductManagementRecord, 0, scanPageSize)
+	for len(items) < maxScanRecords {
+		pageItems, total, err := s.records.List(ctx, filter)
+		if err != nil {
+			return nil, infraAppError("list product management records for combo grouping", err)
+		}
+		items = append(items, pageItems...)
+		if len(pageItems) < scanPageSize || int64(len(items)) >= total {
+			break
+		}
+		filter.Page++
+	}
+	return items, nil
+}
+
+func (s *productManagementService) productManagementComboSyncSummary(ctx context.Context) (*domain.OMPSKUComboSyncState, *domain.AppError) {
+	if s.skuCombos == nil {
+		return nil, nil
+	}
+	state, err := s.skuCombos.GetLatestSyncState(ctx)
+	if err != nil {
+		if isMySQLTableMissing(err) {
+			return nil, nil
+		}
+		return nil, infraAppError("get product management combo sync state", err)
+	}
+	return state, nil
 }
 
 func (s *productManagementService) GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, *domain.AppError) {
@@ -1081,6 +1143,37 @@ func productManagementSingleGroup(record *domain.ProductManagementRecord) domain
 	}
 }
 
+func paginateProductManagementComboGroups(groups []domain.ProductManagementComboGroup, page, pageSize int) []domain.ProductManagementComboGroup {
+	page, pageSize = normalizeProductManagementPage(page, pageSize)
+	start := (page - 1) * pageSize
+	if start >= len(groups) {
+		return []domain.ProductManagementComboGroup{}
+	}
+	end := start + pageSize
+	if end > len(groups) {
+		end = len(groups)
+	}
+	return groups[start:end]
+}
+
+func productManagementRecordsFromComboGroups(groups []domain.ProductManagementComboGroup) []*domain.ProductManagementRecord {
+	out := make([]*domain.ProductManagementRecord, 0, len(groups))
+	seen := make(map[int64]struct{})
+	for _, group := range groups {
+		for _, child := range group.Children {
+			if child.Record == nil {
+				continue
+			}
+			if _, ok := seen[child.Record.ID]; ok {
+				continue
+			}
+			seen[child.Record.ID] = struct{}{}
+			out = append(out, child.Record)
+		}
+	}
+	return out
+}
+
 func isMySQLTableMissing(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1146
@@ -1391,6 +1484,17 @@ func normalizeProductManagementPage(page, pageSize int) (int, int) {
 		pageSize = 20
 	}
 	return page, pageSize
+}
+
+func normalizeProductManagementDisplayScope(scope string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "combo":
+		return "combo"
+	case "single":
+		return "single"
+	default:
+		return "all"
+	}
 }
 
 func isProductManagementERPImageAsset(asset *domain.TaskAsset) bool {

@@ -82,6 +82,7 @@ export interface ProductImageCandidate {
 
 export interface ProductManagementListParams {
   keyword?: string
+  display_scope?: 'combo' | 'single' | 'all'
   image_source?: ProductImageSource | ''
   sync_status?: ProductSyncStatus | ''
   base_sync_status?: ProductSyncStatus | ''

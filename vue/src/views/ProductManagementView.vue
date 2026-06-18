@@ -139,6 +139,7 @@
                   :alt="child.record.sku_code"
                   img-class="pm-preview-apm"
                   inner-img-class="pm-preview-img"
+                  defer-until-visible
                 />
                 <span v-else>{{ child.record.image_missing_reason || 'ERP 图片待补充' }}</span>
               </div>
@@ -261,6 +262,7 @@
               :alt="candidate.file_name"
               img-class="pm-candidate-apm"
               inner-img-class="pm-candidate-img"
+              defer-until-visible
             />
             <span v-else>无预览</span>
             <strong>{{ candidate.file_name }}</strong>
@@ -389,6 +391,7 @@ async function loadRecords(): Promise<void> {
   try {
     const result = await productManagementApi.listComboTree({
       keyword: filters.keyword,
+      display_scope: filters.display_scope,
       issue_scope: filters.issue_scope,
       image_source: filters.image_source,
       cost_status: filters.cost_status,
@@ -764,6 +767,7 @@ function directPreviewURL(raw?: string): string {
   const value = String(raw ?? '').trim()
   if (!value) return ''
   if (/^(https?:|data:|blob:)/i.test(value)) return value
+  if (/^\/v1\/assets\/\d+\/preview\b/i.test(value)) return value
   return ''
 }
 
