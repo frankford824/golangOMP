@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +36,7 @@ func TestBroadcastToAllActiveUsers(t *testing.T) {
 	if len(notifications.created) != 2 {
 		t.Fatalf("created %d notifications, want 2", len(notifications.created))
 	}
+	var broadcastID string
 	for _, n := range notifications.created {
 		if n.NotificationType != domain.NotificationTypeSystemBroadcast {
 			t.Fatalf("notification type = %q, want system_broadcast", n.NotificationType)
@@ -44,6 +47,15 @@ func TestBroadcastToAllActiveUsers(t *testing.T) {
 		}
 		if payload["title"] != "系统通知" || payload["content"] != "今天 18:00 前完成处理" {
 			t.Fatalf("unexpected payload: %#v", payload)
+		}
+		currentBroadcastID := strings.TrimSpace(fmt.Sprint(payload["broadcast_id"]))
+		if currentBroadcastID == "" {
+			t.Fatalf("payload missing broadcast_id: %#v", payload)
+		}
+		if broadcastID == "" {
+			broadcastID = currentBroadcastID
+		} else if currentBroadcastID != broadcastID {
+			t.Fatalf("broadcast_id = %q, want %q", currentBroadcastID, broadcastID)
 		}
 	}
 }

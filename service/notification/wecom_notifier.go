@@ -65,6 +65,9 @@ func (n *WeComNotifier) Notify(ctx context.Context, notification domain.Notifica
 
 func (n *WeComNotifier) format(ctx context.Context, notification domain.Notification) (string, string, bool) {
 	p := payloadMap(notification.Payload)
+	if notification.NotificationType == domain.NotificationTypeSystemBroadcast {
+		return n.formatSystemBroadcast(ctx, p)
+	}
 	taskID := payloadInt64(p, "task_id")
 	if taskID <= 0 {
 		return "", "", false
@@ -89,6 +92,30 @@ func (n *WeComNotifier) format(ctx context.Context, notification domain.Notifica
 	default:
 		return "", "", false
 	}
+}
+
+func (n *WeComNotifier) formatSystemBroadcast(ctx context.Context, p map[string]interface{}) (string, string, bool) {
+	title := compactWeComLine(payloadString(p, "title"), 80)
+	content := compactWeComLine(payloadString(p, "content"), 180)
+	if title == "" && content == "" {
+		return "", "", false
+	}
+	if title == "" {
+		title = "系统广播"
+	}
+	if content == "" {
+		content = "请查看通知中心"
+	}
+	sender := firstNonEmpty(payloadString(p, "broadcast_by_name"), n.nameByID(ctx, payloadInt64(p, "broadcast_by")), "系统")
+	audience := weComBroadcastAudienceLabel(payloadString(p, "broadcast_audience"), payloadInt64(p, "broadcast_recipient_count"))
+	message := fmt.Sprintf("系统广播 | %s\n%s\n发送人: %s  接收: %s", title, content, sender, audience)
+	key := firstNonEmpty(payloadString(p, "broadcast_id"), fmt.Sprintf("%s:%s:%s:%d:%d",
+		domain.NotificationTypeSystemBroadcast,
+		title,
+		content,
+		payloadInt64(p, "broadcast_by"),
+		payloadInt64(p, "broadcast_recipient_count")))
+	return message, key, true
 }
 
 func (n *WeComNotifier) shouldSuppress(key string) bool {
@@ -146,6 +173,29 @@ func weComTaskLabel(taskID int64, taskNo string, task *domain.Task) string {
 		return strings.TrimSpace(task.TaskNo)
 	}
 	return fmt.Sprintf("任务ID %d", taskID)
+}
+
+func weComBroadcastAudienceLabel(audience string, count int64) string {
+	label := "指定人员"
+	if strings.EqualFold(strings.TrimSpace(audience), "all") {
+		label = "全员"
+	}
+	if count > 0 {
+		return fmt.Sprintf("%s %d人", label, count)
+	}
+	return label
+}
+
+func compactWeComLine(value string, limit int) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if limit <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "..."
 }
 
 func firstNonEmpty(values ...string) string {

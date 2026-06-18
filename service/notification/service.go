@@ -139,6 +139,7 @@ func (s *Service) Broadcast(ctx context.Context, actor domain.RequestActor, para
 		audience = BroadcastAudienceUsers
 	}
 	payload := mustRaw(map[string]interface{}{
+		"broadcast_id":              fmt.Sprintf("broadcast_%d_%d", actor.ID, s.now().UTC().UnixNano()),
 		"title":                     title,
 		"content":                   content,
 		"broadcast_by":              actor.ID,
