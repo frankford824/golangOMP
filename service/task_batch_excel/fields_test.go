@@ -196,6 +196,73 @@ func TestParseExcelAssignsReferenceImageByVisualCenterRow(t *testing.T) {
 	}
 }
 
+func TestParseExcelValidationUsesActualSourceRows(t *testing.T) {
+	content := testWorkbookRowsAt(t, domain.TaskTypeNewProductDevelopment, map[int]map[string]string{
+		2: validRowValues(domain.TaskTypeNewProductDevelopment, 1),
+		4: func() map[string]string {
+			values := validRowValues(domain.TaskTypeNewProductDevelopment, 2)
+			values["product_name"] = ""
+			return values
+		}(),
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Preview) != 2 {
+		t.Fatalf("preview len = %d, want 2", len(result.Preview))
+	}
+	if result.Preview[1].SourceRow != 4 {
+		t.Fatalf("second preview source_row = %d, want 4", result.Preview[1].SourceRow)
+	}
+	if len(result.Violations) == 0 || result.Violations[0].Row != 4 {
+		t.Fatalf("violations = %+v, want first violation on Excel row 4", result.Violations)
+	}
+}
+
+func TestParseExcelDuplicateUsesActualSourceRows(t *testing.T) {
+	duplicated := validRowValues(domain.TaskTypeNewProductDevelopment, 1)
+	content := testWorkbookRowsAt(t, domain.TaskTypeNewProductDevelopment, map[int]map[string]string{
+		2: duplicated,
+		4: duplicated,
+	})
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) == 0 {
+		t.Fatalf("violations = %+v, want duplicate violation", result.Violations)
+	}
+	got := result.Violations[0]
+	if got.Code != "duplicate_batch_item" || got.Row != 4 || !strings.Contains(got.Message, "第 4 行与第 2 行") {
+		t.Fatalf("duplicate violation = %+v, want actual Excel rows 4 and 2", got)
+	}
+}
+
+func TestParseExcelImageOnlyRowReportsBusinessHint(t *testing.T) {
+	content := testWorkbookWithImageOnlyRow(t)
+	result, appErr := NewParseService().Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Preview) != 2 {
+		t.Fatalf("preview len = %d, want valid row plus image-only row", len(result.Preview))
+	}
+	if result.Preview[1].SourceRow != 3 {
+		t.Fatalf("image-only preview source_row = %d, want 3", result.Preview[1].SourceRow)
+	}
+	if len(result.Violations) != 1 {
+		t.Fatalf("violations = %+v, want one coalesced image-only violation", result.Violations)
+	}
+	got := result.Violations[0]
+	if got.Row != 3 || got.Column != "产品信息" || got.Code != "image_only_row_missing_required" {
+		t.Fatalf("image-only violation = %+v, want product info hint on row 3", got)
+	}
+	if !strings.Contains(got.Message, "只检测到参考图") {
+		t.Fatalf("image-only message = %q, want business hint", got.Message)
+	}
+}
+
 func TestParseExcelRejectsInvalidIIDBeforeUploadingImages(t *testing.T) {
 	content := testWorkbookWithImage(t, "BAD-IID")
 	uploader := &parseReferenceUploaderStub{}
@@ -358,6 +425,29 @@ func testWorkbookRows(t *testing.T, taskType domain.TaskType, rowValues []map[st
 	return buf.Bytes()
 }
 
+func testWorkbookRowsAt(t *testing.T, taskType domain.TaskType, rowValuesByExcelRow map[int]map[string]string) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(taskType)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+	for i, field := range fields {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(itemsSheet, cell, field.Column)
+	}
+	for row, values := range rowValuesByExcelRow {
+		for i, field := range fields {
+			cell, _ := excelize.CoordinatesToCellName(i+1, row)
+			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
 func testWorkbookWithImage(t *testing.T, iid string) []byte {
 	t.Helper()
 	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
@@ -416,6 +506,34 @@ func testWorkbookWithImageCenteredInNextRow(t *testing.T) []byte {
 		Format: &excelize.GraphicOptions{
 			OffsetY: 12,
 		},
+	}); err != nil {
+		t.Fatalf("AddPictureFromBytes: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func testWorkbookWithImageOnlyRow(t *testing.T) []byte {
+	t.Helper()
+	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetSheetName(f.GetSheetName(0), itemsSheet)
+	for i, field := range fields {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(itemsSheet, cell, field.Column)
+	}
+	values := validRowValues(domain.TaskTypeNewProductDevelopment, 1)
+	for i, field := range fields {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
+		_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
+	}
+	if err := f.AddPictureFromBytes(itemsSheet, "D3", &excelize.Picture{
+		Extension: ".png",
+		File:      tinyPNG(),
 	}); err != nil {
 		t.Fatalf("AddPictureFromBytes: %v", err)
 	}

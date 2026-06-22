@@ -52,6 +52,7 @@ func WithIIDLookup(lookup ERPIIDLookup) ParseOption {
 }
 
 type BatchItem struct {
+	SourceRow         int                       `json:"source_row,omitempty"`
 	ProductName       string                    `json:"product_name"`
 	ProductShortName  string                    `json:"product_short_name,omitempty"`
 	CategoryCode      string                    `json:"category_code"`

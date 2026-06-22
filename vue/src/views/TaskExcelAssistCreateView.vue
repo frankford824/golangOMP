@@ -78,9 +78,9 @@
                   <tr
                     v-for="(row, idx) in previewRows"
                     :key="`preview-npd-${idx}`"
-                    :class="{ 'has-error': previewRowErrors(idx + 1).length > 0 }"
+                    :class="{ 'has-error': previewRowErrors(previewRowExcelNumber(row, idx)).length > 0 }"
                   >
-                    <td>{{ idx + 1 }}</td>
+                    <td>{{ previewRowExcelNumber(row, idx) }}</td>
                     <td>{{ row.product_name || '—' }}</td>
                     <td class="cell-ellipsis">{{ row.design_requirement || '—' }}</td>
                     <td>{{ row.product_i_id || '—' }}</td>
@@ -150,13 +150,13 @@
                     </td>
                     <td>
                       <span
-                        v-for="err in previewRowErrors(idx + 1)"
-                        :key="`${err.column}-${err.code}`"
+                        v-for="err in previewRowErrors(previewRowExcelNumber(row, idx))"
+                        :key="`${err.row}-${err.column}-${err.code}`"
                         class="err-tag"
                       >
                         {{ formatBatchViolationMessage(err) }}
                       </span>
-                      <span v-if="previewRowErrors(idx + 1).length === 0">—</span>
+                      <span v-if="previewRowErrors(previewRowExcelNumber(row, idx)).length === 0">—</span>
                     </td>
                   </tr>
                 </tbody>
@@ -669,6 +669,10 @@ function onOriginalExcelReset() {
 
 function previewRowErrors(row: number): BatchViolation[] {
   return violations.value.filter((v) => v.row === row)
+}
+
+function previewRowExcelNumber(row: BatchPreviewRow, index: number): number {
+  return row.source_row && row.source_row > 0 ? row.source_row : index + 2
 }
 
 function isImageMime(mimeType: string): boolean {

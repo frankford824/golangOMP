@@ -645,6 +645,13 @@ func computeTaskBatchItemDedupeKey(taskType domain.TaskType, item CreateTaskBatc
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// ComputeTaskBatchItemDedupeKeyForExcelDiagnostics mirrors the batch-create
+// duplicate rule so Excel parsing can rewrite validation messages with real
+// worksheet row numbers without changing the shared create validator contract.
+func ComputeTaskBatchItemDedupeKeyForExcelDiagnostics(taskType domain.TaskType, item CreateTaskBatchSKUItemParams) (string, *domain.AppError) {
+	return computeTaskBatchItemDedupeKey(taskType, item)
+}
+
 func normalizeVariantJSONForTaskBatchItem(raw json.RawMessage) (json.RawMessage, *domain.AppError) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {

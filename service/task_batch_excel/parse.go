@@ -89,7 +89,9 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 		}
 		item, parseViolations := parseItemRow(row, fields, columnIndex)
 		items = append(items, item)
-		preview = append(preview, batchItemFromService(item))
+		previewItem := batchItemFromService(item)
+		previewItem.SourceRow = rowNumber
+		preview = append(preview, previewItem)
 		itemRows = append(itemRows, rowNumber)
 		if len(parseViolations) > 0 {
 			parseViolations = parseViolationsForRow(rowIdx+1, parseViolations)
@@ -113,7 +115,7 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 		return &BatchParseResult{
 			TaskType:   taskType,
 			Preview:    preview,
-			Violations: mapValidationViolations(appErr, fields),
+			Violations: mapValidationViolations(appErr, taskType, fields, items, itemRows, imagesByRow),
 		}, nil
 	}
 	if appErr := s.uploadEmbeddedReferenceImages(ctx, imagesByRow, options, items, preview, itemRows); appErr != nil {
@@ -502,21 +504,42 @@ func mimeTypeForPicture(extension string, file []byte) string {
 	}
 }
 
-func mapValidationViolations(appErr *domain.AppError, fields []FieldSpec) []ParseViolation {
+func mapValidationViolations(appErr *domain.AppError, taskType domain.TaskType, fields []FieldSpec, items []service.CreateTaskBatchSKUItemParams, itemRows []int, imagesByRow map[int][]embeddedReferenceImage) []ParseViolation {
 	rawViolations := extractViolations(appErr.Details)
 	out := make([]ParseViolation, 0, len(rawViolations))
 	byKey := fieldByKey(fields)
+	imageOnlyRequiredRows := map[int]bool{}
 	for _, raw := range rawViolations {
 		fieldPath, _ := raw["field"].(string)
 		code, _ := raw["code"].(string)
 		message, _ := raw["message"].(string)
-		row, key := rowAndKeyFromFieldPath(fieldPath)
+		idx, key := rowIndexAndKeyFromFieldPath(fieldPath)
+		row := sourceRowForItemIndex(idx, itemRows)
 		if key == "sku_code" {
 			key = skuColumnKey(fields)
 		}
 		column := ""
 		if field, ok := byKey[key]; ok {
 			column = field.Column
+		}
+		if code == "missing_required_field" && isImageOnlyBatchItem(idx, items, itemRows, imagesByRow) && (key == "product_name" || key == "design_requirement") {
+			if imageOnlyRequiredRows[row] {
+				continue
+			}
+			imageOnlyRequiredRows[row] = true
+			out = append(out, ParseViolation{
+				Row:     row,
+				Column:  "产品信息",
+				Code:    "image_only_row_missing_required",
+				Message: "该行只检测到参考图，没有读取到产品名称和设计要求；请把图片放到对应产品行，或补齐该行必填文字后重新上传",
+			})
+			continue
+		}
+		if code == "duplicate_batch_item" && isImageOnlyBatchItem(idx, items, itemRows, imagesByRow) {
+			continue
+		}
+		if code == "duplicate_batch_item" {
+			message = duplicateBatchItemMessage(taskType, idx, items, itemRows, message)
 		}
 		out = append(out, ParseViolation{
 			Row:     row,
@@ -562,13 +585,23 @@ func extractViolations(details interface{}) []map[string]interface{} {
 	}
 }
 
-func rowAndKeyFromFieldPath(fieldPath string) (int, string) {
+func rowIndexAndKeyFromFieldPath(fieldPath string) (int, string) {
 	matches := batchFieldPathRE.FindStringSubmatch(fieldPath)
 	if len(matches) == 0 {
-		return 0, fieldPath
+		return -1, fieldPath
 	}
 	idx, _ := strconv.Atoi(matches[1])
-	return idx + 2, matches[2]
+	return idx, matches[2]
+}
+
+func sourceRowForItemIndex(idx int, itemRows []int) int {
+	if idx >= 0 && idx < len(itemRows) && itemRows[idx] > 0 {
+		return itemRows[idx]
+	}
+	if idx >= 0 {
+		return idx + 2
+	}
+	return 0
 }
 
 func rowIsEmpty(row []string) bool {
@@ -578,6 +611,46 @@ func rowIsEmpty(row []string) bool {
 		}
 	}
 	return true
+}
+
+func isImageOnlyBatchItem(idx int, items []service.CreateTaskBatchSKUItemParams, itemRows []int, imagesByRow map[int][]embeddedReferenceImage) bool {
+	if idx < 0 || idx >= len(items) {
+		return false
+	}
+	row := sourceRowForItemIndex(idx, itemRows)
+	if row <= 0 || len(imagesByRow[row]) == 0 {
+		return false
+	}
+	item := items[idx]
+	return strings.TrimSpace(item.ProductName) == "" &&
+		strings.TrimSpace(item.ProductShortName) == "" &&
+		strings.TrimSpace(item.CategoryCode) == "" &&
+		strings.TrimSpace(item.ProductIID) == "" &&
+		strings.TrimSpace(item.MaterialMode) == "" &&
+		strings.TrimSpace(item.DesignRequirement) == "" &&
+		strings.TrimSpace(item.NewSKU) == "" &&
+		strings.TrimSpace(item.PurchaseSKU) == "" &&
+		strings.TrimSpace(item.CostPriceMode) == "" &&
+		item.Quantity == nil &&
+		item.BaseSalePrice == nil &&
+		len(bytes.TrimSpace(item.VariantJSON)) == 0
+}
+
+func duplicateBatchItemMessage(taskType domain.TaskType, idx int, items []service.CreateTaskBatchSKUItemParams, itemRows []int, fallback string) string {
+	if idx <= 0 || idx >= len(items) {
+		return fallback
+	}
+	key, appErr := service.ComputeTaskBatchItemDedupeKeyForExcelDiagnostics(taskType, items[idx])
+	if appErr != nil || key == "" {
+		return fallback
+	}
+	for prev := 0; prev < idx; prev++ {
+		prevKey, prevErr := service.ComputeTaskBatchItemDedupeKeyForExcelDiagnostics(taskType, items[prev])
+		if prevErr == nil && prevKey == key {
+			return fmt.Sprintf("第 %d 行与第 %d 行内容重复，请删除重复行或调整产品信息/设计要求", sourceRowForItemIndex(idx, itemRows), sourceRowForItemIndex(prev, itemRows))
+		}
+	}
+	return fallback
 }
 
 func batchItemFromService(item service.CreateTaskBatchSKUItemParams) BatchItem {

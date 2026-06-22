@@ -11,6 +11,7 @@ export interface ReferenceFileRef {
 }
 
 export interface BatchPreviewRow {
+  source_row?: number
   product_name?: string
   design_requirement?: string
   product_i_id?: string
@@ -40,6 +41,9 @@ export interface BatchSkuParseResult {
 export function formatBatchViolationMessage(err: BatchViolation): string {
   const column = err.column?.trim()
   const fallback = err.message || err.code || '请检查这一行'
+  if (err.code === 'image_only_row_missing_required') {
+    return err.message || '该行只有参考图，缺少产品名称和设计要求'
+  }
   if (err.code === 'duplicate_batch_item') {
     return err.message || '这一行和前面某一行内容重复，请删除重复行或修改产品信息/设计要求'
   }
@@ -94,6 +98,7 @@ export function normalizeBatchPreviewRow(row: unknown): BatchPreviewRow {
   const category_code = pickStr('category_code', 'categoryCode')
   const cost_price_mode = pickStr('cost_price_mode', 'costPriceMode')
   const quantity = pickNum('quantity')
+  const source_row = pickNum('source_row', 'sourceRow')
   const base_sale_price = pickNum('base_sale_price', 'baseSalePrice')
   const cost_price = pickNum('cost_price', 'costPrice', 'costPriceAmount')
   const purchase_sku = pickStr('purchase_sku', 'purchaseSku')
@@ -114,6 +119,7 @@ export function normalizeBatchPreviewRow(row: unknown): BatchPreviewRow {
   }
 
   return {
+    ...(source_row !== undefined ? { source_row } : {}),
     product_name: pickStr('product_name', 'productName') ?? r.product_name,
     design_requirement: pickStr('design_requirement', 'designRequirement') ?? r.design_requirement,
     ...(product_i_id !== undefined ? { product_i_id } : {}),
