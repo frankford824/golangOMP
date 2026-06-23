@@ -151,6 +151,7 @@
             'task-card--selected': selectedIds.has(task.id),
             'task-card--overdue': isOverdue(task),
             'task-card--claimable': canClaimTask(task),
+            'task-card--customization': isCustomizationTask(task),
           }"
           @click="goDetail(task)"
         >
@@ -858,10 +859,13 @@ function isOverdue(task: Task): boolean {
   return checkOverdue(task.dueAt, isDoneStatus(task))
 }
 
+function isCustomizationTask(task: Task): boolean {
+  const lane = String(task.workflowLane ?? '').trim().toLowerCase()
+  return task.customizationRequired === true || lane === 'customization'
+}
+
 function taskCategoryLabel(task: Task): string {
-  return task.customizationRequired === true || task.workflowLane === 'customization'
-    ? '定制任务'
-    : '常规任务'
+  return isCustomizationTask(task) ? '定制任务' : '常规任务'
 }
 
 /**
@@ -872,8 +876,7 @@ function shouldShowWorkflowLaneTagOnCard(task: Task): boolean {
   const lane = String(task.workflowLane ?? '').trim().toLowerCase()
   if (lane !== 'normal' && lane !== 'customization') return false
 
-  const categoryIsCustomization =
-    task.customizationRequired === true || task.workflowLane === 'customization'
+  const categoryIsCustomization = isCustomizationTask(task)
 
   if (categoryIsCustomization && lane === 'customization') return false
   if (!categoryIsCustomization && lane === 'normal') return false
@@ -881,7 +884,7 @@ function shouldShowWorkflowLaneTagOnCard(task: Task): boolean {
 }
 
 function taskCategoryClass(task: Task): string {
-  return task.customizationRequired === true || task.workflowLane === 'customization'
+  return isCustomizationTask(task)
     ? 'task-category-pill-custom'
     : 'task-category-pill-normal'
 }
@@ -2164,7 +2167,7 @@ watch(totalPages, (value) => {
   display: inline-flex !important;
   height: 1.25rem;
   align-items: center;
-  border-color: #e5e7eb !important;
+  border: 1px solid #e5e7eb !important;
   border-radius: 999px;
   padding: 0 0.45rem !important;
   background: #f3f4f6 !important;
@@ -2186,11 +2189,17 @@ watch(totalPages, (value) => {
   color: #374151 !important;
 }
 
-.task-category-pill-custom,
-.card-tags :deep(.badge-new),
-.card-tags :deep(.is-customization) {
+.card-tags :deep(.badge-new) {
   border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
   color: #15803d !important;
+}
+
+.task-category-pill-custom,
+.card-tags :deep(.is-customization) {
+  border-color: #fcd34d !important;
+  background: #fffbeb !important;
+  color: #92400e !important;
 }
 
 .card-status-row {
@@ -2571,6 +2580,42 @@ watch(totalPages, (value) => {
 .task-card:hover,
 .task-card--selected {
   background: #ffffff !important;
+}
+
+.task-card--customization {
+  border-color: #fde68a !important;
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.96) 0%, rgba(255, 255, 255, 0.98) 58%, #ffffff 100%) !important;
+}
+
+.task-card--customization::before {
+  background: #d97706;
+  opacity: 1;
+}
+
+.task-card--customization:hover {
+  border-color: #fcd34d !important;
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.98) 0%, rgba(255, 255, 255, 0.99) 58%, #ffffff 100%) !important;
+}
+
+.task-card--customization.task-card--selected {
+  border-color: #93c5fd !important;
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.95) 0%, rgba(239, 246, 255, 0.96) 64%, #ffffff 100%) !important;
+}
+
+.task-card--customization.task-card--selected::before,
+.task-card--customization.task-card--claimable:not(.task-card--overdue)::before {
+  background: #d97706;
+}
+
+.task-card--customization.task-card--overdue {
+  border-color: #f59e0b !important;
+}
+
+.task-card--customization.task-card--overdue::before {
+  background: #f59e0b;
 }
 
 .card-no {
