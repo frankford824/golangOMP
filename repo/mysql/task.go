@@ -720,6 +720,7 @@ func (r *taskRepo) UpdateSKUItemBusinessInfo(ctx context.Context, tx repo.Tx, it
 	_, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_sku_items
 		SET product_name_snapshot = ?,
+		    product_short_name = ?,
 		    design_requirement = ?,
 		    variant_json = ?,
 		    reference_file_refs_json = ?,
@@ -728,6 +729,7 @@ func (r *taskRepo) UpdateSKUItemBusinessInfo(ctx context.Context, tx repo.Tx, it
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND task_id = ?`,
 		item.ProductNameSnapshot,
+		item.ProductShortName,
 		item.DesignRequirement,
 		toNullJSONString(item.VariantJSON),
 		marshalReferenceFileRefs(item.ReferenceFileRefs),
@@ -767,6 +769,7 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 		    product_selection_snapshot_json = ?,
 		    change_request = ?,
 		    design_requirement = ?,
+		    product_short_name = ?,
 		    note = ?,
 		    reference_file_refs_json = ?,
 		    reference_link = ?,
@@ -820,6 +823,7 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 		detail.ProductSelectionSnapshotJSON,
 		detail.ChangeRequest,
 		detail.DesignRequirement,
+		detail.ProductShortName,
 		detail.Note,
 		detail.ReferenceFileRefsJSON,
 		detail.ReferenceLink,

@@ -1909,6 +1909,8 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	previousMatchedRuleVersion := cloneIntPtr(detail.MatchedRuleVersion)
 	previousCategoryCode := detail.CategoryCode
 	previousCostRuleSource := detail.CostRuleSource
+	previousProductShortName := detail.ProductShortName
+	previousProductIID := taskBusinessInfoEventProductIID(detail, "")
 
 	bindingChanged := false
 	if p.ProductSelection != nil {
@@ -1953,6 +1955,9 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		task.ProductID = cloneInt64Ptr(productID)
 		task.SKUCode = strings.TrimSpace(skuCode)
 		task.ProductNameSnapshot = strings.TrimSpace(productNameSnapshot)
+		if strings.TrimSpace(task.ProductNameSnapshot) != "" {
+			detail.ProductShortName = strings.TrimSpace(task.ProductNameSnapshot)
+		}
 		applyTaskProductSelection(detail, selection, task)
 	} else {
 		attachTaskProductSelection(detail, task)
@@ -1968,6 +1973,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			})
 		}
 		task.ProductNameSnapshot = productName
+		detail.ProductShortName = productName
 		bindingChanged = true
 	}
 
@@ -2221,6 +2227,9 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		previousCostRuleSource,
 		detail.CostRuleSource,
 	)
+	productBaseChanged := bindingChanged || costChanged ||
+		strings.TrimSpace(previousProductShortName) != strings.TrimSpace(detail.ProductShortName) ||
+		strings.TrimSpace(previousProductIID) != strings.TrimSpace(taskBusinessInfoEventProductIID(detail, p.ProductIID))
 
 	var singleItemCostProjection *domain.TaskSKUItem
 	if task.TaskType == domain.TaskTypeNewProductDevelopment || task.TaskType == domain.TaskTypePurchaseTask {
@@ -2362,6 +2371,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		triggerSource = TaskFilingTriggerSourceLegacyFiledAt
 		forceTrigger = true
 	}
+	baseSyncQueuedByFiling := false
 	if shouldAutoTriggerFiling(task, triggerSource) || forceTrigger {
 		_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
 			TaskID:     p.TaskID,
@@ -2375,7 +2385,12 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				return nil, filingErr
 			}
 			log.Printf("task_business_info_auto_filing_failed task_id=%d source=%s err=%s", p.TaskID, triggerSource, filingErr.Message)
+		} else {
+			baseSyncQueuedByFiling = true
 		}
+	}
+	if productBaseChanged && !baseSyncQueuedByFiling {
+		s.queueProductManagementBaseSyncAfterBusinessEdit(ctx, p.TaskID, "business_info")
 	}
 
 	updated, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
@@ -2388,6 +2403,27 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		updated.DesignRequirement = strings.TrimSpace(updated.ChangeRequest)
 	}
 	return updated, nil
+}
+
+func (s *taskService) queueProductManagementBaseSyncAfterBusinessEdit(ctx context.Context, taskID int64, reason string) {
+	if s == nil || taskID <= 0 || s.productManagementCloseSyncer == nil {
+		return
+	}
+	queuer, ok := s.productManagementCloseSyncer.(ProductManagementBaseSyncQueuer)
+	if !ok {
+		if appErr := s.productManagementCloseSyncer.RefreshReadModelNow(ctx); appErr != nil {
+			log.Printf("product_management_read_model_refresh_after_business_edit_failed task_id=%d reason=%s err=%s", taskID, reason, appErr.Message)
+		}
+		return
+	}
+	queued, appErr := queuer.QueuePendingBaseSyncForTask(ctx, taskID)
+	if appErr != nil {
+		log.Printf("product_management_base_sync_queue_after_business_edit_failed task_id=%d reason=%s err=%s", taskID, reason, appErr.Message)
+		return
+	}
+	if queued > 0 {
+		log.Printf("product_management_base_sync_queued_after_business_edit task_id=%d reason=%s queued=%d", taskID, reason, queued)
+	}
 }
 
 func taskBusinessInfoEventProductIID(detail *domain.TaskDetail, requested string) string {
@@ -2524,6 +2560,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 			})
 		}
 		item.ProductNameSnapshot = productName
+		item.ProductShortName = productName
 	}
 	productIIDChanged := false
 	if p.ProductIID != nil {
@@ -2582,6 +2619,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	if txErr != nil {
 		return nil, infraError("update sku item info tx", txErr)
 	}
+	productNameChanged := strings.TrimSpace(previousProductName) != strings.TrimSpace(item.ProductNameSnapshot)
 	if p.TriggerFiling || productIIDChanged {
 		_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
 			TaskID:           p.TaskID,
@@ -2594,6 +2632,9 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		if filingErr != nil {
 			return nil, filingErr
 		}
+	}
+	if productNameChanged || productIIDChanged {
+		s.queueProductManagementBaseSyncAfterBusinessEdit(ctx, p.TaskID, "sku_item_info")
 	}
 	updatedItems, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
 	if err != nil {

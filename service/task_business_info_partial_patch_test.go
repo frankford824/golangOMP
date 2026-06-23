@@ -263,3 +263,144 @@ func TestUpdateBusinessInfoRejectsInvalidPriority(t *testing.T) {
 		t.Fatalf("error message = %q, want task_priority_invalid", appErr.Message)
 	}
 }
+
+func TestUpdateBusinessInfoProductNameUpdatesShortNameAndQueuesProductManagementSync(t *testing.T) {
+	const taskID int64 = 9110
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			taskID: {
+				ID:                  taskID,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "CGO_TEST_001",
+				ProductNameSnapshot: "旧商品名称",
+				TaskStatus:          domain.TaskStatusPendingAssign,
+				Priority:            domain.TaskPriorityNormal,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			taskID: {
+				TaskID:           taskID,
+				CategoryCode:     "BOGUS_CAT",
+				ProductShortName: "旧商品名称",
+			},
+		},
+	}
+	productManagement := &productManagementQueueStub{}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithTaskProductManagementCloseSyncer(productManagement),
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:      taskID,
+		OperatorID:  1,
+		ProductName: "新商品名称",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.tasks[taskID].ProductNameSnapshot != "新商品名称" {
+		t.Fatalf("ProductNameSnapshot = %q, want 新商品名称", taskRepo.tasks[taskID].ProductNameSnapshot)
+	}
+	if detail.ProductShortName != "新商品名称" {
+		t.Fatalf("ProductShortName = %q, want 新商品名称", detail.ProductShortName)
+	}
+	if got := productManagement.queuedTasks; len(got) != 1 || got[0] != taskID {
+		t.Fatalf("queued product management tasks = %+v, want [%d]", got, taskID)
+	}
+}
+
+func TestUpdateSKUItemInfoProductNameUpdatesShortNameAndQueuesProductManagementSync(t *testing.T) {
+	const taskID int64 = 9111
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			taskID: {
+				ID:                  taskID,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "CGO_PARENT",
+				ProductNameSnapshot: "批量母任务",
+				TaskStatus:          domain.TaskStatusPendingAssign,
+				Priority:            domain.TaskPriorityNormal,
+				IsBatchTask:         true,
+				BatchItemCount:      1,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			taskID: {TaskID: taskID, CategoryCode: "BOGUS_CAT"},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			taskID: {
+				{
+					ID:                  17,
+					TaskID:              taskID,
+					SequenceNo:          1,
+					SKUCode:             "CGO_TEST_017",
+					ProductNameSnapshot: "旧子项名称",
+					ProductShortName:    "旧子项名称",
+				},
+			},
+		},
+	}
+	productManagement := &productManagementQueueStub{}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithTaskProductManagementCloseSyncer(productManagement),
+	)
+
+	name := "新子项名称"
+	item, appErr := svc.UpdateSKUItemInfo(context.Background(), UpdateTaskSKUItemInfoParams{
+		TaskID:      taskID,
+		SKUItemID:   17,
+		OperatorID:  1,
+		ProductName: &name,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateSKUItemInfo() unexpected error: %+v", appErr)
+	}
+	if item.ProductNameSnapshot != "新子项名称" {
+		t.Fatalf("ProductNameSnapshot = %q, want 新子项名称", item.ProductNameSnapshot)
+	}
+	if item.ProductShortName != "新子项名称" {
+		t.Fatalf("ProductShortName = %q, want 新子项名称", item.ProductShortName)
+	}
+	if got := productManagement.queuedTasks; len(got) != 1 || got[0] != taskID {
+		t.Fatalf("queued product management tasks = %+v, want [%d]", got, taskID)
+	}
+}
+
+type productManagementQueueStub struct {
+	queuedTasks  []int64
+	refreshCalls int
+}
+
+func (s *productManagementQueueStub) AutoSyncImagesAfterTaskClosed(context.Context, int64, int64) *domain.AppError {
+	return nil
+}
+
+func (s *productManagementQueueStub) RefreshReadModelNow(context.Context) *domain.AppError {
+	s.refreshCalls++
+	return nil
+}
+
+func (s *productManagementQueueStub) QueuePendingBaseSyncForTask(_ context.Context, taskID int64) (int, *domain.AppError) {
+	s.queuedTasks = append(s.queuedTasks, taskID)
+	return 1, nil
+}
