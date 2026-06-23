@@ -176,6 +176,7 @@ type ProductManagementRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error)
 	GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, error)
 	ClaimQueuedSyncRecords(ctx context.Context, limit int, claimToken string, now time.Time) ([]*domain.ProductManagementRecord, error)
+	QueuePendingBaseSyncByTaskID(ctx context.Context, tx Tx, taskID int64, now time.Time, cooldownUntil time.Time) (int64, error)
 	UpdateImage(ctx context.Context, tx Tx, id int64, patch ProductManagementImagePatch) error
 	UpdateSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
 	UpdateBaseSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error

@@ -175,6 +175,10 @@ func (f *productManagementRecordRepoFake) ClaimQueuedSyncRecords(context.Context
 	return nil, nil
 }
 
+func (f *productManagementRecordRepoFake) QueuePendingBaseSyncByTaskID(context.Context, repo.Tx, int64, time.Time, time.Time) (int64, error) {
+	return 0, nil
+}
+
 func (f *productManagementRecordRepoFake) UpdateImage(context.Context, repo.Tx, int64, repo.ProductManagementImagePatch) error {
 	return nil
 }

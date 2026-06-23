@@ -303,6 +303,10 @@ type ProductManagementCloseSyncer interface {
 	RefreshReadModelNow(ctx context.Context) *domain.AppError
 }
 
+type ProductManagementBaseSyncQueuer interface {
+	QueuePendingBaseSyncForTask(ctx context.Context, taskID int64) (int, *domain.AppError)
+}
+
 type taskService struct {
 	taskRepo                     repo.TaskRepo
 	procurementRepo              repo.ProcurementRepo

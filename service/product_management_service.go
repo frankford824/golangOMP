@@ -26,6 +26,7 @@ type ProductManagementService interface {
 	RequestImageSync(ctx context.Context, actor domain.RequestActor, recordID int64, force bool) (*domain.ProductManagementRecord, *domain.AppError)
 	AutoSyncImagesAfterTaskClosed(ctx context.Context, taskID int64, actorID int64) *domain.AppError
 	RefreshReadModelNow(ctx context.Context) *domain.AppError
+	QueuePendingBaseSyncForTask(ctx context.Context, taskID int64) (int, *domain.AppError)
 	ProcessQueuedERPSync(ctx context.Context, limit int) (int, *domain.AppError)
 }
 
@@ -498,6 +499,29 @@ func (s *productManagementService) RefreshReadModelNow(ctx context.Context) *dom
 	}
 	s.lastRefresh = s.now()
 	return nil
+}
+
+func (s *productManagementService) QueuePendingBaseSyncForTask(ctx context.Context, taskID int64) (int, *domain.AppError) {
+	if taskID <= 0 {
+		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_id is required", nil)
+	}
+	if appErr := s.RefreshReadModelNow(ctx); appErr != nil {
+		return 0, appErr
+	}
+	now := s.now()
+	cooldownUntil := now.Add(5 * time.Minute)
+	var queued int64
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		count, err := s.records.QueuePendingBaseSyncByTaskID(ctx, tx, taskID, now, cooldownUntil)
+		if err != nil {
+			return err
+		}
+		queued = count
+		return nil
+	}); err != nil {
+		return 0, infraAppError("queue product management base sync for task", err)
+	}
+	return int(queued), nil
 }
 
 func (s *productManagementService) syncRecordToERP(ctx context.Context, record *domain.ProductManagementRecord) *domain.AppError {

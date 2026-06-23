@@ -1232,10 +1232,18 @@ func TestRetryFilingRefreshesProductManagementProjection(t *testing.T) {
 	if productManagement.refreshCalls != 1 {
 		t.Fatalf("product management refresh calls = %d, want 1", productManagement.refreshCalls)
 	}
+	if productManagement.baseQueueCalls != 1 {
+		t.Fatalf("product management base queue calls = %d, want 1", productManagement.baseQueueCalls)
+	}
+	if productManagement.baseQueueTaskID != 976 {
+		t.Fatalf("product management base queue task id = %d, want 976", productManagement.baseQueueTaskID)
+	}
 }
 
 type productManagementCloseSyncerStub struct {
-	refreshCalls int
+	refreshCalls    int
+	baseQueueCalls  int
+	baseQueueTaskID int64
 }
 
 func (s *productManagementCloseSyncerStub) AutoSyncImagesAfterTaskClosed(context.Context, int64, int64) *domain.AppError {
@@ -1245,6 +1253,13 @@ func (s *productManagementCloseSyncerStub) AutoSyncImagesAfterTaskClosed(context
 func (s *productManagementCloseSyncerStub) RefreshReadModelNow(context.Context) *domain.AppError {
 	s.refreshCalls++
 	return nil
+}
+
+func (s *productManagementCloseSyncerStub) QueuePendingBaseSyncForTask(_ context.Context, taskID int64) (int, *domain.AppError) {
+	s.refreshCalls++
+	s.baseQueueCalls++
+	s.baseQueueTaskID = taskID
+	return 1, nil
 }
 
 func TestRetryFilingBatchMultiSKUReportsSKUScopedIIDMissing(t *testing.T) {

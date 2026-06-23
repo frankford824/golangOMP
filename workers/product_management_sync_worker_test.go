@@ -99,6 +99,10 @@ func (productManagementServiceStub) RefreshReadModelNow(context.Context) *domain
 	return nil
 }
 
+func (productManagementServiceStub) QueuePendingBaseSyncForTask(context.Context, int64) (int, *domain.AppError) {
+	return 0, nil
+}
+
 func (productManagementServiceStub) ProcessQueuedERPSync(context.Context, int) (int, *domain.AppError) {
 	return 0, nil
 }

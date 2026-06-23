@@ -827,6 +827,17 @@ func (s *taskService) refreshProductManagementReadModelAfterFiling(ctx context.C
 	if s == nil || task == nil || s.productManagementCloseSyncer == nil {
 		return
 	}
+	if queuer, ok := s.productManagementCloseSyncer.(ProductManagementBaseSyncQueuer); ok {
+		queued, appErr := queuer.QueuePendingBaseSyncForTask(ctx, task.ID)
+		if appErr != nil {
+			log.Printf("product_management_base_sync_queue_after_filing_failed task_id=%d err=%s", task.ID, appErr.Message)
+			return
+		}
+		if queued > 0 {
+			log.Printf("product_management_base_sync_queued_after_filing task_id=%d queued=%d", task.ID, queued)
+		}
+		return
+	}
 	if appErr := s.productManagementCloseSyncer.RefreshReadModelNow(ctx); appErr != nil {
 		log.Printf("product_management_read_model_refresh_after_filing_failed task_id=%d err=%s", task.ID, appErr.Message)
 	}

@@ -399,6 +399,41 @@ func (r *productManagementRepo) ClaimQueuedSyncRecords(ctx context.Context, limi
 	return items, nil
 }
 
+func (r *productManagementRepo) QueuePendingBaseSyncByTaskID(ctx context.Context, tx repo.Tx, taskID int64, now time.Time, cooldownUntil time.Time) (int64, error) {
+	if taskID <= 0 {
+		return 0, nil
+	}
+	sqlTx := Unwrap(tx)
+	result, err := sqlTx.ExecContext(ctx, `
+		UPDATE erp_product_sync_records
+		   SET erp_sync_status = 'queued',
+		       base_sync_status = 'queued',
+		       last_erp_checked_at = ?,
+		       sync_cooldown_until = ?,
+		       sync_claim_token = '',
+		       last_sync_error = '',
+		       base_sync_error = '',
+		       updated_at = CURRENT_TIMESTAMP
+		 WHERE task_id = ?
+		   AND COALESCE(sku_code, '') <> ''
+		   AND COALESCE(product_name, '') <> ''
+		   AND COALESCE(NULLIF(erp_i_id, ''), NULLIF(product_i_id, ''), NULLIF(product_family, ''), NULLIF(category_name, '')) IS NOT NULL
+		   AND base_sync_status IN ('pending_sync', 'failed')
+		   AND erp_sync_status NOT IN ('queued', 'cooling_down', 'syncing')`,
+		now,
+		cooldownUntil,
+		taskID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("queue product management base sync by task: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read queued product management base sync count: %w", err)
+	}
+	return count, nil
+}
+
 func (r *productManagementRepo) UpdateImage(ctx context.Context, tx repo.Tx, id int64, patch repo.ProductManagementImagePatch) error {
 	sqlTx := Unwrap(tx)
 	imageSyncSource := patch.ImageSyncSource

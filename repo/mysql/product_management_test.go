@@ -116,6 +116,64 @@ func TestProductManagementClaimQueuedSyncRecordsClaimsChildSyncStatuses(t *testi
 	}
 }
 
+func TestProductManagementQueuePendingBaseSyncByTaskIDQueuesOnlyReadyBaseRecords(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		if expectedSQL != "queue-product-management-base-sync" {
+			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
+		}
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		required := []string{
+			"SET erp_sync_status = 'queued'",
+			"base_sync_status = 'queued'",
+			"last_sync_error = ''",
+			"base_sync_error = ''",
+			"WHERE task_id = ?",
+			"COALESCE(sku_code, '') <> ''",
+			"COALESCE(product_name, '') <> ''",
+			"COALESCE(NULLIF(erp_i_id, ''), NULLIF(product_i_id, ''), NULLIF(product_family, ''), NULLIF(category_name, '')) IS NOT NULL",
+			"base_sync_status IN ('pending_sync', 'failed')",
+			"erp_sync_status NOT IN ('queued', 'cooling_down', 'syncing')",
+		}
+		for _, fragment := range required {
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("queue SQL missing %q", fragment)
+			}
+		}
+		if strings.Contains(normalized, "image_sync_status = 'queued'") {
+			return fmt.Errorf("queue SQL must not queue image sync")
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := testProductManagementNow()
+	cooldownUntil := now.Add(5 * time.Minute)
+	mock.ExpectBegin()
+	mock.ExpectExec("queue-product-management-base-sync").
+		WithArgs(now, cooldownUntil, int64(1497)).
+		WillReturnResult(sqlmock.NewResult(0, 11))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	var queued int64
+	if err := mysqlDB.RunInTx(context.Background(), func(tx repo.Tx) error {
+		var err error
+		queued, err = NewProductManagementRepo(mysqlDB).QueuePendingBaseSyncByTaskID(context.Background(), tx, 1497, now, cooldownUntil)
+		return err
+	}); err != nil {
+		t.Fatalf("QueuePendingBaseSyncByTaskID() error = %v", err)
+	}
+	if queued != 11 {
+		t.Fatalf("queued = %d, want 11", queued)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func testProductManagementNow() time.Time {
 	return time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
 }
