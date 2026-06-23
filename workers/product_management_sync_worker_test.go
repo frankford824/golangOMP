@@ -21,6 +21,16 @@ func TestProductManagementSyncWorkerDefaultsAreConservative(t *testing.T) {
 	}
 }
 
+func TestGroupProductManagementWorkerUsesResponsiveBatch(t *testing.T) {
+	worker := NewProductManagementSyncWorker(productManagementServiceStub{}, zap.NewNop(), 15*time.Second, 8)
+	if worker.interval != 15*time.Second {
+		t.Fatalf("interval = %s, want 15s", worker.interval)
+	}
+	if worker.limit != 8 {
+		t.Fatalf("limit = %d, want 8", worker.limit)
+	}
+}
+
 func TestGroupShouldStartProductManagementSyncWorkerRequiresERPEnabled(t *testing.T) {
 	svc := productManagementServiceStub{}
 	if (&Group{erpEnabled: false, productMgmt: svc}).shouldStartProductManagementSyncWorker() {

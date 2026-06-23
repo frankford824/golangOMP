@@ -55,7 +55,7 @@ func (g *Group) Start(ctx context.Context) {
 		go NewERPSyncWorker(g.erpSyncSvc, g.logger, g.erpInterval).Run(ctx)
 	}
 	if g.shouldStartProductManagementSyncWorker() {
-		go NewProductManagementSyncWorker(g.productMgmt, g.logger, 30*time.Second, 2).Run(ctx)
+		go NewProductManagementSyncWorker(g.productMgmt, g.logger, 15*time.Second, 8).Run(ctx)
 	}
 	if g.shouldStartSKUComboSyncWorker() {
 		go NewSKUComboSyncWorker(g.skuComboSync, g.logger, time.Minute).Run(ctx)

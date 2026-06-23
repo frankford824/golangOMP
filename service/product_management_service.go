@@ -584,20 +584,28 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	if lookupErr != nil {
 		return lookupErr
 	}
-	payload := domain.ERPItemStyleUpdatePayload{
-		SKUID:     skuCode,
-		IID:       productIID,
-		Pic:       imageURL,
-		PicBig:    imageURL,
-		SKUPic:    imageURL,
-		Operation: "product_management_image_sync",
-		Source:    "product_management",
+	productName := firstNonEmptyString(strings.TrimSpace(record.ProductName), skuCode)
+	shortName := productManagementERPShortName(productName, productIID, skuCode)
+	payload := domain.ERPProductUpsertPayload{
+		ProductID:        skuCode,
+		SKUID:            skuCode,
+		SKUCode:          skuCode,
+		IID:              productIID,
+		Name:             productName,
+		ProductName:      productName,
+		ShortName:        shortName,
+		ProductShortName: shortName,
+		Pic:              imageURL,
+		PicBig:           imageURL,
+		SKUPic:           imageURL,
+		Operation:        "product_management_image_sync",
+		Source:           "product_management",
 		TaskContext: &domain.ERPTaskFilingContext{
 			TaskNo: strings.TrimSpace(record.TaskNo),
 			Remark: fmt.Sprintf("产品管理同步 ERP 图片，图片来源：%s", domain.ProductManagementImageSourceLabel(record.ImageSource)),
 		},
 	}
-	_, appErr = s.erpBridge.UpdateItemStyle(ctx, payload)
+	_, appErr = s.erpBridge.UpsertProduct(ctx, payload)
 	if appErr != nil {
 		return appErr
 	}

@@ -79,6 +79,7 @@ func TestProductManagementClaimQueuedSyncRecordsClaimsChildSyncStatuses(t *testi
 				"OR image_sync_status = 'queued'",
 				"OR (image_sync_status = 'cooling_down'",
 				"OR (image_sync_status = 'syncing'",
+				"WHEN erp_sync_status = 'queued' OR base_sync_status = 'queued' OR image_sync_status = 'queued' THEN 0",
 			}
 			for _, fragment := range required {
 				if !strings.Contains(normalized, fragment) {

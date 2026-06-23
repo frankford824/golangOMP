@@ -364,7 +364,7 @@ func TestProductManagementVerifyERPImageReadbackRejectsNonPublicImage(t *testing
 	}
 }
 
-func TestProductManagementSyncImageUsesItemStyleUpdateWithoutProductNames(t *testing.T) {
+func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T) {
 	assetID := int64(7302)
 	versionID := int64(4396)
 	asset := erpImageProxyTestAsset(versionID, "tasks/RW-20260603-A-001081/assets/AST-0006/v1/delivery/image.jpg")
@@ -402,20 +402,20 @@ func TestProductManagementSyncImageUsesItemStyleUpdateWithoutProductNames(t *tes
 	if appErr != nil {
 		t.Fatalf("syncImageRecordToERP() appErr = %+v", appErr)
 	}
-	if bridge.upsertCalls != 0 {
-		t.Fatalf("image sync used UpsertProduct %d times, want 0", bridge.upsertCalls)
+	if bridge.upsertCalls != 1 {
+		t.Fatalf("UpsertProduct calls = %d, want 1", bridge.upsertCalls)
 	}
-	if bridge.itemStyleCalls != 1 {
-		t.Fatalf("UpdateItemStyle calls = %d, want 1", bridge.itemStyleCalls)
+	if bridge.itemStyleCalls != 0 {
+		t.Fatalf("image sync used UpdateItemStyle %d times, want 0", bridge.itemStyleCalls)
 	}
-	if bridge.itemStylePayload.Name != "" || bridge.itemStylePayload.ShortName != "" {
-		t.Fatalf("image style payload should not carry names: %+v", bridge.itemStylePayload)
+	if bridge.payload.Name != longHistoricalName || bridge.payload.ProductName != longHistoricalName {
+		t.Fatalf("image upsert payload should preserve product name: %+v", bridge.payload)
 	}
-	if bridge.itemStylePayload.SKUID != "NSAC000001" || bridge.itemStylePayload.IID != "定制亚克力" {
-		t.Fatalf("image style payload identifiers = sku:%q iid:%q", bridge.itemStylePayload.SKUID, bridge.itemStylePayload.IID)
+	if bridge.payload.SKUID != "NSAC000001" || bridge.payload.SKUCode != "NSAC000001" || bridge.payload.IID != "定制亚克力" {
+		t.Fatalf("image upsert payload identifiers = sku:%q sku_code:%q iid:%q", bridge.payload.SKUID, bridge.payload.SKUCode, bridge.payload.IID)
 	}
-	if bridge.itemStylePayload.Pic == "" || bridge.itemStylePayload.PicBig == "" || bridge.itemStylePayload.SKUPic == "" {
-		t.Fatalf("image style payload missing image fields: %+v", bridge.itemStylePayload)
+	if bridge.payload.Pic == "" || bridge.payload.PicBig == "" || bridge.payload.SKUPic == "" {
+		t.Fatalf("image upsert payload missing image fields: %+v", bridge.payload)
 	}
 }
 
