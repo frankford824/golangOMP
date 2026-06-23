@@ -278,6 +278,7 @@ import { materialModeLabelCn, skuItemStatusLabelCn } from '@/domain/mappers/read
 import { useCategoryOptions } from '@/composables/useCategoryOptions'
 import { useTasksStore } from '@/stores/tasks'
 import { tasksApi } from '@/services/api/tasksApi'
+import { getTaskFilingStatusLabel } from '@/utils/filing-status'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import {
   IMAGE_PREVIEW_LIGHTBOX_KEY,
@@ -554,13 +555,8 @@ watch(
 )
 
 function filingStatusLabel(status: string | undefined): string {
-  const raw = String(status ?? '').trim()
-  if (!raw) return '未建档'
-  if (raw === 'filed') return '已建档'
-  if (raw === 'filing') return '建档中'
-  if (raw === 'pending_filing') return '待建档'
-  if (raw === 'filing_failed') return '建档失败'
-  return raw
+  const label = getTaskFilingStatusLabel(status)
+  return label === '--' ? '未同步' : label
 }
 
 function productTabTitle(row: TaskParallelProductRow): string {

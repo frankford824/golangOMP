@@ -158,11 +158,64 @@ function filingStatusDisplayCn(raw: string | undefined): string {
   return FILING_STATUS_CN[k] ?? raw.trim()
 }
 
+const PROCUREMENT_STATUS_CN: Record<string, string> = {
+  draft: '待完善',
+  prepared: '已备货',
+  in_progress: '采购中',
+  completed: '已完成',
+  cancelled: '已取消',
+  canceled: '已取消',
+}
+
+function procurementStatusDisplayCn(raw: string | undefined): string {
+  if (!raw?.trim()) return ''
+  const k = raw.trim().toLowerCase()
+  return PROCUREMENT_STATUS_CN[k] ?? raw.trim()
+}
+
+const WAREHOUSE_STATUS_CN: Record<string, string> = {
+  prepared: '已备货',
+  received: '已接收',
+  rejected: '已拒收',
+  completed: '已完成',
+  pending: '待处理',
+}
+
+function warehouseStatusDisplayCn(raw: string | undefined): string {
+  if (!raw?.trim()) return ''
+  const k = raw.trim().toLowerCase()
+  return WAREHOUSE_STATUS_CN[k] ?? raw.trim()
+}
+
 function moneyDisplay(raw: unknown): string {
   if (raw == null || raw === '') return '—'
   const n = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(n)) return String(raw)
   return `${n.toFixed(3)} 元`
+}
+
+function isTechnicalActorName(value: string): boolean {
+  const text = value.trim()
+  if (!text) return true
+  if (/^未知用户$/i.test(text)) return true
+  if (/^用户\s*#?\d+$/i.test(text)) return true
+  if (/^#?\d+$/.test(text)) return true
+  if (/^session_actor\s*#?\d+$/i.test(text)) return true
+  return false
+}
+
+function businessActorDisplay(...candidates: unknown[]): string {
+  for (const candidate of candidates) {
+    const text = String(candidate ?? '').trim()
+    if (!text || isTechnicalActorName(text)) continue
+    const display = userAccountDisplay(text)
+    if (display && !isTechnicalActorName(display)) return display
+  }
+  return ''
+}
+
+function cleanInlineBusinessText(raw: unknown): string {
+  return businessReadableEventSummary(String(raw ?? ''))
 }
 
 function formatActorSegment(raw: Record<string, unknown>, payload: Record<string, unknown>): string {
@@ -182,8 +235,8 @@ function formatActorSegment(raw: Record<string, unknown>, payload: Record<string
       pickField(raw, payload, 'actor_role_short') ??
       pickField(raw, payload, 'actor_role'))?.trim() ?? ''
 
-  if (name) return userAccountDisplay(name)
-  if (roleShort) return userAccountDisplay(roleShort)
+  const actor = businessActorDisplay(name, roleShort)
+  if (actor) return actor
   return '系统'
 }
 
@@ -215,14 +268,88 @@ function preferredApiSummary(raw: Record<string, unknown>, payload: Record<strin
 }
 
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi
+const LONG_HEX_PATTERN = /\b[0-9a-f]{24,}\b/gi
+const STORAGE_PATH_PATTERN = /\b(?:tasks|objects)\/[^\s，。；,;）)]+/gi
+const TECH_FIELD_PATTERN =
+  /\b(?:upload_session_id|remote_upload_id|remote_file_id|storage_key|file_hash|trace_id|asset_id|source_asset_id|asset_version_id|task_asset_id|design_asset_id|ref_id|timeline_version|retouch_requirement_id)\b\s*[:：=]?\s*["']?[\w\-./:%]+["']?/gi
+const BUSINESS_FIELD_NAME_CN: Record<string, string> = {
+  filing_status: '同步状态',
+  erp_sync_status: 'ERP 同步状态',
+  base_sync_status: '基础资料状态',
+  image_sync_status: 'ERP 图片状态',
+  sync_status: '同步状态',
+  c_price: '成本价',
+  s_price: '售价',
+  sku_id: 'SKU 编码',
+  i_id: '款式编码',
+}
+const BUSINESS_FIELD_NAME_PATTERN = new RegExp(
+  `\\b(${Object.keys(BUSINESS_FIELD_NAME_CN)
+    .map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')})\\b`,
+  'gi',
+)
+const BUSINESS_STATUS_CODE_CN: Record<string, string> = {
+  filed: '已同步',
+  pending: '待处理',
+  pending_filing: '待补齐后同步',
+  not_filed: '未同步',
+  unfilled: '未填报',
+  filing: '同步中',
+  filing_failed: '同步失败',
+  queued: '排队中',
+  syncing: '同步中',
+  synced: '已同步',
+  pending_sync: '待同步',
+  waiting_image: '待上传图片',
+  pending_upload: '待上传',
+  cooling_down: '稍后重试',
+  failed: '失败',
+  error: '异常',
+  completed: '已完成',
+  in_progress: '处理中',
+  draft: '草稿',
+  prepared: '已备货',
+  received: '已接收',
+  rejected: '已拒收',
+  cancelled: '已取消',
+  canceled: '已取消',
+}
+const BUSINESS_STATUS_CODE_PATTERN = new RegExp(
+  `\\b(${Object.keys(BUSINESS_STATUS_CODE_CN)
+    .map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')})\\b`,
+  'gi',
+)
+
+function replaceBusinessStatusCodes(text: string): string {
+  return text.replace(
+    BUSINESS_STATUS_CODE_PATTERN,
+    (matched) => BUSINESS_STATUS_CODE_CN[matched.toLowerCase()] ?? matched,
+  )
+}
+
+function replaceBusinessFieldNames(text: string): string {
+  return text.replace(
+    BUSINESS_FIELD_NAME_PATTERN,
+    (matched) => BUSINESS_FIELD_NAME_CN[matched.toLowerCase()] ?? matched,
+  )
+}
 
 function businessReadableEventSummary(summary: string): string {
-  return summary
+  return replaceBusinessFieldNames(replaceBusinessStatusCodes(summary))
     .replace(/未知用户/g, '待确认人员')
+    .replace(/用户\s*#?\d+/gi, '待确认人员')
+    .replace(/session_actor\s*#?\d+/gi, '待确认人员')
     .replace(/上传会话\s*[（(]\s*[0-9a-f-]{32,36}\s*[）)]/gi, '上传记录')
     .replace(/上传会话/g, '上传记录')
+    .replace(TECH_FIELD_PATTERN, '')
+    .replace(STORAGE_PATH_PATTERN, '文件记录')
     .replace(UUID_PATTERN, '')
+    .replace(LONG_HEX_PATTERN, '')
     .replace(/\s*[（(]\s*[）)]/g, '')
+    .replace(/\s*[，,]\s*[，,]+/g, '，')
+    .replace(/[，,]\s*。/g, '。')
     .replace(/\s{2,}/g, ' ')
     .trim()
 }
@@ -267,6 +394,15 @@ function buildTaskEventSummaryCn(
     return `${bits.join('，')}。`
   }
 
+  if (et === 'task.filing.readback_confirmed') {
+    const fs = pickFirst(raw, payload, ['filing_status', 'filingStatus'])
+    const sku = pickFirst(raw, payload, ['sku_code', 'primary_sku_code', 'product_sku'])
+    const parts = ['ERP 同步结果已确认']
+    if (sku) parts.push(`SKU ${sku}`)
+    if (fs) parts.push(`建档状态为「${filingStatusDisplayCn(fs)}」`)
+    return `${parts.join('，')}。`
+  }
+
   if (et === 'task.assigned' || et === 'task.unassigned') {
     const designerId = pickFirst(raw, payload, ['designer_id', 'assignee_id', 'to_user_id', 'current_handler_id'])
     const designerName = pickFirst(raw, payload, [
@@ -278,13 +414,7 @@ function buildTaskEventSummaryCn(
       'current_handler_name',
     ])
     const assigneeSeg =
-      designerName && designerId
-        ? userAccountDisplay(designerName)
-        : designerName
-          ? userAccountDisplay(designerName)
-          : designerId
-            ? '待确认人员'
-            : '—'
+      businessActorDisplay(designerName) || (designerId ? '待确认人员' : '—')
     const selfRaw = payload.self_assign ?? payload.self_claim ?? payload.is_self_claim
     const self =
       selfRaw === true ||
@@ -331,9 +461,8 @@ function buildTaskEventSummaryCn(
       'assignee_name',
       'designer_name',
     ])
-    const fromSeg =
-      fromName && fromId ? userAccountDisplay(fromName) : fromName ? userAccountDisplay(fromName) : fromId ? '待确认人员' : '—'
-    const toSeg = toName && toId ? userAccountDisplay(toName) : toName ? userAccountDisplay(toName) : toId ? '待确认人员' : '—'
+    const fromSeg = businessActorDisplay(fromName) || (fromId ? '待确认人员' : '—')
+    const toSeg = businessActorDisplay(toName) || (toId ? '待确认人员' : '—')
     const mk =
       moduleKeyLabelCn(pickField(raw, payload, 'module_key')) ||
       moduleKeyLabelCn(raw.module_key != null ? String(raw.module_key) : '')
@@ -361,10 +490,28 @@ function buildTaskEventSummaryCn(
     const parts = [`${actor} 更新了成本价：${moneyDisplay(previous)} → ${moneyDisplay(current)}`]
     if (estimated != null && estimated !== '') parts.push(`系统预估 ${moneyDisplay(estimated)}`)
     if (manual === true || manual === 1 || String(manual).toLowerCase() === 'true') parts.push('人工覆盖')
-    if (reason) parts.push(`原因：${reason}`)
+    if (reason) parts.push(`原因：${cleanInlineBusinessText(reason)}`)
     if (syncRequested === true || syncRequested === 1 || String(syncRequested).toLowerCase() === 'true') {
       parts.push('已请求同步 ERP')
     }
+    return `${parts.join('，')}。`
+  }
+
+  if (et === 'task.sku_item.updated') {
+    const sku = pickFirst(raw, payload, ['sku_code', 'item_sku_code', 'target_sku_code'])
+    const name = pickFirst(raw, payload, ['product_name', 'product_name_snapshot', 'item_name'])
+    const parts = [`${actor} 更新了子项信息`]
+    if (sku) parts.push(`SKU ${sku}`)
+    if (name) parts.push(cleanInlineBusinessText(name))
+    return `${parts.join('，')}。`
+  }
+
+  if (et === 'task.batch_items_created') {
+    const count = pickFirst(raw, payload, ['batch_item_count', 'item_count', 'count'])
+    const primarySku = pickFirst(raw, payload, ['primary_sku_code', 'sku_code'])
+    const parts = [`${actor} 生成了批量任务子项`]
+    if (count) parts.push(`共 ${count} 项`)
+    if (primarySku) parts.push(`主 SKU ${primarySku}`)
     return `${parts.join('，')}。`
   }
 
@@ -387,7 +534,132 @@ function buildTaskEventSummaryCn(
   if (et === 'task.asset.version.created') {
     const assetType = pickFirst(raw, payload, ['asset_type', 'assetType'])
     const kind = assetType ? assetKindLabelCn(assetType) : '素材'
-    return `${actor} 写入 ${kind} 新版本。`
+    const filename = pickFirst(raw, payload, ['filename', 'remark', 'file_name'])
+    const isDerived =
+      String(payload.derived_async ?? payload.derivedAsync ?? '').toLowerCase() === 'true' ||
+      String(payload.derivation_reason ?? payload.derivationReason ?? '').trim() !== ''
+    if (isDerived) return kind === '预览辅助' ? '系统生成了预览图。' : `系统生成了${kind}预览。`
+    return `${actor} 保存了${kind}${filename ? `：${cleanInlineBusinessText(filename)}` : ''}。`
+  }
+
+  if (et === 'task.reference.asset.formalized' || et === 'task.reference.asset.bulk_formalized') {
+    const count = pickFirst(raw, payload, ['count', 'ref_count', 'asset_count'])
+    const action = et.endsWith('bulk_formalized') ? '批量接入' : '接入'
+    const parts = [`${actor} 已将创建任务时上传的参考图${action}任务`]
+    if (count) parts.push(`共 ${count} 张`)
+    return `${parts.join('，')}。`
+  }
+
+  if (et === 'task.reference.asset.formalize_failed') {
+    const msg = pickFirst(raw, payload, ['error_message', 'message', 'reason'])
+    return `${actor} 接入创建任务参考图失败${msg ? `：${cleanInlineBusinessText(msg)}` : '，可重新上传或刷新后重试'}。`
+  }
+
+  if (et === 'task.design.submitted') {
+    const assetType = pickFirst(raw, payload, ['asset_type', 'assetType'])
+    const kind = assetType ? assetKindLabelCn(assetType) : '设计稿'
+    const sku = pickFirst(raw, payload, ['target_sku_code', 'sku_code'])
+    return `${actor} 提交了${kind}${sku ? `（SKU ${sku}）` : ''}，进入审核。`
+  }
+
+  if (
+    et === 'task.audit.claimed' ||
+    et === 'task.audit.approved' ||
+    et === 'task.audit.rejected' ||
+    et === 'task.audit.transferred' ||
+    et === 'task.audit.handed_over' ||
+    et === 'task.audit.taken_over'
+  ) {
+    const comment = pickFirst(raw, payload, ['comment', 'reason', 'remark'])
+    const issue = pickFirst(raw, payload, ['issue_types', 'issue_type', 'reject_reason'])
+    const actionLabel: Record<string, string> = {
+      'task.audit.claimed': '领取了审核任务',
+      'task.audit.approved': '通过了审核',
+      'task.audit.rejected': '驳回了审核',
+      'task.audit.transferred': '转交了审核',
+      'task.audit.handed_over': '交接了审核',
+      'task.audit.taken_over': '接管了审核',
+    }
+    const parts = [`${actor} ${actionLabel[et] ?? '处理了审核'}`]
+    if (issue) parts.push(`原因：${cleanInlineBusinessText(issue)}`)
+    if (comment) parts.push(`说明：${cleanInlineBusinessText(comment)}`)
+    return `${parts.join('，')}。`
+  }
+
+  if (et === 'task.procurement.updated' || et === 'task.procurement.advanced') {
+    const status = procurementStatusDisplayCn(pickFirst(raw, payload, ['status', 'procurement_status']))
+    const previous = procurementStatusDisplayCn(pickFirst(raw, payload, ['previous_status', 'from_status']))
+    const supplier = pickFirst(raw, payload, ['supplier_name', 'supplier'])
+    const quantity = pickFirst(raw, payload, ['quantity', 'procurement_quantity'])
+    const price = payload.procurement_price ?? payload.procurementPrice
+    const parts = [`${actor} ${et === 'task.procurement.updated' ? '更新了采购信息' : '推进了采购流程'}`]
+    if (previous && status && previous !== status) parts.push(`状态由「${previous}」变为「${status}」`)
+    else if (status) parts.push(`状态为「${status}」`)
+    if (supplier && supplier !== '[默认]') parts.push(`供应商：${cleanInlineBusinessText(supplier)}`)
+    if (quantity) parts.push(`数量：${quantity}`)
+    if (price != null && price !== '') parts.push(`采购价：${moneyDisplay(price)}`)
+    return `${parts.join('，')}。`
+  }
+
+  if (
+    et === 'task.warehouse.prepared' ||
+    et === 'task.warehouse.received' ||
+    et === 'task.warehouse.rejected' ||
+    et === 'task.warehouse.completed'
+  ) {
+    const status = warehouseStatusDisplayCn(pickFirst(raw, payload, ['warehouse_status', 'status']))
+    const remark = pickFirst(raw, payload, ['remark', 'reason'])
+    const verb: Record<string, string> = {
+      'task.warehouse.prepared': '完成了仓储备货',
+      'task.warehouse.received': '接收了仓库任务',
+      'task.warehouse.rejected': '退回了仓库任务',
+      'task.warehouse.completed': '完成了仓库处理',
+    }
+    const parts = [`${actor} ${verb[et] ?? '处理了仓库任务'}`]
+    if (status) parts.push(`仓库状态为「${status}」`)
+    if (remark) parts.push(cleanInlineBusinessText(remark))
+    return `${parts.join('，')}。`
+  }
+
+  if (et === 'task.closed') {
+    const remark = pickFirst(raw, payload, ['remark', 'reason'])
+    const sku = pickFirst(raw, payload, ['sku_code', 'primary_sku_code'])
+    const parts = [`${actor} 已结单`]
+    if (sku) parts.push(`SKU ${sku}`)
+    if (remark) parts.push(cleanInlineBusinessText(remark))
+    return `${parts.join('，')}。`
+  }
+
+  if (
+    et === 'task.customization.reviewed' ||
+    et === 'task.customization.effect_preview_submitted' ||
+    et === 'task.customization.effect_reviewed' ||
+    et === 'task.customization.production_transferred'
+  ) {
+    const status = pickFirst(raw, payload, ['status', 'action', 'review_result'])
+    const comment = pickFirst(raw, payload, ['comment', 'remark', 'reason'])
+    const actionLabel: Record<string, string> = {
+      'task.customization.reviewed': '处理了定制需求审核',
+      'task.customization.effect_preview_submitted': '提交了定制效果图',
+      'task.customization.effect_reviewed': '处理了定制效果图审核',
+      'task.customization.production_transferred': '将定制任务转入生产',
+    }
+    const parts = [`${actor} ${actionLabel[et] ?? '处理了定制任务'}`]
+    if (status) parts.push(`结果：${cleanInlineBusinessText(status)}`)
+    if (comment) parts.push(`说明：${cleanInlineBusinessText(comment)}`)
+    return `${parts.join('，')}。`
+  }
+
+  if (
+    et === 'task.erp_image.auto_synced' ||
+    et === 'task.erp_image.auto_sync_failed' ||
+    et === 'task.erp_image.awaiting_upload'
+  ) {
+    const sku = pickFirst(raw, payload, ['sku_code', 'primary_sku_code'])
+    const reason = pickFirst(raw, payload, ['reason', 'message'])
+    if (et === 'task.erp_image.auto_synced') return `ERP 图片已自动同步${sku ? `：SKU ${sku}` : ''}。`
+    if (et === 'task.erp_image.awaiting_upload') return `未找到可同步的 ERP 商品图${sku ? `：SKU ${sku}` : ''}，待人工上传。`
+    return `ERP 图片自动同步失败${sku ? `：SKU ${sku}` : ''}${reason ? `，${cleanInlineBusinessText(reason)}` : ''}。`
   }
 
   if (et === 'task.status.changed') {
@@ -408,7 +680,7 @@ function buildTaskEventSummaryCn(
     }
   }
 
-  return `${actor} 执行了「${getTaskEventDisplayTitle(et)}」相关操作。`
+  return `${actor} 记录了${getTaskEventDisplayTitle(et)}。`
 }
 
 /** GET /v1/tasks/{id}/events 单条 → 抽屉展示模型 */
@@ -423,13 +695,14 @@ export function mapTaskEventRowToRecentEvent(raw: Record<string, unknown>, taskI
     pickField(raw, payload, 'replacement_actor_id') ??
     pickField(raw, payload, 'creator_id')
   const actor =
-    pickField(raw, payload, 'operator_username') ??
-    pickField(raw, payload, 'actor_username') ??
-    pickField(raw, payload, 'creator_username') ??
-    pickField(raw, payload, 'operator_name') ??
-    pickField(raw, payload, 'actor_name') ??
-    pickField(raw, payload, 'creator_name') ??
-    (operatorId ? '系统记录' : '—')
+    businessActorDisplay(
+      pickField(raw, payload, 'operator_username'),
+      pickField(raw, payload, 'actor_username'),
+      pickField(raw, payload, 'creator_username'),
+      pickField(raw, payload, 'operator_name'),
+      pickField(raw, payload, 'actor_name'),
+      pickField(raw, payload, 'creator_name'),
+    ) || (operatorId ? '系统记录' : '—')
 
   const title = titleForEvent(eventType, raw, payload)
   const summary = buildTaskEventSummaryCn(eventType, raw, payload)

@@ -106,6 +106,7 @@ import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
 import type { TaskSkuItem } from '@/domain/types/task'
 import { skuItemStatusLabelCn } from '@/domain/mappers/read-model-labels-cn'
 import { formatErpSyncFailureMessage } from '@/utils/business-copy'
+import { getTaskFilingStatusLabel, getTaskFilingStatusTone } from '@/utils/filing-status'
 
 const props = defineProps<{
   items: TaskSkuItem[]
@@ -128,20 +129,15 @@ const disabledUploadTitle = computed(() => props.disabledUploadTitle || '当前�
 const disabledEditTitle = computed(() => '当前账号不可维护子项商品资料')
 
 const filingStatusLabel = computed(() => {
-  const raw = String(props.filingStatus ?? '').trim()
-  if (!raw) return '未建档'
-  if (raw === 'filed') return '建档完成'
-  if (raw === 'filing') return '同步中'
-  if (raw === 'pending_filing') return '待同步'
-  if (raw === 'filing_failed') return '同步失败'
-  return raw
+  const label = getTaskFilingStatusLabel(props.filingStatus)
+  return label === '--' ? '未同步' : label
 })
 
 const filingBadgeClass = computed(() => {
-  const raw = String(props.filingStatus ?? '').trim()
-  if (raw === 'filed') return 'sku-filing-badge--done'
-  if (raw === 'filing') return 'sku-filing-badge--progress'
-  if (raw === 'filing_failed') return 'sku-filing-badge--error'
+  const tone = getTaskFilingStatusTone(props.filingStatus)
+  if (tone === 'success') return 'sku-filing-badge--done'
+  if (tone === 'info') return 'sku-filing-badge--progress'
+  if (tone === 'error') return 'sku-filing-badge--error'
   return 'sku-filing-badge--default'
 })
 

@@ -49,8 +49,8 @@
     >
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span class="font-medium text-slate-800">建档 / ERP</span>
-        <span v-if="task.filing_status" class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.65rem]">
-          {{ task.filing_status }}
+        <span v-if="task.filing_status" class="rounded bg-slate-100 px-1.5 py-0.5 text-[0.65rem]">
+          {{ filingStatusLabel }}
         </span>
         <span v-if="task.last_filed_at" class="text-slate-500">
           最近建档：{{ task.last_filed_at }}
@@ -89,6 +89,7 @@ import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import { formatErpSyncFailureMessage } from '@/utils/business-copy'
+import { getTaskFilingStatusLabel } from '@/utils/filing-status'
 
 const props = withDefaults(
   defineProps<{
@@ -147,6 +148,9 @@ const saving = ref(false)
 const filingLoading = ref(false)
 const saveError = ref('')
 const businessFilingErrorMessage = computed(() => formatErpSyncFailureMessage(props.task.filing_error_message ?? ''))
+const filingStatusLabel = computed(() =>
+  getTaskFilingStatusLabel(props.task.filing_status, props.task.businessType ?? props.task.taskType),
+)
 
 function hydrateFromTask(t: Task) {
   const cat = isNewProduct(t)
