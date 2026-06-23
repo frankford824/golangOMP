@@ -100,6 +100,52 @@ func TestTaskServiceCreatePurchaseTaskUsesDefaultProductCodeRule(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateCustomizationPurchaseKeepsProcurementFlowAndDZ(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	procurementRepo := &prdProcurementRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		procurementRepo,
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:              domain.TaskTypePurchaseTask,
+		SourceMode:            domain.TaskSourceModeNewProduct,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+		CreatorID:             9,
+		OwnerTeam:             domain.AllValidTeams()[0],
+		DeadlineAt:            timePtr(),
+		CategoryCode:          "KT_STANDARD",
+		ProductNameSnapshot:   "Custom Purchase KT",
+		CostPriceMode:         string(domain.CostPriceModeTemplate),
+		Quantity:              int64Ptr(100),
+		BaseSalePrice:         float64Ptr(12.5),
+		CustomizationRequired: true,
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.SKUCode != "DZK000000" {
+		t.Fatalf("Create() sku_code=%s, want DZK000000", task.SKUCode)
+	}
+	if task.TaskStatus != domain.TaskStatusPendingAssign {
+		t.Fatalf("Create() task_status=%s, want %s", task.TaskStatus, domain.TaskStatusPendingAssign)
+	}
+	if task.BusinessLane != domain.TaskBusinessLaneCustomization {
+		t.Fatalf("Create() business_lane=%s, want customization", task.BusinessLane)
+	}
+	if got := procurementRepo.records[task.ID]; got == nil {
+		t.Fatal("Create() did not initialize procurement record")
+	}
+}
+
 func TestTaskServiceCreateCustomizationSKUUsesDZRule(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
@@ -174,6 +220,63 @@ func TestTaskServiceCustomizationLaneDefaultsSKUToDZ(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateCustomizationBatchNewProductUsesDZForAllItems(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
+		WithTaskCustomizationJobRepo(newCustomizationFlowJobRepo()),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:              domain.TaskTypeNewProductDevelopment,
+		SourceMode:            domain.TaskSourceModeNewProduct,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+		CreatorID:             9,
+		OwnerTeam:             domain.AllValidTeams()[0],
+		DeadlineAt:            timePtr(),
+		BatchSKUMode:          "multiple",
+		CustomizationRequired: true,
+		BatchItems: []CreateTaskBatchSKUItemParams{
+			{
+				ProductName:       "Custom Batch A",
+				CategoryCode:      "KT_STANDARD",
+				DesignRequirement: "custom design A",
+			},
+			{
+				ProductName:       "Custom Batch B",
+				CategoryCode:      "KT_STANDARD",
+				DesignRequirement: "custom design B",
+			},
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	items, err := taskRepo.ListSKUItemsByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListSKUItemsByTaskID() err = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("task_sku_items len=%d, want 2", len(items))
+	}
+	for idx, item := range items {
+		if matched, _ := regexp.MatchString(`^DZK00000[0-1]$`, item.SKUCode); !matched {
+			t.Fatalf("item[%d].sku_code=%s, want DZK000000/DZK000001", idx, item.SKUCode)
+		}
+		if item.SKUCodeType != domain.TaskSKUCodeTypeCustomization {
+			t.Fatalf("item[%d].sku_code_type=%s, want customization", idx, item.SKUCodeType)
+		}
+	}
+}
+
 func TestTaskServiceCreateRetouchTaskDoesNotAllocateSKU(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
@@ -244,6 +347,19 @@ func TestTaskServicePrepareProductCodesBatchAndConcurrentUnique(t *testing.T) {
 	}
 	if batchResult.Codes[0].SKUCode != "CGK000000" || batchResult.Codes[1].SKUCode != "CGK000001" || batchResult.Codes[2].SKUCode != "CGA000000" {
 		t.Fatalf("PrepareProductCodes(batch) codes=%+v", batchResult.Codes)
+	}
+
+	customPurchase, appErr := prepareSvc.PrepareProductCodes(context.Background(), PrepareTaskProductCodesParams{
+		TaskType:     domain.TaskTypePurchaseTask,
+		BusinessLane: domain.TaskBusinessLaneCustomization,
+		CategoryCode: "KT_STANDARD",
+		Count:        1,
+	})
+	if appErr != nil {
+		t.Fatalf("PrepareProductCodes(custom purchase) unexpected error: %+v", appErr)
+	}
+	if len(customPurchase.Codes) != 1 || customPurchase.Codes[0].SKUCode != "DZK000000" {
+		t.Fatalf("PrepareProductCodes(custom purchase) codes=%+v, want DZK000000", customPurchase.Codes)
 	}
 
 	const goroutines = 30

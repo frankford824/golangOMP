@@ -11,6 +11,21 @@
         <BaseButton variant="secondary" size="sm" @click="goBack">返回任务中心</BaseButton>
       </header>
 
+      <div class="flow-switch task-group-switch" role="tablist" aria-label="任务分组">
+        <button
+          v-for="opt in taskGroupOptions"
+          :key="opt.value"
+          type="button"
+          role="tab"
+          class="flow-tab"
+          :class="{ active: taskGroup === opt.value }"
+          :aria-selected="taskGroup === opt.value"
+          @click="selectTaskGroup(opt.value)"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+
       <div class="flow-switch" role="tablist" aria-label="Excel 辅助创建类型">
         <button
           v-for="opt in flowOptions"
@@ -26,7 +41,9 @@
         </button>
       </div>
 
-      <p class="flow-label" aria-label="当前任务类型">{{ excelAssistFlowLabel(flow) }}</p>
+      <p class="flow-label" aria-label="当前任务类型">
+        {{ excelAssistFlowLabel(flow) }} · {{ currentFlowLaneLabel }}
+      </p>
 
       <div class="layout-grid">
         <div class="main-column">
@@ -419,6 +436,12 @@ const flowOptions: { value: ExcelAssistFlow; label: string }[] = [
   { value: 'original_single', label: '原款开发' },
 ]
 
+type TaskGroup = 'normal' | 'customization'
+const taskGroupOptions: { value: TaskGroup; label: string }[] = [
+  { value: 'normal', label: '常规任务' },
+  { value: 'customization', label: '定制任务' },
+]
+const taskGroup = ref<TaskGroup>('normal')
 const flow = ref<ExcelAssistFlow>('new_batch')
 
 const previewRows = ref<BatchPreviewRow[]>([])
@@ -454,6 +477,17 @@ const priorityOptions = [
 
 const groupOptions = computed(() =>
   filterOwnerTeamOptions(rawTeamOptions.value, resolveDepartmentByTeam),
+)
+const currentSkuCodeType = computed(() =>
+  taskGroup.value === 'customization' ? 'customization' : 'regular',
+)
+const currentSkuPrefix = computed(() => (taskGroup.value === 'customization' ? 'DZ' : 'CG'))
+const currentFlowLaneLabel = computed(() =>
+  flow.value === 'original_single'
+    ? taskGroup.value === 'customization'
+      ? '定制归类'
+      : '常规归类'
+    : `${currentSkuPrefix.value} 编码`,
 )
 
 const dueAtHourFallback = 18
@@ -681,9 +715,16 @@ function isImageMime(mimeType: string): boolean {
 
 function syncBatchItemsFromPreview() {
   batchItems.value = mapExcelPreviewToBatchItems(EXCEL_ASSIST_TASK_TYPE, previewRows.value, {
-    skuCodeType: 'regular',
+    skuCodeType: currentSkuCodeType.value,
   })
 }
+
+watch(taskGroup, () => {
+  batchItems.value = batchItems.value.map((item) => ({
+    ...item,
+    skuCodeType: currentSkuCodeType.value,
+  }))
+})
 
 function setBatchReferenceInput(index: number, el: unknown) {
   batchReferenceInputs.value[index] = el instanceof HTMLInputElement ? el : null
@@ -808,6 +849,10 @@ function goBack() {
   void router.push({ name: 'TaskList' })
 }
 
+function selectTaskGroup(group: TaskGroup) {
+  taskGroup.value = group
+}
+
 function buildCommonTaskFields(forFlow: ExcelAssistFlow) {
   const currentUser = permissionsStore.currentUser
   const now = nowISO()
@@ -819,9 +864,17 @@ function buildCommonTaskFields(forFlow: ExcelAssistFlow) {
     : isOriginal
       ? ('ORIGINAL_PRODUCT_DEV' as const)
       : ('NEW_PRODUCT_DEV' as const)
+  const isCustomization = taskGroup.value === 'customization'
   return {
-    businessLane: 'normal' as const,
-    workflowLane: 'normal' as const,
+    businessLane: taskGroup.value,
+    workflowLane: taskGroup.value,
+    customizationRequired: isCustomization,
+    customizationSourceType: isCustomization
+      ? isOriginal
+        ? 'existing_product'
+        : 'new_product'
+      : undefined,
+    skuCodeType: currentSkuCodeType.value,
     status: 'PendingAssign' as const,
     groupId: groupId.value,
     groupName: resolveGroupName(),
@@ -880,8 +933,8 @@ async function submit() {
       pageNote: note.value,
     })
     payload = {
-      ...common,
       ...mapped,
+      ...common,
     }
     delete payload.preflightOwnerDepartment
   } else if (flow.value === 'original_single') {
@@ -890,8 +943,8 @@ async function submit() {
       pageNote: note.value,
     })
     payload = {
-      ...common,
       ...mapped,
+      ...common,
     }
     delete payload.preflightOwnerDepartment
     delete payload.syncErpOnCreate
@@ -901,8 +954,8 @@ async function submit() {
       pageNote: note.value,
     })
     payload = {
-      ...common,
       ...mapped,
+      ...common,
     }
     delete payload.preflightOwnerDepartment
   }
@@ -966,6 +1019,10 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
+}
+
+.task-group-switch {
+  margin-bottom: 0.5rem;
 }
 
 .flow-tab {

@@ -695,7 +695,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 
 	initialStatus := domain.TaskStatusPendingAssign
 	var initialHandlerID *int64
-	if p.CustomizationRequired {
+	if usesCustomizationProductionFlow(p.TaskType, p.CustomizationRequired) {
 		initialStatus = domain.TaskStatusPendingCustomizationProduction
 		initialHandlerID = nil
 	} else if p.DesignerID != nil && p.TaskType != domain.TaskTypePurchaseTask {
@@ -838,7 +838,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 
 	initialStatus := domain.TaskStatusPendingAssign
 	var initialHandlerID *int64
-	if p.CustomizationRequired {
+	if usesCustomizationProductionFlow(p.TaskType, p.CustomizationRequired) {
 		initialStatus = domain.TaskStatusPendingCustomizationProduction
 		initialHandlerID = nil
 	} else if p.DesignerID != nil && p.TaskType != domain.TaskTypePurchaseTask {
@@ -1190,6 +1190,18 @@ func defaultCreateTaskProductShortName(p CreateTaskParams) string {
 		return strings.TrimSpace(p.ProductShortName)
 	}
 	return strings.TrimSpace(firstNonEmptyString(p.ProductNameSnapshot, p.ProductShortName))
+}
+
+func usesCustomizationProductionFlow(taskType domain.TaskType, customizationRequired bool) bool {
+	if !customizationRequired {
+		return false
+	}
+	switch taskType {
+	case domain.TaskTypeOriginalProductDevelopment, domain.TaskTypeNewProductDevelopment:
+		return true
+	default:
+		return false
+	}
 }
 
 // validateProductSelectionByTaskType enforces field whitelist: product_selection is only allowed for existing_product.

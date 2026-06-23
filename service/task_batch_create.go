@@ -405,7 +405,7 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 				return fmt.Errorf("initialize purchase task procurement items: %w", err)
 			}
 		}
-		if task.CustomizationRequired {
+		if usesCustomizationProductionFlow(task.TaskType, task.CustomizationRequired) {
 			if s.customizationJobRepo == nil {
 				return fmt.Errorf("customization job repo missing for customization task")
 			}

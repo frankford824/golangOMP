@@ -482,10 +482,20 @@ const {
 // Round I.g · D1：下拉按 actor DataScope 过滤。Global/HR 不限制；
 // DA 只看本部门内的 team；GroupLeader 只看 managed_teams ∪ [actor.team]。
 const groupOptions = computed(() => filterOwnerTeamOptions(rawTeamOptions.value, resolveDepartmentByTeam))
+type TaskGroup = 'normal' | 'customization'
+type CreateType =
+  | 'original'
+  | 'new_single'
+  | 'new_batch'
+  | 'purchase_single'
+  | 'retouch'
+
+const taskGroup = ref<TaskGroup>('normal')
+const createType = ref<CreateType>('original')
 const { assigneeOptions, loadDesigners } = useDesignerOptions({
   includeEmpty: true,
   requiredActions: ['task.create'],
-  workflowLane: 'normal',
+  workflowLane: computed(() => taskGroup.value),
 })
 
 const submitError = ref('')
@@ -547,16 +557,6 @@ const { isDeptAdminPlus } = useAuth()
 let createPredictionTimer: ReturnType<typeof setTimeout> | null = null
 let createPredictionAbort: AbortController | null = null
 
-type TaskGroup = 'normal' | 'customization'
-type CreateType =
-  | 'original'
-  | 'new_single'
-  | 'new_batch'
-  | 'purchase_single'
-  | 'retouch'
-
-const taskGroup = ref<TaskGroup>('normal')
-const createType = ref<CreateType>('original')
 const designSourceVerified = ref(false)
 const erpProductVerified = ref(false)
 const batchPreviewRows = ref<BatchPreviewRow[]>([])
@@ -610,18 +610,32 @@ const createTypeOptions: Array<{
     icon: Wand2,
   },
   {
+    value: 'original',
+    group: 'customization',
+    label: '定制原款开发',
+    kind: 'ORIGINAL_PRODUCT_DEV',
+    icon: Box,
+  },
+  {
     value: 'new_single',
     group: 'customization',
-    label: '新款单 SKU',
+    label: '定制新款单 SKU',
     kind: 'NEW_PRODUCT_DEV',
     icon: Sparkles,
   },
   {
     value: 'new_batch',
     group: 'customization',
-    label: '新款批量',
+    label: '定制新款批量',
     kind: 'NEW_PRODUCT_DEV',
     icon: Images,
+  },
+  {
+    value: 'purchase_single',
+    group: 'customization',
+    label: '定制采购单 SKU',
+    kind: 'PURCHASE_TASK',
+    icon: ShoppingCart,
   },
 ]
 
@@ -868,9 +882,15 @@ function applyCreateType(option: (typeof createTypeOptions)[number]) {
 }
 
 function selectTaskGroup(group: TaskGroup) {
+  const changed = taskGroup.value !== group
   taskGroup.value = group
+  if (changed) {
+    form.value.assigneeId = null
+    form.value.assigneeName = null
+  }
   const first = createTypeOptions.find((option) => option.group === group)
   if (first) applyCreateType(first)
+  if (changed) void loadDesigners()
 }
 
 function selectCreateType(value: CreateType) {
@@ -1191,14 +1211,14 @@ function resolveCreateTypeFromDraft(
   const skuMode = String(draftForm.skuMode ?? 'single')
   if (draftTaskKind === 'ORIGINAL_PRODUCT_DEV') {
     const value = 'original'
-    return createTypeOptions.find((option) => option.value === value)
+    return createTypeOptions.find((option) => option.value === value && option.group === (isCustomization ? 'customization' : 'normal'))
   }
   if (draftTaskKind === 'NEW_PRODUCT_DEV') {
     const value = skuMode === 'multiple' ? 'new_batch' : 'new_single'
     return createTypeOptions.find((option) => option.value === value && option.group === (isCustomization ? 'customization' : 'normal'))
   }
   if (draftTaskKind === 'PURCHASE_TASK') {
-    return createTypeOptions.find((option) => option.value === 'purchase_single')
+    return createTypeOptions.find((option) => option.value === 'purchase_single' && option.group === (isCustomization ? 'customization' : 'normal'))
   }
   if (draftTaskKind === 'RETOUCH_TASK') {
     return createTypeOptions.find((option) => option.value === 'retouch')
@@ -2193,10 +2213,16 @@ async function submit() {
   color: #dc2626;
 }
 .task-kind-switch {
-  @apply inline-flex items-center gap-1 rounded-xl bg-white/70 p-1 whitespace-nowrap overflow-x-auto;
+  @apply inline-flex items-center gap-1 rounded-xl bg-white/70 p-1;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 .task-kind-button {
-  @apply inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 active:scale-95 whitespace-nowrap;
+  @apply inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 active:scale-95;
+  min-height: 2rem;
+  max-width: 100%;
+  line-height: 1.25;
+  text-align: center;
 }
 .task-kind-button.is-inactive {
   @apply text-slate-500 hover:text-slate-900 hover:bg-white/40;
@@ -2478,6 +2504,7 @@ async function submit() {
 .task-kind-button {
   border: 1px solid transparent;
   color: #6b7280 !important;
+  min-width: 0;
 }
 
 .task-kind-button.is-inactive:hover {
