@@ -140,14 +140,17 @@ func jstMapsToERPProducts(rows []map[string]interface{}, keyword string) []*doma
 				costPrice = &f
 			}
 		}
+		shortName := firstNonEmptyString(firstString(m, "product_short_name", "productShortName"), firstString(m, "short_name", "shortName"))
 		out = append(out, &domain.ERPProduct{
-			ProductID:   sku,
-			SKUID:       sku,
-			IID:         firstString(m, "i_id", "iId"),
-			SKUCode:     sku,
-			Name:        name,
-			ProductName: firstNonEmptyString(name, sku),
-			CategoryID:  firstString(m, "c_id", "category_id"),
+			ProductID:        sku,
+			SKUID:            sku,
+			IID:              firstString(m, "i_id", "iId"),
+			SKUCode:          sku,
+			Name:             name,
+			ProductName:      firstNonEmptyString(name, sku),
+			ShortName:        shortName,
+			ProductShortName: shortName,
+			CategoryID:       firstString(m, "c_id", "category_id"),
 			CategoryName: firstNonEmptyString(
 				firstString(m, "category", "category_name", "vc_name"),
 				"",
