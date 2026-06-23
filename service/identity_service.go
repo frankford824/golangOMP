@@ -19,8 +19,9 @@ import (
 )
 
 var (
-	mobilePattern = regexp.MustCompile(`^1[3-9]\d{9}$`)
-	emailPattern  = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	mobilePattern           = regexp.MustCompile(`^1[3-9]\d{9}$`)
+	emailPattern            = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	managedAvatarURLPattern = regexp.MustCompile(`^/v1/me/avatar-files/avatar-[0-9a-f]{32}\.(jpg|jpeg|png|webp)$`)
 )
 
 type RegisterUserParams struct {
@@ -107,6 +108,11 @@ type UpdateMeParams struct {
 	Email       *string
 }
 
+type UpdateMyAvatarParams struct {
+	AvatarURL string
+	Method    string
+}
+
 type DeleteUserParams struct {
 	UserID int64
 	Reason string
@@ -156,6 +162,7 @@ type IdentityService interface {
 	GetCurrentUser(ctx context.Context) (*domain.User, *domain.AppError)
 	GetMe(ctx context.Context) (*domain.User, *domain.AppError)
 	UpdateMe(ctx context.Context, p UpdateMeParams) (*domain.User, *domain.AppError)
+	UpdateMyAvatar(ctx context.Context, p UpdateMyAvatarParams) (*domain.User, *domain.AppError)
 	GetMyOrg(ctx context.Context) (*domain.MyOrgProfile, *domain.AppError)
 	ListUsers(ctx context.Context, filter UserFilter) ([]*domain.User, domain.PaginationMeta, *domain.AppError)
 	// ListAssignableDesigners returns the full set of assignable users for the
@@ -680,15 +687,62 @@ func (s *identityService) UpdateMe(ctx context.Context, p UpdateMeParams) (*doma
 	if err := s.attachRoles(ctx, user); err != nil {
 		return nil, infraError("attach current user roles", err)
 	}
-	params := UpdateUserParams{
-		UserID:      user.ID,
-		DisplayName: p.DisplayName,
-		Mobile:      p.Mobile,
-		Email:       p.Email,
-	}
 	// Self profile edits are allowed for the account owner even without
 	// organization-management roles; keep the writable set narrow.
-	return s.updateUserBypassManagementScope(ctx, user, params, "PATCH", "/v1/me")
+	return s.updateUserBypassManagementScope(ctx, user, p, "PATCH", "/v1/me")
+}
+
+func (s *identityService) UpdateMyAvatar(ctx context.Context, p UpdateMyAvatarParams) (*domain.User, *domain.AppError) {
+	avatarURL, appErr := normalizeManagedAvatarURLForService(p.AvatarURL)
+	if appErr != nil {
+		return nil, appErr
+	}
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || !domain.IsSessionBackedRequestActor(actor) {
+		return nil, domain.ErrUnauthorized
+	}
+	user, err := s.userRepo.GetByID(ctx, actor.ID)
+	if err != nil {
+		return nil, infraError("get current user for avatar update", err)
+	}
+	if user == nil {
+		return nil, domain.ErrNotFound
+	}
+	if err := s.attachRoles(ctx, user); err != nil {
+		return nil, infraError("attach current user roles", err)
+	}
+	if avatarURL == user.AvatarURL {
+		s.prepareUserForResponse(user)
+		return user, nil
+	}
+	user.AvatarURL = avatarURL
+	user.UpdatedAt = time.Now().UTC()
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.userRepo.Update(ctx, tx, user); err != nil {
+			return err
+		}
+		method := strings.TrimSpace(p.Method)
+		if method == "" {
+			method = "POST"
+		}
+		return s.recordPermissionActionTx(ctx, tx, domain.PermissionLog{
+			ActionType:     domain.PermissionActionUserUpdated,
+			TargetUserID:   actorIDPtr(user.ID),
+			TargetUsername: user.Username,
+			TargetRoles:    user.Roles,
+			Granted:        true,
+			Reason:         "updated fields: avatar_url",
+			Method:         method,
+			RoutePath:      "/v1/me/avatar",
+		})
+	}); err != nil {
+		return nil, infraError("update current user avatar tx", err)
+	}
+	updated, appErr := s.GetCurrentUser(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return updated, nil
 }
 
 func (s *identityService) GetMyOrg(ctx context.Context) (*domain.MyOrgProfile, *domain.AppError) {
@@ -871,6 +925,7 @@ func (s *identityService) GetCurrentUser(ctx context.Context) (*domain.User, *do
 	if err := s.attachRoles(ctx, user); err != nil {
 		return nil, infraError("attach current user roles", err)
 	}
+	s.prepareUserForResponse(user)
 	return user, nil
 }
 
@@ -1147,8 +1202,8 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 	return updated, nil
 }
 
-func (s *identityService) updateUserBypassManagementScope(ctx context.Context, user *domain.User, p UpdateUserParams, method, routePath string) (*domain.User, *domain.AppError) {
-	changes := make([]string, 0, 3)
+func (s *identityService) updateUserBypassManagementScope(ctx context.Context, user *domain.User, p UpdateMeParams, method, routePath string) (*domain.User, *domain.AppError) {
+	changes := make([]string, 0, 4)
 	if p.DisplayName != nil {
 		displayName := strings.TrimSpace(*p.DisplayName)
 		if displayName == "" {
@@ -1921,6 +1976,7 @@ func (s *identityService) prepareUserForResponse(user *domain.User) {
 	user.RealName = user.DisplayName
 	user.Group = user.Team
 	user.Phone = user.Mobile
+	user.Avatar = user.AvatarURL
 	user.FrontendAccess = domain.BuildFrontendAccess(user, s.frontendAccessSettings)
 }
 
@@ -2507,6 +2563,17 @@ func validateOptionalEmail(email string) *domain.AppError {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "email format is invalid", nil)
 	}
 	return nil
+}
+
+func normalizeManagedAvatarURLForService(raw string) (string, *domain.AppError) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+	if !managedAvatarURLPattern.MatchString(value) {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "avatar must be uploaded through profile avatar upload", map[string]string{"deny_code": "avatar_url_not_managed"})
+	}
+	return value, nil
 }
 
 func (s *identityService) ensureUniqueIdentity(ctx context.Context, username, mobile string, excludeUserID int64) *domain.AppError {

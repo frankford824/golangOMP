@@ -337,7 +337,7 @@ Content-Type: `multipart/form-data`
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/tasks/reference-upload \
-  -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer $TOKEN" \
   -F "file=@example.xlsx"
 ```
 

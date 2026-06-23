@@ -409,7 +409,7 @@ Content-Type: `application/json`
 | `group` | string | 否 | Compatibility alias of team. |
 | `email` | string | 否 | - |
 | `mobile` | string | 否 | - |
-| `avatar` | string | 否 | R1.7-B placeholder. Server currently ignores this field (no `users.avatar_url` column in v1 DDL). Full persistence is scheduled for R5+. |
+| `avatar` | string | 否 | Backward-compatible placeholder. The current runtime ignores this field on admin user PATCH; current-user avatars are updated through `/v1/me/avatar`. |
 | `roles` | array<V7Role> | 否 | Role assignment per V1_INFORMATION_ARCHITECTURE §5.4. DeptAdmin cannot grant SuperAdmin or DeptAdmin; HRAdmin cannot grant SuperAdmin. |
 | `managed_departments` | array<string> | 否 | - |
 | `managed_teams` | array<string> | 否 | - |

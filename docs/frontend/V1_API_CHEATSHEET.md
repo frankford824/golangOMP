@@ -1,10 +1,10 @@
-# V1 API 速查表(227 path · 一行一条)
+# V1 API 速查表(229 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 227 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 229 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -16,6 +16,8 @@
 | PUT | `/v1/auth/password` | Change current user password | PUT:已登录 / scope-aware | [V1_API_AUTH.md](V1_API_AUTH.md) |
 | GET | `/v1/me/task-drafts` | List my task drafts | GET:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
 | GET, PATCH | `/v1/me` | Get my profile；Update my profile | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
+| POST, DELETE | `/v1/me/avatar` | Upload my avatar；Delete my avatar | POST:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
+| GET | `/v1/me/avatar-files/{filename}` | Read avatar file | GET:公开 | [V1_API_ME.md](V1_API_ME.md) |
 | POST | `/v1/me/change-password` | Change my password | POST:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
 | GET | `/v1/me/org` | Get my org profile | GET:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
 | GET | `/v1/roles` | List role catalog | GET:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |

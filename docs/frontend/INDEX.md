@@ -82,7 +82,7 @@
 | Family | 文档 | path 数 |
 |---|---|---|
 | 认证与登录 | [V1_API_AUTH.md](V1_API_AUTH.md) | 5 |
-| 当前用户 | [V1_API_ME.md](V1_API_ME.md) | 4 |
+| 当前用户 | [V1_API_ME.md](V1_API_ME.md) | 6 |
 | 用户与管理审计 | [V1_API_USERS.md](V1_API_USERS.md) | 18 |
 | 组织架构 | [V1_API_ORG.md](V1_API_ORG.md) | 9 |
 | 任务主流程 | [V1_API_TASKS.md](V1_API_TASKS.md) | 114 |
@@ -95,11 +95,11 @@
 | 搜索 | [V1_API_SEARCH.md](V1_API_SEARCH.md) | 3 |
 | L1 报表 | [V1_API_REPORTS.md](V1_API_REPORTS.md) | 4 |
 | WebSocket | [V1_API_WS.md](V1_API_WS.md) | 0 个 `/v1` path + `/ws/v1` |
-| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 227 |
+| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 229 |
 
 ## §6 联调硬门
 
-- 所有请求必须走 Bearer token，公开登录/注册除外。
+- 所有请求必须走 Bearer token，公开登录/注册和公开随机资源除外。
 - 首屏详情优先使用 `GET /v1/tasks/{id}/detail`，不要并发拼旧 detail 子接口。
 - 前端必须展示后端 `error.code` 或 `deny_code`。
 - 新页面只接 canonical 路径。

@@ -97,9 +97,10 @@ type loginReq struct {
 }
 
 type changePasswordReq struct {
-	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required"`
-	Confirm     string `json:"confirm"`
+	OldPassword          string `json:"old_password" binding:"required"`
+	NewPassword          string `json:"new_password" binding:"required"`
+	Confirm              string `json:"confirm"`
+	PasswordConfirmation string `json:"password_confirmation"`
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -194,7 +195,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	if appErr := h.svc.ChangePassword(c.Request.Context(), service.ChangePasswordParams{
 		OldPassword: req.OldPassword,
 		NewPassword: req.NewPassword,
-		Confirm:     req.Confirm,
+		Confirm:     firstNonEmpty(req.Confirm, req.PasswordConfirmation),
 	}); appErr != nil {
 		respondError(c, appErr)
 		return

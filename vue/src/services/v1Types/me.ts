@@ -4,6 +4,8 @@ export interface MeProfile extends BackendUser {
   nickname?: string
   phone?: string
   account?: string
+  avatar?: string
+  avatar_url?: string
 }
 
 export interface MeOrgProfile {

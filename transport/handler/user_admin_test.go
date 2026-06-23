@@ -359,6 +359,10 @@ func (s *userAdminServiceStub) UpdateMe(context.Context, service.UpdateMeParams)
 	return s.currentUser, nil
 }
 
+func (s *userAdminServiceStub) UpdateMyAvatar(context.Context, service.UpdateMyAvatarParams) (*domain.User, *domain.AppError) {
+	return s.currentUser, nil
+}
+
 func (s *userAdminServiceStub) GetMyOrg(context.Context) (*domain.MyOrgProfile, *domain.AppError) {
 	return nil, nil
 }

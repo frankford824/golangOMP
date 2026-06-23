@@ -50,8 +50,8 @@ func (r *userRepo) CountByTeam(ctx context.Context, team string) (int64, error) 
 
 func (r *userRepo) Create(ctx context.Context, tx repo.Tx, user *domain.User) (int64, error) {
 	result, err := Unwrap(tx).ExecContext(ctx, `
-		INSERT INTO users (username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO users (username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.Username,
 		user.DisplayName,
 		user.Department,
@@ -60,6 +60,7 @@ func (r *userRepo) Create(ctx context.Context, tx repo.Tx, user *domain.User) (i
 		marshalStringSlice(user.ManagedTeams),
 		user.Mobile,
 		user.Email,
+		nullString(user.AvatarURL),
 		user.PasswordHash,
 		user.Status,
 		user.EmploymentType,
@@ -82,28 +83,28 @@ func (r *userRepo) Create(ctx context.Context, tx repo.Tx, user *domain.User) (i
 
 func (r *userRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {
 	row := r.db.db.QueryRowContext(ctx, `
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
 		FROM users WHERE id = ?`, id)
 	return scanUser(row)
 }
 
 func (r *userRepo) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
 	row := r.db.db.QueryRowContext(ctx, `
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
 		FROM users WHERE LOWER(username) = LOWER(?)`, username)
 	return scanUser(row)
 }
 
 func (r *userRepo) GetByMobile(ctx context.Context, mobile string) (*domain.User, error) {
 	row := r.db.db.QueryRowContext(ctx, `
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
 		FROM users WHERE mobile = ?`, mobile)
 	return scanUser(row)
 }
 
 func (r *userRepo) GetByJstUID(ctx context.Context, jstUID int64) (*domain.User, error) {
 	row := r.db.db.QueryRowContext(ctx, `
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
 		FROM users WHERE jst_u_id = ?`, jstUID)
 	return scanUser(row)
 }
@@ -143,7 +144,7 @@ func (r *userRepo) List(ctx context.Context, filter repo.UserListFilter) ([]*dom
 	queryArgs := append([]interface{}{}, args...)
 	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
 		FROM users
 		WHERE `+strings.Join(where, " AND ")+`
 		ORDER BY id DESC
@@ -171,7 +172,7 @@ func (r *userRepo) List(ctx context.Context, filter repo.UserListFilter) ([]*dom
 // small and where the route layer is responsible for access control.
 func (r *userRepo) ListActiveByRole(ctx context.Context, role domain.Role) ([]*domain.User, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
 		FROM users
 		WHERE status = ?
 		  AND EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role = ?)
@@ -200,7 +201,7 @@ func (r *userRepo) ListActiveByRole(ctx context.Context, role domain.Role) ([]*d
 func (r *userRepo) Update(ctx context.Context, tx repo.Tx, user *domain.User) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE users
-		SET display_name = ?, department = ?, team = ?, managed_departments_json = ?, managed_teams_json = ?, mobile = ?, email = ?, status = ?, employment_type = ?, is_config_super_admin = ?, updated_at = ?
+		SET display_name = ?, department = ?, team = ?, managed_departments_json = ?, managed_teams_json = ?, mobile = ?, email = ?, avatar_url = ?, status = ?, employment_type = ?, is_config_super_admin = ?, updated_at = ?
 		WHERE id = ?`,
 		user.DisplayName,
 		user.Department,
@@ -209,6 +210,7 @@ func (r *userRepo) Update(ctx context.Context, tx repo.Tx, user *domain.User) er
 		marshalStringSlice(user.ManagedTeams),
 		user.Mobile,
 		user.Email,
+		nullString(user.AvatarURL),
 		user.Status,
 		user.EmploymentType,
 		user.IsConfigSuperAdmin,
@@ -381,7 +383,7 @@ func (r *userRepo) ListRolesByUserIDs(ctx context.Context, userIDs []int64) (map
 
 func (r *userRepo) ListConfigManagedAdmins(ctx context.Context) ([]*domain.User, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
 		FROM users
 		WHERE is_config_super_admin = 1
 		ORDER BY id ASC`)
@@ -641,6 +643,7 @@ func scanUser(scanner userScanner) (*domain.User, error) {
 	var employmentType sql.NullString
 	var managedDepartmentsJSON sql.NullString
 	var managedTeamsJSON sql.NullString
+	var avatarURL sql.NullString
 	if err := scanner.Scan(
 		&user.ID,
 		&user.Username,
@@ -651,6 +654,7 @@ func scanUser(scanner userScanner) (*domain.User, error) {
 		&managedTeamsJSON,
 		&user.Mobile,
 		&user.Email,
+		&avatarURL,
 		&user.PasswordHash,
 		&user.Status,
 		&employmentType,
@@ -672,6 +676,9 @@ func scanUser(scanner userScanner) (*domain.User, error) {
 	}
 	if jstRaw.Valid {
 		user.JstRawSnapshotJSON = jstRaw.String
+	}
+	if avatarURL.Valid {
+		user.AvatarURL = avatarURL.String
 	}
 	user.ManagedDepartments = unmarshalStringSlice(managedDepartmentsJSON.String)
 	user.ManagedTeams = unmarshalStringSlice(managedTeamsJSON.String)

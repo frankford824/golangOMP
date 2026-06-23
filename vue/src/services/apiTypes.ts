@@ -59,6 +59,7 @@ export interface FrontendAccess {
 /** 后端用户对象 */
 export interface BackendUser {
   id: string
+  account?: string
   username: string
   display_name: string
   name?: string
@@ -68,7 +69,10 @@ export interface BackendUser {
   roles: string[]
   frontend_access: FrontendAccess
   mobile?: string
+  phone?: string
   email?: string
+  avatar?: string
+  avatar_url?: string
   last_login_at?: string
 }
 
@@ -116,6 +120,8 @@ export interface RegisterPayload {
 export interface ChangePasswordPayload {
   old_password: string
   new_password: string
+  confirm?: string
+  password_confirmation?: string
 }
 
 // ─── 任务 ─────────────────────────────────────────────────────────────────────

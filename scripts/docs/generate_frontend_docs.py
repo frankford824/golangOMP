@@ -49,6 +49,7 @@ FAMILY_NOTES = {
     ],
     "ME": [
         "当前用户 family 只面向当前 token，不应用于管理其他用户。",
+        "`GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。",
         "通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。",
     ],
     "USERS": [
@@ -315,8 +316,7 @@ def collect_roles(op):
             parts.extend(str(x) for x in val)
         else:
             parts.append(str(val))
-    sec = op.get("security")
-    if sec == []:
+    if is_public_operation(op):
         return "公开"
     if parts:
         return ", ".join(dict.fromkeys(parts))
@@ -327,6 +327,18 @@ def access_label(path, method, op):
     if method == "get" and path in {"/v1/tasks", "/v1/tasks/{id}", "/v1/tasks/{id}/detail"}:
         return "已登录 / 主流程读全量可见"
     return collect_roles(op)
+
+
+def is_public_operation(op):
+    sec = op.get("security")
+    if sec == []:
+        return True
+    if op.get("x-public") is True:
+        return True
+    rbac = op.get("x-rbac-placeholder")
+    if isinstance(rbac, dict) and str(rbac.get("auth_mode", "")).lower() in {"public", "none", "unauthenticated"}:
+        return True
+    return False
 
 
 def error_rows(op):
@@ -347,10 +359,15 @@ def error_rows(op):
 
 def curl_for(path, method, op, media):
     url = "https://api.example.com" + re.sub(r"\{([^}]+)\}", r"<\1>", path)
-    lines = [f"curl -X {METHOD_LABEL[method]} {url} \\", "  -H \"Authorization: Bearer $TOKEN\""]
+    lines = [f"curl -X {METHOD_LABEL[method]} {url}"]
+    if not is_public_operation(op):
+        lines[-1] += " \\"
+        lines.append("  -H \"Authorization: Bearer $TOKEN\"")
     if method in ("post", "put", "patch"):
         if media == "multipart/form-data":
-            lines.append("  -F \"file=@example.xlsx\"")
+            lines[-1] += " \\"
+            example_file = "avatar.png" if path == "/v1/me/avatar" else "example.xlsx"
+            lines.append(f"  -F \"file=@{example_file}\"")
         elif media:
             lines[-1] += " \\"
             lines.append("  -H \"Content-Type: application/json\" \\")
@@ -412,7 +429,10 @@ def render_path_section(spec, path, path_item, family_key):
         desc.append(f"- `{METHOD_LABEL[m]}`: {' '.join(str(text).split())}")
     out.append(f"支持方法: {methods}。\n\n" + "\n".join(desc) + "\n\n")
     out.append("### 鉴权与 RBAC\n")
-    out.append("- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。\n")
+    if all(is_public_operation(op) for _, op in ops):
+        out.append("- 本节为公开资源接口，不需要 Bearer token。\n")
+    else:
+        out.append("- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。\n")
     role_lines = [f"- `{METHOD_LABEL[m]}` 允许角色: {access_label(path, m, op)}。" for m, op in ops]
     out.append("\n".join(role_lines) + "\n")
     out.append("- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。\n\n")
@@ -529,7 +549,7 @@ def render_index(family_entries, v1_path_count):
         out.append(f"| {title} | [{filename}]({filename}) | {count} |\n")
     out.append(f"| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | {v1_path_count} |\n\n")
     out.append("## §6 联调硬门\n\n")
-    out.append("- 所有请求必须走 Bearer token，公开登录/注册除外。\n- 首屏详情优先使用 `GET /v1/tasks/{id}/detail`，不要并发拼旧 detail 子接口。\n- 前端必须展示后端 `error.code` 或 `deny_code`。\n- 新页面只接 canonical 路径。\n- WebSocket 只做实时提示，最终一致状态回读 HTTP。\n- Excel 批量创建以 parse preview 的 `violations` 为准，不在前端复制完整业务校验。\n\n")
+    out.append("- 所有请求必须走 Bearer token，公开登录/注册和公开随机资源除外。\n- 首屏详情优先使用 `GET /v1/tasks/{id}/detail`，不要并发拼旧 detail 子接口。\n- 前端必须展示后端 `error.code` 或 `deny_code`。\n- 新页面只接 canonical 路径。\n- WebSocket 只做实时提示，最终一致状态回读 HTTP。\n- Excel 批量创建以 parse preview 的 `violations` 为准，不在前端复制完整业务校验。\n\n")
     out.append("## §7 Deprecated / Compatibility 清单\n\n")
     out.append("- `/v1/task-create/asset-center/*`: 创建前资产上传兼容入口。\n- `/v1/products*`: 老本地缓存商品入口，新联调用 `/v1/erp/products*`。\n- `/v1/tasks/{id}/audit_a_claim`、`/v1/tasks/{id}/audit_b_claim`: 老审核领取别名。\n- 所有 `withCompatibilityRoute` / `withDeprecatedRoute` 标记路径不得作为新前端主入口。\n\n")
     return "".join(out)

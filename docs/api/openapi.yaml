@@ -319,6 +319,8 @@ components:
         mobile: { type: string }
         phone: { type: string }
         email: { type: string, nullable: true }
+        avatar: { type: string, nullable: true }
+        avatar_url: { type: string, nullable: true }
         managed_departments:
           type: array
           items:
@@ -7476,7 +7478,7 @@ components:
             $ref: '#/components/schemas/V7Role'
     UpdateMyProfileRequest:
       type: object
-      description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑). R4-SA-B. All fields optional; server applies PATCH semantics."
+      description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑). R4-SA-B. All fields optional; server applies PATCH semantics. Profile save only updates display_name/mobile/email; avatar changes must use POST/DELETE /v1/me/avatar."
       properties:
         display_name:
           type: string
@@ -7485,11 +7487,6 @@ components:
         email:
           type: string
           nullable: true
-        avatar:
-          type: string
-          nullable: true
-          description: |
-            R1.7-B placeholder. The server accepts but currently ignores this field (no `users.avatar_url` column in v1 DDL). Full persistence is scheduled for R5+.
     ChangePasswordRequest:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (安全 · 改密). R4-SA-B."
@@ -7505,6 +7502,11 @@ components:
           type: string
           minLength: 1
           description: Must equal `new_password`; server enforces equality.
+        password_confirmation:
+          type: string
+          minLength: 1
+          deprecated: true
+          description: Backward-compatible alias for `confirm`.
     CreateOrgMoveRequestPayload:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §5.2 (DeptAdmin 发起跨部门移出). R4-SA-B."
@@ -8389,7 +8391,7 @@ paths:
                   type: string
                   nullable: true
                   description: |
-                    R1.7-B placeholder. Server currently ignores this field (no `users.avatar_url` column in v1 DDL). Full persistence is scheduled for R5+.
+                    Backward-compatible placeholder. The current runtime ignores this field on admin user PATCH; current-user avatars are updated through `/v1/me/avatar`.
                 roles:
                   type: array
                   description: |
@@ -16619,7 +16621,8 @@ paths:
     patch:
       summary: Update my profile
       description: |
-        Partial self-update for the authenticated user's profile. Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑 昵称/头像/手机/邮箱).
+        Partial self-update for the authenticated user's display profile. Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑 昵称/头像/手机/邮箱).
+        This endpoint updates display_name/mobile/email only. Avatar fields are rejected here; use POST /v1/me/avatar to upload and DELETE /v1/me/avatar to clear the avatar.
       tags: [Me, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-B
@@ -16643,6 +16646,111 @@ paths:
                     $ref: '#/components/schemas/WorkflowUser'
         '400':
           description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/avatar:
+    post:
+      summary: Upload my avatar
+      description: |
+        Uploads a small JPG, PNG, or WebP avatar for the authenticated user and stores the resulting avatar URL on the user profile.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-B
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPG, PNG, or WebP avatar image, max 2MB.
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkflowUser'
+        '400':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete my avatar
+      description: Clears the authenticated user's avatar URL and removes the stored avatar file when it is managed by this service.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-B
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkflowUser'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/avatar-files/{filename}:
+    get:
+      summary: Read avatar file
+      description: |
+        Publicly serves an uploaded avatar file by its generated random filename so browsers can load it directly in `<img>`.
+        Filenames are generated by the server, do not contain user IDs, and should be treated as opaque.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-B
+      x-public: true
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^avatar-[0-9a-f]{32}\.(jpg|jpeg|png|webp)$'
+      responses:
+        '200':
+          description: Avatar image bytes
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              description: Public browser cache header. Avatar updates use a newly generated URL.
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '404':
+          description: Avatar not found
           content:
             application/json:
               schema:

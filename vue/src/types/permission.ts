@@ -64,7 +64,11 @@ export type PermissionEnumValue = (typeof PermissionEnum)[keyof typeof Permissio
 
 export interface PermissionUser {
   id: string
+  account?: string
+  username?: string
   name: string
+  avatar?: string
+  avatarUrl?: string
   role: RoleEnumValue
   departmentId: string
   groupId: string
@@ -82,4 +86,3 @@ export interface Group {
   name: string
   departmentId: string
 }
-
