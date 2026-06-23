@@ -174,6 +174,70 @@ func TestProductManagementQueuePendingBaseSyncByTaskIDQueuesOnlyReadyBaseRecords
 	}
 }
 
+func TestProductManagementMarkBaseSyncProjectionSyncedUpdatesTaskProjection(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		switch expectedSQL {
+		case "mark-task-sku-item-base-sync-filed":
+			for _, fragment := range []string{
+				"UPDATE task_sku_items",
+				"sku_status = 'filed'",
+				"filing_status = 'filed'",
+				"erp_sync_status = 'filed'",
+				"erp_sync_required = 0",
+				"erp_sync_version = CASE",
+				"WHERE task_id = ? AND id = ?",
+			} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("sku projection SQL missing %q: %s", fragment, normalized)
+				}
+			}
+			return nil
+		case "mark-task-base-sync-filed":
+			for _, fragment := range []string{
+				"UPDATE task_details td",
+				"filing_status = 'filed'",
+				"erp_sync_required = 0",
+				"last_filed_at = ?",
+				"EXISTS ( SELECT 1 FROM erp_product_sync_records pm WHERE pm.task_id = td.task_id )",
+				"NOT EXISTS ( SELECT 1 FROM erp_product_sync_records pm WHERE pm.task_id = td.task_id AND pm.base_sync_status <> 'synced' )",
+			} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("task projection SQL missing %q: %s", fragment, normalized)
+				}
+			}
+			return nil
+		default:
+			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
+		}
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := testProductManagementNow()
+	skuItemID := int64(1492)
+	mock.ExpectBegin()
+	mock.ExpectExec("mark-task-sku-item-base-sync-filed").
+		WithArgs(now, int64(1497), skuItemID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("mark-task-base-sync-filed").
+		WithArgs(now, now, now, int64(1497)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	if err := mysqlDB.RunInTx(context.Background(), func(tx repo.Tx) error {
+		return NewProductManagementRepo(mysqlDB).MarkBaseSyncProjectionSynced(context.Background(), tx, 1497, &skuItemID, now)
+	}); err != nil {
+		t.Fatalf("MarkBaseSyncProjectionSynced() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func testProductManagementNow() time.Time {
 	return time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
 }

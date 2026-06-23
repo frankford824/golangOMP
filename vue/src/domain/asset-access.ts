@@ -6,6 +6,7 @@ import axios from 'axios'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import type { AssetDownloadMeta } from '@/services/api/assetsApi'
 import { assetsApi } from '@/services/api/assetsApi'
+import { normalizePreviewAssetId } from '@/domain/asset-preview-image'
 import { toRelativeAssetUrl } from '@/utils/url'
 
 export type AssetPreviewMetaStatus = 'ok' | 'preparing' | 'not_found' | 'unavailable' | 'error'
@@ -130,7 +131,7 @@ export async function fetchAssetPreviewMeta(
   assetId: string,
   signal?: AbortSignal,
 ): Promise<AssetPreviewMetaResult> {
-  const id = assetId.trim()
+  const id = normalizePreviewAssetId(assetId)
   if (!id) return { status: 'error', message: '缺少资产 id' }
   const cached = readPreviewMetaCache(id)
   if (cached) return cached

@@ -57,6 +57,7 @@ import assetPreviewPlaceholder from '@/assets/default.png'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import {
   materializePreviewImageUrl,
+  normalizePreviewAssetId,
   revokeMaterializedPreviewImage,
   type MaterializedPreviewImage,
 } from '@/domain/asset-preview-image'
@@ -214,8 +215,8 @@ async function runLoad() {
     return
   }
 
-  const primaryId = props.assetId?.trim() || ''
-  const secondaryId = props.fallbackAssetId?.trim() || ''
+  const primaryId = normalizePreviewAssetId(props.assetId)
+  const secondaryId = normalizePreviewAssetId(props.fallbackAssetId)
   if (!primaryId && !secondaryId) {
     clearObjectUrl()
     const fallback = await materializeDisplaySrc((props.fallbackSrc ?? '').trim())

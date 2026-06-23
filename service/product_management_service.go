@@ -835,7 +835,7 @@ func (s *productManagementService) markProductManagementBaseSyncSucceeded(ctx co
 		cooldown = &next
 	}
 	_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		return s.records.UpdateBaseSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
+		if err := s.records.UpdateBaseSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
 			Status:            domain.ProductManagementERPSyncStatusSynced,
 			BaseStatus:        domain.ProductManagementERPSyncStatusSynced,
 			LastERPCheckedAt:  &now,
@@ -844,7 +844,10 @@ func (s *productManagementService) markProductManagementBaseSyncSucceeded(ctx co
 			SyncCooldownUntil: cooldown,
 			LastSyncError:     "",
 			BaseSyncError:     "",
-		})
+		}); err != nil {
+			return err
+		}
+		return s.records.MarkBaseSyncProjectionSynced(ctx, tx, record.TaskID, record.TaskSKUItemID, now)
 	})
 }
 

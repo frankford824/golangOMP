@@ -44,6 +44,7 @@ import {
   type ImagePreviewLightboxItem,
   type OpenImagePreviewLightbox,
 } from '@/components/media/imagePreviewLightbox'
+import { normalizePreviewAssetId } from '@/domain/asset-preview-image'
 
 export type AssetThumbItem = {
   key: string
@@ -114,8 +115,8 @@ const normalizedItems = computed(() =>
     .map((item) => ({
       ...item,
       src: (item.src ?? '').trim(),
-      previewAssetId: (item.previewAssetId ?? '').trim(),
-      fallbackAssetId: (item.fallbackAssetId ?? '').trim(),
+      previewAssetId: normalizePreviewAssetId(item.previewAssetId),
+      fallbackAssetId: normalizePreviewAssetId(item.fallbackAssetId),
       downloadUrl: (item.downloadUrl ?? '').trim(),
       label: (item.label ?? '').trim(),
     }))

@@ -112,6 +112,40 @@ func TestProductManagementComboScopePaginatesComboGroups(t *testing.T) {
 	}
 }
 
+func TestProductManagementBaseSyncSuccessMarksTaskProjection(t *testing.T) {
+	now := time.Date(2026, 6, 23, 9, 40, 0, 0, time.UTC)
+	skuItemID := int64(1492)
+	records := &productManagementRecordRepoFake{}
+	svc := &productManagementService{
+		records:  records,
+		txRunner: productManagementUnitTxRunner{},
+		now:      func() time.Time { return now },
+	}
+
+	svc.markProductManagementBaseSyncSucceeded(context.Background(), &domain.ProductManagementRecord{
+		ID:            6416,
+		TaskID:        1497,
+		TaskSKUItemID: &skuItemID,
+		SKUCode:       "CGO000165",
+	})
+
+	if records.updatedBaseID != 6416 {
+		t.Fatalf("updated base id = %d, want 6416", records.updatedBaseID)
+	}
+	if records.updatedBasePatch.BaseStatus != domain.ProductManagementERPSyncStatusSynced {
+		t.Fatalf("base status = %s, want synced", records.updatedBasePatch.BaseStatus)
+	}
+	if records.projectionTaskID != 1497 {
+		t.Fatalf("projection task id = %d, want 1497", records.projectionTaskID)
+	}
+	if records.projectionSKUItemID == nil || *records.projectionSKUItemID != skuItemID {
+		t.Fatalf("projection sku item id = %+v, want %d", records.projectionSKUItemID, skuItemID)
+	}
+	if !records.projectionNow.Equal(now) {
+		t.Fatalf("projection now = %s, want %s", records.projectionNow, now)
+	}
+}
+
 func productManagementTestRecord(id int64, sku string, now time.Time) *domain.ProductManagementRecord {
 	return &domain.ProductManagementRecord{
 		ID:                 id,
@@ -134,7 +168,12 @@ func productManagementTestRecord(id int64, sku string, now time.Time) *domain.Pr
 }
 
 type productManagementRecordRepoFake struct {
-	items []*domain.ProductManagementRecord
+	items               []*domain.ProductManagementRecord
+	updatedBaseID       int64
+	updatedBasePatch    repo.ProductManagementSyncPatch
+	projectionTaskID    int64
+	projectionSKUItemID *int64
+	projectionNow       time.Time
 }
 
 func (f *productManagementRecordRepoFake) RefreshReadModel(context.Context) error { return nil }
@@ -187,12 +226,34 @@ func (f *productManagementRecordRepoFake) UpdateSyncStatus(context.Context, repo
 	return nil
 }
 
-func (f *productManagementRecordRepoFake) UpdateBaseSyncStatus(context.Context, repo.Tx, int64, repo.ProductManagementSyncPatch) error {
+func (f *productManagementRecordRepoFake) UpdateBaseSyncStatus(_ context.Context, _ repo.Tx, id int64, patch repo.ProductManagementSyncPatch) error {
+	f.updatedBaseID = id
+	f.updatedBasePatch = patch
 	return nil
 }
 
 func (f *productManagementRecordRepoFake) UpdateImageSyncStatus(context.Context, repo.Tx, int64, repo.ProductManagementSyncPatch) error {
 	return nil
+}
+
+func (f *productManagementRecordRepoFake) MarkBaseSyncProjectionSynced(_ context.Context, _ repo.Tx, taskID int64, taskSKUItemID *int64, now time.Time) error {
+	f.projectionTaskID = taskID
+	if taskSKUItemID != nil {
+		id := *taskSKUItemID
+		f.projectionSKUItemID = &id
+	}
+	f.projectionNow = now
+	return nil
+}
+
+type productManagementUnitTx struct{}
+
+func (productManagementUnitTx) IsTx() {}
+
+type productManagementUnitTxRunner struct{}
+
+func (productManagementUnitTxRunner) RunInTx(ctx context.Context, fn func(tx repo.Tx) error) error {
+	return fn(productManagementUnitTx{})
 }
 
 type productManagementERPBridgeCapture struct {

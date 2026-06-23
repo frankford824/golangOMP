@@ -178,6 +178,7 @@ import type { ImagePreviewLightboxItem } from './imagePreviewLightbox'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import {
   materializePreviewImageUrl,
+  normalizePreviewAssetId,
   revokeMaterializedPreviewImage,
   type MaterializedPreviewImage,
 } from '@/domain/asset-preview-image'
@@ -309,7 +310,7 @@ async function resolveActiveImage(item: ImagePreviewLightboxItem): Promise<Mater
   if (item.src.startsWith('blob:') || item.src.startsWith('data:')) {
     return materializePreviewImageUrl(item.src)
   }
-  for (const assetId of uniqueNonEmpty([item.previewAssetId, item.fallbackAssetId])) {
+  for (const assetId of uniqueNonEmpty([normalizePreviewAssetId(item.previewAssetId), normalizePreviewAssetId(item.fallbackAssetId)])) {
     const meta = await fetchAssetPreviewMeta(assetId).catch(() => null)
     if (meta?.status === 'ok' && meta.displayUrl) {
       const image = await materializePreviewImageUrl(meta.displayUrl)

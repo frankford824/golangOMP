@@ -573,6 +573,75 @@ func (r *productManagementRepo) UpdateBaseSyncStatus(ctx context.Context, tx rep
 	return nil
 }
 
+func (r *productManagementRepo) MarkBaseSyncProjectionSynced(ctx context.Context, tx repo.Tx, taskID int64, taskSKUItemID *int64, now time.Time) error {
+	if taskID <= 0 {
+		return nil
+	}
+	sqlTx := Unwrap(tx)
+	if taskSKUItemID != nil && *taskSKUItemID > 0 {
+		if _, err := sqlTx.ExecContext(ctx, `
+			UPDATE task_sku_items
+			   SET sku_status = 'filed',
+			       filing_status = 'filed',
+			       erp_sync_status = 'filed',
+			       erp_sync_required = 0,
+			       erp_sync_version = CASE
+			         WHEN filing_status <> 'filed' OR erp_sync_status <> 'filed' OR erp_sync_required <> 0
+			         THEN erp_sync_version + 1
+			         ELSE erp_sync_version
+			       END,
+			       last_filed_at = ?,
+			       filing_error_message = '',
+			       updated_at = CURRENT_TIMESTAMP
+			 WHERE task_id = ? AND id = ?`,
+			now,
+			taskID,
+			*taskSKUItemID,
+		); err != nil {
+			return fmt.Errorf("mark task_sku_item product management base sync filed: %w", err)
+		}
+	}
+	if _, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_details td
+		   SET filing_status = 'filed',
+		       erp_sync_required = 0,
+		       erp_sync_version = CASE
+		         WHEN td.filing_status <> 'filed' OR COALESCE(td.erp_sync_required, 0) <> 0
+		         THEN td.erp_sync_version + 1
+		         ELSE td.erp_sync_version
+		       END,
+		       last_filing_attempt_at = ?,
+		       last_filed_at = ?,
+		       filing_error_message = '',
+		       filed_at = COALESCE(td.filed_at, ?),
+		       updated_at = CURRENT_TIMESTAMP
+		 WHERE td.task_id = ?
+		   AND EXISTS (
+		     SELECT 1
+		       FROM erp_product_sync_records pm
+		      WHERE pm.task_id = td.task_id
+		   )
+		   AND NOT EXISTS (
+		     SELECT 1
+		       FROM erp_product_sync_records pm
+		      WHERE pm.task_id = td.task_id
+		        AND pm.base_sync_status <> 'synced'
+		   )
+		   AND (
+		     td.filing_status <> 'filed'
+		     OR COALESCE(td.erp_sync_required, 0) <> 0
+		     OR td.last_filed_at IS NULL
+		   )`,
+		now,
+		now,
+		now,
+		taskID,
+	); err != nil {
+		return fmt.Errorf("mark task product management base sync filed: %w", err)
+	}
+	return nil
+}
+
 func (r *productManagementRepo) UpdateImageSyncStatus(ctx context.Context, tx repo.Tx, id int64, patch repo.ProductManagementSyncPatch) error {
 	sqlTx := Unwrap(tx)
 	status := patch.ImageStatus

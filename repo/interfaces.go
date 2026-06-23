@@ -181,6 +181,7 @@ type ProductManagementRepo interface {
 	UpdateSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
 	UpdateBaseSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
 	UpdateImageSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
+	MarkBaseSyncProjectionSynced(ctx context.Context, tx Tx, taskID int64, taskSKUItemID *int64, now time.Time) error
 }
 
 type SKUComboRepo interface {
