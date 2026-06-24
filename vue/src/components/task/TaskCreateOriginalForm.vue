@@ -48,10 +48,11 @@
     </section>
 
     <div class="form-card">
-      <BaseInput
+      <TaskSpecStructuredInput
         v-model="localForm.prefillSpecText"
         label="产品尺寸（可选）"
         placeholder="默认使用 ERP 尺寸，可按需覆盖"
+        hint="不填写时沿用 ERP 或商品名称中的尺寸；填写后用于成本匹配。"
       />
     </div>
     <div class="form-card upload-card">
@@ -71,9 +72,9 @@ import { computed, ref } from 'vue'
 import type { TaskCreateFormModel } from '@/domain/types'
 import type { Product } from '@/types'
 import BaseButton from '@/components/base/BaseButton.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import ProductPickerDialog from '@/components/products/ProductPickerDialog.vue'
 
 const props = defineProps<{

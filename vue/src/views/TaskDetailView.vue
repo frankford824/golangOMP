@@ -1639,6 +1639,47 @@ function recordField(record: Record<string, unknown> | undefined, ...keys: strin
   }
   return undefined
 }
+
+function costGovernanceStatusLabel(value: unknown, kind: 'review' | 'finance'): string {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) return ''
+  const labels: Record<string, string> = {
+    pending: kind === 'review' ? '待审核确认' : '待财务确认',
+    approved: '已确认',
+    rejected: '已驳回',
+    not_required: '无需确认',
+    notrequired: '无需确认',
+    ready_for_view: '已完成',
+    readyforview: '已完成',
+  }
+  return labels[raw] ?? dash(value)
+}
+
+function costOverrideReasonBusinessLabel(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  const normalized = raw.toLowerCase()
+  if (!raw) return '-'
+  if (normalized === 'manual cost override' || normalized.includes('manual') && normalized.includes('override')) {
+    return '人工维护成本'
+  }
+  if (normalized.includes('warehouse')) return '仓库维护成本'
+  if (normalized.includes('supplier')) return '供应商特殊成本'
+  return raw
+}
+
+function costOverrideActorBusinessLabel(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const operatorMatch = raw.match(/^operator:(\d+)$/i)
+  if (operatorMatch) {
+    const operatorID = operatorMatch[1]
+    const creatorID = String(task.value?.creatorId ?? '').trim()
+    if (operatorID && creatorID && operatorID === creatorID) return detailCreatorLabel.value
+    return `操作人 #${operatorID}`
+  }
+  return raw
+}
+
 const detailCostStatusLabel = computed(() => {
   const t = task.value
   const summary = t?.costOverrideSummary
@@ -1648,12 +1689,12 @@ const detailCostStatusLabel = computed(() => {
   const bits: string[] = []
   if (active === true) bits.push('人工覆盖生效')
   else if (active === false) bits.push('系统规则成本')
-  if (review) bits.push(`审核：${review}`)
-  if (finance) bits.push(`财务：${finance}`)
+  if (review) bits.push(`审核：${costGovernanceStatusLabel(review, 'review')}`)
+  if (finance) bits.push(`财务：${costGovernanceStatusLabel(finance, 'finance')}`)
   return bits.length > 0 ? bits.join('；') : '-'
 })
 const detailCostOverrideReasonLabel = computed(() =>
-  dash(recordField(task.value?.costOverrideSummary, 'current_override_reason', 'currentOverrideReason')),
+  costOverrideReasonBusinessLabel(recordField(task.value?.costOverrideSummary, 'current_override_reason', 'currentOverrideReason')),
 )
 const detailCostLatestActionLabel = computed(() => {
   const summary = task.value?.costOverrideSummary
@@ -1671,8 +1712,9 @@ const detailCostLatestActionLabel = computed(() => {
         : eventType === 'override_released'
           ? '解除覆盖'
           : eventType || '成本操作'
+  const actorLabel = costOverrideActorBusinessLabel(actor)
   const timeLabel = at ? formatMonthDayTimeBeijingOffsetAware(at) : ''
-  return [typeLabel, actor, timeLabel].filter(Boolean).join(' · ') || '-'
+  return [typeLabel, actorLabel, timeLabel].filter(Boolean).join(' · ') || '-'
 })
 function mergeTaskAndSkuReferenceRefs(detailTask: {
   referenceFileRefs?: ReferenceFileRef[]

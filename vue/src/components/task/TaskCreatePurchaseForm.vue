@@ -58,11 +58,12 @@
     <p v-else class="form-hint card-hint">选择按模板后，系统会根据产品尺寸等规则自动计算成本。</p>
 
     <section class="form-card">
-      <BaseTextarea
+      <TaskSpecStructuredInput
         v-model="localForm.prefillSpecText"
         label="规格尺寸"
-        :rows="2"
-        placeholder="请输入规格尺寸"
+        required
+        placeholder="请选择宽高或面积并填写数字"
+        hint="按模板计算成本时优先使用这里的标准尺寸。"
       />
     </section>
   </div>
@@ -72,8 +73,8 @@
 import { computed } from 'vue'
 import type { TaskCreateFormModel } from '@/domain/types'
 import BaseInput from '@/components/base/BaseInput.vue'
-import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameError, erpProductNameHint } from '@/domain/erp-product-name'
 

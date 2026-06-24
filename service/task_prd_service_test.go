@@ -2146,6 +2146,9 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testi
 		costRuleRepo,
 		prdCodeRuleService{},
 		step04TxRunner{},
+		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
+			upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+		}),
 	)
 
 	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
@@ -2162,6 +2165,131 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testi
 	}
 	if detail.CostRuleName != "常规写真布基础单价" {
 		t.Fatalf("cost_rule_name = %q, want 常规写真布基础单价", detail.CostRuleName)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoCategoryChangeRecomputesSystemCostAndSyncsSingleSKUItem(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   18,
+		CategoryCode: "FLAG_CLOTH_STANDARD",
+		CategoryName: "常规旗帜布",
+		DisplayName:  "常规旗帜布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        18,
+			RuleVersion:   1,
+			RuleName:      "常规旗帜布基础单价",
+			CategoryCode:  "FLAG_CLOTH_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(4),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_020_sample",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			1734: {
+				ID:                  1734,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				SKUCode:             "CGO000236",
+				PrimarySKUCode:      "CGO000236",
+				ProductNameSnapshot: "陈夕常规海报/夏天/绿色荷花你好夏天特大号100*200cm",
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			1734: {
+				TaskID:                   1734,
+				Category:                 "常规海报",
+				CategoryName:             "常规海报",
+				ProductShortName:         "陈夕常规海报/夏天/绿色荷花你好夏天特大号100*200cm",
+				SpecText:                 "2平方米",
+				Area:                     float64Ptr(2),
+				CostPrice:                float64Ptr(11),
+				EstimatedCost:            float64Ptr(11),
+				CostRuleID:               int64Ptr(14),
+				CostRuleName:             "常规写真布基础单价",
+				CostRuleSource:           "phase_020_sample",
+				MatchedRuleVersion:       intPtr(1),
+				ManualCostOverride:       false,
+				ManualCostOverrideReason: "",
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			1734: {
+				{
+					ID:                  1716,
+					TaskID:              1734,
+					SKUCode:             "CGO000236",
+					ProductNameSnapshot: "陈夕常规海报/夏天/绿色荷花你好夏天特大号100*200cm",
+					ProductShortName:    "陈夕常规海报/夏天/绿色荷花你好夏天特大号100*200cm",
+					CategoryCode:        "常规海报",
+					CostPrice:           float64Ptr(11),
+					EstimatedCost:       float64Ptr(11),
+				},
+			},
+		},
+	}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		&prdTaskCostOverrideEventRepo{},
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
+			upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+		}),
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:      1734,
+		OperatorID:  249,
+		ProductName: "陈夕常规旗帜布/夏天/绿色荷花你好夏天特大号100*200cm",
+		Category:    "常规旗帜布",
+		SpecText:    "2平方米",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-8.8) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 8.8", detail.CostPrice)
+	}
+	if detail.ManualCostOverride {
+		t.Fatalf("manual_cost_override = true, want false")
+	}
+	if detail.ManualCostOverrideReason != "" || detail.OverrideActor != "" {
+		t.Fatalf("override fields = %q / %q, want empty", detail.ManualCostOverrideReason, detail.OverrideActor)
+	}
+	items := taskRepo.skuItems[1734]
+	if len(items) != 1 {
+		t.Fatalf("sku items len = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.ProductNameSnapshot != "陈夕常规旗帜布/夏天/绿色荷花你好夏天特大号100*200cm" ||
+		item.ProductShortName != "陈夕常规旗帜布/夏天/绿色荷花你好夏天特大号100*200cm" {
+		t.Fatalf("sku item product names = %q / %q", item.ProductNameSnapshot, item.ProductShortName)
+	}
+	if item.CategoryCode != "FLAG_CLOTH_STANDARD" {
+		t.Fatalf("sku item category_code = %q, want FLAG_CLOTH_STANDARD", item.CategoryCode)
+	}
+	if item.CostPrice == nil || math.Abs(*item.CostPrice-8.8) > 0.000001 {
+		t.Fatalf("sku item cost_price = %+v, want 8.8", item.CostPrice)
+	}
+	if item.ManualCostOverride {
+		t.Fatal("sku item manual_cost_override = true, want false")
 	}
 }
 

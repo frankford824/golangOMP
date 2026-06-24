@@ -1119,6 +1119,7 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 	}
 	if req.CostPrice != nil {
 		updateParams.CostPrice = req.CostPrice
+		updateParams.CostPriceSet = true
 	}
 	if req.CostRuleID != nil {
 		updateParams.CostRuleID = req.CostRuleID
@@ -1767,6 +1768,7 @@ func (h *TaskHandler) PatchCostInfo(c *gin.Context) {
 	params := buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
 	if req.CostPrice != nil {
 		params.CostPrice = req.CostPrice
+		params.CostPriceSet = true
 	}
 	if req.CostRuleID != nil {
 		params.CostRuleID = req.CostRuleID

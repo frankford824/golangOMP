@@ -134,6 +134,7 @@ type UpdateTaskBusinessInfoParams struct {
 	ReferenceLink            string
 	CraftText                string
 	CostPrice                *float64
+	CostPriceSet             bool
 	CostRuleID               *int64
 	CostRuleIDExplicit       bool
 	CostRuleName             string
@@ -2157,13 +2158,13 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "cost_price is required when manual_cost_override=true", nil)
 		}
 		if detail.ManualCostOverrideReason == "" {
-			detail.ManualCostOverrideReason = "manual cost override"
+			detail.ManualCostOverrideReason = "人工维护成本"
 		}
 		detail.CostPrice = cloneFloat64Ptr(p.CostPrice)
-	} else if shouldTreatCostAsManualOverride(p.CostPrice, detail.EstimatedCost) {
+	} else if p.CostPriceSet && shouldTreatCostAsManualOverride(p.CostPrice, detail.EstimatedCost) {
 		detail.ManualCostOverride = true
 		if detail.ManualCostOverrideReason == "" {
-			detail.ManualCostOverrideReason = "manual cost override"
+			detail.ManualCostOverrideReason = "人工维护成本"
 		}
 		detail.CostPrice = cloneFloat64Ptr(p.CostPrice)
 	} else if detail.EstimatedCost != nil {
@@ -2239,7 +2240,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		}
 		if len(items) == 1 && items[0] != nil {
 			copied := *items[0]
-			syncSKUItemCostFromTaskDetail(&copied, detail)
+			syncSKUItemProjectionFromTaskDetail(&copied, task, detail)
 			singleItemCostProjection = &copied
 		}
 	}
@@ -3027,6 +3028,38 @@ func syncSKUItemCostFromTaskDetail(item *domain.TaskSKUItem, detail *domain.Task
 	item.ManualCostOverrideReason = detail.ManualCostOverrideReason
 	item.OverrideActor = detail.OverrideActor
 	item.OverrideAt = cloneTimePtr(detail.OverrideAt)
+}
+
+func syncSKUItemProjectionFromTaskDetail(item *domain.TaskSKUItem, task *domain.Task, detail *domain.TaskDetail) {
+	if item == nil || detail == nil {
+		return
+	}
+	if task != nil {
+		if productName := strings.TrimSpace(task.ProductNameSnapshot); productName != "" {
+			item.ProductNameSnapshot = productName
+		}
+		if task.ProductID != nil {
+			item.ProductID = cloneInt64Ptr(task.ProductID)
+		}
+	}
+	if productShortName := strings.TrimSpace(detail.ProductShortName); productShortName != "" {
+		item.ProductShortName = productShortName
+	} else if item.ProductShortName == "" {
+		item.ProductShortName = item.ProductNameSnapshot
+	}
+	item.CategoryCode = firstNonEmptyString(
+		strings.TrimSpace(detail.CategoryCode),
+		strings.TrimSpace(detail.CategoryName),
+		strings.TrimSpace(detail.Category),
+	)
+	item.MaterialMode = detail.MaterialMode
+	item.CostPriceMode = detail.CostPriceMode
+	item.Quantity = cloneInt64Ptr(detail.Quantity)
+	item.BaseSalePrice = cloneFloat64Ptr(detail.BaseSalePrice)
+	if task == nil || task.TaskType != domain.TaskTypeOriginalProductDevelopment {
+		item.DesignRequirement = detail.DesignRequirement
+	}
+	syncSKUItemCostFromTaskDetail(item, detail)
 }
 
 func (s *taskService) listActiveCostRulesForText(ctx context.Context, categoryID *int64, categoryCode, notes string) ([]*domain.CostRule, error) {

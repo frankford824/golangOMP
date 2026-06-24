@@ -74,7 +74,14 @@
           <BaseTextarea v-model="form.note" class="sm:col-span-2" label="运营备注" :rows="2" />
           <div>
             <label class="field-label">截止时间</label>
-            <input v-model="form.due_at" type="date" class="native-input" />
+            <div class="due-at-input-row">
+              <input v-model="form.due_at" type="date" class="native-input" />
+              <select v-model="form.due_at_hour" class="native-input due-hour-select">
+                <option v-for="opt in dueHourOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
           </div>
           <div>
             <label class="field-label">优先级</label>
@@ -194,7 +201,7 @@ import {
   erpProductNameLimitMessage,
   isErpProductNameTooLong,
 } from '@/domain/erp-product-name'
-import { taskBeijingDateKey, toBeijingEndOfDayISO } from '@/utils/date'
+import { taskBeijingDateKey, taskBeijingHour, toBeijingEndOfDayISO, toBeijingHourISO } from '@/utils/date'
 
 const props = defineProps<{
   modelValue: boolean
@@ -236,6 +243,7 @@ type EditForm = {
   design_requirement: string
   note: string
   due_at: string
+  due_at_hour: string
   priority: string
   cost_price: number | undefined
   manual_cost_override: boolean
@@ -262,6 +270,7 @@ function emptyForm(): EditForm {
     design_requirement: '',
     note: '',
     due_at: '',
+    due_at_hour: '18',
     priority: 'normal',
     cost_price: undefined,
     manual_cost_override: false,
@@ -280,6 +289,11 @@ const loading = ref(false)
 const loadError = ref('')
 const submitError = ref('')
 const saving = ref(false)
+const dueHourFallback = 18
+const dueHourOptions = Array.from({ length: 24 }, (_, hour) => ({
+  value: String(hour),
+  label: `${String(hour).padStart(2, '0')}:00`,
+}))
 const form = ref<EditForm>(emptyForm())
 const baseline = ref<EditForm>(emptyForm())
 const iIdModel = computed({
@@ -341,6 +355,7 @@ function hydrateFromTaskAndPanels(
   ).trim()
   next.note = String(t.note ?? '').trim()
   next.due_at = taskBeijingDateKey(t.dueAt)
+  next.due_at_hour = String(taskBeijingHour(t.dueAt) ?? dueHourFallback)
   next.priority = String(t.priority ?? 'normal')
 
   const costFromPanel = costPanel?.cost_price
@@ -457,8 +472,8 @@ function buildBusinessPatch(b: EditForm, c: EditForm): Record<string, unknown> |
   const patch: Record<string, unknown> = {}
   const remark = optionalRemark()
   // design_requirement / note 已移至 buildProductPatch → product-info
-  const dueIso = c.due_at ? toBeijingEndOfDayISO(c.due_at) : null
-  const baseDue = b.due_at ? toBeijingEndOfDayISO(b.due_at) : null
+  const dueIso = c.due_at ? toBeijingHourISO(c.due_at, parseDueHour(c.due_at_hour)) : null
+  const baseDue = b.due_at ? toBeijingHourISO(b.due_at, parseDueHour(b.due_at_hour)) : null
   if (dueIso !== baseDue) {
     patch.deadline_at = dueIso
   }
@@ -470,6 +485,11 @@ function buildBusinessPatch(b: EditForm, c: EditForm): Record<string, unknown> |
   const touched = Object.keys(patch).length > 0
   if (touched && remark) patch.remark = remark
   return touched ? patch : null
+}
+
+function parseDueHour(value: string): number {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 23 ? parsed : dueHourFallback
 }
 
 function buildCostPatch(b: EditForm, c: EditForm): Record<string, unknown> | null {
@@ -719,6 +739,17 @@ select.native-input {
     0.35rem 0.35rem;
   background-repeat: no-repeat;
   padding-right: 2rem;
+}
+
+.due-at-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.due-hour-select {
+  min-width: 0;
 }
 
 input.native-input[type='date']::-webkit-calendar-picker-indicator {

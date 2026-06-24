@@ -450,10 +450,18 @@ func (r *taskRepo) UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *
 	}
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx, `
-		UPDATE task_sku_items
-		SET cost_price = ?,
-		    estimated_cost = ?,
-		    cost_rule_id = ?,
+			UPDATE task_sku_items
+			SET product_name_snapshot = ?,
+			    product_short_name = ?,
+			    category_code = ?,
+			    material_mode = ?,
+			    cost_price_mode = ?,
+			    quantity = ?,
+			    base_sale_price = ?,
+			    design_requirement = ?,
+			    cost_price = ?,
+			    estimated_cost = ?,
+			    cost_rule_id = ?,
 		    cost_rule_name = ?,
 		    cost_rule_source = ?,
 		    matched_rule_version = ?,
@@ -468,6 +476,14 @@ func (r *taskRepo) UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *
 		    erp_sync_version = erp_sync_version + 1,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND task_id = ?`,
+		item.ProductNameSnapshot,
+		item.ProductShortName,
+		item.CategoryCode,
+		item.MaterialMode,
+		item.CostPriceMode,
+		toNullInt64(item.Quantity),
+		toNullFloat64(item.BaseSalePrice),
+		item.DesignRequirement,
 		toNullFloat64(item.CostPrice),
 		toNullFloat64(item.EstimatedCost),
 		toNullInt64(item.CostRuleID),
@@ -718,10 +734,11 @@ func (r *taskRepo) UpdateSKUItemBusinessInfo(ctx context.Context, tx repo.Tx, it
 	}
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx, `
-		UPDATE task_sku_items
-		SET product_name_snapshot = ?,
-		    product_short_name = ?,
-		    design_requirement = ?,
+			UPDATE task_sku_items
+			SET product_name_snapshot = ?,
+			    product_short_name = ?,
+			    category_code = ?,
+			    design_requirement = ?,
 		    variant_json = ?,
 		    reference_file_refs_json = ?,
 		    erp_sync_required = 1,
@@ -730,6 +747,7 @@ func (r *taskRepo) UpdateSKUItemBusinessInfo(ctx context.Context, tx repo.Tx, it
 		WHERE id = ? AND task_id = ?`,
 		item.ProductNameSnapshot,
 		item.ProductShortName,
+		item.CategoryCode,
 		item.DesignRequirement,
 		toNullJSONString(item.VariantJSON),
 		marshalReferenceFileRefs(item.ReferenceFileRefs),

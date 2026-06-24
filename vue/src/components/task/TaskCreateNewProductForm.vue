@@ -31,11 +31,11 @@
 
     <section class="form-row">
       <div class="form-card">
-        <BaseTextarea
+        <TaskSpecStructuredInput
           v-model="localForm.prefillSpecText"
           label="规格尺寸"
-          :rows="2"
-          placeholder="请输入规格尺寸"
+          placeholder="可按宽高或面积填写，用于系统自动计算成本"
+          hint="例如宽高填写 100 × 200 厘米后，将提交为 100*200cm。"
         />
       </div>
       <div class="form-card upload-card">
@@ -52,6 +52,7 @@ import type { TaskCreateFormModel } from '@/domain/types'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameError, erpProductNameHint } from '@/domain/erp-product-name'
 
