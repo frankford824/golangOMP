@@ -139,6 +139,37 @@ func TestBuildERPRemoteOpenWebBizBatchAndVirtual(t *testing.T) {
 	}
 }
 
+func TestBuildERPRemoteOpenWebBizOrderActionQuery(t *testing.T) {
+	raw := []byte(`{
+		"page_index":2,
+		"page_size":30,
+		"o_id":"15539375",
+		"so_id":"6927419498646110137",
+		"action_name":"标记异常",
+		"modified_begin":"2026-06-24 00:00:00",
+		"modified_end":"2026-06-24 23:59:59"
+	}`)
+	biz, err := buildERPRemoteOpenWebBiz("jst_order_action_query", raw)
+	if err != nil {
+		t.Fatalf("buildERPRemoteOpenWebBiz order action error: %v", err)
+	}
+	if biz["page_index"] != float64(2) && biz["page_index"] != 2 {
+		t.Fatalf("page_index = %#v, want 2", biz["page_index"])
+	}
+	if biz["page_size"] != float64(30) && biz["page_size"] != 30 {
+		t.Fatalf("page_size = %#v, want 30", biz["page_size"])
+	}
+	if biz["o_id"] != "15539375" {
+		t.Fatalf("o_id = %#v, want 15539375", biz["o_id"])
+	}
+	if _, ok := biz["so_id"]; ok {
+		t.Fatalf("so_id should not be sent to OpenWeb order.action.query: %#v", biz["so_id"])
+	}
+	if biz["action_name"] != "标记异常" {
+		t.Fatalf("action_name = %#v, want 标记异常", biz["action_name"])
+	}
+}
+
 func TestBuildERPRemoteOpenWebBizItemStyleUpdate(t *testing.T) {
 	raw := []byte(`{
 		"i_id":"STYLE-1",

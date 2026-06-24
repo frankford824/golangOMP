@@ -778,6 +778,7 @@ func erpRemoteServiceConfig(cfg *config.Config, log *zap.Logger) service.ERPRemo
 		GetCompanyUsersPath:      cfg.ERPRemote.GetCompanyUsersPath,
 		SkuQueryPath:             cfg.ERPRemote.SkuQueryPath,
 		CombineSKUQueryPath:      cfg.ERPRemote.CombineSKUQueryPath,
+		OrderActionQueryPath:     cfg.ERPRemote.OrderActionQueryPath,
 		OpenWebCharset:           cfg.ERPRemote.OpenWebCharset,
 		OpenWebVersion:           cfg.ERPRemote.OpenWebVersion,
 		Timeout:                  cfg.ERPRemote.Timeout,

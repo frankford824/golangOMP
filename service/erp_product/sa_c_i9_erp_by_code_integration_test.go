@@ -107,3 +107,7 @@ func (s saCERPBridgeStub) UpdateVirtualInventory(context.Context, domain.ERPVirt
 func (s saCERPBridgeStub) ListJSTUsers(context.Context, domain.JSTUserListFilter) (*domain.JSTUserListResponse, *domain.AppError) {
 	return nil, domain.NewAppError(domain.ErrCodeInternalError, "not implemented in test stub", nil)
 }
+
+func (s saCERPBridgeStub) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
+	return nil, domain.NewAppError(domain.ErrCodeInternalError, "not implemented in test stub", nil)
+}

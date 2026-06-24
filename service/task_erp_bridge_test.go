@@ -446,3 +446,10 @@ func (s *erpBridgeSelectionBinderStub) UpdateVirtualInventory(context.Context, d
 func (s *erpBridgeSelectionBinderStub) ListJSTUsers(context.Context, domain.JSTUserListFilter) (*domain.JSTUserListResponse, *domain.AppError) {
 	return &domain.JSTUserListResponse{Datas: []*domain.JSTUser{}}, nil
 }
+
+func (s *erpBridgeSelectionBinderStub) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
+	return &domain.ERPOrderActionLogListResponse{
+		Items:      []*domain.ERPOrderActionLog{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
+	}, nil
+}

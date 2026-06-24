@@ -282,6 +282,35 @@ type ERPSyncLogListResponse struct {
 	Pagination PaginationMeta `json:"pagination"`
 }
 
+// ERPOrderActionLogFilter is the read-only facade contract for JST OpenWeb
+// /open/order/action/query.
+type ERPOrderActionLogFilter struct {
+	PageIndex     int    `json:"page_index"`
+	PageSize      int    `json:"page_size"`
+	ModifiedBegin string `json:"modified_begin,omitempty"`
+	ModifiedEnd   string `json:"modified_end,omitempty"`
+	InternalOID   string `json:"o_id,omitempty"`
+	OnlineSOID    string `json:"so_id,omitempty"`
+	ActionName    string `json:"action_name,omitempty"`
+}
+
+type ERPOrderActionLog struct {
+	InternalOID string          `json:"o_id,omitempty"`
+	OnlineSOID  string          `json:"so_id,omitempty"`
+	Action      string          `json:"action,omitempty"`
+	Content     string          `json:"content,omitempty"`
+	Operator    string          `json:"operator,omitempty"`
+	Modified    string          `json:"modified,omitempty"`
+	Raw         json.RawMessage `json:"raw,omitempty"`
+}
+
+type ERPOrderActionLogListResponse struct {
+	Items             []*ERPOrderActionLog    `json:"items"`
+	Pagination        PaginationMeta          `json:"pagination"`
+	NormalizedFilters ERPOrderActionLogFilter `json:"normalized_filters"`
+	Raw               json.RawMessage         `json:"raw,omitempty"`
+}
+
 type ERPProductBatchMutationItem struct {
 	ProductID string `json:"product_id,omitempty"`
 	SKUID     string `json:"sku_id,omitempty"`

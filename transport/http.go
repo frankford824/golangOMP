@@ -204,6 +204,7 @@ func NewRouter(
 		erpGroup.GET("/warehouses", access(erpGroup, http.MethodGet, "/warehouses", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.ListWarehouses)
 		erpGroup.GET("/sync-logs", access(erpGroup, http.MethodGet, "/sync-logs", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.ListSyncLogs)
 		erpGroup.GET("/sync-logs/*id", access(erpGroup, http.MethodGet, "/sync-logs/{id}", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.GetSyncLogByID)
+		erpGroup.GET("/order-action-logs", access(erpGroup, http.MethodGet, "/order-action-logs", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.QueryOrderActionLogs)
 		erpGroup.GET("/users", access(erpGroup, http.MethodGet, "/users", domain.APIReadinessInternalPlaceholder, domain.RoleAdmin, domain.RoleERP), erpBridgeH.ListJSTUsers)
 		erpGroup.POST("/products/upsert", access(erpGroup, http.MethodPost, "/products/upsert", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.UpsertProduct)
 		erpGroup.POST("/products/style/update", access(erpGroup, http.MethodPost, "/products/style/update", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.UpdateItemStyle)

@@ -71,6 +71,13 @@ func (c *erpBridgeReadbackSequenceClient) GetSyncLogByID(context.Context, string
 	return nil, nil
 }
 
+func (c *erpBridgeReadbackSequenceClient) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	return &domain.ERPOrderActionLogListResponse{
+		Items:      []*domain.ERPOrderActionLog{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
+	}, nil
+}
+
 func (c *erpBridgeReadbackSequenceClient) UpsertProduct(context.Context, domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error) {
 	c.mu.Lock()
 	c.upsertCalls++
@@ -254,6 +261,9 @@ func (c *erpBridgeUpsertFailureClient) ListSyncLogs(ctx context.Context, filter 
 }
 func (c *erpBridgeUpsertFailureClient) GetSyncLogByID(ctx context.Context, id string) (*domain.ERPSyncLog, error) {
 	return c.inner.GetSyncLogByID(ctx, id)
+}
+func (c *erpBridgeUpsertFailureClient) QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	return c.inner.QueryOrderActionLogs(ctx, filter)
 }
 func (c *erpBridgeUpsertFailureClient) UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error) {
 	c.upsertCalls++

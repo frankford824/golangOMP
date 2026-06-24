@@ -132,6 +132,10 @@ func (c *localERPBridgeClient) QueryCombineSKUs(_ context.Context, _ domain.JSTC
 	return nil, fmt.Errorf("%w: jst combine sku query requires OpenWeb remote client", ErrERPRemoteOpenWebAuthRequired)
 }
 
+func (c *localERPBridgeClient) QueryOrderActionLogs(_ context.Context, _ domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	return nil, fmt.Errorf("%w: jst order action query requires OpenWeb remote client", ErrERPRemoteOpenWebAuthRequired)
+}
+
 func (c *localERPBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
 	if c.categoryRepo == nil {
 		return []*domain.ERPCategory{}, nil

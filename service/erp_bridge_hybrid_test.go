@@ -135,6 +135,13 @@ func (c *hybridERPBridgeTestClient) GetSyncLogByID(context.Context, string) (*do
 	return nil, nil
 }
 
+func (c *hybridERPBridgeTestClient) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	return &domain.ERPOrderActionLogListResponse{
+		Items:      []*domain.ERPOrderActionLog{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
+	}, nil
+}
+
 func (c *hybridERPBridgeTestClient) UpsertProduct(context.Context, domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error) {
 	c.upsertCalls++
 	if c.upsertErr != nil {

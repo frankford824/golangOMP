@@ -224,6 +224,25 @@ func (h *ERPBridgeHandler) GetSyncLogByID(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *ERPBridgeHandler) QueryOrderActionLogs(c *gin.Context) {
+	filter, appErr := parseERPOrderActionLogFilter(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.QueryOrderActionLogs(c.Request.Context(), filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, gin.H{
+		"data":               result.Items,
+		"pagination":         result.Pagination,
+		"normalized_filters": result.NormalizedFilters,
+		"raw":                result.Raw,
+	})
+}
+
 func (h *ERPBridgeHandler) ShelveProductsBatch(c *gin.Context) {
 	var payload domain.ERPProductBatchMutationPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -367,6 +386,33 @@ func parseERPBridgeSyncLogFilter(c *gin.Context) (domain.ERPSyncLogFilter, *doma
 		pageSize, err := parseInt(raw)
 		if err != nil {
 			return domain.ERPSyncLogFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_size must be an integer", nil)
+		}
+		filter.PageSize = pageSize
+	}
+	return filter, nil
+}
+
+func parseERPOrderActionLogFilter(c *gin.Context) (domain.ERPOrderActionLogFilter, *domain.AppError) {
+	filter := domain.ERPOrderActionLogFilter{
+		InternalOID:   strings.TrimSpace(firstNonEmptyQueryValue(c, "o_id", "oid", "internal_order_id")),
+		OnlineSOID:    strings.TrimSpace(firstNonEmptyQueryValue(c, "so_id", "soid", "online_order_no")),
+		ActionName:    strings.TrimSpace(firstNonEmptyQueryValue(c, "action_name", "actionName", "action")),
+		ModifiedBegin: strings.TrimSpace(c.Query("modified_begin")),
+		ModifiedEnd:   strings.TrimSpace(c.Query("modified_end")),
+		PageIndex:     1,
+		PageSize:      30,
+	}
+	if raw := strings.TrimSpace(firstNonEmptyQueryValue(c, "page_index", "page")); raw != "" {
+		page, err := parseInt(raw)
+		if err != nil {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_index must be an integer", nil)
+		}
+		filter.PageIndex = page
+	}
+	if raw := strings.TrimSpace(c.Query("page_size")); raw != "" {
+		pageSize, err := parseInt(raw)
+		if err != nil {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_size must be an integer", nil)
 		}
 		filter.PageSize = pageSize
 	}
