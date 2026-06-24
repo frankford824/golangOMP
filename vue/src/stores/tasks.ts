@@ -75,6 +75,46 @@ function objectOrUndefined(raw: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
+function parseObjectJSON(raw: unknown): Record<string, unknown> | undefined {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>
+  }
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function pickTrimmedString(source: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!source) return undefined
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (text !== '') return text
+    }
+  }
+  return undefined
+}
+
+function pickFiniteNumber(source: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  if (!source) return undefined
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return undefined
+}
+
 function mergeReadModelCostGovernanceFields(
   target: Record<string, unknown>,
   readModel: Record<string, unknown> | undefined,
@@ -831,13 +871,31 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
           (o.change_request as string | undefined)?.trim() ||
           (o.changeRequest as string | undefined)?.trim() ||
           undefined
+        const variantJson = parseObjectJSON(o.variant_json ?? o.variantJson)
+        const itemSpecText =
+          pickTrimmedString(o, ['spec_text', 'specText']) ??
+          pickTrimmedString(variantJson, ['spec_text', 'specText'])
+        const itemSizeText =
+          pickTrimmedString(o, ['size_text', 'sizeText']) ??
+          pickTrimmedString(variantJson, ['size_text', 'sizeText'])
+        const itemWidth =
+          pickFiniteNumber(o, ['width', 'width_m']) ??
+          pickFiniteNumber(variantJson, ['width', 'width_m'])
+        const itemHeight =
+          pickFiniteNumber(o, ['height', 'height_m']) ??
+          pickFiniteNumber(variantJson, ['height', 'height_m'])
+        const itemArea =
+          pickFiniteNumber(o, ['area', 'area_m2']) ??
+          pickFiniteNumber(variantJson, ['area', 'area_m2'])
+        const itemQuantity =
+          pickFiniteNumber(o, ['quantity']) ??
+          pickFiniteNumber(variantJson, ['quantity', 'qty'])
         return {
 	          id: typeof o.id === 'number' ? o.id : undefined,
 	          sequenceNo: typeof o.sequence_no === 'number' ? o.sequence_no : undefined,
 	          skuCode: typeof o.sku_code === 'string' ? o.sku_code : undefined,
 	          skuCodeType: typeof o.sku_code_type === 'string' ? o.sku_code_type : undefined,
-	          quantity:
-            typeof o.quantity === 'number' && Number.isFinite(o.quantity) ? o.quantity : undefined,
+	          quantity: itemQuantity,
           skuStatus: typeof o.sku_status === 'string' ? o.sku_status : undefined,
           productNameSnapshot:
             typeof o.product_name_snapshot === 'string' ? o.product_name_snapshot : undefined,
@@ -890,6 +948,12 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
               : o.override_at === null
                 ? null
                 : undefined,
+          specText: itemSpecText,
+          sizeText: itemSizeText,
+          width: itemWidth,
+          height: itemHeight,
+          area: itemArea,
+          ...(variantJson !== undefined ? { variantJson } : {}),
           filing_status: typeof o.filing_status === 'string' ? o.filing_status : undefined,
           erp_sync_status: typeof o.erp_sync_status === 'string' ? o.erp_sync_status : undefined,
           erp_sync_required:

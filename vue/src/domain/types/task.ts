@@ -192,8 +192,14 @@ export interface TaskSkuItem {
   manualCostOverrideReason?: string
   overrideActor?: string
   overrideAt?: string | null
+  specText?: string
+  sizeText?: string
+  width?: number
+  height?: number
+  area?: number
   quantity?: number
   baseSalePrice?: number
+  variantJson?: Record<string, unknown>
   /** GET 任务读模型 sku_items[].reference_file_refs，与任务级字段解析规则一致 */
   referenceFileRefs?: ReferenceFileRef[]
   /** 批量创建时子项级 design_requirement（若后端返回） */

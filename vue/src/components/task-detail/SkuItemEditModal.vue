@@ -32,6 +32,48 @@
         />
       </div>
 
+      <div class="sku-edit-spec">
+        <p class="sku-edit-section-title">规格尺寸</p>
+        <div class="sku-edit-grid">
+          <BaseTextarea
+            v-model="form.specText"
+            class="sku-edit-span-2"
+            label="规格尺寸"
+            :rows="2"
+            placeholder="如 100*150cm；多尺寸可分行填写"
+          />
+          <BaseInput
+            v-model="form.sizeText"
+            label="尺寸备注"
+            placeholder="可选，如 展开尺寸/成品尺寸"
+          />
+          <BaseInput
+            v-model="form.quantity"
+            type="number"
+            label="数量"
+            placeholder="可选"
+          />
+          <BaseInput
+            v-model="form.width"
+            type="number"
+            label="宽 m"
+            placeholder="可选，如 1"
+          />
+          <BaseInput
+            v-model="form.height"
+            type="number"
+            label="高 m"
+            placeholder="可选，如 1.5"
+          />
+          <BaseInput
+            v-model="form.area"
+            type="number"
+            label="面积 ㎡"
+            placeholder="可选，如 1.5"
+          />
+        </div>
+      </div>
+
       <div class="sku-edit-refs">
         <p class="sku-edit-section-title">行级参考图</p>
         <ReferenceUploadPanel
@@ -121,12 +163,19 @@ const form = ref({
   productName: '',
   productIId: '',
   designRequirement: '',
+  specText: '',
+  sizeText: '',
+  width: '',
+  height: '',
+  area: '',
+  quantity: '',
   costPrice: '',
   costReason: '',
   triggerFiling: false,
   remark: '',
 })
 const initialCostDraft = ref('')
+const initialSpecDraft = ref('')
 const skuReferenceRefs = ref<(Record<string, unknown> | string)[]>([])
 const initialReferenceRefsDraft = ref('[]')
 
@@ -138,6 +187,7 @@ const productIIdModel = computed({
 })
 
 const refsChanged = computed(() => referenceRefsDraftKey(skuReferenceRefs.value) !== initialReferenceRefsDraft.value)
+const specChanged = computed(() => specDraftKey() !== initialSpecDraft.value)
 
 const currentCostText = computed(() => {
   const cost = numericCost(props.skuItem?.costPrice)
@@ -156,12 +206,19 @@ watch(
       productName: String(props.skuItem.productNameSnapshot ?? ''),
       productIId: String(props.skuItem.productIId ?? ''),
       designRequirement: String(props.skuItem.designRequirement ?? ''),
+      specText: String(props.skuItem.specText ?? ''),
+      sizeText: String(props.skuItem.sizeText ?? ''),
+      width: numberDraftValue(props.skuItem.width),
+      height: numberDraftValue(props.skuItem.height),
+      area: numberDraftValue(props.skuItem.area),
+      quantity: numberDraftValue(props.skuItem.quantity, 0),
       costPrice: costDraftValue(props.skuItem.costPrice ?? props.skuItem.estimatedCost),
       costReason: String(props.skuItem.manualCostOverrideReason ?? '运营手动维护子项成本'),
       triggerFiling: false,
       remark: '',
     }
     initialCostDraft.value = form.value.costPrice
+    initialSpecDraft.value = specDraftKey()
     skuReferenceRefs.value = [...(props.skuItem.referenceFileRefs ?? [])] as (Record<string, unknown> | string)[]
     initialReferenceRefsDraft.value = referenceRefsDraftKey(skuReferenceRefs.value)
     errorText.value = ''
@@ -179,6 +236,11 @@ function costDraftValue(value: unknown): string {
   return amount == null ? '' : amount.toFixed(3).replace(/\.?0+$/, '')
 }
 
+function numberDraftValue(value: unknown, precision = 4): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return ''
+  return value.toFixed(precision).replace(/\.?0+$/, '')
+}
+
 function normalizedCostDraft(value: string): string {
   const trimmed = String(value ?? '').trim()
   if (!trimmed) return ''
@@ -189,6 +251,36 @@ function normalizedCostDraft(value: string): string {
 
 function referenceRefsDraftKey(refs: (Record<string, unknown> | string)[]): string {
   return JSON.stringify(refs ?? [])
+}
+
+function specDraftKey(): string {
+  return JSON.stringify({
+    specText: String(form.value.specText ?? '').trim(),
+    sizeText: String(form.value.sizeText ?? '').trim(),
+    width: String(form.value.width ?? '').trim(),
+    height: String(form.value.height ?? '').trim(),
+    area: String(form.value.area ?? '').trim(),
+    quantity: String(form.value.quantity ?? '').trim(),
+  })
+}
+
+function optionalPositiveNumberDraft(value: string | number, label: string): number | undefined {
+  const text = String(value ?? '').trim()
+  if (!text) return 0
+  const amount = Number(text)
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error(`请输入有效${label}`)
+  }
+  return amount
+}
+
+function optionalPositiveIntegerDraft(value: string | number, label: string): number | undefined {
+  const amount = optionalPositiveNumberDraft(value, label)
+  if (amount === undefined) return undefined
+  if (!Number.isInteger(amount)) {
+    throw new Error(`${label}必须是整数`)
+  }
+  return amount
 }
 
 async function submit() {
@@ -211,14 +303,33 @@ async function submit() {
       return
     }
   }
+  let width: number | undefined
+  let height: number | undefined
+  let area: number | undefined
+  let quantity: number | undefined
+  try {
+    width = optionalPositiveNumberDraft(form.value.width, '宽度')
+    height = optionalPositiveNumberDraft(form.value.height, '高度')
+    area = optionalPositiveNumberDraft(form.value.area, '面积')
+    quantity = optionalPositiveIntegerDraft(form.value.quantity, '数量')
+  } catch (err) {
+    errorText.value = err instanceof Error ? err.message : '请输入有效规格尺寸'
+    return
+  }
   saving.value = true
   errorText.value = ''
   const payload = {
     product_name: form.value.productName.trim() || null,
     product_i_id: form.value.productIId.trim() || null,
     design_requirement: form.value.designRequirement.trim() || null,
+    spec_text: form.value.specText.trim(),
+    size_text: form.value.sizeText.trim(),
+    width,
+    height,
+    area,
+    quantity,
     reference_file_refs: skuReferenceRefs.value,
-    trigger_filing: form.value.triggerFiling === true || refsChanged.value || undefined,
+    trigger_filing: form.value.triggerFiling === true || refsChanged.value || specChanged.value || undefined,
     remark: form.value.remark.trim() || undefined,
   }
   try {
@@ -274,6 +385,16 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+  border: 1px solid #eaecf0;
+  border-radius: 0.75rem;
+  background: #fff;
+  padding: 0.75rem;
+}
+
+.sku-edit-spec {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
   border: 1px solid #eaecf0;
   border-radius: 0.75rem;
   background: #fff;

@@ -18,6 +18,7 @@
             <th class="sku-th">SKU</th>
             <th class="sku-th">产品名称</th>
             <th class="sku-th">款式编码</th>
+            <th class="sku-th sku-th--wide">规格/数量</th>
             <th class="sku-th sku-th--wide">设计要求</th>
             <th class="sku-th">成本</th>
             <th class="sku-th">参考图</th>
@@ -36,6 +37,12 @@
             <td class="sku-td sku-td--mono">{{ dash(item.skuCode) }}</td>
             <td class="sku-td">{{ dash(item.productNameSnapshot) }}</td>
             <td class="sku-td sku-td--mono">{{ dash(item.productIId) }}</td>
+            <td class="sku-td sku-td--spec">
+              <div class="sku-spec-cell" :title="skuSpecTooltip(item)">
+                <span class="sku-spec-main">{{ skuSpecMain(item) }}</span>
+                <span v-if="skuSpecMeta(item)" class="sku-spec-meta">{{ skuSpecMeta(item) }}</span>
+              </div>
+            </td>
             <td class="sku-td sku-td--req">{{ trunc(item.designRequirement) }}</td>
             <td class="sku-td sku-td--cost">
               <div class="sku-cost-cell" :title="skuCostTooltip(item)">
@@ -150,6 +157,48 @@ function trunc(value: unknown): string {
   const text = String(value ?? '').trim()
   if (!text) return '-'
   return text.length > 36 ? `${text.slice(0, 36)}...` : text
+}
+
+function formatCompactNumber(value: number, precision = 4): string {
+  if (!Number.isFinite(value)) return ''
+  return value.toFixed(precision).replace(/\.?0+$/, '')
+}
+
+function skuSpecMain(item: TaskSkuItem): string {
+  const spec = String(item.specText ?? '').trim()
+  if (spec) return trunc(spec)
+  const size = String(item.sizeText ?? '').trim()
+  if (size) return trunc(size)
+  if (typeof item.width === 'number' && Number.isFinite(item.width) && typeof item.height === 'number' && Number.isFinite(item.height)) {
+    return `${formatCompactNumber(item.width)} x ${formatCompactNumber(item.height)}m`
+  }
+  if (typeof item.area === 'number' && Number.isFinite(item.area)) {
+    return `${formatCompactNumber(item.area)}㎡`
+  }
+  return '-'
+}
+
+function skuSpecMeta(item: TaskSkuItem): string {
+  const parts: string[] = []
+  if (typeof item.quantity === 'number' && Number.isFinite(item.quantity)) {
+    parts.push(`数量 ${formatCompactNumber(item.quantity, 0)}`)
+  }
+  if (typeof item.area === 'number' && Number.isFinite(item.area) && !String(item.specText ?? '').trim().includes('㎡')) {
+    parts.push(`面积 ${formatCompactNumber(item.area)}㎡`)
+  }
+  return parts.join(' / ')
+}
+
+function skuSpecTooltip(item: TaskSkuItem): string {
+  const parts = [
+    String(item.specText ?? '').trim() ? `规格：${String(item.specText ?? '').trim()}` : '',
+    String(item.sizeText ?? '').trim() ? `尺寸备注：${String(item.sizeText ?? '').trim()}` : '',
+    typeof item.width === 'number' && Number.isFinite(item.width) ? `宽：${formatCompactNumber(item.width)}m` : '',
+    typeof item.height === 'number' && Number.isFinite(item.height) ? `高：${formatCompactNumber(item.height)}m` : '',
+    typeof item.area === 'number' && Number.isFinite(item.area) ? `面积：${formatCompactNumber(item.area)}㎡` : '',
+    typeof item.quantity === 'number' && Number.isFinite(item.quantity) ? `数量：${formatCompactNumber(item.quantity, 0)}` : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join('；') : '未维护规格尺寸'
 }
 
 function skuCostAmount(item: TaskSkuItem): number | undefined {
@@ -304,7 +353,7 @@ function formatFiledAt(value: string): string {
 
 .sku-table {
   width: 100%;
-  min-width: 960px;
+  min-width: 1080px;
   border-collapse: collapse;
 }
 
@@ -349,6 +398,31 @@ function formatFiledAt(value: string): string {
   min-width: 140px;
   max-width: 220px;
   color: #475467;
+}
+
+.sku-td--spec {
+  min-width: 130px;
+  max-width: 210px;
+}
+
+.sku-spec-cell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.sku-spec-main {
+  color: #344054;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sku-spec-meta {
+  color: #667085;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.15;
 }
 
 .sku-td--cost {
