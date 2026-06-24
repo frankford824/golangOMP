@@ -378,6 +378,15 @@ func TestBuildTaskListQuerySpecKeywordIncludesTaskSkuItems(t *testing.T) {
 	if !strings.Contains(spec.whereSQL, "tsi.sku_code LIKE ?") {
 		t.Fatalf("whereSQL missing prefix batch sku item match: %s", spec.whereSQL)
 	}
+	if !strings.Contains(spec.whereSQL, "tsi_text.product_name_snapshot LIKE ?") {
+		t.Fatalf("whereSQL missing batch sku item product name match: %s", spec.whereSQL)
+	}
+	if !strings.Contains(spec.whereSQL, "tsi_text.product_short_name LIKE ?") {
+		t.Fatalf("whereSQL missing batch sku item short name match: %s", spec.whereSQL)
+	}
+	if !strings.Contains(spec.whereSQL, "tsi_text.design_requirement LIKE ?") {
+		t.Fatalf("whereSQL missing batch sku item design requirement match: %s", spec.whereSQL)
+	}
 	if !strings.Contains(spec.whereSQL, "users task_keyword_actor") {
 		t.Fatalf("whereSQL missing task actor keyword user lookup: %s", spec.whereSQL)
 	}
@@ -434,7 +443,7 @@ func runTaskRepoListKeywordSearchCase(t *testing.T, keyword string, wantTotal in
 	like := "%" + keyword + "%"
 	prefix := keyword + "%"
 	countArgs := []driver.Value{
-		like, like, like, like, like, like,
+		like, like, like, like, like, like, like, like, like,
 		keyword, keyword, keyword,
 		prefix, prefix, prefix,
 		keyword, prefix,
@@ -448,6 +457,9 @@ func runTaskRepoListKeywordSearchCase(t *testing.T, keyword string, wantTotal in
 		mock.ExpectQuery("SELECT t.id").
 			WithArgs(append(countArgs, 20, 0)...).
 			WillReturnRows(newTaskListItemSQLMockRow(t))
+		mock.ExpectQuery("SELECT id, task_id, sequence_no, sku_code").
+			WithArgs(int64(100)).
+			WillReturnRows(newTaskListSKUItemSQLMockRows())
 	} else {
 		mock.ExpectQuery("SELECT t.id").
 			WithArgs(append(countArgs, 20, 0)...).
@@ -468,6 +480,9 @@ func runTaskRepoListKeywordSearchCase(t *testing.T, keyword string, wantTotal in
 	}
 	if len(items) != wantItems {
 		t.Fatalf("len(items) = %d, want %d", len(items), wantItems)
+	}
+	if wantItems > 0 && len(items[0].SKUItems) != 2 {
+		t.Fatalf("len(items[0].SKUItems) = %d, want 2", len(items[0].SKUItems))
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock.ExpectationsWereMet() = %v", err)
@@ -517,6 +532,30 @@ func newTaskListItemSQLMockRow(t *testing.T) *sqlmock.Rows {
 	values[34] = "CGG000025"
 	values[35] = string(domain.TaskSKUCodeTypeRegular)
 	return sqlmock.NewRows(columns).AddRow(values...)
+}
+
+func newTaskListSKUItemSQLMockRows() *sqlmock.Rows {
+	now := time.Now()
+	return sqlmock.NewRows([]string{
+		"id",
+		"task_id",
+		"sequence_no",
+		"sku_code",
+		"sku_status",
+		"product_name_snapshot",
+		"product_short_name",
+		"design_requirement",
+		"filing_status",
+		"erp_sync_status",
+		"erp_sync_required",
+		"erp_sync_version",
+		"last_filed_at",
+		"filing_error_message",
+		"created_at",
+		"updated_at",
+	}).
+		AddRow(int64(1001), int64(100), 1, "CGG000025", string(domain.TaskSKUStatusGenerated), "寿比南山 A", "寿比南山 A", "升学宴主视觉", string(domain.FilingStatusFiled), string(domain.FilingStatusFiled), false, int64(1), now, "", now, now).
+		AddRow(int64(1002), int64(100), 2, "CGG000026", string(domain.TaskSKUStatusGenerated), "寿比南山 B", "寿比南山 B", "升学宴副视觉", string(domain.FilingStatusFilingFailed), string(domain.FilingStatusFilingFailed), true, int64(2), nil, "ERP失败", now, now)
 }
 
 func TestAppendTaskDataScopeWhereKeepsPlainDepartmentScopeNarrow(t *testing.T) {

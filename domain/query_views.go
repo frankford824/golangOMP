@@ -312,6 +312,7 @@ type TaskListItem struct {
 	IsBatchTask                  bool                         `json:"is_batch_task"`
 	BatchItemCount               int                          `json:"batch_item_count"`
 	BatchMode                    TaskBatchMode                `json:"batch_mode"`
+	SKUItems                     []*TaskSKUItem               `json:"sku_items,omitempty"`
 	WarehouseStatus              *WarehouseReceiptStatus      `json:"warehouse_status,omitempty"`
 	LatestAssetType              *TaskAssetType               `json:"latest_asset_type,omitempty"`
 	Workflow                     TaskWorkflowSnapshot         `json:"workflow"`

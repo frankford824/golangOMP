@@ -152,8 +152,11 @@ type UpdateTaskBusinessInfoParams struct {
 	// ApplyCategory gates category_id/category/category_code resolution. Partial product-info
 	// and cost-info patches must leave this false unless the request body changed category fields.
 	ApplyCategory bool
-	Priority      domain.TaskPriority
-	PrioritySet   bool
+	// BatchDisplayNameOnly means product_name is the batch parent display name only.
+	// It must not recalculate cost, update child SKU items, or trigger ERP filing.
+	BatchDisplayNameOnly bool
+	Priority             domain.TaskPriority
+	PrioritySet          bool
 }
 
 type UpdateTaskProcurementParams struct {
@@ -1921,6 +1924,12 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	previousProductIID := taskBusinessInfoEventProductIID(detail, "")
 
 	bindingChanged := false
+	taskDisplayNameChanged := false
+	if p.BatchDisplayNameOnly && task.IsBatchTask {
+		p.ProductSelection = nil
+		p.ProductIID = ""
+		p.ApplyCategory = false
+	}
 	if p.ProductSelection != nil {
 		resolvedProduct, appErr := s.resolveERPBridgeSelectionBinding(ctx, nil, p.ProductSelection)
 		if appErr != nil {
@@ -1971,7 +1980,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		attachTaskProductSelection(detail, task)
 	}
 	if productName := strings.TrimSpace(p.ProductName); productName != "" && strings.TrimSpace(task.ProductNameSnapshot) != productName {
-		if erpProductNameTooLong(productName) {
+		if !task.IsBatchTask && erpProductNameTooLong(productName) {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, erpProductNameLimitMessage(), map[string]interface{}{
 				"field":      "product_name",
 				"code":       "erp_product_name_too_long",
@@ -1982,7 +1991,14 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		}
 		task.ProductNameSnapshot = productName
 		detail.ProductShortName = productName
-		bindingChanged = true
+		if task.IsBatchTask {
+			taskDisplayNameChanged = true
+		} else {
+			bindingChanged = true
+		}
+	}
+	if p.BatchDisplayNameOnly && task.IsBatchTask {
+		return s.updateBatchTaskDisplayNameOnly(ctx, task, detail, p, taskDisplayNameChanged)
 	}
 
 	if p.PrioritySet {
@@ -2235,12 +2251,16 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		previousCostRuleSource,
 		detail.CostRuleSource,
 	)
+	productShortNameChanged := strings.TrimSpace(previousProductShortName) != strings.TrimSpace(detail.ProductShortName)
+	if task.IsBatchTask && taskDisplayNameChanged && !bindingChanged {
+		productShortNameChanged = false
+	}
 	productBaseChanged := bindingChanged || costChanged ||
-		strings.TrimSpace(previousProductShortName) != strings.TrimSpace(detail.ProductShortName) ||
+		productShortNameChanged ||
 		strings.TrimSpace(previousProductIID) != strings.TrimSpace(taskBusinessInfoEventProductIID(detail, p.ProductIID))
 
 	var singleItemCostProjection *domain.TaskSKUItem
-	if task.TaskType == domain.TaskTypeNewProductDevelopment || task.TaskType == domain.TaskTypePurchaseTask {
+	if !task.IsBatchTask && (task.TaskType == domain.TaskTypeNewProductDevelopment || task.TaskType == domain.TaskTypePurchaseTask) {
 		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
 		if err != nil {
 			return nil, infraError("list task sku items for business info cost projection", err)
@@ -2253,7 +2273,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	}
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if bindingChanged {
+		if bindingChanged || taskDisplayNameChanged {
 			if err := s.taskRepo.UpdateProductBinding(ctx, tx, task); err != nil {
 				return err
 			}
@@ -2379,8 +2399,12 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		triggerSource = TaskFilingTriggerSourceLegacyFiledAt
 		forceTrigger = true
 	}
+	autoTriggerFiling := shouldAutoTriggerFiling(task, triggerSource)
+	if task.IsBatchTask && taskDisplayNameChanged && !productBaseChanged && !forceTrigger {
+		autoTriggerFiling = false
+	}
 	baseSyncQueuedByFiling := false
-	if shouldAutoTriggerFiling(task, triggerSource) || forceTrigger {
+	if autoTriggerFiling || forceTrigger {
 		_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
 			TaskID:     p.TaskID,
 			OperatorID: p.OperatorID,
@@ -2410,6 +2434,42 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	if task.TaskType == domain.TaskTypeOriginalProductDevelopment && strings.TrimSpace(updated.DesignRequirement) == "" {
 		updated.DesignRequirement = strings.TrimSpace(updated.ChangeRequest)
 	}
+	return updated, nil
+}
+
+func (s *taskService) updateBatchTaskDisplayNameOnly(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, p UpdateTaskBusinessInfoParams, changed bool) (*domain.TaskDetail, *domain.AppError) {
+	if task == nil || detail == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task detail record missing", nil)
+	}
+	if changed {
+		txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+			if err := s.taskRepo.UpdateProductBinding(ctx, tx, task); err != nil {
+				return err
+			}
+			if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
+				return err
+			}
+			_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventBusinessInfoUpdated, &p.OperatorID,
+				mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
+					"product_name":          task.ProductNameSnapshot,
+					"product_name_snapshot": task.ProductNameSnapshot,
+					"batch_display_name":    task.ProductNameSnapshot,
+					"display_name_only":     true,
+					"remark":                p.Remark,
+				}),
+			)
+			return err
+		})
+		if txErr != nil {
+			return nil, infraError("update batch task display name tx", txErr)
+		}
+	}
+	updated, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
+	if err != nil || updated == nil {
+		return nil, infraError("re-read task detail after batch display name update", err)
+	}
+	attachTaskProductSelection(updated, task)
+	hydrateTaskDetailFilingProjection(task, updated)
 	return updated, nil
 }
 

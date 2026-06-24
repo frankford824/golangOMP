@@ -1656,6 +1656,10 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 	}
 	params := buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
 	params.CostRuleIDExplicit = false
+	if aggregate.Task != nil && aggregate.Task.IsBatchTask && patchProductInfoOnlyChangesDisplayName(req) {
+		params.BatchDisplayNameOnly = true
+		params.ProductSelection = nil
+	}
 	if req.ProductName != nil || req.ProductNameSnapshot != nil {
 		params.ProductName = firstNonEmptyTrimmed(valueFromStringPtr(req.ProductName), valueFromStringPtr(req.ProductNameSnapshot))
 	}
@@ -1717,6 +1721,27 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 		return
 	}
 	respondOK(c, updated)
+}
+
+func patchProductInfoOnlyChangesDisplayName(req patchTaskProductInfoReq) bool {
+	if req.ProductName == nil && req.ProductNameSnapshot == nil {
+		return false
+	}
+	return req.IID == nil &&
+		req.ProductIID == nil &&
+		req.ProductSelection == nil &&
+		req.Category == nil &&
+		req.CategoryID == nil &&
+		req.CategoryCode == nil &&
+		req.SpecText == nil &&
+		req.Material == nil &&
+		req.SizeText == nil &&
+		req.ReferenceLink == nil &&
+		req.ReferenceFileRefs == nil &&
+		req.DesignRequirement == nil &&
+		req.ChangeRequest == nil &&
+		req.Note == nil &&
+		req.TriggerFiling == nil
 }
 
 // GetCostInfo handles GET /v1/tasks/:id/cost-info

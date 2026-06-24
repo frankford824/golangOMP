@@ -62,6 +62,19 @@
         </label>
       </section>
 
+      <section v-else class="form-card">
+        <p class="section-eyebrow">母任务信息</p>
+        <div class="form-grid">
+          <BaseInput
+            v-model="form.product_name"
+            label="任务名称"
+            placeholder="例如：升学宴海报批量任务"
+            hint="用于识别这一批任务，不会覆盖每个 SKU 的产品名称"
+            class="sm:col-span-2"
+          />
+        </div>
+      </section>
+
       <section class="form-card">
         <p class="section-eyebrow">任务基础</p>
         <div class="form-grid">
@@ -336,12 +349,11 @@ function hydrateFromTaskAndPanels(
 ) {
   const sku = activeSku(t)
   const next = emptyForm()
+  const panelProductName = productPanel?.product_name ?? productPanel?.product_name_snapshot
   next.product_name = String(
-    productPanel?.product_name ??
-      productPanel?.product_name_snapshot ??
-      sku?.productNameSnapshot ??
-      t.productName ??
-      '',
+    isBatchTask.value
+      ? panelProductName ?? t.productName ?? ''
+      : panelProductName ?? sku?.productNameSnapshot ?? t.productName ?? '',
   ).trim()
   next.i_id = String(productPanel?.i_id ?? productPanel?.product_i_id ?? t.erpIId ?? '').trim()
   next.category_code = String(
@@ -440,10 +452,11 @@ function buildProductPatch(b: EditForm, c: EditForm): Record<string, unknown> | 
     patch[fieldKey] = normStr(c.design_requirement)
   }
 
+  if (normStr(c.product_name) !== normStr(b.product_name)) {
+    patch.product_name = normStr(c.product_name) || null
+  }
+
   if (!isBatchTask.value) {
-    if (normStr(c.product_name) !== normStr(b.product_name)) {
-      patch.product_name = normStr(c.product_name) || null
-    }
     if (showField.value.i_id && normStr(c.i_id) !== normStr(b.i_id)) {
       patch.i_id = normStr(c.i_id) || null
     }
@@ -512,9 +525,13 @@ function buildBusinessPatch(b: EditForm, c: EditForm): Record<string, unknown> |
 }
 
 function buildOptimisticTaskPatch(
+  productPatch: Record<string, unknown> | null,
   businessPatch: Record<string, unknown> | null,
 ): Partial<Task> | undefined {
   const patch: Partial<Task> = {}
+  if (productPatch && 'product_name' in productPatch) {
+    patch.productName = String(productPatch.product_name ?? '').trim()
+  }
   if (businessPatch && 'deadline_at' in businessPatch) {
     patch.dueAt = (businessPatch.deadline_at as string | null) ?? null
   }
@@ -594,6 +611,11 @@ async function submit() {
   const b = baseline.value
   const c = form.value
   const errors: string[] = []
+  if (isBatchTask.value && !normStr(c.product_name)) {
+    submitError.value = '任务名称不能为空'
+    saving.value = false
+    return
+  }
   if (!isBatchTask.value && isErpProductNameTooLong(c.product_name)) {
     submitError.value = erpProductNameLimitMessage('产品名称')
     saving.value = false
@@ -645,7 +667,7 @@ async function submit() {
       return
     }
 
-    emit('saved', buildOptimisticTaskPatch(businessPatch))
+    emit('saved', buildOptimisticTaskPatch(productPatch, businessPatch))
     emit('update:modelValue', false)
   } finally {
     saving.value = false

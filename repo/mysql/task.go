@@ -565,6 +565,9 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
+	if err := r.hydrateTaskListSKUItems(ctx, items); err != nil {
+		return nil, 0, err
+	}
 	return items, total, nil
 }
 
@@ -707,10 +710,63 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 
 func taskActorNameJoins() string {
 	return `
-		LEFT JOIN users requester_user ON requester_user.id = t.requester_id
-		LEFT JOIN users creator_user ON creator_user.id = t.creator_id
-		LEFT JOIN users designer_user ON designer_user.id = t.designer_id
-		LEFT JOIN users handler_user ON handler_user.id = t.current_handler_id`
+			LEFT JOIN users requester_user ON requester_user.id = t.requester_id
+			LEFT JOIN users creator_user ON creator_user.id = t.creator_id
+			LEFT JOIN users designer_user ON designer_user.id = t.designer_id
+			LEFT JOIN users handler_user ON handler_user.id = t.current_handler_id`
+}
+
+func (r *taskRepo) hydrateTaskListSKUItems(ctx context.Context, items []*domain.TaskListItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	taskIDs := make([]int64, 0, len(items))
+	byID := make(map[int64]*domain.TaskListItem, len(items))
+	for _, item := range items {
+		if item == nil || item.ID <= 0 {
+			continue
+		}
+		taskIDs = append(taskIDs, item.ID)
+		byID[item.ID] = item
+	}
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(taskIDs)), ",")
+	args := make([]interface{}, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	rows, err := r.db.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, task_id, sequence_no, sku_code, sku_status,
+		       product_name_snapshot, product_short_name, design_requirement,
+		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version,
+		       last_filed_at, COALESCE(filing_error_message, ''),
+		       created_at, updated_at
+		  FROM task_sku_items
+		 WHERE task_id IN (%s)
+		 ORDER BY task_id ASC, sequence_no ASC, id ASC`, placeholders), args...)
+	if err != nil {
+		return fmt.Errorf("hydrate task list sku items: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		item, err := scanTaskListSKUItemRow(rows)
+		if err != nil {
+			return err
+		}
+		if taskItem := byID[item.TaskID]; taskItem != nil {
+			taskItem.SKUItems = append(taskItem.SKUItems, item)
+			if taskItem.BatchItemCount == 0 {
+				taskItem.BatchItemCount = len(taskItem.SKUItems)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("hydrate task list sku items rows: %w", err)
+	}
+	return nil
 }
 
 func (r *taskRepo) UpdateStatus(ctx context.Context, tx repo.Tx, id int64, status domain.TaskStatus) error {
@@ -1518,6 +1574,50 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	return &item, nil
 }
 
+func scanTaskListSKUItemRow(scanner interface{ Scan(...interface{}) error }) (*domain.TaskSKUItem, error) {
+	var item domain.TaskSKUItem
+	var filingStatus string
+	var erpSyncStatus string
+	var lastFiledAt sql.NullTime
+	if err := scanner.Scan(
+		&item.ID,
+		&item.TaskID,
+		&item.SequenceNo,
+		&item.SKUCode,
+		&item.SKUStatus,
+		&item.ProductNameSnapshot,
+		&item.ProductShortName,
+		&item.DesignRequirement,
+		&filingStatus,
+		&erpSyncStatus,
+		&item.ERPSyncRequired,
+		&item.ERPSyncVersion,
+		&lastFiledAt,
+		&item.FilingErrorMessage,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("scan task list sku item: %w", err)
+	}
+	item.FilingStatus = domain.FilingStatus(filingStatus)
+	item.ERPSyncStatus = domain.FilingStatus(erpSyncStatus)
+	item.LastFiledAt = fromNullTime(lastFiledAt)
+	if !item.SKUStatus.Valid() {
+		item.SKUStatus = domain.TaskSKUStatusReserved
+	}
+	if !item.FilingStatus.Valid() {
+		if item.LastFiledAt != nil {
+			item.FilingStatus = domain.FilingStatusFiled
+		} else {
+			item.FilingStatus = domain.FilingStatusNotFiled
+		}
+	}
+	if !item.ERPSyncStatus.Valid() {
+		item.ERPSyncStatus = item.FilingStatus
+	}
+	return &item, nil
+}
+
 func productIIDFromVariantJSON(raw []byte) string {
 	if len(raw) == 0 {
 		return ""
@@ -1632,8 +1732,18 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 						OR task_keyword_actor.username LIKE ?
 					   )
 			)`,
+			`EXISTS (
+				SELECT 1
+				  FROM task_sku_items tsi_text
+				 WHERE tsi_text.task_id = t.id
+				   AND (
+					tsi_text.product_name_snapshot LIKE ?
+					OR tsi_text.product_short_name LIKE ?
+					OR tsi_text.design_requirement LIKE ?
+				   )
+			)`,
 		}
-		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like}
+		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like}
 		if kw.HasInt64 {
 			keywordClauses = append(keywordClauses, "t.id = ?")
 			keywordArgs = append(keywordArgs, kw.Int64)

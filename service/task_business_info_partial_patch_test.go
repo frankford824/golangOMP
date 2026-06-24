@@ -319,6 +319,104 @@ func TestUpdateBusinessInfoProductNameUpdatesShortNameAndQueuesProductManagement
 	}
 }
 
+func TestUpdateBusinessInfoBatchParentNameDoesNotTouchSKUItemsOrQueueSync(t *testing.T) {
+	const taskID int64 = 9112
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			taskID: {
+				ID:                  taskID,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "CGO_PARENT",
+				ProductNameSnapshot: "旧批次名称",
+				TaskStatus:          domain.TaskStatusPendingAssign,
+				Priority:            domain.TaskPriorityNormal,
+				IsBatchTask:         true,
+				BatchItemCount:      2,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			taskID: {
+				TaskID:                   taskID,
+				CategoryCode:             "BOGUS_CAT",
+				ProductShortName:         "旧批次名称",
+				CostPrice:                float64Ptr(12.34),
+				EstimatedCost:            float64Ptr(12.34),
+				ManualCostOverride:       true,
+				ManualCostOverrideReason: "原成本",
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			taskID: {
+				{
+					ID:                  21,
+					TaskID:              taskID,
+					SequenceNo:          1,
+					SKUCode:             "CGO_TEST_021",
+					ProductNameSnapshot: "子项 A",
+					ProductShortName:    "子项 A",
+				},
+				{
+					ID:                  22,
+					TaskID:              taskID,
+					SequenceNo:          2,
+					SKUCode:             "CGO_TEST_022",
+					ProductNameSnapshot: "子项 B",
+					ProductShortName:    "子项 B",
+				},
+			},
+		},
+	}
+	productManagement := &productManagementQueueStub{}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		newCategoryRepoStub(),
+		newCostRuleRepoStub(),
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithTaskProductManagementCloseSyncer(productManagement),
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:               taskID,
+		OperatorID:           1,
+		ProductName:          "升学宴海报批量任务",
+		BatchDisplayNameOnly: true,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if taskRepo.tasks[taskID].ProductNameSnapshot != "升学宴海报批量任务" {
+		t.Fatalf("parent ProductNameSnapshot = %q, want 升学宴海报批量任务", taskRepo.tasks[taskID].ProductNameSnapshot)
+	}
+	if detail.ProductShortName != "升学宴海报批量任务" {
+		t.Fatalf("parent ProductShortName = %q, want 升学宴海报批量任务", detail.ProductShortName)
+	}
+	items := taskRepo.skuItems[taskID]
+	if len(items) != 2 {
+		t.Fatalf("sku item count = %d, want 2", len(items))
+	}
+	if items[0].ProductNameSnapshot != "子项 A" || items[1].ProductNameSnapshot != "子项 B" {
+		t.Fatalf("sku item product names were overwritten: %+v", items)
+	}
+	if detail.CostPrice == nil || *detail.CostPrice != 12.34 {
+		t.Fatalf("CostPrice = %v, want 12.34", detail.CostPrice)
+	}
+	if detail.EstimatedCost == nil || *detail.EstimatedCost != 12.34 {
+		t.Fatalf("EstimatedCost = %v, want 12.34", detail.EstimatedCost)
+	}
+	if !detail.ManualCostOverride || detail.ManualCostOverrideReason != "原成本" {
+		t.Fatalf("manual cost override changed: active=%v reason=%q", detail.ManualCostOverride, detail.ManualCostOverrideReason)
+	}
+	if got := productManagement.queuedTasks; len(got) != 0 {
+		t.Fatalf("queued product management tasks = %+v, want none", got)
+	}
+}
+
 func TestUpdateSKUItemInfoProductNameUpdatesShortNameAndQueuesProductManagementSync(t *testing.T) {
 	const taskID int64 = 9111
 	taskRepo := &prdTaskRepo{

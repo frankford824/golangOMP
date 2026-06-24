@@ -52,7 +52,7 @@
       <div class="toolbar">
         <BaseInput
           v-model="searchKeyword"
-          placeholder="搜索任务号、SKU、产品名称"
+          placeholder="搜索任务号、SKU、任务名、子项名称或设计要求"
           class="search-input w-72"
           @input="debouncedSearch"
         />
@@ -189,11 +189,11 @@
               单号
             </button>
             <button
-              v-if="canCopyTaskField(task.productName)"
+              v-if="canCopyTaskField(taskCardTitle(task))"
               type="button"
-              :aria-label="`复制任务名称 ${task.productName}`"
+              :aria-label="`复制任务名称 ${taskCardTitle(task)}`"
               title="复制任务名称"
-              @click="copyTaskCardText(task.productName, '任务名称')"
+              @click="copyTaskCardText(taskCardTitle(task), '任务名称')"
             >
               名称
             </button>
@@ -210,12 +210,39 @@
           <div class="card-no-row task-copy-zone" data-card-copy-zone>
             <span class="card-no">{{ task.taskNo }}</span>
           </div>
+          <div class="card-product-wrap">
+            <div
+              class="card-product task-copy-zone"
+              :title="taskCardTitle(task)"
+              data-card-copy-zone
+            >
+              {{ taskCardTitle(task) }}
+            </div>
+            <span v-if="isBatchCard(task)" class="batch-count-pill">共 {{ batchItemCount(task) }} 项</span>
+          </div>
           <div
-            class="card-product task-copy-zone"
-            :title="task.productName?.trim() ? task.productName : undefined"
-            data-card-copy-zone
+            v-if="isBatchCard(task)"
+            class="batch-preview"
+            data-card-no-nav="true"
+            @click.stop
           >
-            {{ task.productName }}
+            <div
+              v-for="(item, index) in batchPreviewItems(task)"
+              :key="batchItemKey(item, index)"
+              class="batch-preview-item"
+              :title="batchItemSummary(item)"
+            >
+              <span class="batch-preview-index">{{ item.sequenceNo ?? index + 1 }}</span>
+              <span class="batch-preview-text">{{ batchItemSummary(item) }}</span>
+            </div>
+            <button
+              v-if="batchItemCount(task) > batchPreviewLimit"
+              type="button"
+              class="batch-preview-more"
+              @click="openBatchItemsModal(task)"
+            >
+              查看全部 {{ batchItemCount(task) }} 项
+            </button>
           </div>
           <div class="card-status-row flex flex-wrap items-center gap-1 mt-1">
             <TaskMainStatusBadge
@@ -355,6 +382,35 @@
       :loading="batchDesignersLoading"
       @confirm="onBatchAssignConfirm"
     />
+
+    <BaseModal
+      v-model="batchItemsModalOpen"
+      title="批量任务明细"
+      :show-confirm="false"
+      cancel-text="关闭"
+      panel-class="max-w-[min(780px,94vw)]"
+    >
+      <div v-if="batchItemsModalTask" class="batch-items-modal">
+        <div class="batch-items-modal-header">
+          <p class="batch-items-modal-title">{{ taskCardTitle(batchItemsModalTask) }}</p>
+          <span class="batch-count-pill">共 {{ batchItemCount(batchItemsModalTask) }} 项</span>
+        </div>
+        <div class="batch-items-modal-list">
+          <div
+            v-for="(item, index) in batchModalItems"
+            :key="batchItemKey(item, index)"
+            class="batch-items-modal-row"
+          >
+            <span class="batch-modal-index">{{ item.sequenceNo ?? index + 1 }}</span>
+            <div class="batch-modal-main">
+              <p class="batch-modal-name">{{ batchItemDisplayName(item) }}</p>
+              <p v-if="batchItemSubText(item)" class="batch-modal-sub">{{ batchItemSubText(item) }}</p>
+            </div>
+            <span class="batch-modal-sku">{{ item.skuCode || '-' }}</span>
+          </div>
+        </div>
+      </div>
+    </BaseModal>
   </div>
 </template>
 
@@ -363,7 +419,7 @@ import { ref, computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
-import type { Task, LegacyTaskStatus } from '@/domain/types/task'
+import type { Task, TaskSkuItem, LegacyTaskStatus } from '@/domain/types/task'
 import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterBar.vue'
@@ -376,6 +432,7 @@ import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
+import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import TaskCreateModal from '@/components/task/TaskCreateModal.vue'
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
@@ -500,6 +557,15 @@ const batchReceiving = ref(false)
 const refreshingList = ref(false)
 const advancedFilterOpen = ref(false)
 const claimingTaskId = ref<string | null>(null)
+const batchPreviewLimit = 3
+const batchItemsModalTask = ref<Task | null>(null)
+const batchItemsModalOpen = computed({
+  get: () => batchItemsModalTask.value != null,
+  set: (open: boolean) => {
+    if (!open) batchItemsModalTask.value = null
+  },
+})
+const batchModalItems = computed(() => batchSkuItems(batchItemsModalTask.value))
 const jumpPage = ref<number | string>(page.value)
 const {
   designers: batchDesignerOptions,
@@ -936,8 +1002,89 @@ function isRetouchTask(task: Task): boolean {
   return type === 'RETOUCH_TASK'
 }
 
+function normalizeCardText(value: unknown): string {
+  return String(value ?? '').trim()
+}
+
+function batchSkuItems(task: Task | null | undefined): TaskSkuItem[] {
+  return Array.isArray(task?.skuItems) ? task.skuItems.filter(Boolean) : []
+}
+
+function batchItemCount(task: Task): number {
+  const apiCount =
+    typeof task.batchItemCount === 'number' && Number.isFinite(task.batchItemCount)
+      ? task.batchItemCount
+      : 0
+  return Math.max(apiCount, batchSkuItems(task).length, task.isBatchTask === true ? 1 : 0)
+}
+
+function isBatchCard(task: Task): boolean {
+  return task.isBatchTask === true || batchItemCount(task) > 1
+}
+
+function batchItemDisplayName(item: TaskSkuItem | null | undefined): string {
+  if (!item) return ''
+  return (
+    normalizeCardText(item.productNameSnapshot) ||
+    normalizeCardText(item.productShortName) ||
+    normalizeCardText(item.designRequirement) ||
+    normalizeCardText(item.skuCode)
+  )
+}
+
+function batchItemSubText(item: TaskSkuItem | null | undefined): string {
+  if (!item) return ''
+  const design = normalizeCardText(item.designRequirement)
+  const shortName = normalizeCardText(item.productShortName)
+  const main = batchItemDisplayName(item)
+  if (design && design !== main) return design
+  if (shortName && shortName !== main) return shortName
+  return ''
+}
+
+function batchItemSummary(item: TaskSkuItem): string {
+  const name = batchItemDisplayName(item) || `子项 ${item.sequenceNo ?? ''}`.trim()
+  const sub = batchItemSubText(item)
+  return sub ? `${name} · ${sub}` : name
+}
+
+function batchItemKey(item: TaskSkuItem, index: number): string {
+  return `${item.id ?? item.skuCode ?? item.sequenceNo ?? index}-${index}`
+}
+
+function batchPreviewItems(task: Task): TaskSkuItem[] {
+  return batchSkuItems(task).slice(0, batchPreviewLimit)
+}
+
+function taskCardTitle(task: Task): string {
+  const taskName = normalizeCardText(task.productName)
+  if (!isBatchCard(task)) return taskName || task.taskNo
+  return taskName || batchItemDisplayName(batchSkuItems(task)[0]) || task.taskNo
+}
+
+function filingStatusOfItem(item: TaskSkuItem): string {
+  return normalizeCardText(item.erp_sync_status || item.filing_status).toLowerCase()
+}
+
+function batchSkuSummary(task: Task): string {
+  const items = batchSkuItems(task)
+  const count = batchItemCount(task)
+  const filed = items.filter((item) => filingStatusOfItem(item) === 'filed').length
+  const failed = items.filter((item) => filingStatusOfItem(item) === 'filing_failed').length
+  if (filed > 0 || failed > 0) {
+    return `${count}个SKU · 已同步${filed} · 失败${failed}`
+  }
+  const firstSku = items.map((item) => normalizeCardText(item.skuCode)).find(Boolean)
+  return firstSku ? `${count}个SKU · ${firstSku}等` : `${count}个SKU`
+}
+
 function displaySku(task: Task): string {
+  if (isBatchCard(task)) return batchSkuSummary(task)
   return task.primarySkuCode ?? task.sku ?? '-'
+}
+
+function openBatchItemsModal(task: Task) {
+  batchItemsModalTask.value = task
 }
 
 function canCopyTaskField(value: string | null | undefined): boolean {
@@ -2926,10 +3073,207 @@ watch(totalPages, (value) => {
   outline: none;
 }
 
+.card-product-wrap {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.card-product-wrap .card-product {
+  flex: 1 1 auto;
+  min-height: calc(1.36em * 2);
+}
+
+.batch-count-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 1.25rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.batch-preview {
+  display: grid;
+  gap: 0.22rem;
+  margin-top: 0.45rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.66rem;
+  padding: 0.42rem 0.5rem;
+  background: #f8fafc;
+}
+
+.batch-preview-item {
+  display: grid;
+  grid-template-columns: 1.35rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.32rem;
+  min-width: 0;
+  color: #475569;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.batch-preview-index,
+.batch-modal-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-family: var(--yb-font-data);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.batch-preview-index {
+  width: 1.18rem;
+  height: 1.18rem;
+}
+
+.batch-preview-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #475569;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-preview-more {
+  justify-self: start;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.12rem 0.1rem;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.batch-preview-more:hover,
+.batch-preview-more:focus-visible {
+  color: #1d4ed8;
+  text-decoration: underline;
+  outline: none;
+}
+
+.batch-items-modal {
+  display: grid;
+  gap: 0.85rem;
+  padding-bottom: 0.75rem;
+}
+
+.batch-items-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.75rem;
+}
+
+.batch-items-modal-title {
+  min-width: 0;
+  margin: 0;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.batch-items-modal-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.batch-items-modal-row {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr) minmax(5rem, auto);
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.7rem;
+  padding: 0.62rem 0.7rem;
+  background: #ffffff;
+}
+
+.batch-modal-index {
+  width: 1.45rem;
+  height: 1.45rem;
+}
+
+.batch-modal-main {
+  min-width: 0;
+}
+
+.batch-modal-name,
+.batch-modal-sub {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-modal-name {
+  color: #111827;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.batch-modal-sub {
+  margin-top: 0.15rem;
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.batch-modal-sku {
+  justify-self: end;
+  min-width: 0;
+  max-width: 10rem;
+  overflow: hidden;
+  color: #475569;
+  font-family: var(--yb-font-data);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 720px) {
   .card-copy-toolbar {
     top: 2.35rem;
     right: 0.55rem;
+  }
+
+  .card-product-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .batch-items-modal-header {
+    display: grid;
+  }
+
+  .batch-items-modal-row {
+    grid-template-columns: 1.8rem minmax(0, 1fr);
+  }
+
+  .batch-modal-sku {
+    grid-column: 2;
+    justify-self: start;
+    max-width: 100%;
   }
 }
 </style>
