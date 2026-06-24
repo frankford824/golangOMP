@@ -181,7 +181,14 @@
             </div>
 
             <div class="pm-cost-cell" :class="{ 'is-missing': !hasCost(child.record) }">
-              {{ formatCost(child.record.cost_price) }}
+              <span class="pm-cost-value">{{ formatCost(child.record.cost_price) }}</span>
+              <span class="pm-cost-help" tabindex="0" :aria-label="costTraceAria(child.record)">
+                i
+                <span class="pm-cost-popover" role="tooltip">
+                  <strong>成本计算过程</strong>
+                  <span v-for="line in costTraceLines(child.record)" :key="line">{{ line }}</span>
+                </span>
+              </span>
             </div>
 
             <div class="pm-info-cell">
@@ -316,6 +323,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   productManagementApi,
+  type ProductManagementCostTrace,
   type ProductImageCandidate,
   type ProductManagementComboGroup,
   type ProductManagementComboSyncSummary,
@@ -706,6 +714,134 @@ function replaceRecord(next: ProductManagementRecord): void {
 
 function hasCost(record: ProductManagementRecord): boolean {
   return typeof record.cost_price === 'number' && record.cost_price > 0
+}
+
+function costTraceAria(record: ProductManagementRecord): string {
+  const sku = record.sku_code || '当前 SKU'
+  return `查看 ${sku} 的成本计算过程`
+}
+
+function costTraceLines(record: ProductManagementRecord): string[] {
+  const trace: ProductManagementCostTrace | null | undefined = record.cost_trace
+  if (!trace) {
+    return ['暂无成本计算快照，仅显示当前保存的成本。', '如需核验，请重新触发成本计算或查看任务详情。']
+  }
+  const input = traceObject(trace.input_snapshot)
+  const calculation = traceObject(trace.calculation_snapshot)
+  const lines: string[] = []
+  const ruleName = firstTraceString(trace.rule_name, traceString(calculation, 'cost_rule_name'), traceString(calculation, 'rule_name'), '未匹配到明确规则')
+  const version = trace.matched_rule_version || traceNumber(calculation, 'matched_rule_version')
+  lines.push(`规则：${ruleName}${version ? ` v${version}` : ''}`)
+
+  const source = firstTraceString(trace.rule_source, trace.prefill_source, traceString(calculation, 'cost_rule_source'), traceString(calculation, 'prefill_source'))
+  if (source) {
+    lines.push(`来源：${source}`)
+  }
+
+  const inputLine = costTraceInputLine(input)
+  if (inputLine) {
+    lines.push(`输入：${inputLine}`)
+  }
+
+  const explanation = firstTraceString(
+    traceString(calculation, 'explanation'),
+    traceString(calculation, 'formula'),
+    traceString(calculation, 'formula_expression'),
+    traceString(calculation, 'calculation_expression'),
+  )
+  if (explanation) {
+    lines.push(`公式：${explanation}`)
+  }
+
+  const estimated = traceNumber(calculation, 'estimated_cost')
+  const finalCost = firstTraceNumber(record.cost_price, traceNumber(calculation, 'cost_price'))
+  const costParts = [
+    estimated !== undefined ? `估算 ${formatCost(estimated)}` : '',
+    finalCost !== undefined ? `最终 ${formatCost(finalCost)}` : '',
+  ].filter(Boolean)
+  if (costParts.length > 0) {
+    lines.push(`结果：${costParts.join(' / ')}`)
+  }
+
+  const manualOverride = trace.manual_cost_override || traceBoolean(calculation, 'manual_cost_override')
+  if (manualOverride) {
+    const reason = firstTraceString(trace.manual_cost_override_reason, traceString(calculation, 'manual_cost_override_reason'), '未填写原因')
+    lines.push(`人工覆盖：是，${reason}`)
+  } else if (trace.requires_manual_review || traceBoolean(calculation, 'requires_manual_review')) {
+    lines.push('状态：需要人工复核')
+  } else {
+    lines.push('状态：系统规则自动生成')
+  }
+
+  if (trace.snapshot_at) {
+    lines.push(`快照：${formatDate(trace.snapshot_at)}`)
+  }
+  return lines
+}
+
+function costTraceInputLine(input: Record<string, unknown>): string {
+  const sizeText = firstTraceString(traceString(input, 'spec_text'), traceString(input, 'size_text'))
+  const width = traceNumber(input, 'width')
+  const height = traceNumber(input, 'height')
+  const area = traceNumber(input, 'area')
+  const quantity = traceNumber(input, 'quantity')
+  const category = firstTraceString(traceString(input, 'category_name'), traceString(input, 'category_code'), traceString(input, 'product_i_id'))
+  const parts = [
+    category ? `品类 ${category}` : '',
+    sizeText ? `尺寸 ${sizeText}` : width !== undefined && height !== undefined ? `尺寸 ${formatTraceNumber(width)}x${formatTraceNumber(height)}` : '',
+    area !== undefined ? `面积 ${formatTraceNumber(area)}㎡` : '',
+    quantity !== undefined ? `数量 ${formatTraceNumber(quantity)}` : '',
+  ].filter(Boolean)
+  return parts.join('，')
+}
+
+function traceObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function traceString(source: Record<string, unknown>, key: string): string {
+  const value = source[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function traceNumber(source: Record<string, unknown>, key: string): number | undefined {
+  return numberFromUnknown(source[key])
+}
+
+function traceBoolean(source: Record<string, unknown>, key: string): boolean {
+  const value = source[key]
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'string') return ['1', 'true', 'yes', '是'].includes(value.trim().toLowerCase())
+  return false
+}
+
+function firstTraceString(...values: Array<string | undefined | null>): string {
+  for (const value of values) {
+    const trimmed = typeof value === 'string' ? value.trim() : ''
+    if (trimmed) return trimmed
+  }
+  return ''
+}
+
+function firstTraceNumber(...values: Array<number | undefined | null>): number | undefined {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return undefined
+}
+
+function numberFromUnknown(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
+function formatTraceNumber(value: number): string {
+  return value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
 }
 
 function productIIDLabel(record: ProductManagementRecord): string {
@@ -1205,7 +1341,7 @@ function errorMessage(err: unknown): string {
 }
 
 .pm-table-shell {
-  overflow: hidden;
+  overflow: visible;
   border-radius: 1rem;
 }
 
@@ -1398,7 +1534,7 @@ function errorMessage(err: unknown): string {
 .pm-table-head,
 .pm-row {
   display: grid;
-  grid-template-columns: 9.5rem minmax(8.5rem, 0.9fr) minmax(18rem, 1.6fr) 6.5rem minmax(8rem, 0.8fr) minmax(8.5rem, 0.8fr) minmax(13rem, 0.9fr);
+  grid-template-columns: 9.5rem minmax(8.5rem, 0.9fr) minmax(18rem, 1.6fr) minmax(8.25rem, 0.75fr) minmax(8rem, 0.8fr) minmax(8.5rem, 0.8fr) minmax(13rem, 0.9fr);
   gap: 0.9rem;
   align-items: center;
 }
@@ -1412,12 +1548,14 @@ function errorMessage(err: unknown): string {
 }
 
 .pm-row {
+  position: relative;
   padding: 0.9rem 1rem;
   border-top: 1px solid #edf2f7;
   background: #ffffff;
 }
 
 .pm-row:hover {
+  z-index: 3;
   background: #f8fbff;
 }
 
@@ -1490,12 +1628,101 @@ function errorMessage(err: unknown): string {
 }
 
 .pm-cost-cell {
+  position: relative;
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.45rem;
   color: #047857;
   font-weight: 900;
 }
 
+.pm-cost-value {
+  font-size: 1.16rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pm-cost-help {
+  position: relative;
+  display: inline-flex;
+  width: 1.35rem;
+  height: 1.35rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #86efac;
+  border-radius: 999px;
+  color: #047857;
+  background: linear-gradient(135deg, #ecfdf5, #dcfce7);
+  box-shadow: 0 7px 18px rgba(4, 120, 87, 0.14);
+  cursor: help;
+  font-family: var(--yb-font-sans);
+  font-size: 0.78rem;
+  font-weight: 950;
+  outline: none;
+}
+
+.pm-cost-help:hover,
+.pm-cost-help:focus-visible {
+  border-color: #34d399;
+  color: #065f46;
+  background: #d1fae5;
+}
+
+.pm-cost-popover {
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 0.65rem);
+  z-index: 40;
+  display: grid;
+  width: min(26rem, 52vw);
+  min-width: 21rem;
+  max-height: 20rem;
+  gap: 0.45rem;
+  overflow: auto;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 0.95rem;
+  color: #dbeafe;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.32);
+  opacity: 0;
+  transform: translateY(-50%) translateX(-0.25rem) scale(0.98);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.pm-cost-popover strong {
+  color: #ffffff;
+  font-family: var(--yb-font-sans);
+  font-size: 0.92rem;
+}
+
+.pm-cost-popover span {
+  color: #cbd5e1;
+  font-family: var(--yb-font-sans);
+  font-size: 0.79rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.pm-cost-help:hover .pm-cost-popover,
+.pm-cost-help:focus-visible .pm-cost-popover,
+.pm-cost-help:focus-within .pm-cost-popover {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0) scale(1);
+}
+
 .pm-cost-cell.is-missing {
   color: #dc2626;
+}
+
+.pm-cost-cell.is-missing .pm-cost-help {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fff1f2;
+  box-shadow: 0 7px 18px rgba(220, 38, 38, 0.12);
 }
 
 .pm-link {
@@ -1806,6 +2033,20 @@ function errorMessage(err: unknown): string {
 
   .pm-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pm-cost-popover {
+    top: calc(100% + 0.65rem);
+    left: 0;
+    width: min(22rem, calc(100vw - 2rem));
+    min-width: min(22rem, calc(100vw - 2rem));
+    transform: translateY(0) translateX(-0.25rem) scale(0.98);
+  }
+
+  .pm-cost-help:hover .pm-cost-popover,
+  .pm-cost-help:focus-visible .pm-cost-popover,
+  .pm-cost-help:focus-within .pm-cost-popover {
+    transform: translateY(0) translateX(0) scale(1);
   }
 
   .pm-combo-header {

@@ -2762,23 +2762,30 @@ watch(totalPages, (value) => {
 
 .task-cards {
   grid-template-columns: minmax(0, 1fr) !important;
+  align-items: start;
 }
 
-@media (min-width: 1180px) {
+@media (min-width: 900px) {
   .task-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 
-@media (min-width: 1520px) {
+@media (min-width: 1280px) {
   .task-cards {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
 }
 
-@media (min-width: 1900px) {
+@media (min-width: 1680px) {
   .task-cards {
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 2200px) {
+  .task-cards {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
 }
 
@@ -2792,6 +2799,7 @@ watch(totalPages, (value) => {
 
 .task-card {
   clip-path: inset(0 round 0.86rem);
+  align-self: start;
 }
 
 .batch-action-bar,

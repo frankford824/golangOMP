@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ProductManagementImageSource string
 
@@ -33,6 +36,19 @@ const (
 	ProductManagementERPSyncStatusWaitingImage ProductManagementERPSyncStatus = "waiting_image"
 )
 
+type ProductManagementCostTrace struct {
+	RuleName                 string          `json:"rule_name,omitempty"`
+	RuleSource               string          `json:"rule_source,omitempty"`
+	MatchedRuleVersion       *int            `json:"matched_rule_version,omitempty"`
+	PrefillSource            string          `json:"prefill_source,omitempty"`
+	RequiresManualReview     bool            `json:"requires_manual_review"`
+	ManualCostOverride       bool            `json:"manual_cost_override"`
+	ManualCostOverrideReason string          `json:"manual_cost_override_reason,omitempty"`
+	InputSnapshot            json.RawMessage `json:"input_snapshot,omitempty"`
+	CalculationSnapshot      json.RawMessage `json:"calculation_snapshot,omitempty"`
+	SnapshotAt               *time.Time      `json:"snapshot_at,omitempty"`
+}
+
 type ProductManagementRecord struct {
 	ID                  int64                               `json:"id"`
 	RecordKey           string                              `json:"record_key"`
@@ -48,6 +64,7 @@ type ProductManagementRecord struct {
 	ProductFamily       string                              `json:"product_family,omitempty"`
 	ProductName         string                              `json:"product_name"`
 	CostPrice           *float64                            `json:"cost_price,omitempty"`
+	CostTrace           *ProductManagementCostTrace         `json:"cost_trace,omitempty"`
 	CreatorID           int64                               `json:"creator_id"`
 	CreatorName         string                              `json:"creator_name"`
 	TaskCreatedAt       time.Time                           `json:"task_created_at"`

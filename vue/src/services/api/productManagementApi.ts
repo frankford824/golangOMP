@@ -18,6 +18,19 @@ export type ProductSyncStatus =
   | 'cooling_down'
   | 'waiting_image'
 
+export interface ProductManagementCostTrace {
+  rule_name?: string
+  rule_source?: string
+  matched_rule_version?: number
+  prefill_source?: string
+  requires_manual_review?: boolean
+  manual_cost_override?: boolean
+  manual_cost_override_reason?: string
+  input_snapshot?: Record<string, unknown>
+  calculation_snapshot?: Record<string, unknown>
+  snapshot_at?: string
+}
+
 export interface ProductManagementRecord {
   id: number
   record_key: string
@@ -33,6 +46,7 @@ export interface ProductManagementRecord {
   product_family?: string
   product_name: string
   cost_price?: number | null
+  cost_trace?: ProductManagementCostTrace | null
   creator_id: number
   creator_name: string
   task_created_at: string

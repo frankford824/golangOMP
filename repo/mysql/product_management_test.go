@@ -88,7 +88,7 @@ func TestProductManagementClaimQueuedSyncRecordsClaimsChildSyncStatuses(t *testi
 			}
 			return nil
 		case "list-claimed-product-management-sync":
-			if !strings.Contains(normalized, "WHERE sync_claim_token = ?") {
+			if !strings.Contains(normalized, "WHERE pm.sync_claim_token = ?") {
 				return fmt.Errorf("claimed list SQL missing claim token filter")
 			}
 			return nil
@@ -245,7 +245,7 @@ func testProductManagementNow() time.Time {
 
 func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T) {
 	where, args := buildProductManagementWhere(repo.ProductManagementListFilter{ImageSyncStatus: "synced"})
-	if !strings.Contains(where, "image_sync_status = ? AND last_image_synced_at IS NOT NULL") {
+	if !strings.Contains(where, "pm.image_sync_status = ? AND pm.last_image_synced_at IS NOT NULL") {
 		t.Fatalf("synced image filter where = %s", where)
 	}
 	if len(args) != 1 || args[0] != "synced" {
@@ -253,7 +253,7 @@ func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T
 	}
 
 	where, args = buildProductManagementWhere(repo.ProductManagementListFilter{ImageSyncStatus: "pending_sync"})
-	if !strings.Contains(where, "image_sync_status = ? OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL)") {
+	if !strings.Contains(where, "pm.image_sync_status = ? OR (pm.image_sync_status = 'synced' AND pm.last_image_synced_at IS NULL)") {
 		t.Fatalf("pending image filter where = %s", where)
 	}
 	if len(args) != 1 || args[0] != "pending_sync" {
@@ -261,7 +261,7 @@ func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T
 	}
 
 	where, _ = buildProductManagementWhere(repo.ProductManagementListFilter{IssueScope: "attention"})
-	if !strings.Contains(where, "OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL)") {
+	if !strings.Contains(where, "OR (pm.image_sync_status = 'synced' AND pm.last_image_synced_at IS NULL)") {
 		t.Fatalf("attention filter where = %s", where)
 	}
 }
@@ -271,7 +271,7 @@ func TestProductManagementWhereSearchesComboRelations(t *testing.T) {
 	for _, fragment := range []string{
 		"FROM omp_sku_combo_relations rel",
 		"LEFT JOIN omp_sku_combo_records rec",
-		"rel.child_sku_code = erp_product_sync_records.sku_code COLLATE utf8mb4_0900_ai_ci",
+		"CONVERT(rel.child_sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci = CONVERT(pm.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci",
 		"rel.combo_sku_code = ?",
 		"COALESCE(rec.erp_i_id, '') = ?",
 		"rel.combo_sku_code LIKE ?",
@@ -299,17 +299,17 @@ func TestProductManagementWhereSyncedStatusSkipsAttentionScope(t *testing.T) {
 		{
 			name:         "overall synced",
 			filter:       repo.ProductManagementListFilter{IssueScope: "attention", SyncStatus: "synced"},
-			wantFragment: "erp_sync_status = ?",
+			wantFragment: "pm.erp_sync_status = ?",
 		},
 		{
 			name:         "base synced",
 			filter:       repo.ProductManagementListFilter{IssueScope: "attention", BaseSyncStatus: "synced"},
-			wantFragment: "base_sync_status = ?",
+			wantFragment: "pm.base_sync_status = ?",
 		},
 		{
 			name:         "image synced",
 			filter:       repo.ProductManagementListFilter{IssueScope: "attention", ImageSyncStatus: "synced"},
-			wantFragment: "image_sync_status = ? AND last_image_synced_at IS NOT NULL",
+			wantFragment: "pm.image_sync_status = ? AND pm.last_image_synced_at IS NOT NULL",
 		},
 	}
 

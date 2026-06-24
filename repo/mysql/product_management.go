@@ -3,6 +3,7 @@ package mysqlrepo
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -18,15 +19,43 @@ func NewProductManagementRepo(db *DB) repo.ProductManagementRepo {
 }
 
 const productManagementSelectCols = `
-	id, record_key, task_id, task_sku_item_id, task_no, task_type, source_mode,
-	sku_code, product_i_id, erp_i_id, category_name, product_family,
-	product_name, cost_price, creator_id, creator_name, task_created_at,
-	image_source, image_selection_mode, image_asset_id, image_asset_version_id,
-	image_filename, image_mime_type, image_missing_reason, image_sync_source,
-	erp_sync_status, base_sync_status, image_sync_status,
-	last_erp_checked_at, last_erp_synced_at, last_base_synced_at, last_image_synced_at,
-	sync_cooldown_until, last_sync_error, base_sync_error, image_sync_error, image_required,
-	created_at, updated_at`
+	pm.id, pm.record_key, pm.task_id, pm.task_sku_item_id, pm.task_no, pm.task_type, pm.source_mode,
+	pm.sku_code, pm.product_i_id, pm.erp_i_id, pm.category_name, pm.product_family,
+	pm.product_name, pm.cost_price, pm.creator_id, pm.creator_name, pm.task_created_at,
+	pm.image_source, pm.image_selection_mode, pm.image_asset_id, pm.image_asset_version_id,
+	pm.image_filename, pm.image_mime_type, pm.image_missing_reason, pm.image_sync_source,
+	pm.erp_sync_status, pm.base_sync_status, pm.image_sync_status,
+	pm.last_erp_checked_at, pm.last_erp_synced_at, pm.last_base_synced_at, pm.last_image_synced_at,
+	pm.sync_cooldown_until, pm.last_sync_error, pm.base_sync_error, pm.image_sync_error, pm.image_required,
+	pm.created_at, pm.updated_at,
+	cost_snapshot.cost_rule_name, cost_snapshot.cost_rule_source, cost_snapshot.matched_rule_version,
+	cost_snapshot.prefill_source, cost_snapshot.requires_manual_review, cost_snapshot.manual_cost_override,
+	cost_snapshot.manual_cost_override_reason, cost_snapshot.input_snapshot_json,
+	cost_snapshot.calculation_snapshot_json, cost_snapshot.created_at`
+
+const productManagementCostTraceJoin = `
+	LEFT JOIN omp_sku_cost_snapshots cost_snapshot
+	  ON cost_snapshot.id = (
+	    SELECT s.id
+	      FROM omp_sku_cost_snapshots s
+	     WHERE CONVERT(s.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci = CONVERT(pm.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci
+	       AND (
+	         (pm.task_sku_item_id IS NOT NULL AND s.task_sku_item_id = pm.task_sku_item_id)
+	         OR (pm.task_sku_item_id IS NULL AND s.task_id = pm.task_id AND s.task_sku_item_id IS NULL)
+	         OR s.task_id = pm.task_id
+	         OR s.task_id IS NULL
+	       )
+	     ORDER BY
+	       CASE
+	         WHEN pm.task_sku_item_id IS NOT NULL AND s.task_sku_item_id = pm.task_sku_item_id THEN 0
+	         WHEN pm.task_sku_item_id IS NULL AND s.task_id = pm.task_id AND s.task_sku_item_id IS NULL THEN 1
+	         WHEN s.task_id = pm.task_id THEN 2
+	         ELSE 3
+	       END,
+	       s.created_at DESC,
+	       s.id DESC
+	     LIMIT 1
+	  )`
 
 func (r *productManagementRepo) RefreshReadModel(ctx context.Context) error {
 	if err := r.refreshMainTaskRecords(ctx); err != nil {
@@ -302,12 +331,12 @@ func (r *productManagementRepo) List(ctx context.Context, filter repo.ProductMan
 	where, args := buildProductManagementWhere(filter)
 
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM erp_product_sync_records `+where, args...).Scan(&total); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM erp_product_sync_records pm `+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count product management records: %w", err)
 	}
 	args = append(args, (filter.Page-1)*filter.PageSize, filter.PageSize)
-	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records `+where+`
-		ORDER BY updated_at DESC, task_created_at DESC, id DESC
+	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` `+where+`
+		ORDER BY pm.updated_at DESC, pm.task_created_at DESC, pm.id DESC
 		LIMIT ?, ?`, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list product management records: %w", err)
@@ -317,12 +346,12 @@ func (r *productManagementRepo) List(ctx context.Context, filter repo.ProductMan
 }
 
 func (r *productManagementRepo) GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error) {
-	row := r.db.db.QueryRowContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records WHERE id = ?`, id)
+	row := r.db.db.QueryRowContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` WHERE pm.id = ?`, id)
 	return scanProductManagementRecord(row)
 }
 
 func (r *productManagementRepo) GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, error) {
-	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records WHERE task_id = ? ORDER BY task_sku_item_id IS NULL DESC, id ASC`, taskID)
+	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` WHERE pm.task_id = ? ORDER BY pm.task_sku_item_id IS NULL DESC, pm.id ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list product management records by task: %w", err)
 	}
@@ -387,7 +416,7 @@ func (r *productManagementRepo) ClaimQueuedSyncRecords(ctx context.Context, limi
 	); err != nil {
 		return nil, fmt.Errorf("claim product management sync records: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records WHERE sync_claim_token = ? ORDER BY last_erp_checked_at, id`, claimToken)
+	rows, err := tx.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` WHERE pm.sync_claim_token = ? ORDER BY pm.last_erp_checked_at, pm.id`, claimToken)
 	if err != nil {
 		return nil, fmt.Errorf("list claimed product management sync records: %w", err)
 	}
@@ -704,33 +733,33 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 	if keyword != "" {
 		kw := normalizeSearchKeyword(keyword)
 		keywordClauses := []string{
-			"product_name LIKE ?",
-			"category_name LIKE ?",
-			"creator_name LIKE ?",
+			"pm.product_name LIKE ?",
+			"pm.category_name LIKE ?",
+			"pm.creator_name LIKE ?",
 		}
 		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like}
 		if kw.HasInt64 {
-			keywordClauses = append(keywordClauses, "creator_id = ?")
+			keywordClauses = append(keywordClauses, "pm.creator_id = ?")
 			keywordArgs = append(keywordArgs, kw.Int64)
 		}
 		if kw.IsCode {
 			keywordClauses = append(keywordClauses,
-				"sku_code = ?",
-				"task_no = ?",
-				"product_i_id = ?",
-				"erp_i_id = ?",
-				"sku_code LIKE ?",
-				"task_no LIKE ?",
-				"product_i_id LIKE ?",
-				"erp_i_id LIKE ?",
+				"pm.sku_code = ?",
+				"pm.task_no = ?",
+				"pm.product_i_id = ?",
+				"pm.erp_i_id = ?",
+				"pm.sku_code LIKE ?",
+				"pm.task_no LIKE ?",
+				"pm.product_i_id LIKE ?",
+				"pm.erp_i_id LIKE ?",
 			)
 			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
 		} else {
 			keywordClauses = append(keywordClauses,
-				"sku_code LIKE ?",
-				"task_no LIKE ?",
-				"product_i_id LIKE ?",
-				"erp_i_id LIKE ?",
+				"pm.sku_code LIKE ?",
+				"pm.task_no LIKE ?",
+				"pm.product_i_id LIKE ?",
+				"pm.erp_i_id LIKE ?",
 			)
 			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
 		}
@@ -738,7 +767,7 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 			  SELECT 1
 			    FROM omp_sku_combo_relations rel
 				    LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
-				   WHERE rel.child_sku_code = erp_product_sync_records.sku_code COLLATE utf8mb4_0900_ai_ci
+				   WHERE CONVERT(rel.child_sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci = CONVERT(pm.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci
 			     AND (
 			       rel.combo_sku_code = ?
 			       OR COALESCE(rec.erp_i_id, '') = ?
@@ -753,46 +782,46 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 		args = append(args, keywordArgs...)
 	}
 	if source := strings.TrimSpace(filter.ImageSource); source != "" {
-		clauses = append(clauses, "image_source = ?")
+		clauses = append(clauses, "pm.image_source = ?")
 		args = append(args, source)
 	}
 	if status := strings.TrimSpace(filter.SyncStatus); status != "" {
-		clauses = append(clauses, "erp_sync_status = ?")
+		clauses = append(clauses, "pm.erp_sync_status = ?")
 		args = append(args, status)
 	}
 	if status := strings.TrimSpace(filter.BaseSyncStatus); status != "" {
-		clauses = append(clauses, "base_sync_status = ?")
+		clauses = append(clauses, "pm.base_sync_status = ?")
 		args = append(args, status)
 	}
 	if status := strings.TrimSpace(filter.ImageSyncStatus); status != "" {
 		if status == string(domain.ProductManagementERPSyncStatusSynced) {
-			clauses = append(clauses, "image_sync_status = ? AND last_image_synced_at IS NOT NULL")
+			clauses = append(clauses, "pm.image_sync_status = ? AND pm.last_image_synced_at IS NOT NULL")
 			args = append(args, status)
 		} else if status == string(domain.ProductManagementERPSyncStatusPendingSync) {
-			clauses = append(clauses, "(image_sync_status = ? OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL))")
+			clauses = append(clauses, "(pm.image_sync_status = ? OR (pm.image_sync_status = 'synced' AND pm.last_image_synced_at IS NULL))")
 			args = append(args, status)
 		} else {
-			clauses = append(clauses, "image_sync_status = ?")
+			clauses = append(clauses, "pm.image_sync_status = ?")
 			args = append(args, status)
 		}
 	}
 	switch strings.TrimSpace(filter.CostStatus) {
 	case "missing":
-		clauses = append(clauses, "(cost_price IS NULL OR cost_price <= 0)")
+		clauses = append(clauses, "(pm.cost_price IS NULL OR pm.cost_price <= 0)")
 	case "ready":
-		clauses = append(clauses, "cost_price IS NOT NULL AND cost_price > 0")
+		clauses = append(clauses, "pm.cost_price IS NOT NULL AND pm.cost_price > 0")
 	}
 	if filter.CreatorID != nil && *filter.CreatorID > 0 {
-		clauses = append(clauses, "creator_id = ?")
+		clauses = append(clauses, "pm.creator_id = ?")
 		args = append(args, *filter.CreatorID)
 	}
 	if shouldApplyProductManagementAttentionScope(filter) {
 		clauses = append(clauses, `(
-			cost_price IS NULL
-			OR cost_price <= 0
-			OR base_sync_status IN ('pending_sync', 'failed', 'queued', 'cooling_down', 'syncing')
-			OR image_sync_status IN ('pending_sync', 'waiting_image', 'failed', 'queued', 'cooling_down', 'syncing')
-			OR (image_sync_status = 'synced' AND last_image_synced_at IS NULL)
+			pm.cost_price IS NULL
+			OR pm.cost_price <= 0
+			OR pm.base_sync_status IN ('pending_sync', 'failed', 'queued', 'cooling_down', 'syncing')
+			OR pm.image_sync_status IN ('pending_sync', 'waiting_image', 'failed', 'queued', 'cooling_down', 'syncing')
+			OR (pm.image_sync_status = 'synced' AND pm.last_image_synced_at IS NULL)
 		)`)
 	}
 	return "WHERE " + strings.Join(clauses, " AND "), args
@@ -834,8 +863,12 @@ func scanProductManagementRecord(row *sql.Row) (*domain.ProductManagementRecord,
 func scanProductManagementRecordScanner(scanner productManagementScanner) (*domain.ProductManagementRecord, error) {
 	var item domain.ProductManagementRecord
 	var taskSKUItemID, imageAssetID, imageAssetVersionID sql.NullInt64
+	var costMatchedRuleVersion, costRequiresManualReview, costManualOverride sql.NullInt64
 	var costPrice sql.NullFloat64
 	var lastERPCheckedAt, lastERPSyncedAt, lastBaseSyncedAt, lastImageSyncedAt, syncCooldownUntil sql.NullTime
+	var costRuleName, costRuleSource, costPrefillSource, costManualOverrideReason sql.NullString
+	var costInputSnapshot, costCalculationSnapshot sql.NullString
+	var costSnapshotAt sql.NullTime
 	if err := scanner.Scan(
 		&item.ID,
 		&item.RecordKey,
@@ -876,6 +909,16 @@ func scanProductManagementRecordScanner(scanner productManagementScanner) (*doma
 		&item.ImageRequired,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&costRuleName,
+		&costRuleSource,
+		&costMatchedRuleVersion,
+		&costPrefillSource,
+		&costRequiresManualReview,
+		&costManualOverride,
+		&costManualOverrideReason,
+		&costInputSnapshot,
+		&costCalculationSnapshot,
+		&costSnapshotAt,
 	); err != nil {
 		return nil, fmt.Errorf("scan product management record: %w", err)
 	}
@@ -888,9 +931,65 @@ func scanProductManagementRecordScanner(scanner productManagementScanner) (*doma
 	item.LastBaseSyncedAt = fromNullTime(lastBaseSyncedAt)
 	item.LastImageSyncedAt = fromNullTime(lastImageSyncedAt)
 	item.SyncCooldownUntil = fromNullTime(syncCooldownUntil)
+	item.CostTrace = productManagementCostTraceFromRow(
+		costRuleName,
+		costRuleSource,
+		costMatchedRuleVersion,
+		costPrefillSource,
+		costRequiresManualReview,
+		costManualOverride,
+		costManualOverrideReason,
+		costInputSnapshot,
+		costCalculationSnapshot,
+		costSnapshotAt,
+	)
 	if strings.TrimSpace(item.ERPIID) == "" {
 		item.ERPIID = strings.TrimSpace(item.ProductIID)
 	}
 	item.ImageSourceLabel = domain.ProductManagementImageSourceLabel(item.ImageSource)
 	return &item, nil
+}
+
+func productManagementCostTraceFromRow(
+	ruleName sql.NullString,
+	ruleSource sql.NullString,
+	matchedRuleVersion sql.NullInt64,
+	prefillSource sql.NullString,
+	requiresManualReview sql.NullInt64,
+	manualCostOverride sql.NullInt64,
+	manualCostOverrideReason sql.NullString,
+	inputSnapshot sql.NullString,
+	calculationSnapshot sql.NullString,
+	snapshotAt sql.NullTime,
+) *domain.ProductManagementCostTrace {
+	if !ruleName.Valid && !ruleSource.Valid && !inputSnapshot.Valid && !calculationSnapshot.Valid {
+		return nil
+	}
+	trace := &domain.ProductManagementCostTrace{
+		RuleName:                 strings.TrimSpace(ruleName.String),
+		RuleSource:               strings.TrimSpace(ruleSource.String),
+		MatchedRuleVersion:       fromNullInt(matchedRuleVersion),
+		PrefillSource:            strings.TrimSpace(prefillSource.String),
+		RequiresManualReview:     requiresManualReview.Valid && requiresManualReview.Int64 != 0,
+		ManualCostOverride:       manualCostOverride.Valid && manualCostOverride.Int64 != 0,
+		ManualCostOverrideReason: strings.TrimSpace(manualCostOverrideReason.String),
+		InputSnapshot:            productManagementRawJSON(inputSnapshot),
+		CalculationSnapshot:      productManagementRawJSON(calculationSnapshot),
+		SnapshotAt:               fromNullTime(snapshotAt),
+	}
+	if trace.RuleName == "" && trace.RuleSource == "" && len(trace.InputSnapshot) == 0 && len(trace.CalculationSnapshot) == 0 {
+		return nil
+	}
+	return trace
+}
+
+func productManagementRawJSON(value sql.NullString) json.RawMessage {
+	if !value.Valid {
+		return nil
+	}
+	raw := strings.TrimSpace(value.String)
+	if raw == "" {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
