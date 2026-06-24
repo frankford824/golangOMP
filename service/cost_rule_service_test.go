@@ -578,6 +578,12 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			notes:        "PP海报背胶 30*40cm",
 			want:         []string{"PP_STICKY"},
 		},
+		{
+			name:         "custom poster with happy text is not mistaken for pp material",
+			categoryCode: "GENERAL",
+			notes:        "露邱/定制海报/4rdhappybirthday白底西瓜彩条/100*150cm",
+			want:         []string{"PHOTO_CLOTH_CUSTOM"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

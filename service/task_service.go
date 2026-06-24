@@ -2519,15 +2519,12 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
 		return nil, appErr
 	}
-	var detail *domain.TaskDetail
-	if p.ReferenceFileRefsSet {
-		detail, err = s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
-		if err != nil {
-			return nil, infraError("get task detail for sku item reference update", err)
-		}
-		if detail == nil {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task detail record missing", nil)
-		}
+	detail, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
+	if err != nil {
+		return nil, infraError("get task detail for sku item update", err)
+	}
+	if detail == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task detail record missing", nil)
 	}
 	items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
 	if err != nil {
@@ -2549,6 +2546,14 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	previousProductIID := taskSKUItemProductIID(item)
 	previousDesignRequirement := item.DesignRequirement
 	previousReferenceFileRefs := domain.NormalizeReferenceFileRefs(item.ReferenceFileRefs)
+	previousCostPrice := cloneFloat64Ptr(item.CostPrice)
+	previousEstimatedCost := cloneFloat64Ptr(item.EstimatedCost)
+	previousOverrideActive := item.ManualCostOverride
+	previousOverrideReason := item.ManualCostOverrideReason
+	previousMatchedRuleID := cloneInt64Ptr(item.CostRuleID)
+	previousMatchedRuleVersion := cloneIntPtr(item.MatchedRuleVersion)
+	previousCategoryCode := item.CategoryCode
+	previousCostRuleSource := item.CostRuleSource
 	if p.ProductName != nil {
 		productName := strings.TrimSpace(*p.ProductName)
 		if erpProductNameTooLong(productName) {
@@ -2584,6 +2589,42 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		detailRefs := buildBatchTaskReferenceFileRefsAfterSKUItemUpdate(detail, previousReferenceFileRefs, items, item)
 		detail.ReferenceFileRefsJSON = referenceFileRefsJSON(detailRefs)
 	}
+	productNameChanged := strings.TrimSpace(previousProductName) != strings.TrimSpace(item.ProductNameSnapshot)
+	costInputSubmitted := p.ProductName != nil || p.ProductIID != nil || p.DesignRequirement != nil
+	if costInputSubmitted && s.costRuleRepo != nil {
+		if _, appErr := s.applyTaskSKUItemCostPreview(ctx, detail, item); appErr != nil {
+			return nil, appErr
+		}
+		if item.ManualCostOverride {
+			if item.ManualCostOverrideReason == "" {
+				item.ManualCostOverrideReason = "仓库/运营手动维护成本"
+			}
+		} else if item.EstimatedCost != nil {
+			item.CostPrice = cloneFloat64Ptr(item.EstimatedCost)
+			item.ManualCostOverrideReason = ""
+			item.OverrideActor = ""
+			item.OverrideAt = nil
+		} else {
+			item.CostPrice = nil
+			item.ManualCostOverrideReason = ""
+			item.OverrideActor = ""
+			item.OverrideAt = nil
+		}
+	}
+	costChanged := hasTaskCostStateChanged(
+		previousCostPrice, item.CostPrice,
+		previousEstimatedCost, item.EstimatedCost,
+		previousOverrideActive, item.ManualCostOverride,
+		previousOverrideReason, item.ManualCostOverrideReason,
+		previousMatchedRuleID, item.CostRuleID,
+		previousMatchedRuleVersion, item.MatchedRuleVersion,
+		previousCategoryCode, item.CategoryCode,
+		previousCostRuleSource, item.CostRuleSource,
+	)
+	syncDetailCost := costChanged && (len(items) == 1 || strings.TrimSpace(task.PrimarySKUCode) == strings.TrimSpace(item.SKUCode) || strings.TrimSpace(task.SKUCode) == strings.TrimSpace(item.SKUCode))
+	if syncDetailCost {
+		syncTaskDetailCostFromSKUItem(detail, item)
+	}
 
 	updater, ok := s.taskRepo.(taskSKUItemBusinessInfoUpdater)
 	if !ok {
@@ -2593,8 +2634,13 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		if err := updater.UpdateSKUItemBusinessInfo(ctx, tx, item); err != nil {
 			return err
 		}
-		if p.ReferenceFileRefsSet && detail != nil {
+		if (p.ReferenceFileRefsSet || syncDetailCost) && detail != nil {
 			if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
+				return err
+			}
+		}
+		if costChanged {
+			if err := s.traceTaskCostUpdate(ctx, tx, task, detail, item, p.OperatorID, skuTraceEventSourceBusinessInfo, "sku_item_info_cost_changed"); err != nil {
 				return err
 			}
 		}
@@ -2610,18 +2656,55 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 				"previous_design_requirement": previousDesignRequirement,
 				"design_requirement":          item.DesignRequirement,
 				"reference_file_refs":         item.ReferenceFileRefs,
+				"cost_price":                  item.CostPrice,
+				"estimated_cost":              item.EstimatedCost,
+				"cost_rule_id":                item.CostRuleID,
+				"cost_rule_name":              item.CostRuleName,
+				"cost_rule_source":            item.CostRuleSource,
+				"matched_rule_version":        item.MatchedRuleVersion,
+				"manual_cost_override":        item.ManualCostOverride,
+				"manual_cost_override_reason": item.ManualCostOverrideReason,
 				"erp_sync_requested":          true,
-				"trigger_filing":              p.TriggerFiling || productIIDChanged,
+				"trigger_filing":              p.TriggerFiling || productIIDChanged || costChanged,
 				"remark":                      strings.TrimSpace(p.Remark),
 			}),
 		)
+		if err != nil {
+			return err
+		}
+		if costChanged {
+			_, err = s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventCostUpdated, &p.OperatorID,
+				mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
+					"scope":                         "sku_item",
+					"sku_item_id":                   item.ID,
+					"sku_code":                      item.SKUCode,
+					"previous_cost_price":           previousCostPrice,
+					"cost_price":                    item.CostPrice,
+					"previous_estimated_cost":       previousEstimatedCost,
+					"estimated_cost":                item.EstimatedCost,
+					"cost_rule_id":                  item.CostRuleID,
+					"cost_rule_name":                item.CostRuleName,
+					"cost_rule_source":              item.CostRuleSource,
+					"matched_rule_version":          item.MatchedRuleVersion,
+					"manual_cost_override":          item.ManualCostOverride,
+					"manual_cost_override_reason":   item.ManualCostOverrideReason,
+					"previous_manual_cost_override": previousOverrideActive,
+					"previous_override_reason":      previousOverrideReason,
+					"override_actor":                item.OverrideActor,
+					"override_at":                   item.OverrideAt,
+					"task_detail_cost_synced":       syncDetailCost,
+					"erp_sync_requested":            true,
+					"remark":                        strings.TrimSpace(p.Remark),
+				}),
+			)
+		}
 		return err
 	})
 	if txErr != nil {
 		return nil, infraError("update sku item info tx", txErr)
 	}
-	productNameChanged := strings.TrimSpace(previousProductName) != strings.TrimSpace(item.ProductNameSnapshot)
-	if p.TriggerFiling || productIIDChanged {
+	baseSyncQueuedByFiling := false
+	if p.TriggerFiling || productIIDChanged || costChanged {
 		_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
 			TaskID:           p.TaskID,
 			OperatorID:       p.OperatorID,
@@ -2633,8 +2716,9 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		if filingErr != nil {
 			return nil, filingErr
 		}
+		baseSyncQueuedByFiling = true
 	}
-	if productNameChanged || productIIDChanged {
+	if (productNameChanged || productIIDChanged) && !baseSyncQueuedByFiling {
 		s.queueProductManagementBaseSyncAfterBusinessEdit(ctx, p.TaskID, "sku_item_info")
 	}
 	updatedItems, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
@@ -2740,37 +2824,8 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 
 	item.ManualCostOverride = p.ManualCostOverride
 	item.ManualCostOverrideReason = strings.TrimSpace(p.ManualCostOverrideReason)
-	prefill, appErr := s.previewTaskSKUItemCost(ctx, detail, item)
-	if appErr != nil {
+	if _, appErr := s.applyTaskSKUItemCostPreview(ctx, detail, item); appErr != nil {
 		return nil, appErr
-	}
-	item.EstimatedCost = nil
-	item.RequiresManualReview = false
-	item.CostRuleID = nil
-	item.CostRuleName = ""
-	item.CostRuleSource = ""
-	item.MatchedRuleVersion = nil
-	item.PrefillSource = ""
-	item.PrefillAt = nil
-	if prefill.Response != nil {
-		item.EstimatedCost = cloneFloat64Ptr(prefill.Response.EstimatedCost)
-		item.RequiresManualReview = prefill.Response.RequiresManualReview
-		item.MatchedRuleVersion = cloneIntPtr(prefill.Response.MatchedRuleVersion)
-		item.PrefillSource = taskCostPrefillSourcePreview
-		now := time.Now().UTC()
-		item.PrefillAt = &now
-	}
-	if prefill.MatchedRule != nil {
-		if prefill.MatchedRule.RuleID > 0 {
-			item.CostRuleID = &prefill.MatchedRule.RuleID
-		} else {
-			item.CostRuleID = nil
-		}
-		item.CostRuleName = prefill.MatchedRule.RuleName
-		item.CostRuleSource = prefill.MatchedRule.Source
-		if item.MatchedRuleVersion == nil && prefill.MatchedRule.RuleVersion > 0 {
-			item.MatchedRuleVersion = cloneIntPtr(&prefill.MatchedRule.RuleVersion)
-		}
 	}
 	if item.ManualCostOverride {
 		if p.CostPrice == nil {
@@ -2901,26 +2956,8 @@ func (s *taskService) applyTaskSKUItemCostPrefill(ctx context.Context, detail *d
 	if item == nil {
 		return nil
 	}
-	prefill, appErr := s.previewTaskSKUItemCost(ctx, detail, item)
-	if appErr != nil {
+	if _, appErr := s.applyTaskSKUItemCostPreview(ctx, detail, item); appErr != nil {
 		return appErr
-	}
-	if prefill.Response != nil {
-		item.EstimatedCost = cloneFloat64Ptr(prefill.Response.EstimatedCost)
-		item.RequiresManualReview = prefill.Response.RequiresManualReview
-		item.MatchedRuleVersion = cloneIntPtr(prefill.Response.MatchedRuleVersion)
-		item.PrefillSource = taskCostPrefillSourcePreview
-		now := time.Now().UTC()
-		item.PrefillAt = &now
-	}
-	if prefill.MatchedRule != nil {
-		if prefill.MatchedRule.RuleID > 0 {
-			item.CostRuleID = &prefill.MatchedRule.RuleID
-		} else {
-			item.CostRuleID = nil
-		}
-		item.CostRuleName = prefill.MatchedRule.RuleName
-		item.CostRuleSource = prefill.MatchedRule.Source
 	}
 	if domain.CostPriceMode(item.CostPriceMode) == domain.CostPriceModeManual && item.CostPrice != nil {
 		item.ManualCostOverride = true
@@ -2943,6 +2980,45 @@ func (s *taskService) applyTaskSKUItemCostPrefill(ctx context.Context, detail *d
 	return nil
 }
 
+func (s *taskService) applyTaskSKUItemCostPreview(ctx context.Context, detail *domain.TaskDetail, item *domain.TaskSKUItem) (costPreviewComputation, *domain.AppError) {
+	prefill, appErr := s.previewTaskSKUItemCost(ctx, detail, item)
+	if appErr != nil {
+		return costPreviewComputation{}, appErr
+	}
+	if item == nil {
+		return prefill, nil
+	}
+	item.EstimatedCost = nil
+	item.RequiresManualReview = false
+	item.CostRuleID = nil
+	item.CostRuleName = ""
+	item.CostRuleSource = ""
+	item.MatchedRuleVersion = nil
+	item.PrefillSource = ""
+	item.PrefillAt = nil
+	if prefill.Response != nil {
+		item.EstimatedCost = cloneFloat64Ptr(prefill.Response.EstimatedCost)
+		item.RequiresManualReview = prefill.Response.RequiresManualReview
+		item.MatchedRuleVersion = cloneIntPtr(prefill.Response.MatchedRuleVersion)
+		item.PrefillSource = taskCostPrefillSourcePreview
+		now := time.Now().UTC()
+		item.PrefillAt = &now
+	}
+	if prefill.MatchedRule != nil {
+		if prefill.MatchedRule.RuleID > 0 {
+			item.CostRuleID = &prefill.MatchedRule.RuleID
+		} else {
+			item.CostRuleID = nil
+		}
+		item.CostRuleName = prefill.MatchedRule.RuleName
+		item.CostRuleSource = prefill.MatchedRule.Source
+		if item.MatchedRuleVersion == nil && prefill.MatchedRule.RuleVersion > 0 {
+			item.MatchedRuleVersion = cloneIntPtr(&prefill.MatchedRule.RuleVersion)
+		}
+	}
+	return prefill, nil
+}
+
 func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain.TaskDetail, item *domain.TaskSKUItem) (costPreviewComputation, *domain.AppError) {
 	if s.costRuleRepo == nil || detail == nil || item == nil {
 		return costPreviewComputation{}, nil
@@ -2960,7 +3036,7 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	if categoryID == nil && categoryCode == "" {
 		return costPreviewComputation{}, nil
 	}
-	notes := strings.Join(nonEmptyStrings(
+	notes := strings.Join(uniqueNonEmptyStrings(
 		taskCostPreviewText(detail),
 		item.ProductNameSnapshot,
 		item.ProductShortName,
@@ -3137,7 +3213,8 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 		}
 		return add("PHOTO_CLOTH_STANDARD")
 	}
-	excludedPaperOrStickyPoster := strings.Contains(combined, "pp") ||
+	hasPPMaterial := containsCostAliasPPMaterial(combined)
+	excludedPaperOrStickyPoster := hasPPMaterial ||
 		strings.Contains(combined, "背胶") ||
 		strings.Contains(combined, "铜版纸") ||
 		strings.Contains(combined, "白卡纸")
@@ -3159,12 +3236,12 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 	if strings.Contains(combined, "白卡纸") {
 		return add("WHITE_CARD")
 	}
-	if strings.Contains(combined, "无背胶") && strings.Contains(combined, "pp") {
+	if strings.Contains(combined, "无背胶") && hasPPMaterial {
 		return add("PP_PLAIN")
-	} else if strings.Contains(combined, "背胶") && strings.Contains(combined, "pp") {
+	} else if strings.Contains(combined, "背胶") && hasPPMaterial {
 		return add("PP_STICKY")
 	}
-	if strings.Contains(combined, "模切不干胶") || (strings.Contains(combined, "不干胶") && !strings.Contains(combined, "pp")) {
+	if strings.Contains(combined, "模切不干胶") || (strings.Contains(combined, "不干胶") && !hasPPMaterial) {
 		return add("DIECUT_STICKER")
 	}
 	return aliases
@@ -3233,6 +3310,29 @@ func compactCostAliasText(text string) string {
 		"－", "",
 		"_", "",
 	).Replace(strings.ToLower(text))
+}
+
+func containsCostAliasPPMaterial(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	for offset := 0; offset < len(normalized); {
+		idx := strings.Index(normalized[offset:], "pp")
+		if idx < 0 {
+			return false
+		}
+		start := offset + idx
+		end := start + len("pp")
+		beforeOK := start == 0 || !isCostAliasASCIIAlphaNum(normalized[start-1])
+		afterOK := end >= len(normalized) || !isCostAliasASCIIAlphaNum(normalized[end])
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = end
+	}
+	return false
+}
+
+func isCostAliasASCIIAlphaNum(value byte) bool {
+	return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9')
 }
 
 func virtualCostRulesFromText(categoryCode, notes string) []*domain.CostRule {
@@ -3431,6 +3531,24 @@ func nonEmptyStrings(values ...string) []string {
 		if value != "" {
 			out = append(out, value)
 		}
+	}
+	return out
+}
+
+func uniqueNonEmptyStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
 	}
 	return out
 }

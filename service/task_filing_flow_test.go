@@ -1022,6 +1022,138 @@ func TestUpdateBatchSKUItemCostOnlyRefilesTargetSKU(t *testing.T) {
 	}
 }
 
+func TestUpdateBatchSKUItemInfoRecomputesCostAndRefilesTargetSKU(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   77,
+		CategoryCode: "PHOTO_CLOTH_CUSTOM",
+		CategoryName: "定制写真布",
+		DisplayName:  "定制写真布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        7701,
+			RuleVersion:   1,
+			RuleName:      "定制写真布基础单价",
+			CategoryCode:  "PHOTO_CLOTH_CUSTOM",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			704: {
+				ID:                  704,
+				TaskNo:              "RW-20260624-A-001740",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				ProductNameSnapshot: "CPT-定制海报/批量",
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				IsBatchTask:         true,
+				BatchItemCount:      3,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			704: {
+				TaskID:             704,
+				Category:           "GENERAL",
+				CategoryCode:       "GENERAL",
+				CategoryName:       "通用",
+				FilingStatus:       domain.FilingStatusFilingFailed,
+				FilingErrorMessage: "部分SKU同步失败",
+				ERPSyncRequired:    true,
+				ERPSyncVersion:     2,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			704: {
+				{ID: 2001, TaskID: 704, SequenceNo: 1, SKUCode: "DZG000201", ProductNameSnapshot: "CPT-定制海报/旧/130*150cm", ProductIID: "定制海报", CostPrice: float64Ptr(10.725), FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true, FilingErrorMessage: "ERP频控"},
+				{ID: 2002, TaskID: 704, SequenceNo: 2, SKUCode: "DZC000011", ProductNameSnapshot: "CPT-定制海报/旧", ProductIID: "定制海报", FilingStatus: domain.FilingStatusFilingFailed, ERPSyncStatus: domain.FilingStatusFilingFailed, ERPSyncRequired: true, FilingErrorMessage: "ERP频控"},
+				{ID: 2003, TaskID: 704, SequenceNo: 3, SKUCode: "DZG000203", ProductNameSnapshot: "CPT-定制海报/旧/150*250cm", ProductIID: "定制海报", CostPrice: float64Ptr(20.625), FilingStatus: domain.FilingStatusFiled, ERPSyncStatus: domain.FilingStatusFiled, ERPSyncRequired: false},
+			},
+		},
+	}
+	eventRepo := &prdTaskEventRepo{}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		eventRepo,
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	name := "露邱/定制海报/4rdhappybirthday白底西瓜彩条/100*150cm"
+	updated, appErr := svc.UpdateSKUItemInfo(context.Background(), UpdateTaskSKUItemInfoParams{
+		TaskID:      704,
+		SKUItemID:   2002,
+		OperatorID:  1,
+		ProductName: &name,
+		Remark:      "batch sku info cost refresh",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateSKUItemInfo() unexpected error: %+v", appErr)
+	}
+	if updated.CostPrice == nil || !sameFloat64Ptr(updated.CostPrice, float64Ptr(8.25)) {
+		if updated.CostPrice == nil {
+			t.Fatalf("updated cost = nil, want 8.25")
+		}
+		t.Fatalf("updated cost = %.6f, want 8.25", *updated.CostPrice)
+	}
+	if updated.EstimatedCost == nil || !sameFloat64Ptr(updated.EstimatedCost, float64Ptr(8.25)) {
+		if updated.EstimatedCost == nil {
+			t.Fatalf("updated estimated cost = nil, want 8.25")
+		}
+		t.Fatalf("updated estimated cost = %.6f, want 8.25", *updated.EstimatedCost)
+	}
+	if updated.CostRuleName != "定制写真布基础单价" {
+		t.Fatalf("cost_rule_name = %q, want 定制写真布基础单价", updated.CostRuleName)
+	}
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatalf("upsert calls = %d, want only target SKU refiled", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayload.SKUID; got != "DZC000011" {
+		t.Fatalf("upsert sku = %s, want DZC000011", got)
+	}
+	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || !sameFloat64Ptr(got, float64Ptr(8.25)) {
+		t.Fatalf("erp business_info cost_price = %+v, want 8.25", got)
+	}
+	items := taskRepo.skuItems[704]
+	if items[1].FilingStatus != domain.FilingStatusFiled || items[1].ERPSyncRequired {
+		t.Fatalf("target item filing = %s required=%t, want filed false", items[1].FilingStatus, items[1].ERPSyncRequired)
+	}
+	if items[0].FilingStatus != domain.FilingStatusFilingFailed || !items[0].ERPSyncRequired {
+		t.Fatalf("non-target failed item changed: status=%s required=%t", items[0].FilingStatus, items[0].ERPSyncRequired)
+	}
+	var costEvent *domain.TaskEvent
+	for _, event := range eventRepo.events {
+		if event.EventType == domain.TaskEventCostUpdated {
+			costEvent = event
+			break
+		}
+	}
+	if costEvent == nil {
+		t.Fatalf("events = %+v, want cost updated event", eventRepo.events)
+	}
+}
+
 func TestRetryFilingSyncsSingleSKUItemCostProjectionFromTaskDetail(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},

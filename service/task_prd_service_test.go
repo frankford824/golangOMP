@@ -2168,6 +2168,74 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPosterCost(t *testing.T
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoMapsCustomPosterToPhotoClothCost(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "PHOTO_CLOTH_CUSTOM",
+		CategoryName: "定制写真布",
+		DisplayName:  "定制写真布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "定制写真布基础单价",
+			CategoryCode:  "PHOTO_CLOTH_CUSTOM",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			137: {ID: 137, TaskType: domain.TaskTypeNewProductDevelopment, ProductNameSnapshot: "露邱/定制海报/4rdhappybirthday白底西瓜彩条/100*150cm"},
+		},
+		details: map[int64]*domain.TaskDetail{
+			137: {TaskID: 137, Category: "定制海报", CategoryName: "定制海报"},
+		},
+	}
+	if got := costCategoryAliasesFromText("定制海报", "露邱/定制海报/4rdhappybirthday白底西瓜彩条/100*150cm"); strings.Join(got, ",") != "PHOTO_CLOTH_CUSTOM" {
+		t.Fatalf("aliases = %#v, want PHOTO_CLOTH_CUSTOM", got)
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     137,
+		OperatorID: 9,
+		Category:   "定制海报",
+		SpecText:   "1.5平方米",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-8.25) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 8.25", detail.CostPrice)
+	}
+	if detail.CostRuleName != "定制写真布基础单价" {
+		t.Fatalf("cost_rule_name = %q, want 定制写真布基础单价", detail.CostRuleName)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoCategoryChangeRecomputesSystemCostAndSyncsSingleSKUItem(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()
