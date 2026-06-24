@@ -8,6 +8,7 @@
   { "category_code": "KT_CUSTOM_FILM", "category_name": "定制kt板(覆膜)", "display_name": "定制kt板(覆膜)", "category_type": "board", "source": "phase_020_sample" },
   { "category_code": "PHOTO_CLOTH_STANDARD", "category_name": "常规写真布", "display_name": "常规写真布", "category_type": "cloth", "source": "phase_020_sample" },
   { "category_code": "PHOTO_CLOTH_CUSTOM", "category_name": "定制写真布", "display_name": "定制写真布", "category_type": "cloth", "source": "phase_020_sample" },
+  { "category_code": "POSTER_STANDARD", "category_name": "常规海报", "display_name": "常规海报", "category_type": "cloth", "source": "phase_020_sample" },
   { "category_code": "FLAG_CLOTH_STANDARD", "category_name": "常规旗帜布", "display_name": "常规旗帜布", "category_type": "cloth", "source": "phase_020_sample" },
   { "category_code": "FLAG_CLOTH_SEWED", "category_name": "车缝旗帜布", "display_name": "车缝旗帜布", "category_type": "cloth", "source": "phase_020_sample" },
   { "category_code": "SPRAY_CLOTH_STANDARD", "category_name": "常规喷绘布", "display_name": "常规喷绘布", "category_type": "cloth", "source": "phase_020_sample" },

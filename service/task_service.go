@@ -3119,18 +3119,6 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 			return add(alias)
 		}
 	}
-	looksLikePhotoCloth := strings.Contains(combined, "写真布") ||
-		((strings.Contains(combined, "海报") || strings.Contains(combined, "条幅") || strings.Contains(combined, "挂布")) &&
-			!strings.Contains(combined, "pp") &&
-			!strings.Contains(combined, "背胶") &&
-			!strings.Contains(combined, "铜版纸") &&
-			!strings.Contains(combined, "白卡纸"))
-	if looksLikePhotoCloth {
-		if strings.Contains(combined, "定制") {
-			return add("PHOTO_CLOTH_CUSTOM")
-		}
-		return add("PHOTO_CLOTH_STANDARD")
-	}
 	if strings.Contains(combined, "喷绘布") {
 		if strings.Contains(combined, "定制") {
 			return add("SPRAY_CLOTH_CUSTOM")
@@ -3142,6 +3130,28 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 			return add("FLAG_CLOTH_SEWED")
 		}
 		return add("FLAG_CLOTH_STANDARD")
+	}
+	if strings.Contains(combined, "写真布") {
+		if strings.Contains(combined, "定制") {
+			return add("PHOTO_CLOTH_CUSTOM")
+		}
+		return add("PHOTO_CLOTH_STANDARD")
+	}
+	excludedPaperOrStickyPoster := strings.Contains(combined, "pp") ||
+		strings.Contains(combined, "背胶") ||
+		strings.Contains(combined, "铜版纸") ||
+		strings.Contains(combined, "白卡纸")
+	if strings.Contains(combined, "常规海报") && !excludedPaperOrStickyPoster {
+		return add("POSTER_STANDARD")
+	}
+	looksLikePhotoCloth := strings.Contains(combined, "写真布") ||
+		((strings.Contains(combined, "海报") || strings.Contains(combined, "条幅") || strings.Contains(combined, "横幅") || strings.Contains(combined, "挂布")) &&
+			!excludedPaperOrStickyPoster)
+	if looksLikePhotoCloth {
+		if strings.Contains(combined, "定制") {
+			return add("PHOTO_CLOTH_CUSTOM")
+		}
+		return add("PHOTO_CLOTH_STANDARD")
 	}
 	if strings.Contains(combined, "铜版纸") {
 		return add("COPPER_PAPER")

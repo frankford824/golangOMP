@@ -7,11 +7,11 @@ import (
 
 func TestExtractCostDimensionsUsesLayoutRectangleForClosedBoxFaces(t *testing.T) {
 	dims := extractCostDimensionsFromText("CPT-常规kt板/抽奖箱/30*30cm*6")
-	if dims.WidthM == nil || math.Abs(*dims.WidthM-0.3) > 0.000001 {
-		t.Fatalf("width = %+v, want 0.3", dims.WidthM)
+	if dims.WidthM == nil || math.Abs(*dims.WidthM-1.2) > 0.000001 {
+		t.Fatalf("width = %+v, want 1.2", dims.WidthM)
 	}
-	if dims.HeightM == nil || math.Abs(*dims.HeightM-0.3) > 0.000001 {
-		t.Fatalf("height = %+v, want 0.3", dims.HeightM)
+	if dims.HeightM == nil || math.Abs(*dims.HeightM-0.9) > 0.000001 {
+		t.Fatalf("height = %+v, want 0.9", dims.HeightM)
 	}
 	if dims.AreaM2 == nil || math.Abs(*dims.AreaM2-1.08) > 0.000001 {
 		t.Fatalf("area = %+v, want 1.08", dims.AreaM2)
@@ -37,6 +37,36 @@ func TestExtractCostDimensionsKeepsPlainSizePairArea(t *testing.T) {
 	dims := extractCostDimensionsFromText("常规kt板 30*30cm")
 	if dims.AreaM2 == nil || math.Abs(*dims.AreaM2-0.09) > 0.000001 {
 		t.Fatalf("area = %+v, want 0.09", dims.AreaM2)
+	}
+}
+
+func TestExtractCostDimensionsUsesSingleSizeAndTotalAreaForPieceSet(t *testing.T) {
+	dims := extractCostDimensionsFromText("常规kt板 20*20cm 4件套")
+	if dims.WidthM == nil || math.Abs(*dims.WidthM-0.2) > 0.000001 {
+		t.Fatalf("width = %+v, want 0.2", dims.WidthM)
+	}
+	if dims.HeightM == nil || math.Abs(*dims.HeightM-0.2) > 0.000001 {
+		t.Fatalf("height = %+v, want 0.2", dims.HeightM)
+	}
+	if dims.AreaM2 == nil || math.Abs(*dims.AreaM2-0.16) > 0.000001 {
+		t.Fatalf("area = %+v, want 0.16", dims.AreaM2)
+	}
+}
+
+func TestExtractCostDimensionsSumsMultipleIndependentSizes(t *testing.T) {
+	dims := extractCostDimensionsFromText("40*160cm\n40*200cm")
+	if dims.WidthM != nil || dims.HeightM != nil {
+		t.Fatalf("width/height = %+v/%+v, want nil for mixed-size total", dims.WidthM, dims.HeightM)
+	}
+	if dims.AreaM2 == nil || math.Abs(*dims.AreaM2-1.44) > 0.000001 {
+		t.Fatalf("area = %+v, want 1.44", dims.AreaM2)
+	}
+}
+
+func TestExtractCostDimensionsDoesNotSumCutoutSize(t *testing.T) {
+	dims := extractCostDimensionsFromText("30*42cm（镂空18*18cm）")
+	if dims.AreaM2 == nil || math.Abs(*dims.AreaM2-0.126) > 0.000001 {
+		t.Fatalf("area = %+v, want 0.126", dims.AreaM2)
 	}
 }
 

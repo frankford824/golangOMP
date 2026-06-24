@@ -170,6 +170,99 @@ func TestCostRulePreviewAppliesSurchargeTaxMultiplier(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewAppliesSmallAreaSurchargeBySinglePieceArea(t *testing.T) {
+	tests := []struct {
+		name         string
+		categoryCode string
+		rules        []*domain.CostRule
+		notes        string
+		want         float64
+	}{
+		{
+			name:         "kt board piece set",
+			categoryCode: "KT_STANDARD",
+			notes:        "常规KT板 20*20cm 4件套",
+			want:         2.464,
+			rules: []*domain.CostRule{
+				{
+					RuleID:        31,
+					RuleVersion:   1,
+					RuleName:      "常规KT板基础单价",
+					CategoryCode:  "KT_STANDARD",
+					RuleType:      domain.CostRuleTypeFixedUnitPrice,
+					BasePrice:     costRuleFloat64Ptr(11),
+					TaxMultiplier: costRuleFloat64Ptr(1.1),
+					Priority:      10,
+					IsActive:      true,
+					Source:        "test",
+				},
+				{
+					RuleID:          32,
+					RuleVersion:     1,
+					RuleName:        "常规KT板小面积附加",
+					CategoryCode:    "KT_STANDARD",
+					RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+					AreaThreshold:   costRuleFloat64Ptr(0.15),
+					SurchargeAmount: costRuleFloat64Ptr(3),
+					Priority:        20,
+					IsActive:        true,
+					Source:          "test",
+				},
+			},
+		},
+		{
+			name:         "photo cloth piece set",
+			categoryCode: "PHOTO_CLOTH_STANDARD",
+			notes:        "常规写真布 20*20cm 4件套",
+			want:         1.408,
+			rules: []*domain.CostRule{
+				{
+					RuleID:        41,
+					RuleVersion:   1,
+					RuleName:      "常规写真布基础单价",
+					CategoryCode:  "PHOTO_CLOTH_STANDARD",
+					RuleType:      domain.CostRuleTypeFixedUnitPrice,
+					BasePrice:     costRuleFloat64Ptr(5),
+					TaxMultiplier: costRuleFloat64Ptr(1.1),
+					Priority:      10,
+					IsActive:      true,
+					Source:        "test",
+				},
+				{
+					RuleID:          42,
+					RuleVersion:     1,
+					RuleName:        "常规写真布小面积附加",
+					CategoryCode:    "PHOTO_CLOTH_STANDARD",
+					RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+					TaxMultiplier:   costRuleFloat64Ptr(1.1),
+					AreaThreshold:   costRuleFloat64Ptr(0.15),
+					SurchargeAmount: costRuleFloat64Ptr(3),
+					Priority:        20,
+					IsActive:        true,
+					Source:          "test",
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := previewCostRules(domain.CostRulePreviewRequest{
+				CategoryCode: tt.categoryCode,
+				Notes:        tt.notes,
+			}, tt.rules).Response
+			if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-tt.want) > 0.000001 {
+				t.Fatalf("estimated_cost = %+v, want %.3f", result.EstimatedCost, tt.want)
+			}
+			if len(result.AppliedRules) != 2 {
+				t.Fatalf("applied rules = %d, want base + small-area surcharge", len(result.AppliedRules))
+			}
+			if result.RequiresManualReview {
+				t.Fatalf("requires_manual_review = true, want false")
+			}
+		})
+	}
+}
+
 func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()
@@ -450,10 +543,22 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			want:         []string{"PP_PLAIN"},
 		},
 		{
-			name:         "regular poster maps to photo cloth rule",
+			name:         "regular poster maps to poster rule",
 			categoryCode: "GENERAL",
 			notes:        "常规海报 30*40cm",
+			want:         []string{"POSTER_STANDARD"},
+		},
+		{
+			name:         "plain banner maps to photo cloth rule",
+			categoryCode: "GENERAL",
+			notes:        "横幅 40*200cm",
 			want:         []string{"PHOTO_CLOTH_STANDARD"},
+		},
+		{
+			name:         "flag cloth is not mistaken for hanging cloth",
+			categoryCode: "GENERAL",
+			notes:        "露冉常规旗帜布/夏天挂布/特大号夏万物繁盛夏日长100*200cm",
+			want:         []string{"FLAG_CLOTH_STANDARD"},
 		},
 		{
 			name:         "regular spray cloth maps to spray cloth rule",

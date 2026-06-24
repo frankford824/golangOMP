@@ -15,8 +15,8 @@ type extractedCostDimensions struct {
 var (
 	costAreaPattern           = regexp.MustCompile(`(?i)(?:面积|area)?\s*([0-9]+(?:\.[0-9]+)?)\s*(平方米|平方|平米|㎡|m2|m²|平方厘米|cm2|cm²|平方毫米|mm2|mm²)`)
 	costSizeTriplePattern     = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)`)
-	costSizePairFacesPattern  = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:[/,，;；\s()（）-]*|(?:x|X|×|＊|\*)\s*)([0-9]+(?:\.[0-9]+)?|[一二三四五六七八九十两双单]+)\s*(?:个?面|片|p|P)`)
-	costSizeMultiplierPattern = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:面|片|p|P)?`)
+	costSizePairFacesPattern  = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:[/,，;；\s()（）-]*|(?:x|X|×|＊|\*)\s*)([0-9]+(?:\.[0-9]+)?|[一二三四五六七八九十两双单]+)\s*(?:个?面|件套|件|个|片|p|P)`)
+	costSizeMultiplierPattern = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:面|件套|件|个|片|p|P)?`)
 	costSizePairPattern       = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?\s*(?:x|X|×|＊|\*)\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
 	costNamedSizePattern      = regexp.MustCompile(`(?i)(?:宽|w|width)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?[\s,，;；/]*(?:高|长|h|height|l|length)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
 	costLongestSidePattern    = regexp.MustCompile(`(?i)(?:最长边|长边|最大边|直径)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|毫米|cm|厘米|公分|m|米)?`)
@@ -40,6 +40,9 @@ func extractCostDimensionsFromText(text string) extractedCostDimensions {
 		return dims
 	}
 	if dims := extractCostSizeWithAreaMultiplierM(normalized); dims.AreaM2 != nil {
+		return dims
+	}
+	if dims := extractCostMultipleSizePairsM(normalized); dims.AreaM2 != nil {
 		return dims
 	}
 	if dims := extractCostSizePairM(normalized, costSizePairPattern); dims.AreaM2 != nil {
@@ -194,14 +197,68 @@ func extractCostSizeWithAreaMultiplierM(text string) extractedCostDimensions {
 	return buildCostSizeDimensions(matches[1], matches[2], matches[3], matches[4], multiplier)
 }
 
+func extractCostMultipleSizePairsM(text string) extractedCostDimensions {
+	matches := costSizePairPattern.FindAllStringSubmatchIndex(text, -1)
+	if len(matches) < 2 {
+		return extractedCostDimensions{}
+	}
+	totalArea := 0.0
+	usable := 0
+	for _, match := range matches {
+		if len(match) < 10 || ignoreCostSizePairForAreaSum(text, match[0]) {
+			continue
+		}
+		dims := buildCostSizeDimensions(
+			costSubmatch(text, match, 1),
+			costSubmatch(text, match, 2),
+			costSubmatch(text, match, 3),
+			costSubmatch(text, match, 4),
+			1,
+		)
+		if dims.AreaM2 == nil || *dims.AreaM2 <= 0 {
+			continue
+		}
+		totalArea += *dims.AreaM2
+		usable++
+	}
+	if usable < 2 || totalArea <= 0 {
+		return extractedCostDimensions{}
+	}
+	return extractedCostDimensions{AreaM2: &totalArea}
+}
+
+func costSubmatch(text string, match []int, group int) string {
+	pos := group * 2
+	if pos+1 >= len(match) || match[pos] < 0 || match[pos+1] < 0 {
+		return ""
+	}
+	return text[match[pos]:match[pos+1]]
+}
+
+func ignoreCostSizePairForAreaSum(text string, start int) bool {
+	prefixStart := start - 16
+	if prefixStart < 0 {
+		prefixStart = 0
+	}
+	prefix := strings.ToLower(text[prefixStart:start])
+	for _, keyword := range []string{"镂空", "开孔", "开洞", "孔径", "内径", "外径", "挖孔"} {
+		if strings.Contains(prefix, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
 func buildCostFaceLayoutDimensions(widthText, widthUnit, heightText, heightUnit string, faces int) extractedCostDimensions {
 	base := buildCostSizeDimensions(widthText, widthUnit, heightText, heightUnit, 1)
 	if base.WidthM == nil || base.HeightM == nil || faces <= 0 {
 		return extractedCostDimensions{}
 	}
 	cols, rows := costFaceLayoutGrid(faces)
-	area := (*base.WidthM) * float64(cols) * (*base.HeightM) * float64(rows)
-	return extractedCostDimensions{WidthM: base.WidthM, HeightM: base.HeightM, AreaM2: &area}
+	layoutWidth := (*base.WidthM) * float64(cols)
+	layoutHeight := (*base.HeightM) * float64(rows)
+	area := layoutWidth * layoutHeight
+	return extractedCostDimensions{WidthM: &layoutWidth, HeightM: &layoutHeight, AreaM2: &area}
 }
 
 func costFaceLayoutGrid(faces int) (int, int) {

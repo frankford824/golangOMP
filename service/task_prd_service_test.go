@@ -2100,14 +2100,14 @@ func TestTaskServiceUpdateBusinessInfoResolvesChineseCategoryNameForCost(t *test
 	}
 }
 
-func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testing.T) {
+func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPosterCost(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()
 	categoryRepo.mustCreate(&domain.Category{
 		CategoryID:   1,
-		CategoryCode: "PHOTO_CLOTH_STANDARD",
-		CategoryName: "常规写真布",
-		DisplayName:  "常规写真布",
+		CategoryCode: "POSTER_STANDARD",
+		CategoryName: "常规海报",
+		DisplayName:  "常规海报",
 		CategoryType: domain.CategoryTypeCloth,
 		IsActive:     true,
 		Level:        1,
@@ -2116,8 +2116,8 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testi
 		{
 			RuleID:        1,
 			RuleVersion:   1,
-			RuleName:      "常规写真布基础单价",
-			CategoryCode:  "PHOTO_CLOTH_STANDARD",
+			RuleName:      "常规海报基础单价",
+			CategoryCode:  "POSTER_STANDARD",
 			RuleType:      domain.CostRuleTypeFixedUnitPrice,
 			BasePrice:     float64Ptr(5),
 			TaxMultiplier: float64Ptr(1.1),
@@ -2163,8 +2163,8 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPhotoClothCost(t *testi
 	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-12.705) > 0.000001 {
 		t.Fatalf("cost_price = %+v, want 12.705", detail.CostPrice)
 	}
-	if detail.CostRuleName != "常规写真布基础单价" {
-		t.Fatalf("cost_rule_name = %q, want 常规写真布基础单价", detail.CostRuleName)
+	if detail.CostRuleName != "常规海报基础单价" {
+		t.Fatalf("cost_rule_name = %q, want 常规海报基础单价", detail.CostRuleName)
 	}
 }
 
@@ -2478,9 +2478,9 @@ func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromTaskProductName(t *tes
 	costRuleRepo := newCostRuleRepoStub()
 	categoryRepo.mustCreate(&domain.Category{
 		CategoryID:   1,
-		CategoryCode: "PHOTO_CLOTH_STANDARD",
-		CategoryName: "常规写真布",
-		DisplayName:  "常规写真布",
+		CategoryCode: "POSTER_STANDARD",
+		CategoryName: "常规海报",
+		DisplayName:  "常规海报",
 		CategoryType: domain.CategoryTypeCloth,
 		IsActive:     true,
 		Level:        1,
@@ -2489,8 +2489,8 @@ func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromTaskProductName(t *tes
 		{
 			RuleID:        1,
 			RuleVersion:   1,
-			RuleName:      "常规写真布基础单价",
-			CategoryCode:  "PHOTO_CLOTH_STANDARD",
+			RuleName:      "常规海报基础单价",
+			CategoryCode:  "POSTER_STANDARD",
 			RuleType:      domain.CostRuleTypeFixedUnitPrice,
 			BasePrice:     float64Ptr(5),
 			TaxMultiplier: float64Ptr(1.1),
@@ -2531,6 +2531,149 @@ func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromTaskProductName(t *tes
 	}
 	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-9.9) > 0.000001 {
 		t.Fatalf("cost_price = %+v, want 9.9", detail.CostPrice)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoSumsMultiplePosterSizes(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "POSTER_STANDARD",
+		CategoryName: "常规海报",
+		DisplayName:  "常规海报",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规海报基础单价",
+			CategoryCode:  "POSTER_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			136: {ID: 136, TaskType: domain.TaskTypeNewProductDevelopment, ProductNameSnapshot: "谷/常规海报/端午龙舟粽子/五月初五/2条"},
+		},
+		details: map[int64]*domain.TaskDetail{
+			136: {TaskID: 136, Category: "常规海报", CategoryName: "常规海报"},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     136,
+		OperatorID: 9,
+		Category:   "常规海报",
+		SpecText:   "40*160cm\n40*200cm",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.Area == nil || math.Abs(*detail.Area-1.44) > 0.000001 {
+		t.Fatalf("area = %+v, want 1.44", detail.Area)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-7.92) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 7.92", detail.CostPrice)
+	}
+}
+
+func TestTaskServiceUpdateBusinessInfoPrefersFlagClothOverHangingClothAlias(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   18,
+		CategoryCode: "FLAG_CLOTH_STANDARD",
+		CategoryName: "常规旗帜布",
+		DisplayName:  "常规旗帜布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        18,
+			RuleVersion:   1,
+			RuleName:      "常规旗帜布基础单价",
+			CategoryCode:  "FLAG_CLOTH_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(4),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+		{
+			RuleID:        19,
+			RuleVersion:   1,
+			RuleName:      "常规写真布基础单价",
+			CategoryCode:  "PHOTO_CLOTH_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			137: {ID: 137, TaskType: domain.TaskTypeNewProductDevelopment, ProductNameSnapshot: "露冉常规旗帜布/夏天挂布/特大号夏万物繁盛夏日长100*200cm"},
+		},
+		details: map[int64]*domain.TaskDetail{
+			137: {TaskID: 137, Category: "常规旗帜布", CategoryName: "常规旗帜布"},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:      137,
+		OperatorID:  9,
+		ProductName: "露冉常规旗帜布/夏天挂布/特大号夏万物繁盛夏日长100*200cm",
+		Category:    "常规旗帜布",
+		SpecText:    "2㎡",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.CostRuleName != "常规旗帜布基础单价" {
+		t.Fatalf("cost_rule_name = %q, want 常规旗帜布基础单价", detail.CostRuleName)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-8.8) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 8.8", detail.CostPrice)
 	}
 }
 

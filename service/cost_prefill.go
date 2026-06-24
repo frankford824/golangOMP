@@ -35,6 +35,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 	})
 
 	area := previewArea(req)
+	areaThresholdBasis := previewAreaThresholdBasis(req, area)
 	quantity := previewQuantity(req.Quantity)
 	ruleSource := ""
 	manualReview := false
@@ -91,11 +92,11 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			switch {
 			case rule.AreaThreshold == nil || rule.SurchargeAmount == nil:
 				continue
-			case area <= 0:
+			case area <= 0 || areaThresholdBasis <= 0:
 				manualReview = true
 				applied = append(applied, match)
 				explanations = append(explanations, fmt.Sprintf("%s requires width/height/area input before threshold surcharge can be evaluated", rule.RuleName))
-			case area < *rule.AreaThreshold:
+			case areaThresholdBasis < *rule.AreaThreshold:
 				extra := (*rule.SurchargeAmount) * area * float64(quantity)
 				if rule.TaxMultiplier != nil && *rule.TaxMultiplier > 0 {
 					extra = extra * (*rule.TaxMultiplier)
@@ -104,7 +105,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				}
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.3f and applied %.3f because area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, area, *rule.AreaThreshold))
+				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.3f and applied %.3f because threshold area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, areaThresholdBasis, *rule.AreaThreshold))
 			}
 		case domain.CostRuleTypeSpecialProcessPrice:
 			if rule.SpecialProcessPrice != nil && containsProcessKeyword(req.Process, req.Notes, rule.SpecialProcessKeyword) {
@@ -221,4 +222,18 @@ func previewGovernanceStatus(rule *domain.CostRule) domain.CostRuleGovernanceSta
 		return domain.CostRuleGovernanceStatusNoMatch
 	}
 	return rule.GovernanceStatusAt(time.Now())
+}
+
+func previewAreaThresholdBasis(req domain.CostRulePreviewRequest, billableArea float64) float64 {
+	if costPreviewUsesBillableAreaForThreshold(req) {
+		return billableArea
+	}
+	if req.Width != nil && req.Height != nil && *req.Width > 0 && *req.Height > 0 {
+		return (*req.Width) * (*req.Height)
+	}
+	return billableArea
+}
+
+func costPreviewUsesBillableAreaForThreshold(req domain.CostRulePreviewRequest) bool {
+	return containsCostBoxLayoutKeyword(strings.Join(nonEmptyStrings(req.Process, req.Notes), " "))
 }
