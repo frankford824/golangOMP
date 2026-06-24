@@ -36,16 +36,17 @@
           <BaseTextarea
             v-if="showField.spec_text"
             v-model="form.spec_text"
-            label="规格说明"
+            label="规格 / 工艺补充"
             :rows="2"
-            placeholder="规格、工艺等"
+            placeholder="除标准尺寸外的规格、工艺等补充说明"
           />
-          <BaseTextarea
+          <TaskSpecStructuredInput
             v-if="showField.size_text"
             v-model="form.size_text"
+            class="sm:col-span-2"
             label="尺寸"
-            :rows="2"
-            placeholder="尺寸描述"
+            placeholder="请选择宽高或面积并填写数字"
+            hint="与创建任务保持一致；修改后会参与成本规则重新匹配。"
           />
           <BaseInput
             v-if="showField.reference_link"
@@ -192,6 +193,7 @@ import BaseModal from '@/components/base/BaseModal.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import { normalizePriorityForApi } from '@/domain/task-priority'
 import {
@@ -345,8 +347,10 @@ function hydrateFromTaskAndPanels(
   next.category_code = String(
     productPanel?.category_code ?? t.newProductCategoryCode ?? t.erpCategoryCode ?? t.category ?? '',
   ).trim()
-  next.spec_text = String(productPanel?.spec_text ?? t.specText ?? '').trim()
-  next.size_text = String(productPanel?.size_text ?? t.sizeText ?? '').trim()
+  const specText = String(productPanel?.spec_text ?? t.specText ?? '').trim()
+  const sizeText = String(productPanel?.size_text ?? t.sizeText ?? '').trim()
+  next.spec_text = specText
+  next.size_text = sizeText || (isStructuredDimensionText(specText) ? specText : '')
   next.material = String(productPanel?.material ?? t.newProductMaterial ?? '').trim()
   next.reference_link = String(productPanel?.reference_link ?? t.productReferenceUrl ?? '').trim()
 
@@ -451,6 +455,9 @@ function buildProductPatch(b: EditForm, c: EditForm): Record<string, unknown> | 
     }
     if (showField.value.size_text && normStr(c.size_text) !== normStr(b.size_text)) {
       patch.size_text = normStr(c.size_text) || null
+      if (shouldMirrorEditedSizeToSpec(b, c)) {
+        patch.spec_text = normStr(c.size_text) || null
+      }
     }
     if (showField.value.material && normStr(c.material) !== normStr(b.material)) {
       patch.material = normStr(c.material) || null
@@ -466,6 +473,23 @@ function buildProductPatch(b: EditForm, c: EditForm): Record<string, unknown> | 
   const touched = Object.keys(patch).length > 0
   if (touched && remark) patch.remark = remark
   return touched ? patch : null
+}
+
+function isStructuredDimensionText(value: string): boolean {
+  const text = normStr(value)
+  if (!text) return false
+  return (
+    /^\d+(?:\.\d+)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:cm|m|mm|厘米|米|毫米)$/i.test(text) ||
+    /^\d+(?:\.\d+)?\s*(?:平方米|平方|平米|㎡|m2|m²|平方厘米|cm2|cm²|平方毫米|mm2|mm²)$/i.test(text)
+  )
+}
+
+function shouldMirrorEditedSizeToSpec(b: EditForm, c: EditForm): boolean {
+  const baseSpec = normStr(b.spec_text)
+  if (!showField.value.spec_text || !isStructuredDimensionText(baseSpec)) return false
+  if (normStr(c.spec_text) !== baseSpec) return false
+  const baseSize = normStr(b.size_text)
+  return baseSize === '' || baseSize === baseSpec
 }
 
 function buildBusinessPatch(b: EditForm, c: EditForm): Record<string, unknown> | null {

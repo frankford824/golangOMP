@@ -1606,7 +1606,14 @@ const detailNoteLabel = computed(() => dash(task.value?.note))
 const detailSpecLabel = computed(() => {
   const t = task.value
   if (!t) return '-'
-  const parts = [t.specText, t.sizeText].map((x) => String(x ?? '').trim()).filter(Boolean)
+  const seen = new Set<string>()
+  const parts = [t.specText, t.sizeText]
+    .map((x) => String(x ?? '').trim())
+    .filter((x) => {
+      if (!x || seen.has(x)) return false
+      seen.add(x)
+      return true
+    })
   return parts.length > 0 ? parts.join('；') : '-'
 })
 const detailCostLabel = computed(() => {
