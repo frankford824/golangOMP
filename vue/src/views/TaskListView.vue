@@ -178,23 +178,42 @@
               <TaskTypeBadge :type="task.businessType ?? task.taskType" />
             </div>
           </div>
-          <div class="card-no-row task-copy-zone" data-card-copy-zone>
-            <span class="card-no">{{ task.taskNo }}</span>
+          <div class="card-copy-toolbar" data-card-no-nav="true" @click.stop>
             <button
               v-if="canCopyTaskField(task.taskNo)"
               type="button"
-              class="field-copy-floating"
               :aria-label="`复制任务号 ${task.taskNo}`"
               title="复制任务号"
-              data-card-no-nav="true"
-              @click.stop="copyTaskCardText(task.taskNo, '任务号')"
+              @click="copyTaskCardText(task.taskNo, '任务号')"
             >
-              复制
+              单号
+            </button>
+            <button
+              v-if="canCopyTaskField(task.productName)"
+              type="button"
+              :aria-label="`复制任务名称 ${task.productName}`"
+              title="复制任务名称"
+              @click="copyTaskCardText(task.productName, '任务名称')"
+            >
+              名称
+            </button>
+            <button
+              v-if="canCopyTaskField(displaySku(task))"
+              type="button"
+              :aria-label="`复制 SKU ${displaySku(task)}`"
+              title="复制 SKU"
+              @click="copyTaskCardText(displaySku(task), 'SKU')"
+            >
+              SKU
             </button>
           </div>
+          <div class="card-no-row task-copy-zone" data-card-copy-zone>
+            <span class="card-no">{{ task.taskNo }}</span>
+          </div>
           <div
-            class="card-product"
+            class="card-product task-copy-zone"
             :title="task.productName?.trim() ? task.productName : undefined"
+            data-card-copy-zone
           >
             {{ task.productName }}
           </div>
@@ -222,17 +241,6 @@
               <span class="card-meta-key">SKU</span>
               <span class="card-meta-value task-copy-zone" :title="displaySku(task)" data-card-copy-zone>
                 {{ displaySku(task) }}
-                <button
-                  v-if="canCopyTaskField(displaySku(task))"
-                  type="button"
-                  class="field-copy-floating field-copy-floating--meta"
-                  :aria-label="`复制 SKU ${displaySku(task)}`"
-                  title="复制 SKU"
-                  data-card-no-nav="true"
-                  @click.stop="copyTaskCardText(displaySku(task), 'SKU')"
-                >
-                  复制
-                </button>
               </span>
             </div>
             <div class="card-meta-line card-meta-line--creator">
@@ -2864,34 +2872,26 @@ watch(totalPages, (value) => {
   user-select: text;
 }
 
-.card-no-row.task-copy-zone {
-  padding-right: 2.75rem;
-}
-
 .card-meta-value.task-copy-zone {
   display: block;
-  padding-right: 2.65rem;
 }
 
-.field-copy-floating {
+.card-copy-toolbar {
   position: absolute;
-  top: 50%;
-  right: 0;
-  z-index: 3;
-  min-height: 1.45rem;
-  border: 1px solid #bfdbfe;
+  top: 2.55rem;
+  right: 0.75rem;
+  z-index: 8;
+  display: inline-flex;
+  gap: 0.2rem;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 999px;
-  padding: 0.13rem 0.48rem;
-  background: rgba(239, 246, 255, 0.96);
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.14);
-  color: #1d4ed8;
-  cursor: pointer;
-  font-size: 0.68rem;
-  font-weight: 850;
-  line-height: 1;
+  padding: 0.16rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-50%) translateX(0.24rem);
+  transform: translateY(-0.25rem);
   transition:
     opacity 0.14s ease,
     transform 0.14s ease,
@@ -2899,18 +2899,37 @@ watch(totalPages, (value) => {
     background 0.14s ease;
 }
 
-.task-copy-zone:hover .field-copy-floating,
-.task-copy-zone:focus-within .field-copy-floating,
-.field-copy-floating:focus-visible {
+.task-card:hover .card-copy-toolbar,
+.task-card:focus-within .card-copy-toolbar {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(-50%);
+  transform: translateY(0);
 }
 
-.field-copy-floating:hover,
-.field-copy-floating:focus-visible {
-  border-color: #60a5fa;
+.card-copy-toolbar button {
+  min-height: 1.45rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.14rem 0.46rem;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.card-copy-toolbar button:hover,
+.card-copy-toolbar button:focus-visible {
   background: #dbeafe;
+  color: #1d4ed8;
   outline: none;
+}
+
+@media (max-width: 720px) {
+  .card-copy-toolbar {
+    top: 2.35rem;
+    right: 0.55rem;
+  }
 }
 </style>
