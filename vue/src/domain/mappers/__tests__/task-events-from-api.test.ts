@@ -192,4 +192,62 @@ describe('mapTaskEventRowToRecentEvent', () => {
     expect(event.summary).not.toContain('pending_sync')
     expect(event.summary).not.toContain('filing_status')
   })
+
+  it('uses business copy for ERP filing skip and failure events', () => {
+    const skipped = mapTaskEventRowToRecentEvent(
+      {
+        id: 10,
+        event_type: 'task.filing.triggered',
+        created_at: '2026-06-24T13:45:42+08:00',
+        payload: {
+          attempted: false,
+          filing_status: 'filed',
+          skipped_reason: 'idempotent_skip_same_payload',
+        },
+      },
+      '1734',
+    )
+    const failed = mapTaskEventRowToRecentEvent(
+      {
+        id: 11,
+        event_type: 'task.filing.triggered',
+        created_at: '2026-06-24T10:39:02+08:00',
+        payload: {
+          attempted: true,
+          filing_status: 'filing_failed',
+          erp_filing_items: [{ failure: 'erp bridge request timed out' }],
+        },
+      },
+      '1734',
+    )
+
+    expect(skipped.summary).toBe('ERP 商品资料已是最新，无需重复同步，同步状态为「已同步」。')
+    expect(skipped.summary).not.toContain('idempotent_skip_same_payload')
+    expect(failed.summary).toBe('ERP 商品资料同步失败，同步状态为「同步失败」。')
+    expect(failed.summary).not.toContain('filing_failed')
+    expect(failed.summary).not.toContain('timed out')
+  })
+
+  it('hides technical cost override reason and operator ids in summaries', () => {
+    const event = mapTaskEventRowToRecentEvent(
+      {
+        id: 12,
+        event_type: 'task.cost.updated',
+        created_at: '2026-06-24T10:42:41+08:00',
+        payload: {
+          previous_cost_price: 11,
+          cost_price: 8.8,
+          estimated_cost: 8.8,
+          manual_cost_override: true,
+          manual_cost_override_reason: 'manual cost override by operator:249',
+          erp_sync_requested: true,
+        },
+      },
+      '1734',
+    )
+
+    expect(event.summary).toContain('人工维护成本')
+    expect(event.summary).not.toContain('manual cost override')
+    expect(event.summary).not.toContain('operator:249')
+  })
 })

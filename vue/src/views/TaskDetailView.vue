@@ -1210,7 +1210,7 @@ import {
 } from '@/domain/mappers/reference-file-refs'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { RecentEvent } from '@/domain/types/dashboard'
-import type { TaskSkuItem } from '@/domain/types/task'
+import type { Task, TaskSkuItem } from '@/domain/types/task'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import {
   REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
@@ -2074,8 +2074,14 @@ function onVisibilityChangeForRefs() {
     tasksStore.refreshReferenceUrls(taskId.value)
   }
 }
+let successClearTimer: ReturnType<typeof setTimeout> | null = null
+let postEditRefreshTimer: ReturnType<typeof setTimeout> | null = null
 onMounted(() => document.addEventListener('visibilitychange', onVisibilityChangeForRefs))
-onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibilityChangeForRefs))
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChangeForRefs)
+  if (successClearTimer) clearTimeout(successClearTimer)
+  if (postEditRefreshTimer) clearTimeout(postEditRefreshTimer)
+})
 
 const storeLoading = computed(() => tasksStore.loading)
 const storeError = computed(() => tasksStore.loadError)
@@ -2445,17 +2451,17 @@ function openSkuDesignUpload(payload: { item: TaskSkuItem; index: number }) {
   })
 }
 
-async function onTaskInfoEditSaved() {
+async function onTaskInfoEditSaved(patch?: Partial<Task>) {
   const id = taskId.value
   if (!id || isTempId.value) return
-  await tasksStore.loadTaskById(id)
+  await refreshTaskAfterEdit(id, patch)
   flashSuccess('任务信息已更新')
 }
 
 async function onSkuItemEditSaved() {
   const id = taskId.value
   if (!id || isTempId.value) return
-  await tasksStore.loadTaskById(id)
+  await refreshTaskAfterEdit(id)
   flashSuccess('子项商品资料已更新')
 }
 
@@ -3434,7 +3440,6 @@ const {
   workflowLane: assignDesignerWorkflowLane,
 })
 
-let successClearTimer: ReturnType<typeof setTimeout> | null = null
 function flashSuccess(message: string) {
   actionError.value = ''
   actionSuccess.value = message
@@ -3443,6 +3448,27 @@ function flashSuccess(message: string) {
     actionSuccess.value = ''
     successClearTimer = null
   }, 6000)
+}
+
+async function refreshTaskAfterEdit(id: string, patch?: Partial<Task>) {
+  if (postEditRefreshTimer) {
+    clearTimeout(postEditRefreshTimer)
+    postEditRefreshTimer = null
+  }
+  if (patch && Object.keys(patch).length > 0) {
+    tasksStore.updateTask(id, patch)
+  }
+  await loadTask()
+  if (patch && Object.keys(patch).length > 0) {
+    tasksStore.updateTask(id, patch)
+  }
+  void loadSideEvents()
+  postEditRefreshTimer = setTimeout(() => {
+    postEditRefreshTimer = null
+    if (taskId.value !== id || isTempId.value) return
+    void loadTask()
+    void loadSideEvents()
+  }, 900)
 }
 
 function doAssign() {

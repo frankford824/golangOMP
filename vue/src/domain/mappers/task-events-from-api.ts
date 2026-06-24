@@ -144,11 +144,12 @@ function taskStatusDisplayCn(code: string | undefined): string {
 }
 
 const FILING_STATUS_CN: Record<string, string> = {
-  filed: '已建档',
+  filed: '已同步',
   pending: '待建档',
   pending_filing: '待建档',
-  not_filed: '未建档',
+  not_filed: '未同步',
   unfilled: '未填报',
+  filing_failed: '同步失败',
   error: '异常',
 }
 
@@ -314,6 +315,7 @@ const BUSINESS_STATUS_CODE_CN: Record<string, string> = {
   rejected: '已拒收',
   cancelled: '已取消',
   canceled: '已取消',
+  idempotent_skip_same_payload: '内容无变化，已跳过重复同步',
 }
 const BUSINESS_STATUS_CODE_PATTERN = new RegExp(
   `\\b(${Object.keys(BUSINESS_STATUS_CODE_CN)
@@ -338,6 +340,9 @@ function replaceBusinessFieldNames(text: string): string {
 
 function businessReadableEventSummary(summary: string): string {
   return replaceBusinessFieldNames(replaceBusinessStatusCodes(summary))
+    .replace(/\bmanual\s+cost\s+override\b/gi, '人工维护成本')
+    .replace(/\boperator\s*:\s*\d+\b/gi, '操作人')
+    .replace(/\bERP readback:\s*/gi, 'ERP 状态确认：')
     .replace(/未知用户/g, '待确认人员')
     .replace(/用户\s*#?\d+/gi, '待确认人员')
     .replace(/session_actor\s*#?\d+/gi, '待确认人员')
@@ -385,9 +390,32 @@ function buildTaskEventSummaryCn(
 
   if (et === 'task.filing.triggered') {
     const fs = pickFirst(raw, payload, ['filing_status', 'filingStatus'])
+    const fsKey = String(fs ?? '').trim().toLowerCase()
+    const attemptedRaw = payload.attempted ?? payload.attemptedSync
+    const attempted =
+      attemptedRaw === true ||
+      attemptedRaw === 1 ||
+      String(attemptedRaw).trim().toLowerCase() === 'true'
+    const skippedReason = pickFirst(raw, payload, ['skipped_reason', 'skip_reason'])
+    const itemPayload = JSON.stringify(payload.erp_filing_items ?? payload.erpFilingItems ?? '')
+    const failed =
+      fsKey === 'filing_failed' ||
+      fsKey === 'failed' ||
+      fsKey === 'error' ||
+      /failure|failed|error|timed out/i.test(itemPayload)
+    if (!attempted && skippedReason) {
+      const bits: string[] = ['ERP 商品资料已是最新，无需重复同步']
+      if (fs) bits.push(`同步状态为「${filingStatusDisplayCn(fs)}」`)
+      return `${bits.join('，')}。`
+    }
+    if (failed) {
+      const bits: string[] = ['ERP 商品资料同步失败']
+      if (fs) bits.push(`同步状态为「${filingStatusDisplayCn(fs)}」`)
+      return `${bits.join('，')}。`
+    }
     const okWord =
       toOutcomeCn(payload.success) ?? toOutcomeCn(payload.ok) ?? toOutcomeCn(payload.result) ?? '成功'
-    const bits: string[] = ['创建后已同步至 ERP']
+    const bits: string[] = ['ERP 商品资料已同步']
     if (fs) bits.push(`建档状态为「${filingStatusDisplayCn(fs)}」`)
     const tail = okWord.endsWith('。') ? okWord.slice(0, -1) : okWord
     bits.push(`结果：${tail}`)

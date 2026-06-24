@@ -1167,15 +1167,27 @@ function nonEmptyTrimmed(s: string | null | undefined): boolean {
   return s != null && String(s).trim() !== ''
 }
 
+function isAtLeastAsFresh(candidate: string | null | undefined, baseline: string | null | undefined): boolean {
+  const candidateMs = Date.parse(String(candidate ?? ''))
+  const baselineMs = Date.parse(String(baseline ?? ''))
+  if (!Number.isFinite(candidateMs)) return false
+  if (!Number.isFinite(baselineMs)) return true
+  return candidateMs >= baselineMs
+}
+
 /**
  * 整表拉列表（GET /v1/tasks）后，列表行常为瘦模型；若内存中已有同 id 的详情 GET 结果，合并保留
  * reference_file_refs / sku_items / asset_versions / 负责人 / 发起人等，避免覆盖成详情「空白态」。
  */
 function mergeListRowWithCachedDetail(prev: Task | undefined, listRow: Task): Task {
   if (!prev || prev.id !== listRow.id) return listRow
+  const listRowIsFresh = isAtLeastAsFresh(listRow.updatedAt, prev.updatedAt)
 
   const base: Task = {
     ...listRow,
+    // 详情页保存截止时间后会立即写入本地 Task；随后若任务列表瘦模型仍是旧更新时间，
+    // 不允许整表刷新把「任务设置」卡片覆盖回旧截止时间。
+    dueAt: listRowIsFresh ? (listRow.dueAt ?? prev.dueAt) : (prev.dueAt ?? listRow.dueAt),
     designerId: listRow.designerId ?? prev.designerId ?? null,
     designerName: listRow.designerName ?? prev.designerName ?? null,
     creatorId: listRow.creatorId ?? prev.creatorId ?? null,
@@ -1520,10 +1532,14 @@ export const useTasksStore = defineStore('tasks', () => {
       }
       const idx = items.value.findIndex((t) => t.id === id)
       const existing = idx !== -1 ? items.value[idx] : null
+      const parsedIsFresh = isAtLeastAsFresh(parsed.updatedAt, existing?.updatedAt)
       // 详情若未带 designer_id / assignee_id，勿用 null 覆盖列表已有设计师，否则设计工作台左侧队列会误筛掉该行
       // design_sub_status 合并见 mergeDesignSubStatusOnLoad
       const base: Task = {
         ...parsed,
+        // 保存任务信息后，本地会立即写入最新 dueAt；若随后的详情刷新读到旧快照，
+        // 不允许把「任务设置」里的截止时间刷回旧值。
+        dueAt: parsedIsFresh ? (parsed.dueAt ?? existing?.dueAt ?? null) : (existing?.dueAt ?? parsed.dueAt ?? null),
         designerId: parsed.designerId ?? existing?.designerId ?? null,
         designerName: parsed.designerName ?? existing?.designerName ?? null,
         creatorId: parsed.creatorId ?? existing?.creatorId ?? null,

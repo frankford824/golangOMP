@@ -213,7 +213,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [boolean]
-  saved: []
+  saved: [Partial<Task>?]
 }>()
 
 const isBatchTask = computed(() => props.task.isBatchTask === true)
@@ -511,6 +511,19 @@ function buildBusinessPatch(b: EditForm, c: EditForm): Record<string, unknown> |
   return touched ? patch : null
 }
 
+function buildOptimisticTaskPatch(
+  businessPatch: Record<string, unknown> | null,
+): Partial<Task> | undefined {
+  const patch: Partial<Task> = {}
+  if (businessPatch && 'deadline_at' in businessPatch) {
+    patch.dueAt = (businessPatch.deadline_at as string | null) ?? null
+  }
+  if (businessPatch && 'priority' in businessPatch) {
+    patch.priority = normalizePriorityForApi(String(businessPatch.priority ?? 'normal')) as Task['priority']
+  }
+  return Object.keys(patch).length > 0 ? patch : undefined
+}
+
 function parseDueHour(value: string): number {
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 23 ? parsed : dueHourFallback
@@ -632,7 +645,7 @@ async function submit() {
       return
     }
 
-    emit('saved')
+    emit('saved', buildOptimisticTaskPatch(businessPatch))
     emit('update:modelValue', false)
   } finally {
     saving.value = false
