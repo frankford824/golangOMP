@@ -119,6 +119,7 @@
       </div>
     </Transition>
     <p v-if="listActionError" class="list-action-error">{{ listActionError }}</p>
+    <p v-if="listActionSuccess" class="list-action-success">{{ listActionSuccess }}</p>
 
     <!-- 主内容区（三态统一包裹） -->
     <AsyncStateWrapper
@@ -153,7 +154,9 @@
             'task-card--claimable': canClaimTask(task),
             'task-card--customization': isCustomizationTask(task),
           }"
-          @click="goDetail(task)"
+          @pointerdown="onTaskCardPointerDown"
+          @pointermove="onTaskCardPointerMove"
+          @click="onTaskCardClick($event, task)"
         >
           <div class="card-row card-row-top">
             <label class="card-check" @click.stop>
@@ -175,8 +178,19 @@
               <TaskTypeBadge :type="task.businessType ?? task.taskType" />
             </div>
           </div>
-          <div class="card-no-row">
+          <div class="card-no-row task-copy-zone" data-card-copy-zone>
             <span class="card-no">{{ task.taskNo }}</span>
+            <button
+              v-if="canCopyTaskField(task.taskNo)"
+              type="button"
+              class="field-copy-floating"
+              :aria-label="`复制任务号 ${task.taskNo}`"
+              title="复制任务号"
+              data-card-no-nav="true"
+              @click.stop="copyTaskCardText(task.taskNo, '任务号')"
+            >
+              复制
+            </button>
           </div>
           <div
             class="card-product"
@@ -206,7 +220,20 @@
             </div>
             <div class="card-meta-line card-meta-line--sku">
               <span class="card-meta-key">SKU</span>
-              <span class="card-meta-value" :title="displaySku(task)">{{ displaySku(task) }}</span>
+              <span class="card-meta-value task-copy-zone" :title="displaySku(task)" data-card-copy-zone>
+                {{ displaySku(task) }}
+                <button
+                  v-if="canCopyTaskField(displaySku(task))"
+                  type="button"
+                  class="field-copy-floating field-copy-floating--meta"
+                  :aria-label="`复制 SKU ${displaySku(task)}`"
+                  title="复制 SKU"
+                  data-card-no-nav="true"
+                  @click.stop="copyTaskCardText(displaySku(task), 'SKU')"
+                >
+                  复制
+                </button>
+              </span>
             </div>
             <div class="card-meta-line card-meta-line--creator">
               <span class="card-meta-key">创建</span>
@@ -476,8 +503,15 @@ const {
   requiredActions: ['task.assign', 'task.assign.team', 'task.assign.department'],
 })
 const listActionError = ref('')
+const listActionSuccess = ref('')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let listActionSuccessTimer: ReturnType<typeof setTimeout> | null = null
 let listActionSeq = 0
+const taskCardPointerState = {
+  x: 0,
+  y: 0,
+  moved: false,
+}
 
 const canBatchAssign = computed(
   () =>
@@ -898,6 +932,89 @@ function displaySku(task: Task): string {
   return task.primarySkuCode ?? task.sku ?? '-'
 }
 
+function canCopyTaskField(value: string | null | undefined): boolean {
+  const text = String(value ?? '').trim()
+  return text !== '' && text !== '-' && text !== '—'
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    const ok = document.execCommand('copy')
+    if (!ok) throw new Error('copy command failed')
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
+function flashListActionSuccess(message: string) {
+  if (listActionSuccessTimer) {
+    clearTimeout(listActionSuccessTimer)
+    listActionSuccessTimer = null
+  }
+  listActionSuccess.value = message
+  listActionSuccessTimer = setTimeout(() => {
+    listActionSuccess.value = ''
+    listActionSuccessTimer = null
+  }, 1800)
+}
+
+async function copyTaskCardText(value: string | null | undefined, label: string) {
+  const text = String(value ?? '').trim()
+  if (!canCopyTaskField(text)) return
+  listActionError.value = ''
+  try {
+    await writeClipboardText(text)
+    flashListActionSuccess(`已复制${label}`)
+  } catch {
+    listActionError.value = `复制${label}失败，请手动选择复制`
+  }
+}
+
+function onTaskCardPointerDown(event: PointerEvent) {
+  taskCardPointerState.x = event.clientX
+  taskCardPointerState.y = event.clientY
+  taskCardPointerState.moved = false
+}
+
+function onTaskCardPointerMove(event: PointerEvent) {
+  if (taskCardPointerState.moved) return
+  const dx = Math.abs(event.clientX - taskCardPointerState.x)
+  const dy = Math.abs(event.clientY - taskCardPointerState.y)
+  taskCardPointerState.moved = dx > 4 || dy > 4
+}
+
+function hasActiveTextSelection(): boolean {
+  const selected = window.getSelection?.()?.toString().trim()
+  return Boolean(selected)
+}
+
+function shouldIgnoreTaskCardClick(event: MouseEvent): boolean {
+  if (taskCardPointerState.moved || hasActiveTextSelection()) return true
+  const target = event.target instanceof HTMLElement ? event.target : null
+  return Boolean(
+    target?.closest(
+      'button,a,input,label,select,textarea,[role="button"],[contenteditable="true"],[data-card-no-nav="true"]',
+    ),
+  )
+}
+
+function onTaskCardClick(event: MouseEvent, task: Task) {
+  if (shouldIgnoreTaskCardClick(event)) return
+  goDetail(task)
+}
+
 /** 池中「接单」仅面向设计侧；单靠 design:work 会漏掉只下发 task.asset_upload / task.design_submit 的普通设计师 */
 function userCanClaimFromDesignerPool(): boolean {
   if (can(PermissionEnum.DESIGN_WORK)) return true
@@ -1052,6 +1169,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   listActionSeq += 1
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  if (listActionSuccessTimer) clearTimeout(listActionSuccessTimer)
 })
 
 // 根据路由控制创建任务弹窗（支持侧边栏 /tasks/create 与 ?create=1 深链接）
@@ -1313,6 +1431,16 @@ watch(totalPages, (value) => {
   border: 1px solid rgb(254 202 202);
   color: rgb(185 28 28);
   font-size: 0.8125rem;
+}
+.list-action-success {
+  margin: 0;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(187 247 208);
+  background: rgb(240 253 244);
+  color: rgb(22 101 52);
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 .batch-bar-slide-enter-active,
 .batch-bar-slide-leave-active {
@@ -2716,5 +2844,73 @@ watch(totalPages, (value) => {
   background: #1d4ed8 !important;
   color: #ffffff !important;
   box-shadow: 0 4px 12px rgba(29, 78, 216, 0.22) !important;
+}
+
+/* Copy-friendly task cards: text can be selected; copy controls appear only on hover/focus. */
+.task-card {
+  user-select: text;
+}
+
+.task-card :deep(button),
+.task-card .card-check,
+.task-card .card-tags {
+  user-select: none;
+}
+
+.task-copy-zone {
+  position: relative;
+  min-width: 0;
+  cursor: text;
+  user-select: text;
+}
+
+.card-no-row.task-copy-zone {
+  padding-right: 2.75rem;
+}
+
+.card-meta-value.task-copy-zone {
+  display: block;
+  padding-right: 2.65rem;
+}
+
+.field-copy-floating {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 3;
+  min-height: 1.45rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 0.13rem 0.48rem;
+  background: rgba(239, 246, 255, 0.96);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.14);
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(0.24rem);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+
+.task-copy-zone:hover .field-copy-floating,
+.task-copy-zone:focus-within .field-copy-floating,
+.field-copy-floating:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%);
+}
+
+.field-copy-floating:hover,
+.field-copy-floating:focus-visible {
+  border-color: #60a5fa;
+  background: #dbeafe;
+  outline: none;
 }
 </style>
