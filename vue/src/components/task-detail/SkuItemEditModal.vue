@@ -24,54 +24,32 @@
           placeholder="搜索或选择款式编码"
         />
         <BaseTextarea
+          v-model="form.specText"
+          class="sku-edit-span-2"
+          label="规格 / 工艺补充"
+          :rows="2"
+          placeholder="除标准尺寸外的规格、工艺等补充说明"
+        />
+        <TaskSpecStructuredInput
+          v-model="form.sizeText"
+          class="sku-edit-span-2"
+          label="尺寸"
+          placeholder="请选择宽高或面积并填写数字"
+          hint="与创建任务、单任务编辑保持一致；修改后会参与成本规则重新匹配。"
+        />
+        <BaseInput
+          v-model="form.quantity"
+          type="number"
+          label="数量"
+          placeholder="可选"
+        />
+        <BaseTextarea
           v-model="form.designRequirement"
           class="sku-edit-span-2"
           label="设计要求"
           :rows="3"
           placeholder="请输入设计要求"
         />
-      </div>
-
-      <div class="sku-edit-spec">
-        <p class="sku-edit-section-title">规格尺寸</p>
-        <div class="sku-edit-grid">
-          <BaseTextarea
-            v-model="form.specText"
-            class="sku-edit-span-2"
-            label="规格尺寸"
-            :rows="2"
-            placeholder="如 100*150cm；多尺寸可分行填写"
-          />
-          <BaseInput
-            v-model="form.sizeText"
-            label="尺寸备注"
-            placeholder="可选，如 展开尺寸/成品尺寸"
-          />
-          <BaseInput
-            v-model="form.quantity"
-            type="number"
-            label="数量"
-            placeholder="可选"
-          />
-          <BaseInput
-            v-model="form.width"
-            type="number"
-            label="宽 m"
-            placeholder="可选，如 1"
-          />
-          <BaseInput
-            v-model="form.height"
-            type="number"
-            label="高 m"
-            placeholder="可选，如 1.5"
-          />
-          <BaseInput
-            v-model="form.area"
-            type="number"
-            label="面积 ㎡"
-            placeholder="可选，如 1.5"
-          />
-        </div>
       </div>
 
       <div class="sku-edit-refs">
@@ -134,6 +112,7 @@ import BaseModal from '@/components/base/BaseModal.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import type { TaskSkuItem } from '@/domain/types/task'
@@ -165,9 +144,6 @@ const form = ref({
   designRequirement: '',
   specText: '',
   sizeText: '',
-  width: '',
-  height: '',
-  area: '',
   quantity: '',
   costPrice: '',
   costReason: '',
@@ -176,6 +152,7 @@ const form = ref({
 })
 const initialCostDraft = ref('')
 const initialSpecDraft = ref('')
+const initialSizeTextDraft = ref('')
 const skuReferenceRefs = ref<(Record<string, unknown> | string)[]>([])
 const initialReferenceRefsDraft = ref('[]')
 
@@ -188,6 +165,7 @@ const productIIdModel = computed({
 
 const refsChanged = computed(() => referenceRefsDraftKey(skuReferenceRefs.value) !== initialReferenceRefsDraft.value)
 const specChanged = computed(() => specDraftKey() !== initialSpecDraft.value)
+const sizeTextChanged = computed(() => String(form.value.sizeText ?? '').trim() !== initialSizeTextDraft.value)
 
 const currentCostText = computed(() => {
   const cost = numericCost(props.skuItem?.costPrice)
@@ -208,9 +186,6 @@ watch(
       designRequirement: String(props.skuItem.designRequirement ?? ''),
       specText: String(props.skuItem.specText ?? ''),
       sizeText: String(props.skuItem.sizeText ?? ''),
-      width: numberDraftValue(props.skuItem.width),
-      height: numberDraftValue(props.skuItem.height),
-      area: numberDraftValue(props.skuItem.area),
       quantity: numberDraftValue(props.skuItem.quantity, 0),
       costPrice: costDraftValue(props.skuItem.costPrice ?? props.skuItem.estimatedCost),
       costReason: String(props.skuItem.manualCostOverrideReason ?? '运营手动维护子项成本'),
@@ -219,6 +194,7 @@ watch(
     }
     initialCostDraft.value = form.value.costPrice
     initialSpecDraft.value = specDraftKey()
+    initialSizeTextDraft.value = String(form.value.sizeText ?? '').trim()
     skuReferenceRefs.value = [...(props.skuItem.referenceFileRefs ?? [])] as (Record<string, unknown> | string)[]
     initialReferenceRefsDraft.value = referenceRefsDraftKey(skuReferenceRefs.value)
     errorText.value = ''
@@ -257,26 +233,17 @@ function specDraftKey(): string {
   return JSON.stringify({
     specText: String(form.value.specText ?? '').trim(),
     sizeText: String(form.value.sizeText ?? '').trim(),
-    width: String(form.value.width ?? '').trim(),
-    height: String(form.value.height ?? '').trim(),
-    area: String(form.value.area ?? '').trim(),
     quantity: String(form.value.quantity ?? '').trim(),
   })
 }
 
-function optionalPositiveNumberDraft(value: string | number, label: string): number | undefined {
+function optionalPositiveIntegerDraft(value: string | number, label: string): number | undefined {
   const text = String(value ?? '').trim()
   if (!text) return 0
   const amount = Number(text)
   if (!Number.isFinite(amount) || amount < 0) {
     throw new Error(`请输入有效${label}`)
   }
-  return amount
-}
-
-function optionalPositiveIntegerDraft(value: string | number, label: string): number | undefined {
-  const amount = optionalPositiveNumberDraft(value, label)
-  if (amount === undefined) return undefined
   if (!Number.isInteger(amount)) {
     throw new Error(`${label}必须是整数`)
   }
@@ -303,34 +270,30 @@ async function submit() {
       return
     }
   }
-  let width: number | undefined
-  let height: number | undefined
-  let area: number | undefined
   let quantity: number | undefined
   try {
-    width = optionalPositiveNumberDraft(form.value.width, '宽度')
-    height = optionalPositiveNumberDraft(form.value.height, '高度')
-    area = optionalPositiveNumberDraft(form.value.area, '面积')
     quantity = optionalPositiveIntegerDraft(form.value.quantity, '数量')
   } catch (err) {
-    errorText.value = err instanceof Error ? err.message : '请输入有效规格尺寸'
+    errorText.value = err instanceof Error ? err.message : '请输入有效数量'
     return
   }
   saving.value = true
   errorText.value = ''
-  const payload = {
+  const payload: Record<string, unknown> = {
     product_name: form.value.productName.trim() || null,
     product_i_id: form.value.productIId.trim() || null,
     design_requirement: form.value.designRequirement.trim() || null,
     spec_text: form.value.specText.trim(),
     size_text: form.value.sizeText.trim(),
-    width,
-    height,
-    area,
     quantity,
     reference_file_refs: skuReferenceRefs.value,
     trigger_filing: form.value.triggerFiling === true || refsChanged.value || specChanged.value || undefined,
     remark: form.value.remark.trim() || undefined,
+  }
+  if (sizeTextChanged.value) {
+    payload.width = 0
+    payload.height = 0
+    payload.area = 0
   }
   try {
     if (typeof skuItemID !== 'number') {
@@ -385,16 +348,6 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
-  border: 1px solid #eaecf0;
-  border-radius: 0.75rem;
-  background: #fff;
-  padding: 0.75rem;
-}
-
-.sku-edit-spec {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
   border: 1px solid #eaecf0;
   border-radius: 0.75rem;
   background: #fff;

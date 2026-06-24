@@ -18,7 +18,7 @@
             <th class="sku-th">SKU</th>
             <th class="sku-th">产品名称</th>
             <th class="sku-th">款式编码</th>
-            <th class="sku-th sku-th--wide">规格/数量</th>
+            <th class="sku-th sku-th--wide">规格尺寸</th>
             <th class="sku-th sku-th--wide">设计要求</th>
             <th class="sku-th">成本</th>
             <th class="sku-th">参考图</th>
@@ -165,10 +165,8 @@ function formatCompactNumber(value: number, precision = 4): string {
 }
 
 function skuSpecMain(item: TaskSkuItem): string {
-  const spec = String(item.specText ?? '').trim()
-  if (spec) return trunc(spec)
-  const size = String(item.sizeText ?? '').trim()
-  if (size) return trunc(size)
+  const parts = uniqueTextParts(item.specText, item.sizeText)
+  if (parts.length > 0) return trunc(parts.join('；'))
   if (typeof item.width === 'number' && Number.isFinite(item.width) && typeof item.height === 'number' && Number.isFinite(item.height)) {
     return `${formatCompactNumber(item.width)} x ${formatCompactNumber(item.height)}m`
   }
@@ -176,6 +174,17 @@ function skuSpecMain(item: TaskSkuItem): string {
     return `${formatCompactNumber(item.area)}㎡`
   }
   return '-'
+}
+
+function uniqueTextParts(...values: unknown[]): string[] {
+  const seen = new Set<string>()
+  return values
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => {
+      if (!value || seen.has(value)) return false
+      seen.add(value)
+      return true
+    })
 }
 
 function skuSpecMeta(item: TaskSkuItem): string {
@@ -192,7 +201,7 @@ function skuSpecMeta(item: TaskSkuItem): string {
 function skuSpecTooltip(item: TaskSkuItem): string {
   const parts = [
     String(item.specText ?? '').trim() ? `规格：${String(item.specText ?? '').trim()}` : '',
-    String(item.sizeText ?? '').trim() ? `尺寸备注：${String(item.sizeText ?? '').trim()}` : '',
+    String(item.sizeText ?? '').trim() ? `尺寸：${String(item.sizeText ?? '').trim()}` : '',
     typeof item.width === 'number' && Number.isFinite(item.width) ? `宽：${formatCompactNumber(item.width)}m` : '',
     typeof item.height === 'number' && Number.isFinite(item.height) ? `高：${formatCompactNumber(item.height)}m` : '',
     typeof item.area === 'number' && Number.isFinite(item.area) ? `面积：${formatCompactNumber(item.area)}㎡` : '',
