@@ -141,6 +141,12 @@ type patchTaskSKUItemInfoReq struct {
 	ProductName       *string                   `json:"product_name"`
 	IID               *string                   `json:"i_id"`
 	ProductIID        *string                   `json:"product_i_id"`
+	SpecText          *string                   `json:"spec_text"`
+	SizeText          *string                   `json:"size_text"`
+	Width             *float64                  `json:"width"`
+	Height            *float64                  `json:"height"`
+	Area              *float64                  `json:"area"`
+	Quantity          *int64                    `json:"quantity"`
 	DesignRequirement *string                   `json:"design_requirement"`
 	ReferenceFileRefs []domain.ReferenceFileRef `json:"reference_file_refs"`
 	TriggerFiling     *bool                     `json:"trigger_filing"`
@@ -1841,6 +1847,12 @@ func (h *TaskHandler) PatchSKUItemInfo(c *gin.Context) {
 		OperatorID:           operatorID,
 		ProductName:          req.ProductName,
 		ProductIID:           productIID,
+		SpecText:             req.SpecText,
+		SizeText:             req.SizeText,
+		Width:                req.Width,
+		Height:               req.Height,
+		Area:                 req.Area,
+		Quantity:             req.Quantity,
 		DesignRequirement:    req.DesignRequirement,
 		ReferenceFileRefs:    req.ReferenceFileRefs,
 		ReferenceFileRefsSet: req.ReferenceFileRefs != nil,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -267,6 +268,12 @@ type UpdateTaskSKUItemInfoParams struct {
 	OperatorID           int64
 	ProductName          *string
 	ProductIID           *string
+	SpecText             *string
+	SizeText             *string
+	Width                *float64
+	Height               *float64
+	Area                 *float64
+	Quantity             *int64
 	DesignRequirement    *string
 	ReferenceFileRefs    []domain.ReferenceFileRef
 	ReferenceFileRefsSet bool
@@ -2579,6 +2586,17 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		item.VariantJSON = variantJSON
 		productIIDChanged = previousProductIID != productIID
 	}
+	specInputSubmitted := p.SpecText != nil || p.SizeText != nil || p.Width != nil || p.Height != nil || p.Area != nil || p.Quantity != nil
+	if specInputSubmitted {
+		variantJSON, appErr := setTaskSKUItemSpecInVariantJSON(item.VariantJSON, p)
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.VariantJSON = variantJSON
+		if p.Quantity != nil {
+			item.Quantity = normalizeTaskSKUItemQuantityPtr(p.Quantity)
+		}
+	}
 	if p.DesignRequirement != nil {
 		item.DesignRequirement = strings.TrimSpace(*p.DesignRequirement)
 	}
@@ -2590,7 +2608,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		detail.ReferenceFileRefsJSON = referenceFileRefsJSON(detailRefs)
 	}
 	productNameChanged := strings.TrimSpace(previousProductName) != strings.TrimSpace(item.ProductNameSnapshot)
-	costInputSubmitted := p.ProductName != nil || p.ProductIID != nil || p.DesignRequirement != nil
+	costInputSubmitted := p.ProductName != nil || p.ProductIID != nil || p.DesignRequirement != nil || specInputSubmitted
 	if costInputSubmitted && s.costRuleRepo != nil {
 		if _, appErr := s.applyTaskSKUItemCostPreview(ctx, detail, item); appErr != nil {
 			return nil, appErr
@@ -3038,6 +3056,7 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	}
 	notes := strings.Join(uniqueNonEmptyStrings(
 		taskCostPreviewText(detail),
+		taskSKUItemVariantCostNotes(item),
 		item.ProductNameSnapshot,
 		item.ProductShortName,
 		item.DesignRequirement,
@@ -3051,8 +3070,11 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	if len(rules) == 0 {
 		return costPreviewComputation{}, nil
 	}
-	width, height, area := taskCostPreviewDimensions(detail, notes)
+	width, height, area := taskSKUItemCostPreviewDimensions(detail, item, notes)
 	quantity := cloneInt64Ptr(item.Quantity)
+	if quantity == nil {
+		quantity = taskSKUItemVariantQuantity(item)
+	}
 	if quantity == nil {
 		quantity = cloneInt64Ptr(detail.Quantity)
 	}
@@ -3063,9 +3085,211 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		Height:       height,
 		Area:         area,
 		Quantity:     quantity,
-		Process:      detail.Process,
+		Process:      firstNonEmptyString(taskSKUItemVariantString(item, "process", "craft_text"), detail.Process),
 		Notes:        notes,
 	}, rules), nil
+}
+
+func taskSKUItemCostPreviewDimensions(detail *domain.TaskDetail, item *domain.TaskSKUItem, text string) (*float64, *float64, *float64) {
+	width, height, area := taskSKUItemVariantDimensions(item)
+	hasSKUItemDimension := width != nil || height != nil || area != nil
+	detailWidth, detailHeight, detailArea := taskCostPreviewDimensions(detail, text)
+	if width == nil {
+		width = detailWidth
+	}
+	if height == nil {
+		height = detailHeight
+	}
+	if area == nil && !(hasSKUItemDimension && width != nil && height != nil) {
+		area = detailArea
+	}
+	return width, height, area
+}
+
+func setTaskSKUItemSpecInVariantJSON(raw json.RawMessage, p UpdateTaskSKUItemInfoParams) (json.RawMessage, *domain.AppError) {
+	normalized, appErr := normalizeVariantJSONForTaskBatchItem(raw)
+	if appErr != nil {
+		return nil, appErr
+	}
+	obj := map[string]interface{}{}
+	if len(strings.TrimSpace(string(normalized))) > 0 {
+		if err := json.Unmarshal(normalized, &obj); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "variant_json must be a JSON object when sku item specs are supplied", nil)
+		}
+	}
+	setVariantStringValue(obj, "spec_text", p.SpecText)
+	setVariantStringValue(obj, "size_text", p.SizeText)
+	setVariantFloatValue(obj, "width", p.Width)
+	setVariantFloatValue(obj, "height", p.Height)
+	setVariantFloatValue(obj, "area", p.Area)
+	setVariantInt64Value(obj, "quantity", p.Quantity)
+	if len(obj) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(obj)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "variant_json must be valid JSON", nil)
+	}
+	return json.RawMessage(encoded), nil
+}
+
+func setVariantStringValue(obj map[string]interface{}, key string, value *string) {
+	if value == nil {
+		return
+	}
+	text := strings.TrimSpace(*value)
+	if text == "" {
+		delete(obj, key)
+		return
+	}
+	obj[key] = text
+}
+
+func setVariantFloatValue(obj map[string]interface{}, key string, value *float64) {
+	if value == nil {
+		return
+	}
+	if *value <= 0 {
+		delete(obj, key)
+		return
+	}
+	obj[key] = *value
+}
+
+func setVariantInt64Value(obj map[string]interface{}, key string, value *int64) {
+	if value == nil {
+		return
+	}
+	if *value <= 0 {
+		delete(obj, key)
+		return
+	}
+	obj[key] = *value
+}
+
+func normalizeTaskSKUItemQuantityPtr(value *int64) *int64 {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	return cloneInt64Ptr(value)
+}
+
+func taskSKUItemVariantCostNotes(item *domain.TaskSKUItem) string {
+	return strings.Join(uniqueNonEmptyStrings(
+		taskSKUItemVariantString(item, "spec_text"),
+		taskSKUItemVariantString(item, "size_text"),
+		taskSKUItemVariantString(item, "material", "material_text"),
+		taskSKUItemVariantString(item, "craft_text", "process"),
+	), " ")
+}
+
+func taskSKUItemVariantDimensions(item *domain.TaskSKUItem) (*float64, *float64, *float64) {
+	if item == nil {
+		return nil, nil, nil
+	}
+	obj := taskSKUItemVariantObject(item.VariantJSON)
+	if len(obj) == 0 {
+		return nil, nil, nil
+	}
+	return variantFloatFromObject(obj, "width", "width_m"),
+		variantFloatFromObject(obj, "height", "height_m"),
+		variantFloatFromObject(obj, "area", "area_m2")
+}
+
+func taskSKUItemVariantQuantity(item *domain.TaskSKUItem) *int64 {
+	if item == nil {
+		return nil
+	}
+	obj := taskSKUItemVariantObject(item.VariantJSON)
+	if len(obj) == 0 {
+		return nil
+	}
+	for _, key := range []string{"quantity", "qty"} {
+		if value, ok := variantInt64Value(obj[key]); ok && value > 0 {
+			return &value
+		}
+	}
+	return nil
+}
+
+func taskSKUItemVariantString(item *domain.TaskSKUItem, keys ...string) string {
+	if item == nil {
+		return ""
+	}
+	obj := taskSKUItemVariantObject(item.VariantJSON)
+	if len(obj) == 0 {
+		return ""
+	}
+	for _, key := range keys {
+		if value, ok := obj[key]; ok {
+			if text, ok := value.(string); ok {
+				if trimmed := strings.TrimSpace(text); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func taskSKUItemVariantObject(raw json.RawMessage) map[string]interface{} {
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	return obj
+}
+
+func variantFloatFromObject(obj map[string]interface{}, keys ...string) *float64 {
+	for _, key := range keys {
+		if value, ok := variantFloat64Value(obj[key]); ok && value > 0 {
+			return &value
+		}
+	}
+	return nil
+}
+
+func variantFloat64Value(raw interface{}) (float64, bool) {
+	switch value := raw.(type) {
+	case float64:
+		return value, true
+	case float32:
+		return float64(value), true
+	case int:
+		return float64(value), true
+	case int64:
+		return float64(value), true
+	case json.Number:
+		parsed, err := value.Float64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func variantInt64Value(raw interface{}) (int64, bool) {
+	switch value := raw.(type) {
+	case float64:
+		return int64(value), value == float64(int64(value))
+	case int:
+		return int64(value), true
+	case int64:
+		return value, true
+	case json.Number:
+		parsed, err := value.Int64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func syncTaskDetailCostFromSKUItem(detail *domain.TaskDetail, item *domain.TaskSKUItem) {

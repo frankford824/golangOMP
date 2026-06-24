@@ -1154,6 +1154,111 @@ func TestUpdateBatchSKUItemInfoRecomputesCostAndRefilesTargetSKU(t *testing.T) {
 	}
 }
 
+func TestUpdateBatchSKUItemInfoRecomputesCostFromSubmittedSpec(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   77,
+		CategoryCode: "PHOTO_CLOTH_CUSTOM",
+		CategoryName: "定制写真布",
+		DisplayName:  "定制写真布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        16,
+			RuleVersion:   1,
+			RuleName:      "定制写真布基础单价",
+			CategoryCode:  "PHOTO_CLOTH_CUSTOM",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	bridgeStub := &erpBridgeSelectionBinderStub{
+		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
+		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+	}
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			705: {
+				ID:                  705,
+				TaskNo:              "RW-20260624-A-001741",
+				SourceMode:          domain.TaskSourceModeNewProduct,
+				ProductNameSnapshot: "CPT-定制海报/批量",
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				IsBatchTask:         true,
+				BatchItemCount:      2,
+				BatchMode:           domain.TaskBatchModeMultiSKU,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			705: {
+				TaskID:       705,
+				Category:     "GENERAL",
+				CategoryCode: "GENERAL",
+				CategoryName: "通用",
+				FilingStatus: domain.FilingStatusFiled,
+			},
+		},
+		skuItems: map[int64][]*domain.TaskSKUItem{
+			705: {
+				{ID: 2011, TaskID: 705, SequenceNo: 1, SKUCode: "DZC000111", ProductNameSnapshot: "露邱/定制海报/4rdhappybirthday白底西瓜彩条", ProductIID: "定制海报", FilingStatus: domain.FilingStatusFiled, ERPSyncStatus: domain.FilingStatusFiled, ERPSyncRequired: false},
+				{ID: 2012, TaskID: 705, SequenceNo: 2, SKUCode: "DZC000112", ProductNameSnapshot: "露邱/定制海报/另一款", ProductIID: "定制海报", FilingStatus: domain.FilingStatusFiled, ERPSyncStatus: domain.FilingStatusFiled, ERPSyncRequired: false},
+			},
+		},
+	}
+	eventRepo := &prdTaskEventRepo{}
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		eventRepo,
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		productCodeTestTxRunner{},
+		WithERPBridgeSelectionBinding(bridgeStub),
+	).(*taskService)
+
+	specText := "100*150cm"
+	updated, appErr := svc.UpdateSKUItemInfo(context.Background(), UpdateTaskSKUItemInfoParams{
+		TaskID:     705,
+		SKUItemID:  2011,
+		OperatorID: 1,
+		SpecText:   &specText,
+		Remark:     "batch sku spec cost refresh",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateSKUItemInfo() unexpected error: %+v", appErr)
+	}
+	if updated.CostPrice == nil || !sameFloat64Ptr(updated.CostPrice, float64Ptr(8.25)) {
+		t.Fatalf("updated cost = %+v, want 8.25", updated.CostPrice)
+	}
+	if updated.EstimatedCost == nil || !sameFloat64Ptr(updated.EstimatedCost, float64Ptr(8.25)) {
+		t.Fatalf("updated estimated cost = %+v, want 8.25", updated.EstimatedCost)
+	}
+	if !strings.Contains(string(updated.VariantJSON), `"spec_text":"100*150cm"`) {
+		t.Fatalf("variant_json = %s, want submitted spec_text", string(updated.VariantJSON))
+	}
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatalf("upsert calls = %d, want only target SKU refiled", bridgeStub.upsertCalls)
+	}
+	if got := bridgeStub.upsertPayload.SKUID; got != "DZC000111" {
+		t.Fatalf("upsert sku = %s, want DZC000111", got)
+	}
+	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || !sameFloat64Ptr(got, float64Ptr(8.25)) {
+		t.Fatalf("erp business_info cost_price = %+v, want 8.25", got)
+	}
+}
+
 func TestRetryFilingSyncsSingleSKUItemCostProjectionFromTaskDetail(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
