@@ -17,6 +17,12 @@
         <button type="button" class="apm-retry apm-retry--below" @click.stop="reload">重试</button>
       </div>
     </template>
+    <template v-else-if="phase === 'preparing'">
+      <div class="apm-placeholder apm-loading" role="status" aria-live="polite">
+        <span>正在准备预览…</span>
+        <button type="button" class="apm-retry apm-retry--below" @click.stop="reload">刷新</button>
+      </div>
+    </template>
     <template v-else-if="phase === 'error'">
       <div class="apm-empty apm-empty--stack" role="alert">
         <img :src="placeholderSrc" alt="" class="apm-placeholder-img" />
@@ -33,6 +39,7 @@
         class="apm-img"
         :class="innerImgClass"
         loading="lazy"
+        decoding="async"
         @click.stop="onOpenFull"
       />
     </template>
@@ -48,7 +55,12 @@
 import { ref, watch, computed, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import assetPreviewPlaceholder from '@/assets/default.png'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
-import http from '@/services/http'
+import {
+  materializePreviewImageUrl,
+  normalizePreviewAssetId,
+  revokeMaterializedPreviewImage,
+  type MaterializedPreviewImage,
+} from '@/domain/asset-preview-image'
 
 const placeholderSrc = assetPreviewPlaceholder
 
@@ -85,11 +97,19 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /** 用户点击可展示图时，传出用于灯箱的 URL */
-  'open-full': [url: string]
+  /** 用户点击可展示图时，传出用于灯箱的 URL 和资产上下文 */
+  'open-full': [
+    url: string,
+    context: {
+      assetId?: string
+      fallbackAssetId?: string
+      fallbackSrc?: string
+      resolvedPreviewUrl?: string
+    },
+  ]
 }>()
 
-type Phase = 'idle' | 'deferred' | 'loading' | 'ready' | 'not_found' | 'unavailable' | 'error'
+type Phase = 'idle' | 'deferred' | 'loading' | 'ready' | 'preparing' | 'not_found' | 'unavailable' | 'error'
 const phase = ref<Phase>('idle')
 const displaySrc = ref('')
 const errorHint = ref('加载失败')
@@ -98,16 +118,15 @@ const rootEl = ref<HTMLElement | null>(null)
 const innerImgClass = computed(() => props.innerImgClass)
 
 let seq = 0
-let objectUrl: string | null = null
+let materializedImage: MaterializedPreviewImage | null = null
 let io: IntersectionObserver | null = null
+let prepareRetryTimer: number | null = null
 /** 已满足「进入视区」条件，或无需 defer */
 const viewportGateOpen = ref(!props.deferUntilVisible)
 
 function clearObjectUrl() {
-  if (objectUrl) {
-    URL.revokeObjectURL(objectUrl)
-    objectUrl = null
-  }
+  revokeMaterializedPreviewImage(materializedImage)
+  materializedImage = null
 }
 
 function disconnectDeferIo() {
@@ -120,6 +139,21 @@ function disconnectDeferIo() {
   }
   io?.disconnect()
   io = null
+}
+
+function clearPrepareRetryTimer() {
+  if (prepareRetryTimer != null) {
+    window.clearTimeout(prepareRetryTimer)
+    prepareRetryTimer = null
+  }
+}
+
+function schedulePrepareRetry() {
+  clearPrepareRetryTimer()
+  prepareRetryTimer = window.setTimeout(() => {
+    prepareRetryTimer = null
+    void runLoad()
+  }, 12_000)
 }
 
 function bindDeferIo() {
@@ -148,40 +182,17 @@ function bindDeferIo() {
   io.observe(el)
 }
 
-function isSameOriginUrl(u: string): boolean {
-  if (!u.trim()) return false
-  if (u.startsWith('/')) return true
-  if (typeof window === 'undefined') return false
-  try {
-    const parsed = new URL(u, window.location.origin)
-    return parsed.origin === window.location.origin
-  } catch {
-    return false
-  }
-}
-
 async function materializeDisplaySrc(url: string): Promise<string | undefined> {
-  const u = url.trim()
-  if (!u) return undefined
-  if (u.startsWith('data:') || u.startsWith('blob:')) return u
-  // 同源资源优先走带 Authorization 的 blob 拉取，避免 <img src> 无法附带鉴权头
-  if (!isSameOriginUrl(u)) return u
-  try {
-    const res = await http.get<Blob>(u, { responseType: 'blob' })
-    const blob = res.data
-    if (!(blob instanceof Blob)) return undefined
-    const t = (blob.type || '').toLowerCase()
-    if (t && !t.startsWith('image/')) return undefined
-    clearObjectUrl()
-    objectUrl = URL.createObjectURL(blob)
-    return objectUrl
-  } catch {
-    return undefined
-  }
+  const image = await materializePreviewImageUrl(url)
+  if (!image) return undefined
+  clearObjectUrl()
+  materializedImage = image
+  return image.displaySrc
 }
 
 async function runLoad() {
   const my = ++seq
+  clearPrepareRetryTimer()
   if (props.deferUntilVisible && !viewportGateOpen.value) {
     phase.value = 'deferred'
     return
@@ -204,8 +215,8 @@ async function runLoad() {
     return
   }
 
-  const primaryId = props.assetId?.trim() || ''
-  const secondaryId = props.fallbackAssetId?.trim() || ''
+  const primaryId = normalizePreviewAssetId(props.assetId)
+  const secondaryId = normalizePreviewAssetId(props.fallbackAssetId)
   if (!primaryId && !secondaryId) {
     clearObjectUrl()
     const fallback = await materializeDisplaySrc((props.fallbackSrc ?? '').trim())
@@ -252,6 +263,12 @@ async function runLoad() {
     } else {
       phase.value = 'unavailable'
     }
+    return
+  }
+  if (res.status === 'preparing') {
+    errorHint.value = res.message ?? '正在准备预览'
+    phase.value = 'preparing'
+    schedulePrepareRetry()
     return
   }
   errorHint.value = res.message ?? '加载失败'
@@ -316,12 +333,19 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disconnectDeferIo()
+  clearPrepareRetryTimer()
   clearObjectUrl()
 })
 
 function onOpenFull() {
   const u = displaySrc.value.trim()
-  if (u) emit('open-full', u)
+  if (!u) return
+  emit('open-full', u, {
+    assetId: props.assetId?.trim() || undefined,
+    fallbackAssetId: props.fallbackAssetId?.trim() || undefined,
+    fallbackSrc: props.fallbackSrc?.trim() || undefined,
+    resolvedPreviewUrl: props.resolvedPreviewUrl?.trim() || undefined,
+  })
 }
 </script>
 

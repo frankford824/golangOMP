@@ -3,6 +3,11 @@ import type { MockHandler } from './types'
 const MOCK_ACTOR_ID = 'ops_demo'
 const MOCK_DISPLAY_NAME = '演示账号'
 const MOCK_TOKEN = 'mock-token-ops-demo'
+const MOCK_AVATAR_URL = '/v1/me/avatar-files/avatar-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
+let mockDisplayName = MOCK_DISPLAY_NAME
+let mockMobile = '13800000000'
+let mockEmail = 'demo@example.com'
+let mockAvatarUrl = ''
 
 function buildFrontendAccess() {
   return {
@@ -83,13 +88,18 @@ function buildUser() {
   const frontend_access = buildFrontendAccess()
   return {
     id: MOCK_ACTOR_ID,
+    account: MOCK_ACTOR_ID,
     username: MOCK_ACTOR_ID,
-    display_name: MOCK_DISPLAY_NAME,
+    display_name: mockDisplayName,
+    name: mockDisplayName,
     department: '演示部门',
     team: '演示团队',
     roles: ['super_admin'],
-    mobile: '13800000000',
-    email: 'demo@example.com',
+    mobile: mockMobile,
+    phone: mockMobile,
+    email: mockEmail,
+    avatar: mockAvatarUrl,
+    avatar_url: mockAvatarUrl,
     frontend_access,
   }
 }
@@ -117,21 +127,41 @@ export const authHandler: MockHandler = (request) => {
   }
 
   if (request.method === 'PATCH' && request.path === '/v1/me') {
+    if (request.body && ('avatar' in request.body || 'avatar_url' in request.body)) {
+      return {
+        status: 400,
+        data: {
+          error: {
+            code: 'INVALID_REQUEST',
+            message: '头像请通过头像上传或移除操作更新',
+            deny_code: 'avatar_update_requires_avatar_api',
+          },
+        },
+      }
+    }
+    mockDisplayName = String(request.body?.display_name ?? mockDisplayName)
+    mockMobile = String(request.body?.mobile ?? mockMobile)
+    mockEmail = String(request.body?.email ?? mockEmail)
     return {
       status: 200,
       data: {
-        data: {
-          ...buildUser(),
-          nickname: String(request.body?.nickname ?? MOCK_DISPLAY_NAME),
-          phone: String(request.body?.phone ?? '13800000000'),
-          email: String(request.body?.email ?? 'demo@example.com'),
-        },
+        data: buildUser(),
       },
     }
   }
 
   if (request.method === 'POST' && request.path === '/v1/me/change-password') {
     return { status: 200, data: { data: { message: 'ok' } } }
+  }
+
+  if (request.method === 'POST' && request.path === '/v1/me/avatar') {
+    mockAvatarUrl = MOCK_AVATAR_URL
+    return { status: 200, data: { data: buildUser() } }
+  }
+
+  if (request.method === 'DELETE' && request.path === '/v1/me/avatar') {
+    mockAvatarUrl = ''
+    return { status: 200, data: { data: buildUser() } }
   }
 
   if (request.method === 'GET' && request.path === '/v1/me/org') {

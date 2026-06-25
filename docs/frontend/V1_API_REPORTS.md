@@ -11,7 +11,7 @@ L1 卡片、吞吐与模块停留报表。
 
 - L1 报表仅 super_admin 可用。
 - 403 时重点展示 `reports_super_admin_only`。
-- 本文件覆盖 `3` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `4` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/reports/l1/cards
 
@@ -185,6 +185,67 @@ curl -X GET https://api.example.com/v1/reports/l1/throughput \
 ### curl 示例
 ```bash
 curl -X GET https://api.example.com/v1/reports/l1/module-dwell \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- L1 报表仅 super_admin 可用。
+- 403 时重点展示 `reports_super_admin_only`。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/reports/l1/kpi-events
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns task workflow events enriched with task priority, status and deadline for the KPI/data-center page. RBAC: super_admin only. This endpoint is read-only and does not perform AI analysis.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: super_admin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `from` | query | string | 是 | Start of the report window (inclusive, ISO 8601 date). |
+| `to` | query | string | 是 | End of the report window (inclusive, ISO 8601 date). |
+| `limit` | query | integer | 否 | Maximum number of events to return. Defaults to 2000. |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "task_id": "...",
+      "task_no": "...",
+      "sku_code": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<KPIAnalysisEvent> | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden. `deny_code=reports_super_admin_only`. |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/reports/l1/kpi-events \
   -H "Authorization: Bearer $TOKEN"
 ```
 

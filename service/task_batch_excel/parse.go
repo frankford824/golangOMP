@@ -5,7 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -20,6 +25,8 @@ import (
 const (
 	maxEmbeddedReferenceImagesPerRow = 5
 	maxEmbeddedReferenceImageBytes   = 20 * 1024 * 1024
+	defaultExcelRowHeightPoints      = 15
+	defaultExcelRowHeightPixels      = 20
 )
 
 type parseService struct {
@@ -29,7 +36,7 @@ type parseService struct {
 
 var batchFieldPathRE = regexp.MustCompile(`^batch_items\[(\d+)\](?:\.(.+))?$`)
 
-func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file io.Reader, opts ...ParseOption) (*ParseResult, *domain.AppError) {
+func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file io.Reader, opts ...ParseOption) (*BatchParseResult, *domain.AppError) {
 	fields, ok := FieldsForTaskType(taskType)
 	if !ok {
 		return nil, unsupportedTaskTypeError(taskType)
@@ -49,18 +56,15 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 	}
 	defer f.Close()
 
-	rows, err := f.GetRows(itemsSheet)
-	if err != nil {
-		return nil, excelAppError("read Items sheet", err)
-	}
-	if len(rows) == 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing header row", nil)
+	dataSheet, rows, appErr := resolveDataSheet(f)
+	if appErr != nil {
+		return nil, appErr
 	}
 	columnIndex, appErr := parseHeader(rows[0], fields)
 	if appErr != nil {
 		return nil, appErr
 	}
-	imagesByRow, appErr := extractEmbeddedReferenceImages(f)
+	imagesByRow, appErr := extractEmbeddedReferenceImages(f, dataSheet)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -85,18 +89,20 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 		}
 		item, parseViolations := parseItemRow(row, fields, columnIndex)
 		items = append(items, item)
-		preview = append(preview, batchItemFromService(item))
+		previewItem := batchItemFromService(item)
+		previewItem.SourceRow = rowNumber
+		preview = append(preview, previewItem)
 		itemRows = append(itemRows, rowNumber)
 		if len(parseViolations) > 0 {
 			parseViolations = parseViolationsForRow(rowIdx+1, parseViolations)
-			return &ParseResult{TaskType: taskType, Preview: preview, Violations: parseViolations}, nil
+			return &BatchParseResult{TaskType: taskType, Preview: preview, Violations: parseViolations}, nil
 		}
 	}
 
 	if iidViolations, appErr := s.validateProductIIDs(ctx, items, itemRows, options.IIDLookup); appErr != nil {
 		return nil, appErr
 	} else if len(iidViolations) > 0 {
-		return &ParseResult{TaskType: taskType, Preview: preview, Violations: iidViolations}, nil
+		return &BatchParseResult{TaskType: taskType, Preview: preview, Violations: iidViolations}, nil
 	}
 
 	params := service.CreateTaskParams{
@@ -106,16 +112,16 @@ func (s *parseService) Parse(ctx context.Context, taskType domain.TaskType, file
 		BatchItems:   items,
 	}
 	if appErr := service.ValidateBatchTaskCreateRequest(params); appErr != nil {
-		return &ParseResult{
+		return &BatchParseResult{
 			TaskType:   taskType,
 			Preview:    preview,
-			Violations: mapValidationViolations(appErr, fields),
+			Violations: mapValidationViolations(appErr, taskType, fields, items, itemRows, imagesByRow),
 		}, nil
 	}
 	if appErr := s.uploadEmbeddedReferenceImages(ctx, imagesByRow, options, items, preview, itemRows); appErr != nil {
 		return nil, appErr
 	}
-	return &ParseResult{TaskType: taskType, Preview: preview, Violations: []ParseViolation{}}, nil
+	return &BatchParseResult{TaskType: taskType, Preview: preview, Violations: []ParseViolation{}}, nil
 }
 
 func parseHeader(header []string, fields []FieldSpec) (map[string]int, *domain.AppError) {
@@ -124,21 +130,44 @@ func parseHeader(header []string, fields []FieldSpec) (map[string]int, *domain.A
 	for _, field := range fields {
 		byColumn[strings.TrimSpace(field.Column)] = field
 	}
+	legacyProductIIDColumn := "商品编码"
+	productIIDColumn := ""
+	for _, field := range fields {
+		if field.Key == "product_i_id" {
+			productIIDColumn = strings.TrimSpace(field.Column)
+			break
+		}
+	}
 	for i, raw := range header {
 		column := strings.TrimSpace(raw)
 		if field, ok := byColumn[column]; ok {
 			index[field.Key] = i
+			continue
+		}
+		if column == legacyProductIIDColumn && productIIDColumn != "" {
+			if _, exists := index["product_i_id"]; !exists {
+				index["product_i_id"] = i
+			}
+			index["product_i_id__legacy"] = i
+		}
+	}
+	if productIIDColumn != "" {
+		if idx, ok := index["product_i_id"]; ok {
+			legacyIdx, hasLegacy := index["product_i_id__legacy"]
+			if hasLegacy && legacyIdx != idx {
+				index["product_i_id__primary"] = idx
+			}
 		}
 	}
 	for _, field := range fields {
 		if field.Required {
 			if _, ok := index[field.Key]; !ok {
-				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel header is missing required column", map[string]interface{}{
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, errMsgExcelHeaderMismatch, map[string]interface{}{
 					"violations": []ParseViolation{{
 						Row:     1,
 						Column:  field.Column,
-						Code:    "missing_required_field",
-						Message: "missing required column " + field.Column,
+						Code:    "invalid_header",
+						Message: errMsgExcelHeaderMismatch,
 					}},
 				})
 			}
@@ -150,7 +179,14 @@ func parseHeader(header []string, fields []FieldSpec) (map[string]int, *domain.A
 func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) (service.CreateTaskBatchSKUItemParams, []ParseViolation) {
 	var item service.CreateTaskBatchSKUItemParams
 	var violations []ParseViolation
+	var productIIDField FieldSpec
+	var hasProductIIDField bool
 	for _, field := range fields {
+		if field.Key == "product_i_id" {
+			productIIDField = field
+			hasProductIIDField = true
+			continue
+		}
 		idx, ok := columnIndex[field.Key]
 		if !ok || idx >= len(row) {
 			continue
@@ -166,8 +202,6 @@ func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) 
 			item.ProductShortName = value
 		case "category_code":
 			item.CategoryCode = value
-		case "product_i_id":
-			item.ProductIID = value
 		case "reference_image":
 			// Images pasted into the workbook are extracted from worksheet drawings
 			// by row anchor. Text in this column is only an operator hint.
@@ -203,6 +237,34 @@ func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) 
 			item.VariantJSON = json.RawMessage(value)
 		}
 	}
+	if hasProductIIDField {
+		primaryIdx, hasPrimary := columnIndex["product_i_id"]
+		legacyIdx, hasLegacy := columnIndex["product_i_id__legacy"]
+		dualPrimaryIdx, hasDualPrimary := columnIndex["product_i_id__primary"]
+		if hasDualPrimary {
+			primaryIdx = dualPrimaryIdx
+			hasPrimary = true
+		}
+		primaryValue := ""
+		legacyValue := ""
+		if hasPrimary && primaryIdx < len(row) {
+			primaryValue = strings.TrimSpace(row[primaryIdx])
+		}
+		if hasLegacy && legacyIdx < len(row) {
+			legacyValue = strings.TrimSpace(row[legacyIdx])
+		}
+		if hasPrimary && hasLegacy && primaryIdx != legacyIdx && primaryValue != "" && legacyValue != "" && primaryValue != legacyValue {
+			violations = append(violations, ParseViolation{
+				Column:  productIIDField.Column,
+				Code:    "conflicting_product_i_id_columns",
+				Message: "产品款式编码与商品编码列值不一致，请保持一致后重试",
+			})
+		} else if primaryValue != "" {
+			item.ProductIID = primaryValue
+		} else if legacyValue != "" {
+			item.ProductIID = legacyValue
+		}
+	}
 	return item, violations
 }
 
@@ -215,39 +277,30 @@ type embeddedReferenceImage struct {
 	MimeType  string
 }
 
-func extractEmbeddedReferenceImages(f *excelize.File) (map[int][]embeddedReferenceImage, *domain.AppError) {
-	cells, err := f.GetPictureCells(itemsSheet)
+func extractEmbeddedReferenceImages(f *excelize.File, dataSheet string) (map[int][]embeddedReferenceImage, *domain.AppError) {
+	cells, err := f.GetPictureCells(dataSheet)
 	if err != nil {
 		return nil, excelAppError("read embedded reference images", err)
 	}
 	out := make(map[int][]embeddedReferenceImage)
 	for _, cell := range cells {
-		_, row, err := excelize.CellNameToCoordinates(cell)
+		_, anchorRow, err := excelize.CellNameToCoordinates(cell)
 		if err != nil {
 			return nil, excelAppError("read embedded reference image anchor", err)
 		}
-		if row <= 1 {
+		if anchorRow <= 1 {
 			continue
 		}
-		pictures, err := f.GetPictures(itemsSheet, cell)
+		pictures, err := f.GetPictures(dataSheet, cell)
 		if err != nil {
 			return nil, excelAppError("read embedded reference image bytes", err)
-		}
-		if len(out[row])+len(pictures) > maxEmbeddedReferenceImagesPerRow {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "too many reference images in one Excel row", map[string]interface{}{
-				"violations": []ParseViolation{{
-					Row:     row,
-					Column:  "参考图",
-					Code:    "too_many_reference_images",
-					Message: fmt.Sprintf("one row can contain at most %d reference images", maxEmbeddedReferenceImagesPerRow),
-				}},
-			})
 		}
 		for _, pic := range pictures {
 			if len(pic.File) == 0 {
 				continue
 			}
 			if len(pic.File) > maxEmbeddedReferenceImageBytes {
+				row := visualPictureRow(f, dataSheet, anchorRow, pic)
 				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "embedded reference image is too large", map[string]interface{}{
 					"violations": []ParseViolation{{
 						Row:     row,
@@ -258,6 +311,20 @@ func extractEmbeddedReferenceImages(f *excelize.File) (map[int][]embeddedReferen
 				})
 			}
 			extension := normalizePictureExtension(pic.Extension, pic.File)
+			row := visualPictureRow(f, dataSheet, anchorRow, pic)
+			if row <= 1 {
+				continue
+			}
+			if len(out[row]) >= maxEmbeddedReferenceImagesPerRow {
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "too many reference images in one Excel row", map[string]interface{}{
+					"violations": []ParseViolation{{
+						Row:     row,
+						Column:  "参考图",
+						Code:    "too_many_reference_images",
+						Message: fmt.Sprintf("one row can contain at most %d reference images", maxEmbeddedReferenceImagesPerRow),
+					}},
+				})
+			}
 			out[row] = append(out[row], embeddedReferenceImage{
 				Cell:      cell,
 				Row:       row,
@@ -269,6 +336,44 @@ func extractEmbeddedReferenceImages(f *excelize.File) (map[int][]embeddedReferen
 		}
 	}
 	return out, nil
+}
+
+func visualPictureRow(f *excelize.File, sheet string, anchorRow int, pic excelize.Picture) int {
+	if anchorRow <= 0 || len(pic.File) == 0 {
+		return anchorRow
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(pic.File))
+	if err != nil || cfg.Height <= 0 {
+		return anchorRow
+	}
+	scaleY := 1.0
+	offsetY := 0
+	if pic.Format != nil {
+		if pic.Format.ScaleY > 0 {
+			scaleY = pic.Format.ScaleY
+		}
+		if pic.Format.OffsetY > 0 {
+			offsetY = pic.Format.OffsetY
+		}
+	}
+	centerY := float64(offsetY) + float64(cfg.Height)*scaleY/2
+	row := anchorRow
+	for rowHeight := excelRowHeightPixels(f, sheet, row); rowHeight > 0 && centerY >= rowHeight; rowHeight = excelRowHeightPixels(f, sheet, row) {
+		centerY -= rowHeight
+		row++
+	}
+	return row
+}
+
+func excelRowHeightPixels(f *excelize.File, sheet string, row int) float64 {
+	height, err := f.GetRowHeight(sheet, row)
+	if err != nil || height <= 0 {
+		return defaultExcelRowHeightPixels
+	}
+	if math.Abs(height-defaultExcelRowHeightPoints) < 0.01 {
+		return defaultExcelRowHeightPixels
+	}
+	return math.Ceil(4.0 / 3.4 * height)
 }
 
 func (s *parseService) validateProductIIDs(ctx context.Context, items []service.CreateTaskBatchSKUItemParams, itemRows []int, lookup ERPIIDLookup) ([]ParseViolation, *domain.AppError) {
@@ -303,7 +408,7 @@ func (s *parseService) validateProductIIDs(ctx context.Context, items []service.
 			}
 			violations = append(violations, ParseViolation{
 				Row:     row,
-				Column:  "商品编码",
+				Column:  "产品款式编码",
 				Code:    "invalid_i_id",
 				Message: "batch_items[].product_i_id must be selected from ERP product i_id options",
 			})
@@ -399,21 +504,42 @@ func mimeTypeForPicture(extension string, file []byte) string {
 	}
 }
 
-func mapValidationViolations(appErr *domain.AppError, fields []FieldSpec) []ParseViolation {
+func mapValidationViolations(appErr *domain.AppError, taskType domain.TaskType, fields []FieldSpec, items []service.CreateTaskBatchSKUItemParams, itemRows []int, imagesByRow map[int][]embeddedReferenceImage) []ParseViolation {
 	rawViolations := extractViolations(appErr.Details)
 	out := make([]ParseViolation, 0, len(rawViolations))
 	byKey := fieldByKey(fields)
+	imageOnlyRequiredRows := map[int]bool{}
 	for _, raw := range rawViolations {
 		fieldPath, _ := raw["field"].(string)
 		code, _ := raw["code"].(string)
 		message, _ := raw["message"].(string)
-		row, key := rowAndKeyFromFieldPath(fieldPath)
+		idx, key := rowIndexAndKeyFromFieldPath(fieldPath)
+		row := sourceRowForItemIndex(idx, itemRows)
 		if key == "sku_code" {
 			key = skuColumnKey(fields)
 		}
 		column := ""
 		if field, ok := byKey[key]; ok {
 			column = field.Column
+		}
+		if code == "missing_required_field" && isImageOnlyBatchItem(idx, items, itemRows, imagesByRow) && (key == "product_name" || key == "design_requirement") {
+			if imageOnlyRequiredRows[row] {
+				continue
+			}
+			imageOnlyRequiredRows[row] = true
+			out = append(out, ParseViolation{
+				Row:     row,
+				Column:  "产品信息",
+				Code:    "image_only_row_missing_required",
+				Message: "该行只检测到参考图，没有读取到产品名称和设计要求；请把图片放到对应产品行，或补齐该行必填文字后重新上传",
+			})
+			continue
+		}
+		if code == "duplicate_batch_item" && isImageOnlyBatchItem(idx, items, itemRows, imagesByRow) {
+			continue
+		}
+		if code == "duplicate_batch_item" {
+			message = duplicateBatchItemMessage(taskType, idx, items, itemRows, message)
 		}
 		out = append(out, ParseViolation{
 			Row:     row,
@@ -459,13 +585,23 @@ func extractViolations(details interface{}) []map[string]interface{} {
 	}
 }
 
-func rowAndKeyFromFieldPath(fieldPath string) (int, string) {
+func rowIndexAndKeyFromFieldPath(fieldPath string) (int, string) {
 	matches := batchFieldPathRE.FindStringSubmatch(fieldPath)
 	if len(matches) == 0 {
-		return 0, fieldPath
+		return -1, fieldPath
 	}
 	idx, _ := strconv.Atoi(matches[1])
-	return idx + 2, matches[2]
+	return idx, matches[2]
+}
+
+func sourceRowForItemIndex(idx int, itemRows []int) int {
+	if idx >= 0 && idx < len(itemRows) && itemRows[idx] > 0 {
+		return itemRows[idx]
+	}
+	if idx >= 0 {
+		return idx + 2
+	}
+	return 0
 }
 
 func rowIsEmpty(row []string) bool {
@@ -475,6 +611,46 @@ func rowIsEmpty(row []string) bool {
 		}
 	}
 	return true
+}
+
+func isImageOnlyBatchItem(idx int, items []service.CreateTaskBatchSKUItemParams, itemRows []int, imagesByRow map[int][]embeddedReferenceImage) bool {
+	if idx < 0 || idx >= len(items) {
+		return false
+	}
+	row := sourceRowForItemIndex(idx, itemRows)
+	if row <= 0 || len(imagesByRow[row]) == 0 {
+		return false
+	}
+	item := items[idx]
+	return strings.TrimSpace(item.ProductName) == "" &&
+		strings.TrimSpace(item.ProductShortName) == "" &&
+		strings.TrimSpace(item.CategoryCode) == "" &&
+		strings.TrimSpace(item.ProductIID) == "" &&
+		strings.TrimSpace(item.MaterialMode) == "" &&
+		strings.TrimSpace(item.DesignRequirement) == "" &&
+		strings.TrimSpace(item.NewSKU) == "" &&
+		strings.TrimSpace(item.PurchaseSKU) == "" &&
+		strings.TrimSpace(item.CostPriceMode) == "" &&
+		item.Quantity == nil &&
+		item.BaseSalePrice == nil &&
+		len(bytes.TrimSpace(item.VariantJSON)) == 0
+}
+
+func duplicateBatchItemMessage(taskType domain.TaskType, idx int, items []service.CreateTaskBatchSKUItemParams, itemRows []int, fallback string) string {
+	if idx <= 0 || idx >= len(items) {
+		return fallback
+	}
+	key, appErr := service.ComputeTaskBatchItemDedupeKeyForExcelDiagnostics(taskType, items[idx])
+	if appErr != nil || key == "" {
+		return fallback
+	}
+	for prev := 0; prev < idx; prev++ {
+		prevKey, prevErr := service.ComputeTaskBatchItemDedupeKeyForExcelDiagnostics(taskType, items[prev])
+		if prevErr == nil && prevKey == key {
+			return fmt.Sprintf("第 %d 行与第 %d 行内容重复，请删除重复行或调整产品信息/设计要求", sourceRowForItemIndex(idx, itemRows), sourceRowForItemIndex(prev, itemRows))
+		}
+	}
+	return fallback
 }
 
 func batchItemFromService(item service.CreateTaskBatchSKUItemParams) BatchItem {

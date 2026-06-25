@@ -1,5 +1,3 @@
-import { getToken } from '@/services/http'
-
 export type V1WsEventType =
   | 'task_pool_count_changed'
   | 'my_task_updated'
@@ -19,11 +17,9 @@ const MAX_RECONNECT_DELAY_MS = 30_000
 const FALLBACK_POLL_INTERVAL_MS = 15_000
 
 function resolveWsUrl(): string {
-  const token = getToken()
   const explicit = String(import.meta.env.VITE_WS_BASE_URL ?? '').trim()
   const base = explicit || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
   const url = new URL('/ws/v1', base)
-  if (token) url.searchParams.set('token', token)
   return url.toString()
 }
 

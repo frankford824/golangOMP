@@ -9,6 +9,101 @@ import (
 	"workflow/repo"
 )
 
+func TestCancelCreatorCanCancelOwnTaskWithoutBusinessRestriction(t *testing.T) {
+	taskID := int64(1001)
+	taskRepo := &cancelTaskRepoStub{
+		task: &domain.Task{ID: taskID, CreatorID: 42, TaskStatus: domain.TaskStatusPendingAssign},
+	}
+	moduleRepo := &cancelModuleRepoStub{
+		modules: []*domain.TaskModule{{
+			ID:        1,
+			TaskID:    taskID,
+			ModuleKey: domain.ModuleKeyWarehouse,
+			State:     domain.ModuleStatePending,
+		}},
+	}
+	eventRepo := &cancelModuleEventRepoStub{}
+	svc := NewService(taskRepo, moduleRepo, eventRepo, cancelTxRunnerStub{})
+
+	decision := svc.Cancel(context.Background(), Request{
+		Actor:  domain.RequestActor{ID: 42, Roles: []domain.Role{domain.RoleOps}},
+		TaskID: taskID,
+		Reason: "creator cancel",
+		Force:  false,
+	})
+	if !decision.OK {
+		t.Fatalf("creator cancel denied: %s %s", decision.DenyCode, decision.Message)
+	}
+	if taskRepo.updatedStatus != domain.TaskStatusCancelled {
+		t.Fatalf("updatedStatus = %s, want %s", taskRepo.updatedStatus, domain.TaskStatusCancelled)
+	}
+	if moduleRepo.closedState != domain.ModuleStateForciblyClosed {
+		t.Fatalf("closedState = %s, want %s", moduleRepo.closedState, domain.ModuleStateForciblyClosed)
+	}
+	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.ModuleEventTaskCancelled {
+		t.Fatalf("events = %+v, want one task_cancelled event", eventRepo.events)
+	}
+}
+
+func TestCancelCreatorCanCancelOwnTaskWithClaimedModule(t *testing.T) {
+	taskID := int64(1002)
+	taskRepo := &cancelTaskRepoStub{
+		task: &domain.Task{ID: taskID, CreatorID: 42, TaskStatus: domain.TaskStatusInProgress},
+	}
+	moduleRepo := &cancelModuleRepoStub{
+		modules: []*domain.TaskModule{{
+			ID:        2,
+			TaskID:    taskID,
+			ModuleKey: domain.ModuleKeyWarehouse,
+			State:     domain.ModuleStateActive,
+		}},
+	}
+	eventRepo := &cancelModuleEventRepoStub{}
+	svc := NewService(taskRepo, moduleRepo, eventRepo, cancelTxRunnerStub{})
+
+	decision := svc.Cancel(context.Background(), Request{
+		Actor:  domain.RequestActor{ID: 42, Roles: []domain.Role{domain.RoleOps}},
+		TaskID: taskID,
+		Reason: "creator cancel claimed",
+		Force:  false,
+	})
+	if !decision.OK {
+		t.Fatalf("creator claimed cancel denied: %s %s", decision.DenyCode, decision.Message)
+	}
+	if taskRepo.updatedStatus != domain.TaskStatusCancelled {
+		t.Fatalf("updatedStatus = %s, want %s", taskRepo.updatedStatus, domain.TaskStatusCancelled)
+	}
+	if moduleRepo.closedState != domain.ModuleStateForciblyClosed {
+		t.Fatalf("closedState = %s, want %s", moduleRepo.closedState, domain.ModuleStateForciblyClosed)
+	}
+	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.ModuleEventTaskCancelled {
+		t.Fatalf("events = %+v, want one task_cancelled event", eventRepo.events)
+	}
+}
+
+func TestCancelNonCreatorMemberCannotCancelOthersTask(t *testing.T) {
+	taskID := int64(1003)
+	taskRepo := &cancelTaskRepoStub{
+		task: &domain.Task{ID: taskID, CreatorID: 42, TaskStatus: domain.TaskStatusPendingAssign},
+	}
+	moduleRepo := &cancelModuleRepoStub{}
+	eventRepo := &cancelModuleEventRepoStub{}
+	svc := NewService(taskRepo, moduleRepo, eventRepo, cancelTxRunnerStub{})
+
+	decision := svc.Cancel(context.Background(), Request{
+		Actor:  domain.RequestActor{ID: 88, Roles: []domain.Role{domain.RoleMember}},
+		TaskID: taskID,
+		Reason: "member cancel other",
+		Force:  false,
+	})
+	if decision.OK {
+		t.Fatalf("expected deny for non-creator member")
+	}
+	if decision.DenyCode != domain.DenyModuleActionRoleDenied {
+		t.Fatalf("denyCode = %s, want %s", decision.DenyCode, domain.DenyModuleActionRoleDenied)
+	}
+}
+
 func TestCancelForceKeepsTaskStatusCancelled(t *testing.T) {
 	taskID := int64(607)
 	taskRepo := &cancelTaskRepoStub{
@@ -40,6 +135,39 @@ func TestCancelForceKeepsTaskStatusCancelled(t *testing.T) {
 	}
 	if taskRepo.updatedStatus != domain.TaskStatusCancelled {
 		t.Fatalf("updatedStatus = %s, want %s", taskRepo.updatedStatus, domain.TaskStatusCancelled)
+	}
+	if moduleRepo.closedState != domain.ModuleStateClosedByAdmin {
+		t.Fatalf("closedState = %s, want %s", moduleRepo.closedState, domain.ModuleStateClosedByAdmin)
+	}
+	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.ModuleEventForciblyClosed {
+		t.Fatalf("events = %+v, want one forcibly_closed event", eventRepo.events)
+	}
+}
+
+func TestCancelDeptAdminForceKeepsAdminForceBehavior(t *testing.T) {
+	taskID := int64(1004)
+	taskRepo := &cancelTaskRepoStub{
+		task: &domain.Task{ID: taskID, CreatorID: 1, TaskStatus: domain.TaskStatusPendingClose},
+	}
+	moduleRepo := &cancelModuleRepoStub{
+		modules: []*domain.TaskModule{{
+			ID:        11,
+			TaskID:    taskID,
+			ModuleKey: domain.ModuleKeyWarehouse,
+			State:     domain.ModuleStateActive,
+		}},
+	}
+	eventRepo := &cancelModuleEventRepoStub{}
+	svc := NewService(taskRepo, moduleRepo, eventRepo, cancelTxRunnerStub{})
+
+	decision := svc.Cancel(context.Background(), Request{
+		Actor:  domain.RequestActor{ID: 120, Roles: []domain.Role{domain.RoleDeptAdmin}},
+		TaskID: taskID,
+		Reason: "dept admin force terminate",
+		Force:  true,
+	})
+	if !decision.OK {
+		t.Fatalf("dept admin force denied: %s %s", decision.DenyCode, decision.Message)
 	}
 	if moduleRepo.closedState != domain.ModuleStateClosedByAdmin {
 		t.Fatalf("closedState = %s, want %s", moduleRepo.closedState, domain.ModuleStateClosedByAdmin)
@@ -85,6 +213,12 @@ func (r *cancelTaskRepoStub) ListBoardCandidates(context.Context, repo.TaskBoard
 	return nil, nil
 }
 func (r *cancelTaskRepoStub) UpdateDetailBusinessInfo(context.Context, repo.Tx, *domain.TaskDetail) error {
+	return nil
+}
+func (r *cancelTaskRepoStub) UpdatePriority(_ context.Context, _ repo.Tx, _ int64, priority domain.TaskPriority) error {
+	if r.task != nil {
+		r.task.Priority = priority
+	}
 	return nil
 }
 func (r *cancelTaskRepoStub) UpdateProductBinding(context.Context, repo.Tx, *domain.Task) error {

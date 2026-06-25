@@ -17,6 +17,7 @@ import {
   getTaskFilingStatusTone,
   getTaskFilingStatusDescription,
 } from '@/utils/filing-status'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
 
 const props = withDefaults(
   defineProps<{
@@ -29,11 +30,12 @@ const props = withDefaults(
 )
 
 const label = computed(() => getTaskFilingStatusLabel(props.status, props.taskType))
+const businessErrorMessage = computed(() => formatErpSyncFailureMessage(props.errorMessage ?? ''))
 
 const tooltip = computed(() =>
   getTaskFilingStatusDescription(props.status ?? undefined, props.taskType, {
     missingFieldsSummary: props.missingFieldsSummary ?? undefined,
-    errorMessage: props.errorMessage ?? undefined,
+    errorMessage: businessErrorMessage.value || undefined,
   }),
 )
 

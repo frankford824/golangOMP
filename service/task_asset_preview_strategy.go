@@ -29,14 +29,27 @@ var ossIMGAlphaPreserveExtensions = map[string]struct{}{
 	".webp": {},
 }
 
+var ossIMGTransformRequiredExtensions = map[string]struct{}{
+	".tiff": {},
+	".heic": {},
+	".avif": {},
+}
+
 func isOSSIMGDirectPreviewSupportedSourceVersion(version *domain.DesignAssetVersion) bool {
 	if version == nil || !version.IsSourceFile {
 		return false
 	}
-	return isOSSIMGDirectPreviewSupportedSource(version.OriginalFilename, version.MimeType)
+	return isOSSIMGDirectPreviewSupported(version.OriginalFilename, version.MimeType)
 }
 
-func isOSSIMGDirectPreviewSupportedSource(filename, mimeType string) bool {
+func isOSSIMGDirectPreviewSupportedVersion(version *domain.DesignAssetVersion) bool {
+	if version == nil {
+		return false
+	}
+	return isOSSIMGDirectPreviewSupported(version.OriginalFilename, version.MimeType)
+}
+
+func isOSSIMGDirectPreviewSupported(filename, mimeType string) bool {
 	ext := sourceAssetFormatExtension(filename, mimeType)
 	_, ok := ossIMGDirectSourceExtensions[ext]
 	return ok
@@ -47,6 +60,27 @@ func buildOSSIMGPreviewProcessForSource(version *domain.DesignAssetVersion) (str
 		return "", false
 	}
 	ext := sourceAssetFormatExtension(version.OriginalFilename, version.MimeType)
+	return buildOSSIMGPreviewProcessByExtension(ext), true
+}
+
+func buildOSSIMGPreviewProcessForVersion(version *domain.DesignAssetVersion) (string, bool) {
+	if version == nil {
+		return "", false
+	}
+	if version.IsSourceFile {
+		return buildOSSIMGPreviewProcessForSource(version)
+	}
+	ext := sourceAssetFormatExtension(version.OriginalFilename, version.MimeType)
+	if _, ok := ossIMGTransformRequiredExtensions[ext]; !ok {
+		return "", false
+	}
+	if !isOSSIMGDirectPreviewSupportedVersion(version) {
+		return "", false
+	}
+	return buildOSSIMGPreviewProcessByExtension(ext), true
+}
+
+func buildOSSIMGPreviewProcessByExtension(ext string) string {
 	steps := []string{
 		"image/auto-orient,1",
 		"resize,w_" + intToString(ossIMGPreviewWidth) + ",m_lfit",
@@ -54,7 +88,7 @@ func buildOSSIMGPreviewProcessForSource(version *domain.DesignAssetVersion) (str
 	if _, keep := ossIMGAlphaPreserveExtensions[ext]; !keep {
 		steps = append(steps, "quality,Q_85", "format,jpg")
 	}
-	return strings.Join(steps, "/"), true
+	return strings.Join(steps, "/")
 }
 
 func intToString(value int) string {

@@ -471,7 +471,7 @@ onMounted(() => {
   background: #eef2ff;
 }
 .cell-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-family: var(--yb-font-data);
 }
 .action-muted {
   font-size: 0.75rem;
@@ -542,5 +542,57 @@ onMounted(() => {
   padding: 0.15rem 0.55rem;
   font-size: 0.6875rem;
   font-weight: 600;
+}
+
+/* Phase 6: light admin task assets skin. Style-only. */
+.task-assets-view {
+  background: transparent !important;
+  color: #111827;
+}
+
+.content-card,
+.detail-card,
+.version-card {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.page-title,
+.section-title,
+.subsection-title,
+.version-title,
+.detail-row dd {
+  color: #111827 !important;
+}
+
+.page-subtitle,
+.section-meta,
+.detail-row dt,
+.state-text,
+.action-muted {
+  color: #6b7280 !important;
+}
+
+.data-table th {
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.data-table td {
+  color: #111827;
+}
+
+.row-active {
+  background: #eff6ff !important;
+}
+
+.version-pill {
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important;
 }
 </style>

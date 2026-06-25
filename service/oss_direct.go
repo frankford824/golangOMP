@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -110,6 +111,8 @@ type OSSCompletePart struct {
 	PartNumber int    `xml:"PartNumber" json:"part_number"`
 	ETag       string `xml:"ETag" json:"etag"`
 }
+
+const DownloadFilenameQueryParam = "download_filename"
 
 func (s *OSSDirectService) BuildObjectKey(taskRef, assetNo string, versionNo int, assetType domain.TaskAssetType, filename string) string {
 	roleSubdir := assetTypeToSubdir(assetType)
@@ -287,6 +290,10 @@ func (s *OSSDirectService) PresignDownloadURL(objectKey string) *OSSDirectDownlo
 	return s.presignGetURL(objectKey, "attachment")
 }
 
+func (s *OSSDirectService) PresignDownloadURLWithFilename(objectKey, filename string) *OSSDirectDownloadInfo {
+	return s.presignGetURL(objectKey, attachmentContentDisposition(filename))
+}
+
 func (s *OSSDirectService) PresignPreviewURL(objectKey string) *OSSDirectDownloadInfo {
 	return s.presignGetURL(objectKey, "inline")
 }
@@ -340,6 +347,44 @@ func (s *OSSDirectService) UploadObject(ctx context.Context, objectKey, contentT
 	return nil
 }
 
+func (s *OSSDirectService) UploadObjectFromReader(ctx context.Context, objectKey, contentType string, body io.Reader) error {
+	if !s.Enabled() {
+		return fmt.Errorf("oss direct service is not enabled")
+	}
+	objectKey = strings.TrimSpace(objectKey)
+	if objectKey == "" {
+		return fmt.Errorf("oss direct upload object_key is required")
+	}
+	if body == nil {
+		return fmt.Errorf("oss direct upload body is nil")
+	}
+	contentType = normalizeRequiredUploadContentType(contentType)
+
+	reqURL := s.bucketURL() + "/" + ossEscapePath(objectKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, body)
+	if err != nil {
+		return fmt.Errorf("oss direct upload reader build request: %w", err)
+	}
+	date := time.Now().UTC().Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	req.Header.Set("Content-Type", contentType)
+
+	canonResource := "/" + s.cfg.Bucket + "/" + objectKey
+	sig := s.signV1(http.MethodPut, "", contentType, date, "", canonResource)
+	req.Header.Set("Authorization", "OSS "+s.cfg.AccessKeyID+":"+sig)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("oss direct upload reader request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("oss direct upload reader failed: status=%d body=%s", resp.StatusCode, string(raw))
+	}
+	return nil
+}
+
 func (s *OSSDirectService) HeadObject(ctx context.Context, objectKey string) (bool, error) {
 	if !s.Enabled() {
 		return false, fmt.Errorf("oss direct service is not enabled")
@@ -374,6 +419,38 @@ func (s *OSSDirectService) HeadObject(ctx context.Context, objectKey string) (bo
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return false, fmt.Errorf("oss direct head failed: status=%d body=%s", resp.StatusCode, string(raw))
 	}
+}
+
+func (s *OSSDirectService) OpenObject(ctx context.Context, objectKey string) (io.ReadCloser, error) {
+	if !s.Enabled() {
+		return nil, fmt.Errorf("oss direct service is not enabled")
+	}
+	objectKey = strings.TrimSpace(objectKey)
+	if objectKey == "" {
+		return nil, fmt.Errorf("oss direct open object_key is required")
+	}
+	reqURL := s.bucketURL() + "/" + ossEscapePath(objectKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("oss direct open build request: %w", err)
+	}
+	date := time.Now().UTC().Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+
+	canonResource := "/" + s.cfg.Bucket + "/" + objectKey
+	sig := s.signV1(http.MethodGet, "", "", date, "", canonResource)
+	req.Header.Set("Authorization", "OSS "+s.cfg.AccessKeyID+":"+sig)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("oss direct open request: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("oss direct open failed: status=%d body=%s", resp.StatusCode, string(raw))
+	}
+	return resp.Body, nil
 }
 
 func (s *OSSDirectService) CopyObject(ctx context.Context, srcKey, dstKey string) error {
@@ -475,7 +552,7 @@ func (s *OSSDirectService) presignGetURLWithQuery(objectKey string, subresources
 	if len(keys) > 0 {
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
-			parts = append(parts, key+"="+url.QueryEscape(normalized[key]))
+			parts = append(parts, key+"="+normalized[key])
 		}
 		canonResource += "?" + strings.Join(parts, "&")
 	}
@@ -628,6 +705,172 @@ func ossEscapePath(objectKey string) string {
 		escaped[i] = strings.ReplaceAll(url.PathEscape(part), "+", "%2B")
 	}
 	return strings.Join(escaped, "/")
+}
+
+func ResolveAssetDownloadFilename(originalFilename, fileName string, assetID int64) string {
+	if filename := strings.TrimSpace(originalFilename); filename != "" {
+		return filename
+	}
+	if filename := strings.TrimSpace(fileName); filename != "" {
+		return filename
+	}
+	if assetID > 0 {
+		return "asset-" + strconv.FormatInt(assetID, 10)
+	}
+	return "asset"
+}
+
+func ResolveAssetDownloadFilenameForSingle(originalFilename, fileName string, assetID int64, skuCode string) string {
+	if filename := strings.TrimSpace(originalFilename); filename != "" {
+		return filename
+	}
+	if filename := composeBusinessAssetFilename(skuCode, fileName, fileName); filename != "" {
+		return filename
+	}
+	return ResolveAssetDownloadFilename("", fileName, assetID)
+}
+
+func ResolveAssetDownloadFilenameForBusiness(originalFilename, fileName string, assetID int64, skuCode, businessName string) string {
+	if filename := composeBusinessAssetFilename(skuCode, businessName, firstNonEmptyTrimmed(originalFilename, fileName)); filename != "" {
+		return filename
+	}
+	if filename := composeBusinessAssetFilename(skuCode, fileName, fileName); filename != "" {
+		return filename
+	}
+	return ResolveAssetDownloadFilename(originalFilename, fileName, assetID)
+}
+
+func composeBusinessAssetFilename(skuCode, label, extensionSource string) string {
+	sku := sanitizeDownloadFilenamePart(skuCode)
+	base := sanitizeDownloadFilenamePart(stripFilenameExtension(label))
+	if sku == "" || base == "" {
+		return ""
+	}
+	name := sku + "-" + base
+	ext := safeDownloadExtension(extensionSource)
+	if ext != "" {
+		name += ext
+	}
+	return name
+}
+
+func stripFilenameExtension(value string) string {
+	value = strings.TrimSpace(value)
+	ext := safeDownloadExtension(value)
+	if ext == "" {
+		return value
+	}
+	return strings.TrimSpace(value[:len(value)-len(ext)])
+}
+
+func safeDownloadExtension(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lastSlash := strings.LastIndexAny(value, `/\`)
+	lastDot := strings.LastIndex(value, ".")
+	if lastDot <= lastSlash || lastDot < 0 || lastDot == len(value)-1 {
+		return ""
+	}
+	ext := value[lastDot:]
+	if len(ext) > 12 {
+		return ""
+	}
+	if !isKnownDownloadExtension(strings.ToLower(ext)) {
+		return ""
+	}
+	for _, r := range ext[1:] {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		return ""
+	}
+	return ext
+}
+
+func isKnownDownloadExtension(ext string) bool {
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".heic", ".heif":
+		return true
+	case ".psd", ".psb", ".tif", ".tiff", ".ai", ".cdr", ".pdf":
+		return true
+	case ".zip", ".rar", ".7z", ".xlsx", ".xls":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeDownloadFilenamePart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		`"`, "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+		"\x00", "",
+		"\r", "_",
+		"\n", "_",
+	)
+	value = replacer.Replace(value)
+	value = strings.ReplaceAll(value, "..", "_")
+	return strings.TrimSpace(value)
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func ContentDispositionAttachment(filename string) string {
+	return attachmentContentDisposition(filename)
+}
+
+func attachmentContentDisposition(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return "attachment"
+	}
+	if value := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); value != "" {
+		return value
+	}
+	return "attachment"
+}
+
+func AppendProxyDownloadFilenameQuery(rawURL, filename string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	filename = strings.TrimSpace(filename)
+	if rawURL == "" || filename == "" {
+		return rawURL
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = parsed.Path
+	}
+	if !strings.HasPrefix(path, "/v1/assets/files/") && !strings.HasPrefix(path, "/files/") {
+		return rawURL
+	}
+	query := parsed.Query()
+	query.Set(DownloadFilenameQueryParam, filename)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func assetTypeToSubdir(assetType domain.TaskAssetType) string {

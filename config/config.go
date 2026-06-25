@@ -24,12 +24,52 @@ type Config struct {
 	ERP            ERPSyncConfig
 	ERPBridge      ERPBridgeConfig
 	ERPRemote      ERPRemoteConfig
+	ERPImageProxy  ERPImageProxyConfig
 	UploadService  UploadServiceConfig
 	OSSDirect      OSSDirectConfig
+	ExternalAssets ExternalAssetsConfig
 	AssetCleanup   AssetCleanupConfig
+	AI             AIConfig
+	BusinessTrend  BusinessTrendConfig
+	WeCom          WeComConfig
 	Log            LogConfig
 	Auth           domain.AuthSettings
 	FrontendAccess domain.FrontendAccessSettings
+}
+
+type WeComConfig struct {
+	AiBotEnabled       bool
+	AiBotBotID         string
+	AiBotSecret        string
+	AiBotDefaultChatID string
+	AiBotWSURL         string
+	AiBotQueueSize     int
+}
+
+type AIConfig struct {
+	Enabled         bool
+	Provider        string
+	BaseURL         string
+	APIKey          string
+	Model           string
+	Timeout         time.Duration
+	MaxTokens       int
+	RateLimitWindow time.Duration
+	RateLimitMax    int
+}
+
+type BusinessTrendConfig struct {
+	ChinaHotURL         string
+	ApifyToken          string
+	ApifyBaseURL        string
+	ApifyDouyinHotActor string
+	ApifyDouyinActor    string
+	ApifyRedNoteActor   string
+	Apify1688Actor      string
+	ApifyTaobaoActor    string
+	Timeout             time.Duration
+	MaxExternalKeywords int
+	MaxExternalItems    int
 }
 
 type OSSDirectConfig struct {
@@ -45,6 +85,25 @@ type OSSDirectConfig struct {
 
 type AssetCleanupConfig struct {
 	Enabled bool
+}
+
+type ExternalAssetsConfig struct {
+	Enabled             bool
+	BFFBaseURL          string
+	BFFBrowserBaseURL   string
+	AListBaseURL        string
+	AListToken          string
+	AListMounts         string
+	SyncInterval        time.Duration
+	LinkRefreshInterval time.Duration
+	FullSyncEnabled     bool
+	FullSyncPageSize    int
+	FullSyncMaxDepth    int
+	FullSyncMaxFiles    int
+	FullSyncMaxDirs     int
+	OSSOriginalPrefix   string
+	OSSPreviewPrefix    string
+	LocalPathMappings   string
 }
 
 type ServerConfig struct {
@@ -90,6 +149,8 @@ type ERPRemoteConfig struct {
 	SyncLogsPath             string
 	GetCompanyUsersPath      string
 	SkuQueryPath             string
+	CombineSKUQueryPath      string
+	OrderActionQueryPath     string
 	OpenWebCharset           string
 	OpenWebVersion           string
 	Timeout                  time.Duration
@@ -107,6 +168,12 @@ type ERPRemoteConfig struct {
 	HeaderSignature          string
 	SignatureIncludeBodyHash bool
 	FallbackToLocalOnError   bool
+}
+
+type ERPImageProxyConfig struct {
+	PublicBaseURL string
+	SigningSecret string
+	TokenTTL      time.Duration
 }
 
 type UploadServiceConfig struct {
@@ -140,7 +207,9 @@ func Load() (*Config, error) {
 			WriteTimeout: mustParseDuration(getEnv("SERVER_WRITE_TIMEOUT", "30s")),
 		},
 		MySQL: MySQLConfig{
-			DSN:             getEnv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local"),
+			// No default DSN: shipping a built-in root:password fallback is a
+			// credential risk, so deployments must set MYSQL_DSN explicitly.
+			DSN:             getEnv("MYSQL_DSN", ""),
 			MaxOpenConns:    mustParseInt(getEnv("MYSQL_MAX_OPEN_CONNS", "25")),
 			MaxIdleConns:    mustParseInt(getEnv("MYSQL_MAX_IDLE_CONNS", "10")),
 			ConnMaxLifetime: mustParseDuration(getEnv("MYSQL_CONN_MAX_LIFETIME", "5m")),
@@ -152,7 +221,7 @@ func Load() (*Config, error) {
 		},
 		ERP: ERPSyncConfig{
 			Enabled:    mustParseBool(getEnv("ERP_SYNC_ENABLED", "true")),
-			Interval:   mustParseDuration(getEnv("ERP_SYNC_INTERVAL", "5m")),
+			Interval:   mustParseDuration(getEnv("ERP_SYNC_INTERVAL", "1h")),
 			SourceMode: getEnv("ERP_SYNC_SOURCE_MODE", "stub"),
 			StubFile:   getEnv("ERP_SYNC_STUB_FILE", "config/erp_products_stub.json"),
 			Timeout:    mustParseDuration(getEnv("ERP_SYNC_TIMEOUT", "30s")),
@@ -172,6 +241,8 @@ func Load() (*Config, error) {
 			SyncLogsPath:             getEnv("ERP_REMOTE_SYNC_LOGS_PATH", "/v1/erp/sync-logs"),
 			GetCompanyUsersPath:      getEnv("ERP_REMOTE_GET_COMPANY_USERS_PATH", "/open/webapi/userapi/company/getcompanyusers"),
 			SkuQueryPath:             getEnv("ERP_REMOTE_SKU_QUERY_PATH", "/open/sku/query"),
+			CombineSKUQueryPath:      getEnv("ERP_REMOTE_COMBINE_SKU_QUERY_PATH", "/open/combine/sku/query"),
+			OrderActionQueryPath:     getEnv("ERP_REMOTE_ORDER_ACTION_QUERY_PATH", "/open/order/action/query"),
 			OpenWebCharset:           getEnv("ERP_REMOTE_OPENWEB_CHARSET", "utf-8"),
 			OpenWebVersion:           getEnv("ERP_REMOTE_OPENWEB_VERSION", "2"),
 			Timeout:                  mustParseDuration(getEnv("ERP_REMOTE_TIMEOUT", "15s")),
@@ -189,6 +260,18 @@ func Load() (*Config, error) {
 			HeaderSignature:          getEnv("ERP_REMOTE_HEADER_SIGNATURE", "X-Signature"),
 			SignatureIncludeBodyHash: mustParseBool(getEnv("ERP_REMOTE_SIGNATURE_INCLUDE_BODY_HASH", "true")),
 			FallbackToLocalOnError:   mustParseBool(getEnv("ERP_REMOTE_FALLBACK_LOCAL_ON_ERROR", "true")),
+		},
+		ERPImageProxy: ERPImageProxyConfig{
+			PublicBaseURL: getEnv("ERP_IMAGE_PROXY_PUBLIC_BASE_URL", "https://yongbo.cloud"),
+			SigningSecret: firstNonEmptyEnv(
+				"ERP_IMAGE_PROXY_SIGNING_SECRET",
+				"PRODUCT_MANAGEMENT_IMAGE_PROXY_SIGNING_SECRET",
+				"UPLOAD_SERVICE_INTERNAL_TOKEN",
+				"UPLOAD_SERVICE_AUTH_TOKEN",
+				"OSS_ACCESS_KEY_SECRET",
+				"ERP_REMOTE_APP_SECRET",
+			),
+			TokenTTL: mustParseDuration(getEnv("ERP_IMAGE_PROXY_TOKEN_TTL", "8760h")),
 		},
 		UploadService: UploadServiceConfig{
 			Enabled:                 mustParseBool(getEnv("UPLOAD_SERVICE_ENABLED", "true")),
@@ -209,8 +292,58 @@ func Load() (*Config, error) {
 			PublicEndpoint:  getEnv("OSS_PUBLIC_ENDPOINT", ""),
 			PartSize:        mustParseInt64(getEnv("OSS_PART_SIZE", "10485760")),
 		},
+		ExternalAssets: ExternalAssetsConfig{
+			Enabled:             mustParseBool(getEnv("EXTERNAL_ASSETS_ENABLED", "false")),
+			BFFBaseURL:          getEnv("EXTERNAL_ASSETS_BFF_BASE_URL", ""),
+			BFFBrowserBaseURL:   getEnv("EXTERNAL_ASSETS_BFF_BROWSER_BASE_URL", ""),
+			AListBaseURL:        getEnv("EXTERNAL_ASSETS_ALIST_BASE_URL", ""),
+			AListToken:          getEnv("EXTERNAL_ASSETS_ALIST_TOKEN", ""),
+			AListMounts:         getEnv("EXTERNAL_ASSETS_ALIST_MOUNTS", "/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local"),
+			SyncInterval:        mustParseDuration(getEnv("EXTERNAL_ASSETS_SYNC_INTERVAL", "1h")),
+			LinkRefreshInterval: mustParseDuration(getEnv("EXTERNAL_ASSETS_LINK_REFRESH_INTERVAL", "1h")),
+			FullSyncEnabled:     mustParseBool(getEnv("EXTERNAL_ASSETS_FULL_SYNC_ENABLED", "true")),
+			FullSyncPageSize:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_PAGE_SIZE", "100")),
+			FullSyncMaxDepth:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DEPTH", "16")),
+			FullSyncMaxFiles:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT", "20000")),
+			FullSyncMaxDirs:     mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DIRS_PER_MOUNT", "5000")),
+			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
+			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
+			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),
+		},
 		AssetCleanup: AssetCleanupConfig{
 			Enabled: mustParseBool(getEnv("ASSET_CLEANUP_ENABLED", "false")),
+		},
+		AI: AIConfig{
+			Enabled:         mustParseBool(getEnv("AI_AGENT_ENABLED", "false")),
+			Provider:        getEnv("AI_AGENT_PROVIDER", "anthropic_compatible"),
+			BaseURL:         getEnv("AI_AGENT_BASE_URL", ""),
+			APIKey:          getEnv("AI_AGENT_API_KEY", ""),
+			Model:           getEnv("AI_AGENT_MODEL", ""),
+			Timeout:         mustParseDuration(getEnv("AI_AGENT_TIMEOUT", "30s")),
+			MaxTokens:       mustParseInt(getEnv("AI_AGENT_MAX_TOKENS", "900")),
+			RateLimitWindow: mustParseDuration(getEnv("AI_AGENT_RATE_LIMIT_WINDOW", "5h")),
+			RateLimitMax:    mustParseInt(getEnv("AI_AGENT_RATE_LIMIT_MAX_CALLS", "800")),
+		},
+		BusinessTrend: BusinessTrendConfig{
+			ChinaHotURL:         getEnv("BUSINESS_TREND_CHINA_HOT_URL", ""),
+			ApifyToken:          getEnv("APIFY_TOKEN", ""),
+			ApifyBaseURL:        getEnv("BUSINESS_TREND_APIFY_BASE_URL", "https://api.apify.com"),
+			ApifyDouyinHotActor: getEnv("BUSINESS_TREND_APIFY_DOUYIN_HOT_ACTOR", "zen-studio/douyin-hot-search-scraper"),
+			ApifyDouyinActor:    getEnv("BUSINESS_TREND_APIFY_DOUYIN_SEARCH_ACTOR", "zen-studio/douyin-search-scraper"),
+			ApifyRedNoteActor:   getEnv("BUSINESS_TREND_APIFY_REDNOTE_SEARCH_ACTOR", "zen-studio/rednote-search-scraper"),
+			Apify1688Actor:      getEnv("BUSINESS_TREND_APIFY_1688_ACTOR", "automation-lab/1688-scraper"),
+			ApifyTaobaoActor:    getEnv("BUSINESS_TREND_APIFY_TAOBAO_ACTOR", "zen-studio/taobao-detail-scraper"),
+			Timeout:             mustParseDuration(getEnv("BUSINESS_TREND_EXTERNAL_TIMEOUT", "20s")),
+			MaxExternalKeywords: mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_KEYWORDS", "8")),
+			MaxExternalItems:    mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_ITEMS", "24")),
+		},
+		WeCom: WeComConfig{
+			AiBotEnabled:       mustParseBool(getEnv("WECOM_AIBOT_ENABLED", "false")),
+			AiBotBotID:         getEnv("WECOM_AIBOT_BOT_ID", ""),
+			AiBotSecret:        getEnv("WECOM_AIBOT_SECRET", ""),
+			AiBotDefaultChatID: getEnv("WECOM_AIBOT_DEFAULT_CHAT_ID", ""),
+			AiBotWSURL:         getEnv("WECOM_AIBOT_WS_URL", "wss://openws.work.weixin.qq.com"),
+			AiBotQueueSize:     mustParseInt(getEnv("WECOM_AIBOT_QUEUE_SIZE", "200")),
 		},
 		Log: LogConfig{
 			Level: getEnv("LOG_LEVEL", "info"),
@@ -219,17 +352,71 @@ func Load() (*Config, error) {
 		FrontendAccess: frontendAccess,
 	}
 	if cfg.MySQL.DSN == "" {
-		return nil, fmt.Errorf("MYSQL_DSN is required")
+		return nil, fmt.Errorf("MYSQL_DSN is required (no built-in default; set the environment variable explicitly)")
 	}
 	return cfg, nil
 }
 
+// Known credential placeholders from auth_identity.example.json. They must
+// never appear in a production identity config loaded from disk.
+const (
+	exampleSuperAdminPassword        = "ChangeMeAdmin123"
+	bootstrapSuperAdminPassword      = "520520Abc"
+	allowBootstrapCredentialsEnvName = "AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS"
+	exampleDepartmentAdminKey        = "CHANGE_ME_ADMIN_KEY"
+)
+
 func loadAuthSettings(path string) (domain.AuthSettings, error) {
 	settings := domain.AuthSettings{}
-	if err := unmarshalConfigFile(path, embeddedAuthSettings, &settings); err != nil {
-		return domain.AuthSettings{}, fmt.Errorf("load auth settings: %w", err)
+	raw, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil && len(raw) > 0:
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("load auth settings: %w", err)
+		}
+		if err := rejectExampleCredentials(settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("auth settings %q: %w", path, err)
+		}
+	case mustParseBool(getEnv("AUTH_ALLOW_EMBEDDED_SETTINGS", "false")):
+		// Dev/test escape hatch: the embedded example contains placeholder
+		// credentials and must never silently seed a production deployment.
+		if err := json.Unmarshal(embeddedAuthSettings, &settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("load embedded auth settings: %w", err)
+		}
+		if err := rejectExampleCredentials(settings); err != nil {
+			return domain.AuthSettings{}, fmt.Errorf("embedded auth settings: %w", err)
+		}
+	default:
+		return domain.AuthSettings{}, fmt.Errorf(
+			"auth settings file %q is missing or empty; set AUTH_SETTINGS_FILE to a real identity config (the embedded example fallback is disabled unless AUTH_ALLOW_EMBEDDED_SETTINGS=true)",
+			path,
+		)
 	}
 	return settings, validateAuthSettings(settings)
+}
+
+func rejectExampleCredentials(settings domain.AuthSettings) error {
+	allowBootstrap := mustParseBool(getEnv(allowBootstrapCredentialsEnvName, "false"))
+	for _, entry := range settings.SuperAdmins {
+		switch entry.Password {
+		case exampleSuperAdminPassword, bootstrapSuperAdminPassword:
+			if allowBootstrap {
+				continue
+			}
+			return fmt.Errorf("super admin %q still uses the example default password; change it before starting the server", entry.Username)
+		}
+	}
+	for department, keys := range settings.DepartmentAdminKeys {
+		for _, key := range keys {
+			if key == exampleDepartmentAdminKey {
+				if allowBootstrap {
+					continue
+				}
+				return fmt.Errorf("department %q still uses the example admin key placeholder; change it before starting the server", department)
+			}
+		}
+	}
+	return nil
 }
 
 func loadFrontendAccessSettings(path string) (domain.FrontendAccessSettings, error) {

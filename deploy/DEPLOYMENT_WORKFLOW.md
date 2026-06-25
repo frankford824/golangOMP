@@ -233,4 +233,4 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 - This workflow now distinguishes safe validation from real cutover; side-by-side mode does not perform final cutover.
 - Historical migrations `001` through `004` previously used `TEXT ... DEFAULT ''` clauses. MySQL 8 strict mode rejects defaults on `TEXT`/`BLOB`, so fresh bootstrap had to be corrected in-repo by removing those defaults from the source migrations instead of relying on server-side manual edits.
 - The repository migration pack now also includes `028_v7_runtime_distribution_event_tables.sql` so the legacy runtime tables still required by the binary are repository-owned: `event_logs`, `sku_sequences`, `distribution_jobs`, and `job_attempts`.
-- DB migrations are packaged, but there is still no automatic migration runner in this repo.
+- DB migrations are packaged and cutover deploy runs `deploy/run-pending-migrations.sh` before restarting services. The first run creates a `schema_migrations` baseline without replaying historical files; later releases apply only newly added migration files and strip any `ROLLBACK` block before execution.

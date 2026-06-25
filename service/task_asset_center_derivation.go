@@ -1,15 +1,14 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,30 +24,30 @@ type derivedPreviewSpec struct {
 	MimeType  string
 	Width     int
 	Height    int
-	FillColor color.RGBA
+	Quality   int
 }
 
 var sourceDerivedPreviewSpecs = []derivedPreviewSpec{
 	{
 		AssetType: domain.TaskAssetTypePreview,
-		Filename:  "preview.png",
-		MimeType:  "image/png",
-		Width:     800,
-		Height:    800,
-		FillColor: color.RGBA{R: 236, G: 241, B: 248, A: 255},
+		Filename:  "preview.webp",
+		MimeType:  "image/webp",
+		Width:     1600,
+		Height:    1600,
+		Quality:   82,
 	},
 	{
 		AssetType: domain.TaskAssetTypeDesignThumb,
-		Filename:  "design-thumb.png",
-		MimeType:  "image/png",
-		Width:     240,
-		Height:    240,
-		FillColor: color.RGBA{R: 223, G: 231, B: 242, A: 255},
+		Filename:  "design-thumb.webp",
+		MimeType:  "image/webp",
+		Width:     480,
+		Height:    480,
+		Quality:   78,
 	},
 }
 
-func (s *taskAssetCenterService) resolveSourceDerivedPreviewInfo(ctx context.Context, sourceAsset *domain.DesignAsset) (*domain.AssetDownloadInfo, *domain.AppError) {
-	if sourceAsset == nil || !sourceAsset.AssetType.IsSource() {
+func (s *taskAssetCenterService) resolveDerivedPreviewInfo(ctx context.Context, sourceAsset *domain.DesignAsset) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if sourceAsset == nil || sourceAsset.AssetType.IsPreview() || sourceAsset.AssetType.IsDesignThumb() {
 		return nil, nil
 	}
 	for _, assetType := range []domain.TaskAssetType{domain.TaskAssetTypePreview, domain.TaskAssetTypeDesignThumb} {
@@ -80,10 +79,10 @@ func (s *taskAssetCenterService) resolveSourceDerivedPreviewInfo(ctx context.Con
 }
 
 func (s *taskAssetCenterService) scheduleDerivedPreviewGeneration(taskID, sourceAssetID, completedBy int64, sourceVersion *domain.DesignAssetVersion) {
-	if sourceVersion == nil || !sourceVersion.IsSourceFile {
+	if sourceVersion == nil || !isDerivedPreviewGenerationCandidate(sourceVersion) {
 		return
 	}
-	if isOSSIMGDirectPreviewSupportedSourceVersion(sourceVersion) {
+	if isOSSIMGDirectPreviewSupported(sourceVersion.OriginalFilename, sourceVersion.MimeType) {
 		return
 	}
 	if s.ossDirectService == nil || !s.ossDirectService.Enabled() {
@@ -112,6 +111,16 @@ func (s *taskAssetCenterService) scheduleDerivedPreviewGeneration(taskID, source
 	})
 }
 
+func (s *taskAssetCenterService) EnsureDerivedPreviewAssets(ctx context.Context, taskID, sourceAssetID, actorID int64) *domain.AppError {
+	if err := s.ensureDerivedPreviewAssets(ctx, taskID, sourceAssetID, actorID); err != nil {
+		if appErr, ok := err.(*domain.AppError); ok {
+			return appErr
+		}
+		return infraError("ensure derived preview assets", err)
+	}
+	return nil
+}
+
 func (s *taskAssetCenterService) ensureDerivedPreviewAssets(ctx context.Context, taskID, sourceAssetID, completedBy int64) error {
 	task, appErr := s.requireTask(ctx, taskID)
 	if appErr != nil {
@@ -121,7 +130,19 @@ func (s *taskAssetCenterService) ensureDerivedPreviewAssets(ctx context.Context,
 	if appErr != nil {
 		return appErr
 	}
+	sourceAsset, appErr = s.loadAssetResource(ctx, sourceAsset)
+	if appErr != nil {
+		return appErr
+	}
 	if !sourceAsset.AssetType.IsSource() {
+		if sourceAsset.AssetType.IsPreview() || sourceAsset.AssetType.IsDesignThumb() {
+			return nil
+		}
+	}
+	if sourceAsset.CurrentVersion == nil {
+		return nil
+	}
+	if shouldSkipDerivedPreviewGeneration(sourceAsset.CurrentVersion) {
 		return nil
 	}
 	for _, spec := range sourceDerivedPreviewSpecs {
@@ -133,6 +154,48 @@ func (s *taskAssetCenterService) ensureDerivedPreviewAssets(ctx context.Context,
 	return nil
 }
 
+func isDerivedPreviewGenerationCandidate(version *domain.DesignAssetVersion) bool {
+	if version == nil {
+		return false
+	}
+	if version.IsPreviewFile || version.IsDesignThumb {
+		return false
+	}
+	if strings.TrimSpace(version.StorageKey) == "" {
+		return false
+	}
+	if !isExternalRendererPreviewSupported(version.OriginalFilename, version.MimeType) {
+		return false
+	}
+	return version.IsSourceFile || version.IsDeliveryFile || version.AssetType.IsReference()
+}
+
+func isExternalRendererPreviewSupported(filename, mimeType string) bool {
+	ext := sourceAssetFormatExtension(filename, mimeType)
+	switch ext {
+	case ".psd", ".psb", ".pdf", ".ai", ".eps", ".ps":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldSkipDerivedPreviewGeneration(sourceVersion *domain.DesignAssetVersion) bool {
+	if sourceVersion == nil || sourceVersion.FileSize == nil {
+		return false
+	}
+	if *sourceVersion.FileSize >= 1024 {
+		return false
+	}
+	ext := normalizePreviewFileExtension(sourceVersion.OriginalFilename)
+	switch ext {
+	case ".psd", ".psb":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 	ctx context.Context,
 	task *domain.Task,
@@ -140,7 +203,7 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 	spec derivedPreviewSpec,
 	completedBy int64,
 ) error {
-	if task == nil || sourceAsset == nil {
+	if task == nil || sourceAsset == nil || sourceAsset.CurrentVersion == nil {
 		return nil
 	}
 	sourceAssetID := sourceAsset.ID
@@ -164,15 +227,15 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 			targetAsset = hydrated
 		}
 		if hydrated != nil && hydrated.CurrentVersion != nil && strings.TrimSpace(hydrated.CurrentVersion.StorageKey) != "" {
-			if validateAssetVersionObjectAvailable(hydrated.CurrentVersion) == nil {
+			if validateAssetVersionObjectAvailable(hydrated.CurrentVersion) == nil && !isLegacyPlaceholderDerivedPreview(hydrated.CurrentVersion) {
 				return nil
 			}
 		}
 	}
 
-	content, err := renderDerivedPNG(spec.Width, spec.Height, spec.FillColor)
+	content, err := s.renderDerivedPreviewContent(ctx, sourceAsset.CurrentVersion, spec)
 	if err != nil {
-		return fmt.Errorf("render derived png: %w", err)
+		return fmt.Errorf("render derived preview: %w", err)
 	}
 	contentSize := int64(len(content))
 	contentHash := sha256.Sum256(content)
@@ -220,27 +283,29 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
 		previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
 		taskAsset := &domain.TaskAsset{
-			TaskID:          task.ID,
-			AssetID:         &asset.ID,
-			ScopeSKUCode:    optionalStringPtr(strings.TrimSpace(sourceAsset.ScopeSKUCode)),
-			AssetType:       spec.AssetType,
-			VersionNo:       timelineVersionNo,
-			AssetVersionNo:  &assetVersionNo,
-			UploadMode:      optionalStringPtr(string(domain.DesignAssetUploadModeSmall)),
-			UploadRequestID: nil,
-			StorageRefID:    &storageRefID,
-			FileName:        spec.Filename,
-			OriginalName:    &spec.Filename,
-			RemoteFileID:    nil,
-			MimeType:        &spec.MimeType,
-			FileSize:        &contentSize,
-			StorageKey:      &objectKey,
-			WholeHash:       &contentHashHex,
-			UploadStatus:    &uploadStatus,
-			PreviewStatus:   &previewStatus,
-			UploadedBy:      completedBy,
-			UploadedAt:      &now,
-			Remark:          "async-derived-preview",
+			TaskID:               task.ID,
+			AssetID:              &asset.ID,
+			ScopeSKUCode:         optionalStringPtr(strings.TrimSpace(sourceAsset.ScopeSKUCode)),
+			AssetType:            spec.AssetType,
+			VersionNo:            timelineVersionNo,
+			AssetVersionNo:       &assetVersionNo,
+			UploadMode:           optionalStringPtr(string(domain.DesignAssetUploadModeSmall)),
+			UploadRequestID:      nil,
+			StorageRefID:         &storageRefID,
+			FileName:             spec.Filename,
+			OriginalName:         &spec.Filename,
+			RemoteFileID:         nil,
+			MimeType:             &spec.MimeType,
+			FileSize:             &contentSize,
+			StorageKey:           &objectKey,
+			WholeHash:            &contentHashHex,
+			UploadStatus:         &uploadStatus,
+			PreviewStatus:        &previewStatus,
+			UploadedBy:           completedBy,
+			UploadedAt:           &now,
+			Remark:               "async-derived-preview:webp",
+			FlowReviewStatus:     domain.TaskAssetFlowReviewStatusNotApplicable,
+			SourceAssetVersionID: &sourceAsset.CurrentVersion.ID,
 		}
 		versionID, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
 		if err != nil {
@@ -280,28 +345,84 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 			"upload_mode":       string(domain.DesignAssetUploadModeSmall),
 			"mime_type":         spec.MimeType,
 			"derived_async":     true,
+			"derived_format":    "webp",
 			"derivation_reason": "source_non_direct_preview",
 		})
 		return err
 	})
 }
 
-func renderDerivedPNG(width, height int, fill color.RGBA) ([]byte, error) {
-	if width <= 0 {
-		width = 1
+func (s *taskAssetCenterService) renderDerivedPreviewContent(ctx context.Context, sourceVersion *domain.DesignAssetVersion, spec derivedPreviewSpec) ([]byte, error) {
+	if sourceVersion == nil {
+		return nil, fmt.Errorf("source version is required")
 	}
-	if height <= 0 {
-		height = 1
+	if s.ossDirectService == nil || !s.ossDirectService.Enabled() {
+		return nil, fmt.Errorf("oss direct service is not enabled")
 	}
-	img := image.NewNRGBA(image.Rect(0, 0, width, height))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			img.SetNRGBA(x, y, color.NRGBA{R: fill.R, G: fill.G, B: fill.B, A: fill.A})
-		}
+	if s.previewRenderer == nil {
+		return nil, fmt.Errorf("asset preview renderer is not configured")
 	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
+	sourceKey := strings.TrimSpace(sourceVersion.StorageKey)
+	if sourceKey == "" {
+		return nil, fmt.Errorf("source storage key is empty")
+	}
+	reader, err := s.ossDirectService.OpenObject(ctx, sourceKey)
+	if err != nil {
+		return nil, fmt.Errorf("open source object: %w", err)
+	}
+	defer reader.Close()
+
+	inputPath, cleanup, err := writePreviewRendererSourceTempFile(reader, sourceVersion.OriginalFilename, sourceVersion.MimeType)
+	if err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	defer cleanup()
+
+	return s.previewRenderer.Render(ctx, inputPath, AssetPreviewSourceMeta{
+		Filename: sourceVersion.OriginalFilename,
+		MimeType: sourceVersion.MimeType,
+	}, AssetPreviewRenderSpec{
+		MaxWidth:  spec.Width,
+		MaxHeight: spec.Height,
+		Quality:   spec.Quality,
+	})
+}
+
+func writePreviewRendererSourceTempFile(reader io.Reader, filename, mimeType string) (string, func(), error) {
+	ext := sourceAssetFormatExtension(filename, mimeType)
+	if ext == "" {
+		ext = strings.ToLower(strings.TrimSpace(filepath.Ext(filename)))
+	}
+	if ext == "" || strings.ContainsAny(ext, `/\`) {
+		ext = ".bin"
+	}
+	file, err := os.CreateTemp("", "asset-preview-source-*"+ext)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create source temp file: %w", err)
+	}
+	path := file.Name()
+	cleanup := func() {
+		_ = os.Remove(path)
+	}
+	if _, err := io.Copy(file, reader); err != nil {
+		_ = file.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("write source temp file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("close source temp file: %w", err)
+	}
+	return path, cleanup, nil
+}
+
+func isLegacyPlaceholderDerivedPreview(version *domain.DesignAssetVersion) bool {
+	if version == nil {
+		return false
+	}
+	if strings.TrimSpace(version.Remark) != "async-derived-preview" {
+		return false
+	}
+	ext := normalizePreviewFileExtension(version.OriginalFilename)
+	return ext == ".png"
 }

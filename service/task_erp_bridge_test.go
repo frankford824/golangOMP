@@ -359,6 +359,7 @@ type erpBridgeSelectionBinderStub struct {
 	upsertPayload  *domain.ERPProductUpsertPayload
 	upsertPayloads []domain.ERPProductUpsertPayload
 	upsertResult   *domain.ERPProductUpsertResult
+	upsertResultFn func(call int) *domain.ERPProductUpsertResult
 	upsertAppErr   *domain.AppError
 	upsertCalls    int
 }
@@ -384,6 +385,13 @@ func (s *erpBridgeSelectionBinderStub) GetProductByID(context.Context, string) (
 	return nil, nil
 }
 
+func (s *erpBridgeSelectionBinderStub) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError) {
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, nil
+}
+
 func (s *erpBridgeSelectionBinderStub) ListCategories(context.Context) ([]*domain.ERPCategory, *domain.AppError) {
 	return nil, nil
 }
@@ -405,11 +413,18 @@ func (s *erpBridgeSelectionBinderStub) EnsureLocalProduct(context.Context, repo.
 }
 
 func (s *erpBridgeSelectionBinderStub) UpsertProduct(_ context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError) {
+	callIndex := s.upsertCalls
 	s.upsertCalls++
 	copyPayload := payload
 	s.upsertPayload = &copyPayload
 	s.upsertPayloads = append(s.upsertPayloads, copyPayload)
-	return s.upsertResult, s.upsertAppErr
+	if s.upsertAppErr != nil {
+		return nil, s.upsertAppErr
+	}
+	if s.upsertResultFn != nil {
+		return s.upsertResultFn(callIndex), nil
+	}
+	return s.upsertResult, nil
 }
 
 func (s *erpBridgeSelectionBinderStub) UpdateItemStyle(context.Context, domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, *domain.AppError) {
@@ -430,4 +445,11 @@ func (s *erpBridgeSelectionBinderStub) UpdateVirtualInventory(context.Context, d
 
 func (s *erpBridgeSelectionBinderStub) ListJSTUsers(context.Context, domain.JSTUserListFilter) (*domain.JSTUserListResponse, *domain.AppError) {
 	return &domain.JSTUserListResponse{Datas: []*domain.JSTUser{}}, nil
+}
+
+func (s *erpBridgeSelectionBinderStub) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
+	return &domain.ERPOrderActionLogListResponse{
+		Items:      []*domain.ERPOrderActionLog{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
+	}, nil
 }

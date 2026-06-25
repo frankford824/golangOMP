@@ -6,9 +6,11 @@
     :disabled="disabled || loading"
     @click="onClick"
   >
-    <span
+    <BaseSpinner
       v-if="loading"
-      class="mr-1 inline-block h-4 w-4 animate-spin rounded-full border-2 border-transparent border-t-current"
+      class="mr-1"
+      :size="16"
+      inline
     />
     <span><slot /></span>
   </button>
@@ -16,6 +18,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import BaseSpinner from './BaseSpinner.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -73,4 +76,3 @@ function onClick(e: MouseEvent) {
   emit('click', e)
 }
 </script>
-

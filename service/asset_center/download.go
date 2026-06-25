@@ -7,6 +7,7 @@ import (
 
 	"workflow/domain"
 	"workflow/repo"
+	baseservice "workflow/service"
 )
 
 func (s *Service) DownloadLatest(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
@@ -23,6 +24,20 @@ func (s *Service) DownloadVersion(ctx context.Context, assetID, versionID int64)
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
 	return s.downloadRow(row)
+}
+
+func (s *Service) DownloadExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return nil, domain.ErrNotFound
+	}
+	return s.externalSvc.DownloadInfo(ctx, externalID)
+}
+
+func (s *Service) PreviewExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return nil, domain.ErrNotFound
+	}
+	return s.externalSvc.PreviewInfo(ctx, externalID)
 }
 
 func (s *Service) downloadRow(row *repo.TaskAssetSearchRow) (*domain.AssetDownloadInfo, *domain.AppError) {
@@ -48,10 +63,7 @@ func (s *Service) downloadRow(row *repo.TaskAssetSearchRow) (*domain.AssetDownlo
 	if key == "" {
 		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "asset storage_key is missing", nil)
 	}
-	filename := row.Asset.FileName
-	if row.Asset.OriginalName != nil && strings.TrimSpace(*row.Asset.OriginalName) != "" {
-		filename = strings.TrimSpace(*row.Asset.OriginalName)
-	}
+	filename := resolveSingleDownloadFilename(row)
 	fileSize := int64(0)
 	if row.Asset.FileSize != nil {
 		fileSize = *row.Asset.FileSize
@@ -61,7 +73,11 @@ func (s *Service) downloadRow(row *repo.TaskAssetSearchRow) (*domain.AssetDownlo
 		mimeType = *row.Asset.MimeType
 	}
 	if s.presigner != nil && s.presigner.Enabled() {
-		if signed := s.presigner.PresignDownloadURL(key); signed != nil && strings.TrimSpace(signed.DownloadURL) != "" {
+		signed := s.presigner.PresignDownloadURL(key)
+		if filenamePresigner, ok := s.presigner.(DownloadFilenamePresigner); ok {
+			signed = filenamePresigner.PresignDownloadURLWithFilename(key, filename)
+		}
+		if signed != nil && strings.TrimSpace(signed.DownloadURL) != "" {
 			url := signed.DownloadURL
 			return &domain.AssetDownloadInfo{
 				DownloadMode:     domain.AssetDownloadModeDirect,
@@ -78,6 +94,10 @@ func (s *Service) downloadRow(row *repo.TaskAssetSearchRow) (*domain.AssetDownlo
 	var downloadURL *string
 	if s.urlBuilder != nil {
 		downloadURL = s.urlBuilder.BuildBrowserFileURL(key)
+	}
+	if downloadURL != nil {
+		urlValue := baseservice.AppendProxyDownloadFilenameQuery(*downloadURL, filename)
+		downloadURL = &urlValue
 	}
 	if downloadURL == nil {
 		expires := time.Now().UTC().Add(15 * time.Minute)

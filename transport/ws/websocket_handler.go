@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +12,7 @@ import (
 
 	"workflow/domain"
 	svcws "workflow/service/websocket"
+	"workflow/transport/handler"
 )
 
 type RequestActorResolver interface {
@@ -22,18 +25,57 @@ type Handler struct {
 	upgrader gws.Upgrader
 }
 
+// wsAllowedOrigins lists extra cross-origin sources allowed to open WebSocket
+// connections (comma-separated full origins, e.g. "https://app.example.com").
+// Same-host origins and non-browser clients (no Origin header) are always allowed.
+var wsAllowedOrigins = parseAllowedOrigins(os.Getenv("WS_ALLOWED_ORIGINS"))
+
+func parseAllowedOrigins(raw string) []string {
+	var origins []string
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimRight(strings.TrimSpace(item), "/")
+		if item != "" {
+			origins = append(origins, item)
+		}
+	}
+	return origins
+}
+
+func checkWSOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+	normalized := strings.TrimRight(origin, "/")
+	for _, allowed := range wsAllowedOrigins {
+		if strings.EqualFold(normalized, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
 func NewHandler(resolver RequestActorResolver, hub *svcws.Hub) *Handler {
 	return &Handler{
 		resolver: resolver,
 		hub:      hub,
-		upgrader: gws.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
+		upgrader: gws.Upgrader{CheckOrigin: checkWSOrigin},
 	}
 }
 
 func (h *Handler) Upgrade(c *gin.Context) {
 	token := bearerToken(c.GetHeader("Authorization"))
 	if token == "" {
-		token = strings.TrimSpace(c.Query("access_token"))
+		if cookie, err := c.Cookie(handler.WSTokenCookie); err == nil {
+			token = strings.TrimSpace(cookie)
+		}
 	}
 	if token == "" || h.resolver == nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, domain.APIErrorResponse{Error: domain.ErrUnauthorized})

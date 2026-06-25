@@ -94,10 +94,31 @@ func TestSearchServiceRepoError(t *testing.T) {
 	}
 }
 
+func TestSearchServiceExternalAssetErrorDoesNotFailSearch(t *testing.T) {
+	for _, scope := range []string{"all", "assets"} {
+		repo := &stubSearchRepo{}
+		svc := NewService(repo)
+		svc.SetExternalAssetSearchProvider(errorExternalAssetSearch{})
+		got, appErr := svc.Search(context.Background(), actor(domain.RoleSuperAdmin), "x", scope, 20)
+		if appErr != nil {
+			t.Fatalf("scope=%s appErr=%+v", scope, appErr)
+		}
+		if len(got.Assets) != 1 || got.Assets[0].SourceType == string(domain.AssetResourceSourceExternal) {
+			t.Fatalf("scope=%s assets=%+v, want system asset only", scope, got.Assets)
+		}
+	}
+}
+
 type errorSearchRepo struct{ stubSearchRepo }
 
 func (e *errorSearchRepo) SearchTasks(context.Context, string, int) ([]domain.SearchTask, error) {
 	return nil, errors.New("boom")
+}
+
+type errorExternalAssetSearch struct{}
+
+func (errorExternalAssetSearch) SearchGlobal(context.Context, string, int) ([]domain.SearchAsset, error) {
+	return nil, errors.New("external down")
 }
 
 func actor(role domain.Role) domain.RequestActor {

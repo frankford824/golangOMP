@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type FilingStatus string
 
@@ -35,6 +38,71 @@ func WorkflowLaneFromCustomizationRequired(customizationRequired bool) WorkflowL
 	return WorkflowLaneNormal
 }
 
+type TaskBusinessLane string
+
+const (
+	TaskBusinessLaneNormal        TaskBusinessLane = "normal"
+	TaskBusinessLaneCustomization TaskBusinessLane = "customization"
+)
+
+func (l TaskBusinessLane) Valid() bool {
+	switch l {
+	case TaskBusinessLaneNormal, TaskBusinessLaneCustomization:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l TaskBusinessLane) WorkflowLane() WorkflowLane {
+	switch l {
+	case TaskBusinessLaneCustomization:
+		return WorkflowLaneCustomization
+	default:
+		return WorkflowLaneNormal
+	}
+}
+
+func TaskBusinessLaneFromLegacy(customizationRequired bool) TaskBusinessLane {
+	if customizationRequired {
+		return TaskBusinessLaneCustomization
+	}
+	return TaskBusinessLaneNormal
+}
+
+func TaskBusinessLaneFromWorkflowLane(lane WorkflowLane) TaskBusinessLane {
+	switch lane {
+	case WorkflowLaneCustomization:
+		return TaskBusinessLaneCustomization
+	default:
+		return TaskBusinessLaneNormal
+	}
+}
+
+func NormalizeTaskBusinessLane(lane TaskBusinessLane, customizationRequired bool) TaskBusinessLane {
+	normalized := TaskBusinessLane(strings.TrimSpace(string(lane)))
+	if normalized.Valid() {
+		return normalized
+	}
+	return TaskBusinessLaneFromLegacy(customizationRequired)
+}
+
+type TaskSKUCodeType string
+
+const (
+	TaskSKUCodeTypeRegular       TaskSKUCodeType = "regular"
+	TaskSKUCodeTypeCustomization TaskSKUCodeType = "customization"
+)
+
+func (t TaskSKUCodeType) Valid() bool {
+	switch t {
+	case TaskSKUCodeTypeRegular, TaskSKUCodeTypeCustomization:
+		return true
+	default:
+		return false
+	}
+}
+
 // Task is the V7 business aggregate root (spec V7 §7.1).
 // Every formal workflow must start with a Task that is bound to a SKU.
 type Task struct {
@@ -58,6 +126,7 @@ type Task struct {
 	DeadlineAt                  *time.Time              `db:"deadline_at"           json:"deadline_at,omitempty"`
 	NeedOutsource               bool                    `db:"need_outsource"        json:"need_outsource"`
 	IsOutsource                 bool                    `db:"is_outsource"          json:"is_outsource"`
+	BusinessLane                TaskBusinessLane        `db:"business_lane"         json:"business_lane"`
 	CustomizationRequired       bool                    `db:"customization_required" json:"customization_required"`
 	CustomizationSourceType     CustomizationSourceType `db:"customization_source_type" json:"customization_source_type"`
 	LastCustomizationOperatorID *int64                  `db:"last_customization_operator_id" json:"last_customization_operator_id,omitempty"`
@@ -76,7 +145,7 @@ func (t *Task) WorkflowLane() WorkflowLane {
 	if t == nil {
 		return WorkflowLaneNormal
 	}
-	return WorkflowLaneFromCustomizationRequired(t.CustomizationRequired)
+	return NormalizeTaskBusinessLane(t.BusinessLane, t.CustomizationRequired).WorkflowLane()
 }
 
 // TaskDetail stores supplemental demand information for a Task.
@@ -111,6 +180,7 @@ type TaskDetail struct {
 	CostPriceMode                string                       `db:"cost_price_mode"             json:"cost_price_mode"`
 	BaseSalePrice                *float64                     `db:"base_sale_price"             json:"base_sale_price,omitempty"`
 	ProductChannel               string                       `db:"product_channel"             json:"product_channel"`
+	SKUCodeType                  TaskSKUCodeType              `db:"sku_code_type"               json:"sku_code_type,omitempty"`
 	ReferenceImagesJSON          string                       `db:"reference_images_json"       json:"reference_images_json"`
 	ReferenceFileRefsJSON        string                       `db:"reference_file_refs_json"    json:"reference_file_refs_json"`
 	ReferenceLink                string                       `db:"reference_link"              json:"reference_link"`

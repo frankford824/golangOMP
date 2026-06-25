@@ -10,8 +10,9 @@
 ## Family 约定
 
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
+- `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
-- 本文件覆盖 `4` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `6` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/me/task-drafts
 
@@ -30,7 +31,7 @@
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `task_type` | query | string | 否 | Optional task_type filter (e.g. `new_product`, `customer_customization`). |
+| `task_type` | query | string | 否 | Optional task_type filter (e.g. `new_product_development`, `purchase_task`). |
 | `limit` | query | integer | 否 | - |
 | `cursor` | query | string | 否 | Opaque cursor returned by a previous page; omit for first page. |
 
@@ -71,6 +72,7 @@ curl -X GET https://api.example.com/v1/me/task-drafts \
 
 ### 前端最佳实践
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
+- `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -81,7 +83,7 @@ curl -X GET https://api.example.com/v1/me/task-drafts \
 支持方法: GET, PATCH。
 
 - `GET`: Returns the currently authenticated user's full profile. Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息).
-- `PATCH`: Partial self-update for the authenticated user's profile. Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑 昵称/头像/手机/邮箱).
+- `PATCH`: Partial self-update for the authenticated user's display profile. Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑 昵称/头像/手机/邮箱). This endpoint updates display_name/mobile/email only. Avatar fields are rejected here; use POST /v1/me/avatar to upload and DELETE /v1/me/avatar to clear the avatar.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -145,7 +147,6 @@ Content-Type: `application/json`
 | `display_name` | string | 否 | - |
 | `mobile` | string | 否 | - |
 | `email` | string | 否 | - |
-| `avatar` | string | 否 | R1.7-B placeholder. The server accepts but currently ignores this field (no `users.avatar_url` column in v1 DDL). Full persistence is scheduled for R5+. |
 
 ##### 响应体 schema
 成功响应: `200 application/json`
@@ -180,6 +181,159 @@ curl -X PATCH https://api.example.com/v1/me \
 
 ### 前端最佳实践
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
+- `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
+- 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/me/avatar
+
+### 简介
+支持方法: POST, DELETE。
+
+- `POST`: Uploads a small JPG, PNG, or WebP avatar for the authenticated user and stores the resulting avatar URL on the user profile.
+- `DELETE`: Clears the authenticated user's avatar URL and removes the stored avatar file when it is managed by this service.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- `DELETE` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### POST 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `multipart/form-data`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `file` | string | 是 | JPG, PNG, or WebP avatar image, max 2MB. |
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "username": "string",
+    "account": "string",
+    "display_name": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | WorkflowUser | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Validation failed |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+
+##### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/me/avatar \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@avatar.png"
+```
+
+#### DELETE 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "username": "string",
+    "account": "string",
+    "display_name": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | WorkflowUser | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+
+##### curl 示例
+```bash
+curl -X DELETE https://api.example.com/v1/me/avatar \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 当前用户 family 只面向当前 token，不应用于管理其他用户。
+- `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
+- 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/me/avatar-files/{filename}
+
+### 简介
+支持方法: GET。
+
+- `GET`: Publicly serves an uploaded avatar file by its generated random filename so browsers can load it directly in `<img>`. Filenames are generated by the server, do not contain user IDs, and should be treated as opaque.
+
+### 鉴权与 RBAC
+- 本节为公开资源接口，不需要 Bearer token。
+- `GET` 允许角色: 公开。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `filename` | path | string | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 image/jpeg`
+
+```json
+"string"
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | string | 视接口 | OpenAPI 声明的整体对象。 |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 404 | 见 `error.code` | 见 `deny_code` | Avatar not found |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/me/avatar-files/<filename>
+```
+
+### 前端最佳实践
+- 当前用户 family 只面向当前 token，不应用于管理其他用户。
+- `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -208,6 +362,7 @@ Content-Type: `application/json`
 | `old_password` | string | 是 | - |
 | `new_password` | string | 是 | - |
 | `confirm` | string | 是 | Must equal `new_password`; server enforces equality. |
+| `password_confirmation` | string | 否 | Backward-compatible alias for `confirm`. |
 
 ### 响应体 schema
 成功响应: `204`
@@ -229,6 +384,7 @@ curl -X POST https://api.example.com/v1/me/change-password \
 
 ### 前端最佳实践
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
+- `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
@@ -291,6 +447,7 @@ curl -X GET https://api.example.com/v1/me/org \
 
 ### 前端最佳实践
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
+- `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。

@@ -4,21 +4,28 @@
     :title="isBatchTask ? '编辑母任务信息' : '编辑任务信息'"
     :show-confirm="false"
     cancel-text="关闭"
-    panel-class="max-w-[min(1060px,96vw)] !max-h-[94vh] task-info-edit-modal"
+    panel-class="max-w-[min(1060px,96vw)] !max-h-[94vh] task-info-edit-modal-panel"
     @update:model-value="onClose"
   >
-    <div v-if="loadError" class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+    <div v-if="loadError" class="edit-error-banner">
       {{ loadError }}
     </div>
-    <div v-if="submitError" class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+    <div v-if="submitError" class="edit-error-banner">
       {{ submitError }}
     </div>
-    <div v-if="loading" class="py-8 text-center text-sm text-slate-500">加载可编辑数据…</div>
+    <div v-if="loading" class="edit-loading-text">加载可编辑数据…</div>
     <div v-else class="edit-workspace">
       <section v-if="!isBatchTask" class="form-card">
         <p class="section-eyebrow">商品信息</p>
         <div class="form-grid">
-          <BaseInput v-model="form.product_name" label="产品名称" placeholder="与创建侧一致" />
+          <BaseInput
+            v-model="form.product_name"
+            label="产品名称"
+            placeholder="与创建侧一致"
+            :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
+            :hint="erpProductNameHint(form.product_name)"
+            :error="erpProductNameError(form.product_name)"
+          />
           <IIdSelector
             v-if="showField.i_id"
             v-model="iIdModel"
@@ -29,16 +36,17 @@
           <BaseTextarea
             v-if="showField.spec_text"
             v-model="form.spec_text"
-            label="规格说明"
+            label="规格 / 工艺补充"
             :rows="2"
-            placeholder="规格、工艺等"
+            placeholder="除标准尺寸外的规格、工艺等补充说明"
           />
-          <BaseTextarea
+          <TaskSpecStructuredInput
             v-if="showField.size_text"
             v-model="form.size_text"
+            class="sm:col-span-2"
             label="尺寸"
-            :rows="2"
-            placeholder="尺寸描述"
+            placeholder="请选择宽高或面积并填写数字"
+            hint="与创建任务保持一致；修改后会参与成本规则重新匹配。"
           />
           <BaseInput
             v-if="showField.reference_link"
@@ -48,10 +56,23 @@
             class="sm:col-span-2"
           />
         </div>
-        <label v-if="showField.trigger_filing" class="mt-3 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-          <input v-model="form.trigger_filing" type="checkbox" class="rounded border-slate-300" />
+        <label v-if="showField.trigger_filing" class="field-checkbox-label mt-3">
+          <input v-model="form.trigger_filing" type="checkbox" class="native-checkbox" />
           <span>保存商品信息时强制触发一次 ERP 建档同步</span>
         </label>
+      </section>
+
+      <section v-else class="form-card">
+        <p class="section-eyebrow">母任务信息</p>
+        <div class="form-grid">
+          <BaseInput
+            v-model="form.product_name"
+            label="任务名称"
+            placeholder="例如：升学宴海报批量任务"
+            hint="用于识别这一批任务，不会覆盖每个 SKU 的产品名称"
+            class="sm:col-span-2"
+          />
+        </div>
       </section>
 
       <section class="form-card">
@@ -67,7 +88,14 @@
           <BaseTextarea v-model="form.note" class="sm:col-span-2" label="运营备注" :rows="2" />
           <div>
             <label class="field-label">截止时间</label>
-            <input v-model="form.due_at" type="date" class="native-input" />
+            <div class="due-at-input-row">
+              <input v-model="form.due_at" type="date" class="native-input" />
+              <select v-model="form.due_at_hour" class="native-input due-hour-select">
+                <option v-for="opt in dueHourOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
           </div>
           <div>
             <label class="field-label">优先级</label>
@@ -88,21 +116,24 @@
             v-model.number="form.cost_price"
             type="number"
             min="0"
-            step="0.01"
+            step="0.001"
             label="成本单价（CNY）"
             placeholder="请输入成本单价，可不填"
           />
-          <label class="flex cursor-pointer items-center gap-2 self-end pb-1 text-sm text-slate-700">
-            <input v-model="form.manual_cost_override" type="checkbox" class="rounded border-slate-300" />
+          <label class="field-checkbox-label self-end pb-1">
+            <input v-model="form.manual_cost_override" type="checkbox" class="native-checkbox" />
             <span>手动指定成本</span>
           </label>
           <BaseInput
             v-model="form.manual_cost_override_reason"
             class="sm:col-span-2"
             label="覆盖原因"
-            placeholder="勾选人工覆盖时建议填写"
+            placeholder="如：仓库维护成本价、ERP 同步前修正"
           />
         </div>
+        <p class="section-hint section-hint--after-grid">
+          系统预估成本仅作参考；保存成本单价后将按人工维护成本处理，并请求同步 ERP。
+        </p>
       </section>
 
       <section v-if="isPurchaseTask" class="form-card">
@@ -122,7 +153,7 @@
             v-model.number="form.procurement_price"
             type="number"
             min="0"
-            step="0.01"
+            step="0.001"
             label="采购单价"
             placeholder="可选"
           />
@@ -175,9 +206,17 @@ import BaseModal from '@/components/base/BaseModal.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
 import { normalizePriorityForApi } from '@/domain/task-priority'
-import { taskBeijingDateKey, toBeijingEndOfDayISO } from '@/utils/date'
+import {
+  ERP_PRODUCT_NAME_MAX_LENGTH,
+  erpProductNameError,
+  erpProductNameHint,
+  erpProductNameLimitMessage,
+  isErpProductNameTooLong,
+} from '@/domain/erp-product-name'
+import { taskBeijingDateKey, taskBeijingHour, toBeijingEndOfDayISO, toBeijingHourISO } from '@/utils/date'
 
 const props = defineProps<{
   modelValue: boolean
@@ -187,7 +226,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [boolean]
-  saved: []
+  saved: [Partial<Task>?]
 }>()
 
 const isBatchTask = computed(() => props.task.isBatchTask === true)
@@ -219,6 +258,7 @@ type EditForm = {
   design_requirement: string
   note: string
   due_at: string
+  due_at_hour: string
   priority: string
   cost_price: number | undefined
   manual_cost_override: boolean
@@ -245,6 +285,7 @@ function emptyForm(): EditForm {
     design_requirement: '',
     note: '',
     due_at: '',
+    due_at_hour: '18',
     priority: 'normal',
     cost_price: undefined,
     manual_cost_override: false,
@@ -263,6 +304,11 @@ const loading = ref(false)
 const loadError = ref('')
 const submitError = ref('')
 const saving = ref(false)
+const dueHourFallback = 18
+const dueHourOptions = Array.from({ length: 24 }, (_, hour) => ({
+  value: String(hour),
+  label: `${String(hour).padStart(2, '0')}:00`,
+}))
 const form = ref<EditForm>(emptyForm())
 const baseline = ref<EditForm>(emptyForm())
 const iIdModel = computed({
@@ -303,19 +349,20 @@ function hydrateFromTaskAndPanels(
 ) {
   const sku = activeSku(t)
   const next = emptyForm()
+  const panelProductName = productPanel?.product_name ?? productPanel?.product_name_snapshot
   next.product_name = String(
-    productPanel?.product_name ??
-      productPanel?.product_name_snapshot ??
-      sku?.productNameSnapshot ??
-      t.productName ??
-      '',
+    isBatchTask.value
+      ? panelProductName ?? t.productName ?? ''
+      : panelProductName ?? sku?.productNameSnapshot ?? t.productName ?? '',
   ).trim()
   next.i_id = String(productPanel?.i_id ?? productPanel?.product_i_id ?? t.erpIId ?? '').trim()
   next.category_code = String(
     productPanel?.category_code ?? t.newProductCategoryCode ?? t.erpCategoryCode ?? t.category ?? '',
   ).trim()
-  next.spec_text = String(productPanel?.spec_text ?? t.specText ?? '').trim()
-  next.size_text = String(productPanel?.size_text ?? t.sizeText ?? '').trim()
+  const specText = String(productPanel?.spec_text ?? t.specText ?? '').trim()
+  const sizeText = String(productPanel?.size_text ?? t.sizeText ?? '').trim()
+  next.spec_text = specText
+  next.size_text = sizeText || (isStructuredDimensionText(specText) ? specText : '')
   next.material = String(productPanel?.material ?? t.newProductMaterial ?? '').trim()
   next.reference_link = String(productPanel?.reference_link ?? t.productReferenceUrl ?? '').trim()
 
@@ -324,6 +371,7 @@ function hydrateFromTaskAndPanels(
   ).trim()
   next.note = String(t.note ?? '').trim()
   next.due_at = taskBeijingDateKey(t.dueAt)
+  next.due_at_hour = String(taskBeijingHour(t.dueAt) ?? dueHourFallback)
   next.priority = String(t.priority ?? 'normal')
 
   const costFromPanel = costPanel?.cost_price
@@ -404,10 +452,11 @@ function buildProductPatch(b: EditForm, c: EditForm): Record<string, unknown> | 
     patch[fieldKey] = normStr(c.design_requirement)
   }
 
+  if (normStr(c.product_name) !== normStr(b.product_name)) {
+    patch.product_name = normStr(c.product_name) || null
+  }
+
   if (!isBatchTask.value) {
-    if (normStr(c.product_name) !== normStr(b.product_name)) {
-      patch.product_name = normStr(c.product_name) || null
-    }
     if (showField.value.i_id && normStr(c.i_id) !== normStr(b.i_id)) {
       patch.i_id = normStr(c.i_id) || null
     }
@@ -419,6 +468,9 @@ function buildProductPatch(b: EditForm, c: EditForm): Record<string, unknown> | 
     }
     if (showField.value.size_text && normStr(c.size_text) !== normStr(b.size_text)) {
       patch.size_text = normStr(c.size_text) || null
+      if (shouldMirrorEditedSizeToSpec(b, c)) {
+        patch.spec_text = normStr(c.size_text) || null
+      }
     }
     if (showField.value.material && normStr(c.material) !== normStr(b.material)) {
       patch.material = normStr(c.material) || null
@@ -436,12 +488,29 @@ function buildProductPatch(b: EditForm, c: EditForm): Record<string, unknown> | 
   return touched ? patch : null
 }
 
+function isStructuredDimensionText(value: string): boolean {
+  const text = normStr(value)
+  if (!text) return false
+  return (
+    /^\d+(?:\.\d+)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:cm|m|mm|厘米|米|毫米)$/i.test(text) ||
+    /^\d+(?:\.\d+)?\s*(?:平方米|平方|平米|㎡|m2|m²|平方厘米|cm2|cm²|平方毫米|mm2|mm²)$/i.test(text)
+  )
+}
+
+function shouldMirrorEditedSizeToSpec(b: EditForm, c: EditForm): boolean {
+  const baseSpec = normStr(b.spec_text)
+  if (!showField.value.spec_text || !isStructuredDimensionText(baseSpec)) return false
+  if (normStr(c.spec_text) !== baseSpec) return false
+  const baseSize = normStr(b.size_text)
+  return baseSize === '' || baseSize === baseSpec
+}
+
 function buildBusinessPatch(b: EditForm, c: EditForm): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {}
   const remark = optionalRemark()
   // design_requirement / note 已移至 buildProductPatch → product-info
-  const dueIso = c.due_at ? toBeijingEndOfDayISO(c.due_at) : null
-  const baseDue = b.due_at ? toBeijingEndOfDayISO(b.due_at) : null
+  const dueIso = c.due_at ? toBeijingHourISO(c.due_at, parseDueHour(c.due_at_hour)) : null
+  const baseDue = b.due_at ? toBeijingHourISO(b.due_at, parseDueHour(b.due_at_hour)) : null
   if (dueIso !== baseDue) {
     patch.deadline_at = dueIso
   }
@@ -455,19 +524,44 @@ function buildBusinessPatch(b: EditForm, c: EditForm): Record<string, unknown> |
   return touched ? patch : null
 }
 
+function buildOptimisticTaskPatch(
+  productPatch: Record<string, unknown> | null,
+  businessPatch: Record<string, unknown> | null,
+): Partial<Task> | undefined {
+  const patch: Partial<Task> = {}
+  if (productPatch && 'product_name' in productPatch) {
+    patch.productName = String(productPatch.product_name ?? '').trim()
+  }
+  if (businessPatch && 'deadline_at' in businessPatch) {
+    patch.dueAt = (businessPatch.deadline_at as string | null) ?? null
+  }
+  if (businessPatch && 'priority' in businessPatch) {
+    patch.priority = normalizePriorityForApi(String(businessPatch.priority ?? 'normal')) as Task['priority']
+  }
+  return Object.keys(patch).length > 0 ? patch : undefined
+}
+
+function parseDueHour(value: string): number {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 23 ? parsed : dueHourFallback
+}
+
 function buildCostPatch(b: EditForm, c: EditForm): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {}
   const remark = optionalRemark()
   const bc = b.cost_price
   const cc = c.cost_price
+  const reason = normStr(c.manual_cost_override_reason)
   if (cc !== bc) {
     patch.cost_price = cc == null || Number.isNaN(cc) ? null : cc
-  }
-  if (Boolean(c.manual_cost_override) !== Boolean(b.manual_cost_override)) {
+    patch.manual_cost_override = true
+    patch.manual_cost_override_reason = reason || '仓库/运营手动维护成本'
+    patch.trigger_filing = true
+  } else if (Boolean(c.manual_cost_override) !== Boolean(b.manual_cost_override)) {
     patch.manual_cost_override = c.manual_cost_override
   }
-  if (normStr(c.manual_cost_override_reason) !== normStr(b.manual_cost_override_reason)) {
-    patch.manual_cost_override_reason = normStr(c.manual_cost_override_reason) || null
+  if (reason !== normStr(b.manual_cost_override_reason) && !('manual_cost_override_reason' in patch)) {
+    patch.manual_cost_override_reason = reason || null
   }
   const touched = Object.keys(patch).length > 0
   if (touched && remark) patch.remark = remark
@@ -517,6 +611,16 @@ async function submit() {
   const b = baseline.value
   const c = form.value
   const errors: string[] = []
+  if (isBatchTask.value && !normStr(c.product_name)) {
+    submitError.value = '任务名称不能为空'
+    saving.value = false
+    return
+  }
+  if (!isBatchTask.value && isErpProductNameTooLong(c.product_name)) {
+    submitError.value = erpProductNameLimitMessage('产品名称')
+    saving.value = false
+    return
+  }
   try {
     const productPatch = buildProductPatch(b, c)
     const businessPatch = buildBusinessPatch(b, c)
@@ -563,7 +667,7 @@ async function submit() {
       return
     }
 
-    emit('saved')
+    emit('saved', buildOptimisticTaskPatch(productPatch, businessPatch))
     emit('update:modelValue', false)
   } finally {
     saving.value = false
@@ -585,67 +689,272 @@ watch(
 .edit-workspace {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding-bottom: 0.5rem;
+  gap: 0.75rem;
+  padding-bottom: 0.35rem;
 }
+
 .form-card {
-  border: 1px solid #e6eaf0;
+  border: 1px solid #e5e7eb;
   border-radius: 0.875rem;
-  background: #f8fafc;
-  padding: 1rem 1.1rem;
+  background: #ffffff;
+  padding: 0.875rem 1rem;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
+
 .section-eyebrow {
-  margin: 0 0 0.75rem;
-  font-size: 0.6875rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  margin: 0 0 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #64748b;
+  color: #6b7280;
 }
+
 .section-hint {
-  margin: -0.35rem 0 0.65rem;
+  margin: 0.35rem 0 0.65rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: #6b7280;
   line-height: 1.45;
 }
+
+.section-hint--after-grid {
+  margin-top: 0.65rem;
+  margin-bottom: 0;
+}
+
 .form-grid {
   display: grid;
-  gap: 0.75rem 1rem;
+  gap: 0.65rem 0.875rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
 @media (max-width: 720px) {
   .form-grid {
     grid-template-columns: 1fr;
   }
 }
+
 .field-label {
   display: block;
   margin-bottom: 0.35rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #475569;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #374151;
+  letter-spacing: 0.01em;
 }
+
+.field-checkbox-label {
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: #374151;
+  line-height: 1.4;
+}
+
 .native-input {
   width: 100%;
-  border: 1px solid #d0d5dd;
-  border-radius: 0.625rem;
-  background: #fff;
-  color: #101828;
-  font-size: 0.8125rem;
-  padding: 0.5rem 0.65rem;
+  min-height: 2.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.875rem;
+  padding: 0.45rem 0.65rem;
   outline: none;
+  color-scheme: light;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
+
+.native-input::placeholder {
+  color: #9ca3af;
+}
+
 .native-input:focus {
-  border-color: #98a2b3;
-  box-shadow: 0 0 0 3px rgb(152 162 179 / 0.14);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
+
+.native-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: #f9fafb;
+}
+
+select.native-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #6b7280 50%),
+    linear-gradient(135deg, #6b7280 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.1rem) calc(50% + 0.12rem),
+    calc(100% - 0.75rem) calc(50% + 0.12rem);
+  background-size:
+    0.35rem 0.35rem,
+    0.35rem 0.35rem;
+  background-repeat: no-repeat;
+  padding-right: 2rem;
+}
+
+.due-at-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.due-hour-select {
+  min-width: 0;
+}
+
+input.native-input[type='date']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.native-checkbox {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 0.25rem;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.edit-error-banner {
+  margin-bottom: 0.65rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #fecaca;
+  border-radius: 0.5rem;
+  background: #fef2f2;
+  font-size: 0.875rem;
+  color: #b91c1c;
+  line-height: 1.45;
+}
+
+.edit-loading-text {
+  padding: 2rem 0;
+  text-align: center;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
 .edit-modal-footer {
   display: flex;
+  flex-shrink: 0;
   justify-content: flex-end;
   gap: 0.5rem;
   width: 100%;
   padding: 1rem 1.25rem;
-  border-top: 1px solid #e2e8f0;
-  background: #fff;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+/* BaseInput / BaseTextarea / IIdSelector（BaseSelect）局部浅色覆写 */
+.edit-workspace :deep(label.text-sm.font-medium.text-slate-600),
+.edit-workspace :deep(label.field-label) {
+  color: #374151 !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.form-card :deep(.flex.flex-col.gap-1) {
+  gap: 0.4rem;
+}
+
+.form-card :deep(input),
+.form-card :deep(textarea) {
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: none !important;
+}
+
+.form-card :deep(input) {
+  min-height: 2.75rem;
+  border-radius: 0.75rem !important;
+}
+
+.form-card :deep(textarea) {
+  border-radius: 0.75rem !important;
+  resize: vertical;
+}
+
+.form-card :deep(input::placeholder),
+.form-card :deep(textarea::placeholder) {
+  color: #9ca3af !important;
+}
+
+.form-card :deep(input:focus),
+.form-card :deep(textarea:focus) {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+}
+
+.form-card :deep(input:disabled),
+.form-card :deep(textarea:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: #f9fafb !important;
+}
+
+.form-card :deep(.relative > div) {
+  min-height: 2.75rem;
+  border-color: #d1d5db !important;
+  border-radius: 0.75rem !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: none !important;
+}
+
+.form-card :deep(.relative > div:focus-within) {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+}
+
+.form-card :deep(.relative button) {
+  color: #111827 !important;
+}
+
+.form-card :deep(.relative .text-slate-500) {
+  color: #6b7280 !important;
+}
+
+.form-card :deep(.text-xs.text-slate-400) {
+  color: #6b7280 !important;
+}
+
+/* 浅色弹窗外壳（对齐 BaseModal / 阶段一全局壳） */
+:global(.task-info-edit-modal-panel) {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12) !important;
+}
+
+:global(.task-info-edit-modal-panel > header) {
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+:global(.task-info-edit-modal-panel > header h2) {
+  color: #111827 !important;
+}
+
+:global(.task-info-edit-modal-panel > header button) {
+  color: #6b7280 !important;
+}
+
+:global(.task-info-edit-modal-panel > header button:hover) {
+  color: #111827 !important;
+}
+
+:global(.task-info-edit-modal-panel > div.flex-1) {
+  color: #111827 !important;
 }
 </style>

@@ -48,10 +48,11 @@
     </section>
 
     <div class="form-card">
-      <BaseInput
+      <TaskSpecStructuredInput
         v-model="localForm.prefillSpecText"
         label="产品尺寸（可选）"
         placeholder="默认使用 ERP 尺寸，可按需覆盖"
+        hint="不填写时沿用 ERP 或商品名称中的尺寸；填写后用于成本匹配。"
       />
     </div>
     <div class="form-card upload-card">
@@ -71,9 +72,9 @@ import { computed, ref } from 'vue'
 import type { TaskCreateFormModel } from '@/domain/types'
 import type { Product } from '@/types'
 import BaseButton from '@/components/base/BaseButton.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import ProductPickerDialog from '@/components/products/ProductPickerDialog.vue'
 
 const props = defineProps<{
@@ -239,6 +240,61 @@ function onImageError(event: Event) {
   font-size: 0.75rem;
   color: #64748b;
 }
+
+/* Phase 6: light embedded form skin (parent modal already light). Style-only. */
+.form-card {
+  border-color: #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.upload-card {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+.field-label {
+  color: #374151;
+}
+
+.form-hint,
+.selected-meta {
+  color: #6b7280;
+}
+
+.selected-product-card,
+.selected-thumb {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+
+.selected-name {
+  color: #111827;
+}
+
+.selected-thumb-placeholder {
+  color: #6b7280;
+}
+
+.form-card :deep(input),
+.form-card :deep(.relative > div),
+.form-card :deep(textarea) {
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #111827;
+}
+
+.form-card :deep(input::placeholder),
+.form-card :deep(textarea::placeholder) {
+  color: #9ca3af;
+}
+
+.form-card :deep(input:focus),
+.form-card :deep(textarea:focus) {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
 @media (max-width: 760px) {
   .type-section,
   .product-card {
@@ -249,4 +305,3 @@ function onImageError(event: Event) {
   }
 }
 </style>
-

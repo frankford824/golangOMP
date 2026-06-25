@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -15,20 +17,40 @@ import (
 )
 
 const (
-	erpBridgeCategoryCacheTTL       = time.Minute
-	erpBridgeRefinementMaxPages     = 20
-	erpBridgeDetailFallbackPageSize = 20
+	erpBridgeCategoryCacheTTL        = time.Minute
+	erpBridgeRefinementMaxPages      = 20
+	erpBridgeDetailFallbackPageSize  = 20
+	erpBridgeCostVerificationEpsilon = 0.0001
+
+	erpBridgeCostVerificationStatusMatched          = "matched"
+	erpBridgeCostVerificationStatusMismatched       = "mismatched"
+	erpBridgeCostVerificationStatusUnverified       = "unverified"
+	erpBridgeCostVerificationStatusReadbackNotFound = "readback_not_found"
+
+	erpBridgeCostReadbackNotFoundExhaustedMessage = "ERP cost readback not found after upsert: product still unavailable after readback retries"
 )
+
+var erpBridgeCostReadbackRetryDelays = []time.Duration{
+	1 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+}
+
+// erpBridgeCostReadbackSleep is invoked between cost readback not-found retries; tests may replace it with a no-op.
+var erpBridgeCostReadbackSleep = time.Sleep
 
 type ERPBridgeService interface {
 	// Query behavior stays Bridge-owned even when MAIN exposes a facade route.
 	SearchProducts(ctx context.Context, filter domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, *domain.AppError)
 	ListIIDs(ctx context.Context, filter domain.ERPIIDListFilter) (*domain.ERPIIDListResponse, *domain.AppError)
 	GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, *domain.AppError)
+	QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError)
 	ListCategories(ctx context.Context) ([]*domain.ERPCategory, *domain.AppError)
 	ListWarehouses(ctx context.Context) ([]domain.ERPWarehouse, *domain.AppError)
 	ListSyncLogs(ctx context.Context, filter domain.ERPSyncLogFilter) (*domain.ERPSyncLogListResponse, *domain.AppError)
 	GetSyncLogByID(ctx context.Context, id string) (*domain.ERPSyncLog, *domain.AppError)
+	QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError)
 	EnsureLocalProduct(ctx context.Context, tx repo.Tx, snapshot *domain.ERPProductSelectionSnapshot) (*domain.Product, *domain.AppError)
 	// Mutation execution remains Bridge-owned; MAIN may invoke this only from explicit business boundaries.
 	UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError)
@@ -136,6 +158,58 @@ func normalizeERPIIDListFilter(filter domain.ERPIIDListFilter) domain.ERPIIDList
 	return filter
 }
 
+func normalizeERPOrderActionLogFilter(filter domain.ERPOrderActionLogFilter) (domain.ERPOrderActionLogFilter, *domain.AppError) {
+	filter.InternalOID = strings.TrimSpace(filter.InternalOID)
+	filter.OnlineSOID = strings.TrimSpace(filter.OnlineSOID)
+	filter.ActionName = strings.TrimSpace(filter.ActionName)
+	filter.ModifiedBegin = strings.TrimSpace(filter.ModifiedBegin)
+	filter.ModifiedEnd = strings.TrimSpace(filter.ModifiedEnd)
+	filter.PageIndex = normalizePositiveInt(filter.PageIndex, 1)
+	filter.PageSize = normalizePositiveInt(filter.PageSize, 30)
+	if filter.PageSize > 500 {
+		filter.PageSize = 500
+	}
+	hasOrder := filter.InternalOID != ""
+	hasBegin := filter.ModifiedBegin != ""
+	hasEnd := filter.ModifiedEnd != ""
+	if !hasOrder && !(hasBegin && hasEnd) {
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "o_id or modified_begin/modified_end is required; so_id is retained only as a display-side correlation field", nil)
+	}
+	if hasBegin != hasEnd {
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_begin and modified_end must be provided together", nil)
+	}
+	if hasBegin && hasEnd {
+		begin, ok := parseJSTOpenWebDateTime(filter.ModifiedBegin)
+		if !ok {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_begin must use yyyy-MM-dd HH:mm:ss", nil)
+		}
+		end, ok := parseJSTOpenWebDateTime(filter.ModifiedEnd)
+		if !ok {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_end must use yyyy-MM-dd HH:mm:ss", nil)
+		}
+		if end.Before(begin) {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_end must not be earlier than modified_begin", nil)
+		}
+		if end.Sub(begin) > 24*time.Hour {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_begin/modified_end interval must not exceed one day", nil)
+		}
+	}
+	return filter, nil
+}
+
+func parseJSTOpenWebDateTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, time.RFC3339Nano} {
+		if parsed, err := time.ParseInLocation(layout, value, time.FixedZone("Asia/Shanghai", 8*3600)); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func (s *erpBridgeService) GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, *domain.AppError) {
 	if s.client == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
@@ -183,6 +257,31 @@ func (s *erpBridgeService) GetProductByID(ctx context.Context, id string) (*doma
 		}
 	}
 	return prepareERPProduct(product, catalog), nil
+}
+
+func (s *erpBridgeService) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError) {
+	if s.client == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
+	}
+	filter.PageIndex = normalizePositiveInt(filter.PageIndex, 1)
+	filter.PageSize = normalizePositiveInt(filter.PageSize, 50)
+	if filter.PageSize > 50 {
+		filter.PageSize = 50
+	}
+	result, err := s.client.QueryCombineSKUs(ctx, filter)
+	if err != nil {
+		return nil, mapERPBridgeError("query jst combine skus", err)
+	}
+	if result == nil {
+		result = &domain.JSTCombineSKUListResponse{
+			Items:      []domain.JSTCombineSKUItem{},
+			Pagination: buildPaginationMeta(filter.PageIndex, filter.PageSize, 0),
+		}
+	}
+	if result.Items == nil {
+		result.Items = []domain.JSTCombineSKUItem{}
+	}
+	return result, nil
 }
 
 func (s *erpBridgeService) ListCategories(ctx context.Context) ([]*domain.ERPCategory, *domain.AppError) {
@@ -268,6 +367,37 @@ func (s *erpBridgeService) GetSyncLogByID(ctx context.Context, id string) (*doma
 		return nil, domain.ErrNotFound
 	}
 	return item, nil
+}
+
+func (s *erpBridgeService) QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
+	if s.client == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
+	}
+	normalized, appErr := normalizeERPOrderActionLogFilter(filter)
+	if appErr != nil {
+		return nil, appErr
+	}
+	result, err := s.client.QueryOrderActionLogs(ctx, normalized)
+	if err != nil {
+		return nil, mapERPBridgeError("query erp order action logs", err)
+	}
+	if result == nil {
+		result = &domain.ERPOrderActionLogListResponse{
+			Items:      []*domain.ERPOrderActionLog{},
+			Pagination: buildPaginationMeta(normalized.PageIndex, normalized.PageSize, 0),
+		}
+	}
+	if result.Items == nil {
+		result.Items = []*domain.ERPOrderActionLog{}
+	}
+	if result.Pagination.Page <= 0 {
+		result.Pagination.Page = normalized.PageIndex
+	}
+	if result.Pagination.PageSize <= 0 {
+		result.Pagination.PageSize = normalized.PageSize
+	}
+	result.NormalizedFilters = normalized
+	return result, nil
 }
 
 func (s *erpBridgeService) EnsureLocalProduct(ctx context.Context, tx repo.Tx, snapshot *domain.ERPProductSelectionSnapshot) (*domain.Product, *domain.AppError) {
@@ -369,6 +499,9 @@ func (s *erpBridgeService) UpsertProduct(ctx context.Context, payload domain.ERP
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
 	}
 	payload = normalizeERPProductUpsertPayload(payload)
+	if appErr := validateERPProductUpsertNameLength(payload); appErr != nil {
+		return nil, appErr
+	}
 	if strings.TrimSpace(payload.SKUID) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "sku_id is required", nil)
 	}
@@ -421,7 +554,86 @@ func (s *erpBridgeService) UpsertProduct(ctx context.Context, payload domain.ERP
 	if strings.TrimSpace(result.Route) == "" {
 		result.Route = "itemskubatchupload"
 	}
+	s.attachERPProductCostVerification(ctx, payload, result)
 	return result, nil
+}
+
+func (s *erpBridgeService) attachERPProductCostVerification(ctx context.Context, payload domain.ERPProductUpsertPayload, result *domain.ERPProductUpsertResult) {
+	if s == nil || s.client == nil || result == nil || payload.CostPrice == nil {
+		return
+	}
+	expected := *payload.CostPrice
+	checkedAt := time.Now().UTC()
+	verification := &domain.ERPCostVerificationResult{
+		Status:       erpBridgeCostVerificationStatusUnverified,
+		SKUID:        strings.TrimSpace(payload.SKUID),
+		ExpectedCost: float64PtrCopy(expected),
+		CheckedAt:    &checkedAt,
+	}
+	result.CostVerification = verification
+
+	skuID := strings.TrimSpace(payload.SKUID)
+	maxAttempts := 1 + len(erpBridgeCostReadbackRetryDelays)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		product, appErr := s.lookupERPProductForCostVerification(ctx, skuID)
+		if appErr != nil {
+			verification.Message = fmt.Sprintf("ERP cost readback failed after upsert: %s", appErr.Message)
+			return
+		}
+		if product == nil {
+			if attempt >= maxAttempts {
+				verification.Status = erpBridgeCostVerificationStatusReadbackNotFound
+				verification.Message = erpBridgeCostReadbackNotFoundExhaustedMessage
+				return
+			}
+			erpBridgeCostReadbackSleep(erpBridgeCostReadbackRetryDelays[attempt-1])
+			continue
+		}
+		applyERPProductCostVerificationFromProduct(verification, product, expected)
+		return
+	}
+}
+
+// lookupERPProductForCostVerification uses the service-layer GetProductByID (search fallback) for readback.
+func (s *erpBridgeService) lookupERPProductForCostVerification(ctx context.Context, skuID string) (*domain.ERPProduct, *domain.AppError) {
+	skuID = strings.TrimSpace(skuID)
+	if skuID == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "sku_id is required for cost readback", nil)
+	}
+	product, appErr := s.GetProductByID(ctx, skuID)
+	if appErr != nil {
+		if appErr.Code == domain.ErrCodeNotFound {
+			return nil, nil
+		}
+		return nil, appErr
+	}
+	return product, nil
+}
+
+func applyERPProductCostVerificationFromProduct(verification *domain.ERPCostVerificationResult, product *domain.ERPProduct, expected float64) {
+	if verification == nil || product == nil {
+		return
+	}
+	verification.ObservedProduct = product
+	if product.CostPrice == nil {
+		verification.Status = erpBridgeCostVerificationStatusMismatched
+		verification.Message = "ERP cost readback did not return cost_price after upsert"
+		return
+	}
+	actual := *product.CostPrice
+	verification.ActualCost = float64PtrCopy(actual)
+	if math.Abs(actual-expected) <= erpBridgeCostVerificationEpsilon {
+		verification.Status = erpBridgeCostVerificationStatusMatched
+		verification.Message = "ERP cost readback matched expected cost"
+		return
+	}
+	verification.Status = erpBridgeCostVerificationStatusMismatched
+	verification.Message = fmt.Sprintf("ERP cost readback mismatch: expected %.4f, actual %.4f", expected, actual)
+}
+
+func float64PtrCopy(v float64) *float64 {
+	copied := v
+	return &copied
 }
 
 func (s *erpBridgeService) UpdateItemStyle(ctx context.Context, payload domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, *domain.AppError) {
@@ -654,6 +866,16 @@ func resolveERPBridgeCategoryConstraint(filter domain.ERPProductSearchFilter, ca
 }
 
 func (s *erpBridgeService) searchERPBridgeProducts(ctx context.Context, normalized domain.ERPProductSearchFilter, catalog *erpBridgeCategoryCatalog, constraint *erpBridgeCategoryConstraint) (*domain.ERPProductListResponse, *domain.AppError) {
+	if shouldSearchERPBridgeLocalReplicaFirst(normalized) {
+		localItems, appErr := s.searchERPBridgeProductsFromLocalReplica(ctx, normalized, catalog, constraint)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if localItems != nil {
+			return localItems, nil
+		}
+	}
+
 	if needsERPBridgeLocalRefinement(normalized, constraint) {
 		return s.searchERPBridgeProductsWithLocalRefinement(ctx, normalized, catalog, constraint)
 	}
@@ -672,6 +894,7 @@ func (s *erpBridgeService) searchERPBridgeProducts(ctx context.Context, normaliz
 		items.Items = []*domain.ERPProduct{}
 	}
 	items.Items = prepareERPProducts(items.Items, catalog)
+	s.cacheERPBridgeProducts(ctx, items.Items)
 	if items.Pagination.Page <= 0 {
 		items.Pagination.Page = normalized.Page
 	}
@@ -689,6 +912,70 @@ func (s *erpBridgeService) searchERPBridgeProducts(ctx context.Context, normaliz
 		}
 	}
 	return items, nil
+}
+
+func (s *erpBridgeService) cacheERPBridgeProducts(ctx context.Context, items []*domain.ERPProduct) {
+	if s.productRepo == nil || s.txRunner == nil || len(items) == 0 {
+		return
+	}
+	products := make([]*domain.Product, 0, len(items))
+	now := time.Now().UTC()
+	for _, item := range items {
+		product := localProductFromERPBridgeProduct(item, now)
+		if product != nil {
+			products = append(products, product)
+		}
+	}
+	if len(products) == 0 {
+		return
+	}
+	_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		_, err := s.productRepo.UpsertBatch(ctx, tx, products)
+		return err
+	})
+}
+
+func localProductFromERPBridgeProduct(item *domain.ERPProduct, now time.Time) *domain.Product {
+	if item == nil {
+		return nil
+	}
+	erpProductID := firstNonEmptyString(item.ProductID, item.SKUID, item.SKUCode)
+	skuCode := firstNonEmptyString(item.SKUCode, item.SKUID, erpProductID)
+	productName := firstNonEmptyString(item.ProductName, item.Name, item.ShortName, skuCode)
+	if erpProductID == "" || skuCode == "" || productName == "" {
+		return nil
+	}
+	snapshot := normalizeERPProductSelectionSnapshot(&domain.ERPProductSelectionSnapshot{
+		ProductID:        erpProductID,
+		SKUID:            item.SKUID,
+		IID:              item.IID,
+		SKUCode:          skuCode,
+		Name:             item.Name,
+		ProductName:      productName,
+		ShortName:        item.ShortName,
+		CategoryID:       item.CategoryID,
+		CategoryCode:     firstNonEmptyString(item.CategoryCode, item.CategoryID),
+		CategoryName:     item.CategoryName,
+		ProductShortName: item.ProductShortName,
+		ImageURL:         item.ImageURL,
+		Price:            item.Price,
+		SPrice:           item.SPrice,
+		WMSCoID:          item.WMSCoID,
+		Currency:         item.Currency,
+	})
+	specJSON := "{}"
+	if b, err := json.Marshal(snapshot); err == nil {
+		specJSON = string(b)
+	}
+	return &domain.Product{
+		ERPProductID:    erpProductID,
+		SKUCode:         skuCode,
+		ProductName:     productName,
+		Category:        firstNonEmptyString(item.CategoryName, item.CategoryCode, item.CategoryID),
+		SpecJSON:        specJSON,
+		Status:          "active",
+		SourceUpdatedAt: &now,
+	}
 }
 
 func (s *erpBridgeService) searchERPBridgeProductsFromLocalReplica(ctx context.Context, normalized domain.ERPProductSearchFilter, catalog *erpBridgeCategoryCatalog, constraint *erpBridgeCategoryConstraint) (*domain.ERPProductListResponse, *domain.AppError) {
@@ -902,6 +1189,10 @@ func stabilizeERPProductPagination(meta *domain.PaginationMeta, itemCount int) {
 
 func needsERPBridgeLocalRefinement(normalized domain.ERPProductSearchFilter, constraint *erpBridgeCategoryConstraint) bool {
 	return strings.TrimSpace(normalized.SKUCode) != "" || constraint != nil
+}
+
+func shouldSearchERPBridgeLocalReplicaFirst(normalized domain.ERPProductSearchFilter) bool {
+	return normalized.QueryMode == "keyword" && strings.TrimSpace(normalized.Q) != ""
 }
 
 func shouldFallbackERPBridgeKeywordTimeout(err error, normalized domain.ERPProductSearchFilter) bool {
@@ -1172,11 +1463,11 @@ func normalizeERPProductSearchFilter(filter domain.ERPProductSearchFilter) domai
 		normalized.Q = normalized.Keyword
 	}
 	switch {
-	case normalized.Q != "":
-		normalized.QueryMode = "keyword"
 	case normalized.SKUCode != "":
 		normalized.Q = normalized.SKUCode
 		normalized.QueryMode = "sku_code"
+	case normalized.Q != "":
+		normalized.QueryMode = "keyword"
 	case normalized.CategoryID != "" || normalized.CategoryName != "":
 		normalized.QueryMode = "category_auxiliary"
 	default:
@@ -1192,6 +1483,30 @@ func normalizeERPProductSearchFilter(filter domain.ERPProductSearchFilter) domai
 		normalized.PageSize = 100
 	}
 	return normalized
+}
+
+func isERPBridgeSkuLikeKeyword(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 3 {
+		return false
+	}
+	hasLetter := false
+	hasDigit := false
+	for _, r := range value {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case r >= 'a' && r <= 'z':
+			hasLetter = true
+		case r >= 'A' && r <= 'Z':
+			hasLetter = true
+		case r == '-' || r == '_':
+			continue
+		default:
+			return false
+		}
+	}
+	return hasLetter && hasDigit
 }
 
 func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) domain.ERPProductUpsertPayload {
@@ -1287,11 +1602,12 @@ func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) do
 	if payload.ProductName == "" {
 		payload.ProductName = payload.Name
 	}
-	if payload.ShortName == "" {
-		payload.ShortName = payload.ProductShortName
-	}
-	if payload.ProductShortName == "" {
-		payload.ProductShortName = payload.ShortName
+	displayName := firstNonEmptyString(payload.Name, payload.ProductName, payload.ShortName, payload.ProductShortName, payload.SKUCode)
+	if displayName != "" {
+		payload.Name = displayName
+		payload.ProductName = displayName
+		payload.ShortName = displayName
+		payload.ProductShortName = displayName
 	}
 	if payload.SPrice == nil {
 		payload.SPrice = payload.Price
@@ -1335,13 +1651,9 @@ func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) do
 		skuImmutable := true
 		payload.SKUImmutable = &skuImmutable
 	}
-	scene := taskType
-	if scene == "" {
-		scene = payload.Operation
-	}
 	autoEnabled := payload.AutoGenerateShortName == nil || *payload.AutoGenerateShortName
 	if autoEnabled && payload.ShortName == "" {
-		payload.ShortName = generateERPShortName(scene, payload.ShortNameTemplateKey, payload.Name, payload.IID)
+		payload.ShortName = firstNonEmptyString(payload.ProductName, payload.Name, payload.SKUCode, payload.IID)
 		payload.ProductShortName = payload.ShortName
 	}
 	return payload

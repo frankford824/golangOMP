@@ -39,6 +39,13 @@ func (e *RuleEngine) SetNotificationGenerator(gen notificationGenerator) {
 	}
 }
 
+func (e *RuleEngine) GenerateNotificationForEvent(ctx context.Context, tx repo.Tx, event domain.TaskModuleEvent) {
+	if e == nil || e.notificationGen == nil {
+		return
+	}
+	_ = e.notificationGen.GenerateForEvent(ctx, tx, event)
+}
+
 func (e *RuleEngine) InitTask(ctx context.Context, tx repo.Tx, task *domain.Task) error {
 	if task == nil {
 		return nil
@@ -47,7 +54,8 @@ func (e *RuleEngine) InitTask(ctx context.Context, tx repo.Tx, task *domain.Task
 	if err != nil {
 		return err
 	}
-	for i, spec := range bp.Modules {
+	moduleSpecs := ModulesForTask(task, bp)
+	for i, spec := range moduleSpecs {
 		state := spec.InitialState
 		pool := spec.PoolTeamCode
 		if i > 1 {
@@ -125,14 +133,19 @@ func (e *RuleEngine) completeRetouchTask(ctx context.Context, tx repo.Tx, task *
 }
 
 func (e *RuleEngine) enterModule(ctx context.Context, tx repo.Tx, task *domain.Task, moduleKey string, actorID *int64, triggerEventID int64) error {
-	spec, ok := e.specFor(task.TaskType, moduleKey)
+	spec, ok := e.specFor(task, moduleKey)
 	if !ok {
 		return fmt.Errorf("module %s not in blueprint for task_type %s", moduleKey, task.TaskType)
 	}
 	state := domain.ModuleStatePendingClaim
 	pool := spec.PoolTeamCode
-	if moduleKey == domain.ModuleKeyWarehouse {
+	switch moduleKey {
+	case domain.ModuleKeyWarehouse:
 		pool = strPtr(domain.TeamWarehouseMain)
+	case domain.ModuleKeyAudit:
+		if isCustomizationTask(task) {
+			pool = strPtr(domain.TeamAuditCustomization)
+		}
 	}
 	m, err := e.modules.Enter(ctx, tx, task.ID, moduleKey, state, pool, json.RawMessage(`{}`))
 	if err != nil {
@@ -199,12 +212,15 @@ func (e *RuleEngine) reopenModule(ctx context.Context, tx repo.Tx, taskID int64,
 	return err
 }
 
-func (e *RuleEngine) specFor(taskType domain.TaskType, moduleKey string) (ModuleSpec, bool) {
-	bp, ok := e.registry.Get(taskType)
+func (e *RuleEngine) specFor(task *domain.Task, moduleKey string) (ModuleSpec, bool) {
+	if task == nil {
+		return ModuleSpec{}, false
+	}
+	bp, ok := e.registry.Get(task.TaskType)
 	if !ok {
 		return ModuleSpec{}, false
 	}
-	for _, spec := range bp.Modules {
+	for _, spec := range ModulesForTask(task, bp) {
 		if spec.Key == moduleKey {
 			return spec, true
 		}
@@ -213,7 +229,16 @@ func (e *RuleEngine) specFor(taskType domain.TaskType, moduleKey string) (Module
 }
 
 func isCustomizationTask(task *domain.Task) bool {
-	return task != nil && (task.TaskType == domain.TaskTypeCustomerCustomization || task.TaskType == domain.TaskTypeRegularCustomization || task.CustomizationRequired)
+	if task == nil {
+		return false
+	}
+	if task.TaskType == domain.TaskTypeCustomerCustomization || task.TaskType == domain.TaskTypeRegularCustomization {
+		return true
+	}
+	if task.CustomizationRequired {
+		return true
+	}
+	return domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired) == domain.TaskBusinessLaneCustomization
 }
 
 func payload(v interface{}) json.RawMessage {

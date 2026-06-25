@@ -34,6 +34,8 @@ type ERPRemoteClientConfig struct {
 	SyncLogsPath             string
 	GetCompanyUsersPath      string
 	SkuQueryPath             string
+	CombineSKUQueryPath      string
+	OrderActionQueryPath     string
 	OpenWebCharset           string
 	OpenWebVersion           string
 	Timeout                  time.Duration
@@ -63,6 +65,8 @@ type remoteERPBridgeClient struct {
 	syncLogsPath             string
 	getCompanyUsersPath      string
 	skuQueryPath             string
+	combineSKUQueryPath      string
+	orderActionQueryPath     string
 	openWebCharset           string
 	openWebVersion           string
 	httpClient               *http.Client
@@ -240,8 +244,10 @@ func NewRemoteERPBridgeClient(cfg ERPRemoteClientConfig) (ERPBridgeClient, error
 		unshelveBatchPath:        normalizeERPRemotePath(unshelveBatchPath),
 		virtualQtyPath:           normalizeERPRemotePath(virtualQtyPath),
 		syncLogsPath:             normalizeERPRemotePath(syncLogsPath),
-		getCompanyUsersPath:     normalizeERPRemotePath(getCompanyUsersPath),
+		getCompanyUsersPath:      normalizeERPRemotePath(getCompanyUsersPath),
 		skuQueryPath:             normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.SkuQueryPath), "/open/sku/query")),
+		combineSKUQueryPath:      normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.CombineSKUQueryPath), "/open/combine/sku/query")),
+		orderActionQueryPath:     normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.OrderActionQueryPath), "/open/order/action/query")),
 		openWebCharset:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebCharset), "utf-8"),
 		openWebVersion:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebVersion), "2"),
 		httpClient:               &http.Client{Timeout: timeout},
@@ -395,6 +401,20 @@ func (c *hybridERPBridgeClient) GetProductByID(ctx context.Context, id string) (
 	return c.localFallback.GetProductByID(ctx, id)
 }
 
+func (c *hybridERPBridgeClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	if c.remote != nil {
+		result, err := c.remote.QueryCombineSKUs(ctx, filter)
+		if err == nil {
+			return result, nil
+		}
+		return nil, err
+	}
+	if c.localFallback == nil {
+		return nil, fmt.Errorf("local fallback erp bridge client is unavailable")
+	}
+	return c.localFallback.QueryCombineSKUs(ctx, filter)
+}
+
 func (c *hybridERPBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
 	if c.localFallback == nil {
 		return []*domain.ERPCategory{}, nil
@@ -441,6 +461,20 @@ func (c *hybridERPBridgeClient) GetSyncLogByID(ctx context.Context, id string) (
 	return c.localFallback.GetSyncLogByID(ctx, id)
 }
 
+func (c *hybridERPBridgeClient) QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	if c.remote != nil {
+		result, err := c.remote.QueryOrderActionLogs(ctx, filter)
+		if err == nil {
+			return result, nil
+		}
+		return nil, err
+	}
+	if c.localFallback == nil {
+		return nil, fmt.Errorf("local fallback erp bridge client is unavailable")
+	}
+	return c.localFallback.QueryOrderActionLogs(ctx, filter)
+}
+
 func (c *hybridERPBridgeClient) UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error) {
 	if c.remote == nil {
 		if c.localFallback == nil {
@@ -453,6 +487,13 @@ func (c *hybridERPBridgeClient) UpsertProduct(ctx context.Context, payload domai
 	if err == nil {
 		c.logger.Info("erp_bridge_write_path_remote", zap.String("operation", "upsert"))
 		return result, nil
+	}
+	if !erpRemoteFailureAllowsLocalFallback(err) {
+		c.logger.Warn("erp_remote_upsert_failed_no_fallback",
+			zap.String("error_class", classifyERPRemoteErr(err)),
+			zap.Error(err),
+		)
+		return nil, err
 	}
 	if !c.enableFallback || c.localFallback == nil {
 		return nil, err
@@ -652,6 +693,21 @@ func (c *remoteERPBridgeClient) GetProductByID(ctx context.Context, id string) (
 	return nil, &erpBridgeRemoteProductNotFoundError{QueryID: id}
 }
 
+func (c *remoteERPBridgeClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	if !strings.EqualFold(strings.TrimSpace(c.authMode), "openweb") {
+		return nil, fmt.Errorf("%w: remote erp combine sku query requires ERP_REMOTE_AUTH_MODE=openweb", ErrERPRemoteOpenWebAuthRequired)
+	}
+	raw, err := json.Marshal(filter)
+	if err != nil {
+		return nil, fmt.Errorf("marshal jst combine sku filter: %w", err)
+	}
+	respBody, err := c.doRequestWithRetry(ctx, http.MethodPost, c.combineSKUQueryPath, nil, raw, "jst_combine_sku_query")
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSTCombineSKUList(respBody, filter.PageIndex, filter.PageSize)
+}
+
 func (c *remoteERPBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
 	return []*domain.ERPCategory{}, nil
 }
@@ -693,6 +749,21 @@ func (c *remoteERPBridgeClient) GetSyncLogByID(ctx context.Context, id string) (
 		return nil, err
 	}
 	return decodeERPSyncLog(respBody)
+}
+
+func (c *remoteERPBridgeClient) QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	if !strings.EqualFold(strings.TrimSpace(c.authMode), "openweb") {
+		return nil, fmt.Errorf("%w: remote erp order action query requires ERP_REMOTE_AUTH_MODE=openweb", ErrERPRemoteOpenWebAuthRequired)
+	}
+	raw, err := json.Marshal(filter)
+	if err != nil {
+		return nil, fmt.Errorf("marshal jst order action query filter: %w", err)
+	}
+	respBody, err := c.doRequestWithRetry(ctx, http.MethodPost, c.orderActionQueryPath, nil, raw, "jst_order_action_query")
+	if err != nil {
+		return nil, err
+	}
+	return decodeERPOrderActionLogList(respBody, filter.PageIndex, filter.PageSize)
 }
 
 func (c *remoteERPBridgeClient) UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error) {
@@ -1221,8 +1292,10 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			item["category_name"] = categoryName
 		}
 		if payload.CostPrice != nil {
+			item["c_price"] = *payload.CostPrice
 			item["cost_price"] = *payload.CostPrice
 		} else if payload.BusinessInfo != nil && payload.BusinessInfo.CostPrice != nil {
+			item["c_price"] = *payload.BusinessInfo.CostPrice
 			item["cost_price"] = *payload.BusinessInfo.CostPrice
 		}
 		if payload.Remark != "" {
@@ -1440,7 +1513,7 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			"page_action":  pageAction,
 			"current_page": currentPage,
 			"page_size":    pageSize,
-			"version":     version,
+			"version":      version,
 		}
 		if filter.Enabled != nil {
 			biz["enabled"] = *filter.Enabled
@@ -1477,6 +1550,37 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			"page_size":  "50",
 			"sku_ids":    id,
 		}, nil
+	case "jst_combine_sku_query":
+		var filter domain.JSTCombineSKUFilter
+		if err := json.Unmarshal(rawBody, &filter); err != nil {
+			return nil, fmt.Errorf("decode jst combine sku query filter: %w", err)
+		}
+		return buildJSTCombineSKUQueryBizFilter(filter), nil
+	case "jst_order_action_query":
+		var filter domain.ERPOrderActionLogFilter
+		if err := json.Unmarshal(rawBody, &filter); err != nil {
+			return nil, fmt.Errorf("decode jst order action query filter: %w", err)
+		}
+		biz := map[string]interface{}{}
+		if filter.PageIndex > 0 {
+			biz["page_index"] = filter.PageIndex
+		}
+		if filter.PageSize > 0 {
+			biz["page_size"] = filter.PageSize
+		}
+		if value := strings.TrimSpace(filter.ModifiedBegin); value != "" {
+			biz["modified_begin"] = value
+		}
+		if value := strings.TrimSpace(filter.ModifiedEnd); value != "" {
+			biz["modified_end"] = value
+		}
+		if value := strings.TrimSpace(filter.InternalOID); value != "" {
+			biz["o_id"] = value
+		}
+		if value := strings.TrimSpace(filter.ActionName); value != "" {
+			biz["action_name"] = value
+		}
+		return biz, nil
 	default:
 		trimmed := strings.TrimSpace(string(rawBody))
 		if trimmed == "" {

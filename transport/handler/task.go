@@ -2,8 +2,10 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,29 +42,33 @@ func (h *TaskHandler) SetR3Services(poolQuery *task_pool.PoolQueryService, claim
 
 type createTaskReq struct {
 	// Common fields
-	TaskType                string                    `json:"task_type"             binding:"required"`
-	SourceMode              string                    `json:"source_mode"`
-	OwnerTeam               string                    `json:"owner_team"`
-	OwnerDepartment         string                    `json:"owner_department"`
-	OwnerOrgTeam            string                    `json:"owner_org_team"`
-	CreatorID               *int64                    `json:"creator_id"`
-	OperatorGroupID         *int64                    `json:"operator_group_id"`
-	DesignerID              *int64                    `json:"designer_id"`
-	AssigneeID              *int64                    `json:"assignee_id"` // alias for designer_id
-	RequesterID             *int64                    `json:"requester_id"`
-	Priority                string                    `json:"priority"`
-	DeadlineAt              *string                   `json:"deadline_at"`
-	DueAt                   *string                   `json:"due_at"`
-	IsOutsource             *bool                     `json:"is_outsource"`
-	NeedOutsource           *bool                     `json:"need_outsource"`
-	CustomizationRequired   *bool                     `json:"customization_required"`
-	CustomizationSourceType string                    `json:"customization_source_type"`
-	ReferenceImages         []string                  `json:"reference_images"`
-	ReferenceFileRefs       []domain.ReferenceFileRef `json:"reference_file_refs"`
-	Remark                  string                    `json:"remark"`
-	Note                    string                    `json:"note"`
-	BatchSKUMode            string                    `json:"batch_sku_mode"`
-	BatchItems              []createTaskBatchItemReq  `json:"batch_items"`
+	TaskType                string                            `json:"task_type"             binding:"required"`
+	SourceMode              string                            `json:"source_mode"`
+	OwnerTeam               string                            `json:"owner_team"`
+	OwnerDepartment         string                            `json:"owner_department"`
+	OwnerOrgTeam            string                            `json:"owner_org_team"`
+	CreatorID               *int64                            `json:"creator_id"`
+	OperatorGroupID         *int64                            `json:"operator_group_id"`
+	DesignerID              *int64                            `json:"designer_id"`
+	AssigneeID              *int64                            `json:"assignee_id"` // alias for designer_id
+	RequesterID             *int64                            `json:"requester_id"`
+	Priority                string                            `json:"priority"`
+	DeadlineAt              *string                           `json:"deadline_at"`
+	DueAt                   *string                           `json:"due_at"`
+	IsOutsource             *bool                             `json:"is_outsource"`
+	NeedOutsource           *bool                             `json:"need_outsource"`
+	BusinessLane            string                            `json:"business_lane"`
+	WorkflowLane            string                            `json:"workflow_lane"`
+	CustomizationRequired   *bool                             `json:"customization_required"`
+	CustomizationSourceType string                            `json:"customization_source_type"`
+	ReferenceImages         []string                          `json:"reference_images"`
+	ReferenceFileRefs       []domain.ReferenceFileRef         `json:"reference_file_refs"`
+	Remark                  string                            `json:"remark"`
+	Note                    string                            `json:"note"`
+	BatchSKUMode            string                            `json:"batch_sku_mode"`
+	BatchItems              []createTaskBatchItemReq          `json:"batch_items"`
+	RetouchRequirements     []createTaskRetouchRequirementReq `json:"retouch_requirements"`
+	SKUCodeType             string                            `json:"sku_code_type"`
 
 	// Original product development fields
 	ProductID           createTaskProductID      `json:"product_id"`
@@ -87,7 +93,7 @@ type createTaskReq struct {
 	Quantity          *int64   `json:"quantity"`
 	BaseSalePrice     *float64 `json:"base_sale_price"`
 	ReferenceLink     string   `json:"reference_link"`
-	SyncERPOnCreate   bool     `json:"sync_erp_on_create"`
+	SyncERPOnCreate   *bool    `json:"sync_erp_on_create"`
 
 	// Purchase task fields
 	PurchaseSKU    string `json:"purchase_sku"`
@@ -104,6 +110,14 @@ type createTaskReq struct {
 	referenceImagesFieldPresent  bool
 }
 
+type createTaskRetouchRequirementReq struct {
+	Description string `json:"description"`
+	SKUCode     string `json:"sku_code"`
+	Spec        string `json:"spec"`
+	Remark      string `json:"remark"`
+	SortOrder   int    `json:"sort_order"`
+}
+
 type createTaskBatchItemReq struct {
 	ProductName       string                    `json:"product_name"`
 	ProductShortName  string                    `json:"product_short_name"`
@@ -114,22 +128,45 @@ type createTaskBatchItemReq struct {
 	DesignRequirement string                    `json:"design_requirement"`
 	NewSKU            string                    `json:"new_sku"`
 	PurchaseSKU       string                    `json:"purchase_sku"`
+	SKUCodeType       string                    `json:"sku_code_type"`
 	CostPriceMode     string                    `json:"cost_price_mode"`
+	CostPrice         *float64                  `json:"cost_price"`
 	Quantity          *int64                    `json:"quantity"`
 	BaseSalePrice     *float64                  `json:"base_sale_price"`
 	VariantJSON       json.RawMessage           `json:"variant_json"`
 	ReferenceFileRefs []domain.ReferenceFileRef `json:"reference_file_refs"`
 }
 
+type patchTaskSKUItemInfoReq struct {
+	ProductName       *string                   `json:"product_name"`
+	IID               *string                   `json:"i_id"`
+	ProductIID        *string                   `json:"product_i_id"`
+	SpecText          *string                   `json:"spec_text"`
+	SizeText          *string                   `json:"size_text"`
+	Width             *float64                  `json:"width"`
+	Height            *float64                  `json:"height"`
+	Area              *float64                  `json:"area"`
+	Quantity          *int64                    `json:"quantity"`
+	DesignRequirement *string                   `json:"design_requirement"`
+	ReferenceFileRefs []domain.ReferenceFileRef `json:"reference_file_refs"`
+	TriggerFiling     *bool                     `json:"trigger_filing"`
+	OperatorID        *int64                    `json:"operator_id"`
+	Remark            *string                   `json:"remark"`
+}
+
 type prepareTaskProductCodesReq struct {
 	TaskType     string                            `json:"task_type" binding:"required"`
+	BusinessLane string                            `json:"business_lane"`
+	WorkflowLane string                            `json:"workflow_lane"`
 	CategoryCode string                            `json:"category_code"`
+	SKUCodeType  string                            `json:"sku_code_type"`
 	Count        int                               `json:"count"`
 	BatchItems   []prepareTaskProductCodeBatchItem `json:"batch_items"`
 }
 
 type prepareTaskProductCodeBatchItem struct {
 	CategoryCode string `json:"category_code"`
+	SKUCodeType  string `json:"sku_code_type"`
 }
 
 func (r *createTaskReq) UnmarshalJSON(data []byte) error {
@@ -177,6 +214,8 @@ type updateTaskBusinessInfoReq struct {
 	ProductNameSnapshot      string                   `json:"product_name_snapshot"`
 	IID                      string                   `json:"i_id"`
 	ProductIID               string                   `json:"product_i_id"`
+	DeadlineAt               *string                  `json:"deadline_at"`
+	DueAt                    *string                  `json:"due_at"`
 	Category                 string                   `json:"category"`
 	CategoryID               *int64                   `json:"category_id"`
 	CategoryCode             string                   `json:"category_code"`
@@ -196,11 +235,12 @@ type updateTaskBusinessInfoReq struct {
 	CostRuleID               *int64                   `json:"cost_rule_id"`
 	CostRuleName             string                   `json:"cost_rule_name"`
 	CostRuleSource           string                   `json:"cost_rule_source"`
-	ManualCostOverride       bool                     `json:"manual_cost_override"`
+	ManualCostOverride       *bool                    `json:"manual_cost_override"`
 	ManualCostOverrideReason string                   `json:"manual_cost_override_reason"`
-	TriggerFiling            bool                     `json:"trigger_filing"`
+	TriggerFiling            *bool                    `json:"trigger_filing"`
 	FiledAt                  *string                  `json:"filed_at"`
 	Remark                   string                   `json:"remark"`
+	Priority                 *string                  `json:"priority"`
 }
 
 type retryTaskFilingReq struct {
@@ -274,6 +314,14 @@ type patchTaskCostInfoReq struct {
 	CostRuleID               *int64   `json:"cost_rule_id"`
 	CostRuleName             *string  `json:"cost_rule_name"`
 	CostRuleSource           *string  `json:"cost_rule_source"`
+	ManualCostOverride       *bool    `json:"manual_cost_override"`
+	ManualCostOverrideReason *string  `json:"manual_cost_override_reason"`
+	Remark                   *string  `json:"remark"`
+}
+
+type patchTaskSKUItemCostInfoReq struct {
+	OperatorID               *int64   `json:"operator_id"`
+	CostPrice                *float64 `json:"cost_price"`
 	ManualCostOverride       *bool    `json:"manual_cost_override"`
 	ManualCostOverrideReason *string  `json:"manual_cost_override_reason"`
 	Remark                   *string  `json:"remark"`
@@ -791,6 +839,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 
 	params := service.CreateTaskParams{
 		SourceMode:              domain.TaskSourceMode(sourceMode),
+		BusinessLane:            domain.TaskBusinessLane(firstNonEmptyTrimmed(req.BusinessLane, req.WorkflowLane)),
 		ProductID:               req.ProductID.LocalID(),
 		SKUCode:                 skuCode,
 		ProductNameSnapshot:     productName,
@@ -833,9 +882,23 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		PurchaseSKU:         req.PurchaseSKU,
 		ProductChannel:      req.ProductChannel,
 		BatchSKUMode:        req.BatchSKUMode,
+		SKUCodeType:         domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
 		TopLevelNewSKU:      req.NewSKU,
 		TopLevelPurchaseSKU: req.PurchaseSKU,
-		SyncERPOnCreate:     req.SyncERPOnCreate,
+		SyncERPOnCreate:     req.SyncERPOnCreate != nil && *req.SyncERPOnCreate,
+		SyncERPOnCreateSet:  req.SyncERPOnCreate != nil,
+	}
+	if len(req.RetouchRequirements) > 0 {
+		params.RetouchRequirements = make([]domain.CreateRetouchRequirementItem, 0, len(req.RetouchRequirements))
+		for _, item := range req.RetouchRequirements {
+			params.RetouchRequirements = append(params.RetouchRequirements, domain.CreateRetouchRequirementItem{
+				Description: item.Description,
+				SKUCode:     item.SKUCode,
+				Spec:        item.Spec,
+				Remark:      item.Remark,
+				SortOrder:   item.SortOrder,
+			})
+		}
 	}
 	if len(req.BatchItems) > 0 {
 		params.BatchItems = make([]service.CreateTaskBatchSKUItemParams, 0, len(req.BatchItems))
@@ -849,7 +912,9 @@ func (h *TaskHandler) Create(c *gin.Context) {
 				DesignRequirement: item.DesignRequirement,
 				NewSKU:            item.NewSKU,
 				PurchaseSKU:       item.PurchaseSKU,
+				SKUCodeType:       domain.TaskSKUCodeType(strings.TrimSpace(item.SKUCodeType)),
 				CostPriceMode:     item.CostPriceMode,
+				CostPrice:         item.CostPrice,
 				Quantity:          item.Quantity,
 				BaseSalePrice:     item.BaseSalePrice,
 				VariantJSON:       item.VariantJSON,
@@ -887,7 +952,9 @@ func (h *TaskHandler) PrepareProductCodes(c *gin.Context) {
 
 	params := service.PrepareTaskProductCodesParams{
 		TaskType:     domain.TaskType(strings.TrimSpace(req.TaskType)),
+		BusinessLane: domain.TaskBusinessLane(firstNonEmptyTrimmed(req.BusinessLane, req.WorkflowLane)),
 		CategoryCode: strings.TrimSpace(req.CategoryCode),
+		SKUCodeType:  domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
 		Count:        req.Count,
 	}
 	if len(req.BatchItems) > 0 {
@@ -895,6 +962,7 @@ func (h *TaskHandler) PrepareProductCodes(c *gin.Context) {
 		for _, item := range req.BatchItems {
 			params.BatchItems = append(params.BatchItems, service.PrepareTaskProductCodeBatchItemParams{
 				CategoryCode: strings.TrimSpace(item.CategoryCode),
+				SKUCodeType:  domain.TaskSKUCodeType(strings.TrimSpace(item.SKUCodeType)),
 			})
 		}
 	}
@@ -923,6 +991,23 @@ func (h *TaskHandler) List(c *gin.Context) {
 	respondOKWithPagination(c, tasks, pagination)
 }
 
+// FilterOptions handles GET /v1/tasks/filter-options
+func (h *TaskHandler) FilterOptions(c *gin.Context) {
+	provider, ok := h.svc.(interface {
+		ListFilterOptions(context.Context) (*domain.TaskFilterOptions, *domain.AppError)
+	})
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "task filter options service not configured", nil))
+		return
+	}
+	options, appErr := provider.ListFilterOptions(c.Request.Context())
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, options)
+}
+
 // GetByID handles GET /v1/tasks/:id
 func (h *TaskHandler) GetByID(c *gin.Context) {
 	id, err := parseID(c)
@@ -947,8 +1032,14 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 	}
 
 	var req updateTaskBusinessInfoReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+
+	deadlineAt, deadlineAtSet, appErr := parseBusinessInfoDeadline(c)
+	if appErr != nil {
+		respondError(c, appErr)
 		return
 	}
 
@@ -977,44 +1068,142 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 		base = buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
 	}
 
-	detail, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), service.UpdateTaskBusinessInfoParams{
-		TaskID:                   taskID,
-		OperatorID:               operatorID,
-		ProductName:              firstNonEmptyTrimmed(req.ProductName, req.ProductNameSnapshot),
-		ProductIID:               firstNonEmptyTrimmed(req.IID, req.ProductIID),
-		Category:                 req.Category,
-		CategoryID:               req.CategoryID,
-		CategoryCode:             req.CategoryCode,
-		SpecText:                 req.SpecText,
-		Material:                 req.Material,
-		SizeText:                 req.SizeText,
-		CraftText:                req.CraftText,
-		Width:                    req.Width,
-		Height:                   req.Height,
-		Area:                     req.Area,
-		Quantity:                 req.Quantity,
-		Process:                  req.Process,
-		ProductSelection:         req.ProductSelection.toDomain(),
-		Note:                     base.Note,
-		ChangeRequest:            req.ChangeRequest,
-		DesignRequirement:        req.DesignRequirement,
-		ReferenceFileRefs:        base.ReferenceFileRefs,
-		ReferenceLink:            base.ReferenceLink,
-		CostPrice:                req.CostPrice,
-		CostRuleID:               req.CostRuleID,
-		CostRuleName:             req.CostRuleName,
-		CostRuleSource:           req.CostRuleSource,
-		ManualCostOverride:       req.ManualCostOverride,
-		ManualCostOverrideReason: req.ManualCostOverrideReason,
-		TriggerFiling:            req.TriggerFiling,
-		FiledAt:                  filedAt,
-		Remark:                   req.Remark,
-	})
+	updateParams := base
+	updateParams.TaskID = taskID
+	updateParams.OperatorID = operatorID
+	if productName := firstNonEmptyTrimmed(req.ProductName, req.ProductNameSnapshot); productName != "" {
+		updateParams.ProductName = productName
+	}
+	if productIID := firstNonEmptyTrimmed(req.IID, req.ProductIID); productIID != "" {
+		updateParams.ProductIID = productIID
+	}
+	if deadlineAtSet {
+		updateParams.DeadlineAt = deadlineAt
+		updateParams.DeadlineAtSet = true
+	}
+	if strings.TrimSpace(req.Category) != "" || req.CategoryID != nil || strings.TrimSpace(req.CategoryCode) != "" {
+		updateParams.Category = req.Category
+		updateParams.CategoryID = req.CategoryID
+		updateParams.CategoryCode = req.CategoryCode
+		updateParams.ApplyCategory = true
+	}
+	if strings.TrimSpace(req.SpecText) != "" {
+		updateParams.SpecText = req.SpecText
+	}
+	if strings.TrimSpace(req.Material) != "" {
+		updateParams.Material = req.Material
+	}
+	if strings.TrimSpace(req.SizeText) != "" {
+		updateParams.SizeText = req.SizeText
+	}
+	if strings.TrimSpace(req.CraftText) != "" {
+		updateParams.CraftText = req.CraftText
+	}
+	if req.Width != nil {
+		updateParams.Width = req.Width
+	}
+	if req.Height != nil {
+		updateParams.Height = req.Height
+	}
+	if req.Area != nil {
+		updateParams.Area = req.Area
+	}
+	if req.Quantity != nil {
+		updateParams.Quantity = req.Quantity
+	}
+	if strings.TrimSpace(req.Process) != "" {
+		updateParams.Process = req.Process
+	}
+	if req.ProductSelection != nil {
+		updateParams.ProductSelection = req.ProductSelection.toDomain()
+	}
+	if strings.TrimSpace(req.ChangeRequest) != "" {
+		updateParams.ChangeRequest = req.ChangeRequest
+	}
+	if strings.TrimSpace(req.DesignRequirement) != "" {
+		updateParams.DesignRequirement = req.DesignRequirement
+	}
+	if req.CostPrice != nil {
+		updateParams.CostPrice = req.CostPrice
+		updateParams.CostPriceSet = true
+	}
+	if req.CostRuleID != nil {
+		updateParams.CostRuleID = req.CostRuleID
+		updateParams.CostRuleIDExplicit = true
+	}
+	if strings.TrimSpace(req.CostRuleName) != "" {
+		updateParams.CostRuleName = req.CostRuleName
+	}
+	if strings.TrimSpace(req.CostRuleSource) != "" {
+		updateParams.CostRuleSource = req.CostRuleSource
+	}
+	if req.ManualCostOverride != nil {
+		updateParams.ManualCostOverride = *req.ManualCostOverride
+	}
+	if strings.TrimSpace(req.ManualCostOverrideReason) != "" {
+		updateParams.ManualCostOverrideReason = req.ManualCostOverrideReason
+	}
+	if req.TriggerFiling != nil {
+		updateParams.TriggerFiling = *req.TriggerFiling
+	}
+	if filedAt != nil {
+		updateParams.FiledAt = filedAt
+	}
+	updateParams.Remark = req.Remark
+	if req.Priority != nil {
+		normalized, appErr := validateCreateTaskPriority(*req.Priority)
+		if appErr != nil {
+			respondError(c, appErr)
+			return
+		}
+		updateParams.Priority = domain.TaskPriority(normalized)
+		updateParams.PrioritySet = true
+	}
+	detail, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), updateParams)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	respondOK(c, detail)
+}
+
+func parseBusinessInfoDeadline(c *gin.Context) (*time.Time, bool, *domain.AppError) {
+	rawBodyValue, ok := c.Get(gin.BodyBytesKey)
+	if !ok {
+		return nil, false, nil
+	}
+	rawBody, ok := rawBodyValue.([]byte)
+	if !ok || len(rawBody) == 0 {
+		return nil, false, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &fields); err != nil {
+		return nil, false, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil)
+	}
+	for _, name := range []string{"deadline_at", "due_at"} {
+		raw, exists := fields[name]
+		if !exists {
+			continue
+		}
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+			return nil, true, nil
+		}
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, true, domain.NewAppError(domain.ErrCodeInvalidRequest, "deadline_at/due_at must be RFC3339", nil)
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, true, nil
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return nil, true, domain.NewAppError(domain.ErrCodeInvalidRequest, "deadline_at/due_at must be RFC3339", nil)
+		}
+		return &parsed, true, nil
+	}
+	return nil, false, nil
 }
 
 func (h *TaskHandler) GetFilingStatus(c *gin.Context) {
@@ -1466,6 +1655,11 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 		return
 	}
 	params := buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
+	params.CostRuleIDExplicit = false
+	if aggregate.Task != nil && aggregate.Task.IsBatchTask && patchProductInfoOnlyChangesDisplayName(req) {
+		params.BatchDisplayNameOnly = true
+		params.ProductSelection = nil
+	}
 	if req.ProductName != nil || req.ProductNameSnapshot != nil {
 		params.ProductName = firstNonEmptyTrimmed(valueFromStringPtr(req.ProductName), valueFromStringPtr(req.ProductNameSnapshot))
 	}
@@ -1474,6 +1668,9 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 	}
 	if req.ProductSelection != nil {
 		params.ProductSelection = req.ProductSelection.toDomain()
+	}
+	if req.Category != nil || req.CategoryID != nil || req.CategoryCode != nil {
+		params.ApplyCategory = true
 	}
 	if req.Category != nil {
 		params.Category = strings.TrimSpace(*req.Category)
@@ -1524,6 +1721,27 @@ func (h *TaskHandler) PatchProductInfo(c *gin.Context) {
 		return
 	}
 	respondOK(c, updated)
+}
+
+func patchProductInfoOnlyChangesDisplayName(req patchTaskProductInfoReq) bool {
+	if req.ProductName == nil && req.ProductNameSnapshot == nil {
+		return false
+	}
+	return req.IID == nil &&
+		req.ProductIID == nil &&
+		req.ProductSelection == nil &&
+		req.Category == nil &&
+		req.CategoryID == nil &&
+		req.CategoryCode == nil &&
+		req.SpecText == nil &&
+		req.Material == nil &&
+		req.SizeText == nil &&
+		req.ReferenceLink == nil &&
+		req.ReferenceFileRefs == nil &&
+		req.DesignRequirement == nil &&
+		req.ChangeRequest == nil &&
+		req.Note == nil &&
+		req.TriggerFiling == nil
 }
 
 // GetCostInfo handles GET /v1/tasks/:id/cost-info
@@ -1581,9 +1799,11 @@ func (h *TaskHandler) PatchCostInfo(c *gin.Context) {
 	params := buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
 	if req.CostPrice != nil {
 		params.CostPrice = req.CostPrice
+		params.CostPriceSet = true
 	}
 	if req.CostRuleID != nil {
 		params.CostRuleID = req.CostRuleID
+		params.CostRuleIDExplicit = true
 	}
 	if req.CostRuleName != nil {
 		params.CostRuleName = strings.TrimSpace(*req.CostRuleName)
@@ -1601,6 +1821,126 @@ func (h *TaskHandler) PatchCostInfo(c *gin.Context) {
 		params.Remark = strings.TrimSpace(*req.Remark)
 	}
 	updated, appErr := h.svc.UpdateBusinessInfo(c.Request.Context(), params)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, updated)
+}
+
+// PatchSKUItemInfo handles PATCH /v1/tasks/:id/sku-items/:sku_item_id
+func (h *TaskHandler) PatchSKUItemInfo(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	skuItemID, err := strconv.ParseInt(strings.TrimSpace(c.Param("sku_item_id")), 10, 64)
+	if err != nil || skuItemID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid sku item id", nil))
+		return
+	}
+	var req patchTaskSKUItemInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	updater, ok := h.svc.(interface {
+		UpdateSKUItemInfo(context.Context, service.UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError)
+	})
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "task sku item service not configured", nil))
+		return
+	}
+	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID, "operator_id")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	productIID := req.ProductIID
+	if productIID == nil {
+		productIID = req.IID
+	}
+	triggerFiling := req.TriggerFiling != nil && *req.TriggerFiling
+	remark := ""
+	if req.Remark != nil {
+		remark = strings.TrimSpace(*req.Remark)
+	}
+	updated, appErr := updater.UpdateSKUItemInfo(c.Request.Context(), service.UpdateTaskSKUItemInfoParams{
+		TaskID:               taskID,
+		SKUItemID:            skuItemID,
+		OperatorID:           operatorID,
+		ProductName:          req.ProductName,
+		ProductIID:           productIID,
+		SpecText:             req.SpecText,
+		SizeText:             req.SizeText,
+		Width:                req.Width,
+		Height:               req.Height,
+		Area:                 req.Area,
+		Quantity:             req.Quantity,
+		DesignRequirement:    req.DesignRequirement,
+		ReferenceFileRefs:    req.ReferenceFileRefs,
+		ReferenceFileRefsSet: req.ReferenceFileRefs != nil,
+		TriggerFiling:        triggerFiling,
+		Remark:               remark,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, updated)
+}
+
+// PatchSKUItemCostInfo handles PATCH /v1/tasks/:id/sku-items/:sku_item_id/cost-info
+func (h *TaskHandler) PatchSKUItemCostInfo(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	skuItemID, err := parseInt64(strings.TrimSpace(c.Param("sku_item_id")))
+	if err != nil || skuItemID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid sku item id", nil))
+		return
+	}
+	var req patchTaskSKUItemCostInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	updater, ok := h.svc.(interface {
+		UpdateSKUItemCostInfo(context.Context, service.UpdateTaskSKUItemCostInfoParams) (*domain.TaskSKUItem, *domain.AppError)
+	})
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "task sku item cost service not configured", nil))
+		return
+	}
+	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID, "operator_id")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	manual := true
+	if req.ManualCostOverride != nil {
+		manual = *req.ManualCostOverride
+	}
+	reason := ""
+	if req.ManualCostOverrideReason != nil {
+		reason = strings.TrimSpace(*req.ManualCostOverrideReason)
+	}
+	remark := ""
+	if req.Remark != nil {
+		remark = strings.TrimSpace(*req.Remark)
+	}
+	updated, appErr := updater.UpdateSKUItemCostInfo(c.Request.Context(), service.UpdateTaskSKUItemCostInfoParams{
+		TaskID:                   taskID,
+		SKUItemID:                skuItemID,
+		OperatorID:               operatorID,
+		CostPrice:                req.CostPrice,
+		ManualCostOverride:       manual,
+		ManualCostOverrideReason: reason,
+		Remark:                   remark,
+	})
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1638,7 +1978,18 @@ func (h *TaskHandler) PreviewCostQuote(c *gin.Context) {
 	if req.Process != nil {
 		process = strings.TrimSpace(*req.Process)
 	}
-	notes := strings.TrimSpace(detail.Material + " " + detail.CraftText + " " + detail.SpecText)
+	notes := strings.TrimSpace(strings.Join([]string{
+		detail.SizeText,
+		detail.SpecText,
+		detail.Material,
+		detail.CraftText,
+		detail.Process,
+		detail.DesignRequirement,
+		detail.ChangeRequest,
+		detail.Note,
+		detail.Remark,
+		detail.DemandText,
+	}, " "))
 	if req.Notes != nil {
 		notes = strings.TrimSpace(*req.Notes)
 	}
@@ -1680,12 +2031,9 @@ func (h *TaskHandler) loadTaskAggregate(c *gin.Context, taskID int64) (*domain.T
 
 func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggregate *domain.TaskDetailAggregate) service.UpdateTaskBusinessInfoParams {
 	detail := aggregate.TaskDetail
-	return service.UpdateTaskBusinessInfoParams{
+	params := service.UpdateTaskBusinessInfoParams{
 		TaskID:                   taskID,
 		OperatorID:               operatorID,
-		Category:                 detail.Category,
-		CategoryID:               detail.CategoryID,
-		CategoryCode:             detail.CategoryCode,
 		SpecText:                 detail.SpecText,
 		Material:                 detail.Material,
 		SizeText:                 detail.SizeText,
@@ -1708,8 +2056,11 @@ func buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID int64, aggreg
 		ManualCostOverride:       detail.ManualCostOverride,
 		ManualCostOverrideReason: detail.ManualCostOverrideReason,
 		TriggerFiling:            false,
-		FiledAt:                  detail.FiledAt,
 	}
+	if aggregate.Task != nil {
+		params.DeadlineAt = aggregate.Task.DeadlineAt
+	}
+	return params
 }
 
 func firstInt64(primary, fallback *int64) *int64 {

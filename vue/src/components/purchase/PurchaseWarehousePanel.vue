@@ -8,6 +8,9 @@
       <p class="hint-text">
         立项所需的采购信息已在创建任务时填写；金额与数量请以「成本与价格」为准，此处仅用于推进采购与仓库节点。
       </p>
+      <p class="hint-text mt-2">
+        采购任务不会自动产生设计成品图；如需同步 ERP 图片，请在任务详情的「ERP 商品资料」中上传 ERP 商品图。
+      </p>
       <PurchaseBusinessInfoSupplement :task="task" class="mt-3" />
       <div class="field mt-3">
         <label class="field-label">采购状态</label>

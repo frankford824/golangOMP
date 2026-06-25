@@ -22,20 +22,30 @@ const taskAssetSearchSelect = `
 	       ta.mime_type, ta.file_size, ta.file_path, ta.storage_key, ta.whole_hash, ta.upload_status, ta.preview_status,
 	       ta.uploaded_by, ta.uploaded_at, ta.remark, ta.created_at,
 	       ta.source_module_key, ta.source_task_module_id, ta.is_archived, ta.archived_at, ta.archived_by, ta.cleaned_at, ta.deleted_at,
+	       ta.flow_review_status, ta.approved_at, ta.approved_by, ta.rejected_at, ta.rejected_by, ta.superseded_by_version_id, ta.superseded_at, ta.cleanup_after_at, ta.source_asset_version_id,
 	       t.id, t.task_no, t.source_mode, t.product_id, t.sku_code, t.product_name_snapshot,
 	       t.task_type, t.operator_group_id, t.owner_team, t.owner_department, t.owner_org_team, t.creator_id, t.requester_id,
 	       t.designer_id, t.current_handler_id, t.task_status, t.priority, t.deadline_at, t.need_outsource, t.is_outsource,
-	       t.customization_required, t.customization_source_type, t.last_customization_operator_id, t.warehouse_reject_reason,
+	       COALESCE(t.business_lane, ''), t.customization_required, t.customization_source_type, t.last_customization_operator_id, t.warehouse_reject_reason,
 	       t.warehouse_reject_category, t.is_batch_task, t.batch_item_count, t.batch_mode, t.primary_sku_code,
 	       t.sku_generation_status, t.created_at, t.updated_at,
 	       da.asset_no, da.created_by, da.created_at, da.updated_at,
-	       COALESCE(tm.claimed_team_code, tm.pool_team_code, '') AS owner_team_code`
+	       COALESCE(tm.claimed_team_code, tm.pool_team_code, '') AS owner_team_code,
+	       COALESCE(NULLIF(task_creator.username, ''), '') AS task_creator_username,
+	       COALESCE(NULLIF(task_creator.display_name, ''), '') AS task_creator_name,
+	       COALESCE(NULLIF(asset_creator.username, ''), '') AS asset_creator_username,
+	       COALESCE(NULLIF(asset_creator.display_name, ''), '') AS asset_creator_name,
+	       COALESCE(NULLIF(uploaded_user.username, ''), '') AS uploaded_by_username,
+	       COALESCE(NULLIF(uploaded_user.display_name, ''), '') AS uploaded_by_name`
 
 const taskAssetSearchFrom = `
 	  FROM task_assets ta
 	  JOIN design_assets da ON da.id = ta.asset_id
 	  JOIN tasks t ON t.id = ta.task_id
-	  LEFT JOIN task_modules tm ON tm.id = ta.source_task_module_id`
+	  LEFT JOIN task_modules tm ON tm.id = ta.source_task_module_id
+	  LEFT JOIN users task_creator ON task_creator.id = t.creator_id
+	  LEFT JOIN users asset_creator ON asset_creator.id = da.created_by
+	  LEFT JOIN users uploaded_user ON uploaded_user.id = ta.uploaded_by`
 
 func (r *taskAssetSearchRepo) Search(ctx context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
 	query = query.Normalized()
@@ -47,7 +57,7 @@ func (r *taskAssetSearchRepo) Search(ctx context.Context, query domain.AssetSear
 	}
 	args = append(args, (query.Page-1)*query.Size, query.Size)
 	rows, err := r.db.db.QueryContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+where+`
-		ORDER BY ta.created_at DESC, ta.id DESC
+		ORDER BY da.updated_at DESC, ta.created_at DESC, ta.id DESC
 		LIMIT ?, ?`, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search task assets: %w", err)
@@ -64,6 +74,19 @@ func (r *taskAssetSearchRepo) GetCurrentByAssetID(ctx context.Context, assetID i
 		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
 		  ))`, assetID)
 	return scanTaskAssetSearchRow(row)
+}
+
+func (r *taskAssetSearchRepo) ListCurrentByAssetIDs(ctx context.Context, assetIDs []int64) ([]*repo.TaskAssetSearchRow, error) {
+	query, args := buildListCurrentByAssetIDsQuery(assetIDs)
+	if query == "" {
+		return []*repo.TaskAssetSearchRow{}, nil
+	}
+	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list current assets by ids: %w", err)
+	}
+	defer rows.Close()
+	return scanTaskAssetSearchRows(rows)
 }
 
 func (r *taskAssetSearchRepo) ListVersionsByAssetID(ctx context.Context, assetID int64) ([]*repo.TaskAssetSearchRow, error) {
@@ -86,12 +109,47 @@ func (r *taskAssetSearchRepo) GetVersion(ctx context.Context, assetID, versionID
 func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interface{}) {
 	clauses := []string{`ta.id = COALESCE(da.current_version_id, (
 		SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
-	))`, `ta.deleted_at IS NULL`}
+	))`, `ta.deleted_at IS NULL`, `NOT (
+		da.source_asset_id IS NOT NULL
+		AND da.asset_type IN ('preview', 'design_thumb')
+		AND COALESCE(ta.remark, '') IN ('async-derived-preview', 'async-derived-preview:webp')
+	)`}
 	var args []interface{}
 	if query.Keyword != "" {
-		like := "%" + strings.TrimSpace(query.Keyword) + "%"
-		clauses = append(clauses, `(ta.file_name LIKE ? OR t.task_no LIKE ? OR t.product_name_snapshot LIKE ?)`)
-		args = append(args, like, like, like)
+		kw := normalizeSearchKeyword(query.Keyword)
+		keywordClauses := []string{
+			"ta.file_name LIKE ?",
+			"ta.original_filename LIKE ?",
+			"t.product_name_snapshot LIKE ?",
+		}
+		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like}
+		if kw.HasInt64 {
+			keywordClauses = append(keywordClauses, "ta.asset_id = ?", "ta.id = ?", "ta.task_id = ?")
+			keywordArgs = append(keywordArgs, kw.Int64, kw.Int64, kw.Int64)
+		}
+		if kw.IsCode {
+			keywordClauses = append(keywordClauses,
+				"t.sku_code = ?",
+				"t.primary_sku_code = ?",
+				"ta.scope_sku_code = ?",
+				"t.task_no = ?",
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				"ta.scope_sku_code LIKE ?",
+				"t.task_no LIKE ?",
+			)
+			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
+		} else {
+			keywordClauses = append(keywordClauses,
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				"ta.scope_sku_code LIKE ?",
+				"t.task_no LIKE ?",
+			)
+			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+		}
+		clauses = append(clauses, "("+strings.Join(keywordClauses, " OR ")+")")
+		args = append(args, keywordArgs...)
 	}
 	if query.ModuleKey != "" {
 		clauses = append(clauses, `ta.source_module_key = ?`)
@@ -127,6 +185,38 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 		clauses = append(clauses, `t.task_status = ?`)
 		args = append(args, string(domain.TaskStatusArchived))
 	}
+	switch query.UsableState {
+	case domain.AssetUsableStateFilterEditable:
+		clauses = append(clauses, `ta.asset_type IN (?, ?, ?)`)
+		args = append(args, string(domain.TaskAssetTypeDelivery), string(domain.TaskAssetTypeSource), string(domain.TaskAssetTypeReference))
+		clauses = append(clauses, `COALESCE(ta.flow_review_status, '') NOT IN (?, ?)`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusSuperseded), string(domain.TaskAssetFlowReviewStatusCleaned))
+	case domain.AssetUsableStateFilterReadyForUse:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusApproved))
+	case domain.AssetUsableStateFilterPendingReview:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusPendingReview))
+	case domain.AssetUsableStateFilterRejected:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusRejected))
+	case domain.AssetUsableStateFilterHistory:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusSuperseded))
+	case domain.AssetUsableStateFilterCleaned:
+		clauses = append(clauses, `ta.flow_review_status = ?`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusCleaned))
+	case domain.AssetUsableStateFilterOther:
+		clauses = append(clauses, `(ta.flow_review_status IS NULL OR ta.flow_review_status = ? OR ta.flow_review_status = '')`)
+		args = append(args, string(domain.TaskAssetFlowReviewStatusNotApplicable))
+	}
+	clauses, args = appendAssetFormatCategoryWhere(
+		clauses,
+		args,
+		[]string{`LOWER(ta.file_name)`, `LOWER(COALESCE(ta.original_filename, ''))`},
+		`LOWER(COALESCE(ta.mime_type, ''))`,
+		query.FormatCategory,
+	)
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
@@ -157,29 +247,35 @@ type taskAssetSearchScanner interface {
 func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearchRow, error) {
 	var a domain.TaskAsset
 	var t domain.Task
-	var assetID, assetVersionNo, sourceTaskModuleID, archivedBy, productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
-	var scopeSKUCode, uploadMode, uploadRequestID, storageRefID, originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var assetID, assetVersionNo, sourceTaskModuleID, archivedBy, approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID, productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
+	var scopeSKUCode, uploadMode, uploadRequestID, storageRefID, originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var flowReviewStatus sql.NullString
 	var fileSize sql.NullInt64
-	var uploadedAt, archivedAt, cleanedAt, deletedAt, deadlineAt sql.NullTime
+	var uploadedAt, archivedAt, cleanedAt, deletedAt, approvedAt, rejectedAt, supersededAt, cleanupAfterAt, deadlineAt sql.NullTime
 	var needOutsource, isOutsource, customizationRequired, isBatchTask sql.NullBool
 	var assetNo string
 	var designCreatedBy int64
 	var designCreatedAt, designUpdatedAt time.Time
 	var ownerTeamCode string
+	var taskCreatorUsername, taskCreatorName, assetCreatorUsername, assetCreatorName, uploadedByUsername, uploadedByName string
 	if err := s.Scan(
 		&a.ID, &a.TaskID, &assetID, &scopeSKUCode, &a.AssetType, &a.VersionNo, &assetVersionNo,
 		&uploadMode, &uploadRequestID, &storageRefID, &a.FileName, &originalFilename, &remoteFileID,
 		&mimeType, &fileSize, &filePath, &storageKey, &wholeHash, &uploadStatus, &previewStatus,
 		&a.UploadedBy, &uploadedAt, &a.Remark, &a.CreatedAt,
 		&a.SourceModuleKey, &sourceTaskModuleID, &a.IsArchived, &archivedAt, &archivedBy, &cleanedAt, &deletedAt,
+		&flowReviewStatus, &approvedAt, &approvedBy, &rejectedAt, &rejectedBy, &supersededByVersionID, &supersededAt, &cleanupAfterAt, &sourceAssetVersionID,
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
 		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &t.OwnerDepartment, &t.OwnerOrgTeam, &t.CreatorID, &requesterID,
 		&designerID, &currentHandlerID, &t.TaskStatus, &t.Priority, &deadlineAt, &needOutsource, &isOutsource,
-		&customizationRequired, &customizationSourceType, &lastCustomizationOperatorID, &warehouseRejectReason,
+		&businessLane, &customizationRequired, &customizationSourceType, &lastCustomizationOperatorID, &warehouseRejectReason,
 		&warehouseRejectCategory, &isBatchTask, &t.BatchItemCount, &t.BatchMode, &t.PrimarySKUCode,
 		&t.SKUGenerationStatus, &t.CreatedAt, &t.UpdatedAt,
 		&assetNo, &designCreatedBy, &designCreatedAt, &designUpdatedAt,
 		&ownerTeamCode,
+		&taskCreatorUsername, &taskCreatorName,
+		&assetCreatorUsername, &assetCreatorName,
+		&uploadedByUsername, &uploadedByName,
 	); err != nil {
 		return nil, fmt.Errorf("scan task asset search row: %w", err)
 	}
@@ -205,6 +301,19 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	a.ArchivedBy = fromNullInt64(archivedBy)
 	a.CleanedAt = fromNullTime(cleanedAt)
 	a.DeletedAt = fromNullTime(deletedAt)
+	if flowReviewStatus.Valid {
+		a.FlowReviewStatus = domain.NormalizeTaskAssetFlowReviewStatus(domain.TaskAssetFlowReviewStatus(flowReviewStatus.String), a.AssetType)
+	} else {
+		a.FlowReviewStatus = domain.NormalizeTaskAssetFlowReviewStatus("", a.AssetType)
+	}
+	a.ApprovedAt = fromNullTime(approvedAt)
+	a.ApprovedBy = fromNullInt64(approvedBy)
+	a.RejectedAt = fromNullTime(rejectedAt)
+	a.RejectedBy = fromNullInt64(rejectedBy)
+	a.SupersededByVersionID = fromNullInt64(supersededByVersionID)
+	a.SupersededAt = fromNullTime(supersededAt)
+	a.CleanupAfterAt = fromNullTime(cleanupAfterAt)
+	a.SourceAssetVersionID = fromNullInt64(sourceAssetVersionID)
 	t.ProductID = fromNullInt64(productID)
 	t.OperatorGroupID = fromNullInt64(operatorGroupID)
 	t.RequesterID = fromNullInt64(requesterID)
@@ -214,6 +323,11 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	t.NeedOutsource = needOutsource.Valid && needOutsource.Bool
 	t.IsOutsource = isOutsource.Valid && isOutsource.Bool
 	t.CustomizationRequired = customizationRequired.Valid && customizationRequired.Bool
+	if businessLane.Valid {
+		t.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), t.CustomizationRequired)
+	} else {
+		t.BusinessLane = domain.TaskBusinessLaneFromLegacy(t.CustomizationRequired)
+	}
 	if customizationSourceType.Valid {
 		t.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
 	}
@@ -226,12 +340,43 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	}
 	t.IsBatchTask = isBatchTask.Valid && isBatchTask.Bool
 	return &repo.TaskAssetSearchRow{
-		Asset:           &a,
-		Task:            &t,
-		AssetNo:         assetNo,
-		DesignCreatedBy: designCreatedBy,
-		DesignCreatedAt: designCreatedAt,
-		DesignUpdatedAt: designUpdatedAt,
-		OwnerTeamCode:   ownerTeamCode,
+		Asset:                &a,
+		Task:                 &t,
+		AssetNo:              assetNo,
+		DesignCreatedBy:      designCreatedBy,
+		DesignCreatedAt:      designCreatedAt,
+		DesignUpdatedAt:      designUpdatedAt,
+		OwnerTeamCode:        ownerTeamCode,
+		TaskCreatorUsername:  taskCreatorUsername,
+		TaskCreatorName:      taskCreatorName,
+		AssetCreatorUsername: assetCreatorUsername,
+		AssetCreatorName:     assetCreatorName,
+		UploadedByUsername:   uploadedByUsername,
+		UploadedByName:       uploadedByName,
 	}, nil
+}
+
+func buildListCurrentByAssetIDsQuery(assetIDs []int64) (string, []interface{}) {
+	if len(assetIDs) == 0 {
+		return "", nil
+	}
+	placeholders := make([]string, 0, len(assetIDs))
+	args := make([]interface{}, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		if assetID <= 0 {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, assetID)
+	}
+	if len(placeholders) == 0 {
+		return "", nil
+	}
+	query := taskAssetSearchSelect + taskAssetSearchFrom + `
+		WHERE da.id IN (` + strings.Join(placeholders, ", ") + `)
+		  AND ta.id = COALESCE(da.current_version_id, (
+		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
+		  ))
+		ORDER BY ta.created_at DESC, ta.id DESC`
+	return query, args
 }

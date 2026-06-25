@@ -154,7 +154,7 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		decision.MatchedRule = "pending_assign_self_claim"
 	}
 	authz.logDecision(operation.Action, decision)
-	if isActorTakingTaskAlreadyClaimedByOther(task, p, actorID) {
+	if isActorTakingTaskAlreadyClaimedByOther(ctx, task, p, actorID, operation) {
 		denied := decision
 		denied.Allowed = false
 		denied.DenyCode = domain.DenyTaskAlreadyClaimed
@@ -175,7 +175,9 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		}
 		decision = overrideDecision
 	}
-	if task.TaskStatus != domain.TaskStatusPendingAssign && !taskActionDecisionHasElevatedScope(decision) {
+	if task.TaskStatus != domain.TaskStatusPendingAssign &&
+		!isCustomizationProductionAssignmentTask(task) &&
+		!taskAssignmentAllowsInProgressReassign(ctx, task, operation, decision) {
 		denied := decision
 		denied.Allowed = false
 		denied.DenyCode = "task_reassign_requires_manager_scope"
@@ -202,7 +204,11 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	if p.DesignerID == nil {
 		return s.clearAssignment(ctx, task, p, operation, decision)
 	}
-	if appErr := s.validateManagedDepartmentTarget(ctx, p.DesignerID); appErr != nil {
+	if appErr := s.validateAssignableDesignerTarget(ctx, task, p.DesignerID); appErr != nil {
+		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
+		return nil, appErr
+	}
+	if appErr := s.validateManagedDepartmentTarget(ctx, task, decision, p.DesignerID); appErr != nil {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
 		return nil, appErr
 	}
@@ -268,7 +274,7 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		if err != nil {
 			return err
 		}
-		if err := s.syncDesignModuleAssignment(ctx, tx, task, p, previousDesignerID); err != nil {
+		if err := s.syncAssignmentModule(ctx, tx, task, p, previousDesignerID); err != nil {
 			return err
 		}
 		s.createAssignmentNotification(ctx, tx, task, p, operation, actorID, previousDesignerID, previousHandlerID)
@@ -322,11 +328,14 @@ func (s *taskAssignmentService) createAssignmentNotification(ctx context.Context
 	}
 }
 
-func (s *taskAssignmentService) syncDesignModuleAssignment(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, previousDesignerID *int64) error {
-	if s.taskModuleRepo == nil || p.DesignerID == nil || *p.DesignerID <= 0 || task == nil || !task.TaskType.RequiresDesign() {
+func (s *taskAssignmentService) syncAssignmentModule(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, previousDesignerID *int64) error {
+	if s.taskModuleRepo == nil || p.DesignerID == nil || *p.DesignerID <= 0 || task == nil {
 		return nil
 	}
-	moduleKey := assignmentDesignModuleKey(task)
+	if !isCustomizationAssignmentTask(task) && !task.TaskType.RequiresDesign() {
+		return nil
+	}
+	moduleKey := assignmentModuleKey(task)
 	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, moduleKey)
 	if err != nil {
 		return fmt.Errorf("load design module for task assignment sync: %w", err)
@@ -363,11 +372,14 @@ func (s *taskAssignmentService) syncDesignModuleAssignment(ctx context.Context, 
 	return nil
 }
 
-func (s *taskAssignmentService) syncDesignModuleUnassignment(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, previousDesignerID *int64) error {
-	if s.taskModuleRepo == nil || task == nil || !task.TaskType.RequiresDesign() {
+func (s *taskAssignmentService) syncAssignmentModuleUnassignment(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, previousDesignerID *int64) error {
+	if s.taskModuleRepo == nil || task == nil {
 		return nil
 	}
-	moduleKey := assignmentDesignModuleKey(task)
+	if !isCustomizationAssignmentTask(task) && !task.TaskType.RequiresDesign() {
+		return nil
+	}
+	moduleKey := assignmentModuleKey(task)
 	module, err := s.taskModuleRepo.GetByTaskAndKey(ctx, p.TaskID, moduleKey)
 	if err != nil {
 		return fmt.Errorf("load design module for task unassignment sync: %w", err)
@@ -407,7 +419,21 @@ func (s *taskAssignmentService) syncDesignModuleUnassignment(ctx context.Context
 	return nil
 }
 
-func assignmentDesignModuleKey(task *domain.Task) string {
+func isCustomizationAssignmentTask(task *domain.Task) bool {
+	if task == nil {
+		return false
+	}
+	return task.WorkflowLane() == domain.WorkflowLaneCustomization
+}
+
+func isCustomizationProductionAssignmentTask(task *domain.Task) bool {
+	return isCustomizationAssignmentTask(task) && task.TaskStatus == domain.TaskStatusPendingCustomizationProduction
+}
+
+func assignmentModuleKey(task *domain.Task) string {
+	if isCustomizationAssignmentTask(task) {
+		return domain.ModuleKeyCustomization
+	}
 	if task != nil && task.TaskType == domain.TaskTypeRetouchTask {
 		return domain.ModuleKeyRetouch
 	}
@@ -415,6 +441,9 @@ func assignmentDesignModuleKey(task *domain.Task) string {
 }
 
 func assignmentDefaultPoolTeam(task *domain.Task) string {
+	if isCustomizationAssignmentTask(task) {
+		return domain.TeamCustomizationArt
+	}
 	if task != nil && task.TaskType == domain.TaskTypeRetouchTask {
 		return domain.TeamDesignRetouch
 	}
@@ -504,7 +533,7 @@ func (s *taskAssignmentService) clearAssignment(ctx context.Context, task *domai
 		if err != nil {
 			return err
 		}
-		return s.syncDesignModuleUnassignment(ctx, tx, task, p, previousDesignerID)
+		return s.syncAssignmentModuleUnassignment(ctx, tx, task, p, previousDesignerID)
 	})
 	if txErr != nil {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, nil, resultingStatus, decision, false)
@@ -518,12 +547,58 @@ func (s *taskAssignmentService) clearAssignment(ctx context.Context, task *domai
 	return updated, nil
 }
 
-func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Context, designerID *int64) *domain.AppError {
+func (s *taskAssignmentService) validateAssignableDesignerTarget(ctx context.Context, task *domain.Task, designerID *int64) *domain.AppError {
+	if designerID == nil || s.scopeUserRepo == nil {
+		return nil
+	}
+	target, appErr := s.loadTaskAssignmentTarget(ctx, designerID)
+	if appErr != nil {
+		return appErr
+	}
+	if target.Status != domain.UserStatusActive {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee is not active", map[string]interface{}{
+			"deny_code":      "target_assignee_not_active",
+			"target_user_id": *designerID,
+			"target_status":  target.Status,
+		})
+	}
+	roles := append([]domain.Role(nil), target.Roles...)
+	if len(roles) == 0 {
+		loadedRoles, err := s.scopeUserRepo.ListRoles(ctx, *designerID)
+		if err != nil {
+			return infraError("load target assignee roles", err)
+		}
+		roles = loadedRoles
+	}
+	if isCustomizationAssignmentTask(task) {
+		if !hasRoleValue(roles, domain.RoleCustomizationOperator) {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee is not a customization operator", map[string]interface{}{
+				"deny_code":      "target_assignee_not_customization_operator",
+				"target_user_id": *designerID,
+				"target_roles":   roles,
+			})
+		}
+		return nil
+	}
+	if !hasRoleValue(roles, domain.RoleDesigner) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee is not a designer", map[string]interface{}{
+			"deny_code":      "target_assignee_not_designer",
+			"target_user_id": *designerID,
+			"target_roles":   roles,
+		})
+	}
+	return nil
+}
+
+func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Context, task *domain.Task, decision TaskActionDecision, designerID *int64) *domain.AppError {
 	if designerID == nil {
 		return nil
 	}
 	actor, ok := domain.RequestActorFromContext(ctx)
 	if !ok || !hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector) {
+		return nil
+	}
+	if !taskAssignmentRequiresManagedTargetScope(actor, task, decision) {
 		return nil
 	}
 	managedDepartments := normalizeTaskDepartmentCodes(actor.ManagedDepartments)
@@ -563,6 +638,32 @@ func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Cont
 	})
 }
 
+func taskAssignmentRequiresManagedTargetScope(actor domain.RequestActor, task *domain.Task, decision TaskActionDecision) bool {
+	if hasAnyRoleValue(actor.Roles, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleRoleAdmin, domain.RoleHRAdmin) {
+		return false
+	}
+	if task != nil && actor.ID > 0 {
+		if task.CreatorID == actor.ID {
+			return false
+		}
+		if task.RequesterID != nil && *task.RequesterID == actor.ID {
+			return false
+		}
+	}
+	switch TaskActionScopeSource(decision.ScopeSource) {
+	case TaskActionScopeCreator, TaskActionScopeRequester, TaskActionScopeViewAll:
+		return false
+	case TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam:
+		return true
+	case TaskActionScopeDepartment:
+		return hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector)
+	case TaskActionScopeTeam:
+		return hasRoleValue(actor.Roles, domain.RoleTeamLead)
+	default:
+		return strings.EqualFold(strings.TrimSpace(decision.MatchedRule), "design_manager_target_scope")
+	}
+}
+
 func (s *taskAssignmentService) allowDesignManagerAssignmentByTargetScope(ctx context.Context, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, decision TaskActionDecision) (TaskActionDecision, bool, *domain.AppError) {
 	if task == nil || p.DesignerID == nil {
 		return decision, false, nil
@@ -570,7 +671,9 @@ func (s *taskAssignmentService) allowDesignManagerAssignmentByTargetScope(ctx co
 	if operation.Action != TaskActionAssign && operation.Action != TaskActionReassign {
 		return decision, false, nil
 	}
-	if operation.Action == TaskActionAssign && task.TaskStatus != domain.TaskStatusPendingAssign {
+	if operation.Action == TaskActionAssign &&
+		task.TaskStatus != domain.TaskStatusPendingAssign &&
+		!isCustomizationProductionAssignmentTask(task) {
 		return decision, false, nil
 	}
 	if operation.Action == TaskActionReassign && task.TaskStatus != domain.TaskStatusInProgress {
@@ -757,11 +860,31 @@ func taskAlreadyClaimedByOther(task *domain.Task, actorID int64) bool {
 	return false
 }
 
-func isActorTakingTaskAlreadyClaimedByOther(task *domain.Task, p AssignTaskParams, actorID int64) bool {
+func isActorTakingTaskAlreadyClaimedByOther(ctx context.Context, task *domain.Task, p AssignTaskParams, actorID int64, operation taskAssignmentOperation) bool {
 	if p.DesignerID == nil || actorID <= 0 || *p.DesignerID != actorID {
 		return false
 	}
+	// Management reassign-to-self is scheduled handoff, not unassigned-pool self-claim.
+	if operation.Action == TaskActionReassign {
+		if actor, ok := resolveTaskActionActor(ctx); ok && taskActionActorHasManagementScopeRole(actor) {
+			return false
+		}
+	}
 	return taskAlreadyClaimedByOther(task, actorID)
+}
+
+func taskAssignmentAllowsInProgressReassign(ctx context.Context, task *domain.Task, operation taskAssignmentOperation, decision TaskActionDecision) bool {
+	if task == nil || operation.Action != TaskActionReassign {
+		return taskActionDecisionHasElevatedScope(decision)
+	}
+	if taskActionDecisionHasElevatedScope(decision) {
+		return true
+	}
+	actor, ok := resolveTaskActionActor(ctx)
+	if !ok {
+		return false
+	}
+	return taskActionActorIsCreatorOrRequester(actor, task)
 }
 
 func (s *taskAssignmentService) BatchAssign(ctx context.Context, p BatchAssignTasksParams) (*BatchTaskActionResult, *domain.AppError) {
@@ -883,6 +1006,14 @@ func normalizeBatchTaskIDs(taskIDs []int64) []int64 {
 }
 
 func resolveTaskAssignmentOperation(task *domain.Task) taskAssignmentOperation {
+	if isCustomizationProductionAssignmentTask(task) {
+		return taskAssignmentOperation{
+			Action:          TaskActionAssign,
+			EventType:       domain.TaskEventAssigned,
+			LogAction:       "assign",
+			ResultingStatus: domain.TaskStatusPendingCustomizationProduction,
+		}
+	}
 	if task != nil && task.TaskStatus == domain.TaskStatusPendingAssign {
 		return taskAssignmentOperation{
 			Action:          TaskActionAssign,

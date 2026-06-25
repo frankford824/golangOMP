@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +115,483 @@ func TestCostRulePreviewAppliesFixedThresholdAndProcessSurcharge(t *testing.T) {
 	}
 	if result.EstimatedCost == nil || *result.EstimatedCost <= 0 {
 		t.Fatalf("estimated_cost = %+v, want > 0", result.EstimatedCost)
+	}
+}
+
+func TestCostRulePreviewAppliesSurchargeTaxMultiplier(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   11,
+		CategoryCode: "PHOTO_CLOTH_STANDARD",
+		CategoryName: "常规写真布",
+		DisplayName:  "常规写真布",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       11,
+			RuleVersion:  1,
+			RuleName:     "常规写真布基础单价",
+			CategoryCode: "PHOTO_CLOTH_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    costRuleFloat64Ptr(5),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "test",
+		},
+		{
+			RuleID:          12,
+			RuleVersion:     1,
+			RuleName:        "常规写真布小面积附加",
+			CategoryCode:    "PHOTO_CLOTH_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			TaxMultiplier:   costRuleFloat64Ptr(1.1),
+			AreaThreshold:   costRuleFloat64Ptr(0.15),
+			SurchargeAmount: costRuleFloat64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "test",
+		},
+	}
+
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "PHOTO_CLOTH_STANDARD",
+		Area:         costRuleFloat64Ptr(0.1),
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.83) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.83", result.EstimatedCost)
+	}
+}
+
+func TestCostRulePreviewAppliesSmallAreaSurchargeBySinglePieceArea(t *testing.T) {
+	tests := []struct {
+		name         string
+		categoryCode string
+		rules        []*domain.CostRule
+		notes        string
+		want         float64
+	}{
+		{
+			name:         "kt board piece set",
+			categoryCode: "KT_STANDARD",
+			notes:        "常规KT板 20*20cm 4件套",
+			want:         2.464,
+			rules: []*domain.CostRule{
+				{
+					RuleID:        31,
+					RuleVersion:   1,
+					RuleName:      "常规KT板基础单价",
+					CategoryCode:  "KT_STANDARD",
+					RuleType:      domain.CostRuleTypeFixedUnitPrice,
+					BasePrice:     costRuleFloat64Ptr(11),
+					TaxMultiplier: costRuleFloat64Ptr(1.1),
+					Priority:      10,
+					IsActive:      true,
+					Source:        "test",
+				},
+				{
+					RuleID:          32,
+					RuleVersion:     1,
+					RuleName:        "常规KT板小面积附加",
+					CategoryCode:    "KT_STANDARD",
+					RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+					AreaThreshold:   costRuleFloat64Ptr(0.15),
+					SurchargeAmount: costRuleFloat64Ptr(3),
+					Priority:        20,
+					IsActive:        true,
+					Source:          "test",
+				},
+			},
+		},
+		{
+			name:         "photo cloth piece set",
+			categoryCode: "PHOTO_CLOTH_STANDARD",
+			notes:        "常规写真布 20*20cm 4件套",
+			want:         1.408,
+			rules: []*domain.CostRule{
+				{
+					RuleID:        41,
+					RuleVersion:   1,
+					RuleName:      "常规写真布基础单价",
+					CategoryCode:  "PHOTO_CLOTH_STANDARD",
+					RuleType:      domain.CostRuleTypeFixedUnitPrice,
+					BasePrice:     costRuleFloat64Ptr(5),
+					TaxMultiplier: costRuleFloat64Ptr(1.1),
+					Priority:      10,
+					IsActive:      true,
+					Source:        "test",
+				},
+				{
+					RuleID:          42,
+					RuleVersion:     1,
+					RuleName:        "常规写真布小面积附加",
+					CategoryCode:    "PHOTO_CLOTH_STANDARD",
+					RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+					TaxMultiplier:   costRuleFloat64Ptr(1.1),
+					AreaThreshold:   costRuleFloat64Ptr(0.15),
+					SurchargeAmount: costRuleFloat64Ptr(3),
+					Priority:        20,
+					IsActive:        true,
+					Source:          "test",
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := previewCostRules(domain.CostRulePreviewRequest{
+				CategoryCode: tt.categoryCode,
+				Notes:        tt.notes,
+			}, tt.rules).Response
+			if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-tt.want) > 0.000001 {
+				t.Fatalf("estimated_cost = %+v, want %.3f", result.EstimatedCost, tt.want)
+			}
+			if len(result.AppliedRules) != 2 {
+				t.Fatalf("applied rules = %d, want base + small-area surcharge", len(result.AppliedRules))
+			}
+			if result.RequiresManualReview {
+				t.Fatalf("requires_manual_review = true, want false")
+			}
+		})
+	}
+}
+
+func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   21,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规KT板",
+		DisplayName:  "常规KT板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       21,
+			RuleVersion:  1,
+			RuleName:     "KT板面积单价",
+			CategoryCode: "KT_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    costRuleFloat64Ptr(11),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "test",
+		},
+		{
+			RuleID:          22,
+			RuleVersion:     1,
+			RuleName:        "小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   costRuleFloat64Ptr(0.15),
+			SurchargeAmount: costRuleFloat64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "运营备注：尺寸20x20cm，做常规KT板",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.56) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.56", result.EstimatedCost)
+	}
+	if result.RequiresManualReview {
+		t.Fatalf("requires_manual_review = true, want false")
+	}
+}
+
+func TestCostRulePreviewRegularKTUsesTaxedStandardUnitPrice(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   21,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规KT板",
+		DisplayName:  "常规KT板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        21,
+			RuleVersion:   1,
+			RuleName:      "KT板面积单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     costRuleFloat64Ptr(11),
+			TaxMultiplier: costRuleFloat64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "CPT-常规kt板/娜塔莎生日/红色波点裙子大号/150*90cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-16.335) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 16.335", result.EstimatedCost)
+	}
+}
+
+func TestCostRulePreviewTreatsTrailingMultiplierAsBoxFaces(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   21,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规KT板",
+		DisplayName:  "常规KT板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        21,
+			RuleVersion:   1,
+			RuleName:      "KT板面积单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     costRuleFloat64Ptr(11),
+			TaxMultiplier: costRuleFloat64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "test",
+		},
+		{
+			RuleID:          22,
+			RuleVersion:     1,
+			RuleName:        "小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   costRuleFloat64Ptr(0.15),
+			SurchargeAmount: costRuleFloat64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "CPT-常规kt板/中高考抽奖箱/高考顺利/30*30cm*6",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-13.068) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 13.068", result.EstimatedCost)
+	}
+	if len(result.AppliedRules) != 1 {
+		t.Fatalf("applied rules = %d, want only base rule without small-area surcharge", len(result.AppliedRules))
+	}
+}
+
+func TestCostRulePreviewExtractsLongestSideFromNotes(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "KT_STANDARD",
+		CategoryName: "常规kt板",
+		DisplayName:  "常规kt板",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       1,
+			RuleVersion:  1,
+			RuleName:     "常规KT板基础单价",
+			CategoryCode: "KT_STANDARD",
+			RuleType:     domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:    float64Ptr(11),
+			Priority:     10,
+			IsActive:     true,
+			Source:       "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Notes:        "常规kt板 心理手举牌 最长边25cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.688) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.688", result.EstimatedCost)
+	}
+}
+
+func TestCostRulePreviewCopperPaperSizeLookupUsesNameAndPrintSide(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   22,
+		CategoryCode: "COPPER_PAPER",
+		CategoryName: "铜版纸",
+		DisplayName:  "铜版纸",
+		CategoryType: domain.CategoryTypePaper,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:            22,
+			RuleVersion:       1,
+			RuleName:          "铜版纸尺寸规则骨架",
+			CategoryCode:      "COPPER_PAPER",
+			RuleType:          domain.CostRuleTypeSizeBasedFormula,
+			FormulaExpression: "size_lookup_required",
+			Priority:          10,
+			IsActive:          true,
+			Source:            "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "COPPER_PAPER",
+		Notes:        "常规250g铜版纸 双面 10*15cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.RequiresManualReview {
+		t.Fatalf("requires_manual_review = true, want false; result=%+v", result)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-0.6) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 0.6", result.EstimatedCost)
+	}
+}
+
+func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
+	tests := []struct {
+		name         string
+		categoryCode string
+		notes        string
+		want         []string
+	}{
+		{
+			name:         "custom film kt does not also add normal kt",
+			categoryCode: "GENERAL",
+			notes:        "定制覆膜kt板 30*40cm",
+			want:         []string{"KT_CUSTOM_FILM"},
+		},
+		{
+			name:         "regular kt keeps material when variant name has red",
+			categoryCode: "GENERAL",
+			notes:        "CPT-常规kt板/娜塔莎生日/红色波点裙子大号/150*90cm",
+			want:         []string{"KT_STANDARD"},
+		},
+		{
+			name:         "regular kt keeps material when variant name has gold",
+			categoryCode: "GENERAL",
+			notes:        "CPT-常规kt板/活动物料/金色奖牌造型/100*60cm",
+			want:         []string{"KT_STANDARD"},
+		},
+		{
+			name:         "red kt material still maps to red kt",
+			categoryCode: "GENERAL",
+			notes:        "CPT-红色kt板/门头装饰/150*90cm",
+			want:         []string{"KT_RED"},
+		},
+		{
+			name:         "gold kt material still maps to gold kt",
+			categoryCode: "GENERAL",
+			notes:        "CPT-金色kt板/门头装饰/150*90cm",
+			want:         []string{"KT_GOLD"},
+		},
+		{
+			name:         "copper paper can be found from product name",
+			categoryCode: "GENERAL",
+			notes:        "常规250g铜版纸 双面 10*15cm",
+			want:         []string{"COPPER_PAPER"},
+		},
+		{
+			name:         "plain pp is not mistaken for sticky pp",
+			categoryCode: "PP_STICKY",
+			notes:        "PP纸无背胶 20*30cm",
+			want:         []string{"PP_PLAIN"},
+		},
+		{
+			name:         "regular poster maps to poster rule",
+			categoryCode: "GENERAL",
+			notes:        "常规海报 30*40cm",
+			want:         []string{"POSTER_STANDARD"},
+		},
+		{
+			name:         "plain banner maps to photo cloth rule",
+			categoryCode: "GENERAL",
+			notes:        "横幅 40*200cm",
+			want:         []string{"PHOTO_CLOTH_STANDARD"},
+		},
+		{
+			name:         "flag cloth is not mistaken for hanging cloth",
+			categoryCode: "GENERAL",
+			notes:        "露冉常规旗帜布/夏天挂布/特大号夏万物繁盛夏日长100*200cm",
+			want:         []string{"FLAG_CLOTH_STANDARD"},
+		},
+		{
+			name:         "regular spray cloth maps to spray cloth rule",
+			categoryCode: "GENERAL",
+			notes:        "CPT-常规喷绘布/端午保龄球游戏地垫粽子大号/130*240cm",
+			want:         []string{"SPRAY_CLOTH_STANDARD"},
+		},
+		{
+			name:         "custom spray cloth maps to custom spray cloth rule",
+			categoryCode: "GENERAL",
+			notes:        "CPT-定制喷绘布/地垫/80*240cm",
+			want:         []string{"SPRAY_CLOTH_CUSTOM"},
+		},
+		{
+			name:         "pp poster is not mistaken for photo cloth",
+			categoryCode: "GENERAL",
+			notes:        "PP海报背胶 30*40cm",
+			want:         []string{"PP_STICKY"},
+		},
+		{
+			name:         "custom poster with happy text is not mistaken for pp material",
+			categoryCode: "GENERAL",
+			notes:        "露邱/定制海报/4rdhappybirthday白底西瓜彩条/100*150cm",
+			want:         []string{"PHOTO_CLOTH_CUSTOM"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := costCategoryAliasesFromText(tt.categoryCode, tt.notes)
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("aliases = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -343,8 +822,34 @@ func (r *categoryRepoStub) List(_ context.Context, _ repo.CategoryListFilter) ([
 	return nil, 0, nil
 }
 
-func (r *categoryRepoStub) Search(_ context.Context, _ repo.CategorySearchFilter) ([]*domain.Category, error) {
-	return nil, nil
+func (r *categoryRepoStub) Search(_ context.Context, filter repo.CategorySearchFilter) ([]*domain.Category, error) {
+	keyword := strings.TrimSpace(filter.Keyword)
+	activeOnly := filter.IsActive != nil && *filter.IsActive
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	items := make([]*domain.Category, 0)
+	for _, item := range r.byID {
+		if item == nil {
+			continue
+		}
+		if activeOnly && !item.IsActive {
+			continue
+		}
+		if keyword != "" &&
+			!strings.Contains(item.CategoryCode, keyword) &&
+			!strings.Contains(item.CategoryName, keyword) &&
+			!strings.Contains(item.DisplayName, keyword) {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+		if len(items) >= limit {
+			break
+		}
+	}
+	return items, nil
 }
 
 func (r *categoryRepoStub) Create(_ context.Context, _ repo.Tx, category *domain.Category) (int64, error) {

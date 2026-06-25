@@ -31,6 +31,7 @@ func TestTaskHandlerCreateOrgTeamCompatOwnerTeamSucceeds(t *testing.T) {
 				"task_type":          "new_product_development",
 				"source_mode":        "new_product",
 				"creator_id":         9,
+				"sku_code":           "TEST-" + mapping.OrgTeam,
 				"owner_team":         mapping.OrgTeam,
 				"due_at":             "2026-04-01T00:00:00Z",
 				"category_code":      "LIGHTBOX",
@@ -197,6 +198,10 @@ func (s *ownerTeamCompatTaskServiceProxy) UpdateBusinessInfo(context.Context, se
 	return nil, nil
 }
 
+func (s *ownerTeamCompatTaskServiceProxy) UpdateSKUItemInfo(context.Context, service.UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError) {
+	return nil, nil
+}
+
 func (s *ownerTeamCompatTaskServiceProxy) UpdateProcurement(context.Context, service.UpdateTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError) {
 	return nil, nil
 }
@@ -289,6 +294,10 @@ func (r *ownerTeamTaskRepo) ListBoardCandidates(context.Context, repo.TaskBoardC
 }
 
 func (r *ownerTeamTaskRepo) UpdateDetailBusinessInfo(context.Context, repo.Tx, *domain.TaskDetail) error {
+	return nil
+}
+
+func (r *ownerTeamTaskRepo) UpdatePriority(context.Context, repo.Tx, int64, domain.TaskPriority) error {
 	return nil
 }
 
@@ -412,13 +421,13 @@ func (ownerTeamCodeRuleService) Preview(context.Context, int64) (*domain.CodePre
 
 func (ownerTeamCodeRuleService) GenerateCode(_ context.Context, ruleType domain.CodeRuleType) (string, *domain.AppError) {
 	if ruleType == domain.CodeRuleTypeNewSKU {
-		return "SKU-TEST", nil
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 	}
 	return "RW-TEST", nil
 }
 
 func (ownerTeamCodeRuleService) GenerateSKU(context.Context, int64) (string, *domain.AppError) {
-	return "SKU-TEST", nil
+	return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 }
 
 type ownerTeamTx struct{}

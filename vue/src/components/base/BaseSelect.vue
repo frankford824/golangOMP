@@ -9,11 +9,11 @@
       <div
         ref="triggerEl"
         class="flex h-11 w-full items-center gap-1 rounded-xl border border-stone-200 bg-stone-50/80 px-2 text-sm text-stone-800 transition focus-within:border-stone-400 focus-within:ring-1 focus-within:ring-stone-300 hover:bg-stone-50"
-        :class="{ 'cursor-not-allowed bg-stone-100 opacity-60': disabled }"
+        :class="{ 'cursor-not-allowed bg-stone-100 text-stone-500': disabled }"
       >
         <button
           type="button"
-          class="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-stone-400"
+          class="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-stone-500"
           :disabled="disabled"
           @click="toggleOpen"
         >
@@ -47,7 +47,7 @@
         <div
           v-if="open"
           ref="panelEl"
-          class="fixed overflow-hidden rounded-2xl border border-stone-200 bg-white/95 shadow-float backdrop-blur-xl"
+          class="fixed overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-md"
           :class="filterable ? 'flex max-h-72 flex-col' : 'py-1'"
           :style="panelStyle"
         >
@@ -85,6 +85,12 @@
                 class="px-3 py-2 text-center text-xs text-slate-500"
               >
                 无匹配结果
+              </p>
+              <p
+                v-else-if="hiddenOptionCount > 0"
+                class="px-3 py-2 text-center text-xs text-slate-500"
+              >
+                还有 {{ hiddenOptionCount }} 项，请输入关键字缩小范围
               </p>
             </div>
           </template>
@@ -146,6 +152,7 @@ const props = withDefaults(
      */
     filterable?: boolean
     filterPlaceholder?: string
+    maxDisplayedOptions?: number
   }>(),
   {
     disabled: false,
@@ -153,6 +160,7 @@ const props = withDefaults(
     clearValue: '',
     filterable: false,
     filterPlaceholder: '输入关键字筛选',
+    maxDisplayedOptions: 160,
   },
 )
 
@@ -168,8 +176,9 @@ const panelEl = ref<HTMLElement | null>(null)
 const filterInputRef = ref<HTMLInputElement | null>(null)
 const filterQuery = ref('')
 const panelStyle = ref<Record<string, string>>({})
+let positionFrame: number | null = null
 
-const displayedOptions = computed(() => {
+const filteredOptions = computed(() => {
   if (!props.filterable) return props.options
   const q = filterQuery.value.trim().toLowerCase()
   if (!q) return props.options
@@ -179,6 +188,16 @@ const displayedOptions = computed(() => {
     return label.includes(q) || val.includes(q)
   })
 })
+
+const displayedOptions = computed(() => {
+  if (!props.filterable) return props.options
+  const max = Math.max(20, props.maxDisplayedOptions)
+  return filteredOptions.value.slice(0, max)
+})
+
+const hiddenOptionCount = computed(() =>
+  props.filterable ? Math.max(0, filteredOptions.value.length - displayedOptions.value.length) : 0,
+)
 
 const selectedLabel = computed(() => {
   const match = props.options.find((opt) => opt.value === props.modelValue)
@@ -220,18 +239,31 @@ function updatePanelPosition() {
   const rect = trigger.getBoundingClientRect()
   const panelHeight = panelEl.value?.offsetHeight ?? 0
   const viewportHeight = window.innerHeight
+  const viewportWidth = window.innerWidth
   const gap = 8
   const placeAbove = panelHeight > 0 && rect.bottom + gap + panelHeight > viewportHeight && rect.top - gap - panelHeight >= 8
   const top = placeAbove
     ? Math.max(8, rect.top - panelHeight - gap)
     : Math.min(viewportHeight - panelHeight - 8, rect.bottom + gap)
+  const width = Math.min(Math.max(rect.width, 180), Math.max(180, viewportWidth - 16))
+  const left = Math.min(Math.max(8, rect.left), Math.max(8, viewportWidth - width - 8))
 
   panelStyle.value = {
     top: `${Math.max(8, top)}px`,
-    left: `${Math.max(8, rect.left)}px`,
-    width: `${rect.width}px`,
-    zIndex: '4000',
+    left: `${left}px`,
+    width: `${width}px`,
+    maxWidth: 'calc(100vw - 16px)',
+    // Must stay above BaseModal overlay (7100) after visual upgrade.
+    zIndex: '7200',
   }
+}
+
+function schedulePanelPositionUpdate() {
+  if (positionFrame != null) return
+  positionFrame = window.requestAnimationFrame(() => {
+    positionFrame = null
+    updatePanelPosition()
+  })
 }
 
 function selectOption(value: string | number) {
@@ -250,7 +282,7 @@ function handleClickOutside(e: MouseEvent) {
 
 function handleViewportChange() {
   if (!open.value) return
-  updatePanelPosition()
+  schedulePanelPositionUpdate()
 }
 
 onMounted(() => {
@@ -265,6 +297,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleViewportChange)
   window.removeEventListener('scroll', handleViewportChange, true)
   window.removeEventListener('layout-change', handleViewportChange)
+  if (positionFrame != null) {
+    window.cancelAnimationFrame(positionFrame)
+    positionFrame = null
+  }
 })
 
 watch(open, async (value) => {
@@ -274,7 +310,7 @@ watch(open, async (value) => {
   }
   filterQuery.value = ''
   await nextTick()
-  updatePanelPosition()
+  schedulePanelPositionUpdate()
   if (props.filterable) {
     filterInputRef.value?.focus()
   }
@@ -284,10 +320,53 @@ watch(filterQuery, () => {
   if (!open.value || !props.filterable) return
   emit('filter-change', filterQuery.value)
   void nextTick(() => {
-    updatePanelPosition()
+    schedulePanelPositionUpdate()
   })
 })
 </script>
+
+<style scoped>
+/* Light admin select dropdown skin. Style-only. */
+.fixed {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: 0 10px 24px -8px rgba(15, 23, 42, 0.12) !important;
+}
+
+.fixed :deep(input) {
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
+  color: #111827 !important;
+}
+
+.fixed :deep(input::placeholder) {
+  color: #9ca3af !important;
+}
+
+.fixed button {
+  color: #374151 !important;
+}
+
+.fixed button:hover,
+.fixed .bg-stone-100 {
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+.fixed .bg-stone-100 {
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.fixed .border-b {
+  border-color: #e5e7eb !important;
+}
+
+.cursor-not-allowed {
+  opacity: 1 !important;
+}
+</style>
 
 <style scoped>
 .fade-scale-enter-active,

@@ -1,6 +1,6 @@
 <template>
   <div class="export-center-view min-h-[100dvh]">
-    <div class="page-header">
+    <div v-if="!props.embedded" class="page-header">
       <h2 class="page-title">导出中心</h2>
     </div>
     <div v-if="!canExport" class="mt-6">
@@ -32,55 +32,46 @@
           />
         </div>
 
-        <div class="filters">
-          <BaseInput
-            v-model="filters.keyword"
-            label="关键词"
-            placeholder="任务号 / SKU / 产品名称"
-          />
-          <BaseInput
-            v-model="filters.assignee"
-            label="人物筛选"
-            placeholder="创建人 / 设计师 / 当前处理人 姓名"
-          />
-          <BaseSelect
-            v-model="filters.taskType"
-            label="任务类型"
-            placeholder="全部类型"
-            :options="taskTypeOptions"
-          />
-          <BaseSelect
-            v-model="filters.mainStatus"
-            label="状态"
-            placeholder="全部状态"
-            :options="mainStatusOptions"
-          />
-          <BaseDatePicker
-            v-model="filters.startDate"
-            label="开始日期"
-            :max="filters.endDate || undefined"
-          />
-          <BaseDatePicker
-            v-model="filters.endDate"
-            label="结束日期"
-            :min="filters.startDate || undefined"
+        <p class="hint-text text-xs text-slate-500 mb-3">
+          导出使用<strong>任务中心</strong>当前 Tab、关键词与高级筛选条件。筛选结果共
+          <strong>{{ tasksStore.listTotal }}</strong> 条，当前页已加载
+          <strong>{{ currentPageTasks.length }}</strong> 条。
+        </p>
+        <p
+          v-if="exportFeedback"
+          class="text-xs mb-2"
+          :class="exportFeedbackIsError ? 'text-red-600' : 'text-emerald-700'"
+        >
+          {{ exportFeedback }}
+        </p>
+        <div v-if="!hasTaskCenterContext" class="mt-2">
+          <BaseEmptyState
+            title="请先在任务中心加载列表"
+            description="打开任务中心并应用筛选后，再回到导出中心导出全部筛选结果。"
           />
         </div>
-        <div v-if="tasksEmpty" class="mt-4">
-          <BaseEmptyState title="暂无任务数据" description="根据当前筛选条件未找到可导出的任务。" />
-        </div>
-        <div v-else class="mt-4 flex items-center gap-3">
+        <div v-else class="mt-2 flex flex-wrap items-center gap-3">
+          <BaseButton
+            size="sm"
+            variant="secondary"
+            :loading="exporting && !exportingAll"
+            :disabled="exportBusy || !currentPageTasks.length"
+            @click="onExportCurrentPage"
+          >
+            导出当前页
+          </BaseButton>
           <BaseButton
             size="sm"
             variant="primary"
-            :loading="exporting"
-            :disabled="!filteredTasks.length"
-            @click="onExportTasks"
+            :loading="exportingAll"
+            :disabled="exportBusy || tasksStore.listTotal === 0"
+            @click="onExportAllFiltered"
           >
-            导出 CSV
+            导出全部筛选结果
           </BaseButton>
           <p class="hint-text text-xs text-slate-500">
-            共 {{ filteredTasks.length }} 条任务将被导出。
+            当前页 {{ currentPageTasks.length }} 条；全部筛选结果最多同步导出
+            {{ TASK_EXPORT_MAX_TOTAL }} 条。
           </p>
         </div>
       </section>
@@ -143,26 +134,28 @@
           title="暂无导出记录"
           description="完成首次导出后将在此展示最近记录。"
         />
-        <table v-else class="simple-table mt-2">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>导出人</th>
-              <th>类型</th>
-              <th>条数</th>
-              <th>文件大小</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in exportHistory" :key="item.id">
-              <td>{{ item.exportedAt }}</td>
-              <td>{{ item.userName }}</td>
-              <td>{{ item.typeLabel }}</td>
-              <td>{{ item.count }}</td>
-              <td>{{ item.sizeLabel }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="table-scroll">
+          <table class="simple-table mt-2">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>导出人</th>
+                <th>类型</th>
+                <th>条数</th>
+                <th>文件大小</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in exportHistory" :key="item.id">
+                <td>{{ item.exportedAt }}</td>
+                <td>{{ item.userName }}</td>
+                <td>{{ item.typeLabel }}</td>
+                <td>{{ item.count }}</td>
+                <td>{{ item.sizeLabel }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </template>
   </div>
@@ -176,31 +169,35 @@ import ExportFieldSelector from '@/components/export/ExportFieldSelector.vue'
 import type { ExportField } from '@/components/export/ExportFieldSelector.vue'
 import { useAuditsStore } from '@/stores/audits'
 import BaseButton from '@/components/base/BaseButton.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
-import BaseDatePicker from '@/components/base/BaseDatePicker.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import { usePermission } from '@/composables/usePermission'
-import { TaskTypeEnum } from '@/domain/enums/task-type'
-import { TASK_MAIN_STATUS_LABELS } from '@/domain/enums/task-status'
-import type { TaskTypeEnumValue } from '@/domain/enums/task-type'
-import type { TaskMainStatus } from '@/domain/types/task'
+import { TASK_EXPORT_MAX_TOTAL } from '@/constants/task-export'
 import {
   formatDateOnlyBeijing,
   formatDateTimeBeijing,
   getBeijingDateCompactString,
   nowISO,
-  startOfBeijingDayMs,
-  endOfBeijingDayMs,
-  taskInstantMs,
 } from '@/utils/date'
+import {
+  fetchAllFilteredTasks,
+  TaskExportAllError,
+} from '@/utils/export-all-filtered-tasks'
 import {
   taskCreatorDisplayName,
   taskCurrentHandlerDisplayName,
   taskDesignerDisplayName,
 } from '@/domain/task-actors'
+
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean
+  }>(),
+  {
+    embedded: false,
+  },
+)
 
 const tasksStore = useTasksStore()
 const auditsStore = useAuditsStore()
@@ -216,6 +213,13 @@ const tabs = [
 const activeTab = ref<typeof tabs[number]['key']>('tasks')
 
 const exporting = ref(false)
+const exportingAll = ref(false)
+const exportFeedback = ref('')
+const exportFeedbackIsError = ref(false)
+
+const exportBusy = computed(() => exporting.value || exportingAll.value)
+const currentPageTasks = computed(() => tasksStore.list)
+const hasTaskCenterContext = computed(() => tasksStore.lastListQueryParams != null)
 
 // 穿梭框字段选择：任务导出可选字段定义
 const allTaskExportFields: ExportField[] = [
@@ -256,88 +260,6 @@ const selectedExportFields = ref<string[]>([
   'dueAt',
   'createdAt',
 ])
-
-const taskTypeOptions = [
-  { value: '', label: '全部类型' },
-  { value: TaskTypeEnum.ORIGINAL_PRODUCT_DEV, label: '原品开发' },
-  { value: TaskTypeEnum.NEW_PRODUCT_DEV, label: '新品开发' },
-  { value: TaskTypeEnum.PURCHASE_TASK, label: '采购任务' },
-]
-
-const mainStatusOptions = [
-  { value: '', label: '全部状态' },
-  ...(Object.entries(TASK_MAIN_STATUS_LABELS) as [TaskMainStatus, string][]).map(([value, label]) => ({
-    value,
-    label,
-  })),
-]
-
-const filters = ref({
-  keyword: '',
-  assignee: '',
-  taskType: '' as TaskTypeEnumValue | '',
-  mainStatus: '' as TaskMainStatus | '',
-  startDate: '',
-  endDate: '',
-})
-
-function getEffectiveMainStatus(t: Task): string {
-  if (t.mainStatus) return t.mainStatus
-  const s = t.status
-  if (s === 'Draft') return 'Draft'
-  if (s === 'PendingAssign' || s === 'InProgress') return 'Designing'
-  if (['PendingAuditA', 'RejectedByAuditA', 'PendingAuditB', 'RejectedByAuditB'].includes(s)) return 'Auditing'
-  if (['PendingOutsource', 'Outsourcing', 'PendingOutsourceReview', 'PendingCustomizationReview'].includes(s)) return 'Outsourcing'
-  if (s === 'PendingWarehouseReceive') return 'Warehouse'
-  if (s === 'Completed') return 'Completed'
-  if (s === 'Archived') return 'Archived'
-  if (s === 'Blocked') return 'Blocked'
-  if (s === 'Cancelled') return 'Cancelled'
-  return s
-}
-
-function normalizeTaskType(t: Task): TaskTypeEnumValue {
-  return (t.taskType ?? t.businessType ?? TaskTypeEnum.ORIGINAL_PRODUCT_DEV) as TaskTypeEnumValue
-}
-
-const filteredTasks = computed<Task[]>(() => {
-  let list = tasksStore.list
-  const kw = filters.value.keyword.trim().toLowerCase()
-  if (kw) {
-    list = list.filter(
-      (t) =>
-        t.taskNo.toLowerCase().includes(kw) ||
-        (t.sku?.toLowerCase().includes(kw)) ||
-        t.productName.toLowerCase().includes(kw),
-    )
-  }
-  const assignee = filters.value.assignee.trim()
-  if (assignee) {
-    list = list.filter(
-      (t) =>
-        taskDesignerDisplayName(t).includes(assignee) ||
-        taskCreatorDisplayName(t).includes(assignee) ||
-        taskCurrentHandlerDisplayName(t).includes(assignee),
-    )
-  }
-  if (filters.value.taskType) {
-    list = list.filter((t) => normalizeTaskType(t) === filters.value.taskType)
-  }
-  if (filters.value.mainStatus) {
-    list = list.filter((t) => getEffectiveMainStatus(t) === filters.value.mainStatus)
-  }
-  if (filters.value.startDate) {
-    const start = startOfBeijingDayMs(filters.value.startDate)
-    list = list.filter((t) => taskInstantMs(t.createdAt) >= start)
-  }
-  if (filters.value.endDate) {
-    const end = endOfBeijingDayMs(filters.value.endDate)
-    list = list.filter((t) => taskInstantMs(t.createdAt) <= end)
-  }
-  return list
-})
-
-const tasksEmpty = computed(() => filteredTasks.value.length === 0)
 
 const filteredWarehouseTasks = computed<Task[]>(() => {
   return tasksStore.list.filter(
@@ -438,21 +360,58 @@ function downloadCsv(content: string, filename: string) {
   return blob
 }
 
-function onExportTasks() {
-  if (!filteredTasks.value.length) return
+function setExportFeedback(message: string, isError = false) {
+  exportFeedback.value = message
+  exportFeedbackIsError.value = isError
+}
+
+function runTaskCsvExport(tasks: Task[], historyLabel: string) {
+  const csv = buildTaskCsv(tasks)
+  const dateStr = getBeijingDateCompactString()
+  const blob = downloadCsv(csv, `tasks_export_${dateStr}.csv`)
+  const sizeLabel = `${(blob.size / 1024).toFixed(1)} KB`
+  pushHistory(historyLabel, tasks.length, sizeLabel)
+}
+
+function onExportCurrentPage() {
+  if (!currentPageTasks.value.length) return
+  setExportFeedback('')
   try {
     exporting.value = true
-    const csv = buildTaskCsv(filteredTasks.value)
-    const dateStr = getBeijingDateCompactString()
-    const blob = downloadCsv(csv, `tasks_export_${dateStr}.csv`)
-    const sizeLabel = `${(blob.size / 1024).toFixed(1)} KB`
-    pushHistory('任务列表导出', filteredTasks.value.length, sizeLabel)
+    runTaskCsvExport(currentPageTasks.value, '任务列表导出（当前页）')
+    setExportFeedback(`已导出当前页 ${currentPageTasks.value.length} 条任务。`)
   } catch (e) {
-    exportHistoryError.value = '导出失败，请稍后重试'
+    setExportFeedback('导出失败，请稍后重试', true)
     // eslint-disable-next-line no-console
     console.error(e)
   } finally {
     exporting.value = false
+  }
+}
+
+async function onExportAllFiltered() {
+  if (exportBusy.value) return
+  setExportFeedback('正在导出全部筛选结果...', false)
+  exportingAll.value = true
+  try {
+    const { items, total } = await fetchAllFilteredTasks(
+      tasksStore.lastListQueryParams,
+      (params) => tasksStore.loadTaskListSnapshot(params),
+    )
+    runTaskCsvExport(items, '任务列表导出（全部筛选）')
+    setExportFeedback(`已导出全部筛选结果，共 ${total} 条任务。`)
+  } catch (e) {
+    const message =
+      e instanceof TaskExportAllError
+        ? e.message
+        : e instanceof Error
+          ? e.message
+          : '导出失败，请稍后重试'
+    setExportFeedback(message, true)
+    // eslint-disable-next-line no-console
+    console.error(e)
+  } finally {
+    exportingAll.value = false
   }
 }
 
@@ -559,13 +518,17 @@ onMounted(() => {
   color: #0f172a;
 }
 .tabs {
-  display: inline-flex;
+  display: flex;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   gap: 0.25rem;
   padding: 0.125rem;
   border-radius: 9999px;
   background: #e2e8f0;
 }
 .tab-btn {
+  flex: 0 0 auto;
   padding: 0.25rem 0.75rem;
   font-size: 0.75rem;
   border-radius: 9999px;
@@ -574,14 +537,15 @@ onMounted(() => {
   color: #475569;
 }
 .tab-btn.active {
-  background: #fff;
-  color: #0f172a;
+  background: #2563eb;
+  color: #ffffff;
 }
 .content-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 0.75rem;
   padding: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 .section-title {
   margin: 0 0 0.75rem;
@@ -596,13 +560,46 @@ onMounted(() => {
 }
 .simple-table {
   width: 100%;
+  min-width: 40rem;
   border-collapse: collapse;
   font-size: 0.75rem;
 }
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mt-2.flex,
+  .tabs {
+    width: 100%;
+  }
+
+  .mt-2.flex {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+.simple-table th {
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 600;
+}
 .simple-table th,
 .simple-table td {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e5e7eb;
   padding: 0.25rem 0.5rem;
   text-align: left;
+  color: #111827;
+}
+.simple-table tbody tr:hover td {
+  background: #f9fafb;
 }
 </style>

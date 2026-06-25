@@ -123,11 +123,12 @@ func buildTaskLevelFallbackDesignAssetReadModel(task *domain.Task, records []*do
 		if _, exists := assetsByID[assetID]; !exists {
 			orderedAssetIDs = append(orderedAssetIDs, assetID)
 			asset := &domain.DesignAsset{
-				ID:           assetID,
-				TaskID:       version.TaskID,
-				AssetNo:      buildFallbackAssetNo(assetID, len(orderedAssetIDs)),
-				ScopeSKUCode: version.ScopeSKUCode,
-				AssetType:    version.AssetType,
+				ID:                   assetID,
+				TaskID:               version.TaskID,
+				AssetNo:              buildFallbackAssetNo(assetID, len(orderedAssetIDs)),
+				ScopeSKUCode:         version.ScopeSKUCode,
+				RetouchRequirementID: domain.CloneInt64Ptr(version.RetouchRequirementID),
+				AssetType:            version.AssetType,
 				CreatedBy:    version.UploadedBy,
 				CreatedAt:    fallbackTaskAssetTimestamp(record),
 				UpdatedAt:    fallbackTaskAssetTimestamp(record),

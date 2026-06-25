@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+const ERPProductShortNameMaxLength = 40
+
 type erpShortNameRuleConfig struct {
 	Enabled         bool              `json:"enabled"`
 	MaxLength       int               `json:"max_length"`
@@ -53,10 +55,30 @@ func generateERPShortName(scene, templateKey, name, iID string) string {
 	if maxLength <= 0 {
 		maxLength = 32
 	}
-	if len(shortName) > maxLength {
-		shortName = strings.TrimSpace(shortName[:maxLength])
+	if maxLength > ERPProductShortNameMaxLength {
+		maxLength = ERPProductShortNameMaxLength
 	}
-	return shortName
+	return truncateERPShortName(shortName, maxLength)
+}
+
+func erpProductShortNameTooLong(value string) bool {
+	return len([]rune(strings.TrimSpace(value))) > ERPProductShortNameMaxLength
+}
+
+func erpProductShortNameForFiling(scene, templateKey, explicitShortName, name, iID string) string {
+	return strings.TrimSpace(firstNonEmptyString(name, explicitShortName, iID))
+}
+
+func truncateERPShortName(value string, maxLength int) string {
+	value = strings.TrimSpace(value)
+	if maxLength <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxLength {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:maxLength]))
 }
 
 func loadERPShortNameRuleConfig() erpShortNameRuleConfig {

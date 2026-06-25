@@ -6,9 +6,10 @@ import axios from 'axios'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import type { AssetDownloadMeta } from '@/services/api/assetsApi'
 import { assetsApi } from '@/services/api/assetsApi'
+import { normalizePreviewAssetId } from '@/domain/asset-preview-image'
 import { toRelativeAssetUrl } from '@/utils/url'
 
-export type AssetPreviewMetaStatus = 'ok' | 'not_found' | 'unavailable' | 'error'
+export type AssetPreviewMetaStatus = 'ok' | 'preparing' | 'not_found' | 'unavailable' | 'error'
 
 export interface AssetPreviewMetaResult {
   status: AssetPreviewMetaStatus
@@ -18,11 +19,13 @@ export interface AssetPreviewMetaResult {
   message?: string
 }
 
-export type AssetDownloadMetaStatus = 'ok' | 'not_found' | 'forbidden' | 'error'
+export type AssetDownloadMetaStatus = 'ok' | 'preparing' | 'not_found' | 'forbidden' | 'error'
 
 export interface AssetDownloadMetaResult {
   status: AssetDownloadMetaStatus
   downloadUrl?: string
+  /** From GET /v1/assets/{id}/download (`ResolveAssetDownloadFilename` on backend). */
+  filename?: string
   message?: string
 }
 
@@ -89,6 +92,16 @@ function normalizeDisplayUrl(raw: string | null | undefined): string | undefined
   return toRelativeAssetUrl(raw.trim()) ?? raw.trim()
 }
 
+export function pickDownloadFilenameFromMeta(meta: AssetDownloadMeta | undefined): string {
+  if (!meta) return ''
+  const raw = meta as Record<string, unknown>
+  for (const key of ['filename', 'file_name', 'original_filename', 'originalFilename'] as const) {
+    const value = raw[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
 function pickMetaUrl(meta: AssetDownloadMeta | undefined): string | undefined {
   if (!meta) return undefined
   const raw = meta as Record<string, unknown>
@@ -118,7 +131,7 @@ export async function fetchAssetPreviewMeta(
   assetId: string,
   signal?: AbortSignal,
 ): Promise<AssetPreviewMetaResult> {
-  const id = assetId.trim()
+  const id = normalizePreviewAssetId(assetId)
   if (!id) return { status: 'error', message: '缺少资产 id' }
   const cached = readPreviewMetaCache(id)
   if (cached) return cached
@@ -138,6 +151,11 @@ export async function fetchAssetPreviewMeta(
         }
         writePreviewMetaCache(id, out)
         return out
+      }
+      const raw = meta as Record<string, unknown> | undefined
+      const hint = String(raw?.access_hint ?? raw?.accessHint ?? '').trim()
+      if (hint.includes('prepare_required')) {
+        return { status: 'preparing', message: '正在准备预览，请稍后自动刷新' }
       }
       return { status: 'unavailable', message: '预览地址为空' }
     } catch (e) {
@@ -159,8 +177,29 @@ export async function fetchAssetPreviewMeta(
   return p
 }
 
-/** GET /v1/assets/{id}/download → download_url（代理字节流入口） */
-export async function fetchAssetDownloadUrl(
+function buildDownloadMetaResult(meta: AssetDownloadMeta | undefined): AssetDownloadMetaResult {
+  const downloadUrl = normalizeDisplayUrl(pickMetaUrl(meta))
+  if (!downloadUrl) {
+    const raw = meta as Record<string, unknown> | undefined
+    const hint = String(raw?.access_hint ?? raw?.accessHint ?? '').trim()
+    if (hint.includes('prepare_required')) {
+      return {
+        status: 'preparing',
+        message: '外部资源正在准备中，请稍后刷新后再下载',
+      }
+    }
+    return { status: 'error', message: '下载地址为空' }
+  }
+  const filename = pickDownloadFilenameFromMeta(meta)
+  return {
+    status: 'ok',
+    downloadUrl,
+    filename: filename || undefined,
+  }
+}
+
+/** GET /v1/assets/{id}/download → download_url + filename（代理字节流入口） */
+export async function fetchAssetDownloadMetaResolved(
   assetId: string,
   signal?: AbortSignal,
 ): Promise<AssetDownloadMetaResult> {
@@ -175,12 +214,8 @@ export async function fetchAssetDownloadUrl(
     try {
       const res = await assetsApi.getAssetDownloadMeta(id, signal)
       const meta = unwrapDownloadPayload(res.data)
-      const downloadUrl = normalizeDisplayUrl(pickMetaUrl(meta))
-      if (!downloadUrl) {
-        return { status: 'error', message: '下载地址为空' }
-      }
-      const out: AssetDownloadMetaResult = { status: 'ok', downloadUrl }
-      writeDownloadCache(id, out)
+      const out = buildDownloadMetaResult(meta)
+      if (out.status === 'ok') writeDownloadCache(id, out)
       return out
     } catch (e) {
       if (axios.isAxiosError(e)) {
@@ -197,6 +232,14 @@ export async function fetchAssetDownloadUrl(
 
   downloadMetaInflight.set(id, p)
   return p
+}
+
+/** GET /v1/assets/{id}/download → download_url（代理字节流入口） */
+export async function fetchAssetDownloadUrl(
+  assetId: string,
+  signal?: AbortSignal,
+): Promise<AssetDownloadMetaResult> {
+  return fetchAssetDownloadMetaResolved(assetId, signal)
 }
 
 function pushUrl(map: Map<string, string>, raw: unknown, assetRootId: string) {

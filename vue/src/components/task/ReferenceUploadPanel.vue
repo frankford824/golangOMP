@@ -3,9 +3,17 @@
     <!-- 统一走 canonical asset upload-session -->
     <div
       class="upload-zone"
-      :class="{ 'upload-zone-disabled': uploading }"
-      @dragover.prevent
+      :class="{ 'upload-zone-disabled': uploading, 'upload-zone-drag-active': isDragActive }"
+      role="button"
+      tabindex="0"
+      @click="openFilePicker"
+      @focusin="activateFileReceiver"
+      @pointerenter="activateFileReceiver"
+      @dragenter.prevent="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave.prevent="onDragLeave"
       @drop.prevent="handleDrop"
+      @paste="handlePaste"
     >
       <input
         ref="fileInput"
@@ -13,10 +21,11 @@
         :accept="UPLOAD_ACCEPT_ATTRIBUTE"
         multiple
         class="hidden-input"
+        :disabled="uploading"
         @change="onFileChange"
       />
       <span class="upload-plus">+</span>
-      <p>{{ compact ? '上传参考图/附件' : `点击或拖拽上传参考图（任意格式，单文件不超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB）` }}</p>
+      <p>{{ compact ? '上传参考图/附件' : `点击、拖拽或粘贴上传参考图（任意格式，单文件不超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB）` }}</p>
       <p class="upload-hint">
         {{ uploadHintText }}
       </p>
@@ -66,6 +75,12 @@ import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { useTasksStore } from '@/stores/tasks'
 import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
+import {
   REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
   REFERENCE_UPLOAD_MAX_FILE_SIZE_MB,
   isAcceptableReferenceFile,
@@ -108,6 +123,8 @@ const fileRefs = ref<RefItem[]>([])
 const limitError = ref('')
 const uploadError = ref('')
 const uploading = ref(false)
+const isDragActive = ref(false)
+const dragDepth = ref(0)
 const retriedThumbKeys = ref(new Set<string>())
 
 const emit = defineEmits<{
@@ -117,7 +134,7 @@ const emit = defineEmits<{
 
 const uploadHintText = computed(() =>
   props.compact
-    ? (uploading.value ? '上传中...' : '点击按钮选择文件')
+    ? (uploading.value ? '上传中...' : '点击选择、拖拽或 Ctrl+V 粘贴文件')
     : (
   props.taskId?.trim()
     ? '已关联当前任务，上传的参考图会直接绑定到该任务。'
@@ -161,9 +178,57 @@ function syncFromModelValue() {
   fileRefs.value = nextItems
 }
 
+const { activateFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => !uploading.value),
+  onFiles: (files) => {
+    void processFiles(files)
+  },
+})
+
+function openFilePicker() {
+  if (uploading.value) return
+  fileInput.value?.click()
+}
+
+function onDragEnter(e: DragEvent) {
+  if (uploading.value || !hasFileDataTransfer(e.dataTransfer)) return
+  activateFileReceiver()
+  dragDepth.value += 1
+  isDragActive.value = true
+}
+
+function onDragOver(e: DragEvent) {
+  if (uploading.value || !hasFileDataTransfer(e.dataTransfer)) return
+  activateFileReceiver()
+  isDragActive.value = true
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onDragLeave(e: DragEvent) {
+  if (!hasFileDataTransfer(e.dataTransfer)) return
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+  if (dragDepth.value === 0) {
+    isDragActive.value = false
+  }
+}
+
 function handleDrop(e: DragEvent) {
-  const files = e.dataTransfer?.files
-  if (files?.length) processFiles(files)
+  isDragActive.value = false
+  dragDepth.value = 0
+  if (uploading.value) return
+  const files = getFilesFromDataTransfer(e.dataTransfer)
+  if (files.length) processFiles(files)
+}
+
+function handlePaste(e: ClipboardEvent) {
+  if (uploading.value) return
+  const files = getFilesFromClipboardEvent(e)
+  if (!files.length) return
+  e.preventDefault()
+  activateFileReceiver()
+  void processFiles(files)
 }
 
 function onFileChange(e: Event) {
@@ -172,7 +237,8 @@ function onFileChange(e: Event) {
   input.value = ''
 }
 
-async function processFiles(files: FileList) {
+async function processFiles(files: FileList | File[]) {
+  if (uploading.value) return
   limitError.value = ''
   uploadError.value = ''
   const picked = Array.from(files)
@@ -301,6 +367,10 @@ watch(
   border-radius: 6px;
   transition: background 0.15s, border-color 0.15s;
 }
+.upload-zone-drag-active {
+  background: #e8f1ff;
+  box-shadow: inset 0 0 0 1px #3b82f6;
+}
 .upload-panel-compact .upload-zone {
   flex-direction: row;
   justify-content: flex-start;
@@ -322,7 +392,10 @@ watch(
   margin-left: auto;
   color: #94a3b8;
   font-weight: 400;
-  white-space: nowrap;
+  min-width: 0;
+  text-align: right;
+  line-height: 1.35;
+  white-space: normal;
 }
 .compact-upload-summary {
   display: flex;
@@ -337,11 +410,14 @@ watch(
 .upload-zone-disabled { cursor: not-allowed; opacity: 0.7; }
 .hidden-input {
   position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .upload-plus { font-size: 1.375rem; color: #94a3b8; line-height: 1; }
 .upload-zone p {
@@ -436,5 +512,58 @@ watch(
   font-size: 0.625rem;
   color: #94a3b8;
   text-align: center;
+}
+
+/* Phase 4: light upload panel skin. Style-only. */
+.upload-panel,
+.upload-panel-compact {
+  border-color: #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+}
+
+.upload-zone,
+.upload-panel-compact .upload-zone {
+  border-color: #d1d5db;
+  background: #f9fafb;
+}
+
+.upload-zone:hover:not(.upload-zone-disabled),
+.upload-zone-drag-active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.upload-plus,
+.upload-panel-compact .upload-plus {
+  color: #2563eb;
+}
+
+.upload-zone p,
+.upload-panel-compact .upload-zone p {
+  color: #111827;
+}
+
+.upload-hint,
+.upload-panel-compact .upload-hint,
+.compact-upload-summary,
+.thumb-label,
+.thumb-placeholder-label {
+  color: #6b7280;
+}
+
+.thumb-img {
+  border-color: #e5e7eb;
+  background: #ffffff;
+}
+
+.thumb-placeholder {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+}
+
+.limit-error {
+  color: #b91c1c;
 }
 </style>

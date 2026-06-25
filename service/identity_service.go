@@ -19,8 +19,9 @@ import (
 )
 
 var (
-	mobilePattern = regexp.MustCompile(`^1[3-9]\d{9}$`)
-	emailPattern  = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	mobilePattern           = regexp.MustCompile(`^1[3-9]\d{9}$`)
+	emailPattern            = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	managedAvatarURLPattern = regexp.MustCompile(`^/v1/me/avatar-files/avatar-[0-9a-f]{32}\.(jpg|jpeg|png|webp)$`)
 )
 
 type RegisterUserParams struct {
@@ -107,6 +108,11 @@ type UpdateMeParams struct {
 	Email       *string
 }
 
+type UpdateMyAvatarParams struct {
+	AvatarURL string
+	Method    string
+}
+
 type DeleteUserParams struct {
 	UserID int64
 	Reason string
@@ -156,6 +162,7 @@ type IdentityService interface {
 	GetCurrentUser(ctx context.Context) (*domain.User, *domain.AppError)
 	GetMe(ctx context.Context) (*domain.User, *domain.AppError)
 	UpdateMe(ctx context.Context, p UpdateMeParams) (*domain.User, *domain.AppError)
+	UpdateMyAvatar(ctx context.Context, p UpdateMyAvatarParams) (*domain.User, *domain.AppError)
 	GetMyOrg(ctx context.Context) (*domain.MyOrgProfile, *domain.AppError)
 	ListUsers(ctx context.Context, filter UserFilter) ([]*domain.User, domain.PaginationMeta, *domain.AppError)
 	// ListAssignableDesigners returns the full set of assignable users for the
@@ -270,8 +277,10 @@ func (s *identityService) SyncConfiguredAuth(ctx context.Context) *domain.AppErr
 		if username == "" {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "configured super admin username is required", nil)
 		}
-		if appErr := s.validatePassword(entry.Password, "configured super admin password"); appErr != nil {
-			return appErr
+		if strings.TrimSpace(entry.Password) != "" {
+			if appErr := s.validatePassword(entry.Password, "configured super admin password"); appErr != nil {
+				return appErr
+			}
 		}
 		if appErr := s.validateDepartment(entry.Department); appErr != nil {
 			return appErr
@@ -678,15 +687,62 @@ func (s *identityService) UpdateMe(ctx context.Context, p UpdateMeParams) (*doma
 	if err := s.attachRoles(ctx, user); err != nil {
 		return nil, infraError("attach current user roles", err)
 	}
-	params := UpdateUserParams{
-		UserID:      user.ID,
-		DisplayName: p.DisplayName,
-		Mobile:      p.Mobile,
-		Email:       p.Email,
-	}
 	// Self profile edits are allowed for the account owner even without
 	// organization-management roles; keep the writable set narrow.
-	return s.updateUserBypassManagementScope(ctx, user, params, "PATCH", "/v1/me")
+	return s.updateUserBypassManagementScope(ctx, user, p, "PATCH", "/v1/me")
+}
+
+func (s *identityService) UpdateMyAvatar(ctx context.Context, p UpdateMyAvatarParams) (*domain.User, *domain.AppError) {
+	avatarURL, appErr := normalizeManagedAvatarURLForService(p.AvatarURL)
+	if appErr != nil {
+		return nil, appErr
+	}
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || !domain.IsSessionBackedRequestActor(actor) {
+		return nil, domain.ErrUnauthorized
+	}
+	user, err := s.userRepo.GetByID(ctx, actor.ID)
+	if err != nil {
+		return nil, infraError("get current user for avatar update", err)
+	}
+	if user == nil {
+		return nil, domain.ErrNotFound
+	}
+	if err := s.attachRoles(ctx, user); err != nil {
+		return nil, infraError("attach current user roles", err)
+	}
+	if avatarURL == user.AvatarURL {
+		s.prepareUserForResponse(user)
+		return user, nil
+	}
+	user.AvatarURL = avatarURL
+	user.UpdatedAt = time.Now().UTC()
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.userRepo.Update(ctx, tx, user); err != nil {
+			return err
+		}
+		method := strings.TrimSpace(p.Method)
+		if method == "" {
+			method = "POST"
+		}
+		return s.recordPermissionActionTx(ctx, tx, domain.PermissionLog{
+			ActionType:     domain.PermissionActionUserUpdated,
+			TargetUserID:   actorIDPtr(user.ID),
+			TargetUsername: user.Username,
+			TargetRoles:    user.Roles,
+			Granted:        true,
+			Reason:         "updated fields: avatar_url",
+			Method:         method,
+			RoutePath:      "/v1/me/avatar",
+		})
+	}); err != nil {
+		return nil, infraError("update current user avatar tx", err)
+	}
+	updated, appErr := s.GetCurrentUser(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return updated, nil
 }
 
 func (s *identityService) GetMyOrg(ctx context.Context) (*domain.MyOrgProfile, *domain.AppError) {
@@ -869,6 +925,7 @@ func (s *identityService) GetCurrentUser(ctx context.Context) (*domain.User, *do
 	if err := s.attachRoles(ctx, user); err != nil {
 		return nil, infraError("attach current user roles", err)
 	}
+	s.prepareUserForResponse(user)
 	return user, nil
 }
 
@@ -898,6 +955,9 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	}
 	if err := s.attachRolesForUsers(ctx, users); err != nil {
 		return nil, domain.PaginationMeta{}, infraError("attach user roles", err)
+	}
+	for _, user := range users {
+		s.prepareUserForResponse(user)
 	}
 	return users, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
@@ -1142,8 +1202,8 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 	return updated, nil
 }
 
-func (s *identityService) updateUserBypassManagementScope(ctx context.Context, user *domain.User, p UpdateUserParams, method, routePath string) (*domain.User, *domain.AppError) {
-	changes := make([]string, 0, 3)
+func (s *identityService) updateUserBypassManagementScope(ctx context.Context, user *domain.User, p UpdateMeParams, method, routePath string) (*domain.User, *domain.AppError) {
+	changes := make([]string, 0, 4)
 	if p.DisplayName != nil {
 		displayName := strings.TrimSpace(*p.DisplayName)
 		if displayName == "" {
@@ -1913,8 +1973,10 @@ func (s *identityService) prepareUserForResponse(user *domain.User) {
 	}
 	user.Account = user.Username
 	user.Name = user.DisplayName
+	user.RealName = user.DisplayName
 	user.Group = user.Team
 	user.Phone = user.Mobile
+	user.Avatar = user.AvatarURL
 	user.FrontendAccess = domain.BuildFrontendAccess(user, s.frontendAccessSettings)
 }
 
@@ -2503,6 +2565,17 @@ func validateOptionalEmail(email string) *domain.AppError {
 	return nil
 }
 
+func normalizeManagedAvatarURLForService(raw string) (string, *domain.AppError) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+	if !managedAvatarURLPattern.MatchString(value) {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "avatar must be uploaded through profile avatar upload", map[string]string{"deny_code": "avatar_url_not_managed"})
+	}
+	return value, nil
+}
+
 func (s *identityService) ensureUniqueIdentity(ctx context.Context, username, mobile string, excludeUserID int64) *domain.AppError {
 	if existing, err := s.userRepo.GetByUsername(ctx, username); err != nil {
 		return infraError("get user by username", err)
@@ -2579,10 +2652,6 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 	if appErr := s.ensureUniqueIdentity(ctx, entry.Username, entry.Mobile, existingUserID(existing)); appErr != nil {
 		return appErr
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(entry.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return infraError("hash configured super admin password", err)
-	}
 	roles, appErr := s.resolveConfiguredSuperAdminRoles(entry)
 	if appErr != nil {
 		return appErr
@@ -2605,6 +2674,13 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 	}
 	now := time.Now().UTC()
 	if existing == nil {
+		if strings.TrimSpace(entry.Password) == "" {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "configured super admin password is required when creating a new config-managed admin", nil)
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(entry.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return infraError("hash configured super admin password", err)
+		}
 		user := &domain.User{
 			Username:           entry.Username,
 			DisplayName:        strings.TrimSpace(entry.DisplayName),
@@ -2662,12 +2738,22 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 		}
 		roles = mergeRoles(currentRoles, roles)
 	}
+	var passwordHash string
+	if strings.TrimSpace(entry.Password) != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(entry.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return infraError("hash configured super admin password", err)
+		}
+		passwordHash = string(hash)
+	}
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := s.userRepo.Update(ctx, tx, existing); err != nil {
 			return err
 		}
-		if err := s.userRepo.UpdatePassword(ctx, tx, existing.ID, string(hash), now); err != nil {
-			return err
+		if passwordHash != "" {
+			if err := s.userRepo.UpdatePassword(ctx, tx, existing.ID, passwordHash, now); err != nil {
+				return err
+			}
 		}
 		return s.userRepo.ReplaceRoles(ctx, tx, existing.ID, roles)
 	}); err != nil {
@@ -2957,8 +3043,8 @@ func defaultFrontendAccessSettings() domain.FrontendAccessSettings {
 			"super_admin": {
 				Roles:   []string{"super_admin"},
 				Scopes:  []string{"view_all", "identity_admin", "organization_admin", "all_departments"},
-				Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center"},
-				Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"},
+				Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"},
+				Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"},
 				Actions: []string{"user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"},
 			},
 			"department_admin": {
@@ -2973,37 +3059,37 @@ func defaultFrontendAccessSettings() domain.FrontendAccessSettings {
 			},
 		},
 		Roles: map[string]domain.FrontendAccessSpec{
-			string(domain.RoleSuperAdmin):     {Roles: []string{"super_admin"}, Scopes: []string{"view_all", "identity_admin", "organization_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"}, Actions: []string{"user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"}},
+			string(domain.RoleSuperAdmin):     {Roles: []string{"super_admin"}, Scopes: []string{"view_all", "identity_admin", "organization_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"}, Actions: []string{"user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"}},
 			string(domain.RoleHRAdmin):        {Roles: []string{"hr_admin"}, Scopes: []string{"view_all", "hr_admin"}, Menus: []string{"user_admin", "org_admin", "logs_center"}, Pages: []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "org_options"}, Actions: []string{"user.manage", "org.assign", "permission_logs.read", "operation_logs.read"}},
 			string(domain.RoleOrgAdmin):       {Roles: []string{"org_admin"}, Scopes: []string{"org_admin"}, Menus: []string{"org_admin", "user_admin"}, Pages: []string{"admin_users", "org_options"}, Actions: []string{"org.manage", "user.org.assign"}},
 			string(domain.RoleRoleAdmin):      {Roles: []string{"role_admin"}, Scopes: []string{"role_admin"}, Menus: []string{"role_admin", "user_admin"}, Pages: []string{"admin_users", "admin_roles"}, Actions: []string{"role.assign", "role.remove", "role.read"}},
-			string(domain.RoleAdmin):          {Roles: []string{"admin"}, Scopes: []string{"workflow_admin", "identity_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"}, Actions: []string{"user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "task.full_access", "organization.manage"}},
+			string(domain.RoleAdmin):          {Roles: []string{"admin"}, Scopes: []string{"workflow_admin", "identity_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"}, Actions: []string{"user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "task.full_access", "organization.manage"}},
 			string(domain.RoleDeptAdmin):      {Roles: []string{"department_admin"}, Scopes: []string{"department_scope"}, Menus: []string{"org_admin", "user_admin"}, Pages: []string{"department_users", "org_options"}, Actions: []string{"department.manage", "department.users.read"}},
 			string(domain.RoleTeamLead):       {Roles: []string{"team_lead"}, Scopes: []string{"team_scope"}, Pages: []string{"team_users"}, Actions: []string{"team.users.read"}},
-			string(domain.RoleDesignDirector): {Roles: []string{"design_director"}, Scopes: []string{"design_department_scope"}, Menus: []string{"design_workspace", "user_admin"}, Pages: []string{"design_workspace", "department_users"}, Actions: []string{"design.review.read", "department.users.read"}},
+			string(domain.RoleDesignDirector): {Roles: []string{"design_director"}, Scopes: []string{"design_department_scope"}, Menus: []string{"design_workspace", "resource_management", "product_management", "user_admin"}, Pages: []string{"design_workspace", "department_users", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"design.review.read", "department.users.read"}},
 			string(domain.RoleDesignReviewer): {Roles: []string{"design_reviewer"}, Scopes: []string{"design_review_scope"}, Menus: []string{"design_workspace"}, Pages: []string{"design_workspace", "audit_workspace"}, Actions: []string{"design.review", "task.audit.review"}},
 			string(domain.RoleMember):         {Roles: []string{"member"}, Scopes: []string{"self_only"}, Actions: []string{"profile.view"}},
-			string(domain.RoleOps):            {Roles: []string{"ops"}, Scopes: []string{"workflow_ops"}, Menus: []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "export_center", "resource_management", "customization_management"}, Pages: []string{"task_board", "task_list", "task_create", "products", "categories", "cost_rules", "warehouse_receive", "warehouse_processing", "outsource_orders", "workbench", "export_jobs", "code_rules", "assets_index", "task_assets", "asset_detail", "customization_jobs", "customization_job_detail"}, Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"}},
-			string(domain.RoleDesigner):       {Roles: []string{"designer"}, Scopes: []string{"design_workspace"}, Menus: []string{"design_workspace", "task_list", "export_center", "resource_management"}, Pages: []string{"design_workspace", "my_tasks", "design_submit", "design_rework", "export_jobs", "assets_index", "task_assets", "asset_detail"}, Actions: []string{"task.design_submit", "task.asset_upload", "task.list"}},
+			string(domain.RoleOps):            {Roles: []string{"ops"}, Scopes: []string{"workflow_ops"}, Menus: []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "export_center", "resource_management", "product_management", "customization_management"}, Pages: []string{"task_board", "task_list", "task_create", "products", "categories", "cost_rules", "warehouse_receive", "warehouse_processing", "outsource_orders", "workbench", "export_jobs", "code_rules", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"}, Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"}},
+			string(domain.RoleDesigner):       {Roles: []string{"designer"}, Scopes: []string{"design_workspace"}, Menus: []string{"design_workspace", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"design_workspace", "my_tasks", "design_submit", "design_rework", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.design_submit", "task.asset_upload", "task.list"}},
 			string(domain.RoleCustomizationOperator): {
 				Roles:   []string{"customization_operator"},
 				Scopes:  []string{"customization_workspace"},
-				Menus:   []string{"customization_management", "resource_management", "task_list"},
-				Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "task_list"},
+				Menus:   []string{"customization_management", "resource_management", "product_management", "task_list"},
+				Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "task_list"},
 				Actions: []string{"task.customization.submit", "task.customization.transfer", "task.asset_upload", "task.list"},
 			},
-			string(domain.RoleAuditA):    {Roles: []string{"audit_a"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.list"}},
-			string(domain.RoleAuditB):    {Roles: []string{"audit_b"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"}},
-			string(domain.RoleWarehouse): {Roles: []string{"warehouse"}, Scopes: []string{"warehouse_workspace"}, Menus: []string{"warehouse_receive", "warehouse_processing", "task_board", "task_list", "export_center"}, Pages: []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs"}, Actions: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"}},
+			string(domain.RoleAuditA):    {Roles: []string{"audit_a"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.list"}},
+			string(domain.RoleAuditB):    {Roles: []string{"audit_b"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"}},
+			string(domain.RoleWarehouse): {Roles: []string{"warehouse"}, Scopes: []string{"warehouse_workspace"}, Menus: []string{"warehouse_receive", "warehouse_processing", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"}},
 			string(domain.RoleOutsource): {Roles: []string{"outsource"}, Scopes: []string{"outsource_workspace"}, Menus: []string{"task_list"}, Pages: []string{"outsource_orders", "task_list"}, Actions: []string{"outsource.manage", "task.list"}},
 			string(domain.RoleCustomizationReviewer): {
 				Roles:   []string{"customization_reviewer"},
 				Scopes:  []string{"customization_review_scope"},
-				Menus:   []string{"customization_management", "resource_management", "task_list"},
-				Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "task_list"},
+				Menus:   []string{"customization_management", "resource_management", "product_management", "task_list"},
+				Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "task_list"},
 				Actions: []string{"task.customization.review", "task.customization.effect_review", "task.list"},
 			},
-			string(domain.RoleERP): {Roles: []string{"erp"}, Scopes: []string{"erp_internal"}, Menus: []string{"integration_center"}, Pages: []string{"erp_sync_console"}, Actions: []string{"erp.sync"}},
+			string(domain.RoleERP): {Roles: []string{"erp"}, Scopes: []string{"erp_internal"}, Menus: []string{"integration_center", "product_management"}, Pages: []string{"erp_sync_console", "product_management"}, Actions: []string{"erp.sync"}},
 		},
 		Departments: map[string]domain.DepartmentAccessEntry{
 			string(domain.DepartmentHR):               {Code: "hr", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_hr"}}},

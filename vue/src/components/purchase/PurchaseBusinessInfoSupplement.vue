@@ -15,15 +15,20 @@
         v-model.number="costPriceInput"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         label="成本单价（CNY）"
         placeholder="结单条件「成本价已录入」看此项"
+      />
+      <BaseInput
+        v-model="costOverrideReason"
+        label="成本维护原因"
+        placeholder="如：仓库维护成本价"
       />
       <BaseInput
         v-model.number="procurementPriceInput"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         label="采购单价（CNY）"
         placeholder="可与成本单价相同，用于仓库准入"
       />
@@ -37,6 +42,9 @@
       />
     </div>
     <BaseTextarea v-model="specText" class="mt-2" label="规格说明" :rows="3" placeholder="规格、尺寸、工艺等" />
+    <p class="mt-2 text-xs leading-relaxed text-slate-600">
+      成本单价保存后将作为人工维护成本，并请求同步 ERP；后续仍可再次修改。
+    </p>
     <p v-if="saveError" class="mt-2 text-xs text-red-600">{{ saveError }}</p>
     <div class="mt-3 flex flex-wrap gap-2">
       <BaseButton size="sm" variant="primary" :loading="saving" :disabled="saving" @click="save">
@@ -92,6 +100,7 @@ onBeforeUnmount(() => {
 
 const categoryModel = ref('')
 const specText = ref('')
+const costOverrideReason = ref('')
 const quantityInput = ref<number | undefined>(undefined)
 /** 对应 Task.costPrice / PATCH business-info.cost_price，结单面板「成本价已录入」依赖此项 */
 const costPriceInput = ref<number | undefined>(undefined)
@@ -103,6 +112,7 @@ const saveError = ref('')
 function hydrateFromTask(t: Task) {
   categoryModel.value = t.newProductCategoryCode ?? t.categoryName ?? t.category ?? ''
   specText.value = t.designRequirement ?? ''
+  costOverrideReason.value = ''
   const q = t.purchaseInfo?.quantity
   quantityInput.value = typeof q === 'number' && Number.isFinite(q) ? q : undefined
   const cp = t.costPrice?.amount
@@ -143,7 +153,14 @@ async function save() {
     Object.assign(bizPatch, buildCategoryPatchFields(cat))
     if (spec) bizPatch.spec_text = spec
     if (typeof q === 'number' && Number.isFinite(q)) bizPatch.quantity = Math.trunc(q)
-    if (typeof cost === 'number' && Number.isFinite(cost)) bizPatch.cost_price = cost
+    if (typeof cost === 'number' && Number.isFinite(cost)) {
+      const reason = costOverrideReason.value.trim() || '仓库维护成本价'
+      bizPatch.cost_price = cost
+      bizPatch.manual_cost_override = true
+      bizPatch.manual_cost_override_reason = reason
+      bizPatch.trigger_filing = true
+      bizPatch.remark = reason
+    }
 
     const procurementUnit =
       typeof pp === 'number' && Number.isFinite(pp)

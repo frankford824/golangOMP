@@ -45,6 +45,7 @@ func (s *taskAssetCenterService) applyDesignAssetVersionDerivedFields(task *doma
 	}
 	if task != nil {
 		version.TaskNo = task.TaskNo
+		version.ProductNameSnapshot = strings.TrimSpace(task.ProductNameSnapshot)
 	}
 	if asset != nil {
 		version.AssetNo = asset.AssetNo
@@ -134,6 +135,12 @@ func findCurrentDesignAssetVersion(currentVersionID *int64, versions []*domain.D
 }
 
 func findApprovedDesignAssetVersion(task *domain.Task, versions []*domain.DesignAssetVersion) *domain.DesignAssetVersion {
+	for i := len(versions) - 1; i >= 0; i-- {
+		version := versions[i]
+		if version != nil && version.IsDeliveryFile && version.FlowReviewStatus == domain.TaskAssetFlowReviewStatusApproved {
+			return version
+		}
+	}
 	if !taskHasApprovedDelivery(task) {
 		return nil
 	}
@@ -147,6 +154,9 @@ func findApprovedDesignAssetVersion(task *domain.Task, versions []*domain.Design
 }
 
 func findWarehouseReadyDesignAssetVersion(task *domain.Task, versions []*domain.DesignAssetVersion) *domain.DesignAssetVersion {
+	if approved := findApprovedDesignAssetVersion(task, versions); approved != nil {
+		return approved
+	}
 	if !taskHasApprovedDelivery(task) {
 		return nil
 	}

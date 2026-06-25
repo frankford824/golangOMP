@@ -9,6 +9,9 @@
           v-model="localForm.productName"
           label="产品名称"
           placeholder="请输入产品名称"
+          :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
+          :hint="erpProductNameHint(localForm.productName)"
+          :error="erpProductNameError(localForm.productName)"
         />
         <p v-if="localForm.sku" class="form-hint">
           SKU：{{ localForm.sku }}（后端生成，预展示可用）
@@ -48,18 +51,19 @@
         v-model.number="localForm.costPriceAmount"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         placeholder="请输入成本"
       />
     </section>
     <p v-else class="form-hint card-hint">选择按模板后，系统会根据产品尺寸等规则自动计算成本。</p>
 
     <section class="form-card">
-      <BaseTextarea
+      <TaskSpecStructuredInput
         v-model="localForm.prefillSpecText"
         label="规格尺寸"
-        :rows="2"
-        placeholder="请输入规格尺寸"
+        required
+        placeholder="请选择宽高或面积并填写数字"
+        hint="按模板计算成本时优先使用这里的标准尺寸。"
       />
     </section>
   </div>
@@ -69,9 +73,10 @@
 import { computed } from 'vue'
 import type { TaskCreateFormModel } from '@/domain/types'
 import BaseInput from '@/components/base/BaseInput.vue'
-import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
+import TaskSpecStructuredInput from '@/components/task/TaskSpecStructuredInput.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
+import { ERP_PRODUCT_NAME_MAX_LENGTH, erpProductNameError, erpProductNameHint } from '@/domain/erp-product-name'
 
 const props = defineProps<{
   form: TaskCreateFormModel
@@ -156,6 +161,48 @@ const costPriceModeOptions = [
   background: #f8fafc;
   box-shadow: none;
   resize: vertical;
+}
+
+/* Phase 6: light embedded form skin (parent modal already light). Style-only. */
+.form-card,
+.card-hint {
+  border-color: #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.field-label {
+  color: #374151;
+}
+
+.form-hint,
+.optional-text {
+  color: #6b7280;
+}
+
+.form-hint.danger,
+.required {
+  color: #b91c1c;
+}
+
+.form-card :deep(input),
+.form-card :deep(.relative > div),
+.form-card :deep(textarea) {
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #111827;
+}
+
+.form-card :deep(input::placeholder),
+.form-card :deep(textarea::placeholder) {
+  color: #9ca3af;
+}
+
+.form-card :deep(input:focus),
+.form-card :deep(textarea:focus) {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 @media (max-width: 760px) {
   .type-section {

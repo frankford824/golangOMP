@@ -138,7 +138,7 @@ function onSelect(ev: RecentEvent) {
 }
 .event-ref {
   color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;

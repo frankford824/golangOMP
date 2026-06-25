@@ -95,7 +95,9 @@ func (m CostPriceMode) Valid() bool {
 type CodeRuleType string
 
 const (
-	CodeRuleTypeTaskNo      CodeRuleType = "task_no"
+	CodeRuleTypeTaskNo CodeRuleType = "task_no"
+	// CodeRuleTypeNewSKU is retained only to recognize and reject archived legacy rules.
+	// Current SKU/product-code allocation uses product_code_sequences.
 	CodeRuleTypeNewSKU      CodeRuleType = "new_sku"
 	CodeRuleTypeOutsourceNo CodeRuleType = "outsource_no"
 	CodeRuleTypeHandoverNo  CodeRuleType = "handover_no"

@@ -2,11 +2,27 @@ package config
 
 import (
 	"sort"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestLoadAuthSettingsRejectsBootstrapCredentialsByDefault(t *testing.T) {
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "false")
+
+	_, err := loadAuthSettings("auth_identity.example.json")
+	if err == nil {
+		t.Fatal("loadAuthSettings() error = nil, want bootstrap credential rejection")
+	}
+	if !strings.Contains(err.Error(), "example default password") {
+		t.Fatalf("loadAuthSettings() error = %v, want default password rejection", err)
+	}
+}
 
 func TestLoadDefaultsERPBridgeToLoopback(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
 	t.Setenv("ERP_BRIDGE_BASE_URL", "")
 
 	cfg, err := Load()
@@ -20,6 +36,8 @@ func TestLoadDefaultsERPBridgeToLoopback(t *testing.T) {
 
 func TestLoadUsesExplicitERPBridgeBaseURL(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
 	t.Setenv("ERP_BRIDGE_BASE_URL", "http://223.4.249.11:8081")
 
 	cfg, err := Load()
@@ -33,6 +51,8 @@ func TestLoadUsesExplicitERPBridgeBaseURL(t *testing.T) {
 
 func TestLoadIncludesUploadServiceDefaults(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
 	t.Setenv("UPLOAD_SERVICE_BASE_URL", "")
 	t.Setenv("UPLOAD_SERVICE_BROWSER_MULTIPART_BASE_URL", "")
 	t.Setenv("UPLOAD_SERVICE_BROWSER_DOWNLOAD_BASE_URL", "")
@@ -70,6 +90,8 @@ func TestLoadIncludesUploadServiceDefaults(t *testing.T) {
 
 func TestLoadPrefersUploadServiceInternalToken(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
 	t.Setenv("UPLOAD_SERVICE_INTERNAL_TOKEN", "internal-token")
 	t.Setenv("UPLOAD_SERVICE_AUTH_TOKEN", "legacy-token")
 
@@ -82,8 +104,54 @@ func TestLoadPrefersUploadServiceInternalToken(t *testing.T) {
 	}
 }
 
+func TestLoadIncludesERPImageProxyDefaultsAndSecretFallback(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+	t.Setenv("ERP_IMAGE_PROXY_PUBLIC_BASE_URL", "")
+	t.Setenv("ERP_IMAGE_PROXY_TOKEN_TTL", "")
+	t.Setenv("ERP_IMAGE_PROXY_SIGNING_SECRET", "")
+	t.Setenv("PRODUCT_MANAGEMENT_IMAGE_PROXY_SIGNING_SECRET", "")
+	t.Setenv("UPLOAD_SERVICE_INTERNAL_TOKEN", "internal-token")
+	t.Setenv("UPLOAD_SERVICE_AUTH_TOKEN", "legacy-token")
+	t.Setenv("OSS_ACCESS_KEY_SECRET", "oss-secret")
+	t.Setenv("ERP_REMOTE_APP_SECRET", "erp-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ERPImageProxy.PublicBaseURL != "https://yongbo.cloud" {
+		t.Fatalf("ERPImageProxy.PublicBaseURL = %q", cfg.ERPImageProxy.PublicBaseURL)
+	}
+	if cfg.ERPImageProxy.TokenTTL != 8760*time.Hour {
+		t.Fatalf("ERPImageProxy.TokenTTL = %s, want 8760h", cfg.ERPImageProxy.TokenTTL)
+	}
+	if cfg.ERPImageProxy.SigningSecret != "internal-token" {
+		t.Fatalf("ERPImageProxy.SigningSecret = %q, want internal token fallback", cfg.ERPImageProxy.SigningSecret)
+	}
+}
+
+func TestLoadPrefersExplicitERPImageProxySigningSecret(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+	t.Setenv("ERP_IMAGE_PROXY_SIGNING_SECRET", "explicit-secret")
+	t.Setenv("UPLOAD_SERVICE_INTERNAL_TOKEN", "internal-token")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ERPImageProxy.SigningSecret != "explicit-secret" {
+		t.Fatalf("ERPImageProxy.SigningSecret = %q, want explicit-secret", cfg.ERPImageProxy.SigningSecret)
+	}
+}
+
 func TestLoadIncludesAuthAndFrontendAccessSettings(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
 
 	cfg, err := Load()
 	if err != nil {
@@ -139,6 +207,8 @@ func TestLoadIncludesAuthAndFrontendAccessSettings(t *testing.T) {
 // legacy operations groups 1-7 must not be part of the runtime org source.
 func TestLoadAuthSettingsV1_0OfficialBaseline(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
 
 	cfg, err := Load()
 	if err != nil {

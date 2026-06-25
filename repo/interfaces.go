@@ -130,6 +130,72 @@ type ProductRepo interface {
 	UpsertBatch(ctx context.Context, tx Tx, products []*domain.Product) (int64, error)
 }
 
+type ProductManagementListFilter struct {
+	Keyword         string
+	DisplayScope    string
+	ImageSource     string
+	SyncStatus      string
+	BaseSyncStatus  string
+	ImageSyncStatus string
+	CostStatus      string
+	IssueScope      string
+	CreatorID       *int64
+	Page            int
+	PageSize        int
+}
+
+type ProductManagementImagePatch struct {
+	ImageSource         domain.ProductManagementImageSource
+	ImageSelectionMode  domain.ProductManagementImageSelectionMode
+	ImageAssetID        *int64
+	ImageAssetVersionID *int64
+	ImageFilename       string
+	ImageMimeType       string
+	ImageMissingReason  string
+	ImageSyncSource     domain.ProductManagementImageSource
+	ImageSyncStatus     domain.ProductManagementERPSyncStatus
+}
+
+type ProductManagementSyncPatch struct {
+	Status            domain.ProductManagementERPSyncStatus
+	BaseStatus        domain.ProductManagementERPSyncStatus
+	ImageStatus       domain.ProductManagementERPSyncStatus
+	LastERPCheckedAt  *time.Time
+	LastERPSyncedAt   *time.Time
+	LastBaseSyncedAt  *time.Time
+	LastImageSyncedAt *time.Time
+	SyncCooldownUntil *time.Time
+	LastSyncError     string
+	BaseSyncError     string
+	ImageSyncError    string
+}
+
+type ProductManagementRepo interface {
+	RefreshReadModel(ctx context.Context) error
+	List(ctx context.Context, filter ProductManagementListFilter) ([]*domain.ProductManagementRecord, int64, error)
+	GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error)
+	GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, error)
+	ClaimQueuedSyncRecords(ctx context.Context, limit int, claimToken string, now time.Time) ([]*domain.ProductManagementRecord, error)
+	QueuePendingBaseSyncByTaskID(ctx context.Context, tx Tx, taskID int64, now time.Time, cooldownUntil time.Time) (int64, error)
+	UpdateImage(ctx context.Context, tx Tx, id int64, patch ProductManagementImagePatch) error
+	UpdateSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
+	UpdateBaseSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
+	UpdateImageSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
+	MarkBaseSyncProjectionSynced(ctx context.Context, tx Tx, taskID int64, taskSKUItemID *int64, now time.Time) error
+}
+
+type SKUComboRepo interface {
+	UpsertComboRecord(ctx context.Context, tx Tx, record *domain.OMPSKUComboRecord) error
+	UpsertComboRelation(ctx context.Context, tx Tx, relation *domain.OMPSKUComboRelation) error
+	DeleteStaleComboRelations(ctx context.Context, tx Tx, comboSKUCode string, source string, currentChildSKUs []string) error
+	ListRelationsByChildSKUs(ctx context.Context, childSKUs []string) ([]*domain.OMPSKUComboRelationWithRecord, error)
+	GetLatestSyncState(ctx context.Context) (*domain.OMPSKUComboSyncState, error)
+	EnsureNextSyncWindow(ctx context.Context, now time.Time, windowSize time.Duration) (*domain.OMPSKUComboSyncState, error)
+	ClaimSyncState(ctx context.Context, tx Tx, id int64, now time.Time) (bool, error)
+	MarkSyncStateSuccess(ctx context.Context, tx Tx, id int64, nextPage int, processed int, finished bool, now time.Time) error
+	MarkSyncStateFailed(ctx context.Context, tx Tx, id int64, message string, nextRetryAt time.Time) error
+}
+
 type CategoryRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.Category, error)
 	GetByCode(ctx context.Context, code string) (*domain.Category, error)
@@ -175,6 +241,31 @@ type TaskCostFinanceFlagRepo interface {
 	ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskCostFinanceFlag, error)
 }
 
+type SKUTraceRepo interface {
+	UpsertSKURecord(ctx context.Context, tx Tx, record *domain.OMPSKURecord) error
+	AppendCostSnapshot(ctx context.Context, tx Tx, snapshot *domain.OMPSKUCostSnapshot) (int64, error)
+	AppendERPTraceLog(ctx context.Context, tx Tx, log *domain.OMPSKUERPTraceLog) (int64, error)
+	UpsertComboRelation(ctx context.Context, tx Tx, relation *domain.OMPSKUComboRelation) error
+}
+
+type ExternalAssetRepo interface {
+	Search(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error)
+	Upsert(ctx context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error)
+	GetByID(ctx context.Context, id int64) (*domain.ExternalAssetRecord, error)
+	CreateSyncRun(ctx context.Context, run *domain.ExternalAssetSyncRun) (int64, error)
+	FinishSyncRun(ctx context.Context, id int64, status string, scannedCount, upsertedCount int, errorMessage string) error
+	MarkMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error
+	UpdateDirectURL(ctx context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error
+	MarkOSSPreparePending(ctx context.Context, id int64) error
+	MarkPreviewPreparePending(ctx context.Context, id int64) error
+	ListDirectURLRefreshCandidates(ctx context.Context, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error)
+	ListPendingOSS(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error)
+	ListPendingPreview(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error)
+	MarkOSSReady(ctx context.Context, id int64, objectKey string) error
+	MarkPreviewReady(ctx context.Context, id int64, previewKey string) error
+	MarkPrepareFailed(ctx context.Context, id int64, target, message string) error
+}
+
 // ERPSyncRunRepo stores ERP sync execution history.
 type ERPSyncRunRepo interface {
 	Create(ctx context.Context, tx Tx, run *domain.ERPSyncRun) (int64, error)
@@ -192,6 +283,7 @@ type TaskRepo interface {
 	List(ctx context.Context, filter TaskListFilter) ([]*domain.TaskListItem, int64, error)
 	ListBoardCandidates(ctx context.Context, filter TaskBoardCandidateFilter) ([]*domain.TaskListItem, error)
 	UpdateDetailBusinessInfo(ctx context.Context, tx Tx, detail *domain.TaskDetail) error
+	UpdatePriority(ctx context.Context, tx Tx, id int64, priority domain.TaskPriority) error
 	UpdateProductBinding(ctx context.Context, tx Tx, task *domain.Task) error
 	// UpdateStatus performs a direct status update inside a transaction.
 	// The service layer is responsible for validating the transition before calling this.
@@ -294,7 +386,9 @@ type CostRuleListFilter struct {
 type TaskListFilter struct {
 	domain.TaskQueryFilterDefinition
 	CreatorID                   *int64
+	MineActorID                 *int64
 	DesignerID                  *int64
+	DesignerEmpty               *bool
 	NeedOutsource               *bool
 	Overdue                     *bool
 	Keyword                     string
@@ -677,6 +771,12 @@ type DesignAssetRepo interface {
 	UpdateCurrentVersionID(ctx context.Context, tx Tx, id int64, currentVersionID *int64) error
 }
 
+type TaskReferenceAssetBindingRepo interface {
+	Create(ctx context.Context, tx Tx, binding *domain.TaskReferenceAssetBinding) (*domain.TaskReferenceAssetBinding, error)
+	GetByTaskAndRefID(ctx context.Context, taskID int64, refID string) (*domain.TaskReferenceAssetBinding, error)
+	ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskReferenceAssetBinding, error)
+}
+
 // TaskEventRepo handles task_event_logs and task_event_sequences tables.
 // Append MUST be called inside the same transaction as the state-changing operation.
 type TaskEventRepo interface {
@@ -690,6 +790,28 @@ type TaskEventListFilter struct {
 	TaskID    *int64
 	Page      int
 	PageSize  int
+}
+
+type KPIAnalysisRepo interface {
+	ListTaskEvents(ctx context.Context, filter KPIAnalysisFilter) ([]domain.KPIAnalysisEvent, error)
+	ListTaskAssets(ctx context.Context, filter KPIAnalysisFilter) ([]domain.KPIAnalysisAsset, error)
+}
+
+type KPIAnalysisFilter struct {
+	From  time.Time
+	To    time.Time
+	Limit int
+}
+
+type BusinessTrendRepo interface {
+	ListRecentTaskTexts(ctx context.Context, filter BusinessTrendFilter) ([]domain.BusinessTrendTaskText, error)
+}
+
+type BusinessTrendFilter struct {
+	From           time.Time
+	To             time.Time
+	Limit          int
+	BatchItemLimit int
 }
 
 // OutsourceListFilter for paginated outsource order queries.

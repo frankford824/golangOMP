@@ -1,4 +1,5 @@
 import type { Task, LegacyTaskStatus } from './types/task'
+import { RoleEnum } from '@/types'
 import { TaskTypeEnum, normalizeTaskType } from './enums/task-type'
 import {
   DesignSubStatusEnum,
@@ -34,6 +35,22 @@ const WAREHOUSE_ELIGIBLE_LEGACY_STATUSES: readonly LegacyTaskStatus[] = [
   'PendingOutsourceReview',
 ] as const
 
+export const TASK_PRODUCT_INFO_MAINTAINER_ROLES = [
+  RoleEnum.OPS,
+  RoleEnum.WAREHOUSE,
+  'Admin',
+  'SuperAdmin',
+  RoleEnum.SUPER_ADMIN,
+  'HRAdmin',
+  RoleEnum.HR_ADMIN,
+  'RoleAdmin',
+  'DepartmentAdmin',
+  RoleEnum.DEPT_ADMIN,
+  'TeamLead',
+  RoleEnum.GROUP_LEADER,
+  'DesignDirector',
+] as const
+
 // ─── 任务分型判断 ──────────────────────────────────────────────────────────────
 
 export function isPurchaseTask(task: Task): boolean {
@@ -48,10 +65,47 @@ export function isRetouchTask(task: Task): boolean {
   return task.businessType === TaskTypeEnum.RETOUCH_TASK
 }
 
+export function isCustomizationTask(task: Task): boolean {
+  return (
+    task.workflowLane === 'customization' ||
+    task.businessLane === 'customization' ||
+    task.customizationRequired === true
+  )
+}
+
+/** 任务中心卡片 meta：是否展示「设计」行（设计师姓名）。 */
+export function shouldShowDesignerMetaOnTaskCenterCard(task: Task): boolean {
+  if (isPurchaseTask(task)) return false
+  if (task.designSubStatus === DesignSubStatusEnum.NOT_REQUIRED) return false
+  return true
+}
+
 // ─── 设计流程操作谓词 ──────────────────────────────────────────────────────────
 
-/** 是否可执行「指派设计师」 */
+/** 任务尚无设计/美工负责人（指派/接单前）。 */
+export function taskHasNoDesignHandler(task: Task): boolean {
+  const designerId = task.designerId ?? task.assigneeId
+  const handlerId = task.currentHandlerId
+  return (
+    (designerId == null || String(designerId).trim() === '') &&
+    (handlerId == null || String(handlerId).trim() === '')
+  )
+}
+
+/**
+ * 定制任务「指派美工」：PendingCustomizationProduction + 未分配。
+ * 与 module claim 分工：运营指派走 POST /assign，美工自领走 customization/claim。
+ */
+export function canAssignCustomizationArtOperator(task: Task): boolean {
+  if (!isCustomizationTask(task)) return false
+  if (isPurchaseTask(task)) return false
+  if (task.status !== 'PendingCustomizationProduction') return false
+  return taskHasNoDesignHandler(task)
+}
+
+/** 是否可执行「指派设计师」或定制 lane「指派美工」 */
 export function canAssign(task: Task): boolean {
+  if (canAssignCustomizationArtOperator(task)) return true
   if (isPurchaseTask(task)) return false
   if (task.designSubStatus != null) {
     return task.designSubStatus === DesignSubStatusEnum.PENDING_ASSIGN
@@ -131,6 +185,17 @@ function isAuditSubStatusBlockingReassignment(task: Task): boolean {
 }
 
 /**
+ * 定制任务「美工已指派、可重新指派」阶段：
+ * PendingCustomizationProduction + 已有设计侧负责人（designer/assignee/current_handler）。
+ * 与首次「指派美工」互斥；仍走 POST /v1/tasks/{id}/assign。
+ */
+export function isInCustomizationArtReassignmentPhase(task: Task): boolean {
+  if (!isCustomizationTask(task)) return false
+  if (task.status !== 'PendingCustomizationProduction') return false
+  return !taskHasNoDesignHandler(task)
+}
+
+/**
  * 是否仍处于「设计责任人可调整」阶段：
  * 已指派，且仍在设计池（PendingAssign/InProgress），但尚未进入审核责任链。
  */
@@ -158,19 +223,25 @@ export function isInDesignerReassignmentPhase(task: Task): boolean {
  * 仍复用 `POST /v1/tasks/{id}/assign`；若后端状态机与此前提不一致可能 409。
  */
 export function canReassignDesigner(task: Task): boolean {
-  if (!taskHasAssignee(task)) return false
+  const customizationReassign = isInCustomizationArtReassignmentPhase(task)
+  if (!customizationReassign && !taskHasAssignee(task)) return false
   if (isPurchaseTask(task)) return false
   if (isDoneStatus(task)) return false
-  if (isMainStatusBlockingReassignment(task)) return false
-  if (hasWarehousePipelineEntered(task)) return false
-  if (!isRetouchTask(task)) {
-    if (isLegacyAfterDesignerReassignmentPhase(task)) return false
-    if (isDesignSubStatusAfterReassignmentPhase(task)) return false
-  } else {
-    const d = task.designSubStatus
-    if (d === DesignSubStatusEnum.APPROVED || d === DesignSubStatusEnum.FINALIZED) return false
+  // 定制 PendingCustomizationProduction 的 main/design/audit 子状态由读模型推导，
+  // 与常规设计重派阶段不同；仅对定制美工重派跳过这些常规门禁。
+  if (!customizationReassign) {
+    if (isMainStatusBlockingReassignment(task)) return false
+    if (hasWarehousePipelineEntered(task)) return false
+    if (!isRetouchTask(task)) {
+      if (isLegacyAfterDesignerReassignmentPhase(task)) return false
+      if (isDesignSubStatusAfterReassignmentPhase(task)) return false
+    } else {
+      const d = task.designSubStatus
+      if (d === DesignSubStatusEnum.APPROVED || d === DesignSubStatusEnum.FINALIZED) return false
+    }
+    if (isAuditSubStatusBlockingReassignment(task)) return false
   }
-  if (isAuditSubStatusBlockingReassignment(task)) return false
+  if (customizationReassign) return true
   return isInDesignerReassignmentPhase(task)
 }
 
@@ -182,6 +253,7 @@ export function canReassignDesigner(task: Task): boolean {
 export function canSubmitAudit(task: Task): boolean {
   if (isPurchaseTask(task)) return false
   if (isRetouchTask(task)) return Boolean(task.designerId)
+  if (isCustomizationTask(task)) return task.status === 'PendingCustomizationProduction'
   const s = task.status
   return s === 'InProgress' || s === 'RejectedByAuditA' || s === 'RejectedByAuditB'
 }
@@ -193,6 +265,9 @@ export function canSubmitAudit(task: Task): boolean {
 export function isLegacyTaskStatusInDesignerEditablePhase(task: Task): boolean {
   if (isPurchaseTask(task)) return false
   const s = task.status
+  if (isCustomizationTask(task)) {
+    return s === 'PendingCustomizationProduction'
+  }
   return (
     s === 'PendingAssign' ||
     s === 'InProgress' ||
@@ -202,11 +277,24 @@ export function isLegacyTaskStatusInDesignerEditablePhase(task: Task): boolean {
 }
 
 /**
+ * 商品/ERP 基础资料维护不受设计、审核、仓库节点限制；流程范围仍由详情页的数据范围判断兜底。
+ */
+export function canMaintainTaskProductInfoAtAnyStage(
+  hasAnyRole: (roles: readonly string[]) => boolean,
+  hasTaskScopeAccess: boolean,
+): boolean {
+  return hasTaskScopeAccess && hasAnyRole(TASK_PRODUCT_INFO_MAINTAINER_ROLES)
+}
+
+/**
  * 交付设计稿上传区是否应展示：设计子状态 + 权威扁平状态双重要求，避免 design_sub_status 滞后导致 403。
  */
 export function canUploadDesignDelivery(task: Task): boolean {
   if (isPurchaseTask(task)) return false
   if (isRetouchTask(task)) return Boolean(task.designerId)
+  if (isCustomizationTask(task)) {
+    return task.status === 'PendingCustomizationProduction'
+  }
   if (!isLegacyTaskStatusInDesignerEditablePhase(task)) return false
   return task.designSubStatus === 'IN_PROGRESS' || task.designSubStatus === 'REJECTED'
 }
@@ -228,6 +316,7 @@ export function canUploadAuditAsset(task: Task): boolean {
 /** 是否处于审核节点（可通过/打回/转交/交班） */
 export function canAudit(task: Task): boolean {
   if (isPurchaseTask(task) || isRetouchTask(task)) return false
+  if (isCustomizationTask(task)) return false
   return task.status === 'PendingAuditA' || task.status === 'PendingAuditB'
 }
 
@@ -318,6 +407,7 @@ export function isInAuditQueue(task: Task): boolean {
 /** 是否处于定制流程链路 */
 export function isInCustomizationFlow(task: Task): boolean {
   return (
+    isCustomizationTask(task) ||
     task.status === 'PendingOutsource' ||
     task.status === 'Outsourcing' ||
     task.status === 'PendingOutsourceReview' ||

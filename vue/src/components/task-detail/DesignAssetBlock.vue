@@ -2,11 +2,12 @@
   <section
     ref="designAssetSectionRef"
     class="detail-block h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6"
+    :class="{ 'detail-block--result': showResultDisplayState }"
   >
     <div class="block-header">
       <div class="flex items-center gap-2">
         <span class="block-icon">D</span>
-        <h3 class="block-title">设计与资产</h3>
+        <h3 class="block-title">{{ designAssetBlockTitle }}</h3>
       </div>
       <div v-if="designAssetStatusRow && !isPurchase" class="status-inline">
         <span class="status-dot" :class="designAssetStatusRow.dotClass" />
@@ -14,15 +15,50 @@
       </div>
     </div>
 
-    <!-- 设计师指派（采购任务无设计节点，不展示） -->
+    <!-- 设计师 / 美工处理人（采购任务无设计节点，不展示） -->
     <div v-if="designerLine && !isPurchase" class="info-row-simple">
-      <span class="row-label">设计师</span>
+      <span class="row-label">{{ designerRoleLabel }}</span>
       <span>{{ designerLine }}</span>
+    </div>
+    <div v-else-if="canShowCustomizationClaim && !isPurchase" class="info-row-simple customization-claim-row">
+      <span class="row-label">{{ designerRoleLabel }}</span>
+      <div class="customization-claim-actions">
+        <BaseButton
+          variant="primary"
+          size="sm"
+          :disabled="customizationClaiming"
+          @click="onCustomizationClaim"
+        >
+          {{ customizationClaimButtonLabel }}
+        </BaseButton>
+        <p v-if="customizationClaimError" class="customization-claim-error">{{ customizationClaimError }}</p>
+      </div>
     </div>
     <div v-if="task.needOutsource && !isPurchase" class="outsource-flag">
       已标记外协意图（need_outsource）
     </div>
 
+    <DesignAssetResultBlock
+      v-if="showResultDisplayState"
+      :is-retouch-task="isRetouchTask"
+      :batch-ui="batchUi"
+      :show-reference-pane="showReferencePane"
+      :reference-thumb-items="referenceThumbItems"
+      :reference-entry-count="referencePaneEntries.length"
+      :design-asset-layout-class="designAssetLayoutClass"
+      :scoped-asset-version-groups="scopedAssetVersionGroups"
+      :shared-asset-versions="sharedAssetVersions"
+      :active-version-idx="activeVersionIdx"
+      :active-version="activeVersion"
+      :flat-index-of-version="flatIndexOfVersion"
+      :is-version-unavailable="isVersionUnavailable"
+      :is-audit-replacement-version="isAuditReplacementVersion"
+      @activate-version="activateVersion"
+      @open-lightbox="openLightbox"
+      @open-shared-version="openSharedVersionPreview"
+    />
+
+    <template v-else>
     <!-- 并列商品切换在「商品与编码信息」卡片；本区随详情页共用 productIndex -->
     <!-- 分栏：左参考图（审核工作台式）、右版本/交付/源文件与上传（采购任务仅单列参考） -->
     <div :class="designAssetLayoutClass">
@@ -73,7 +109,7 @@
           :key="'shared-ver-' + v.id"
           type="button"
           class="shared-asset-chip"
-          @click="openLightbox(v.fileRefs?.[0] ?? '')"
+          @click="openSharedVersionPreview(v)"
         >
           共享 V{{ v.rootVersionNo ?? i + 1 }} · {{ versionTotalFileCount(v) }} 文件
         </button>
@@ -109,7 +145,7 @@
           >
             V{{ v.rootVersionNo ?? 1 }}
             <span v-if="isAuditReplacementVersion(v)" class="version-replace-tag">替换</span>
-            <span v-if="versionTotalFileCount(v) > 1" class="version-file-count">{{ versionTotalFileCount(v) }}图</span>
+            <span v-if="versionTotalFileCount(v) > 1" class="version-file-count">{{ versionTotalFileCount(v) }}文件</span>
             <span v-if="isVersionUnavailable(v)" class="version-unavailable-tag">不可看</span>
           </button>
         </div>
@@ -160,18 +196,20 @@
     </div>
     <div v-else class="empty-assets">
       <template v-if="batchUi && scopedAssetVersions.length === 0">
-        当前商品暂无版本记录；可切换商品查看或上传设计稿
+        当前商品暂无版本记录；可切换商品查看或{{ uploadActionLabel }}
       </template>
-      <template v-else>暂无版本，请上传设计稿</template>
+      <template v-else>暂无版本，请{{ uploadActionLabel }}</template>
     </div>
 
     <!-- 交付设计稿上传（与 DesignWorkbench 共用 DesignAssetPanel） -->
     <DesignAssetPanel
-      v-if="!isPurchase && can('design.upload') && (canUploadDesignDelivery(task) || retouchModuleCanUpload)"
+      v-if="!isPurchase && canShowDesignUploadPanel"
       :task-id="task.id"
       :can-upload="true"
       :can-submit-audit="canSubmitFromDesignPanel"
-      :submit-button-label="isRetouchTask ? '提交精修' : undefined"
+      :submit-button-label="submitButtonLabel"
+      :upload-button-label="uploadButtonLabel"
+      :submit-hint-idle="submitHintIdle"
       :upload-context-label="designPanelCaption"
       :delivery-remark-suffix="designRemarkSuffix"
       :active-sku-code="activeSkuCodeForPanel || undefined"
@@ -182,6 +220,7 @@
     />
       </div>
     </div>
+    </template>
 
   </section>
 </template>
@@ -195,23 +234,41 @@ import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import { TASK_DETAIL_PRODUCT_INDEX_KEY } from '@/composables/task-detail-product-index'
 import { getDesignSubStatusLabel } from '@/domain/enums/task-status'
+import { getCustomizationDetailStatusLabel } from '@/domain/task-center-card-status'
 import { retouchDesignAssetStatusDisplay } from '@/domain/retouch-display'
 import {
   canSubmitAudit,
   canUploadDesignDelivery,
 } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
+import { usePermissionsStore } from '@/stores/permissions'
 import { useTasksStore } from '@/stores/tasks'
+import BaseButton from '@/components/base/BaseButton.vue'
+import {
+  canClaimCustomizationOnTaskDetail,
+  taskCenterClaimButtonLabel,
+} from '@/domain/task-center-claim'
+import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { assetsApi } from '@/services/api/assetsApi'
 import DesignAssetPanel from '@/components/business/DesignAssetPanel.vue'
+import DesignAssetResultBlock from '@/components/task-detail/DesignAssetResultBlock.vue'
 import { formatDateTimeBeijingOffsetAware } from '@/utils/date'
 import { toRelativeAssetUrl } from '@/utils/url'
 import { resolveBackendPreviewAssetId } from '@/domain/asset-access'
 import {
   downloadHrefForAssetPreviewSlot,
 } from '@/domain/task-asset-preview-slot'
+import {
+  isTaskAssetVersionUnavailable,
+  preferredTaskAssetVersionIndex,
+} from '@/domain/task-asset-version-selection'
 import AssetDownloadLink from '@/components/media/AssetDownloadLink.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
 import { versionTotalFileCount } from '@/utils/task-ui-labels'
 import {
   activeSkuCodeForSelection,
@@ -225,8 +282,7 @@ import {
   taskHasSkuItemsForBatchUi,
 } from '@/domain/task-batch-assets'
 import { taskDesignerDisplayName } from '@/domain/task-actors'
-
-const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
+import { referenceFileRefDedupeKey } from '@/domain/mappers/reference-file-refs'
 
 const injected = inject<ComputedRef<Task | null>>(TASK_DETAIL_KEY)
 if (!injected) throw new Error('[DesignAssetBlock] 必须在 TaskDetailView 内使用')
@@ -240,8 +296,43 @@ const designerLine = computed(() => {
   return s === '-' ? '' : s
 })
 
-const { can } = usePermission()
+const { can, currentUser, frontendRoles } = usePermission()
+const permissionsStore = usePermissionsStore()
 const tasksStore = useTasksStore()
+
+const customizationClaiming = ref(false)
+const customizationClaimError = ref('')
+
+const canShowCustomizationClaim = computed(() => {
+  if (!isCustomizationTask.value || isPurchase.value) return false
+  return canClaimCustomizationOnTaskDetail(
+    task.value,
+    (roles) => permissionsStore.hasAnyRole(roles),
+    permissionsStore.isCustomizationOperator,
+  )
+})
+
+const customizationClaimButtonLabel = computed(() =>
+  taskCenterClaimButtonLabel(task.value, customizationClaiming.value),
+)
+
+async function onCustomizationClaim() {
+  if (!canShowCustomizationClaim.value || customizationClaiming.value) return
+  customizationClaimError.value = ''
+  customizationClaiming.value = true
+  try {
+    await tasksStore.claimCustomizationModule(task.value.id)
+    await tasksStore.loadTaskById(task.value.id)
+  } catch (e) {
+    customizationClaimError.value = formatTaskActionDenyMessage(
+      e,
+      '任务已被他人接单，请刷新详情后重试',
+    )
+    await tasksStore.loadTaskById(task.value.id)
+  } finally {
+    customizationClaiming.value = false
+  }
+}
 
 const isPurchase = computed(
   () =>
@@ -251,16 +342,102 @@ const isRetouchTask = computed(
   () =>
     task.value.businessType === 'RETOUCH_TASK' || task.value.taskType === 'RETOUCH_TASK',
 )
+const isCustomizationTask = computed(
+  () =>
+    task.value.workflowLane === 'customization' ||
+    task.value.businessLane === 'customization' ||
+    task.value.customizationRequired === true,
+)
+
+const retouchModuleSummary = computed(() =>
+  task.value.moduleSummaries?.find((m: { module_key: string }) => m.module_key === 'retouch'),
+)
+
+const retouchModuleState = computed(() => retouchModuleSummary.value?.state ?? '')
 
 const retouchModuleCanUpload = computed(() => {
   if (!isRetouchTask.value) return false
-  const mod = task.value.moduleSummaries?.find(
-    (m: { module_key: string }) => m.module_key === 'retouch',
-  )
+  const mod = retouchModuleSummary.value
   if (mod?.state === 'in_progress') return true
   if (task.value.designerId) return true
   return false
 })
+
+const isDesignChainTask = computed(() => !isPurchase.value && !isRetouchTask.value)
+const designAssetBlockTitle = computed(() => isCustomizationTask.value ? '定制稿与资产' : '设计与资产')
+const designerRoleLabel = computed(() => isCustomizationTask.value ? '美工处理人' : '设计师')
+const uploadActionLabel = computed(() => isCustomizationTask.value ? '上传定制设计稿' : '上传设计稿')
+const submitButtonLabel = computed(() => {
+  if (isRetouchTask.value) return '提交精修'
+  if (isCustomizationTask.value) return '提交定制审核'
+  return undefined
+})
+const uploadButtonLabel = computed(() =>
+  isCustomizationTask.value ? '上传/拖拽/粘贴定制设计稿' : '上传/拖拽/粘贴设计稿',
+)
+const submitHintIdle = computed(() =>
+  isCustomizationTask.value
+    ? '提交后定制设计稿将进入定制审核队列，本次文件锁定为新版本'
+    : '',
+)
+const customizationSubmitRoles = [
+  'CustomizationOperator',
+  'customization_operator',
+  'Ops',
+  'ops',
+  'Admin',
+  'admin',
+  'SuperAdmin',
+  'super_admin',
+  'HRAdmin',
+  'hr_admin',
+  'RoleAdmin',
+  'role_admin',
+  'DepartmentAdmin',
+  'department_admin',
+  'TeamLead',
+  'team_lead',
+  'DesignDirector',
+  'design_director',
+] as const
+const canUseCustomizationSubmit = computed(() => {
+  const role = String(currentUser.value?.role ?? '').trim()
+  const roles = frontendRoles.value.map((item) => String(item).trim())
+  const normalized = new Set([role, ...roles].map((item) => item.toLowerCase()).filter(Boolean))
+  return customizationSubmitRoles.some((candidate) => normalized.has(String(candidate).toLowerCase()))
+})
+const canShowDesignUploadPanel = computed(() => {
+  if (!can('design.upload')) return false
+  if (isRetouchTask.value) return retouchModuleCanUpload.value
+  if (isCustomizationTask.value && !canUseCustomizationSubmit.value) return false
+  return canUploadDesignDelivery(task.value)
+})
+
+/** 设计链：已有版本且已离开上传/提交审核操作态 */
+const showDesignResultDisplayState = computed(() => {
+  if (!isDesignChainTask.value) return false
+  if (scopedAssetVersions.value.length === 0) return false
+  if (canUploadDesignDelivery(task.value)) return false
+  if (canSubmitAudit(task.value)) return false
+  return true
+})
+
+/** 精修：已有版本且模块已进入提交/完成类状态 */
+const showRetouchResultDisplayState = computed(() => {
+  if (!isRetouchTask.value || isPurchase.value) return false
+  if (scopedAssetVersions.value.length === 0) return false
+  const state = retouchModuleState.value
+  if (state === 'submitted' || state === 'closed' || state === 'completed') return true
+  const ts = task.value.status
+  if (ts === 'PendingAuditA' || ts === 'PendingAuditB' || ts === 'Completed' || ts === 'Archived') {
+    return true
+  }
+  return false
+})
+
+const showResultDisplayState = computed(
+  () => showDesignResultDisplayState.value || showRetouchResultDisplayState.value,
+)
 
 const batchUi = computed(
   () => taskHasSkuItemsForBatchUi(task.value) && !isPurchase.value,
@@ -316,7 +493,8 @@ const getDeliveryRemarkSuffixBySkuForPanel = computed((): ((skuCode: string) => 
 
 const activeVersionIdx = ref(0)
 const activeFileIdx = ref(0)
-const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
+const hasManualActiveVersionSelection = ref(false)
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 /** 后端资产列表（GET /v1/tasks/{id}/assets） */
 const backendAssets = ref<BackendAsset[]>([])
@@ -395,6 +573,7 @@ function pickDisplayUrl(v: BackendAssetVersion): string {
 }
 function refDisplayItem(v: BackendAssetVersion, asset: BackendAsset) {
   const rec = v as Record<string, unknown>
+  const assetRec = asset as Record<string, unknown>
   const previewOk = v.preview_available === true
   const mode = (v.download_mode ?? 'public') as string
   const publicUrl =
@@ -406,6 +585,7 @@ function refDisplayItem(v: BackendAssetVersion, asset: BackendAsset) {
         ? rec.original_filename
         : ''
   return {
+    assetId: String(assetRec.asset_id ?? assetRec.assetId ?? asset.id ?? '').trim(),
     url: pickDisplayUrl(v),
     lan_url: v.lan_url,
     tailscale_url: v.tailscale_url,
@@ -432,8 +612,6 @@ onMounted(() => bindBackendAssetsObserver())
 onBeforeUnmount(() => disconnectBackendAssetsObserver())
 
 watch(() => task.value?.id, (id) => {
-  activeVersionIdx.value = 0
-  activeFileIdx.value = 0
   disconnectBackendAssetsObserver()
   if (id) bindBackendAssetsObserver()
 })
@@ -447,15 +625,27 @@ type RefPaneEntry =
   | { kind: 'legacy'; url: string; ref: ReferenceFileRef }
   | { kind: 'api'; item: ReturnType<typeof refDisplayItem> }
 
-/** legacy referenceFileRefs 在前，后端 reference 资产版本在后（与原先网格顺序一致） */
+/** 后端 current reference 优先；legacy reference_file_refs 只做历史兼容兜底。 */
 const referencePaneEntries = computed((): RefPaneEntry[] => {
   const out: RefPaneEntry[] = []
-  for (const refObj of currentReferenceRefs.value) {
-    const u = (typeof refObj.download_url === 'string' ? refObj.download_url : '').trim()
-    if (u) out.push({ kind: 'legacy', url: u, ref: refObj })
+  const seen = new Set<string>()
+  const pushEntry = (entry: RefPaneEntry, ref: ReferenceFileRef) => {
+    const key = referenceFileRefDedupeKey(ref, out.length)
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(entry)
   }
   for (const item of referenceDisplayList.value) {
-    out.push({ kind: 'api', item })
+    pushEntry(
+      { kind: 'api', item },
+      { asset_id: item.assetId || undefined, download_url: item.url, filename: item.fileName },
+    )
+  }
+  if (out.length === 0) {
+    for (const refObj of currentReferenceRefs.value) {
+      const u = (typeof refObj.download_url === 'string' ? refObj.download_url : '').trim()
+      if (u) pushEntry({ kind: 'legacy', url: u, ref: refObj }, refObj)
+    }
   }
   return out
 })
@@ -534,7 +724,7 @@ type AssetRootGroup = {
 
 function assetKindLabel(kind: string): string {
   if (kind === 'delivery') return '交付'
-  if (kind === 'source') return '设计原稿'
+  if (kind === 'source') return isCustomizationTask.value ? '定制原稿' : '设计原稿'
   return kind || '其他'
 }
 
@@ -565,15 +755,8 @@ function flatIndexOfVersion(v: TaskAssetVersion): number {
   return scopedAssetVersions.value.findIndex((x) => x.id === v.id)
 }
 
-function versionHasUsableFile(v: TaskAssetVersion): boolean {
-  const hasPreviewable = Array.isArray(v.fileRefs) && v.fileRefs.some((u) => Boolean(u?.trim()))
-  if (hasPreviewable) return true
-  return Boolean(v.nonPreviewFiles?.some((item) => Boolean(item.url?.trim())))
-}
-
 function isVersionUnavailable(v: TaskAssetVersion): boolean {
-  if (versionTotalFileCount(v) <= 0) return true
-  return !versionHasUsableFile(v)
+  return isTaskAssetVersionUnavailable(v)
 }
 
 /**
@@ -591,36 +774,41 @@ function isAuditReplacementVersion(v: TaskAssetVersion): boolean {
 function activateVersion(nextIdx: number) {
   const next = scopedAssetVersions.value[nextIdx]
   if (!next || isVersionUnavailable(next)) return
+  hasManualActiveVersionSelection.value = true
   activeVersionIdx.value = nextIdx
   activeFileIdx.value = 0
 }
 
-watch(
-  () => scopedAssetVersions.value.length,
-  (n) => {
-    if (activeVersionIdx.value >= n) activeVersionIdx.value = Math.max(0, n - 1)
-  },
-)
+function selectPreferredActiveVersion(versions = scopedAssetVersions.value) {
+  const preferredIdx = preferredTaskAssetVersionIndex(versions, isVersionUnavailable)
+  activeVersionIdx.value = preferredIdx >= 0 ? preferredIdx : 0
+  activeFileIdx.value = 0
+}
 
 watch(
   () => [task.value?.id, productIdxCtx?.productIndex.value] as const,
   () => {
-    activeVersionIdx.value = 0
-    activeFileIdx.value = 0
+    hasManualActiveVersionSelection.value = false
+    selectPreferredActiveVersion()
   },
+  { immediate: true },
 )
 
 watch(
   () => scopedAssetVersions.value,
   (versions) => {
-    if (!versions.length) return
+    if (!versions.length) {
+      activeVersionIdx.value = 0
+      activeFileIdx.value = 0
+      return
+    }
+    if (!hasManualActiveVersionSelection.value || activeVersionIdx.value >= versions.length) {
+      selectPreferredActiveVersion(versions)
+      return
+    }
     const current = versions[activeVersionIdx.value]
     if (current && !isVersionUnavailable(current)) return
-    const firstAvailableIdx = versions.findIndex((v) => !isVersionUnavailable(v))
-    if (firstAvailableIdx >= 0) {
-      activeVersionIdx.value = firstAvailableIdx
-      activeFileIdx.value = 0
-    }
+    selectPreferredActiveVersion(versions)
   },
   { immediate: true },
 )
@@ -660,13 +848,31 @@ const activeVersionThumbItems = computed((): AssetThumbItem[] => {
   return [...previews, ...sources]
 })
 
+function versionPreviewItems(version: TaskAssetVersion | null | undefined): ImagePreviewLightboxItem[] {
+  return (version?.fileRefs ?? [])
+    .map((src, index) => {
+      const url = String(src ?? '').trim()
+      const title = `版本图 ${index + 1}`
+      return url ? { src: url, title, alt: title, downloadUrl: url } : null
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[]
+}
+
+function openSharedVersionPreview(version: TaskAssetVersion) {
+  const items = versionPreviewItems(version)
+  if (!items.length) return
+  openLightbox(items[0].src, {
+    title: items[0].title,
+    items,
+    index: 0,
+  })
+}
+
 function onActiveVersionThumbSelect(key: string) {
   if (key.startsWith('preview-')) {
     const next = Number(key.slice('preview-'.length))
     if (Number.isFinite(next)) {
       activeFileIdx.value = Math.max(0, next)
-      const src = activeVersion.value?.fileRefs?.[activeFileIdx.value] ?? ''
-      if (src) openLightbox(src)
     }
     return
   }
@@ -678,13 +884,25 @@ function onActiveVersionThumbSelect(key: string) {
 }
 
 const canSubmitDesign = computed(() => canSubmitAudit(task.value))
-const canSubmitFromDesignPanel = computed(
-  () => can('design.submit') && canSubmitDesign.value,
-)
+const canSubmitFromDesignPanel = computed(() => {
+  if (!canSubmitDesign.value) return false
+  if (isCustomizationTask.value) {
+    return (
+      can('task.customization.submit') ||
+      can('customization.submit') ||
+      can('design.submit')
+    )
+  }
+  return can('design.submit')
+})
 
 const designAssetStatusRow = computed(() => {
   const rt = retouchDesignAssetStatusDisplay(task.value)
   if (rt) return rt
+  const customizationLabel = getCustomizationDetailStatusLabel(task.value)
+  if (customizationLabel) {
+    return { text: customizationLabel, dotClass: 'dot-blue' }
+  }
   if (!task.value.designSubStatus) return null
   const s = task.value.designSubStatus
   if (s === 'FINALIZED' || s === 'APPROVED') return { text: getDesignSubStatusLabel(s), dotClass: 'dot-green' }
@@ -701,10 +919,8 @@ async function onDeliveryPanelSuccess() {
   await loadBackendAssets()
   const tid = task.value.id
   await tasksStore.loadTaskById(tid)
-  // 时间线只展示 delivery 根；跳转到新上传那版 = 过滤后的最后一个
-  const n = scopedAssetVersions.value.length
-  activeVersionIdx.value = Math.max(0, n - 1)
-  activeFileIdx.value = 0
+  hasManualActiveVersionSelection.value = false
+  selectPreferredActiveVersion()
 }
 </script>
 
@@ -731,6 +947,20 @@ async function onDeliveryPanelSuccess() {
   text-transform: uppercase;
   color: #64748b;
   min-width: 4rem;
+}
+.customization-claim-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.5rem 1.5rem;
+  font-size: 0.8125rem;
+  margin-bottom: 0.5rem;
+}
+.customization-claim-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
 }
 .outsource-flag {
   display: inline-block;
@@ -1025,4 +1255,219 @@ async function onDeliveryPanelSuccess() {
 .meta-item--replace { color: #1d4ed8; font-weight: 600; }
 .meta-sep { color: #cbd5e1; }
 .empty-assets { font-size: 0.75rem; color: #9ca3af; padding: 0.5rem 0; }
+
+/* Task detail light skin override. Style-only: keep data flow, uploads, and audit logic unchanged. */
+.detail-block {
+  background: #ffffff !important;
+  border-color: #e5e7eb !important;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.block-title,
+.info-row-simple,
+.empty-assets {
+  color: #111827;
+}
+
+.status-inline,
+.row-label,
+.section-label,
+.ref-pane-hint,
+.shared-asset-note {
+  color: #6b7280;
+}
+
+.block-icon {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.outsource-flag,
+.object-switch-bar,
+.design-asset-pane--refs,
+.design-asset-pane--drafts,
+.nonpreview-panel {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #111827;
+  box-shadow: none;
+}
+
+.detail-block--result :deep(.design-asset-pane--drafts > .asset-section:first-of-type) {
+  min-height: 0;
+}
+
+.design-asset-pane--drafts > .asset-section:first-of-type {
+  min-height: 16.25rem;
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.detail-block--result :deep(.design-asset-result-manuscript),
+.detail-block--result :deep(.design-asset-pane--refs),
+.detail-block--result :deep(.design-asset-pane--timeline) {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #111827;
+  box-shadow: none;
+}
+
+.detail-block--result :deep(.manuscript-title),
+.detail-block--result :deep(.manuscript-card-label),
+.detail-block--result :deep(.nonpreview-name) {
+  color: #111827;
+}
+
+.detail-block--result :deep(.manuscript-meta),
+.detail-block--result :deep(.manuscript-empty),
+.detail-block--result :deep(.timeline-empty),
+.detail-block--result :deep(.nonpreview-hint) {
+  color: #6b7280;
+}
+
+.detail-block--result :deep(.manuscript-card) {
+  background: #ffffff;
+  border-color: #e5e7eb;
+}
+
+.detail-block--result :deep(.manuscript-card-visual) {
+  background: #f3f4f6;
+}
+
+.detail-block--result :deep(.version-group) {
+  border-radius: 0.625rem;
+  padding: 0.35rem 0.45rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.detail-block--result :deep(.version-btn) {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #374151;
+}
+
+.detail-block--result :deep(.version-btn.version-active) {
+  color: #ffffff;
+  border-color: #2563eb;
+  background: #2563eb;
+}
+
+.version-header {
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.45rem;
+}
+
+.version-group {
+  border-radius: 0.625rem;
+  padding: 0.35rem 0.45rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.version-group-kind.kind-delivery {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.version-group-kind.kind-source {
+  background: #fdf2f8;
+  border-color: #fbcfe8;
+  color: #be185d;
+}
+
+.version-group-no,
+.meta-item,
+.nonpreview-hint {
+  color: #6b7280;
+}
+
+.version-btn {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #374151;
+}
+
+.version-btn:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.version-btn.version-active {
+  color: #ffffff;
+  border-color: #2563eb;
+  background: #2563eb;
+  box-shadow: none;
+}
+
+.version-btn.version-disabled {
+  color: #9ca3af;
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+
+.version-file-count,
+.version-replace-tag,
+.version-unavailable-tag {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.version-preview {
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.version-preview-dl {
+  border-top-color: #e5e7eb;
+}
+
+.nonpreview-name {
+  color: #111827;
+}
+
+.meta-item--replace {
+  color: #2563eb;
+}
+
+.meta-sep {
+  color: #d1d5db;
+}
+
+:deep(.thumb-btn) {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  box-shadow: none;
+}
+
+:deep(.thumb-btn:hover) {
+  border-color: #93c5fd;
+}
+
+:deep(.thumb-placeholder),
+:deep(.thumb-empty),
+:deep(.apm-placeholder),
+:deep(.apm-empty) {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+:deep(.asset-dl-link--button) {
+  color: #ffffff;
+  background: #2563eb;
+  border-color: #2563eb;
+  box-shadow: none;
+}
+
+:deep(.asset-dl-link--button:hover) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
 </style>

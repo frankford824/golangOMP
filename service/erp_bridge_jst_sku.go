@@ -42,6 +42,11 @@ func jstExtractSkuRows(payload []byte) ([]map[string]interface{}, int64, error) 
 	if v := firstInt64ish(root, "data_count", "total"); v > 0 && int64(len(rows)) < v {
 		total = v
 	}
+	if pagination, ok := root["pagination"].(map[string]interface{}); ok {
+		if v := firstInt64ish(pagination, "total"); v > 0 && int64(len(rows)) < v {
+			total = v
+		}
+	}
 	return rows, total, nil
 }
 
@@ -49,7 +54,7 @@ func jstCollectSkuRows(node map[string]interface{}) []map[string]interface{} {
 	if node == nil {
 		return nil
 	}
-	for _, key := range []string{"datas", "items", "skus", "list", "data_list"} {
+	for _, key := range []string{"datas", "items", "skus", "list", "data_list", "data"} {
 		if raw, ok := node[key]; ok {
 			if arr, ok := raw.([]interface{}); ok {
 				out := make([]map[string]interface{}, 0, len(arr))
@@ -83,6 +88,10 @@ func firstInt64ish(m map[string]interface{}, keys ...string) int64 {
 			return x
 		case int:
 			return int64(x)
+		case json.Number:
+			if n, err := x.Int64(); err == nil {
+				return n
+			}
 		case string:
 			if n, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64); err == nil {
 				return n
@@ -125,20 +134,30 @@ func jstMapsToERPProducts(rows []map[string]interface{}, keyword string) []*doma
 				price = &f
 			}
 		}
+		var costPrice *float64
+		if cp := firstString(m, "cost_price", "c_price"); cp != "" {
+			if f, err := strconv.ParseFloat(cp, 64); err == nil {
+				costPrice = &f
+			}
+		}
+		shortName := firstNonEmptyString(firstString(m, "product_short_name", "productShortName"), firstString(m, "short_name", "shortName"))
 		out = append(out, &domain.ERPProduct{
-			ProductID:   sku,
-			SKUID:       sku,
-			IID:         firstString(m, "i_id", "iId"),
-			SKUCode:     sku,
-			Name:        name,
-			ProductName: firstNonEmptyString(name, sku),
-			CategoryID:  firstString(m, "c_id", "category_id"),
+			ProductID:        sku,
+			SKUID:            sku,
+			IID:              firstString(m, "i_id", "iId"),
+			SKUCode:          sku,
+			Name:             name,
+			ProductName:      firstNonEmptyString(name, sku),
+			ShortName:        shortName,
+			ProductShortName: shortName,
+			CategoryID:       firstString(m, "c_id", "category_id"),
 			CategoryName: firstNonEmptyString(
 				firstString(m, "category", "category_name", "vc_name"),
 				"",
 			),
-			ImageURL: firstNonEmptyString(firstString(m, "pic_big", "pic"), ""),
-			SPrice:   price,
+			ImageURL:  firstNonEmptyString(firstString(m, "sku_pic", "skuPic", "pic_big", "picBig", "pic", "pic_url", "image_url", "image", "main_image", "cover_url", "cover", "thumbnail", "thumb", "imageUrl"), ""),
+			SPrice:    price,
+			CostPrice: costPrice,
 		})
 	}
 	return out
@@ -155,11 +174,11 @@ func jstMapsToERPProductRecords(rows []map[string]interface{}) []domain.ERPProdu
 		name := firstNonEmptyString(jstRowName(m), sku)
 		cat := firstNonEmptyString(firstString(m, "category", "category_name", "vc_name"), "")
 		spec := map[string]interface{}{
-			"i_id":              firstString(m, "i_id", "iId"),
-			"properties_value":  firstString(m, "properties_value"),
-			"jst_sale_price":    firstString(m, "sale_price"),
-			"jst_cost_price":    firstString(m, "cost_price"),
-			"jst_source":        "jst_openweb_sku_query",
+			"i_id":             firstString(m, "i_id", "iId"),
+			"properties_value": firstString(m, "properties_value"),
+			"jst_sale_price":   firstString(m, "sale_price"),
+			"jst_cost_price":   firstString(m, "cost_price"),
+			"jst_source":       "jst_openweb_sku_query",
 		}
 		b, _ := json.Marshal(spec)
 		out = append(out, domain.ERPProductRecord{
@@ -193,14 +212,18 @@ func buildJSTSkuQueryBizFilter(filter domain.ERPProductSearchFilter) map[string]
 	}
 	skuKey := strings.TrimSpace(filter.SKUCode)
 	if skuKey == "" {
-		skuKey = strings.TrimSpace(filter.Q)
+		candidate := firstNonEmptyString(strings.TrimSpace(filter.Q), strings.TrimSpace(filter.Keyword))
+		if isERPBridgeSkuLikeKeyword(candidate) {
+			skuKey = candidate
+		}
 	}
-	if skuKey == "" {
-		skuKey = strings.TrimSpace(filter.Keyword)
-	}
-	if skuKey != "" {
+	nameKey := strings.TrimSpace(firstNonEmptyString(filter.Q, filter.Keyword))
+	switch {
+	case skuKey != "":
 		biz["sku_ids"] = skuKey
-	} else {
+	case nameKey != "":
+		biz["name"] = nameKey
+	default:
 		end := time.Now()
 		begin := end.AddDate(0, 0, -6)
 		biz["modified_begin"] = begin.Format("2006-01-02 15:04:05")

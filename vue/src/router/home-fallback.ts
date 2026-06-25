@@ -11,6 +11,7 @@ interface PermissionStoreLike {
   currentUser: unknown
   hasMenu: (key: string) => boolean
   hasPermission: (perms: PermissionEnumValue | PermissionEnumValue[]) => boolean
+  hasAction?: (key: string) => boolean
 }
 
 interface HomeRouteCandidate {
@@ -23,14 +24,15 @@ interface HomeRouteCandidate {
 const HOME_ROUTE_CANDIDATES: HomeRouteCandidate[] = [
   { name: 'Dashboard', menuKey: 'dashboard' },
   { name: 'TaskList', menuKey: 'task_list' },
+  { name: 'ProductManagement', menuKey: 'product_management' },
   { name: 'AssetsIndex', menuKey: 'resource_management' },
-  { name: 'ExportCenter', menuKey: 'export_center' },
+  { name: 'DataCenter', menuKey: 'report_center' },
+  { name: 'DataCenter', menuKey: 'export_center' },
   { name: 'AuditLog', menuKey: 'audit_log' },
-  { name: 'LogsManagement', menuKey: 'logs_center' },
+  { name: 'DataCenter', menuKey: 'logs_center' },
   { name: 'Finance', menuKey: 'finance' },
-  { name: 'Kpi', menuKey: 'kpi' },
+  { name: 'DataCenter', menuKey: 'kpi' },
   { name: 'RuleConfig', menuKey: 'rules' },
-  { name: 'OrgIndex', menuKey: 'org_admin' },
   { name: 'UserManagement', menuKey: 'user_admin' },
 ]
 
@@ -43,6 +45,39 @@ export function resolveFirstAccessibleHomeRoute(
 ): RouteLocationRaw | null {
   for (const candidate of HOME_ROUTE_CANDIDATES) {
     if (candidate.name === 'TaskList') {
+      const canReviewCustomization =
+        permissionsStore.hasAction?.('task.customization.review') === true ||
+        permissionsStore.hasAction?.('task.customization.effect_review') === true ||
+        permissionsStore.hasMenu('customization_management')
+      const canReviewNormal =
+        permissionsStore.hasAction?.('task.audit.review') === true ||
+        permissionsStore.hasAction?.('task.audit.claim') === true
+      if (canReviewCustomization && !canReviewNormal) {
+        return {
+          name: candidate.name,
+          query: {
+            task_category: 'customization',
+            status: 'PendingCustomizationReview,PendingEffectReview',
+          },
+        }
+      }
+      if (canReviewNormal && !canReviewCustomization) {
+        return {
+          name: candidate.name,
+          query: {
+            task_category: 'normal',
+            status: 'PendingAuditA,PendingAuditB',
+          },
+        }
+      }
+      if (canReviewCustomization && canReviewNormal) {
+        return {
+          name: candidate.name,
+          query: {
+            status: 'PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
+          },
+        }
+      }
       return { name: candidate.name }
     }
     if (permissionsStore.hasMenu(candidate.menuKey)) {

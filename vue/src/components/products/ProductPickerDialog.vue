@@ -56,6 +56,8 @@
                     :src="row.imageUrl"
                     alt="产品图片"
                     class="thumb-img"
+                    loading="lazy"
+                    decoding="async"
                     @error="onImageError($event)"
                   />
                   <div v-else class="thumb-placeholder">无图</div>
@@ -103,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import type { Product } from '@/types'
 import { useProductsStore } from '@/stores/products'
 import BaseModal from '@/components/base/BaseModal.vue'
@@ -142,6 +144,13 @@ watch(keyword, (kw) => {
     productsStore.loadProducts({ keyword: trimmed || undefined, page: 1 })
     debounceTimer = null
   }, DEBOUNCE_MS)
+})
+
+onBeforeUnmount(() => {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
 })
 
 function selectRow(row: Product) {
@@ -206,11 +215,14 @@ function goNextPage() {
 .table-scroll {
   max-height: 360px;
   overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
 }
 .thumb {
   width: 56px;
   height: 56px;
   border-radius: 6px;
+  border: 1px solid #e5e7eb;
   background: #f1f5f9;
   display: flex;
   align-items: center;
@@ -237,6 +249,9 @@ function goNextPage() {
   text-align: left;
   border-bottom: 1px solid #e2e8f0;
 }
+.data-table td {
+  color: #374151;
+}
 .data-table th {
   background: #f8fafc;
   font-weight: 600;
@@ -248,6 +263,9 @@ function goNextPage() {
 .row-click:hover,
 .row-click.selected {
   background: #f0fdf4;
+}
+.row-click.selected {
+  box-shadow: inset 3px 0 0 #10b981;
 }
 .ellipsis {
   max-width: 140px;

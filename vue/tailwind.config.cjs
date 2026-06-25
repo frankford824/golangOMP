@@ -3,6 +3,13 @@ module.exports = {
   content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
   darkMode: 'class',
   theme: {
+    fontFamily: {
+      sans: ['var(--yb-font-text)'],
+      serif: ['var(--yb-font-text)'],
+      mono: ['var(--yb-font-data)'],
+      headline: ['var(--yb-font-display)'],
+      body: ['var(--yb-font-text)'],
+    },
     extend: {
       colors: {
         surface: '#FAFAF9',
@@ -12,11 +19,6 @@ module.exports = {
         'sidebar-hover': '#292524',
         'glass-border': 'rgba(255, 255, 255, 0.5)',
         'glass-bg': 'rgba(255, 255, 255, 0.72)',
-      },
-      fontFamily: {
-        headline: ['Manrope', 'sans-serif'],
-        body: ['Inter', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
       },
       boxShadow: {
         glass: '0 4px 24px -4px rgba(28, 25, 23, 0.06)',

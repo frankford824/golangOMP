@@ -73,12 +73,12 @@ require_cmd() {
 }
 
 go_cmd() {
-  if command -v go >/dev/null 2>&1; then
-    printf '%s\n' go
-    return
-  fi
   if command -v go.exe >/dev/null 2>&1; then
     printf '%s\n' go.exe
+    return
+  fi
+  if command -v go >/dev/null 2>&1; then
+    printf '%s\n' go
     return
   fi
   fail "go is required."
@@ -369,11 +369,32 @@ resolve_go_entrypoint() {
 native_path_for_tool() {
   local tool="$1"
   local path="$2"
-  if [[ "$tool" = *.exe ]] && command -v wslpath >/dev/null 2>&1; then
+  if go_tool_is_windows_exe "$tool" && command -v wslpath >/dev/null 2>&1; then
     wslpath -w "$path"
     return
   fi
   printf '%s\n' "$path"
+}
+
+go_tool_resolved_path() {
+  local tool="$1"
+  local resolved
+  resolved="$(command -v "$tool" 2>/dev/null || printf '%s\n' "$tool")"
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$resolved" 2>/dev/null || printf '%s\n' "$resolved"
+    return
+  fi
+  printf '%s\n' "$resolved"
+}
+
+go_tool_is_windows_exe() {
+  local tool="$1"
+  local resolved
+  resolved="$(go_tool_resolved_path "$tool")"
+  case "${tool,,}:${resolved,,}" in
+    *.exe:*|*:*.exe) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 ps_single_quote_escape() {
@@ -386,13 +407,13 @@ go_build_linux_amd64() {
   local output_path="$3"
   local entrypoint="$4"
 
-  if [[ "$go_tool" = *.exe ]]; then
+  if go_tool_is_windows_exe "$go_tool"; then
     command -v powershell.exe >/dev/null 2>&1 || fail "powershell.exe is required when using go.exe from bash."
 
     local go_tool_path
     local native_root
     local native_output
-    go_tool_path="$(command -v "$go_tool" || printf '%s' "$go_tool")"
+    go_tool_path="$(go_tool_resolved_path "$go_tool")"
     go_tool_path="$(native_path_for_tool "$go_tool" "$go_tool_path")"
     native_root="$(native_path_for_tool "$go_tool" "$root")"
     native_output="$(native_path_for_tool "$go_tool" "$output_path")"
@@ -415,8 +436,11 @@ wait_for_file() {
   local path="$1"
   local label="$2"
   local attempt
-  for attempt in $(seq 1 20); do
-    [ -f "$path" ] && return 0
+  # Windows go.exe can return before WSL/DrvFS has made the cross-compiled
+  # binary visible to subsequent bash checks. Give the filesystem enough time
+  # to settle instead of failing a valid package build.
+  for attempt in $(seq 1 120); do
+    [ -s "$path" ] && return 0
     sleep 0.25
   done
   fail "Linux build output missing: $path ($label)"
@@ -438,6 +462,8 @@ package_release() {
   local go_tool
   local main_output
   local bridge_output
+  local asset_preview_output
+  local external_asset_worker_output
 
   dist_root="$(resolve_path "$root" "$output_root")"
   artifact_dir_name="${artifact_prefix}-${version}-linux-amd64"
@@ -448,6 +474,8 @@ package_release() {
   go_tool="$(go_cmd)"
   main_output="$stage_root/ecommerce-api"
   bridge_output="$stage_root/erp_bridge"
+  asset_preview_output="$stage_root/generate_asset_previews"
+  external_asset_worker_output="$stage_root/external_asset_worker"
 
   rm -rf "$stage_root" "$artifact_path"
   mkdir -p "$stage_root" "$stage_root/config" "$stage_root/db" "$stage_root/docs" "$deploy_root"
@@ -459,10 +487,22 @@ package_release() {
     fi
     go_build_linux_amd64 "$root" "$go_tool" "$main_output" "$entrypoint"
     go_build_linux_amd64 "$root" "$go_tool" "$bridge_output" "$entrypoint"
+    if [ -f "$root/cmd/tools/generate-asset-previews/main.go" ]; then
+      go_build_linux_amd64 "$root" "$go_tool" "$asset_preview_output" "./cmd/tools/generate-asset-previews"
+    fi
+    if [ -f "$root/cmd/tools/external-asset-worker/main.go" ]; then
+      go_build_linux_amd64 "$root" "$go_tool" "$external_asset_worker_output" "./cmd/tools/external-asset-worker"
+    fi
   )
 
   wait_for_file "$stage_root/ecommerce-api" "main"
   wait_for_file "$stage_root/erp_bridge" "bridge"
+  if [ -f "$root/cmd/tools/generate-asset-previews/main.go" ]; then
+    wait_for_file "$stage_root/generate_asset_previews" "asset preview generator"
+  fi
+  if [ -f "$root/cmd/tools/external-asset-worker/main.go" ]; then
+    wait_for_file "$stage_root/external_asset_worker" "external asset worker"
+  fi
 
   cp "$root"/config/*.json "$stage_root/config/"
   cp -R "$root/db/migrations" "$stage_root/db/"
@@ -476,7 +516,7 @@ package_release() {
   cp "$root/deploy/DEPLOYMENT_WORKFLOW.md" "$stage_root/README_DEPLOY.md"
 
   local helpe
-  for helper in lib.sh remote-deploy.sh run-with-env.sh run-migrations-v05.sh run-org-master-convergence.sh verify-v05-acceptance.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh; do
+  for helper in lib.sh remote-deploy.sh run-with-env.sh run-pending-migrations.sh run-migrations-v05.sh run-org-master-convergence.sh verify-v05-acceptance.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh; do
     cp "$root/deploy/$helper" "$deploy_root/$helper"
   done
   # Normalize packaged shell helpers to LF to avoid CRLF parse failures on Linux.
@@ -489,6 +529,12 @@ package_release() {
     mv "$normalized_script" "$deploy_script"
   done
   chmod +x "$stage_root/ecommerce-api" "$stage_root/erp_bridge" "$deploy_root/"*.sh
+  if [ -f "$stage_root/generate_asset_previews" ]; then
+    chmod +x "$stage_root/generate_asset_previews"
+  fi
+  if [ -f "$stage_root/external_asset_worker" ]; then
+    chmod +x "$stage_root/external_asset_worker"
+  fi
 
   cat >"$stage_root/PACKAGE_INFO.json" <<EOF
 {
@@ -497,9 +543,13 @@ package_release() {
   "artifact_archive": "$(json_escape "$(basename "$artifact_path")")",
   "main_binary": "ecommerce-api",
   "bridge_binary": "erp_bridge",
+  "asset_preview_generator_binary": "generate_asset_previews",
+  "external_asset_worker_binary": "external_asset_worker",
   "resolved_entrypoint": "$(json_escape "$entrypoint")",
   "main_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ecommerce-api $(json_escape "$entrypoint")",
   "bridge_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o erp_bridge $(json_escape "$entrypoint")",
+  "asset_preview_generator_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o generate_asset_previews ./cmd/tools/generate-asset-previews",
+  "external_asset_worker_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external_asset_worker ./cmd/tools/external-asset-worker",
   "runtime_bridge_base_url": "$(json_escape "$bridge_base_url")",
   "suggested_remote_base_dir": "/root/ecommerce_ai",
   "runtime_env_example": ".env.example",

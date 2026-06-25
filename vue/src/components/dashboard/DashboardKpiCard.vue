@@ -1,6 +1,6 @@
 <template>
   <div
-    class="kpi-card ring-1 ring-slate-200/70 shadow-sm shadow-slate-900/5"
+    class="kpi-card"
     :class="{ 'kpi-card--clickable': isClickable }"
     @click="navigate"
   >

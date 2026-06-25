@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"workflow/domain"
@@ -50,6 +51,38 @@ func TestLocalERPBridgeClientSearchProductsReadsLocalRepo(t *testing.T) {
 	}
 }
 
+func TestLocalERPBridgeClientUpsertProductPersistsCostForReadback(t *testing.T) {
+	productRepo := &localERPBridgeProductRepoStub{}
+	client := NewLocalERPBridgeClient(productRepo, nil, erpBridgeTxRunner{}, nil)
+
+	cost := 14.133
+	_, err := client.UpsertProduct(context.Background(), domain.ERPProductUpsertPayload{
+		ProductID:   "DZK000013",
+		SKUID:       "DZK000013",
+		SKUCode:     "DZK000013",
+		IID:         "定制kt板",
+		ProductName: "真/定制kt板/双层宠物迎宾牌",
+		CostPrice:   &cost,
+	})
+	if err != nil {
+		t.Fatalf("UpsertProduct() error = %v", err)
+	}
+
+	product, err := client.GetProductByID(context.Background(), "DZK000013")
+	if err != nil {
+		t.Fatalf("GetProductByID() error = %v", err)
+	}
+	if product == nil {
+		t.Fatal("GetProductByID() product = nil")
+	}
+	if product.CostPrice == nil || *product.CostPrice != cost {
+		t.Fatalf("CostPrice = %+v, want %.3f", product.CostPrice, cost)
+	}
+	if len(productRepo.searchProducts) != 1 || !strings.Contains(productRepo.searchProducts[0].SpecJSON, `"c_price":14.133`) {
+		t.Fatalf("local spec json did not persist c_price: %+v", productRepo.searchProducts)
+	}
+}
+
 type localERPBridgeProductRepoStub struct {
 	searchProducts []*domain.Product
 	searchTotal    int64
@@ -85,6 +118,25 @@ func (s *localERPBridgeProductRepoStub) ListIIDs(context.Context, repo.ProductII
 	return []*domain.ERPIIDOption{}, 0, nil
 }
 
-func (s *localERPBridgeProductRepoStub) UpsertBatch(context.Context, repo.Tx, []*domain.Product) (int64, error) {
-	return 0, nil
+func (s *localERPBridgeProductRepoStub) UpsertBatch(_ context.Context, _ repo.Tx, products []*domain.Product) (int64, error) {
+	for _, product := range products {
+		if product == nil {
+			continue
+		}
+		replaced := false
+		for idx, existing := range s.searchProducts {
+			if existing != nil && existing.ERPProductID == product.ERPProductID {
+				copyProduct := *product
+				s.searchProducts[idx] = &copyProduct
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			copyProduct := *product
+			s.searchProducts = append(s.searchProducts, &copyProduct)
+		}
+	}
+	s.searchTotal = int64(len(s.searchProducts))
+	return int64(len(products)), nil
 }

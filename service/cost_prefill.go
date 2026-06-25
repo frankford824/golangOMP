@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ type costPreviewComputation struct {
 }
 
 func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
+	req = withTextDerivedCostRuleDimensions(req)
 	sortedRules := make([]*domain.CostRule, 0, len(rules))
 	for _, rule := range rules {
 		if rule == nil {
@@ -33,10 +35,13 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 	})
 
 	area := previewArea(req)
+	areaThresholdBasis := previewAreaThresholdBasis(req, area)
 	quantity := previewQuantity(req.Quantity)
 	ruleSource := ""
 	manualReview := false
 	var estimated float64
+	fixedUnitTaxMultiplier := 1.0
+	hasFixedUnitPrice := false
 	var matchedRule *domain.CostRule
 	applied := make([]domain.CostRulePreviewMatch, 0, len(sortedRules))
 	explanations := make([]string, 0, len(sortedRules))
@@ -79,28 +84,35 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				continue
 			}
 			estimated += *baseCharge
+			hasFixedUnitPrice = true
+			fixedUnitTaxMultiplier = taxMultiplierOrOne(rule.TaxMultiplier)
 			applied = append(applied, match)
-			explanations = append(explanations, fmt.Sprintf("%s applied fixed price %.2f", rule.RuleName, *baseCharge))
+			explanations = append(explanations, fmt.Sprintf("%s applied fixed price %.3f", rule.RuleName, *baseCharge))
 		case domain.CostRuleTypeAreaThresholdSurcharge:
 			switch {
 			case rule.AreaThreshold == nil || rule.SurchargeAmount == nil:
 				continue
-			case area <= 0:
+			case area <= 0 || areaThresholdBasis <= 0:
 				manualReview = true
 				applied = append(applied, match)
 				explanations = append(explanations, fmt.Sprintf("%s requires width/height/area input before threshold surcharge can be evaluated", rule.RuleName))
-			case area < *rule.AreaThreshold:
-				extra := (*rule.SurchargeAmount) * float64(quantity)
+			case areaThresholdBasis < *rule.AreaThreshold:
+				extra := (*rule.SurchargeAmount) * area * float64(quantity)
+				if rule.TaxMultiplier != nil && *rule.TaxMultiplier > 0 {
+					extra = extra * (*rule.TaxMultiplier)
+				} else if hasFixedUnitPrice {
+					extra = extra * fixedUnitTaxMultiplier
+				}
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s added surcharge %.2f because area %.4f < %.4f", rule.RuleName, extra, area, *rule.AreaThreshold))
+				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.3f and applied %.3f because threshold area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, areaThresholdBasis, *rule.AreaThreshold))
 			}
 		case domain.CostRuleTypeSpecialProcessPrice:
 			if rule.SpecialProcessPrice != nil && containsProcessKeyword(req.Process, req.Notes, rule.SpecialProcessKeyword) {
 				extra := (*rule.SpecialProcessPrice) * float64(quantity)
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s added process surcharge %.2f", rule.RuleName, extra))
+				explanations = append(explanations, fmt.Sprintf("%s added process surcharge %.3f", rule.RuleName, extra))
 			}
 		case domain.CostRuleTypeSizeBasedFormula:
 			calculated, explanation, ok := applySizeBasedFormula(rule, quantity, req.Process, req.Notes)
@@ -122,7 +134,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 
 	var estimatedPtr *float64
 	if len(applied) > 0 && (!manualReview || estimated > 0) {
-		estimatedCopy := estimated
+		estimatedCopy := roundCostAmount(estimated)
 		estimatedPtr = &estimatedCopy
 	}
 	if len(applied) == 0 {
@@ -144,6 +156,34 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 		},
 		MatchedRule: matchedRule,
 	}
+}
+
+func roundCostAmount(value float64) float64 {
+	return math.Round(value*1000) / 1000
+}
+
+func taxMultiplierOrOne(value *float64) float64 {
+	if value == nil || *value <= 0 {
+		return 1
+	}
+	return *value
+}
+
+func withTextDerivedCostRuleDimensions(req domain.CostRulePreviewRequest) domain.CostRulePreviewRequest {
+	if req.Area != nil || (req.Width != nil && req.Height != nil) {
+		return req
+	}
+	extracted := extractCostDimensionsFromText(strings.Join(nonEmptyStrings(req.Process, req.Notes), " "))
+	if req.Width == nil {
+		req.Width = cloneFloat64Ptr(extracted.WidthM)
+	}
+	if req.Height == nil {
+		req.Height = cloneFloat64Ptr(extracted.HeightM)
+	}
+	if req.Area == nil {
+		req.Area = cloneFloat64Ptr(extracted.AreaM2)
+	}
+	return req
 }
 
 func previewMatchFromRule(rule *domain.CostRule) *domain.CostRulePreviewMatch {
@@ -182,4 +222,18 @@ func previewGovernanceStatus(rule *domain.CostRule) domain.CostRuleGovernanceSta
 		return domain.CostRuleGovernanceStatusNoMatch
 	}
 	return rule.GovernanceStatusAt(time.Now())
+}
+
+func previewAreaThresholdBasis(req domain.CostRulePreviewRequest, billableArea float64) float64 {
+	if costPreviewUsesBillableAreaForThreshold(req) {
+		return billableArea
+	}
+	if req.Width != nil && req.Height != nil && *req.Width > 0 && *req.Height > 0 {
+		return (*req.Width) * (*req.Height)
+	}
+	return billableArea
+}
+
+func costPreviewUsesBillableAreaForThreshold(req domain.CostRulePreviewRequest) bool {
+	return containsCostBoxLayoutKeyword(strings.Join(nonEmptyStrings(req.Process, req.Notes), " "))
 }

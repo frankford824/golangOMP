@@ -19,6 +19,7 @@
         <div class="cost-tile">
           <span class="cost-tile-label">成本单价</span>
           <span class="cost-tile-value">{{ formatMoneyShort(task.newProductCostUnitPrice) }}</span>
+          <span v-if="costNeedsManualMaintenance" class="cost-tile-warning">缺尺寸，成本待维护</span>
         </div>
         <div class="cost-tile">
           <span class="cost-tile-label">数量</span>
@@ -39,6 +40,7 @@
         <div class="cost-tile">
           <span class="cost-tile-label">成本单价</span>
           <span class="cost-tile-value">{{ formatMoneyShort(task.costPrice?.amount) }}</span>
+          <span v-if="costNeedsManualMaintenance" class="cost-tile-warning">缺尺寸，成本待维护</span>
         </div>
         <div class="cost-tile">
           <span class="cost-tile-label">基本售价</span>
@@ -55,7 +57,7 @@
       </div>
       <div class="info-row">
         <dt>成本单价</dt>
-        <dd>{{ formatMoney(task.newProductCostUnitPrice) }}</dd>
+        <dd>{{ costDisplay }}</dd>
       </div>
       <div class="info-row">
         <dt>数量（非必填）</dt>
@@ -79,7 +81,7 @@
       </div>
       <div class="info-row">
         <dt>成本单价</dt>
-        <dd>{{ formatMoney(task.costPrice?.amount) }}</dd>
+        <dd>{{ costDisplay }}</dd>
       </div>
       <div class="info-row">
         <dt>基本售价</dt>
@@ -116,6 +118,7 @@ const isPurchase = computed(
 )
 
 const costModeLabel = computed(() => {
+  if (costNeedsManualMaintenance.value) return '缺尺寸，成本待维护'
   const m = task.value.costPriceMode
   if (m === 'manual') return '手动录入'
   if (m === 'template') return '按模板/系统计算'
@@ -124,6 +127,7 @@ const costModeLabel = computed(() => {
 
 /** 磁贴标题行内展示：无明确模式时不显示，避免出现孤立 em dash */
 const costTitleSuffix = computed(() => {
+  if (costNeedsManualMaintenance.value) return '· 缺尺寸，成本待维护'
   const m = task.value.costPriceMode
   if (m === 'manual') return '· 手动录入'
   if (m === 'template') return '· 按模板/系统计算'
@@ -136,14 +140,25 @@ const purchaseQuantityLine = computed(() => {
   return '—'
 })
 
+const costNeedsManualMaintenance = computed(() => {
+  const t = task.value
+  const amount = isNewProduct.value ? t.newProductCostUnitPrice : t.costPrice?.amount
+  return t.requiresManualReview === true && (amount == null || Number.isNaN(Number(amount)))
+})
+
+const costDisplay = computed(() => {
+  if (costNeedsManualMaintenance.value) return '缺尺寸，成本待维护'
+  return isNewProduct.value ? formatMoney(task.value.newProductCostUnitPrice) : formatMoney(task.value.costPrice?.amount)
+})
+
 function formatMoney(n: number | undefined | null): string {
   if (n == null || Number.isNaN(Number(n))) return '—'
-  return `${Number(n)} CNY`
+  return `${Number(n).toFixed(3)} CNY`
 }
 
 function formatMoneyShort(n: number | undefined | null): string {
   if (n == null || Number.isNaN(Number(n))) return '—'
-  return `${Number(n)}`
+  return `${Number(n).toFixed(3)}`
 }
 </script>
 
@@ -255,5 +270,11 @@ dd {
   font-weight: 600;
   color: rgb(15 23 42);
   font-variant-numeric: tabular-nums;
+}
+.cost-tile-warning {
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: rgb(251 146 60);
+  line-height: 1.2;
 }
 </style>

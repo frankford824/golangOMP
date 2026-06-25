@@ -47,7 +47,7 @@ func (s *Service) Cancel(ctx context.Context, req Request) permission.Decision {
 	if err != nil {
 		return permission.Deny(domain.ErrCodeInternalError, err.Error())
 	}
-	if !req.Force {
+	if !canBypassClaimRestriction(req.Actor, task, req.Force) {
 		for _, m := range modules {
 			if m.ModuleKey != domain.ModuleKeyBasicInfo && m.State != domain.ModuleStatePendingClaim && m.State != domain.ModuleStatePending && !m.State.Terminal() {
 				return permission.Deny("task_already_claimed", "task has already been claimed")
@@ -102,6 +102,21 @@ func (s *Service) taskRepoUpdateStatus(ctx context.Context, tx repo.Tx, taskID i
 func canCancel(actor domain.RequestActor, task *domain.Task, force bool) bool {
 	if actor.ID > 0 && actor.ID == task.CreatorID && !force {
 		return true
+	}
+	for _, role := range actor.Roles {
+		if role == domain.RoleSuperAdmin || role == domain.RoleDeptAdmin {
+			return true
+		}
+	}
+	return actor.FrontendAccess.IsSuperAdmin || actor.FrontendAccess.IsDepartmentAdmin
+}
+
+func canBypassClaimRestriction(actor domain.RequestActor, task *domain.Task, force bool) bool {
+	if actor.ID > 0 && actor.ID == task.CreatorID {
+		return true
+	}
+	if !force {
+		return false
 	}
 	for _, role := range actor.Roles {
 		if role == domain.RoleSuperAdmin || role == domain.RoleDeptAdmin {

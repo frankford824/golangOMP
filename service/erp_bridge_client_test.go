@@ -172,6 +172,33 @@ func TestERPBridgeClientSearchProductsUsesCodeLikeIDAsSKUCodeFallback(t *testing
 	}
 }
 
+func TestJSTSkuQueryBizFilterSplitsNameAndSKUKeyword(t *testing.T) {
+	const productName = "常规kt板/毕业手举牌/粉黄青春不打烊梦想启航/6个装"
+	nameBiz := buildJSTSkuQueryBizFilter(domain.ERPProductSearchFilter{
+		Q:        productName,
+		Page:     1,
+		PageSize: 20,
+	})
+	if got := nameBiz["name"]; got != productName {
+		t.Fatalf("name keyword mapped to name = %#v", got)
+	}
+	if _, exists := nameBiz["sku_ids"]; exists {
+		t.Fatalf("name keyword must not be mapped to sku_ids: %#v", nameBiz)
+	}
+
+	skuBiz := buildJSTSkuQueryBizFilter(domain.ERPProductSearchFilter{
+		Q:        "CGD000003",
+		Page:     1,
+		PageSize: 20,
+	})
+	if got := skuBiz["sku_ids"]; got != "CGD000003" {
+		t.Fatalf("sku keyword mapped to sku_ids = %#v", got)
+	}
+	if _, exists := skuBiz["name"]; exists {
+		t.Fatalf("sku keyword must not be mapped to name: %#v", skuBiz)
+	}
+}
+
 func TestERPBridgeClientParsesDetailAndCategories(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -493,6 +520,35 @@ func TestERPBridgeServiceEnsureLocalProductMergesExistingSnapshot(t *testing.T) 
 	}
 }
 
+func TestAdaptERPProductReadsJSTImageFields(t *testing.T) {
+	product := adaptERPProduct(map[string]interface{}{
+		"sku_id":  "CGK000181",
+		"i_id":    "10001",
+		"name":    "ERP Product",
+		"sku_pic": "https://img.example.com/sku.jpg",
+		"pic_big": "https://img.example.com/big.jpg",
+	})
+	if product == nil {
+		t.Fatal("adaptERPProduct() = nil")
+	}
+	if product.ImageURL != "https://img.example.com/sku.jpg" {
+		t.Fatalf("ImageURL = %q, want sku_pic", product.ImageURL)
+	}
+
+	product = adaptERPProduct(map[string]interface{}{
+		"sku_id":  "CGK000182",
+		"i_id":    "10002",
+		"name":    "ERP Product",
+		"pic_big": "https://img.example.com/big.jpg",
+	})
+	if product == nil {
+		t.Fatal("adaptERPProduct() with pic_big = nil")
+	}
+	if product.ImageURL != "https://img.example.com/big.jpg" {
+		t.Fatalf("ImageURL = %q, want pic_big", product.ImageURL)
+	}
+}
+
 func TestERPBridgeServiceSearchProductsRejectsUnknownCategory(t *testing.T) {
 	client := &erpBridgeClientStub{
 		searchResponses: map[string]*domain.ERPProductListResponse{
@@ -677,6 +733,44 @@ func TestERPBridgeServiceSearchProductsFallsBackToLocalReplicaWhenRemoteKeywordE
 	}
 }
 
+func TestERPBridgeServiceSearchProductsCachesRemoteNameResult(t *testing.T) {
+	const productName = "常规kt板/毕业手举牌/粉黄青春不打烊梦想启航/6个装"
+	client := &erpBridgeClientStub{
+		searchResponses: map[string]*domain.ERPProductListResponse{
+			"page=1&q=" + productName: {
+				Items: []*domain.ERPProduct{
+					{
+						ProductID:    "HSC99999",
+						SKUID:        "HSC99999",
+						SKUCode:      "HSC99999",
+						ProductName:  productName,
+						CategoryName: "常规kt板",
+					},
+				},
+				Pagination: domain.PaginationMeta{Page: 1, PageSize: 20, Total: 1},
+			},
+		},
+		categories: []*domain.ERPCategory{},
+	}
+	productRepo := &erpBridgeProductRepoStub{products: map[string]*domain.Product{}}
+	svc := NewERPBridgeService(client, productRepo, erpBridgeTxRunner{})
+
+	resp, appErr := svc.SearchProducts(context.Background(), domain.ERPProductSearchFilter{
+		Q:        productName,
+		Page:     1,
+		PageSize: 20,
+	})
+	if appErr != nil {
+		t.Fatalf("SearchProducts() appErr = %+v", appErr)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].SKUCode != "HSC99999" {
+		t.Fatalf("SearchProducts() items = %+v", resp.Items)
+	}
+	if got := productRepo.products["HSC99999"]; got == nil || got.ProductName != productName {
+		t.Fatalf("remote name result was not cached: %+v", got)
+	}
+}
+
 func TestERPBridgeServiceGetProductByIDFallsBackToSearchReference(t *testing.T) {
 	const productRef = "NAME-REF-1"
 	client := &erpBridgeClientStub{
@@ -705,6 +799,64 @@ func TestERPBridgeServiceGetProductByIDFallsBackToSearchReference(t *testing.T) 
 	}
 	if product == nil || product.ProductID != productRef {
 		t.Fatalf("GetProductByID() product = %+v", product)
+	}
+}
+
+func TestERPBridgeServiceUpsertProductVerifiesCostReadbackMatch(t *testing.T) {
+	expected := 5.28
+	client := &erpBridgeClientStub{
+		getProducts: map[string]*domain.ERPProduct{
+			"NSKT000292": {ProductID: "NSKT000292", SKUID: "NSKT000292", CostPrice: float64Ptr(expected)},
+		},
+	}
+	svc := NewERPBridgeService(client, nil, nil)
+
+	result, appErr := svc.UpsertProduct(context.Background(), domain.ERPProductUpsertPayload{
+		SKUID:     "NSKT000292",
+		CostPrice: float64Ptr(expected),
+	})
+	if appErr != nil {
+		t.Fatalf("UpsertProduct() appErr = %+v", appErr)
+	}
+	if result == nil || result.CostVerification == nil {
+		t.Fatalf("missing cost verification: %+v", result)
+	}
+	if result.CostVerification.Status != "matched" {
+		t.Fatalf("cost verification status = %s, want matched", result.CostVerification.Status)
+	}
+	if result.CostVerification.ActualCost == nil || *result.CostVerification.ActualCost != expected {
+		t.Fatalf("actual cost = %+v, want %.2f", result.CostVerification.ActualCost, expected)
+	}
+}
+
+func TestERPBridgeServiceUpsertProductVerifiesCostReadbackMismatch(t *testing.T) {
+	expected := 5.28
+	actual := 0.96
+	client := &erpBridgeClientStub{
+		getProducts: map[string]*domain.ERPProduct{
+			"NSKT000292": {ProductID: "NSKT000292", SKUID: "NSKT000292", CostPrice: float64Ptr(actual)},
+		},
+	}
+	svc := NewERPBridgeService(client, nil, nil)
+
+	result, appErr := svc.UpsertProduct(context.Background(), domain.ERPProductUpsertPayload{
+		SKUID:     "NSKT000292",
+		CostPrice: float64Ptr(expected),
+	})
+	if appErr != nil {
+		t.Fatalf("UpsertProduct() appErr = %+v", appErr)
+	}
+	if result == nil || result.CostVerification == nil {
+		t.Fatalf("missing cost verification: %+v", result)
+	}
+	if result.CostVerification.Status != "mismatched" {
+		t.Fatalf("cost verification status = %s, want mismatched", result.CostVerification.Status)
+	}
+	if result.CostVerification.ActualCost == nil || *result.CostVerification.ActualCost != actual {
+		t.Fatalf("actual cost = %+v, want %.2f", result.CostVerification.ActualCost, actual)
+	}
+	if result.CostVerification.ExpectedCost == nil || *result.CostVerification.ExpectedCost != expected {
+		t.Fatalf("expected cost = %+v, want %.2f", result.CostVerification.ExpectedCost, expected)
 	}
 }
 
@@ -760,6 +912,13 @@ func (s *erpBridgeClientStub) GetProductByID(_ context.Context, id string) (*dom
 	return nil, nil
 }
 
+func (s *erpBridgeClientStub) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, nil
+}
+
 func (s *erpBridgeClientStub) ListCategories(context.Context) ([]*domain.ERPCategory, error) {
 	if s.categoryErr != nil {
 		return nil, s.categoryErr
@@ -776,6 +935,13 @@ func (s *erpBridgeClientStub) ListSyncLogs(context.Context, domain.ERPSyncLogFil
 
 func (s *erpBridgeClientStub) GetSyncLogByID(context.Context, string) (*domain.ERPSyncLog, error) {
 	return nil, nil
+}
+
+func (s *erpBridgeClientStub) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	return &domain.ERPOrderActionLogListResponse{
+		Items:      []*domain.ERPOrderActionLog{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
+	}, nil
 }
 
 func (s *erpBridgeClientStub) UpsertProduct(context.Context, domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error) {

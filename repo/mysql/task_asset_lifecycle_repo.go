@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"workflow/domain"
@@ -15,6 +16,108 @@ type taskAssetLifecycleRepo struct{ db *DB }
 
 func NewTaskAssetLifecycleRepo(db *DB) repo.TaskAssetLifecycleRepo {
 	return &taskAssetLifecycleRepo{db: db}
+}
+
+func (r *taskAssetLifecycleRepo) ListSupersededEligibleForCleanup(ctx context.Context, cutoff time.Time, limit int) ([]*repo.TaskAssetCleanupCandidate, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT ta.asset_id, ta.id, ta.task_id, ta.source_task_module_id, COALESCE(ta.storage_key, ''), ta.source_module_key, t.updated_at,
+		       COALESCE(GROUP_CONCAT(NULLIF(derived.storage_key, '') SEPARATOR '\n'), '') AS related_storage_keys
+		  FROM task_assets ta
+		  JOIN tasks t ON t.id = ta.task_id
+		  LEFT JOIN task_assets derived
+		    ON derived.source_asset_version_id = ta.id
+		   AND derived.cleaned_at IS NULL
+		   AND derived.deleted_at IS NULL
+		   AND COALESCE(derived.storage_key, '') <> ''
+		 WHERE ta.deleted_at IS NULL
+		   AND ta.cleaned_at IS NULL
+		   AND COALESCE(ta.storage_key, '') <> ''
+		   AND ta.flow_review_status = ?
+		   AND ta.cleanup_after_at IS NOT NULL
+		   AND ta.cleanup_after_at <= ?
+		   AND ta.id <> COALESCE((
+		        SELECT da.current_version_id FROM design_assets da WHERE da.id = ta.asset_id
+		   ), 0)
+		   AND EXISTS (
+		        SELECT 1 FROM task_assets newer
+		         WHERE newer.id = ta.superseded_by_version_id
+		           AND newer.deleted_at IS NULL
+		           AND newer.cleaned_at IS NULL
+		   )
+		 GROUP BY ta.asset_id, ta.id, ta.task_id, ta.source_task_module_id, ta.storage_key, ta.source_module_key, t.updated_at
+		 ORDER BY ta.cleanup_after_at ASC, ta.id ASC
+		 LIMIT ?`,
+		string(domain.TaskAssetFlowReviewStatusSuperseded), cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list superseded cleanup candidates: %w", err)
+	}
+	defer rows.Close()
+	var out []*repo.TaskAssetCleanupCandidate
+	for rows.Next() {
+		var c repo.TaskAssetCleanupCandidate
+		var assetID, moduleID sql.NullInt64
+		var related string
+		if err := rows.Scan(&assetID, &c.VersionID, &c.TaskID, &moduleID, &c.StorageKey, &c.SourceModuleKey, &c.TaskUpdatedAt, &related); err != nil {
+			return nil, fmt.Errorf("scan superseded cleanup candidate: %w", err)
+		}
+		if assetID.Valid {
+			c.AssetID = assetID.Int64
+		}
+		c.SourceTaskModuleID = fromNullInt64(moduleID)
+		c.RelatedStorageKeys = splitCleanupStorageKeys(related)
+		c.CleanupReason = "superseded"
+		out = append(out, &c)
+	}
+	return out, rows.Err()
+}
+
+func (r *taskAssetLifecycleRepo) MarkSupersededAutoCleaned(ctx context.Context, tx repo.Tx, versionID int64, cleanedAt time.Time) error {
+	sqlTx := Unwrap(tx)
+	taskID, err := taskIDByAssetVersionID(ctx, sqlTx, versionID)
+	if err != nil {
+		return err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_assets
+		   SET is_archived = 1,
+		       cleaned_at = ?,
+		       storage_key = NULL,
+		       flow_review_status = ?
+		 WHERE (id = ? OR source_asset_version_id = ?)
+		   AND cleaned_at IS NULL
+		   AND deleted_at IS NULL`,
+		cleanedAt, string(domain.TaskAssetFlowReviewStatusCleaned), versionID, versionID)
+	if err != nil {
+		return fmt.Errorf("mark superseded task asset auto cleaned: %w", err)
+	}
+	if _, err := res.RowsAffected(); err != nil {
+		return err
+	}
+	if taskID > 0 {
+		return reindexTaskSearchDocument(ctx, sqlTx, taskID)
+	}
+	return nil
+}
+
+func splitCleanupStorageKeys(raw string) []string {
+	parts := strings.Split(raw, "\n")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		key := strings.TrimSpace(part)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
 }
 
 func (r *taskAssetLifecycleRepo) Archive(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {

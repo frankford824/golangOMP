@@ -1,5 +1,6 @@
 import type { PurchaseInfo } from './purchase'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
+import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import type { ModuleSummary } from '@/services/apiTypes'
 import type { TaskPriorityApi } from '@/domain/task-priority'
 
@@ -11,6 +12,7 @@ import type { TaskPriorityApi } from '@/domain/task-priority'
 export type LegacyTaskStatus =
   | 'Draft'
   | 'PendingAssign'
+  | 'Assigned'
   | 'InProgress'
   | 'PendingAuditA'
   | 'RejectedByAuditA'
@@ -168,6 +170,7 @@ export interface TaskSkuItem {
   id?: number
   sequenceNo?: number
   skuCode?: string
+  skuCodeType?: 'regular' | 'customization' | string
   skuStatus?: string
   productNameSnapshot?: string
   productShortName?: string
@@ -176,8 +179,27 @@ export interface TaskSkuItem {
   categoryCode?: string
   materialMode?: string
   costPriceMode?: string
+  costPrice?: number
+  estimatedCost?: number
+  costRuleId?: number
+  costRuleName?: string
+  costRuleSource?: string
+  matchedRuleVersion?: number
+  prefillSource?: string
+  prefillAt?: string | null
+  requiresManualReview?: boolean
+  manualCostOverride?: boolean
+  manualCostOverrideReason?: string
+  overrideActor?: string
+  overrideAt?: string | null
+  specText?: string
+  sizeText?: string
+  width?: number
+  height?: number
+  area?: number
   quantity?: number
   baseSalePrice?: number
+  variantJson?: Record<string, unknown>
   /** GET 任务读模型 sku_items[].reference_file_refs，与任务级字段解析规则一致 */
   referenceFileRefs?: ReferenceFileRef[]
   /** 批量创建时子项级 design_requirement（若后端返回） */
@@ -267,12 +289,17 @@ export interface Task {
   ownerOrgTeam?: string
   /** 工作流业务 lane：普通 / 定制（GET 任务读模型 `workflow_lane`） */
   workflowLane?: 'normal' | 'customization'
+  /** 任务业务 lane：普通 / 定制（GET 任务读模型 `business_lane`） */
+  businessLane?: 'normal' | 'customization'
+  skuCodeType?: 'regular' | 'customization' | string
   /** GET /v1/tasks/{id}/detail modules projection, including backend allowed actions. */
   moduleSummaries?: ModuleSummary[]
   /** 上游来源部门（GET 任务读模型 `source_department`） */
   sourceDepartment?: string
 
   // ── 需求描述 ───────────────────────────────────────────────────────────────
+  /** retouch_task structured demand lines (Phase 1A text only). */
+  retouchRequirements?: RetouchRequirement[]
   designRequirement?: string
   copyContent?: string
   styleKeywords?: string
@@ -309,6 +336,22 @@ export interface Task {
   basePriceAmount?: number
   /** 采购任务：成本单价来源 */
   costPriceMode?: 'manual' | 'template'
+  /** 系统规则估算成本；为空且 requiresManualReview=true 时，需补尺寸或人工维护 */
+  estimatedCost?: number
+  costRuleId?: number
+  costRuleName?: string
+  costRuleSource?: string
+  requiresManualReview?: boolean
+  manualCostOverride?: boolean
+  manualCostOverrideReason?: string
+  /** 成本治理读模型：GET /v1/tasks/{id} 的采购摘要，用于详情页展示与仓库/财务判断 */
+  procurementSummary?: Record<string, unknown>
+  /** 成本人工覆盖摘要：GET /v1/tasks/{id} override_summary */
+  costOverrideSummary?: Record<string, unknown>
+  /** 成本治理审计摘要：GET /v1/tasks/{id} governance_audit_summary */
+  governanceAuditSummary?: Record<string, unknown>
+  /** 成本覆盖审批/财务边界：GET /v1/tasks/{id} override_governance_boundary */
+  costOverrideBoundary?: Record<string, unknown>
 
   /**
    * 与创建任务 3-in-1 表单对齐的只读字段（GET task 归一化）。

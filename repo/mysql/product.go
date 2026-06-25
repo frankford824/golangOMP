@@ -36,9 +36,14 @@ func (r *productRepo) Search(ctx context.Context, filter repo.ProductSearchFilte
 	args := []interface{}{}
 
 	if filter.Keyword != "" {
-		where = append(where, "(product_name LIKE ? OR sku_code LIKE ?)")
-		like := "%" + filter.Keyword + "%"
-		args = append(args, like, like)
+		kw := normalizeSearchKeyword(filter.Keyword)
+		if kw.IsCode {
+			where = append(where, "(sku_code = ? OR sku_code LIKE ? OR product_name LIKE ?)")
+			args = append(args, kw.Upper, kw.Upper+"%", kw.Like)
+		} else {
+			where = append(where, "(product_name LIKE ? OR sku_code LIKE ?)")
+			args = append(args, kw.Like, kw.Like)
+		}
 	}
 	if filter.Category != "" {
 		where = append(where, "category LIKE ?")
@@ -89,9 +94,14 @@ func (r *productRepo) ListIIDs(ctx context.Context, filter repo.ProductIIDListFi
 	where := []string{fmt.Sprintf("%s <> ''", iidExpr)}
 	args := []interface{}{}
 	if q := strings.TrimSpace(filter.Q); q != "" {
-		like := "%" + q + "%"
-		where = append(where, fmt.Sprintf("(%s LIKE ? OR category LIKE ? OR %s LIKE ? OR product_name LIKE ? OR sku_code LIKE ?)", iidExpr, categoryNameExpr))
-		args = append(args, like, like, like, like, like)
+		kw := normalizeSearchKeyword(q)
+		if kw.IsCode {
+			where = append(where, fmt.Sprintf("(%s = ? OR %s LIKE ? OR sku_code = ? OR sku_code LIKE ? OR category LIKE ? OR %s LIKE ? OR product_name LIKE ?)", iidExpr, iidExpr, categoryNameExpr))
+			args = append(args, kw.Upper, kw.Upper+"%", kw.Upper, kw.Upper+"%", kw.Like, kw.Like, kw.Like)
+		} else {
+			where = append(where, fmt.Sprintf("(%s LIKE ? OR category LIKE ? OR %s LIKE ? OR product_name LIKE ? OR sku_code LIKE ?)", iidExpr, categoryNameExpr))
+			args = append(args, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like)
+		}
 	}
 	whereSQL := strings.Join(where, " AND ")
 

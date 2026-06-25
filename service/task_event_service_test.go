@@ -117,6 +117,10 @@ func (r *taskEventTaskRepoStub) UpdateDetailBusinessInfo(context.Context, repo.T
 	panic("not used")
 }
 
+func (r *taskEventTaskRepoStub) UpdatePriority(context.Context, repo.Tx, int64, domain.TaskPriority) error {
+	panic("not used")
+}
+
 func (r *taskEventTaskRepoStub) UpdateProductBinding(context.Context, repo.Tx, *domain.Task) error {
 	panic("not used")
 }

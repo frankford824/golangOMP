@@ -16,7 +16,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
-import * as echarts from 'echarts'
+import { PieChart } from 'echarts/charts'
+import { LegendComponent, TitleComponent, TooltipComponent } from 'echarts/components'
+import { init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+
+use([PieChart, LegendComponent, TitleComponent, TooltipComponent, CanvasRenderer])
 
 const props = withDefaults(
   defineProps<{
@@ -27,23 +32,29 @@ const props = withDefaults(
 )
 
 const chartRef = ref<HTMLDivElement | null>(null)
-let chart: echarts.ECharts | null = null
+let chart: ECharts | null = null
+const chartFontFamily = 'YB Source Han Sans'
 
-const option = computed(() => {
+const option = computed<EChartsCoreOption>(() => {
   const data = props.series.filter((d) => d.value > 0)
   if (!data.length) {
     return {
+      textStyle: { fontFamily: chartFontFamily },
       title: {
         text: '暂无数据',
         left: 'center',
         top: 'middle',
-        textStyle: { color: '#94a3b8', fontSize: 13, fontWeight: 400 },
+        textStyle: { color: '#94a3b8', fontFamily: chartFontFamily, fontSize: 13, fontWeight: 400 },
       },
     }
   }
   return {
     color: ['#5470C6', '#91CC75', '#FAC858', '#EE6666', '#73C0DE'],
-    tooltip: { trigger: 'item' as const },
+    textStyle: { fontFamily: chartFontFamily },
+    tooltip: {
+      trigger: 'item' as const,
+      textStyle: { fontFamily: chartFontFamily },
+    },
     legend: {
       type: 'scroll' as const,
       orient: 'horizontal' as const,
@@ -51,7 +62,7 @@ const option = computed(() => {
       bottom: 0,
       itemWidth: 10,
       itemHeight: 10,
-      textStyle: { color: '#475569', fontSize: 10 },
+      textStyle: { color: '#475569', fontFamily: chartFontFamily, fontSize: 10 },
     },
     series: [
       {
@@ -75,7 +86,7 @@ function resize() {
 function render() {
   if (!chartRef.value) return
   if (!chart) {
-    chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' })
+    chart = init(chartRef.value, undefined, { renderer: 'canvas' })
   }
   chart.setOption(option.value, { notMerge: true })
 }

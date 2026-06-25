@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"workflow/domain"
@@ -30,9 +31,6 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 	levelName := strings.TrimSpace(p.CustomizationLevelName)
 	if levelCode == "" && levelName != "" {
 		levelCode = levelName
-	}
-	if p.Decision != domain.CustomizationReviewDecisionReturnToDesigner && levelCode == "" && levelName == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "customization_level_code or customization_level_name is required for non-return decisions", nil)
 	}
 
 	currentJob, err := s.customizationJobRepo.GetLatestByTaskID(ctx, task.ID)
@@ -66,17 +64,20 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 	currentJob.ReviewDecision = p.Decision
 	currentJob.DecisionType = domain.CustomizationJobDecisionTypeFinal
 
-	nextStatus := domain.TaskStatusPendingCustomizationReview
-	nextHandler := cloneInt64Ptr(task.DesignerID)
-	nextJobStatus := domain.CustomizationJobStatusPendingCustomizationReview
+	nextStatus := domain.TaskStatusPendingCustomizationProduction
+	nextHandler := customizationOperatorFallbackHandler(task, currentJob)
+	nextJobStatus := domain.CustomizationJobStatusPendingCustomizationProduction
 	if p.Decision != domain.CustomizationReviewDecisionReturnToDesigner {
-		nextStatus = domain.TaskStatusPendingCustomizationProduction
+		nextStatus = domain.TaskStatusPendingWarehouseReceive
 		nextHandler = nil
-		nextJobStatus = domain.CustomizationJobStatusPendingCustomizationProduction
+		nextJobStatus = domain.CustomizationJobStatusPendingWarehouseQC
 	}
 	currentJob.Status = nextJobStatus
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if currentJob.LastOperatorID == nil && task.LastCustomizationOperatorID != nil {
+			currentJob.LastOperatorID = cloneInt64Ptr(task.LastCustomizationOperatorID)
+		}
 		if currentJob.ID == 0 {
 			id, err := s.customizationJobRepo.Create(ctx, tx, currentJob)
 			if err != nil {
@@ -90,6 +91,9 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 			return err
 		}
 		if err := s.taskRepo.UpdateHandler(ctx, tx, task.ID, nextHandler); err != nil {
+			return err
+		}
+		if err := s.taskRepo.UpdateCustomizationState(ctx, tx, task.ID, customizationOperatorFallbackHandler(task, currentJob), "", ""); err != nil {
 			return err
 		}
 		_, err := s.taskEventRepo.Append(ctx, tx, task.ID, "task.customization.reviewed", &p.ReviewerID, mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
@@ -106,6 +110,7 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 			"from_task_status":               task.TaskStatus,
 			"to_task_status":                 nextStatus,
 			"to_job_status":                  nextJobStatus,
+			"last_customization_operator_id": customizationOperatorFallbackHandler(task, currentJob),
 		}))
 		return err
 	})
@@ -198,7 +203,13 @@ func (s *taskService) SubmitCustomizationEffectPreview(ctx context.Context, p Su
 			"unit_price":                     job.UnitPrice,
 			"weight_factor":                  job.WeightFactor,
 		}))
-		return err
+		if err != nil {
+			return err
+		}
+		if nextTaskStatus == domain.TaskStatusPendingEffectReview {
+			s.notifyCustomizationAuditPool(ctx, tx, task.ID, job.ID, p.OperatorID, "effect_review")
+		}
+		return nil
 	})
 	if txErr != nil {
 		if appErr, ok := txErr.(*domain.AppError); ok {
@@ -207,6 +218,27 @@ func (s *taskService) SubmitCustomizationEffectPreview(ctx context.Context, p Su
 		return nil, infraError("customization effect preview tx", txErr)
 	}
 	return s.GetCustomizationJob(ctx, p.JobID)
+}
+
+func (s *taskService) notifyCustomizationAuditPool(ctx context.Context, tx repo.Tx, taskID, jobID, actorID int64, stage string) {
+	if s == nil || s.blueprintRuleEngine == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"pool_team_code":       domain.TeamAuditCustomization,
+		"customization_job_id": jobID,
+		"customization_stage":  stage,
+	})
+	if err != nil {
+		payload = []byte(`{"pool_team_code":"audit_customization"}`)
+	}
+	s.blueprintRuleEngine.GenerateNotificationForEvent(ctx, tx, domain.TaskModuleEvent{
+		TaskID:    taskID,
+		ModuleKey: domain.ModuleKeyAudit,
+		EventType: domain.ModuleEventEntered,
+		ActorID:   &actorID,
+		Payload:   payload,
+	})
 }
 
 func (s *taskService) ReviewCustomizationEffect(ctx context.Context, p ReviewCustomizationEffectParams) (*domain.CustomizationJob, *domain.AppError) {
@@ -487,7 +519,7 @@ func (s *taskService) resolveCustomizationRejectStatus(task *domain.Task) (domai
 	if task == nil || !task.CustomizationRequired {
 		return domain.TaskStatusRejectedByAuditB, cloneInt64Ptr(task.DesignerID)
 	}
-	return domain.TaskStatusRejectedByWarehouse, cloneInt64Ptr(task.LastCustomizationOperatorID)
+	return domain.TaskStatusPendingCustomizationProduction, customizationOperatorFallbackHandler(task, nil)
 }
 
 func (s *taskService) resolveWarehouseReceiveStatus(task *domain.Task) domain.TaskStatus {
@@ -495,4 +527,17 @@ func (s *taskService) resolveWarehouseReceiveStatus(task *domain.Task) domain.Ta
 		return domain.TaskStatusPendingWarehouseQC
 	}
 	return domain.TaskStatusPendingWarehouseReceive
+}
+
+func customizationOperatorFallbackHandler(task *domain.Task, job *domain.CustomizationJob) *int64 {
+	if task == nil {
+		return nil
+	}
+	if task.LastCustomizationOperatorID != nil {
+		return cloneInt64Ptr(task.LastCustomizationOperatorID)
+	}
+	if job != nil && job.LastOperatorID != nil {
+		return cloneInt64Ptr(job.LastOperatorID)
+	}
+	return cloneInt64Ptr(task.DesignerID)
 }

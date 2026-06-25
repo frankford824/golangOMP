@@ -8,6 +8,29 @@ import (
 	"workflow/repo"
 )
 
+func TestResolveTaskAssignmentOperationCustomizationProduction(t *testing.T) {
+	task := &domain.Task{
+		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
+		CustomizationRequired: true,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+	}
+	op := resolveTaskAssignmentOperation(task)
+	if op.Action != TaskActionAssign {
+		t.Fatalf("action = %s, want assign", op.Action)
+	}
+	if op.ResultingStatus != domain.TaskStatusPendingCustomizationProduction {
+		t.Fatalf("resulting status = %s, want PendingCustomizationProduction", op.ResultingStatus)
+	}
+}
+
+func TestResolveTaskAssignmentOperationPendingAssign(t *testing.T) {
+	task := &domain.Task{TaskStatus: domain.TaskStatusPendingAssign}
+	op := resolveTaskAssignmentOperation(task)
+	if op.Action != TaskActionAssign || op.ResultingStatus != domain.TaskStatusInProgress {
+		t.Fatalf("operation = %+v, want assign -> InProgress", op)
+	}
+}
+
 func TestTaskAssignmentPendingAssignUsesCAS(t *testing.T) {
 	taskRepo := &assignmentCASTaskRepo{
 		prdTaskRepo: prdTaskRepo{

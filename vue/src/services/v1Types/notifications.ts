@@ -1,9 +1,12 @@
 export type NotificationType =
   | 'task_assigned_to_me'
   | 'task_rejected'
+  | 'task_pending_audit'
+  | 'task_closed'
   | 'claim_conflict'
   | 'pool_reassigned'
   | 'task_cancelled'
+  | 'system_broadcast'
 
 export interface TaskAssignedPayload {
   task_id: number
@@ -28,6 +31,30 @@ export interface TaskRejectedPayload {
   module_key?: string
   rejected_by?: number
   rejected_by_name?: string
+}
+
+export interface TaskPendingAuditPayload {
+  task_id: number
+  task_no?: string
+  module_key?: string
+  pool_team_code?: string
+  team_name?: string
+  designer_id?: number
+  designer_name?: string
+}
+
+export interface TaskClosedPayload {
+  task_id: number
+  task_no?: string
+  creator_id?: number
+  creator_name?: string
+  designer_id?: number
+  designer_name?: string
+  closed_by?: number
+  closed_by_name?: string
+  warehouse_status?: string
+  auto_release?: boolean
+  remark?: string
 }
 
 export interface ClaimConflictPayload {
@@ -57,12 +84,24 @@ export interface TaskCancelledPayload {
   module_key?: string
 }
 
+export interface SystemBroadcastPayload {
+  title: string
+  content: string
+  broadcast_by?: number
+  broadcast_by_name?: string
+  broadcast_audience?: string
+  broadcast_recipient_count?: number
+}
+
 export type NotificationPayload =
   | TaskAssignedPayload
   | TaskRejectedPayload
+  | TaskPendingAuditPayload
+  | TaskClosedPayload
   | ClaimConflictPayload
   | PoolReassignedPayload
   | TaskCancelledPayload
+  | SystemBroadcastPayload
   | Record<string, unknown>
 
 export interface NotificationRecord {

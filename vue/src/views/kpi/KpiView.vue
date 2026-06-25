@@ -153,7 +153,7 @@
 }
 
 .api-note-code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--yb-font-data);
   color: #0f172a;
   word-break: break-all;
 }

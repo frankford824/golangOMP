@@ -16,6 +16,7 @@ const props = defineProps<{ status: TaskStatus }>()
 const statusLabels: Record<TaskStatus, string> = {
   Draft: '草稿',
   PendingAssign: '待指派',
+  Assigned: '已指派',
   InProgress: '进行中',
   PendingAuditA: '待审核',
   RejectedByAuditA: '审核打回',
@@ -24,7 +25,7 @@ const statusLabels: Record<TaskStatus, string> = {
   PendingOutsource: '待定制',
   Outsourcing: '定制中',
   PendingOutsourceReview: '定制中',
-  PendingCustomizationReview: '定制中',
+  PendingCustomizationReview: '待定制审核',
   PendingCustomizationProduction: '待定制生产',
   PendingEffectReview: '待效果审核',
   PendingEffectRevision: '待效果返修',
@@ -58,6 +59,7 @@ function getSemanticKind(status: TaskStatus): SemanticKind {
   if (
     status === 'PendingAuditA' ||
     status === 'PendingAuditB' ||
+    status === 'PendingCustomizationReview' ||
     status === 'PendingEffectReview' ||
     status === 'PendingWarehouseQC' ||
     status === 'PendingWarehouseReceive' ||

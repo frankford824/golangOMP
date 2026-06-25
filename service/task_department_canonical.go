@@ -48,7 +48,7 @@ func taskSourceDepartment(task *domain.Task) string {
 	switch {
 	case task.TaskType == domain.TaskTypePurchaseTask:
 		return string(domain.DepartmentCloudWarehouse)
-	case task.WorkflowLane() == domain.WorkflowLaneCustomization:
+	case domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired) == domain.TaskBusinessLaneCustomization && task.CustomizationRequired:
 		return string(domain.DepartmentCustomizationArt)
 	default:
 		return string(domain.DepartmentDesignRD)

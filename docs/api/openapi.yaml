@@ -82,6 +82,48 @@ components:
           type: boolean
         debug_compatible:
           type: boolean
+    PredictionSuggestion:
+      type: object
+      description: Deterministic user-operation suggestion generated from existing workflow traces, tasks, assets, products, or KPI data. This response does not consume AI provider quota.
+      required: [id, type, title]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          description: Suggestion category such as `recent`, `search`, `asset`, `task_create`, `task_next_action`, or `management`.
+        title: { type: string }
+        detail: { type: string }
+        action_label: { type: string }
+        action_type: { type: string }
+        target_type:
+          type: string
+          description: Frontend navigation target such as `task`, `asset`, `product`, `task_center`, `data_center`, or `logs`.
+        target_id: { type: string }
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        source: { type: string }
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    PredictionBundle:
+      type: object
+      required: [suggestions, generated_at]
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PredictionSuggestion'
+        generated_at:
+          type: string
+          format: date-time
+    PredictionBundleResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/PredictionBundle'
     RuleTemplate:
       type: object
       properties:
@@ -269,6 +311,7 @@ components:
         account: { type: string }
         display_name: { type: string }
         name: { type: string }
+        real_name: { type: string }
         department:
           $ref: '#/components/schemas/Department'
         team: { type: string }
@@ -276,6 +319,8 @@ components:
         mobile: { type: string }
         phone: { type: string }
         email: { type: string, nullable: true }
+        avatar: { type: string, nullable: true }
+        avatar_url: { type: string, nullable: true }
         managed_departments:
           type: array
           items:
@@ -661,10 +706,129 @@ components:
         actor_id:
           type: integer
           nullable: true
+        actor_username: { type: string }
         actor_type: { type: string }
         status: { type: string }
         payload: {}
         created_at:
+          type: string
+          format: date-time
+    WorkflowTraceEvent:
+      type: object
+      description: Lightweight business trace event used by the business tracing and AI insight page.
+      properties:
+        id: { type: integer }
+        event_id: { type: string }
+        trace_id: { type: string }
+        event_source:
+          type: string
+          enum: [api, frontend, system, integration]
+        event_type:
+          type: string
+          example: api_request
+        action: { type: string }
+        actor_id:
+          type: integer
+          nullable: true
+        actor_username: { type: string }
+        actor_source: { type: string }
+        actor_auth_mode:
+          $ref: '#/components/schemas/PlaceholderAuthMode'
+        actor_roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/V7Role'
+        actor_department: { type: string }
+        actor_team: { type: string }
+        route_method: { type: string }
+        route_path: { type: string }
+        route_full_path: { type: string }
+        http_status:
+          type: integer
+          nullable: true
+        latency_ms:
+          type: integer
+          nullable: true
+        client_ip: { type: string }
+        user_agent: { type: string }
+        page_url: { type: string }
+        page_name: { type: string }
+        component_id: { type: string }
+        task_id:
+          type: integer
+          nullable: true
+        task_module_id:
+          type: integer
+          nullable: true
+        module_key: { type: string }
+        sku_code: { type: string }
+        task_sku_item_id:
+          type: integer
+          nullable: true
+        asset_id:
+          type: integer
+          nullable: true
+        design_asset_id:
+          type: integer
+          nullable: true
+        task_asset_id:
+          type: integer
+          nullable: true
+        integration_call_log_id:
+          type: integer
+          nullable: true
+        resource_type: { type: string }
+        resource_id: { type: string }
+        outcome: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    WorkflowTraceEventRecordRequest:
+      type: object
+      required: [event_type]
+      properties:
+        event_type: { type: string }
+        action: { type: string }
+        page_url: { type: string }
+        page_name: { type: string }
+        component_id: { type: string }
+        task_id:
+          type: integer
+          nullable: true
+        task_module_id:
+          type: integer
+          nullable: true
+        module_key: { type: string }
+        sku_code: { type: string }
+        task_sku_item_id:
+          type: integer
+          nullable: true
+        asset_id:
+          type: integer
+          nullable: true
+        design_asset_id:
+          type: integer
+          nullable: true
+        task_asset_id:
+          type: integer
+          nullable: true
+        integration_call_log_id:
+          type: integer
+          nullable: true
+        resource_type: { type: string }
+        resource_id: { type: string }
+        outcome: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+        occurred_at:
           type: string
           format: date-time
     PolicyMode:
@@ -1136,6 +1300,10 @@ components:
           type: number
           format: double
           nullable: true
+        cost_price:
+          type: number
+          format: double
+          nullable: true
         wms_co_id:
           type: string
           description: Warehouse dimension code resolved from ERP.
@@ -1309,6 +1477,23 @@ components:
         sync_log_id: { type: string }
         status: { type: string, description: 'e.g. accepted, stored locally, synced' }
         message: { type: string }
+        cost_verification:
+          $ref: '#/components/schemas/ERPCostVerificationResult'
+    ERPCostVerificationResult:
+      type: object
+      description: Post-upsert ERP cost readback evidence. When a filing payload includes cost, MAIN/Bridge reads the SKU back and compares the returned ERP cost to the expected cost before marking task filing as complete.
+      properties:
+        status:
+          type: string
+          enum: [matched, mismatched, unverified, skipped]
+        sku_id: { type: string }
+        expected_cost: { type: number, nullable: true }
+        actual_cost: { type: number, nullable: true }
+        checked_at: { type: string, format: date-time, nullable: true }
+        message: { type: string }
+        observed_product:
+          allOf: [{ $ref: '#/components/schemas/ERPBridgeProduct' }]
+          nullable: true
     ERPItemStyleUpdatePayload:
       type: object
       description: Style-update payload written through `POST /v1/erp/products/style/update`.
@@ -1702,6 +1887,10 @@ components:
           nullable: true
         need_outsource: { type: boolean }
         is_outsource: { type: boolean }
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical task business lane used for workflow routing and audit-domain isolation.
         customization_required: { type: boolean }
         customization_source_type:
           type: string
@@ -1761,6 +1950,10 @@ components:
           format: double
           nullable: true
         product_channel: { type: string }
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          description: Automatic SKU code type used for generated task SKUs. Historical rows may omit it and should be treated as `regular`.
         reference_images_json: { type: string }
         reference_file_refs_json: { type: string }
         reference_link: { type: string }
@@ -1935,12 +2128,53 @@ components:
         sku_item_id:
           type: integer
           nullable: true
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: When set, this reference index row belongs to one `task_retouch_requirements` line. NULL means task-level or legacy scope.
         ref_id: { type: string }
         owner_module_key: { type: string }
         context:
           type: string
           nullable: true
         attached_at: { type: string, format: date-time }
+    TaskRetouchRequirement:
+      type: object
+      description: One structured demand line for `task_type=retouch_task`. Phase 1B adds per-requirement `reference_file_refs` and `source_assets` on read models.
+      properties:
+        id: { type: integer, format: int64 }
+        task_id: { type: integer, format: int64 }
+        description: { type: string }
+        sku_code: { type: string, nullable: true }
+        spec: { type: string, nullable: true }
+        remark: { type: string, nullable: true }
+        sort_order: { type: integer }
+        created_by: { type: integer, format: int64, nullable: true }
+        updated_by: { type: integer, format: int64, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        reference_file_refs:
+          type: array
+          description: Requirement-scoped reference images for this line. Always present on read models and may be empty.
+          items:
+            $ref: '#/components/schemas/ReferenceFileRef'
+        source_assets:
+          type: array
+          description: Requirement-scoped source/material files (`asset_type=source`) for this line. Always present on read models and may be empty.
+          items:
+            $ref: '#/components/schemas/DesignAsset'
+      required: [id, task_id, description, sort_order, created_at, updated_at]
+    CreateTaskRetouchRequirementItem:
+      type: object
+      description: Create-time input for one retouch demand line. Only accepted when `task_type=retouch_task`.
+      required: [description]
+      properties:
+        description: { type: string }
+        sku_code: { type: string }
+        spec: { type: string }
+        remark: { type: string }
+        sort_order: { type: integer }
     TaskAggregateDetailV2:
       type: object
       description: V1.1-A1 fast-path task aggregate detail. Batch tasks include `sku_items`; design uploads include `asset_versions` with `scope_sku_code` for per-SKU grouping.
@@ -1983,6 +2217,11 @@ components:
         designer_name: { type: string }
         assignee_name: { type: string }
         current_handler_name: { type: string }
+        retouch_requirements:
+          type: array
+          description: Structured retouch demand lines for `retouch_task`. Always present for retouch tasks and may be empty for legacy rows.
+          items:
+            $ref: '#/components/schemas/TaskRetouchRequirement'
     ProcurementStatus:
       type: string
       enum: [draft, prepared, in_progress, completed]
@@ -2692,6 +2931,12 @@ components:
         created_at:
           type: string
           format: date-time
+    TaskAssetFlowReviewStatus:
+      type: string
+      enum: [not_applicable, pending_review, approved, rejected, superseded, cleaned]
+    TaskAssetUsableState:
+      type: string
+      enum: [not_applicable, pending_review, ready_for_use, rejected, history, cleaned]
     TaskAsset:
       type: object
       description: Task-scoped asset timeline item. Asset semantics are now canonicalized to `reference/source/delivery/preview`, while legacy input aliases remain compatibility-only.
@@ -2766,6 +3011,15 @@ components:
         scope_sku_code:
           type: string
           nullable: true
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy timeline row.
+        source_asset_version_id:
+          type: integer
+          nullable: true
+          description: Source version used to derive this asset version when applicable.
         source_module_key:
           type: string
           nullable: true
@@ -2781,6 +3035,33 @@ components:
           format: date-time
           nullable: true
         cleaned_at:
+          type: string
+          format: date-time
+          nullable: true
+        flow_review_status:
+          $ref: '#/components/schemas/TaskAssetFlowReviewStatus'
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          type: integer
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejected_by:
+          type: integer
+          nullable: true
+        superseded_by_version_id:
+          type: integer
+          nullable: true
+        superseded_at:
+          type: string
+          format: date-time
+          nullable: true
+        cleanup_after_at:
           type: string
           format: date-time
           nullable: true
@@ -2833,6 +3114,11 @@ components:
           type: string
           nullable: true
           description: Optional batch-SKU scope. When present, this version belongs to exactly one `sku_items[].sku_code`.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy asset scope.
         asset_type:
           type: string
           enum: [reference, source, delivery, preview, design_thumb]
@@ -2841,7 +3127,16 @@ components:
         upload_mode:
           $ref: '#/components/schemas/DesignAssetUploadMode'
           description: Compatibility input alias. New frontend integrations should prefer `asset_kind` and let backend strategy selection drive `upload_strategy`.
+        file_name:
+          type: string
+          description: Stored file name. When no explicit original upload name exists, download naming may fall back to this value.
         original_filename: { type: string }
+        has_original_filename:
+          type: boolean
+          description: Whether `original_filename` came from an explicit uploaded original name rather than a stored-file fallback.
+        product_name_snapshot:
+          type: string
+          description: Task product name snapshot for business download naming.
         remote_file_id:
           type: string
           nullable: true
@@ -2886,6 +3181,35 @@ components:
             Whether this asset version is currently previewable.
             For `asset_kind=source`, preview is available immediately only when source format is OSS IMG direct-preview capable (`jpg/png/bmp/gif/webp/tiff/heic/avif`);
             otherwise preview depends on backend-derived `preview/design_thumb` assets linked by `source_asset_id`.
+        flow_review_status:
+          $ref: '#/components/schemas/TaskAssetFlowReviewStatus'
+        usable_state:
+          $ref: '#/components/schemas/TaskAssetUsableState'
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          type: integer
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejected_by:
+          type: integer
+          nullable: true
+        superseded_by_version_id:
+          type: integer
+          nullable: true
+        superseded_at:
+          type: string
+          format: date-time
+          nullable: true
+        cleanup_after_at:
+          type: string
+          format: date-time
+          nullable: true
         warehouse_ready: { type: boolean }
         approved_for_flow: { type: boolean }
         current_version_role:
@@ -2922,6 +3246,11 @@ components:
           type: string
           nullable: true
           description: Optional batch-SKU scope for the asset root. Empty/null means task-level asset shared across the task.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy asset scope.
         asset_type:
           type: string
           enum: [reference, source, delivery, preview, design_thumb]
@@ -2979,6 +3308,11 @@ components:
           type: string
           nullable: true
           description: Optional target SKU captured on the upload-session business view for batch-task uploads. The completed asset root and asset version later expose the persisted SKU scope on `scope_sku_code`.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task` uploads. Only valid when the task is `retouch_task` and the requirement belongs to the task.
         upload_mode:
           $ref: '#/components/schemas/DesignAssetUploadMode'
           description: Compatibility-only persisted upload mode. New frontend integration must rely on `upload_strategy`.
@@ -3223,6 +3557,11 @@ components:
         target_sku_code:
           type: string
           nullable: true
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope captured when the upload request was created.
         asset_id:
           type: integer
           nullable: true
@@ -3408,6 +3747,11 @@ components:
         target_sku_code:
           type: string
           description: Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version.
+        retouch_requirement_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`.
     CreateTaskAssetUploadSessionResponseData:
       type: object
       properties:
@@ -3572,6 +3916,41 @@ components:
           $ref: '#/components/schemas/UploadRequestAdvanceAction'
         remark:
           type: string
+    TaskFilterActorOption:
+      type: object
+      required: [id, name, task_count]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          description: Display label resolved from display_name, username, or user id.
+        username:
+          type: string
+        display_name:
+          type: string
+        department:
+          type: string
+        team:
+          type: string
+        task_count:
+          type: integer
+          format: int64
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+    TaskFilterOptions:
+      type: object
+      properties:
+        creators:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskFilterActorOption'
+        designers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskFilterActorOption'
     TaskListItem:
       type: object
       properties:
@@ -3581,6 +3960,10 @@ components:
         primary_sku_code:
           type: string
           nullable: true
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          description: Automatic SKU code type used for generated task SKUs. Historical rows may omit it and should be treated as `regular`.
         product_name_snapshot: { type: string }
         task_type:
           type: string
@@ -3634,7 +4017,11 @@ components:
         workflow_lane:
           type: string
           enum: [normal, customization]
-          description: Explicit business lane projection derived from `customization_required`.
+          description: Compatibility lane projection. New integrations should use `business_lane`.
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical task business lane used for audit-domain isolation and routing.
         customization_source_type:
           type: string
           enum: [new_product, existing_product]
@@ -3748,6 +4135,10 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/TaskSKUItem'
+            sku_code_type:
+              type: string
+              enum: [regular, customization]
+              description: Automatic SKU code type used for generated task SKUs. Historical rows may omit it and should be treated as `regular`.
             workflow:
               $ref: '#/components/schemas/TaskWorkflowSnapshot'
             procurement:
@@ -3837,6 +4228,11 @@ components:
               description: Flattened design asset versions ordered by asset root and version order. Batch-task SKU scope is exposed by `scope_sku_code`.
               items:
                 $ref: '#/components/schemas/DesignAssetVersion'
+            retouch_requirements:
+              type: array
+              description: Structured retouch demand lines for `retouch_task`. Always present and may be empty for legacy tasks without rows in `task_retouch_requirements`.
+              items:
+                $ref: '#/components/schemas/TaskRetouchRequirement'
     TaskSKUItem:
       type: object
       properties:
@@ -3844,6 +4240,9 @@ components:
         task_id: { type: integer }
         sequence_no: { type: integer }
         sku_code: { type: string }
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
         sku_status:
           type: string
           enum: [reserved, generated, filed, filing_failed]
@@ -3878,6 +4277,36 @@ components:
         category_code: { type: string }
         material_mode: { type: string }
         cost_price_mode: { type: string }
+        cost_price:
+          type: number
+          format: double
+          nullable: true
+          description: Per-SKU effective cost used when filing this SKU to ERP.
+        estimated_cost:
+          type: number
+          format: double
+          nullable: true
+        cost_rule_id:
+          type: integer
+          nullable: true
+        cost_rule_name: { type: string }
+        cost_rule_source: { type: string }
+        matched_rule_version:
+          type: integer
+          nullable: true
+        prefill_source: { type: string }
+        prefill_at:
+          type: string
+          format: date-time
+          nullable: true
+        requires_manual_review: { type: boolean }
+        manual_cost_override: { type: boolean }
+        manual_cost_override_reason: { type: string }
+        override_actor: { type: string }
+        override_at:
+          type: string
+          format: date-time
+          nullable: true
         quantity:
           type: integer
           format: int64
@@ -3941,12 +4370,20 @@ components:
         remark: { type: string }
     CreateTaskRequest:
       type: object
-      description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, `retouch_task`, `customer_customization`, and `regular_customization`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
+      description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, and `retouch_task`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
       required: [task_type, owner_team]
       properties:
         task_type:
           type: string
-          enum: [original_product_development, new_product_development, purchase_task, retouch_task, customer_customization, regular_customization]
+          enum: [original_product_development, new_product_development, purchase_task, retouch_task]
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical task lane selector (`normal` or `customization`). Drives audit-domain routing.
+        workflow_lane:
+          type: string
+          enum: [normal, customization]
+          description: Compatibility alias of `business_lane`.
         source_mode:
           type: string
           enum: [existing_product, new_product]
@@ -4003,6 +4440,11 @@ components:
           type: string
           enum: [single, multiple]
           default: single
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          default: regular
+          description: Automatic SKU code type for generated new-product/purchase task SKUs. `regular` generates `CG` + one category letter + six digits; `customization` generates `DZ` + one category letter + six digits. Historical SKU strings are not rewritten.
         source_draft_id:
           type: integer
           nullable: true
@@ -4047,6 +4489,11 @@ components:
           type: string
         design_requirement:
           type: string
+        retouch_requirements:
+          type: array
+          description: Structured demand lines for `retouch_task` only. Other task types must omit this field or receive `400 INVALID_REQUEST` with violation code `field_not_allowed_for_task_type`.
+          items:
+            $ref: '#/components/schemas/CreateTaskRetouchRequirementItem'
         cost_price_mode:
           type: string
           enum: [manual, template]
@@ -4100,9 +4547,18 @@ components:
           type: string
         purchase_sku:
           type: string
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          description: Optional per-row automatic SKU code type. Defaults to the top-level `sku_code_type`.
         cost_price_mode:
           type: string
           enum: [manual, template]
+        cost_price:
+          type: number
+          format: double
+          nullable: true
+          description: Optional per-row cost for manual batch cost maintenance.
         quantity:
           type: integer
           format: int64
@@ -4127,9 +4583,22 @@ components:
         task_type:
           type: string
           enum: [new_product_development, purchase_task]
+        business_lane:
+          type: string
+          enum: [normal, customization]
+          description: Canonical lane selector. Controls default SKU prefix (`CG` for `normal`, `DZ` for `customization`).
+        workflow_lane:
+          type: string
+          enum: [normal, customization]
+          description: Compatibility alias of `business_lane`.
         category_code:
           type: string
           description: Required when `batch_items` is omitted.
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          default: regular
+          description: Automatic SKU code type. `regular` allocates `CG` codes; `customization` allocates `DZ` codes.
         count:
           type: integer
           minimum: 1
@@ -4144,6 +4613,10 @@ components:
             properties:
               category_code:
                 type: string
+              sku_code_type:
+                type: string
+                enum: [regular, customization]
+                description: Optional per-row automatic SKU code type. Defaults to `regular` when omitted.
     PrepareTaskProductCodesResponse:
       type: object
       properties:
@@ -4158,7 +4631,7 @@ components:
                 type: string
               sku_code:
                 type: string
-                description: "Auto-generated default task product code. Format: `NS` + two-letter uppercase category short code + 6-digit sequence (for example `NSKT000060`)."
+                description: "Auto-generated default task product code. Format depends on `sku_code_type`: `regular` uses `CG` + one uppercase category letter + 6-digit sequence; `customization` uses `DZ` + one uppercase category letter + 6-digit sequence."
     AssignTaskRequest:
       type: object
       description: |
@@ -4167,7 +4640,11 @@ components:
         designer_id:
           type: integer
           nullable: true
-          description: Designer/assignee user id. Omit or send null on a single-task reassign to clear the assignee and return an InProgress task to PendingAssign.
+          description: |
+            Designer or customization-operator user id (same field for both lanes).
+            Regular tasks expect an active `Designer` target; customization tasks in
+            `PendingCustomizationProduction` expect an active `CustomizationOperator` target.
+            Omit or send null on a single-task reassign to clear the assignee and return an InProgress task to PendingAssign.
         assigned_by:
           type: integer
           description: Optional override for compatibility. Defaults to the current authenticated actor.
@@ -4329,6 +4806,10 @@ components:
           format: date-time
           nullable: true
           description: Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source.
+        priority:
+          type: string
+          enum: [low, normal, high, critical]
+          description: Task priority. When provided, updates `tasks.priority` without requiring other business-info fields.
         remark: { type: string }
     CreateCategoryRequest:
       type: object
@@ -4630,6 +5111,249 @@ components:
           format: date-time
           nullable: true
           description: Expiry time for signed direct URL when present.
+    AssetBatchDownloadRequest:
+      type: object
+      required: [asset_ids]
+      properties:
+        asset_ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+        naming_mode:
+          type: string
+          enum: [original, business]
+          default: original
+          description: Download filename mode. original keeps original upload/file_name; business uses SKU plus task product name for batch business downloads.
+    AssetBatchDownloadItem:
+      type: object
+      required: [asset_id, task_id, filename, file_size, download_url]
+      properties:
+        asset_id:
+          type: integer
+        task_id:
+          type: integer
+        filename:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+        download_url:
+          type: string
+          format: uri
+          description: Presigned OSS direct download URL. The backend does not proxy file bytes.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    AssetBatchDownloadFailure:
+      type: object
+      required: [asset_id, reason]
+      properties:
+        asset_id:
+          type: integer
+        task_id:
+          type: integer
+        filename:
+          type: string
+        reason:
+          type: string
+    AssetBatchDownloadManifest:
+      type: object
+      required: [items, success_count, failure_count, total_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetBatchDownloadItem'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetBatchDownloadFailure'
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        total_size:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    AssetExcelPackageRow:
+      type: object
+      required: [order_no, quantity]
+      properties:
+        row_number:
+          type: integer
+          description: Original Excel row number, used in failure reports.
+        order_no:
+          type: string
+          description: Order number used as the ZIP folder name.
+        sku_code:
+          type: string
+          description: SKU code for asset matching.
+        sku_name:
+          type: string
+          description: Optional SKU/product name for secondary matching.
+        quantity:
+          type: integer
+          minimum: 1
+          description: Number of image copies to place under the order folder.
+        keyword:
+          type: string
+          description: Optional filename/product keyword for disambiguation.
+    AssetExcelPackagePreviewRequest:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/AssetExcelPackageRow'
+    AssetExcelPackageItem:
+      type: object
+      required: [order_no, sku_code, quantity, asset_id, task_id, filename, file_size, download_url]
+      properties:
+        row_number: { type: integer }
+        order_no: { type: string }
+        sku_code: { type: string }
+        sku_name: { type: string }
+        quantity: { type: integer }
+        asset_id: { type: integer }
+        task_id: { type: integer }
+        task_no: { type: string }
+        filename: { type: string }
+        file_size:
+          type: integer
+          format: int64
+        mime_type: { type: string }
+        download_url:
+          type: string
+          format: uri
+          description: Presigned OSS direct download URL for a JPG/PNG asset.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    TaskReferenceBatchDownloadRequest:
+      type: object
+      additionalProperties: false
+      description: Reserved for future filters. Send `{}` for now.
+    TaskReferenceBatchDownloadItem:
+      type: object
+      required: [key, filename, file_size, download_url, source_kind]
+      properties:
+        key:
+          type: string
+        filename:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+        download_url:
+          type: string
+          format: uri
+          description: Presigned OSS direct download URL or compatibility proxy path.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        source_kind:
+          type: string
+          enum: [formalized_asset, legacy_ref]
+        asset_id:
+          type: integer
+          nullable: true
+        ref_id:
+          type: string
+          nullable: true
+    TaskReferenceBatchDownloadFailure:
+      type: object
+      required: [reason]
+      properties:
+        key:
+          type: string
+        source_kind:
+          type: string
+          enum: [formalized_asset, legacy_ref]
+        asset_id:
+          type: integer
+          nullable: true
+        ref_id:
+          type: string
+          nullable: true
+        filename:
+          type: string
+        reason:
+          type: string
+    TaskReferenceBatchDownloadManifest:
+      type: object
+      required: [items, success_count, failure_count, total_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskReferenceBatchDownloadItem'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskReferenceBatchDownloadFailure'
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        total_size:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    AssetExcelPackageFailure:
+      type: object
+      required: [reason, message]
+      properties:
+        row_number: { type: integer }
+        order_no: { type: string }
+        sku_code: { type: string }
+        sku_name: { type: string }
+        quantity: { type: integer }
+        reason: { type: string }
+        message: { type: string }
+    AssetExcelPackageManifest:
+      type: object
+      required: [items, success_count, failure_count, total_files, total_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetExcelPackageItem'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetExcelPackageFailure'
+        success_count: { type: integer }
+        failure_count: { type: integer }
+        total_files:
+          type: integer
+          description: Expanded file count after applying row quantities.
+        total_size:
+          type: integer
+          format: int64
+          description: Expanded byte size after applying row quantities.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
     ValidationViolation:
       type: object
       properties:
@@ -6277,6 +7001,9 @@ components:
           type: string
         purchase_sku:
           type: string
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
         cost_price_mode:
           type: string
           enum: [manual, template]
@@ -6307,8 +7034,102 @@ components:
           type: string
         code:
           type: string
+          description: |
+            Row-level parse code. Common values include `missing_required_field`, `invalid_i_id`,
+            `invalid_sku_code`, `product_not_found`, `ambiguous_product`, `erp_lookup_failed`,
+            `multiple_rows_not_allowed`, `invalid_header`, and `invalid_quantity` (non-numeric or
+            non-positive quantity for purchase single-task assist).
         message:
           type: string
+    ExcelAssistERPProductDraft:
+      type: object
+      description: ERP product snapshot enriched during original-product single-task Excel parse.
+      properties:
+        product_id:
+          type: string
+        sku_code:
+          type: string
+        sku_id:
+          type: string
+        name:
+          type: string
+        product_name:
+          type: string
+        category_code:
+          type: string
+        category_name:
+          type: string
+        image_url:
+          type: string
+    SingleTaskExcelDraft:
+      type: object
+      description: |
+        Draft fields for single-task Excel assist. Required columns depend on `task_type`:
+        `new_product_development` requires `product_i_id`, `product_name`, `design_requirement`;
+        `purchase_task` requires `product_i_id`, `product_name`, `quantity`, `spec_text`;
+        `original_product_development` requires `sku_code`, `change_request` (ERP lookup enriches product fields).
+      properties:
+        product_i_id:
+          type: string
+          description: ERP product style i_id (maps to task create `i_id` / category). New/purchase only.
+        product_name:
+          type: string
+        design_requirement:
+          type: string
+          description: Required for `new_product_development` only.
+        sku_code:
+          type: string
+          description: Required for `original_product_development`; ERP existing SKU binding key.
+        change_request:
+          type: string
+          description: Required for `original_product_development` (修改要求).
+        product_id:
+          type: string
+          description: ERP facade product id enriched from SKU lookup (original only).
+        sku_id:
+          type: string
+          description: ERP sku id enriched from SKU lookup (original only).
+        product_name_snapshot:
+          type: string
+          description: Display name snapshot enriched from ERP (original only).
+        category_code:
+          type: string
+        category_name:
+          type: string
+        image_url:
+          type: string
+        erp_product:
+          allOf:
+            - $ref: '#/components/schemas/ExcelAssistERPProductDraft'
+          nullable: true
+        spec_text:
+          type: string
+          description: Optional for `new_product_development` and `original_product_development`; required for `purchase_task`.
+        quantity:
+          type: integer
+          format: int64
+          description: Required for `purchase_task` only; must be a positive integer.
+        material:
+          type: string
+        material_other:
+          type: string
+        remark:
+          type: string
+    ExcelAssistParseResult:
+      type: object
+      properties:
+        task_type:
+          type: string
+          enum: [new_product_development, purchase_task, original_product_development]
+        mode:
+          type: string
+          enum: [single]
+        draft:
+          $ref: '#/components/schemas/SingleTaskExcelDraft'
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParseViolation'
     BatchCreateParseResult:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §3.5.4."
@@ -6333,8 +7154,36 @@ components:
         - $ref: '#/components/schemas/DesignAsset'
         - type: object
           properties:
+            resource_id:
+              type: string
+              description: Unified resource id. System assets use numeric strings; external resources use `ext-{id}`.
+            source_type:
+              type: string
+              enum: [system, external]
+            source_label:
+              type: string
+              description: UI bucket label, currently `系统资源` or `外部资源`.
             source_module_key:
               type: string
+            external_kind:
+              type: string
+              enum: [netdisk, nas_local]
+              nullable: true
+            external_mount_path:
+              type: string
+              nullable: true
+            external_driver:
+              type: string
+              nullable: true
+            origin_path:
+              type: string
+              nullable: true
+            oss_sync_status:
+              type: string
+              nullable: true
+            external_preview_status:
+              type: string
+              nullable: true
             lifecycle_state:
               $ref: '#/components/schemas/AssetLifecycleState'
     ERPProductSnapshot:
@@ -6458,12 +7307,32 @@ components:
               asset_id:
                 type: integer
                 format: int64
+              resource_id:
+                type: string
+                nullable: true
+                description: Unified resource id. External resources use `ext-{id}`.
               file_name:
                 type: string
+              source_type:
+                type: string
+                enum: [system, external]
+                nullable: true
+              source_label:
+                type: string
+                nullable: true
               source_module_key:
                 type: string
                 nullable: true
                 description: One of `basic_info` / `design` / `audit` / `customization` / `warehouse`.
+              external_kind:
+                type: string
+                nullable: true
+              external_mount_path:
+                type: string
+                nullable: true
+              external_driver:
+                type: string
+                nullable: true
               task_id:
                 type: integer
                 format: int64
@@ -6502,8 +7371,8 @@ components:
                 nullable: true
     NotificationType:
       type: string
-      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). Current values: `task_assigned_to_me`, `task_rejected`, `task_pending_audit`, `claim_conflict`, `pool_reassigned`, and `task_cancelled`."
-      enum: [task_assigned_to_me, task_rejected, task_pending_audit, claim_conflict, pool_reassigned, task_cancelled]
+      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). Current values: `task_assigned_to_me`, `task_rejected`, `task_pending_audit`, `task_closed`, `claim_conflict`, `pool_reassigned`, `task_cancelled`, and `system_broadcast`."
+      enum: [task_assigned_to_me, task_rejected, task_pending_audit, task_closed, claim_conflict, pool_reassigned, task_cancelled, system_broadcast]
     Notification:
       type: object
       description: |
@@ -6523,12 +7392,17 @@ components:
           `rejected_by`, `rejected_by_name`.
         - `task_pending_audit`: `task_id`, `module_key`, `pool_team_code`; optional
           `task_no`, `task_type`, `submitted_by`, `submitted_by_name`.
+        - `task_closed`: `task_id`; optional `task_no`, `creator_id`, `creator_name`,
+          `designer_id`, `designer_name`, `closed_by`, `closed_by_name`,
+          `warehouse_status`, `auto_release`, `remark`.
         - `claim_conflict`: `task_id`, `module_key`; optional `task_no`, `winner_user_id`,
           `winner_user_name`.
         - `pool_reassigned`: `task_id`, `module_key`; optional `task_no`, `team_code`,
           `team_name`, `reassigned_by`, `reassigned_by_name`.
         - `task_cancelled`: `task_id`, `cancel_reason`, `cancelled_by`; optional `task_no`,
           `cancelled_by_name`, `module_key`.
+        - `system_broadcast`: `title`, `content`; optional `broadcast_by`,
+          `broadcast_by_name`, `broadcast_audience`, `broadcast_recipient_count`.
       properties:
         id:
           type: integer
@@ -6604,7 +7478,7 @@ components:
             $ref: '#/components/schemas/V7Role'
     UpdateMyProfileRequest:
       type: object
-      description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑). R4-SA-B. All fields optional; server applies PATCH semantics."
+      description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑). R4-SA-B. All fields optional; server applies PATCH semantics. Profile save only updates display_name/mobile/email; avatar changes must use POST/DELETE /v1/me/avatar."
       properties:
         display_name:
           type: string
@@ -6613,11 +7487,6 @@ components:
         email:
           type: string
           nullable: true
-        avatar:
-          type: string
-          nullable: true
-          description: |
-            R1.7-B placeholder. The server accepts but currently ignores this field (no `users.avatar_url` column in v1 DDL). Full persistence is scheduled for R5+.
     ChangePasswordRequest:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §7.2 (安全 · 改密). R4-SA-B."
@@ -6633,6 +7502,11 @@ components:
           type: string
           minLength: 1
           description: Must equal `new_password`; server enforces equality.
+        password_confirmation:
+          type: string
+          minLength: 1
+          deprecated: true
+          description: Backward-compatible alias for `confirm`.
     CreateOrgMoveRequestPayload:
       type: object
       description: "Source: V1_INFORMATION_ARCHITECTURE §5.2 (DeptAdmin 发起跨部门移出). R4-SA-B."
@@ -6677,6 +7551,63 @@ components:
           type: number
           nullable: true
           description: Change vs previous period; null when no baseline available.
+    KPIAnalysisEvent:
+      type: object
+      description: Enriched task workflow event used by the data-center KPI page. The event actor remains the actual operator; assignment target ids are carried in payload.
+      properties:
+        id:
+          type: string
+        task_id:
+          type: integer
+          format: int64
+        task_no:
+          type: string
+        sku_code:
+          type: string
+        product_name:
+          type: string
+        task_type:
+          type: string
+        business_lane:
+          type: string
+        category_name:
+          type: string
+        task_status:
+          type: string
+        priority:
+          type: string
+          enum: [low, normal, high, critical]
+        deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+        event_type:
+          type: string
+          enum:
+            - task.created
+            - task.batch_items_created
+            - task.assigned
+            - task.reassigned
+            - task.batch_assigned
+            - task.design.submitted
+            - task.audit.approved
+            - task.audit.rejected
+        operator_id:
+          type: integer
+          format: int64
+          nullable: true
+        operator_name:
+          type: string
+        operator_department:
+          type: string
+        operator_team:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
     AssetReasonRequest:
       type: object
       description: "Source: V1_ASSET_OWNERSHIP §5.4 (delete) / §7.3 (archive). R4-SA-A."
@@ -6715,6 +7646,15 @@ components:
       properties:
         id:
           type: integer
+        resource_id:
+          type: string
+          description: Unified resource id. System assets use numeric strings; external resources use `ext-{id}`.
+        source_type:
+          type: string
+          enum: [system, external]
+        source_label:
+          type: string
+          description: UI bucket label, currently `系统资源` or `外部资源`.
         task_id:
           type: integer
         asset_no:
@@ -6747,6 +7687,33 @@ components:
           nullable: true
         mime_type:
           type: string
+        download_url:
+          type: string
+          nullable: true
+        preview_available:
+          type: boolean
+        external_kind:
+          type: string
+          enum: [netdisk, nas_local]
+          nullable: true
+        external_mount_path:
+          type: string
+          nullable: true
+        external_driver:
+          type: string
+          nullable: true
+        origin_path:
+          type: string
+          nullable: true
+        oss_sync_status:
+          type: string
+          nullable: true
+        external_preview_status:
+          type: string
+          nullable: true
+        last_prepare_error:
+          type: string
+          nullable: true
         task_no:
           type: string
         task_status:
@@ -6780,6 +7747,55 @@ components:
           type: string
           format: date-time
           nullable: true
+    AssetBatchSearchRequest:
+      type: object
+      required: [terms]
+      properties:
+        terms:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: string
+          description: SKU codes or task numbers, one logical search term per item.
+        format_filter:
+          type: string
+          enum: [jpg_png, jpg, png, webp, image, design, pdf, archive, all]
+          default: jpg_png
+          description: UI-facing format filter. The server maps this to a coarse DB format category first, then applies exact extension/MIME filtering.
+        asset_kind:
+          type: string
+          enum: [auto, all, delivery, reference, source, preview, other]
+          default: auto
+          description: UI-facing asset role filter. `auto` keeps all roles but ranks delivery assets first.
+    AssetBatchSearchResult:
+      type: object
+      required: [term, status, message, candidates]
+      properties:
+        term:
+          type: string
+        status:
+          type: string
+          enum: [matched, not_found, error]
+        message:
+          type: string
+        candidates:
+          type: integer
+          description: Number of assets matching the requested format and role filters for this term.
+        asset:
+          $ref: '#/components/schemas/AssetDetail'
+    AssetBatchSearchResponse:
+      type: object
+      required: [results, matched_count, failed_count]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetBatchSearchResult'
+        matched_count:
+          type: integer
+        failed_count:
+          type: integer
 paths:
   /v1/auth/register:
     post:
@@ -7285,6 +8301,8 @@ paths:
                         id: { type: integer }
                         username: { type: string }
                         display_name: { type: string }
+                        name: { type: string }
+                        real_name: { type: string }
                   pagination:
                     type: object
                     properties:
@@ -7373,7 +8391,7 @@ paths:
                   type: string
                   nullable: true
                   description: |
-                    R1.7-B placeholder. Server currently ignores this field (no `users.avatar_url` column in v1 DDL). Full persistence is scheduled for R5+.
+                    Backward-compatible placeholder. The current runtime ignores this field on admin user PATCH; current-user avatars are updated through `/v1/me/avatar`.
                 roles:
                   type: array
                   description: |
@@ -7663,6 +8681,142 @@ paths:
                       $ref: '#/components/schemas/OperationLogEntry'
                   pagination:
                     $ref: '#/components/schemas/PaginationMeta'
+  /v1/trace-events:
+    get:
+      summary: List business trace events
+      description: |
+        Query the lightweight full-chain event ledger for business tracing and AI insight use cases.
+        Supports filtering by people, department, task, SKU, asset, ERP/integration call, event source,
+        outcome, trace ID, and occurred time range.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Admin, SuperAdmin, HRAdmin]
+      parameters:
+        - in: query
+          name: trace_id
+          schema: { type: string }
+        - in: query
+          name: event_source
+          schema: { type: string, enum: [api, frontend, system, integration] }
+        - in: query
+          name: event_type
+          schema: { type: string }
+        - in: query
+          name: action
+          schema: { type: string }
+        - in: query
+          name: actor_id
+          schema: { type: integer }
+        - in: query
+          name: actor_username
+          schema: { type: string }
+          description: Contains match on logged-in username/display name snapshot.
+        - in: query
+          name: actor_source
+          schema: { type: string, enum: [session_token, anonymous, header_placeholder, header_roles_placeholder, system_fallback] }
+          description: Filter by actor source; business dashboards typically use session_token.
+        - in: query
+          name: actor_department
+          schema: { type: string }
+        - in: query
+          name: actor_team
+          schema: { type: string }
+        - in: query
+          name: route_path
+          schema: { type: string }
+        - in: query
+          name: task_id
+          schema: { type: integer }
+        - in: query
+          name: module_key
+          schema: { type: string }
+        - in: query
+          name: sku_code
+          schema: { type: string }
+        - in: query
+          name: asset_id
+          schema: { type: integer }
+        - in: query
+          name: design_asset_id
+          schema: { type: integer }
+        - in: query
+          name: task_asset_id
+          schema: { type: integer }
+        - in: query
+          name: integration_call_log_id
+          schema: { type: integer }
+        - in: query
+          name: resource_type
+          schema: { type: string }
+        - in: query
+          name: resource_id
+          schema: { type: string }
+        - in: query
+          name: outcome
+          schema: { type: string, enum: [succeeded, failed] }
+        - in: query
+          name: business_only
+          schema: { type: boolean }
+          description: Excludes low-value technical traffic such as auth, polling, websocket, and log-center routes.
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: until
+          schema: { type: string, format: date-time }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: page_size
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Business trace events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkflowTraceEvent'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+    post:
+      summary: Record frontend business trace event
+      description: |
+        Authenticated frontend endpoint for recording page-view and user-action events.
+        The server enriches the record with session actor, client IP, user agent, and request trace ID.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowTraceEventRecordRequest'
+      responses:
+        '200':
+          description: Created business trace event
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkflowTraceEvent'
   /v1/audit-logs:
     get:
       summary: List audit records (cross-task)
@@ -9287,6 +10441,80 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/DesignAsset'
+  /v1/assets/batch-download:
+    post:
+      summary: Batch download asset direct URL manifest
+      description: Return presigned OSS direct download URLs for current versions of the requested assets. The backend does not proxy file bytes or build ZIP packages.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetBatchDownloadRequest'
+      responses:
+        '200':
+          description: Direct download manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetBatchDownloadManifest'
+        '400':
+          description: Invalid request or all assets unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error while building direct download manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/assets/excel-package/preview:
+    post:
+      summary: Preview Excel image package manifest
+      description: Matches uploaded Excel rows to current JPG/PNG assets only, returns presigned download URLs and per-row failures. The frontend builds the ZIP with order-number folders and quantity-based image copies.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetExcelPackagePreviewRequest'
+      responses:
+        '200':
+          description: Excel image package manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetExcelPackageManifest'
+        '400':
+          description: Invalid rows or no rows matched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error while matching assets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/assets/{asset_id}:
     get:
       summary: Get asset
@@ -9302,7 +10530,8 @@ paths:
           name: asset_id
           required: true
           schema:
-            type: integer
+            type: string
+          description: Numeric system asset id or external resource id such as `ext-123`.
       responses:
         '200':
           description: Asset detail with version list
@@ -9362,7 +10591,8 @@ paths:
           name: asset_id
           required: true
           schema:
-            type: integer
+            type: string
+          description: Numeric system asset id or external resource id such as `ext-123`.
       responses:
         '200':
           description: Asset download metadata
@@ -9396,7 +10626,8 @@ paths:
           name: asset_id
           required: true
           schema:
-            type: integer
+            type: string
+          description: Numeric system asset id or external resource id such as `ext-123`.
       responses:
         '200':
           description: Asset preview metadata
@@ -9559,7 +10790,7 @@ paths:
       summary: Prepare task product codes
       description: |
         Allocates unique default product codes for task-create UIs.
-        Default format is fixed to `NS + {CATEGORY_CODE} + {6-digit sequence}`.
+        Default format is selected by `sku_code_type`: `regular` allocates `CG + {CATEGORY_LETTER} + {6-digit sequence}` and `customization` allocates `DZ + {CATEGORY_LETTER} + {6-digit sequence}`.
         This endpoint does not require frontend code-rule/template selection and is available for
         `new_product_development` and `purchase_task`.
       tags: [Tasks, ReadyForFrontend]
@@ -9603,12 +10834,12 @@ paths:
         - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately.
         - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, does not enter audit, and is completed immediately after the retouch/design worker submits the retouched image.
         - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime.
-        - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationReview` immediately and does not pass through the normal design workbench first.
+        - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationProduction` first as the compatible "waiting for customization operator design submission" state and does not pass through the normal design workbench.
         - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors.
         - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval.
         - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels.
-        - default task product-code rule is backend-only and fixed to `NS + category_short_code(2 uppercase letters) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation.
-        - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> KT`), otherwise first two alphabet letters from `category_code` (uppercased), then deterministic fallback to two letters.
+        - default task product-code rule is backend-only: `sku_code_type=regular` generates `CG + category_short_code(1 uppercase letter) + 6-digit sequence`, while `sku_code_type=customization` generates `DZ + category_short_code(1 uppercase letter) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation.
+        - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> K`), otherwise first alphabet letter from `category_code` (uppercased), then deterministic fallback to one letter.
         - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique.
         - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`.
         - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned.
@@ -9744,6 +10975,20 @@ paths:
           name: designer_id
           schema: { type: integer }
         - in: query
+          name: priority
+          description: Filters by task priority (`t.priority`). Supports comma-separated multi-value queries such as `priority=critical,high`.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [low, normal, high, critical]
+          style: form
+          explode: false
+        - in: query
+          name: designer_empty
+          description: When `true`, returns only tasks with no designer assignment (`designer_id` IS NULL or `0`). Use with `workflow_lane=customization` for customization-lane unassigned-artwork filtering; do not combine with `status=PendingAssign` for that case.
+          schema: { type: boolean }
+        - in: query
           name: need_outsource
           schema: { type: boolean }
         - in: query
@@ -9752,7 +10997,7 @@ paths:
           schema: { type: boolean }
         - in: query
           name: keyword
-          description: Matches `task_no`, `sku_code`, or `product_name_snapshot`.
+          description: Matches task no, task SKU, batch SKU, product name, owner department/team, task id, and related actor display names/usernames (creator, requester, designer, current handler).
           schema: { type: string }
         - in: query
           name: owner_department
@@ -9783,6 +11028,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListResponse'
+  /v1/tasks/filter-options:
+    get:
+      summary: Get task center filter options
+      description: Returns task-derived creator and designer options for the task center advanced filters. The source is historical task actor usage, not the user-management directory, so ordinary task roles can filter by people who appear in tasks without requiring `/v1/users` access.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      responses:
+        '200':
+          description: Task filter options
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskFilterOptions'
   /v1/tasks/{id}:
     get:
       summary: Get task read model
@@ -9811,6 +11075,50 @@ paths:
           description: "`PERMISSION_DENIED` with `deny_code` such as `task_out_of_department_scope` or `task_out_of_team_scope`."
         '404':
           description: Task not found
+  /v1/tasks/{id}/predictions:
+    get:
+      summary: Get task next-action prediction suggestions
+      description: |
+        Returns deterministic next-action suggestions for a task detail page based on current task status,
+        task modules, task assets, cost, and ERP filing state. This endpoint does not call the AI provider.
+      tags: [Tasks, Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '400':
+          description: Invalid task id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/tasks/{id}/product-info:
     get:
       summary: Get per-task product information
@@ -10020,6 +11328,97 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/TaskDetail'
+        '403':
+          description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
+  /v1/tasks/{id}/sku-items/{sku_item_id}:
+    patch:
+      summary: Patch one batch SKU item
+      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: sku_item_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operator_id: { type: integer, nullable: true }
+                product_name: { type: string, nullable: true }
+                i_id: { type: string, nullable: true }
+                product_i_id: { type: string, nullable: true }
+                design_requirement: { type: string, nullable: true }
+                reference_file_refs:
+                  type: array
+                  nullable: true
+                  items:
+                    $ref: '#/components/schemas/ReferenceFileRef'
+                trigger_filing: { type: boolean, nullable: true }
+                remark: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Updated SKU item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskSKUItem'
+        '403':
+          description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
+  /v1/tasks/{id}/sku-items/{sku_item_id}/cost-info:
+    patch:
+      summary: Patch per-SKU cost information for a batch task item
+      description: Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: sku_item_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operator_id: { type: integer, nullable: true }
+                cost_price: { type: number, format: double, nullable: true }
+                manual_cost_override: { type: boolean, nullable: true }
+                manual_cost_override_reason: { type: string, nullable: true }
+                remark: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Updated SKU item cost projection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskSKUItem'
         '403':
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
   /v1/tasks/{id}/cost-quote/preview:
@@ -10402,9 +11801,10 @@ paths:
     post:
       summary: Assign task to designer
       description: |
-        `POST /v1/tasks/{id}/assign` now carries two bounded semantics under the same route:
-        - `PendingAssign`: assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`.
-        - `InProgress`: the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied.
+        `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route:
+        - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`.
+        - `PendingCustomizationProduction` (customization lane): Ops/Admin/SuperAdmin (and other existing assign scopes) may assign an active `CustomizationOperator` as `designer_id`. Success writes `designer_id` and `current_handler_id`, keeps `task_status` at `PendingCustomizationProduction`, and syncs the `customization` module to `in_progress` (not the `design` module). Pure `Designer` targets are rejected with `target_assignee_not_customization_operator`. Customization operators self-claim through `POST /v1/tasks/{id}/modules/customization/claim` instead of this route.
+        - `InProgress` (regular lane): the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. Target user must remain an active `Designer`.
         - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
         - `purchase_task` cannot be assigned or reassigned to a designer.
       tags: [Tasks, ReadyForFrontend]
@@ -10481,6 +11881,10 @@ paths:
           normal design task status to `PendingAuditA` when current status is one of `PendingAssign`, `Assigned`, `InProgress`,
           `RejectedByAuditA`, or `RejectedByAuditB`, and for multi-SKU batch tasks the gate waits until required SKU-scoped
           delivery assets are complete.
+          Customization-lane tasks also use this endpoint: `CustomizationOperator` submits the customization design/delivery
+          from `PendingCustomizationProduction`, the backend records/updates `last_customization_operator_id`, and successful
+          delivery submission advances the task to `PendingCustomizationReview`. Customization tasks then continue through
+          `POST /v1/tasks/{id}/customization/review`; they must not be sent through the normal audit endpoints.
           For `retouch_task`, delivery submission completes the task directly (`task_status=Completed`), clears `current_handler_id`,
           marks the `retouch` module completed, and never triggers audit.
           `purchase_task` cannot submit design. This action uses minimum role plus org or handler gating.
@@ -10488,7 +11892,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
@@ -10553,6 +11957,64 @@ paths:
                       $ref: '#/components/schemas/DesignAsset'
         '404':
           description: Task not found
+  /v1/tasks/{id}/reference-assets/batch-download:
+    post:
+      summary: Batch download task reference direct URL manifest
+      description: |
+        Return a task-scoped direct-download manifest that aggregates all reference images visible on task detail:
+        - formalized reference assets under task asset center
+        - legacy reference_file_refs persisted on task detail or sku_items
+        The backend does not build ZIP packages; frontend should use JSZip.
+      tags: [TaskAssetCenter, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskReferenceBatchDownloadRequest'
+      responses:
+        '200':
+          description: Task reference direct download manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskReferenceBatchDownloadManifest'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error while building manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/tasks/{id}/assets/timeline:
     get:
       summary: List legacy task asset timeline
@@ -13188,7 +14650,7 @@ paths:
   /v1/tasks/{id}/customization/review:
     post:
       summary: Submit customization review for task
-      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review writes business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`), moves approved tasks into customization production, and keeps `return_to_designer` tasks inside the customization review lane instead of sending them through the normal design workbench. Review does not freeze execution settlement pricing."
+      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -13210,10 +14672,10 @@ paths:
                 source_asset_id: { type: integer, nullable: true }
                 customization_level_code:
                   type: string
-                  description: Business-entered review reference level code.
+                  description: Optional business-entered review reference level code. Omitted for lightweight approved reviews.
                 customization_level_name:
                   type: string
-                  description: Business-entered review reference level name.
+                  description: Optional business-entered review reference level name. Omitted for lightweight approved reviews.
                 customization_price:
                   type: number
                   format: double
@@ -13242,7 +14704,7 @@ paths:
                     allOf: [{ $ref: '#/components/schemas/CustomizationJob' }]
                     nullable: true
         '400':
-          description: Invalid decision or missing required review fields
+          description: Invalid customization_review_decision
         '409':
           description: Invalid workflow state transition
         '403':
@@ -13507,8 +14969,10 @@ paths:
           description: Rule not found
   /v1/code-rules/generate-sku:
     post:
-      summary: Generate SKU code
-      tags: [CodeRules, ReadyForFrontend]
+      summary: "[ARCHIVED] Legacy CodeRule SKU generation"
+      description: "Archived. Legacy CodeRule new_sku generation is disabled. Use POST /v1/tasks/prepare-product-codes or task creation default product-code allocation instead."
+      deprecated: true
+      tags: [CodeRules, Archived]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
@@ -13523,8 +14987,8 @@ paths:
               properties:
                 rule_id: { type: integer }
       responses:
-        '200':
-          description: SKU generated
+        '400':
+          description: Legacy new_sku CodeRule is archived
   /v1/sku/preview_code:
     post:
       summary: "[V6] Preview SKU code"
@@ -14071,7 +15535,7 @@ paths:
         - in: query
           name: task_type
           schema: { type: string }
-          description: Optional task_type filter (e.g. `new_product`, `customer_customization`).
+          description: Optional task_type filter (e.g. `new_product_development`, `purchase_task`).
         - in: query
           name: limit
           schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
@@ -14178,11 +15642,129 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/tasks/excel-assist/template.xlsx:
+    get:
+      summary: Download single-task Excel assist template
+      description: |
+        Downloads the Excel assist workbook for creating one task at a time with `mode=single`.
+        `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required);
+        optional `规格尺寸`, `材质`, `材质备注`, `备注`.
+        `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`.
+        `task_type=original_product_development` columns: `SKU编码`, `修改要求` (required); optional `规格尺寸`, `备注`.
+        Product name and category are enriched from ERP during `parse-excel`, not collected in the template.
+        The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R5
+      parameters:
+        - in: query
+          name: task_type
+          required: true
+          schema:
+            type: string
+            enum: [new_product_development, purchase_task, original_product_development]
+        - in: query
+          name: mode
+          required: true
+          schema:
+            type: string
+            enum: [single]
+      responses:
+        '200':
+          description: Excel template stream
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid task_type or mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/tasks/excel-assist/parse-excel:
+    post:
+      summary: Parse a single-task Excel assist file
+      description: |
+        Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks.
+        `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`.
+        For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`.
+        For `original_product_development`, required: `SKU编码`, `修改要求`; optional `规格尺寸`, `备注`.
+        Parsed `sku_code` values are resolved through ERP product search; unknown SKU returns `product_not_found`.
+        More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`.
+        Parsed `product_i_id` values (new/purchase only) are validated against ERP i_id options when configured.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R5
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [task_type, mode, file]
+              properties:
+                task_type:
+                  type: string
+                  enum: [new_product_development, purchase_task, original_product_development]
+                mode:
+                  type: string
+                  enum: [single]
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Excel parse draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExcelAssistParseResult'
+        '400':
+          description: Invalid upload or parse error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/tasks/batch-create/template.xlsx:
     get:
       summary: Download batch create Excel template
       description: |
-        Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `商品编码` (mapped to `batch_items[].product_i_id`) and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For `purchase_task`, purchase-specific fields remain, and `商品编码`/`参考图` are also supported as optional row-scoped fields.
+        Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `产品款式编码` (mapped to `batch_items[].product_i_id`) and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For backward compatibility, `parse-excel` also accepts legacy column `商品编码`. For `purchase_task`, purchase-specific fields remain, and `产品款式编码`/`参考图` are also supported as optional row-scoped fields.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5
@@ -14223,7 +15805,7 @@ paths:
     post:
       summary: Parse a batch create Excel file
       description: |
-        Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required. If `商品编码` is filled, the backend maps it to `batch_items[].product_i_id` and validates exact membership against ERP i_id options. If users pasted images into workbook rows, the backend extracts the row-anchored pictures, uploads them through the task reference upload flow, and returns row-level `reference_file_refs`; frontend should only preview/confirm and submit the returned refs unchanged.
+        Parses the batch-create workbook into `batch_items`. For `new_product_development`, only `产品名称` and `设计要求` are required. `产品款式编码` is the canonical column for mapping `batch_items[].product_i_id`; legacy column `商品编码` is still accepted for backward compatibility. When both columns exist in one row, parser behavior is: both non-empty and equal -> accept; both non-empty but different -> row-level conflict violation; only one non-empty -> use that value. Parsed i_id values are validated against ERP i_id options. If users pasted images into workbook rows, the backend extracts the row-anchored pictures, uploads them through the task reference upload flow, and returns row-level `reference_file_refs`; frontend should only preview/confirm and submit the returned refs unchanged.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R5
@@ -14285,8 +15867,15 @@ paths:
       parameters:
         - in: query
           name: keyword
-          description: Fuzzy match file_name / task_no / task title.
+          description: Fuzzy match system asset fields and indexed external resource paths/names.
           schema: { type: string }
+        - in: query
+          name: source
+          description: Resource source bucket. `all` returns system + external; external resources are read-only and prepared for preview/download on demand.
+          schema:
+            type: string
+            enum: [all, system, external]
+            default: all
         - in: query
           name: module_key
           description: Restrict to one source module.
@@ -14343,6 +15932,50 @@ paths:
                     type: integer
                   size:
                     type: integer
+  /v1/assets/search/batch:
+    post:
+      summary: Batch search assets by SKU or task number
+      description: Batch asset search for the asset management bulk-download dialog. It returns one ranked asset candidate per input term and avoids issuing one HTTP request per SKU/task number.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-A
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetBatchSearchRequest'
+      responses:
+        '200':
+          description: Batch asset search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetBatchSearchResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/assets/{asset_id}/versions/{version_id}/download:
     get:
       summary: Download a specific asset version
@@ -14580,6 +16213,187 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/search:
+    get:
+      summary: Get global-search prediction suggestions
+      description: |
+        Returns deterministic suggestions for the global search overlay. Empty `q` returns recent personal
+        workflow trace suggestions; non-empty `q` returns task / asset / product suggestions. This endpoint
+        uses existing OMP data only and does not call the AI provider.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Optional keyword. When omitted, returns recent personal suggestions.
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [all, tasks, assets, products, users]
+            default: all
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/task-create:
+    get:
+      summary: Get task-create form prediction suggestions
+      description: |
+        Returns deterministic form-fill suggestions from historical task detail fields. This endpoint is
+        lightweight and does not call the AI provider.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: keyword
+          schema: { type: string }
+          description: Optional form context keyword. Alias `q` is also accepted by the backend.
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Compatibility alias for `keyword`.
+        - in: query
+          name: task_type
+          schema: { type: string }
+          description: Optional task type filter.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/assets:
+    get:
+      summary: Get asset-center prediction suggestions
+      description: |
+        Returns deterministic asset suggestions sorted by asset usable state and recency. This endpoint uses
+        task asset records only and does not call the AI provider.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Optional keyword. Alias `keyword` is also accepted by the backend.
+        - in: query
+          name: keyword
+          schema: { type: string }
+          description: Compatibility alias for `q`.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/predictions/management:
+    get:
+      summary: Get management prediction suggestions
+      description: |
+        Returns deterministic management attention points for the KPI/data-center page. This endpoint does
+        not call the AI provider; it aggregates tasks, task details, and task assets.
+      tags: [Predictions, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+          description: Start date, inclusive. Defaults to seven days before now.
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+          description: End date, inclusive. Defaults to now.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Prediction suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionBundleResponse'
+        '400':
+          description: Invalid date range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/me/notifications:
     get:
       summary: List my notifications
@@ -14710,6 +16524,80 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/notifications/broadcast:
+    post:
+      summary: Broadcast a notification to one, many, or all users
+      description: |
+        Creates persistent `system_broadcast` notifications for active recipients. Selected-user
+        broadcasts are available to Admin, SuperAdmin, HRAdmin, and DepartmentAdmin. Full-system
+        broadcasts are restricted to Admin, SuperAdmin, and HRAdmin.
+      tags: [Notifications, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Admin, SuperAdmin, HRAdmin, DepartmentAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audience, title, content]
+              properties:
+                audience:
+                  type: string
+                  enum: [all, users]
+                user_ids:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: integer
+                    format: int64
+                  description: Required when `audience = users`.
+                title:
+                  type: string
+                  maxLength: 80
+                content:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '200':
+          description: Broadcast write result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      notification_count:
+                        type: integer
+                      recipient_count:
+                        type: integer
+                      recipient_ids:
+                        type: array
+                        items:
+                          type: integer
+                          format: int64
+        '400':
+          description: Invalid audience, content, or inactive recipient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Actor is not allowed to broadcast to the requested audience
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/me:
     get:
       summary: Get my profile
@@ -14733,7 +16621,8 @@ paths:
     patch:
       summary: Update my profile
       description: |
-        Partial self-update for the authenticated user's profile. Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑 昵称/头像/手机/邮箱).
+        Partial self-update for the authenticated user's display profile. Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑 昵称/头像/手机/邮箱).
+        This endpoint updates display_name/mobile/email only. Avatar fields are rejected here; use POST /v1/me/avatar to upload and DELETE /v1/me/avatar to clear the avatar.
       tags: [Me, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-B
@@ -14757,6 +16646,111 @@ paths:
                     $ref: '#/components/schemas/WorkflowUser'
         '400':
           description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/avatar:
+    post:
+      summary: Upload my avatar
+      description: |
+        Uploads a small JPG, PNG, or WebP avatar for the authenticated user and stores the resulting avatar URL on the user profile.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-B
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPG, PNG, or WebP avatar image, max 2MB.
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkflowUser'
+        '400':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete my avatar
+      description: Clears the authenticated user's avatar URL and removes the stored avatar file when it is managed by this service.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-B
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkflowUser'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/avatar-files/{filename}:
+    get:
+      summary: Read avatar file
+      description: |
+        Publicly serves an uploaded avatar file by its generated random filename so browsers can load it directly in `<img>`.
+        Filenames are generated by the server, do not contain user IDs, and should be treated as opaque.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-B
+      x-public: true
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^avatar-[0-9a-f]{32}\.(jpg|jpeg|png|webp)$'
+      responses:
+        '200':
+          description: Avatar image bytes
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              description: Public browser cache header. Avatar updates use a newly generated URL.
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '404':
+          description: Avatar not found
           content:
             application/json:
               schema:
@@ -15210,6 +17204,62 @@ paths:
                         samples:
                           type: integer
                           description: Number of dwell samples used for the aggregation.
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: |
+            Forbidden. `deny_code=reports_super_admin_only`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/reports/l1/kpi-events:
+    get:
+      summary: Get enriched KPI task events
+      description: |
+        Returns task workflow events enriched with task priority, status and deadline for the KPI/data-center page.
+        RBAC: super_admin only. This endpoint is read-only and does not perform AI analysis.
+      tags: [Reports, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: R4-SA-D
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+        allowed_roles: [super_admin]
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date }
+          description: Start of the report window (inclusive, ISO 8601 date).
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date }
+          description: End of the report window (inclusive, ISO 8601 date).
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+          description: Maximum number of events to return. Defaults to 2000.
+      responses:
+        '200':
+          description: Enriched KPI task events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KPIAnalysisEvent'
         '401':
           description: Unauthenticated
           content:

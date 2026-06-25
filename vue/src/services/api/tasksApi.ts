@@ -15,6 +15,118 @@ import type {
   SubmitDesignPayload,
 } from '@/services/apiTypes'
 
+export interface TaskReferenceBatchDownloadItem {
+  key: string
+  filename: string
+  file_size: number
+  mime_type?: string
+  download_url: string
+  expires_at?: string | null
+  source_kind: 'formalized_asset' | 'legacy_ref' | string
+  asset_id?: number | null
+  ref_id?: string | null
+}
+
+export interface TaskReferenceBatchDownloadFailure {
+  key?: string
+  source_kind?: 'formalized_asset' | 'legacy_ref' | string
+  asset_id?: number | null
+  ref_id?: string | null
+  filename?: string
+  reason: string
+}
+
+export interface TaskReferenceBatchDownloadManifest {
+  items: TaskReferenceBatchDownloadItem[]
+  failures?: TaskReferenceBatchDownloadFailure[]
+  success_count: number
+  failure_count: number
+  total_size: number
+  expires_at?: string | null
+}
+
+export interface TaskReferenceBatchDownloadResponse {
+  data?: TaskReferenceBatchDownloadManifest
+}
+
+export interface TaskAiSummaryPerson {
+  role: string
+  name: string
+  id?: string
+  note?: string
+}
+
+export interface TaskAiSummaryBlocker {
+  title: string
+  owner?: string
+  reason?: string
+}
+
+export interface TaskAiSummaryAction {
+  role: string
+  action: string
+  timing?: string
+}
+
+export interface TaskAiSummaryTimelineItem {
+  time?: string
+  stage: string
+  actor?: string
+  summary: string
+}
+
+export interface TaskAiSummaryStuckPoint {
+  level: 'high' | 'medium' | 'low' | string
+  title: string
+  reason: string
+  owner?: string
+  next_action?: string
+}
+
+export interface TaskAiSummarySkuAssetCost {
+  sku: string
+  asset_status?: string
+  erp_status?: string
+  cost_status?: string
+  note?: string
+}
+
+export interface TaskAiSummaryResponse {
+  decision?: string
+  impact?: string
+  primary_blocker?: TaskAiSummaryBlocker | null
+  actions?: TaskAiSummaryAction[]
+  evidence?: string[]
+  headline?: string
+  current_status?: string
+  people?: TaskAiSummaryPerson[]
+  timeline?: TaskAiSummaryTimelineItem[]
+  stuck_points?: TaskAiSummaryStuckPoint[]
+  sku_asset_erp_cost?: TaskAiSummarySkuAssetCost[]
+  next_actions?: string[]
+  confidence?: 'high' | 'medium' | 'low' | string
+  raw_text?: string
+  generated_at?: string
+  model?: string
+  provider?: string
+}
+
+export interface TaskFilterActorOption {
+  id: number
+  name: string
+  username?: string
+  display_name?: string
+  department?: string
+  team?: string
+  task_count?: number
+  last_used_at?: string | null
+}
+
+export interface TaskFilterOptionsResponse {
+  creators?: TaskFilterActorOption[]
+  designers?: TaskFilterActorOption[]
+}
+
 // ─── 任务列表 / 详情 ──────────────────────────────────────────────────────────
 
 export const tasksApi = {
@@ -25,6 +137,14 @@ export const tasksApi = {
    */
   list: (params?: TaskListParams, signal?: AbortSignal) =>
     http.get('/v1/tasks', { params, signal }),
+
+  /**
+   * 获取任务中心筛选候选项
+   * GET /v1/tasks/filter-options
+   * 权限：已登录且可看任务中心的用户
+   */
+  filterOptions: (signal?: AbortSignal) =>
+    http.get<{ data?: TaskFilterOptionsResponse }>('/v1/tasks/filter-options', { signal }),
 
   /**
    * 任务池列表（按模块领取）
@@ -76,6 +196,20 @@ export const tasksApi = {
    */
   getDetail: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/tasks/${id}/detail`, { signal }),
+
+  generateAiSummary: (id: string, signal?: AbortSignal) =>
+    http.post<{ data?: TaskAiSummaryResponse }>(
+      `/v1/tasks/${encodeURIComponent(id)}/ai-summary`,
+      {},
+      { signal },
+    ),
+
+  batchDownloadTaskReferences: (id: string, signal?: AbortSignal) =>
+    http.post<TaskReferenceBatchDownloadResponse>(
+      `/v1/tasks/${encodeURIComponent(id)}/reference-assets/batch-download`,
+      {},
+      { signal },
+    ),
 
   /**
    * 任务业务事件流（审核替换、指派等）
@@ -427,9 +561,16 @@ export const tasksApi = {
     http.patch(`/v1/tasks/${id}/cost-info`, patch, { signal }),
 
   /**
-   * POST /v1/tOps/Warehouse/Admin；设计/审核/外协不可调用
-   asks/{id}/cost-quote/preview
-   * 权限：*/
+   * PATCH /v1/tasks/{id}/sku-items/{sku_item_id}/cost-info
+   * 批量母任务子项成本维护；保存后后端按该子项成本重新请求 ERP 同步。
+   */
+  patchSkuItemCostInfo: (id: string, skuItemId: number | string, patch: Record<string, unknown>, signal?: AbortSignal) =>
+    http.patch(`/v1/tasks/${id}/sku-items/${skuItemId}/cost-info`, patch, { signal }),
+
+  /**
+   * POST /v1/tasks/{id}/cost-quote/preview
+   * 权限：Ops/Warehouse/Admin；设计/审核/外协不可调用
+   */
   costQuotePreview: (id: string, payload: Record<string, unknown>, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/cost-quote/preview`, payload, { signal }),
 

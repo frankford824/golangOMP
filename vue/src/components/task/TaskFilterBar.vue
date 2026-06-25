@@ -1,6 +1,16 @@
 <template>
   <div class="filter-bar">
     <div class="filter-field">
+      <span class="field-label">任务分组</span>
+      <BaseSelect
+        :model-value="filters.taskCategory"
+        clearable
+        placeholder="全部分组"
+        :options="taskCategoryOptions"
+        @update:model-value="patchFilters({ taskCategory: String($event) })"
+      />
+    </div>
+    <div class="filter-field filter-field--status">
       <span class="field-label">任务状态</span>
       <TaskStatusMultiSelect
         :model-value="filters.status"
@@ -117,8 +127,7 @@ import BaseDatePicker from '@/components/base/BaseDatePicker.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import TaskStatusMultiSelect from '@/components/task/TaskStatusMultiSelect.vue'
-import { useDesignerOptions } from '@/composables/useDesignerOptions'
-import { useTaskCreatorOptions } from '@/composables/useTaskCreatorOptions'
+import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import { useOrgOwnershipFilterOptions } from '@/composables/useOrgOwnershipFilterOptions'
 
 export interface TaskListFilters {
@@ -185,11 +194,18 @@ const statusOptions: { value: TaskStatus; label: string }[] = [
   { value: 'RejectedByAuditA', label: '审核打回' },
   { value: 'PendingOutsource', label: '待定制' },
   { value: 'Outsourcing', label: '定制中' },
+  { value: 'PendingCustomizationReview', label: '待定制审核' },
+  { value: 'PendingEffectReview', label: '待效果审核' },
   { value: 'PendingWarehouseReceive', label: '待仓库接收' },
   { value: 'Completed', label: '已完成' },
   { value: 'Archived', label: '已归档' },
   { value: 'Blocked', label: '阻塞' },
   { value: 'Cancelled', label: '已取消' },
+]
+
+const taskCategoryOptions: BaseSelectOption[] = [
+  { label: '常规任务', value: 'normal' },
+  { label: '定制任务', value: 'customization' },
 ]
 
 const taskTypeOptions: BaseSelectOption[] = [
@@ -208,8 +224,7 @@ const priorityOptions: BaseSelectOption[] = [
   { label: '加急', value: 'critical' },
 ]
 
-const { creatorOptions } = useTaskCreatorOptions(true, '全部')
-const { assigneeOptions } = useDesignerOptions(true, '全部')
+const { creatorOptions, assigneeOptions } = useTaskFilterOptions(true, '全部')
 
 const warehouseStatusOptions: BaseSelectOption[] = [
   { label: '待接收', value: 'pending' },
@@ -248,6 +263,9 @@ function reset() {
   flex-direction: column;
   gap: 0.25rem;
   width: 10rem;
+}
+.filter-field--status {
+  width: 12.5rem;
 }
 .field-label {
   font-size: 0.75rem;

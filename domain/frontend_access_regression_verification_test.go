@@ -26,7 +26,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "运营一组",
 				Roles:      []Role{RoleMember, RoleDeptAdmin, RoleOps},
 			},
-			expectMenus: []string{"dashboard", "task_create", "business_info", "task_board", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin", "task_center"},
+			expectMenus: []string{"dashboard", "task_create", "business_info", "task_board", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "user_admin", "task_center"},
 		},
 		{
 			name: "Row02_OpsMember",
@@ -37,7 +37,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "运营二组",
 				Roles:      []Role{RoleMember, RoleOps},
 			},
-			expectMenus: []string{"dashboard", "task_create", "business_info", "task_board", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management"},
+			expectMenus: []string{"dashboard", "task_create", "business_info", "task_board", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "product_management"},
 		},
 		{
 			name: "Row03_DesignDirectorDeptAdmin",
@@ -48,7 +48,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "设计审核组",
 				Roles:      []Role{RoleMember, RoleDeptAdmin, RoleDesignDirector},
 			},
-			expectMenus: []string{"dashboard", "design_workspace", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "user_admin", "task_center", "task_list"},
+			expectMenus: []string{"dashboard", "design_workspace", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "user_admin", "task_center", "task_list"},
 		},
 		{
 			name: "Row04_DesignerMember",
@@ -59,7 +59,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "研发默认组",
 				Roles:      []Role{RoleMember, RoleDesigner},
 			},
-			expectMenus: []string{"dashboard", "design_workspace", "resource_management", "task_list"},
+			expectMenus: []string{"dashboard", "design_workspace", "resource_management", "product_management", "task_list"},
 		},
 		{
 			name: "Row05_AuditAMember",
@@ -70,7 +70,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "常规审核组",
 				Roles:      []Role{RoleMember, RoleAuditA},
 			},
-			expectMenus: []string{"dashboard", "task_board", "task_list", "audit_queue", "resource_management"},
+			expectMenus: []string{"dashboard", "task_board", "task_list", "audit_queue", "resource_management", "product_management"},
 		},
 		{
 			name: "Row05b_AuditBMember",
@@ -81,7 +81,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "普通审核组",
 				Roles:      []Role{RoleMember, RoleAuditB},
 			},
-			expectMenus: []string{"dashboard", "task_board", "task_list", "audit_queue", "resource_management"},
+			expectMenus: []string{"dashboard", "task_board", "task_list", "audit_queue", "resource_management", "product_management"},
 		},
 		{
 			name: "Row06_CustomizationReviewerMember",
@@ -92,7 +92,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "定制审核组",
 				Roles:      []Role{RoleMember, RoleCustomizationReviewer},
 			},
-			expectMenus: []string{"dashboard", "customization_management", "audit_queue", "resource_management"},
+			expectMenus: []string{"dashboard", "task_list", "customization_management", "audit_queue", "resource_management", "product_management"},
 		},
 		{
 			name: "Row07_AuditDeptAdmin",
@@ -103,7 +103,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "普通审核组",
 				Roles:      []Role{RoleMember, RoleDeptAdmin, RoleAuditA, RoleAuditB, RoleCustomizationReviewer},
 			},
-			expectMenus: []string{"dashboard", "task_board", "task_list", "audit_queue", "customization_management", "resource_management", "user_admin", "task_center"},
+			expectMenus: []string{"dashboard", "task_board", "task_list", "audit_queue", "customization_management", "resource_management", "product_management", "user_admin", "task_center"},
 		},
 		{
 			name: "Row08_CustomizationDeptAdmin",
@@ -114,7 +114,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "定制默认组",
 				Roles:      []Role{RoleMember, RoleDeptAdmin, RoleCustomizationOperator},
 			},
-			expectMenus: []string{"dashboard", "design_workspace", "customization_management", "resource_management", "user_admin", "task_center", "task_list"},
+			expectMenus: []string{"dashboard", "design_workspace", "customization_management", "resource_management", "product_management", "user_admin", "task_center", "task_list"},
 		},
 		{
 			name: "Row09_CustomizationOperatorMember",
@@ -125,7 +125,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "定制默认组",
 				Roles:      []Role{RoleMember, RoleCustomizationOperator},
 			},
-			expectMenus: []string{"dashboard", "design_workspace", "resource_management", "task_list"},
+			expectMenus: []string{"dashboard", "design_workspace", "resource_management", "product_management", "task_list"},
 		},
 		{
 			name: "Row10_WarehouseDeptAdmin",
@@ -136,7 +136,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "云仓默认组",
 				Roles:      []Role{RoleMember, RoleDeptAdmin, RoleWarehouse},
 			},
-			expectMenus: []string{"dashboard", "warehouse_receive", "warehouse_processing", "resource_management", "export_center", "user_admin", "task_center", "task_list"},
+			expectMenus: []string{"dashboard", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "export_center", "user_admin", "task_center", "task_list"},
 		},
 		{
 			name: "Row11_WarehouseMember",
@@ -147,7 +147,7 @@ func TestFrontendAccessRegressionScenarioMatrix(t *testing.T) {
 				Team:       "云仓默认组",
 				Roles:      []Role{RoleMember, RoleWarehouse},
 			},
-			expectMenus: []string{"dashboard", "warehouse_receive", "warehouse_processing", "resource_management", "export_center"},
+			expectMenus: []string{"dashboard", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "export_center"},
 		},
 		{
 			name: "Row12_BareMember",
@@ -205,7 +205,7 @@ func TestCustomizationArtDeptAdminSeesCustomizationManagementMenu(t *testing.T) 
 		Roles:      []Role{RoleMember, RoleDeptAdmin, RoleCustomizationOperator},
 	}, settings)
 
-	assertContainsAll(t, view.Menus, []string{"dashboard", "design_workspace", "customization_management", "resource_management", "user_admin"}, "menus")
+	assertContainsAll(t, view.Menus, []string{"dashboard", "design_workspace", "customization_management", "resource_management", "product_management", "user_admin"}, "menus")
 }
 
 func TestHRAdminGetsFullMenuUnion(t *testing.T) {
@@ -240,7 +240,7 @@ func TestCustomizationOperatorMemberHidesCustomizationManagement(t *testing.T) {
 		Roles:      []Role{RoleMember, RoleCustomizationOperator},
 	}, settings)
 
-	assertStringSetEqual(t, view.Menus, []string{"dashboard", "design_workspace", "resource_management", "task_list"}, "menus")
+	assertStringSetEqual(t, view.Menus, []string{"dashboard", "design_workspace", "resource_management", "product_management", "task_list"}, "menus")
 	assertNotContainsAny(t, view.Menus, []string{"customization_management"}, "menus")
 }
 

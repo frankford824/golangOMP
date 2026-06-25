@@ -10,6 +10,9 @@
     <div v-if="submitError" class="submit-error-banner">
       {{ submitError }}
     </div>
+    <div v-if="submitStatusMessage" class="submit-status-banner">
+      {{ submitStatusMessage }}
+    </div>
     <div class="modal-grid" :class="{ 'is-batch': isBatchLayout }">
       <div class="form-section">
         <section class="create-type-panel">
@@ -93,9 +96,9 @@
                       <tr
                         v-for="(row, idx) in batchPreviewRows"
                         :key="`batch-preview-${idx}`"
-                        :class="{ 'has-error': previewRowErrors(idx + 1).length }"
+                        :class="{ 'has-error': previewRowErrors(batchPreviewExcelRow(row, idx)).length }"
                       >
-                        <td>{{ idx + 1 }}</td>
+                        <td>{{ batchPreviewExcelRow(row, idx) }}</td>
                         <td>{{ row.product_name || '—' }}</td>
                         <td class="batch-cell-ellipsis">{{ row.design_requirement || '—' }}</td>
                         <td>{{ row.product_i_id || '—' }}</td>
@@ -120,13 +123,13 @@
                         </td>
                         <td>
                           <span
-                            v-for="err in previewRowErrors(idx + 1)"
-                            :key="`${err.column}-${err.code}`"
+                            v-for="err in previewRowErrors(batchPreviewExcelRow(row, idx))"
+                            :key="`${err.row}-${err.column}-${err.code}`"
                             class="batch-err-tag"
                           >
-                            {{ err.column }} · {{ err.message || err.code }}
+                            {{ formatBatchViolationMessage(err) }}
                           </span>
-                          <span v-if="previewRowErrors(idx + 1).length === 0">—</span>
+                          <span v-if="previewRowErrors(batchPreviewExcelRow(row, idx)).length === 0">—</span>
                         </td>
                       </tr>
                     </tbody>
@@ -137,12 +140,19 @@
               <section class="batch-meta-compact">
                 <div class="batch-meta-card field-group">
                   <label class="field-label">任务截止时间</label>
-                  <input
-                    v-model="dueAtLocal"
-                    type="date"
-                    class="native-input"
-                    :min="dueAtMin"
-                  />
+                  <div class="due-at-input-row">
+                    <input
+                      v-model="dueAtLocal"
+                      type="date"
+                      class="native-input"
+                      :min="dueAtMin"
+                    />
+                    <select v-model="dueAtHourLocal" class="native-input due-hour-select">
+                      <option v-for="opt in dueHourOptions" :key="opt.value" :value="opt.value">
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                  </div>
                 </div>
                 <div class="batch-meta-card field-group">
                   <BaseSelect
@@ -168,20 +178,10 @@
                 v-if="usesOriginalProductForm"
                 v-model:form="form"
               />
-              <section v-else-if="taskKind === 'RETOUCH_TASK'" class="type-section retouch-form">
-                <div class="form-card upload-card">
-                  <label class="field-label">图片/附件 <span class="required">*</span></label>
-                  <ReferenceUploadPanel v-model="referenceRefsModel" compact />
-                </div>
-                <div class="form-card">
-                  <BaseTextarea
-                    v-model="form.designRequirement"
-                    label="修改要求"
-                    :rows="4"
-                    placeholder="请填写 P 图修改要求，例如去背景、补光、替换文字"
-                  />
-                </div>
-              </section>
+              <TaskCreateRetouchForm
+                v-else-if="taskKind === 'RETOUCH_TASK'"
+                v-model:form="form"
+              />
               <TaskCreateNewProductForm
                 v-else-if="taskKind === 'NEW_PRODUCT_DEV'"
                 v-model:form="form"
@@ -226,12 +226,19 @@
               <section class="meta-card-grid">
                 <div class="field-group">
                   <label class="field-label">任务截止时间</label>
-                  <input
-                    v-model="dueAtLocal"
-                    type="date"
-                    class="native-input"
-                    :min="dueAtMin"
-                  />
+                  <div class="due-at-input-row">
+                    <input
+                      v-model="dueAtLocal"
+                      type="date"
+                      class="native-input"
+                      :min="dueAtMin"
+                    />
+                    <select v-model="dueAtHourLocal" class="native-input due-hour-select">
+                      <option v-for="opt in dueHourOptions" :key="opt.value" :value="opt.value">
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                  </div>
                 </div>
 
                 <div class="field-group">
@@ -259,6 +266,24 @@
                 <h4>{{ contextPanelTitle }}</h4>
               </div>
             </div>
+
+            <section v-if="createPredictionSuggestions.length" class="create-prediction-section">
+              <div class="create-prediction-head">
+                <span>填写联想</span>
+                <small>来自历史任务规则</small>
+              </div>
+              <button
+                v-for="item in createPredictionSuggestions"
+                :key="item.id"
+                type="button"
+                class="create-prediction-item"
+                @click="applyCreatePrediction(item)"
+              >
+                <strong>{{ item.title }}</strong>
+                <span v-if="item.detail">{{ item.detail }}</span>
+                <em>{{ item.action_label || '套用参考' }}</em>
+              </button>
+            </section>
 
             <ExcelBatchSkuPanel
               v-if="isBatchLayout"
@@ -299,9 +324,29 @@
                   }}
                 </p>
               </div>
-            </section>
+	            </section>
 
-            <section class="submit-check-section">
+	            <section v-if="showSkuCodeTypeCard" class="sku-code-type-card">
+	              <div class="erp-sync-toggle-head">
+	                <label class="field-label erp-sync-title">SKU 编码</label>
+	                <span class="erp-sync-badge">{{ showSkuAsCustomization ? 'DZ' : 'CG' }}</span>
+	              </div>
+	              <div class="erp-sync-toggle-row">
+	                <div class="erp-sync-control">
+	                  <span class="erp-sync-main-label">{{ isCustomizationFlow ? '定制任务固定标记' : '常规任务固定标记' }}</span>
+	                  <span class="erp-sync-locked-badge">{{ showSkuAsCustomization ? 'DZ' : 'CG' }}</span>
+	                </div>
+	                <p class="erp-sync-toggle-hint" :class="{ warning: showSkuAsCustomization }">
+	                  {{
+	                    showSkuAsCustomization
+	                      ? '将使用 DZ + 类目首字母 + 6 位序号，ERP 中可直接识别定制 SKU。'
+	                      : '将使用 CG + 类目首字母 + 6 位序号，适用于常规新品或采购 SKU。'
+	                  }}
+	                </p>
+	              </div>
+	            </section>
+
+	            <section class="submit-check-section">
               <div class="submit-check-header">
                 <div>
                   <h4 class="summary-title">提交校验</h4>
@@ -324,6 +369,9 @@
                   {{ msg }}
                 </li>
               </ul>
+              <div v-if="normalCustomizationWarning" class="submit-warning-card">
+                {{ normalCustomizationWarning }}
+              </div>
             </section>
           </aside>
         </div>
@@ -363,14 +411,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { Box, Images, Palette, Sparkles, ShoppingCart, Wand2 } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Box, Images, Sparkles, ShoppingCart, Wand2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import type { Task } from '@/domain/types'
 import type { TaskCreateFormModel, TaskKind } from '@/domain/types'
 import { canSubmitTask } from '@/domain/task-create-rules'
 import { pickFieldWhitelistViolations } from '@/domain/task-create-fields'
 import { defaultBatchTemplateValues } from '@/domain/batch-task-create'
+import { erpProductNameLimitMessage, isErpProductNameTooLong } from '@/domain/erp-product-name'
 import { useTasksStore } from '@/stores/tasks'
 import { generateActionId } from '@/utils/uuid'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -383,7 +432,17 @@ import BaseSwitch from '@/components/base/BaseSwitch.vue'
 import TaskCreateOriginalForm from '@/components/task/TaskCreateOriginalForm.vue'
 import TaskCreateNewProductForm from '@/components/task/TaskCreateNewProductForm.vue'
 import TaskCreatePurchaseForm from '@/components/task/TaskCreatePurchaseForm.vue'
-import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
+import TaskCreateRetouchForm from '@/components/task/TaskCreateRetouchForm.vue'
+import { createEmptyRetouchRequirementDraft } from '@/domain/types/retouch-requirement'
+import {
+  hasValidRetouchRequirementDrafts,
+  normalizeRetouchRequirementDraftsWithPending,
+} from '@/domain/retouch-requirements'
+import {
+  hasRetouchRequirementPendingUploads,
+  RETOUCH_REQUIREMENT_UPLOAD_PARTIAL_FAILURE_MESSAGE,
+  uploadRetouchRequirementPendingAssets,
+} from '@/services/upload/retouchRequirementUpload'
 import ExcelBatchSkuPanel from '@/components/task-create/ExcelBatchSkuPanel.vue'
 import CloseDraftConfirmModal from '@/components/task-create/CloseDraftConfirmModal.vue'
 import DesignSourcePicker from '@/components/task-create/DesignSourcePicker.vue'
@@ -394,8 +453,9 @@ import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { useAuth } from '@/composables/useAuth'
 import { useActorOwnerScope } from '@/composables/useActorOwnerScope'
 import { tasksApi } from '@/services/api/tasksApi'
-import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
-import { getBeijingDateString, nowISO, taskBeijingDateKey, toBeijingEndOfDayISO } from '@/utils/date'
+import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
+import { formatBatchViolationMessage, type BatchPreviewRow, type BatchViolation } from '@/services/api/batchSkuApi'
+import { getBeijingDateString, nowISO, taskBeijingDateKey, taskBeijingHour, toBeijingHourISO } from '@/utils/date'
 import { humanizeTaskCreateFields, humanizeViolationCode } from '@/domain/task-create-fields'
 import { normalizePriorityForApi } from '@/domain/task-priority'
 import { buildCategoryPatchFields } from '@/domain/category-payload'
@@ -422,15 +482,27 @@ const {
 // Round I.g · D1：下拉按 actor DataScope 过滤。Global/HR 不限制；
 // DA 只看本部门内的 team；GroupLeader 只看 managed_teams ∪ [actor.team]。
 const groupOptions = computed(() => filterOwnerTeamOptions(rawTeamOptions.value, resolveDepartmentByTeam))
+type TaskGroup = 'normal' | 'customization'
+type CreateType =
+  | 'original'
+  | 'new_single'
+  | 'new_batch'
+  | 'purchase_single'
+  | 'retouch'
+
+const taskGroup = ref<TaskGroup>('normal')
+const createType = ref<CreateType>('original')
 const { assigneeOptions, loadDesigners } = useDesignerOptions({
   includeEmpty: true,
   requiredActions: ['task.create'],
-  workflowLane: 'normal',
+  workflowLane: computed(() => taskGroup.value),
 })
 
 const submitError = ref('')
+const submitStatusMessage = ref('')
 const batchItemsError = ref('')
 const fieldErrors = ref<Record<string, string>>({})
+const createPredictionSuggestions = ref<PredictionSuggestion[]>([])
 const preparingSku = ref(false)
 const showCloseConfirm = ref(false)
 const draftId = ref('')
@@ -467,6 +539,10 @@ onMounted(() => {
   if (props.modelValue) handleModalOpened()
 })
 
+onBeforeUnmount(() => {
+  clearCreatePredictionRequest()
+})
+
 const priorityOptions = [
   { value: 'low', label: '低' },
   { value: 'normal', label: '普通' },
@@ -478,19 +554,9 @@ const router = useRouter()
 const tasksStore = useTasksStore()
 const permissionsStore = usePermissionsStore()
 const { isDeptAdminPlus } = useAuth()
+let createPredictionTimer: ReturnType<typeof setTimeout> | null = null
+let createPredictionAbort: AbortController | null = null
 
-type TaskGroup = 'normal' | 'customization'
-type CreateType =
-  | 'original'
-  | 'new_single'
-  | 'new_batch'
-  | 'purchase_single'
-  | 'retouch'
-  | 'customer_customization'
-  | 'regular_customization'
-
-const taskGroup = ref<TaskGroup>('normal')
-const createType = ref<CreateType>('original')
 const designSourceVerified = ref(false)
 const erpProductVerified = ref(false)
 const batchPreviewRows = ref<BatchPreviewRow[]>([])
@@ -544,18 +610,32 @@ const createTypeOptions: Array<{
     icon: Wand2,
   },
   {
-    value: 'customer_customization',
+    value: 'original',
     group: 'customization',
-    label: '客户定制',
+    label: '定制原款开发',
     kind: 'ORIGINAL_PRODUCT_DEV',
-    icon: Palette,
+    icon: Box,
   },
   {
-    value: 'regular_customization',
+    value: 'new_single',
     group: 'customization',
-    label: '常规定制',
+    label: '定制新款单 SKU',
     kind: 'NEW_PRODUCT_DEV',
     icon: Sparkles,
+  },
+  {
+    value: 'new_batch',
+    group: 'customization',
+    label: '定制新款批量',
+    kind: 'NEW_PRODUCT_DEV',
+    icon: Images,
+  },
+  {
+    value: 'purchase_single',
+    group: 'customization',
+    label: '定制采购单 SKU',
+    kind: 'PURCHASE_TASK',
+    icon: ShoppingCart,
   },
 ]
 
@@ -581,7 +661,7 @@ const form = ref<TaskCreateFormModel>({
   customizationRequired: false,
   customizationSourceType: undefined,
   note: '',
-  costPriceMode: 'manual',
+  costPriceMode: 'template',
   category: undefined,
   material: undefined,
   materialOther: undefined,
@@ -590,11 +670,12 @@ const form = ref<TaskCreateFormModel>({
   costUnitPrice: undefined,
   quantity: undefined,
   basePriceAmount: undefined,
-  productChannel: undefined,
-  costPriceAmount: undefined,
-  costPriceCurrency: 'CNY',
-  syncErpOnCreate: true,
-  purchaseQuantity: undefined,
+	  productChannel: undefined,
+	  costPriceAmount: undefined,
+	  costPriceCurrency: 'CNY',
+	  syncErpOnCreate: true,
+	  skuCodeType: 'regular',
+	  purchaseQuantity: undefined,
   purchaseUnit: undefined,
   prefillSpecText: undefined,
   skuMode: 'single',
@@ -616,30 +697,29 @@ const contextPanelClass = computed(() => ({
 }))
 const contextPanelTitle = computed(() => {
   if (isBatchLayout.value) return 'Excel 批量流程'
-  if (createType.value === 'customer_customization') return '客户上下文'
-  if (createType.value === 'regular_customization') return '蓝图解析'
+  if (isCustomizationFlow.value) return '定制上下文'
   if (taskKind.value === 'RETOUCH_TASK') return 'P 图任务只保留必要字段'
   if (taskKind.value === 'PURCHASE_TASK') return '成本与采购规则'
   if (taskKind.value === 'NEW_PRODUCT_DEV') return 'SKU 创建状态'
   return 'ERP 产品主档'
 })
 const contextPanelItems = computed(() => {
-  if (createType.value === 'customer_customization') {
+  if (isCustomizationFlow.value) {
     return [
-      { title: '客户来单校验', body: '先命中 ERP 商品，再填写订单号、文案和风格关键词。' },
-      { title: '风险提示', body: '定制需求建议包含颜色、尺寸、用途和交付约束，降低返工。' },
-    ]
-  }
-  if (createType.value === 'regular_customization') {
-    return [
-      { title: '设计来源', body: '常规定制必须先命中设计源，未命中时禁止提交。' },
-      { title: '蓝图建议', body: '先确认蓝图版本，再提交定制说明和补充资料。' },
+      { title: '定制归属', body: '定制任务统一写入 customization 业务域，审核与流转按域隔离执行。' },
+      { title: '输入建议', body: '建议补齐订单号、文案和风格关键词，降低返工与跨岗沟通成本。' },
     ]
   }
   if (taskKind.value === 'RETOUCH_TASK') {
     return [
-      { title: '最小字段', body: '只需要上传图片/附件并填写修改要求，无需 SKU、成本或分类。' },
-      { title: '上传提示', body: '上传文件会以小缩略图横向展示，单文件不超过 300MB。' },
+      {
+        title: '填写方式',
+        body: '每条需求写清修改说明即可；补充说明写在需求描述中，整单说明可写到底部备注。',
+      },
+      {
+        title: '本条附件',
+        body: '每条需求可单独上传参考图与素材文件（PSD / AI / ZIP 等），创建后自动绑定到该需求；单文件大小上限见上传提示。',
+      },
     ]
   }
   if (taskKind.value === 'PURCHASE_TASK') {
@@ -664,14 +744,37 @@ const contextPanelItems = computed(() => {
 const usesOriginalProductForm = computed(
   () =>
     taskKind.value === 'ORIGINAL_PRODUCT_DEV' &&
-    (createType.value === 'original' || createType.value === 'customer_customization'),
+    createType.value === 'original',
 )
-const requiresDesignSource = computed(() => createType.value === 'regular_customization')
-const requiresErpVerification = computed(() => createType.value === 'customer_customization')
+const requiresDesignSource = computed(() => false)
+const requiresErpVerification = computed(() => false)
 const showSyncErpToggle = computed(() =>
   createType.value === 'new_single' ||
   createType.value === 'new_batch' ||
   createType.value === 'purchase_single',
+)
+const showSkuCodeTypeCard = computed(() =>
+  createType.value === 'new_single' ||
+  createType.value === 'new_batch' ||
+  createType.value === 'purchase_single'
+)
+/** 右侧 SKU 编码提示：定制分组优先 DZ，避免 form.skuCodeType 与 taskGroup 脱节 */
+const showSkuAsCustomization = computed(
+  () => isCustomizationFlow.value || form.value.skuCodeType === 'customization',
+)
+
+const createPredictionKeyword = computed(() =>
+  [
+    form.value.productName,
+    form.value.productShortName,
+    form.value.category,
+    form.value.productCategoryName,
+    form.value.material,
+    form.value.designRequirement,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim(),
 )
 
 const copyContentModel = computed({
@@ -687,16 +790,87 @@ const styleKeywordsModel = computed({
   },
 })
 
+watch([createPredictionKeyword, taskKind, () => props.modelValue], () => {
+  scheduleCreatePredictions()
+})
+
+function clearCreatePredictionRequest(): void {
+  if (createPredictionTimer) {
+    clearTimeout(createPredictionTimer)
+    createPredictionTimer = null
+  }
+  createPredictionAbort?.abort()
+  createPredictionAbort = null
+}
+
+function scheduleCreatePredictions(): void {
+  clearCreatePredictionRequest()
+  createPredictionSuggestions.value = []
+  if (!props.modelValue) {
+    return
+  }
+  if (!createPredictionKeyword.value && taskKind.value === 'ORIGINAL_PRODUCT_DEV') {
+    return
+  }
+  const abortController = new AbortController()
+  createPredictionAbort = abortController
+  createPredictionTimer = setTimeout(async () => {
+    try {
+      const bundle = await predictionsApi.taskCreate(
+        {
+          keyword: createPredictionKeyword.value,
+          taskType: taskKind.value,
+          limit: 4,
+        },
+        abortController.signal,
+      )
+      if (abortController.signal.aborted) return
+      createPredictionSuggestions.value = bundle.suggestions
+    } catch {
+      if (!abortController.signal.aborted) createPredictionSuggestions.value = []
+    }
+  }, 450)
+}
+
+function applyCreatePrediction(item: PredictionSuggestion): void {
+  const meta = item.metadata ?? {}
+  if (meta.category_code && !form.value.category) {
+    form.value.category = meta.category_code
+    form.value.productCategoryCode = meta.category_code
+  }
+  if (meta.category_name && !form.value.productCategoryName) {
+    form.value.productCategoryName = meta.category_name
+  }
+  if (meta.material && !form.value.material) {
+    form.value.material = meta.material
+  }
+  const specHint = [meta.spec_text, meta.size_text].filter(Boolean).join(' / ')
+  if (specHint && !form.value.prefillSpecText) {
+    form.value.prefillSpecText = specHint
+  }
+  const processHint = meta.process?.trim()
+  if (processHint && !String(form.value.designRequirement ?? '').includes(processHint)) {
+    form.value.designRequirement = [form.value.designRequirement, `工艺参考：${processHint}`]
+      .filter(Boolean)
+      .join('\n')
+  }
+}
+
 function applyCreateType(option: (typeof createTypeOptions)[number]) {
   createType.value = option.value
   taskKind.value = option.kind
-  form.value.skuMode = option.value === 'new_batch' ? 'multiple' : 'single'
-  form.value.customizationRequired = option.group === 'customization'
-  form.value.customizationSourceType = option.group === 'customization'
-    ? option.kind === 'ORIGINAL_PRODUCT_DEV'
-      ? 'existing_product'
-      : 'new_product'
-    : undefined
+	form.value.skuMode = option.value === 'new_batch' ? 'multiple' : 'single'
+	form.value.customizationRequired = option.group === 'customization'
+	form.value.customizationSourceType = option.group === 'customization'
+	  ? option.kind === 'ORIGINAL_PRODUCT_DEV'
+	    ? 'existing_product'
+	    : 'new_product'
+	  : undefined
+	form.value.skuCodeType = option.group === 'customization' ? 'customization' : 'regular'
+  form.value.batchItems = (form.value.batchItems ?? []).map((item) => ({
+    ...item,
+    skuCodeType: option.group === 'customization' ? 'customization' : 'regular',
+  }))
   designSourceVerified.value = false
   erpProductVerified.value = false
   batchPreviewRows.value = []
@@ -708,13 +882,21 @@ function applyCreateType(option: (typeof createTypeOptions)[number]) {
 }
 
 function selectTaskGroup(group: TaskGroup) {
+  const changed = taskGroup.value !== group
   taskGroup.value = group
+  if (changed) {
+    form.value.assigneeId = null
+    form.value.assigneeName = null
+  }
   const first = createTypeOptions.find((option) => option.group === group)
   if (first) applyCreateType(first)
+  if (changed) void loadDesigners()
 }
 
 function selectCreateType(value: CreateType) {
-  const option = createTypeOptions.find((item) => item.value === value)
+  const option = createTypeOptions.find(
+    (item) => item.value === value && item.group === taskGroup.value,
+  )
   if (option) applyCreateType(option)
 }
 
@@ -772,10 +954,18 @@ watch(taskKind, (mode) => {
     form.value.purchaseQuantity = undefined
     form.value.basePriceAmount = undefined
     form.value.productChannel = undefined
-    form.value.costPriceMode = 'manual'
+    form.value.costPriceMode = 'template'
   }
   if (mode === 'PURCHASE_TASK') {
     form.value.designRequirement = ''
+    form.value.costPriceMode = form.value.costPriceMode || 'template'
+  }
+  if (mode === 'RETOUCH_TASK') {
+    if (!Array.isArray(form.value.retouchRequirements) || form.value.retouchRequirements.length === 0) {
+      form.value.retouchRequirements = [createEmptyRetouchRequirementDraft(1)]
+    }
+  } else {
+    form.value.retouchRequirements = undefined
   }
 })
 
@@ -792,6 +982,12 @@ watch(
 )
 
 const actionId = ref(generateActionId())
+const dueAtHourFallback = 18
+
+const dueHourOptions = Array.from({ length: 24 }, (_, hour) => ({
+  value: String(hour),
+  label: `${String(hour).padStart(2, '0')}:00`,
+}))
 
 const dueAtLocal = computed({
   get: () => {
@@ -802,7 +998,24 @@ const dueAtLocal = computed({
       form.value.dueAt = null
       return
     }
-    form.value.dueAt = toBeijingEndOfDayISO(v)
+    const parsed = Number.parseInt(dueAtHourLocal.value, 10)
+    const hour = Number.isFinite(parsed) ? parsed : dueAtHourFallback
+    form.value.dueAt = toBeijingHourISO(v, hour)
+  },
+})
+
+const dueAtHourLocal = computed({
+  get: () => {
+    const hour = taskBeijingHour(form.value.dueAt)
+    return String(hour ?? dueAtHourFallback)
+  },
+  set: (v: string) => {
+    const parsed = Number.parseInt(v, 10)
+    const hour =
+      Number.isFinite(parsed) && parsed >= 0 && parsed <= 23 ? parsed : dueAtHourFallback
+    const currentDate = taskBeijingDateKey(form.value.dueAt)
+    if (!currentDate) return
+    form.value.dueAt = toBeijingHourISO(currentDate, hour)
   },
 })
 
@@ -817,17 +1030,14 @@ const urgentModel = computed({
   },
 })
 
-const referenceRefsModel = computed({
-  get: () => form.value.referenceFileRefs,
-  set: (value: (string | Record<string, unknown>)[]) => {
-    form.value.referenceFileRefs = value
-  },
-})
-
 const isDraftDirty = computed(() => JSON.stringify(buildDraftPayload()) !== savedDraftSnapshot.value)
 
 function previewRowErrors(row: number): BatchViolation[] {
   return excelViolations.value.filter((v) => v.row === row)
+}
+
+function batchPreviewExcelRow(row: BatchPreviewRow, index: number): number {
+  return row.source_row && row.source_row > 0 ? row.source_row : index + 2
 }
 
 function isImageMimeType(mimeType: string | undefined): boolean {
@@ -852,18 +1062,19 @@ const validationIssues = computed<string[]>(() => {
     if (taskKind.value === 'NEW_PRODUCT_DEV') {
       if (!f.category) issues.push('未选择产品款式编码')
       if (!f.productName) issues.push('未填写产品名称')
+      if (isErpProductNameTooLong(f.productName)) issues.push(erpProductNameLimitMessage('产品名称'))
       if (!f.designRequirement?.trim()) issues.push('未填写设计需求')
     } else if (taskKind.value === 'PURCHASE_TASK') {
       if (!f.category) issues.push('未选择产品款式编码')
       if (!f.productName) issues.push('未填写产品名称')
+      if (isErpProductNameTooLong(f.productName)) issues.push(erpProductNameLimitMessage('产品名称'))
       if (!f.prefillSpecText?.trim()) issues.push('未填写规格尺寸')
       if (f.purchaseQuantity == null) issues.push('未填写采购数量')
       if (f.costPriceMode === 'manual' && (f.costPriceAmount == null || Number.isNaN(f.costPriceAmount))) {
         issues.push('成本计价方式为手动录入时未填写成本')
       }
     } else if (taskKind.value === 'RETOUCH_TASK') {
-      if ((f.referenceFileRefs ?? []).length === 0) issues.push('请上传图片/附件')
-      if (!f.designRequirement?.trim()) issues.push('未填写修改要求')
+      if (!hasValidRetouchRequirementDrafts(f)) issues.push('请至少填写 1 条 P 图需求描述')
     } else if (taskKind.value === 'ORIGINAL_PRODUCT_DEV') {
       if (!f.sku) issues.push('未绑定原品 SKU')
       if (!f.productId) issues.push('未选择 ERP 产品')
@@ -871,6 +1082,9 @@ const validationIssues = computed<string[]>(() => {
     }
   } else {
     if ((f.batchItems ?? []).length === 0) issues.push('请先上传并解析 Excel')
+    if ((f.batchItems ?? []).some((item) => isErpProductNameTooLong(item.productName))) {
+      issues.push(erpProductNameLimitMessage('批量商品产品名称'))
+    }
     if (excelViolations.value.length > 0) issues.push('Excel 存在行级错误，请修正后重新上传')
   }
   if (requiresDesignSource.value && !designSourceVerified.value) issues.push('请先校验设计源')
@@ -880,12 +1094,63 @@ const validationIssues = computed<string[]>(() => {
   return canSubmit.value ? [] : issues.slice(0, 3)
 })
 
+const CUSTOMIZATION_KEYWORDS = ['定制', '客制', '来图定做', '个性化']
+
+function textLooksCustomization(value: unknown): boolean {
+  const text = String(value ?? '').trim()
+  if (!text) return false
+  return CUSTOMIZATION_KEYWORDS.some((keyword) => text.includes(keyword))
+}
+
+function addCustomizationSignal(signals: string[], label: string, value: unknown) {
+  const text = String(value ?? '').trim()
+  if (!textLooksCustomization(text)) return
+  signals.push(`${label}：${text}`)
+}
+
+function erpSnapshotSignals(snapshot: unknown): string[] {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return []
+  const raw = snapshot as Record<string, unknown>
+  const signals: string[] = []
+  addCustomizationSignal(signals, 'ERP款式', raw.i_id ?? raw.iId)
+  addCustomizationSignal(signals, 'ERP名称', raw.name ?? raw.sku_name ?? raw.skuName)
+  addCustomizationSignal(signals, 'ERP分类', raw.category_name ?? raw.categoryName)
+  return signals
+}
+
+const normalCustomizationSignals = computed(() => {
+  if (taskGroup.value !== 'normal') return []
+  const signals: string[] = []
+  const f = form.value
+  const template = batchTemplateModel.value
+
+  addCustomizationSignal(signals, '商品名称', f.productName)
+  addCustomizationSignal(signals, '产品简称', f.productShortName)
+  addCustomizationSignal(signals, '款式编码', f.category ?? f.productCategoryCode)
+  addCustomizationSignal(signals, '分类名称', f.productCategoryName)
+  addCustomizationSignal(signals, '批量模板名称', template.productName)
+  addCustomizationSignal(signals, '批量模板款式', template.categoryCode ?? template.productIId)
+  for (const item of f.batchItems ?? []) {
+    addCustomizationSignal(signals, '批量商品名称', item.productName)
+    addCustomizationSignal(signals, '批量商品款式', item.categoryCode ?? item.productIId)
+  }
+  signals.push(...erpSnapshotSignals(f.erpProductSnapshot))
+  return Array.from(new Set(signals)).slice(0, 5)
+})
+
+const normalCustomizationWarning = computed(() => {
+  if (normalCustomizationSignals.value.length === 0) return ''
+  const preview = normalCustomizationSignals.value.slice(0, 3).join('；')
+  return `检测到常规任务中包含定制特征：${preview}。如果这是定制单，请切换到“定制任务”；继续按常规创建会进入常规审核并生成常规 SKU。`
+})
+
 const canSubmit = computed(() => {
   if (form.value.skuMode === 'multiple' && taskKind.value !== 'ORIGINAL_PRODUCT_DEV') {
     return Boolean(
       form.value.groupId &&
         form.value.dueAt &&
         (form.value.batchItems ?? []).length >= 2 &&
+        !(form.value.batchItems ?? []).some((item) => isErpProductNameTooLong(item.productName)) &&
         excelViolations.value.length === 0,
     )
   }
@@ -901,8 +1166,9 @@ function onExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchV
     clientKey: `excel-${idx + 1}`,
     productName: row.product_name ?? '',
     designRequirement: row.design_requirement ?? '',
-    productIId: row.product_i_id ?? undefined,
-    referenceFileRefs: (row.reference_file_refs ?? []).map((ref) => ({ ...ref })) as Record<string, unknown>[],
+	  productIId: row.product_i_id ?? undefined,
+	  skuCodeType: form.value.skuCodeType,
+	  referenceFileRefs: (row.reference_file_refs ?? []).map((ref) => ({ ...ref })) as Record<string, unknown>[],
   }))
   form.value.batchTemplateSaved = payload.preview.length > 0
 }
@@ -940,18 +1206,19 @@ function resolveCreateTypeFromDraft(
   draftTaskKind: string,
   draftForm: Record<string, unknown>,
 ): (typeof createTypeOptions)[number] | undefined {
-  const isCustomization = Boolean(draftForm.customizationRequired)
+  const draftLane = String(draftForm.businessLane ?? draftForm.workflowLane ?? '').trim().toLowerCase()
+  const isCustomization = draftLane === 'customization' || Boolean(draftForm.customizationRequired)
   const skuMode = String(draftForm.skuMode ?? 'single')
   if (draftTaskKind === 'ORIGINAL_PRODUCT_DEV') {
-    const value = isCustomization ? 'customer_customization' : 'original'
-    return createTypeOptions.find((option) => option.value === value)
+    const value = 'original'
+    return createTypeOptions.find((option) => option.value === value && option.group === (isCustomization ? 'customization' : 'normal'))
   }
   if (draftTaskKind === 'NEW_PRODUCT_DEV') {
-    const value = skuMode === 'multiple' ? 'new_batch' : isCustomization ? 'regular_customization' : 'new_single'
-    return createTypeOptions.find((option) => option.value === value)
+    const value = skuMode === 'multiple' ? 'new_batch' : 'new_single'
+    return createTypeOptions.find((option) => option.value === value && option.group === (isCustomization ? 'customization' : 'normal'))
   }
   if (draftTaskKind === 'PURCHASE_TASK') {
-    return createTypeOptions.find((option) => option.value === 'purchase_single')
+    return createTypeOptions.find((option) => option.value === 'purchase_single' && option.group === (isCustomization ? 'customization' : 'normal'))
   }
   if (draftTaskKind === 'RETOUCH_TASK') {
     return createTypeOptions.find((option) => option.value === 'retouch')
@@ -1059,10 +1326,13 @@ async function prepareSkuPreview() {
       designRequirement: businessType === 'PURCHASE_TASK' ? undefined : form.value.designRequirement || undefined,
       referenceFileRefs: referenceFileRefs as unknown as Task['referenceFileRefs'],
       dueAt: form.value.dueAt,
-      priority: normalizedPriority,
-      customizationRequired: false,
-      customizationSourceType: undefined,
-      note: form.value.note,
+	      priority: normalizedPriority,
+	      customizationRequired: form.value.customizationRequired,
+	      customizationSourceType: form.value.customizationSourceType,
+	      businessLane: taskGroup.value,
+	      workflowLane: taskGroup.value,
+	      skuCodeType: form.value.skuCodeType,
+	      note: form.value.note,
       assetVersions: [],
       businessType,
       requiresAssetVersions: businessType !== 'PURCHASE_TASK',
@@ -1107,12 +1377,15 @@ async function prepareSkuPreview() {
         category: topCategoryCode || form.value.category,
         material: form.value.material,
         materialOther: form.value.materialOther,
-        productShortName: form.value.productShortName,
+        productShortName: form.value.productName,
       })
     }
 
     if (isBatch) {
-      const normalizedItems = form.value.batchItems ?? []
+      const normalizedItems = (form.value.batchItems ?? []).map((item) => ({
+        ...item,
+        productShortName: item.productName,
+      }))
       Object.assign(base, {
         skuMode: 'multiple',
         sku: null,
@@ -1179,8 +1452,17 @@ function getPrefillBusinessPatchPayload(): Record<string, unknown> {
 async function submit() {
   if (!canSubmit.value || submitting.value) return
   submitError.value = ''
+  submitStatusMessage.value = ''
   batchItemsError.value = ''
   fieldErrors.value = {}
+
+  if (normalCustomizationWarning.value) {
+    const confirmed = window.confirm(
+      `${normalCustomizationWarning.value}\n\n仍然按常规任务创建吗？`,
+    )
+    if (!confirmed) return
+  }
+
   submitting.value = true
 
   // Round I.g · D1：submit-guard 兜底，避免脏 groupId 绕过下拉过滤直达 axios。
@@ -1200,6 +1482,10 @@ async function submit() {
   const now = nowISO()
   const businessType = taskKind.value
   const isBatch = form.value.skuMode === 'multiple' && businessType !== 'ORIGINAL_PRODUCT_DEV'
+  const retouchDraftsForUpload =
+    businessType === 'RETOUCH_TASK'
+      ? normalizeRetouchRequirementDraftsWithPending(form.value.retouchRequirements)
+      : []
 
   const referenceFileRefs = (
     isBatch
@@ -1243,6 +1529,9 @@ async function submit() {
     ownerOrgTeam: hideOwnerFields.value ? undefined : (form.value.groupId || undefined),
     designRequirement:
       businessType === 'PURCHASE_TASK' ? undefined : form.value.designRequirement || undefined,
+    ...(businessType === 'RETOUCH_TASK'
+      ? { retouchRequirements: form.value.retouchRequirements ?? [] }
+      : {}),
     referenceFileRefs,
     dueAt: form.value.dueAt,
     priority: normalizedPriority,
@@ -1251,9 +1540,11 @@ async function submit() {
     note: form.value.note,
     assetVersions: [],
     businessType,
-    workflowLane: taskGroup.value,
-    taskCreateType: createType.value,
-    orderNumber: form.value.orderNumber,
+    businessLane: taskGroup.value,
+	    workflowLane: taskGroup.value,
+	    taskCreateType: createType.value,
+	    skuCodeType: form.value.skuCodeType,
+	    orderNumber: form.value.orderNumber,
     copyContent: form.value.copyContent,
     styleKeywords: form.value.styleKeywords,
     designSourceVerified: designSourceVerified.value,
@@ -1303,18 +1594,21 @@ async function submit() {
       category: form.value.category,
       material: form.value.material,
       materialOther: form.value.materialOther,
-      productShortName: form.value.productShortName,
+      productShortName: form.value.productName,
     })
   }
 
   if (isBatch) {
-    const normalizedItems = form.value.batchItems ?? []
+    const normalizedItems = (form.value.batchItems ?? []).map((item) => ({
+      ...item,
+      productShortName: item.productName,
+    }))
     Object.assign(base, {
       skuMode: 'multiple',
       sku: null,
       productName: '',
       designRequirement: undefined,
-      batchItems: normalizedItems,
+	        batchItems: normalizedItems,
       batchExcelImported: true,
       ...(businessType === 'PURCHASE_TASK'
         ? {
@@ -1371,6 +1665,39 @@ async function submit() {
     }
     // 只刷新当前任务，避免整表刷新覆盖详情页所需字段
     await tasksStore.loadTaskById(created.id)
+
+    let retouchRequirementUploadFailed = false
+    if (businessType === 'RETOUCH_TASK' && hasRetouchRequirementPendingUploads(retouchDraftsForUpload)) {
+      submitStatusMessage.value = '正在上传 P 图需求附件...'
+      const loadedTask = tasksStore.getById(created.id) ?? created
+      const uploadResult = await uploadRetouchRequirementPendingAssets(
+        created.id,
+        loadedTask.retouchRequirements ?? [],
+        retouchDraftsForUpload,
+        {
+          onStatusMessage: (message) => {
+            submitStatusMessage.value = message
+          },
+        },
+      )
+      if (uploadResult.failures.length > 0) {
+        retouchRequirementUploadFailed = true
+        const failurePreview = uploadResult.failures
+          .slice(0, 3)
+          .map((item) => item.fileName ? `${item.fileName}：${item.message}` : item.message)
+          .join('\n')
+        window.alert(
+          `${RETOUCH_REQUIREMENT_UPLOAD_PARTIAL_FAILURE_MESSAGE}${failurePreview ? `\n\n${failurePreview}` : ''}`,
+        )
+      } else if (uploadResult.referenceUploaded + uploadResult.sourceUploaded > 0) {
+        try {
+          await tasksStore.loadTaskById(created.id)
+        } catch {
+          /* 上传已成功，详情页挂载会再拉 */
+        }
+      }
+    }
+
     emit('update:modelValue', false)
     emit('created', created.id)
     void router.push({
@@ -1379,6 +1706,7 @@ async function submit() {
         fromCreate: '1',
         ...(prefillSyncFailed ? { prefillSyncFailed: '1' } : {}),
         ...(procurementSyncFailed ? { procurementSyncFailed: '1' } : {}),
+        ...(retouchRequirementUploadFailed ? { retouchRequirementUploadFailed: '1' } : {}),
       },
     })
   } catch (e) {
@@ -1446,11 +1774,22 @@ async function submit() {
     }
   } finally {
     submitting.value = false
+    submitStatusMessage.value = ''
   }
 }
 </script>
 
 <style scoped>
+.submit-status-banner {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .modal-grid {
   display: flex;
   flex-direction: column;
@@ -1586,7 +1925,7 @@ async function submit() {
   border-radius: 0.875rem;
   padding: 0.75rem;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr) minmax(0, 0.9fr);
   gap: 0.65rem;
   align-items: stretch;
   background: #f8fafc;
@@ -1745,10 +2084,11 @@ async function submit() {
 .meta-card-grid :deep(textarea) {
   grid-column: 1 / -1;
 }
-.erp-sync-toggle-card {
-  border: 1px solid #d9dee7;
-  border-radius: 0.875rem;
-  padding: 0.7rem 0.8rem;
+.erp-sync-toggle-card,
+.sku-code-type-card {
+	border: 1px solid #d9dee7;
+	border-radius: 0.875rem;
+	padding: 0.7rem 0.8rem;
   background: linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
@@ -1771,6 +2111,19 @@ async function submit() {
   color: #6b7280;
   background: #e5e7eb;
   border: 1px solid #d1d5db;
+}
+.erp-sync-locked-badge {
+  min-width: 3.2rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 83, 9, 0.18);
+  background: rgba(251, 191, 36, 0.16);
+  color: #92400e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.38rem 0.62rem;
+  text-align: center;
 }
 .erp-sync-toggle-row {
   display: flex;
@@ -1801,10 +2154,20 @@ async function submit() {
   width: auto;
   min-width: 4.7rem;
   justify-content: center;
+  flex-shrink: 0;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .erp-sync-toggle-card :deep(.erp-switch[aria-pressed='true']) {
   background: #111827;
   color: #f9fafb;
+  border-color: rgba(125, 211, 252, 0.35) !important;
+  box-shadow:
+    0 0 0 1px rgba(34, 197, 94, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 .erp-sync-toggle-card :deep(.erp-switch[aria-pressed='false']) {
   background: #e5e7eb;
@@ -1813,13 +2176,12 @@ async function submit() {
 .erp-sync-toggle-card :deep(.erp-switch[aria-pressed='true'] span.inline-block) {
   background: #22c55e;
 }
+/* P 图表单由 TaskCreateRetouchForm 内部布局；勿在此拆成两列 grid */
 .retouch-form {
-  display: grid;
-  grid-template-columns: 0.95fr 1.05fr;
-  gap: 0.75rem;
-}
-.retouch-form .upload-card {
-  background: #eef5ff;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
 }
 .batch-section-title {
   margin: 0;
@@ -1851,10 +2213,16 @@ async function submit() {
   color: #dc2626;
 }
 .task-kind-switch {
-  @apply inline-flex items-center gap-1 rounded-xl bg-white/70 p-1 whitespace-nowrap overflow-x-auto;
+  @apply inline-flex items-center gap-1 rounded-xl bg-white/70 p-1;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 .task-kind-button {
-  @apply inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 active:scale-95 whitespace-nowrap;
+  @apply inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 active:scale-95;
+  min-height: 2rem;
+  max-width: 100%;
+  line-height: 1.25;
+  text-align: center;
 }
 .task-kind-button.is-inactive {
   @apply text-slate-500 hover:text-slate-900 hover:bg-white/40;
@@ -1894,6 +2262,14 @@ async function submit() {
   border-radius: 6px;
   font-size: 0.875rem;
 }
+.due-at-input-row {
+  display: grid;
+  grid-template-columns: minmax(8.75rem, 1fr) 6.25rem;
+  gap: 0.5rem;
+}
+.due-hour-select {
+  min-width: 6.25rem;
+}
 .switch-row {
   display: flex;
   align-items: center;
@@ -1932,6 +2308,16 @@ async function submit() {
 }
 .issue-item::marker {
   color: #f97316;
+}
+.submit-warning-card {
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #fed7aa;
+  border-radius: 0.5rem;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 .issue-ok {
   margin: 0.2rem 0 0;
@@ -2035,6 +2421,379 @@ async function submit() {
 .create-context-panel.is-retouch .context-card-body {
   color: #fff;
 }
+
+/* Phase 4: light admin create-task modal skin. Style-only except parent visibility fix. */
+:global(.create-task-modal-panel) {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12) !important;
+}
+
+:global(.create-task-modal-panel > header) {
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+:global(.create-task-modal-panel > div.flex-1) {
+  color: #111827 !important;
+}
+
+.create-type-panel,
+.field-group,
+.batch-preview-section,
+.batch-meta-compact,
+.batch-meta-card,
+.batch-public,
+.batch-field-card,
+.batch-template-card,
+.prefill-section,
+.v1-extra-section,
+.meta-card-grid,
+.form-card,
+.submit-check-section,
+.create-context-panel,
+.context-card {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.create-type-panel {
+  background: #f9fafb !important;
+}
+
+.eyebrow,
+.batch-preview-header span,
+.batch-bridge-hint,
+.submit-check-hint,
+.context-card-body,
+.erp-sync-toggle-hint {
+  color: #6b7280 !important;
+}
+
+/*
+ * 左侧表单区字段标题：与 eyebrow/说明文案区分层级，统一覆盖
+ * - 本组件内 label.field-label
+ * - 子表单内 label.field-label（:deep）
+ * - BaseInput/BaseTextarea/BaseSelect 的 label（Tailwind text-slate-600）
+ * 限定在 .form-fields，避免影响右侧说明面板、ERP 同步标题等。
+ */
+.form-fields :deep(label.field-label),
+.form-fields :deep(label.text-sm.font-medium.text-slate-600) {
+  color: #374151 !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.batch-section-title,
+.summary-title,
+.context-panel-header h4,
+.context-card-title,
+.erp-sync-title {
+  color: #111827 !important;
+}
+
+.task-kind-switch,
+.mode-switch {
+  border-color: #e5e7eb !important;
+  background: #f3f4f6 !important;
+}
+
+.task-kind-button {
+  border: 1px solid transparent;
+  color: #6b7280 !important;
+  min-width: 0;
+}
+
+.task-kind-button.is-inactive:hover {
+  border-color: #d1d5db;
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+.task-kind-button.is-active {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.native-input,
+.batch-meta-card :deep(input),
+.batch-meta-card :deep(.relative > div),
+.batch-meta-card :deep(textarea),
+.v1-extra-section :deep(input),
+.form-card :deep(input),
+.batch-public :deep(input),
+.batch-field-card :deep(input),
+.meta-card-grid :deep(input),
+.v1-extra-section :deep(.relative > div),
+.form-card :deep(.relative > div),
+.batch-public :deep(.relative > div),
+.batch-field-card :deep(.relative > div),
+.meta-card-grid :deep(.relative > div),
+.v1-extra-section :deep(textarea),
+.form-card :deep(textarea),
+.batch-public :deep(textarea),
+.batch-field-card :deep(textarea),
+.meta-card-grid :deep(textarea) {
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+.native-input::placeholder,
+.v1-extra-section :deep(input::placeholder),
+.form-card :deep(input::placeholder),
+.batch-public :deep(input::placeholder),
+.batch-field-card :deep(input::placeholder),
+.meta-card-grid :deep(input::placeholder),
+.v1-extra-section :deep(textarea::placeholder),
+.form-card :deep(textarea::placeholder),
+.batch-public :deep(textarea::placeholder),
+.batch-field-card :deep(textarea::placeholder),
+.meta-card-grid :deep(textarea::placeholder) {
+  color: #9ca3af !important;
+}
+
+.native-input:focus,
+.v1-extra-section :deep(input:focus),
+.form-card :deep(input:focus),
+.batch-public :deep(input:focus),
+.batch-field-card :deep(input:focus),
+.meta-card-grid :deep(input:focus),
+.v1-extra-section :deep(textarea:focus),
+.form-card :deep(textarea:focus),
+.batch-public :deep(textarea:focus),
+.batch-field-card :deep(textarea:focus),
+.meta-card-grid :deep(textarea:focus) {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+}
+
+.erp-sync-toggle-card,
+.sku-code-type-card {
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
+}
+
+.erp-sync-toggle-card .erp-sync-control,
+.sku-code-type-card .erp-sync-control {
+  margin-top: 0.12rem;
+  padding: 0.55rem 0.72rem;
+  border-radius: 0.65rem;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: none;
+  gap: 0.85rem;
+}
+.erp-sync-toggle-card .erp-sync-main-label,
+.sku-code-type-card .erp-sync-main-label {
+  color: #111827 !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+.erp-sync-toggle-card .erp-sync-toggle-hint:not(.warning),
+.sku-code-type-card .erp-sync-toggle-hint:not(.warning) {
+  color: #6b7280 !important;
+  font-weight: 400;
+}
+.erp-sync-toggle-card :deep(.erp-switch[aria-pressed='false']),
+.sku-code-type-card :deep(.erp-switch[aria-pressed='false']) {
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+  border-color: #d1d5db !important;
+  box-shadow: none;
+}
+
+.erp-sync-badge,
+.erp-sync-locked-badge,
+.batch-ref-thumb-file,
+.batch-bridge-hint {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.batch-preview-table th {
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.batch-preview-table th,
+.batch-preview-table td {
+  border-top-color: #e5e7eb !important;
+}
+
+.batch-preview-table tr.has-error,
+.submit-error-banner {
+  border-color: #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+}
+
+.issue-list,
+.field-hint-error {
+  color: #b91c1c !important;
+}
+
+.issue-ok {
+  color: #15803d !important;
+}
+
+.issue-warn,
+.erp-sync-toggle-hint.warning {
+  color: #b45309 !important;
+}
+
+.summary-footer {
+  border-top-color: #e5e7eb !important;
+  background: #f9fafb !important;
+}
+
+.context-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.create-context-panel.is-customization,
+.create-context-panel.is-retouch {
+  background: #f9fafb !important;
+}
+
+.create-context-panel.is-customization .context-card-title,
+.create-context-panel.is-customization .context-card-body,
+.create-context-panel.is-retouch .context-card-title,
+.create-context-panel.is-retouch .context-card-body {
+  color: #111827 !important;
+}
+
+.create-context-panel.is-retouch .context-card {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+}
+
+.create-prediction-section {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.08), rgba(37, 99, 235, 0.08)),
+    #eff6ff;
+  background-size: 220% 100%;
+  animation: create-stream-panel 8s linear infinite;
+}
+
+.create-prediction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.create-prediction-head span {
+  color: #1e3a8a;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.create-prediction-head small {
+  color: #64748b;
+  font-size: 0.6875rem;
+}
+
+.create-prediction-item {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.625rem 0.7rem;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 0.625rem;
+  background: #ffffff;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  animation: create-card-enter 420ms ease both;
+}
+
+.create-prediction-item:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 14px 28px -22px rgba(37, 99, 235, 0.75);
+}
+
+.create-prediction-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(59, 130, 246, 0.13) 42%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+}
+
+.create-prediction-item:hover::after {
+  transform: translateX(120%);
+}
+
+.create-prediction-item strong {
+  color: #111827;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.create-prediction-item span {
+  color: #475569;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.create-prediction-item em {
+  width: max-content;
+  max-width: 100%;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.6875rem;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+@keyframes create-stream-panel {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes create-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .create-prediction-section,
+  .create-prediction-item {
+    animation: none !important;
+  }
+
+  .create-prediction-item,
+  .create-prediction-item::after {
+    transition: none !important;
+  }
+}
+
 @media (max-width: 900px) {
   .create-workspace {
     grid-template-columns: 1fr;
@@ -2044,7 +2803,6 @@ async function submit() {
   }
   .customization-card-grid,
   .meta-card-grid,
-  .retouch-form,
   .batch-meta-compact,
   .batch-two-col {
     grid-template-columns: 1fr;

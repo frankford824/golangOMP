@@ -111,9 +111,56 @@ func TestERPBridgeHandlerGetProductByIDAcceptsSlashContainingID(t *testing.T) {
 	}
 }
 
+func TestERPBridgeHandlerQueryOrderActionLogs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handler := NewERPBridgeHandler(&erpBridgeServiceStub{
+		orderLogs: &domain.ERPOrderActionLogListResponse{
+			Items: []*domain.ERPOrderActionLog{
+				{InternalOID: "15539375", OnlineSOID: "6927419498646110137", Action: "审核", Content: "订单审核通过"},
+			},
+			Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 1},
+			NormalizedFilters: domain.ERPOrderActionLogFilter{
+				PageIndex:   1,
+				PageSize:    30,
+				InternalOID: "15539375",
+				OnlineSOID:  "6927419498646110137",
+				ActionName:  "标记异常",
+			},
+		},
+	})
+	router.GET("/v1/erp/order-action-logs", handler.QueryOrderActionLogs)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/erp/order-action-logs?o_id=15539375&so_id=6927419498646110137&action_name=%E6%A0%87%E8%AE%B0%E5%BC%82%E5%B8%B8&page_index=1&page_size=30", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/erp/order-action-logs code = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Data              []domain.ERPOrderActionLog     `json:"data"`
+		Pagination        domain.PaginationMeta          `json:"pagination"`
+		NormalizedFilters domain.ERPOrderActionLogFilter `json:"normalized_filters"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].InternalOID != "15539375" {
+		t.Fatalf("response data = %+v", resp.Data)
+	}
+	if resp.NormalizedFilters.OnlineSOID != "6927419498646110137" {
+		t.Fatalf("normalized filters = %+v", resp.NormalizedFilters)
+	}
+	if resp.NormalizedFilters.ActionName != "标记异常" {
+		t.Fatalf("normalized action_name = %q, want 标记异常", resp.NormalizedFilters.ActionName)
+	}
+}
+
 type erpBridgeServiceStub struct {
 	searchResponse *domain.ERPProductListResponse
 	iidResponse    *domain.ERPIIDListResponse
+	orderLogs      *domain.ERPOrderActionLogListResponse
 	product        *domain.ERPProduct
 	categories     []*domain.ERPCategory
 	appErr         *domain.AppError
@@ -134,6 +181,13 @@ func (s *erpBridgeServiceStub) GetProductByID(context.Context, string) (*domain.
 	return s.product, s.appErr
 }
 
+func (s *erpBridgeServiceStub) QueryCombineSKUs(context.Context, domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, *domain.AppError) {
+	return &domain.JSTCombineSKUListResponse{
+		Items:      []domain.JSTCombineSKUItem{},
+		Pagination: domain.PaginationMeta{Page: 1, PageSize: 50, Total: 0},
+	}, s.appErr
+}
+
 func (s *erpBridgeServiceStub) ListCategories(context.Context) ([]*domain.ERPCategory, *domain.AppError) {
 	return s.categories, s.appErr
 }
@@ -148,6 +202,13 @@ func (s *erpBridgeServiceStub) ListSyncLogs(context.Context, domain.ERPSyncLogFi
 
 func (s *erpBridgeServiceStub) GetSyncLogByID(context.Context, string) (*domain.ERPSyncLog, *domain.AppError) {
 	return nil, s.appErr
+}
+
+func (s *erpBridgeServiceStub) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
+	if s.orderLogs != nil {
+		return s.orderLogs, s.appErr
+	}
+	return &domain.ERPOrderActionLogListResponse{Items: []*domain.ERPOrderActionLog{}, Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0}}, s.appErr
 }
 
 func (s *erpBridgeServiceStub) EnsureLocalProduct(context.Context, repo.Tx, *domain.ERPProductSelectionSnapshot) (*domain.Product, *domain.AppError) {

@@ -12,9 +12,14 @@ describe('upload-types', () => {
     expect(isAllowedUploadFile('cutter.PLT')).toBe(true)
   })
 
+  it('accepts delivery archive packages', () => {
+    expect(isAllowedUploadFile('final-package.zip')).toBe(true)
+    expect(isAllowedUploadFile('source-bundle.rar')).toBe(true)
+    expect(isAllowedUploadFile('print-files.7z')).toBe(true)
+  })
+
   it('rejects unsupported extensions', () => {
     expect(isAllowedUploadFile('movie.mp4')).toBe(false)
-    expect(isAllowedUploadFile('archive.zip')).toBe(false)
     expect(isAllowedUploadFile('README')).toBe(false)
   })
 

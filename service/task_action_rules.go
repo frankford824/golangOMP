@@ -112,7 +112,7 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 		return taskActionRule{
 			Action:            action,
 			RequiredRoles:     append([]domain.Role{domain.RoleOps}, managerRoles...),
-			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAssign},
+			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAssign, domain.TaskStatusPendingCustomizationProduction},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeCreator},
 			StatusDenyCode:    "task_status_not_actionable",
 			StatusGateMessage: "task action is not allowed in the current status",
@@ -135,11 +135,11 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 	case TaskActionSubmitDesign:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleDesigner, domain.RoleOps}, managerRoles...),
-			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB},
-			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeHandler, TaskActionScopeDesigner},
+			RequiredRoles:     append([]domain.Role{domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleOps}, managerRoles...),
+			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusPendingCustomizationProduction},
+			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeHandler, TaskActionScopeDesigner, TaskActionScopeStage},
 			PreferHandlerDeny: true,
-			RoleGateMessage:   "design submission requires a design, operation, or management role",
+			RoleGateMessage:   "design submission requires a design, customization, operation, or management role",
 			ScopeGateMessage:  "task design action is outside the actor organization scope",
 			MatchedRule:       "role_plus_design_scope_or_handler",
 		}

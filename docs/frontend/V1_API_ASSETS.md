@@ -11,7 +11,7 @@
 
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
-- 本文件覆盖 `15` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `18` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/assets
 
@@ -80,6 +80,134 @@ curl -X GET https://api.example.com/v1/assets \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## POST /v1/assets/batch-download
+
+### 简介
+支持方法: POST。
+
+- `POST`: Return presigned OSS direct download URLs for current versions of the requested assets. The backend does not proxy file bytes or build ZIP packages.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `asset_ids` | array<integer> | 是 | - |
+| `naming_mode` | enum(original/business) | 否 | Download filename mode. original keeps original upload/file_name; business uses SKU plus task product name for batch business downloads. |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ],
+    "success_count": 123,
+    "failure_count": 123,
+    "total_size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetBatchDownloadManifest | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request or all assets unavailable |
+| 500 | 见 `error.code` | 见 `deny_code` | Internal error while building direct download manifest |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/batch-download \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/excel-package/preview
+
+### 简介
+支持方法: POST。
+
+- `POST`: Matches uploaded Excel rows to current JPG/PNG assets only, returns presigned download URLs and per-row failures. The frontend builds the ZIP with order-number folders and quantity-based image copies.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `rows` | array<AssetExcelPackageRow> | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ],
+    "success_count": 123,
+    "failure_count": 123,
+    "total_files": 123,
+    "total_size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetExcelPackageManifest | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid rows or no rows matched |
+| 500 | 见 `error.code` | 见 `deny_code` | Internal error while matching assets |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/excel-package/preview \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## GET /v1/assets/{asset_id}
 
 ### 简介
@@ -101,7 +229,7 @@ curl -X GET https://api.example.com/v1/assets \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `asset_id` | path | integer | 是 | - |
+| `asset_id` | path | string | 是 | Numeric system asset id or external resource id such as `ext-123`. |
 
 请求体: 无请求体。
 
@@ -112,9 +240,9 @@ curl -X GET https://api.example.com/v1/assets \
 {
   "data": {
     "id": 123,
-    "task_id": 123,
-    "asset_no": "string",
-    "scope_sku_code": "string"
+    "resource_id": "string",
+    "source_type": "system",
+    "source_label": "string"
   }
 }
 ```
@@ -189,7 +317,7 @@ curl -X DELETE https://api.example.com/v1/assets/<asset_id> \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `asset_id` | path | integer | 是 | - |
+| `asset_id` | path | string | 是 | Numeric system asset id or external resource id such as `ext-123`. |
 
 请求体: 无请求体。
 
@@ -245,7 +373,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/download \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `asset_id` | path | integer | 是 | - |
+| `asset_id` | path | string | 是 | Numeric system asset id or external resource id such as `ext-123`. |
 
 请求体: 无请求体。
 
@@ -838,6 +966,71 @@ Content-Type: `application/json`
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/assets/upload-requests/<id>/advance \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/search/batch
+
+### 简介
+支持方法: POST。
+
+- `POST`: Batch asset search for the asset management bulk-download dialog. It returns one ranked asset candidate per input term and avoids issuing one HTTP request per SKU/task number.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `terms` | array<string> | 是 | SKU codes or task numbers, one logical search term per item. |
+| `format_filter` | enum(jpg_png/jpg/png/webp/image/design/pdf/archive/all) | 否 | UI-facing format filter. The server maps this to a coarse DB format category first, then applies exact extension/MIME filtering. |
+| `asset_kind` | enum(auto/all/delivery/reference/source/preview/other) | 否 | UI-facing asset role filter. `auto` keeps all roles but ranks delivery assets first. |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "results": [
+      "..."
+    ],
+    "matched_count": 123,
+    "failed_count": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetBatchSearchResponse | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Authentication required |
+| 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/search/batch \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'

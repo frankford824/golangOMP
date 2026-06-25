@@ -66,7 +66,9 @@ func taskFilterToRepoTaskListFilter(filter TaskFilter, page, pageSize int, scope
 	repoFilter := repo.TaskListFilter{
 		TaskQueryFilterDefinition: filter.TaskQueryFilterDefinition,
 		CreatorID:                 filter.CreatorID,
+		MineActorID:               filter.MineActorID,
 		DesignerID:                filter.DesignerID,
+		DesignerEmpty:             filter.DesignerEmpty,
 		NeedOutsource:             filter.NeedOutsource,
 		Overdue:                   filter.Overdue,
 		Keyword:                   filter.Keyword,
@@ -102,6 +104,9 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 	if len(filter.Statuses) > 0 && !containsTaskStatus(filter.Statuses, item.TaskStatus) {
 		return false
 	}
+	if len(filter.Priorities) > 0 && !containsTaskPriority(filter.Priorities, item.Priority) {
+		return false
+	}
 	if len(filter.TaskTypes) > 0 && !containsTaskType(filter.TaskTypes, item.TaskType) {
 		return false
 	}
@@ -109,6 +114,9 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 		return false
 	}
 	if len(filter.WorkflowLanes) > 0 && !containsWorkflowLane(filter.WorkflowLanes, item.WorkflowLane) {
+		return false
+	}
+	if len(filter.BusinessLanes) > 0 && !containsBusinessLane(filter.BusinessLanes, item.BusinessLane) {
 		return false
 	}
 	if len(filter.MainStatuses) > 0 && !containsTaskMainStatus(filter.MainStatuses, item.Workflow.MainStatus) {
@@ -135,6 +143,11 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 	}
 	if len(filter.OwnerOrgTeams) > 0 && !containsStringValue(filter.OwnerOrgTeams, item.OwnerOrgTeam) {
 		return false
+	}
+	if filter.DesignerEmpty != nil && *filter.DesignerEmpty {
+		if item.DesignerID != nil && *item.DesignerID > 0 {
+			return false
+		}
 	}
 	if filter.WarehousePrepareReady != nil {
 		if item.Workflow.CanPrepareWarehouse != *filter.WarehousePrepareReady {
@@ -272,6 +285,15 @@ func sortTaskListItems(items []*domain.TaskListItem) {
 	})
 }
 
+func containsTaskPriority(values []domain.TaskPriority, want domain.TaskPriority) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func containsTaskStatus(values []domain.TaskStatus, want domain.TaskStatus) bool {
 	for _, value := range values {
 		if value == want {
@@ -309,6 +331,15 @@ func containsTaskMainStatus(values []domain.TaskMainStatus, want domain.TaskMain
 }
 
 func containsWorkflowLane(values []domain.WorkflowLane, want domain.WorkflowLane) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsBusinessLane(values []domain.TaskBusinessLane, want domain.TaskBusinessLane) bool {
 	for _, value := range values {
 		if value == want {
 			return true

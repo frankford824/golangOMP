@@ -59,47 +59,71 @@ function filterPresets(keyword: string): ErpIidOption[] {
   })
 }
 
+function mergeWithPresetsFirst(presetMatched: ErpIidOption[], apiItems: ErpIidOption[]): ErpIidOption[] {
+  if (!apiItems.length) return presetMatched
+  const merged = presetMatched.slice()
+  const seen = new Set(merged.map((item) => item.i_id))
+  for (const item of apiItems) {
+    if (seen.has(item.i_id)) continue
+    merged.push(item)
+    seen.add(item.i_id)
+  }
+  return merged
+}
+
 export function useErpIidOptions() {
   const loading = ref(false)
   const items = ref<ErpIidOption[]>(ERP_IID_PRESETS.slice())
   const lastSourceMode = ref<SourceMode>('fallback')
+  let seq = 0
+  let activeAbort: AbortController | null = null
 
   async function loadIids(keyword = ''): Promise<void> {
+    activeAbort?.abort()
+    const requestSeq = ++seq
     const cacheKey = keyword.trim().toLowerCase()
     if (!cacheKey) {
       const presets = ERP_IID_PRESETS.slice()
       items.value = presets
       lastSourceMode.value = 'fallback'
       optionCache.set(cacheKey, presets)
+      loading.value = false
       return
     }
     if (optionCache.has(cacheKey)) {
       items.value = optionCache.get(cacheKey) ?? []
+      loading.value = false
       return
     }
+    const abortController = new AbortController()
+    activeAbort = abortController
     loading.value = true
     try {
       const q = keyword.trim()
+      const presetMatched = filterPresets(keyword)
       const first = await erpApi.getIids({
         q,
         page: 1,
         page_size: PAGE_SIZE,
-      })
+      }, abortController.signal)
+      if (abortController.signal.aborted || requestSeq !== seq) return
       const firstPayload = unwrapErpIidsPayload(first.data)
       const normalized = firstPayload.rows
         .map((row) => normalizeErpIidItem((row ?? {}) as Record<string, unknown>))
         .filter((row): row is ErpIidOption => row != null)
       if (normalized.length > 0) {
-        lastSourceMode.value = 'api'
-        items.value = normalized
-        optionCache.set(cacheKey, normalized)
+        const merged = mergeWithPresetsFirst(presetMatched, normalized)
+        lastSourceMode.value = presetMatched.length > 0 ? 'mixed' : 'api'
+        items.value = merged
+        optionCache.set(cacheKey, merged)
         return
       }
-      const fallback = filterPresets(keyword)
+      const fallback = presetMatched
       lastSourceMode.value = 'mixed'
       items.value = fallback
       optionCache.set(cacheKey, fallback)
     } catch (error) {
+      if (abortController.signal.aborted || requestSeq !== seq) return
       // eslint-disable-next-line no-console
       console.warn('[useErpIidOptions] GET /v1/erp/iids failed, fallback to local presets', error)
       const fallback = filterPresets(keyword)
@@ -107,7 +131,12 @@ export function useErpIidOptions() {
       items.value = fallback
       optionCache.set(cacheKey, fallback)
     } finally {
-      loading.value = false
+      if (activeAbort === abortController) {
+        activeAbort = null
+      }
+      if (requestSeq === seq) {
+        loading.value = false
+      }
     }
   }
 

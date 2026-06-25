@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,6 +30,7 @@ func NewRouter(
 	userAdminH *handler.UserAdminHandler,
 	erpBridgeH *handler.ERPBridgeHandler,
 	productH *handler.ProductHandler,
+	productManagementH *handler.ProductManagementHandler,
 	categoryH *handler.CategoryHandler,
 	categoryMappingH *handler.CategoryERPMappingHandler,
 	costRuleH *handler.CostRuleHandler,
@@ -41,9 +44,11 @@ func NewRouter(
 	assetFilesH *handler.AssetFilesHandler,
 	designSubmissionH *handler.DesignSubmissionHandler,
 	taskDetailH *handler.TaskDetailHandler,
+	taskAISummaryH *handler.TaskAISummaryHandler,
 	taskCostOverrideH *handler.TaskCostOverrideHandler,
 	taskBoardH *handler.TaskBoardHandler,
 	taskBatchExcelH *handler.TaskBatchExcelHandler,
+	taskSingleExcelH *handler.TaskSingleExcelHandler,
 	workbenchH *handler.WorkbenchHandler,
 	exportCenterH *handler.ExportCenterHandler,
 	integrationCenterH *handler.IntegrationCenterHandler,
@@ -62,18 +67,24 @@ func NewRouter(
 	designSourceH *handler.DesignSourceHandler,
 	searchH *handler.SearchHandler,
 	reportL1H *handler.ReportL1Handler,
+	predictionH *handler.PredictionHandler,
 	wsH *transportws.Handler,
 	routeAccessCatalog *RouteAccessCatalog,
 	actorResolver RequestActorResolver,
 	permissionLogger PermissionLogWriter,
 	logger *zap.Logger,
+	traceRecorders ...workflowTraceRecorder,
 ) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
+	var traceRecorder workflowTraceRecorder
+	if len(traceRecorders) > 0 {
+		traceRecorder = traceRecorders[0]
+	}
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(injectTraceID())
 	r.Use(injectRequestActor(actorResolver))
-	r.Use(requestLogger(logger, serverLogH))
+	r.Use(requestLogger(logger, serverLogH, traceRecorder))
 	registerOperationalRoutes(r)
 
 	v1 := r.Group("/v1")
@@ -97,23 +108,41 @@ func NewRouter(
 
 	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
 
-	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH)
+	if assetFilesH != nil {
+		v1.GET("/public/erp-product-images/:version_id", assetFilesH.ServeERPProductImage)
+	}
 
-	// SKU endpoints
+	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH, notificationH)
+
+	v1.POST("/trace-events", access(v1, http.MethodPost, "/trace-events", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), userAdminH.RecordWorkflowTraceEvent)
+	v1.GET("/trace-events", access(v1, http.MethodGet, "/trace-events", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin), userAdminH.ListWorkflowTraceEvents)
+
+	if predictionH != nil {
+		predictionGroup := v1.Group("/predictions")
+		{
+			predictionGroup.GET("/search", access(predictionGroup, http.MethodGet, "/search", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), predictionH.Search)
+			predictionGroup.GET("/task-create", access(predictionGroup, http.MethodGet, "/task-create", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin), predictionH.TaskCreate)
+			predictionGroup.GET("/assets", access(predictionGroup, http.MethodGet, "/assets", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), predictionH.Assets)
+			predictionGroup.GET("/management", access(predictionGroup, http.MethodGet, "/management", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin, domain.RoleAdmin), predictionH.Management)
+		}
+	}
+
+	// SKU endpoints (legacy surface; reads require login, writes require Ops/Admin)
 	skuGroup := v1.Group("/sku")
 	{
-		skuGroup.GET("/list", skuH.List)
-		skuGroup.POST("", skuH.Create)
-		skuGroup.GET("/:id", skuH.GetByID)
-		skuGroup.GET("/:id/sync_status", skuH.SyncStatus) // sequence-gap recovery
-		skuGroup.POST("/preview_code", skuH.PreviewCode)
+		skuGroup.GET("/list", access(skuGroup, http.MethodGet, "/list", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), skuH.List)
+		skuGroup.POST("", access(skuGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), skuH.Create)
+		skuGroup.GET("/:id", access(skuGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), skuH.GetByID)
+		skuGroup.GET("/:id/sync_status", access(skuGroup, http.MethodGet, "/:id/sync_status", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), skuH.SyncStatus) // sequence-gap recovery
+		skuGroup.POST("/preview_code", access(skuGroup, http.MethodPost, "/preview_code", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), skuH.PreviewCode)
 	}
 
 	// Audit (idempotent via action_id)
-	v1.POST("/audit", withDeprecatedRoute("/v1/tasks/{id}/audit/*", "candidate_for_v1_0_removal"), auditH.Submit)
+	v1.POST("/audit", access(v1, http.MethodPost, "/audit", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin), withDeprecatedRoute("/v1/tasks/{id}/audit/*", "candidate_for_v1_0_removal"), auditH.Submit)
 
-	// NAS Agent endpoints
+	// NAS Agent endpoints (machine-to-machine; pre-shared token via AGENT_API_TOKEN)
 	agentGroup := v1.Group("/agent")
+	agentGroup.Use(withAgentTokenAuth())
 	{
 		agentGroup.POST("/sync", agentH.Sync)
 		agentGroup.POST("/pull_job", agentH.PullJob)
@@ -124,16 +153,16 @@ func NewRouter(
 	// Incident endpoints
 	incidentGroup := v1.Group("/incidents")
 	{
-		incidentGroup.GET("", incidentH.List)
-		incidentGroup.POST("/:id/assign", incidentH.Assign)
-		incidentGroup.POST("/:id/resolve", incidentH.Resolve)
+		incidentGroup.GET("", access(incidentGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), incidentH.List)
+		incidentGroup.POST("/:id/assign", access(incidentGroup, http.MethodPost, "/:id/assign", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), incidentH.Assign)
+		incidentGroup.POST("/:id/resolve", access(incidentGroup, http.MethodPost, "/:id/resolve", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), incidentH.Resolve)
 	}
 
 	// Policy endpoints (Admin-protected on Update)
 	policyGroup := v1.Group("/policies")
 	{
-		policyGroup.GET("", policyH.List)
-		policyGroup.PUT("/:id", policyH.Update)
+		policyGroup.GET("", access(policyGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), policyH.List)
+		policyGroup.PUT("/:id", access(policyGroup, http.MethodPut, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleAdmin), policyH.Update)
 	}
 
 	// V7: Product (ERP master data)
@@ -145,10 +174,25 @@ func NewRouter(
 		productGroup.GET("/:id", access(productGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse), withCompatibilityRoute("/v1/erp/products/{id}", "candidate_for_v1_0_removal"), productH.GetByID)
 	}
 
+	if productManagementH != nil {
+		productManagementGroup := v1.Group("/product-management")
+		{
+			productManagementGroup.GET("", access(productManagementGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.List)
+			productManagementGroup.GET("/combo-tree", access(productManagementGroup, http.MethodGet, "/combo-tree", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListComboTree)
+			productManagementGroup.GET("/:id/image-candidates", access(productManagementGroup, http.MethodGet, "/:id/image-candidates", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListImageCandidates)
+			productManagementGroup.POST("/:id/reparse-image", access(productManagementGroup, http.MethodPost, "/:id/reparse-image", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ReparseImage)
+			productManagementGroup.POST("/:id/image", access(productManagementGroup, http.MethodPost, "/:id/image", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.SetManualImage)
+			productManagementGroup.POST("/:id/base-sync-request", access(productManagementGroup, http.MethodPost, "/:id/base-sync-request", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.RequestBaseSync)
+			productManagementGroup.POST("/:id/image-sync-request", access(productManagementGroup, http.MethodPost, "/:id/image-sync-request", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.RequestImageSync)
+			productManagementGroup.POST("/:id/sync-request", access(productManagementGroup, http.MethodPost, "/:id/sync-request", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.RequestSync)
+		}
+	}
+
 	erpGroup := v1.Group("/erp")
 	{
 		erpGroup.GET("/products", access(erpGroup, http.MethodGet, "/products", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleERP, domain.RoleAdmin), erpBridgeH.SearchProducts)
 		erpGroup.GET("/iids", access(erpGroup, http.MethodGet, "/iids", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleERP, domain.RoleAdmin), erpBridgeH.ListIIDs)
+		erpGroup.GET("/combine-skus", access(erpGroup, http.MethodGet, "/combine-skus", domain.APIReadinessReadyForFrontend, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), erpBridgeH.QueryCombineSKUs)
 		erpGroup.GET("/products/*id", access(erpGroup, http.MethodGet, "/products/{id}", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleERP, domain.RoleAdmin), func(c *gin.Context) {
 			if erpProductH != nil && strings.Trim(strings.TrimSpace(c.Param("id")), "/") == "by-code" {
 				erpProductH.ByCode(c)
@@ -160,6 +204,7 @@ func NewRouter(
 		erpGroup.GET("/warehouses", access(erpGroup, http.MethodGet, "/warehouses", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.ListWarehouses)
 		erpGroup.GET("/sync-logs", access(erpGroup, http.MethodGet, "/sync-logs", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.ListSyncLogs)
 		erpGroup.GET("/sync-logs/*id", access(erpGroup, http.MethodGet, "/sync-logs/{id}", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.GetSyncLogByID)
+		erpGroup.GET("/order-action-logs", access(erpGroup, http.MethodGet, "/order-action-logs", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.QueryOrderActionLogs)
 		erpGroup.GET("/users", access(erpGroup, http.MethodGet, "/users", domain.APIReadinessInternalPlaceholder, domain.RoleAdmin, domain.RoleERP), erpBridgeH.ListJSTUsers)
 		erpGroup.POST("/products/upsert", access(erpGroup, http.MethodPost, "/products/upsert", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.UpsertProduct)
 		erpGroup.POST("/products/style/update", access(erpGroup, http.MethodPost, "/products/style/update", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin), erpBridgeH.UpdateItemStyle)
@@ -209,16 +254,27 @@ func NewRouter(
 	{
 		taskGroup.POST("/reference-upload", access(taskGroup, http.MethodPost, "/reference-upload", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.UploadFile)
 		taskGroup.POST("/prepare-product-codes", access(taskGroup, http.MethodPost, "/prepare-product-codes", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), taskH.PrepareProductCodes)
+		taskGroup.GET("/excel-assist/template.xlsx", access(taskGroup, http.MethodGet, "/excel-assist/template.xlsx", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskSingleExcelH.DownloadTemplate)
+		taskGroup.POST("/excel-assist/parse-excel", access(taskGroup, http.MethodPost, "/excel-assist/parse-excel", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskSingleExcelH.ParseUpload)
 		taskGroup.GET("/batch-create/template.xlsx", access(taskGroup, http.MethodGet, "/batch-create/template.xlsx", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBatchExcelH.DownloadTemplate)
 		taskGroup.POST("/batch-create/parse-excel", access(taskGroup, http.MethodPost, "/batch-create/parse-excel", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBatchExcelH.ParseUpload)
 		taskGroup.POST("", access(taskGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskH.Create)
 		taskGroup.GET("", access(taskGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.List)
+		taskGroup.GET("/filter-options", access(taskGroup, http.MethodGet, "/filter-options", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.FilterOptions)
 		taskGroup.GET("/pool", access(taskGroup, http.MethodGet, "/pool", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.Pool)
 		taskGroup.GET("/:id", access(taskGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.GetByID)
+		if predictionH != nil {
+			taskGroup.GET("/:id/predictions", access(taskGroup, http.MethodGet, "/:id/predictions", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), predictionH.TaskNextActions)
+		}
 		taskGroup.GET("/:id/product-info", access(taskGroup, http.MethodGet, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetProductInfo)
 		taskGroup.PATCH("/:id/product-info", access(taskGroup, http.MethodPatch, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchProductInfo)
 		taskGroup.GET("/:id/cost-info", access(taskGroup, http.MethodGet, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetCostInfo)
+		if productManagementH != nil {
+			taskGroup.GET("/:id/product-management", access(taskGroup, http.MethodGet, "/:id/product-management", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListByTaskID)
+		}
 		taskGroup.PATCH("/:id/cost-info", access(taskGroup, http.MethodPatch, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchCostInfo)
+		taskGroup.PATCH("/:id/sku-items/:sku_item_id", access(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchSKUItemInfo)
+		taskGroup.PATCH("/:id/sku-items/:sku_item_id/cost-info", access(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchSKUItemCostInfo)
 		taskGroup.POST("/:id/cost-quote/preview", access(taskGroup, http.MethodPost, "/:id/cost-quote/preview", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), taskH.PreviewCostQuote)
 		// business-info remains a compatibility filing entry, but Step 87 filing policy
 		// also auto-triggers from create/audit/procurement/warehouse checkpoints.
@@ -228,6 +284,7 @@ func NewRouter(
 		taskGroup.PATCH("/:id/procurement", access(taskGroup, http.MethodPatch, "/:id/procurement", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.UpdateProcurement)
 		taskGroup.POST("/:id/procurement/advance", access(taskGroup, http.MethodPost, "/:id/procurement/advance", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.AdvanceProcurement)
 		taskGroup.GET("/:id/detail", access(taskGroup, http.MethodGet, "/:id/detail", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskDetailH.GetByTaskID)
+		taskGroup.POST("/:id/ai-summary", access(taskGroup, http.MethodPost, "/:id/ai-summary", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAISummaryH.Generate)
 		taskGroup.POST("/:id/modules/:module_key/claim", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/claim", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.ModuleClaim)
 		taskGroup.POST("/:id/modules/:module_key/actions/:action", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/actions/:action", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.ModuleAction)
 		taskGroup.POST("/:id/modules/:module_key/reassign", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/reassign", domain.APIReadinessReadyForFrontend, v1R1ManagementRoles()...), taskH.ModuleReassign)
@@ -240,8 +297,9 @@ func NewRouter(
 		taskGroup.POST("/batch/assign", access(taskGroup, http.MethodPost, "/batch/assign", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssignmentH.BatchAssign)
 		taskGroup.POST("/batch/remind", access(taskGroup, http.MethodPost, "/batch/remind", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssignmentH.BatchRemind)
 		taskGroup.POST("/:id/assign", access(taskGroup, http.MethodPost, "/:id/assign", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssignmentH.Assign)
-		taskGroup.POST("/:id/submit-design", access(taskGroup, http.MethodPost, "/:id/submit-design", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), designSubmissionH.Submit)
+		taskGroup.POST("/:id/submit-design", access(taskGroup, http.MethodPost, "/:id/submit-design", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), designSubmissionH.Submit)
 		taskGroup.GET("/:id/assets", access(taskGroup, http.MethodGet, "/:id/assets", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.ListAssets)
+		taskGroup.POST("/:id/reference-assets/batch-download", access(taskGroup, http.MethodPost, "/:id/reference-assets/batch-download", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.BatchDownloadTaskReferenceAssets)
 		taskGroup.GET("/:id/assets/timeline", access(taskGroup, http.MethodGet, "/:id/assets/timeline", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks/{id}/asset-center/assets", "candidate_for_v1_0_removal"), taskAssetH.List)
 		taskGroup.GET("/:id/assets/:asset_id/versions", access(taskGroup, http.MethodGet, "/:id/assets/:asset_id/versions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks/{id}/asset-center/assets/{asset_id}/versions", "remove_after_frontend_migration"), taskAssetCenterH.ListVersions)
 		taskGroup.GET("/:id/assets/:asset_id/download", access(taskGroup, http.MethodGet, "/:id/assets/:asset_id/download", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks/{id}/asset-center/assets/{asset_id}/download", "remove_after_frontend_migration"), taskAssetCenterH.DownloadAsset)
@@ -300,19 +358,24 @@ func NewRouter(
 	{
 		assetGroup.GET("", access(assetGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.ListAssetResources)
 		assetGroup.GET("/search", access(assetGroup, http.MethodGet, "/search", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.SearchGlobalAssets)
+		assetGroup.POST("/search/batch", access(assetGroup, http.MethodPost, "/search/batch", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.BatchSearchGlobalAssets)
+		assetGroup.POST("/batch-download", access(assetGroup, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.BatchDownloadGlobalAssets)
+		assetGroup.POST("/excel-package/preview", access(assetGroup, http.MethodPost, "/excel-package/preview", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.PreviewExcelPackage)
 		assetGroup.GET("/:asset_id", access(assetGroup, http.MethodGet, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.GetGlobalAsset)
 		assetGroup.DELETE("/:asset_id", access(assetGroup, http.MethodDelete, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DeleteGlobalAsset)
 		assetGroup.GET("/:asset_id/download", access(assetGroup, http.MethodGet, "/:asset_id/download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DownloadGlobalAsset)
 		assetGroup.GET("/:asset_id/versions/:version_id/download", access(assetGroup, http.MethodGet, "/:asset_id/versions/:version_id/download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DownloadGlobalAssetVersion)
 		assetGroup.POST("/:asset_id/archive", access(assetGroup, http.MethodPost, "/:asset_id/archive", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.ArchiveGlobalAsset)
 		assetGroup.POST("/:asset_id/restore", access(assetGroup, http.MethodPost, "/:asset_id/restore", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.RestoreGlobalAsset)
-		assetGroup.GET("/:asset_id/preview", access(assetGroup, http.MethodGet, "/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.PreviewAssetResource)
+		assetGroup.GET("/:asset_id/preview", access(assetGroup, http.MethodGet, "/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), taskAssetCenterH.PreviewAssetResource)
 		assetGroup.POST("/upload-sessions", access(assetGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CreateAssetUploadSession)
 		assetGroup.GET("/upload-sessions/:session_id", access(assetGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.GetAssetUploadSession)
 		assetGroup.POST("/upload-sessions/:session_id/complete", access(assetGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CompleteAssetUploadSession)
 		assetGroup.POST("/upload-sessions/:session_id/cancel", access(assetGroup, http.MethodPost, "/upload-sessions/:session_id/cancel", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CancelAssetUploadSession)
-		// GET /v1/assets/files/* — compatibility proxy fallback for OSS-backed business file bytes
-		assetGroup.GET("/files/*path", assetFilesH.ServeFile)
+		// GET /v1/assets/files/* — compatibility proxy fallback for OSS-backed business file bytes.
+		// Browser-native loads (<img>) authenticate via login-issued HttpOnly
+		// cookie; header-based sessions pass through.
+		assetGroup.GET("/files/*path", withAssetFileTokenFallback(actorResolver), access(assetGroup, http.MethodGet, "/files/*path", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), assetFilesH.ServeFile)
 		assetGroup.GET("/upload-requests", access(assetGroup, http.MethodGet, "/upload-requests", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.ListUploadRequests)
 		assetGroup.POST("/upload-requests", access(assetGroup, http.MethodPost, "/upload-requests", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.CreateUploadRequest)
 		assetGroup.GET("/upload-requests/:id", access(assetGroup, http.MethodGet, "/upload-requests/:id", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.GetUploadRequest)
@@ -479,6 +542,7 @@ func v1R1ReservedHandler(ownerRound string) gin.HandlerFunc {
 func v1R1ContractRouteSpecs() []v1R1RouteSpec {
 	return []v1R1RouteSpec{
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks"},
+		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks/filter-options", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/filter-options"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks/:id/detail", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/101/detail"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/tasks/pool", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/pool"},
 		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/tasks/:id/modules/:module_key/claim", OwnerRound: "R3", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/tasks/101/modules/design/claim"},
@@ -499,6 +563,9 @@ func v1R1ContractRouteSpecs() []v1R1RouteSpec {
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me/notifications/unread-count", OwnerRound: "R4-SA-C", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/notifications/unread-count"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me"},
 		{GroupBase: "/v1", Method: http.MethodPatch, RelativePath: "/me", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me"},
+		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/me/avatar", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/avatar"},
+		{GroupBase: "/v1", Method: http.MethodDelete, RelativePath: "/me/avatar", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/avatar"},
+		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me/avatar-files/:filename", OwnerRound: "R4-SA-B", SamplePath: "/v1/me/avatar-files/avatar-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"},
 		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/me/change-password", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/change-password"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me/org", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/org"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/users", OwnerRound: "R4-SA-B", RequiredRoles: v1R1ManagementRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/users"},
@@ -607,23 +674,148 @@ type serverLogRecorder interface {
 	RecordHTTPError(c *gin.Context, status int, path, method, traceID, clientIP string)
 }
 
-func requestLogger(logger *zap.Logger, recorder serverLogRecorder) gin.HandlerFunc {
+type workflowTraceRecorder interface {
+	RecordTraceEvent(ctx context.Context, event *domain.WorkflowTraceEvent) (*domain.WorkflowTraceEvent, *domain.AppError)
+}
+
+func requestLogger(logger *zap.Logger, recorder serverLogRecorder, traceRecorder workflowTraceRecorder) gin.HandlerFunc {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
 		status := c.Writer.Status()
+		latency := time.Since(start)
 		logger.Info("http_request",
 			zap.String("method", c.Request.Method),
 			zap.String("path", c.Request.URL.Path),
 			zap.Int("status", status),
-			zap.Duration("latency", time.Since(start)),
+			zap.Duration("latency", latency),
 			zap.String("trace_id", c.GetString(traceIDKey)),
 			zap.String("client_ip", c.ClientIP()),
 		)
 		if recorder != nil && status >= 500 {
 			recorder.RecordHTTPError(c, status, c.Request.URL.Path, c.Request.Method, c.GetString(traceIDKey), c.ClientIP())
 		}
+		recordHTTPWorkflowTraceEvent(c, traceRecorder, logger, status, start, latency)
 	}
+}
+
+func recordHTTPWorkflowTraceEvent(c *gin.Context, recorder workflowTraceRecorder, logger *zap.Logger, status int, start time.Time, latency time.Duration) {
+	if recorder == nil || shouldSkipWorkflowTracePath(c.Request.URL.Path) {
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	routePath := routePathForLog(c)
+	latencyMS := latency.Milliseconds()
+	outcome := domain.WorkflowTraceOutcomeSucceeded
+	if status >= 500 {
+		outcome = domain.WorkflowTraceOutcomeFailed
+	}
+	httpStatus := status
+	event := &domain.WorkflowTraceEvent{
+		TraceID:         c.GetString(traceIDKey),
+		EventSource:     domain.WorkflowTraceSourceAPI,
+		EventType:       domain.WorkflowTraceEventAPIRequest,
+		Action:          c.Request.Method + " " + routePath,
+		ActorID:         actorIDPtrFromTransportActor(actor),
+		ActorUsername:   actor.Username,
+		ActorSource:     actor.Source,
+		ActorAuthMode:   actor.AuthMode,
+		ActorRoles:      actor.Roles,
+		ActorDepartment: actor.Department,
+		ActorTeam:       actor.Team,
+		RouteMethod:     c.Request.Method,
+		RoutePath:       routePath,
+		RouteFullPath:   c.Request.URL.Path,
+		HTTPStatus:      &httpStatus,
+		LatencyMS:       &latencyMS,
+		ClientIP:        c.ClientIP(),
+		UserAgent:       c.GetHeader("User-Agent"),
+		TaskID:          taskIDFromRoute(c),
+		TaskModuleID:    positiveInt64Param(c, "task_module_id"),
+		ModuleKey:       strings.TrimSpace(c.Param("module_key")),
+		TaskSKUItemID:   positiveInt64Param(c, "sku_item_id"),
+		AssetID:         assetIDFromRoute(c),
+		Outcome:         outcome,
+		Payload:         httpTracePayload(c),
+		OccurredAt:      start.UTC(),
+	}
+	if strings.Contains(routePath, "/integration/call-logs/:id") {
+		event.IntegrationCallLogID = positiveInt64Param(c, "id")
+	}
+	ctx := context.WithoutCancel(c.Request.Context())
+	if _, appErr := recorder.RecordTraceEvent(ctx, event); appErr != nil {
+		logger.Warn("workflow_trace_http_record_failed",
+			zap.String("code", appErr.Code),
+			zap.String("message", appErr.Message),
+			zap.String("trace_id", event.TraceID),
+			zap.String("route_path", routePath),
+		)
+	}
+}
+
+func shouldSkipWorkflowTracePath(path string) bool {
+	switch strings.TrimSpace(path) {
+	case "/health", "/healthz", "/ping", "/favicon.ico", "/v1/trace-events", "/v1/search", "/v1/assets/search":
+		return true
+	default:
+		return false
+	}
+}
+
+func actorIDPtrFromTransportActor(actor domain.RequestActor) *int64 {
+	if actor.ID <= 0 {
+		return nil
+	}
+	return &actor.ID
+}
+
+func taskIDFromRoute(c *gin.Context) *int64 {
+	routePath := routePathForLog(c)
+	if strings.Contains(routePath, "/tasks/:id") || strings.Contains(routePath, "/tasks/{id}") {
+		return positiveInt64Param(c, "id")
+	}
+	return positiveInt64Param(c, "task_id")
+}
+
+func assetIDFromRoute(c *gin.Context) *int64 {
+	routePath := routePathForLog(c)
+	if strings.Contains(routePath, "/assets/:asset_id") {
+		return positiveInt64Param(c, "asset_id")
+	}
+	return positiveInt64Param(c, "asset_id")
+}
+
+func positiveInt64Param(c *gin.Context, name string) *int64 {
+	raw := strings.TrimSpace(c.Param(name))
+	if raw == "" {
+		return nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return nil
+	}
+	return &value
+}
+
+func httpTracePayload(c *gin.Context) json.RawMessage {
+	payload := map[string]string{}
+	if rawQuery := strings.TrimSpace(c.Request.URL.RawQuery); rawQuery != "" {
+		payload["query"] = rawQuery
+	}
+	if referer := strings.TrimSpace(c.GetHeader("Referer")); referer != "" {
+		payload["referer"] = referer
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func withCompatibilityRoute(successorPath, targetRemovalPhase string) gin.HandlerFunc {

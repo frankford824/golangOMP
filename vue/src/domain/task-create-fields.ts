@@ -29,9 +29,10 @@ export const TASK_TYPE_FIELD_WHITELIST = {
       'reference_file_refs',
       'reference_link',
       'remark',
-      'customization_required',
-      'customization_source_type',
-      'designer_id',
+	      'customization_required',
+	      'customization_source_type',
+	      'sku_code_type',
+	      'designer_id',
       'priority',
       'deadline_at',
       'due_at',
@@ -74,9 +75,10 @@ export const TASK_TYPE_FIELD_WHITELIST = {
       'reference_file_refs',
       'reference_link',
       'remark',
-      'customization_required',
-      'customization_source_type',
-      'designer_id',
+	      'customization_required',
+	      'customization_source_type',
+	      'sku_code_type',
+	      'designer_id',
       'priority',
       'deadline_at',
       'due_at',
@@ -113,8 +115,9 @@ export const TASK_TYPE_FIELD_WHITELIST = {
     optional: [
       'cost_price',
       'remark',
-      'customization_required',
-      'designer_id',
+	      'customization_required',
+	      'sku_code_type',
+	      'designer_id',
       'priority',
       'deadline_at',
       'due_at',
@@ -144,16 +147,17 @@ export const TASK_TYPE_FIELD_WHITELIST = {
     ] as readonly string[],
   },
   retouch_task: {
-    required: [
+    // 前端门禁：至少 1 条 retouch_requirements[].description + due_at（见 task-create-rules.ts）。
+    // demand_text / design_requirement 由首条需求描述兜底写入，reference_file_refs 可为空。
+    // 创建页不收集每条需求的 sku_code/spec（可写在 remark）；POST 仍兼容后端可选字段。
+    required: ['retouch_requirements', 'due_at'] as readonly string[],
+    optional: [
       'demand_text',
       'design_requirement',
       'reference_file_refs',
-    ] as readonly string[],
-    optional: [
       'remark',
       'priority',
       'deadline_at',
-      'due_at',
       'owner_department',
       'owner_org_team',
       'owner_team',
@@ -288,10 +292,12 @@ export function humanizeTaskCreateFields(fields: readonly string[]): string[] {
  * 未识别的 code 返回空字符串，由调用方走通用 fallback。
  */
 export function humanizeViolationCode(code: string, field: string): string {
+  if (code === 'erp_product_name_too_long') return '产品名称将同步为 ERP 简称，最多可填写 40 个字，请精简后再提交'
   if (code === 'insufficient_batch_items') return '批量 SKU 模式下至少需要 2 个商品'
   if (code === 'missing_required_field') {
     const leaf = field.replace(/^.*[\].]\s*/, '') || field
     const label = humanizeTaskCreateFields([leaf])[0] ?? field
+    if (leaf === 'i_id') return `必填字段缺失：${label} (i_id)`
     return `必填字段缺失：${label}`
   }
   if (code === 'field_not_allowed_for_task_type') {

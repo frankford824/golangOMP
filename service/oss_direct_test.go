@@ -1,6 +1,10 @@
 package service
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
@@ -105,6 +109,44 @@ func TestBuildObjectKey_ASCIIStorageFilename(t *testing.T) {
 	}
 }
 
+func TestResolveAssetDownloadFilename(t *testing.T) {
+	tests := []struct {
+		name             string
+		originalFilename string
+		fileName         string
+		assetID          int64
+		want             string
+	}{
+		{
+			name:             "original filename wins",
+			originalFilename: " 原始文件.psd ",
+			fileName:         "storage-name.psd",
+			assetID:          42,
+			want:             "原始文件.psd",
+		},
+		{
+			name:     "file name fallback",
+			fileName: " storage-name.psd ",
+			assetID:  42,
+			want:     "storage-name.psd",
+		},
+		{
+			name:    "asset id fallback",
+			assetID: 42,
+			want:    "asset-42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveAssetDownloadFilename(tt.originalFilename, tt.fileName, tt.assetID)
+			if got != tt.want {
+				t.Fatalf("ResolveAssetDownloadFilename() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPresignDownloadURL(t *testing.T) {
 	svc := newTestOSSDirectService()
 	info := svc.PresignDownloadURL("tasks/T1/assets/A1/v1/delivery/test.psd")
@@ -136,6 +178,37 @@ func TestPresignDownloadURL(t *testing.T) {
 	}
 	if !strings.Contains(info.DownloadURL, "attachment") {
 		t.Fatal("expected attachment disposition for download")
+	}
+}
+
+func TestPresignDownloadURLWithFilename(t *testing.T) {
+	svc := newTestOSSDirectService()
+	info := svc.PresignDownloadURLWithFilename("tasks/T1/assets/A1/v1/delivery/test.psd", "交付 文件.psd")
+	if info == nil || info.DownloadURL == "" {
+		t.Fatalf("PresignDownloadURLWithFilename() = %+v", info)
+	}
+
+	u, err := url.Parse(info.DownloadURL)
+	if err != nil {
+		t.Fatalf("invalid download URL: %v", err)
+	}
+	disposition := u.Query().Get("response-content-disposition")
+	if disposition == "" {
+		t.Fatal("expected response-content-disposition in URL")
+	}
+	if !strings.Contains(disposition, "attachment") {
+		t.Fatalf("disposition = %q, want attachment", disposition)
+	}
+	if !strings.Contains(disposition, "filename*=") {
+		t.Fatalf("disposition = %q, want encoded filename parameter", disposition)
+	}
+	if !strings.Contains(disposition, "%E4%BA%A4%E4%BB%98%20%E6%96%87%E4%BB%B6.psd") {
+		t.Fatalf("disposition = %q, want encoded unicode filename", disposition)
+	}
+	expectedCanonicalResource := "/test-bucket/tasks/T1/assets/A1/v1/delivery/test.psd?response-content-disposition=" + disposition
+	expectedSignature := svc.signV1(http.MethodGet, "", "", u.Query().Get("Expires"), "", expectedCanonicalResource)
+	if got := u.Query().Get("Signature"); got != expectedSignature {
+		t.Fatalf("signature = %q, want %q for canonical resource %q", got, expectedSignature, expectedCanonicalResource)
 	}
 }
 
@@ -340,5 +413,93 @@ func TestOSSEscapePath(t *testing.T) {
 	}
 	if !strings.Contains(result, "/") {
 		t.Fatal("expected slashes to be preserved")
+	}
+}
+
+func TestOSSDirectServiceOpenObjectSuccess(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.EscapedPath() != "/tasks/T1/assets/A1/v1/source/test.psd" {
+			t.Fatalf("path = %s", r.URL.EscapedPath())
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "OSS LTAI5tTestKeyID:") {
+			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
+		}
+		_, _ = io.WriteString(w, "oss-object-body")
+	}))
+	defer server.Close()
+
+	svc := NewOSSDirectService(OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        strings.TrimPrefix(server.URL, "https://"),
+		PublicEndpoint:  strings.TrimPrefix(server.URL, "https://"),
+		Bucket:          "test-bucket",
+		AccessKeyID:     "LTAI5tTestKeyID",
+		AccessKeySecret: "TestSecretKeyXYZ",
+		PresignExpiry:   15 * time.Minute,
+	})
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	httpClient := server.Client()
+	httpClient.Transport = &rewriteHostTransport{
+		base:  baseURL,
+		inner: httpClient.Transport,
+	}
+	svc.httpClient = httpClient
+
+	stream, err := svc.OpenObject(context.Background(), "tasks/T1/assets/A1/v1/source/test.psd")
+	if err != nil {
+		t.Fatalf("OpenObject() error = %v", err)
+	}
+	defer stream.Close()
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read stream error = %v", err)
+	}
+	if string(body) != "oss-object-body" {
+		t.Fatalf("body = %q, want oss-object-body", string(body))
+	}
+}
+
+func TestOSSDirectServiceOpenObjectNon2xxReturnsError(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "not found")
+	}))
+	defer server.Close()
+
+	svc := NewOSSDirectService(OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        strings.TrimPrefix(server.URL, "https://"),
+		PublicEndpoint:  strings.TrimPrefix(server.URL, "https://"),
+		Bucket:          "test-bucket",
+		AccessKeyID:     "LTAI5tTestKeyID",
+		AccessKeySecret: "TestSecretKeyXYZ",
+		PresignExpiry:   15 * time.Minute,
+	})
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	httpClient := server.Client()
+	httpClient.Transport = &rewriteHostTransport{
+		base:  baseURL,
+		inner: httpClient.Transport,
+	}
+	svc.httpClient = httpClient
+
+	stream, err := svc.OpenObject(context.Background(), "tasks/T1/missing.psd")
+	if err == nil {
+		if stream != nil {
+			_ = stream.Close()
+		}
+		t.Fatal("OpenObject() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "status=404") {
+		t.Fatalf("error = %v, want status=404", err)
 	}
 }

@@ -131,6 +131,66 @@ func TestIdentityServiceGetCurrentUserAllowsNonManagementSessionUser(t *testing.
 	}
 }
 
+func TestIdentityServiceUpdateMyAvatarIsDedicatedManagedPath(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	sessionRepo := &identitySessionRepoStub{}
+	svc := NewIdentityService(userRepo, sessionRepo, &identityPermissionLogRepoStub{}, identityTxRunner{})
+
+	registerResult, appErr := svc.Register(context.Background(), RegisterUserParams{
+		Username:    "avatar_member",
+		DisplayName: "头像成员",
+		Department:  domain.DepartmentOperations,
+		Team:        "淘系一组",
+		Mobile:      "13800000998",
+		Password:    "Pass1234",
+	})
+	if appErr != nil {
+		t.Fatalf("Register() error = %+v", appErr)
+	}
+	actor, appErr := svc.ResolveRequestActor(context.Background(), registerResult.Session.Token)
+	if appErr != nil {
+		t.Fatalf("ResolveRequestActor() error = %+v", appErr)
+	}
+	ctx := domain.WithRequestActor(context.Background(), *actor)
+
+	if _, appErr := svc.UpdateMyAvatar(ctx, UpdateMyAvatarParams{AvatarURL: "https://example.com/avatar.png", Method: "POST"}); appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("UpdateMyAvatar(external) appErr = %+v, want invalid request", appErr)
+	}
+	afterReject, err := userRepo.GetByID(context.Background(), registerResult.User.ID)
+	if err != nil {
+		t.Fatalf("GetByID() after reject error = %v", err)
+	}
+	if afterReject.AvatarURL != "" {
+		t.Fatalf("avatar after rejected update = %q, want empty", afterReject.AvatarURL)
+	}
+
+	avatarURL := "/v1/me/avatar-files/avatar-" + strings.Repeat("a", 32) + ".png"
+	updated, appErr := svc.UpdateMyAvatar(ctx, UpdateMyAvatarParams{AvatarURL: avatarURL, Method: "POST"})
+	if appErr != nil {
+		t.Fatalf("UpdateMyAvatar(managed) error = %+v", appErr)
+	}
+	if updated.AvatarURL != avatarURL || updated.Avatar != avatarURL {
+		t.Fatalf("UpdateMyAvatar(managed) avatar = url:%q alias:%q, want %q", updated.AvatarURL, updated.Avatar, avatarURL)
+	}
+
+	nextName := "头像成员改名"
+	profileUpdated, appErr := svc.UpdateMe(ctx, UpdateMeParams{DisplayName: &nextName})
+	if appErr != nil {
+		t.Fatalf("UpdateMe(profile) error = %+v", appErr)
+	}
+	if profileUpdated.DisplayName != nextName || profileUpdated.AvatarURL != avatarURL {
+		t.Fatalf("UpdateMe(profile) user = %+v, want name changed and avatar preserved", profileUpdated)
+	}
+
+	cleared, appErr := svc.UpdateMyAvatar(ctx, UpdateMyAvatarParams{AvatarURL: "", Method: "DELETE"})
+	if appErr != nil {
+		t.Fatalf("UpdateMyAvatar(clear) error = %+v", appErr)
+	}
+	if cleared.AvatarURL != "" || cleared.Avatar != "" {
+		t.Fatalf("UpdateMyAvatar(clear) avatar = url:%q alias:%q, want empty", cleared.AvatarURL, cleared.Avatar)
+	}
+}
+
 func TestIdentityServiceRegistrationOptionsAndTeamValidation(t *testing.T) {
 	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
 

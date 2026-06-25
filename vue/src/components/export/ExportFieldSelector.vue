@@ -229,4 +229,92 @@ const DraggableList = {
   color: #dc2626;
   padding: 0;
 }
+
+/* Apple Music / iOS liquid glass export field selector skin. Style-only. */
+.selector-panel {
+  border-radius: 0.85rem;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(14, 15, 22, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.panel-header {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.panel-title {
+  color: rgba(220, 230, 255, 0.78);
+}
+
+.panel-action {
+  color: var(--yb-music-cyan);
+  font-weight: 700;
+}
+
+.field-list,
+:deep(.selected-list) {
+  scrollbar-color: rgba(220, 230, 255, 0.36) transparent;
+}
+
+.field-chip,
+:deep(.selected-item) {
+  border-radius: 0.65rem;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.065);
+  color: var(--yb-music-text-2);
+}
+
+.field-chip:hover {
+  border-color: rgba(100, 210, 255, 0.36);
+  background: rgba(100, 210, 255, 0.12);
+  color: #fff;
+}
+
+.chip-add,
+:deep(.order-btn) {
+  color: var(--yb-music-cyan);
+}
+
+:deep(.selected-label),
+.empty-fields {
+  color: var(--yb-music-text-2);
+}
+
+.arrow-btn {
+  border-radius: 0.65rem;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--yb-music-text-2);
+}
+
+.arrow-btn:hover {
+  border-color: rgba(100, 210, 255, 0.36);
+  background: rgba(100, 210, 255, 0.12);
+  color: #fff;
+}
+
+:deep(.remove-btn) {
+  color: #ff9b95;
+}
+
+@media (max-width: 700px) {
+  .field-selector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .selector-arrows {
+    flex-direction: row;
+    justify-content: flex-start;
+    padding-top: 0;
+  }
+
+  :deep(.selected-item) {
+    align-items: flex-start;
+  }
+
+  :deep(.item-actions) {
+    flex: 0 0 auto;
+  }
+}
 </style>

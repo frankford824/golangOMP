@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,21 +32,113 @@ func (h *TaskAssetCenterHandler) SetGlobalAssetServices(globalSvc *assetcenter.S
 }
 
 type createTaskAssetUploadSessionReq struct {
-	TaskID        *int64 `json:"task_id"`
-	CreatedBy     *int64 `json:"created_by"`
-	AssetID       *int64 `json:"asset_id"`
-	SourceAssetID *int64 `json:"source_asset_id"`
-	AssetType     string `json:"asset_type"`
-	AssetKind     string `json:"asset_kind"`
-	UploadMode    string `json:"upload_mode"`
-	Filename      string `json:"filename"`
-	FileName      string `json:"file_name"`
-	ExpectedSize  *int64 `json:"expected_size"`
-	FileSize      *int64 `json:"file_size"`
-	MimeType      string `json:"mime_type"`
-	FileHash      string `json:"file_hash"`
-	Remark        string `json:"remark"`
-	TargetSKUCode string `json:"target_sku_code"`
+	TaskID               *int64 `json:"task_id"`
+	CreatedBy            *int64 `json:"created_by"`
+	AssetID              *int64 `json:"asset_id"`
+	SourceAssetID        *int64 `json:"source_asset_id"`
+	AssetType            string `json:"asset_type"`
+	AssetKind            string `json:"asset_kind"`
+	UploadMode           string `json:"upload_mode"`
+	Filename             string `json:"filename"`
+	FileName             string `json:"file_name"`
+	ExpectedSize         *int64 `json:"expected_size"`
+	FileSize             *int64 `json:"file_size"`
+	MimeType             string `json:"mime_type"`
+	FileHash             string `json:"file_hash"`
+	Remark               string `json:"remark"`
+	TargetSKUCode        string `json:"target_sku_code"`
+	OwnerModuleKey       string `json:"owner_module_key"`
+	UploadPolicy         string `json:"upload_policy"`
+	RetouchRequirementID *int64 `json:"retouch_requirement_id"`
+}
+
+type optionalInt64JSONField struct {
+	value *int64
+}
+
+func (f *optionalInt64JSONField) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if raw == "" || raw == "null" {
+		f.value = nil
+		return nil
+	}
+	if strings.HasPrefix(raw, `"`) {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		raw = strings.TrimSpace(s)
+		if raw == "" {
+			f.value = nil
+			return nil
+		}
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fmt.Errorf("integer fields must use a JSON integer or numeric string")
+	}
+	f.value = &parsed
+	return nil
+}
+
+func (f optionalInt64JSONField) Ptr() *int64 {
+	if f.value == nil {
+		return nil
+	}
+	value := *f.value
+	return &value
+}
+
+type createTaskAssetUploadSessionPayload struct {
+	TaskID               optionalInt64JSONField `json:"task_id"`
+	CreatedBy            optionalInt64JSONField `json:"created_by"`
+	AssetID              optionalInt64JSONField `json:"asset_id"`
+	SourceAssetID        optionalInt64JSONField `json:"source_asset_id"`
+	AssetType            string                 `json:"asset_type"`
+	AssetKind            string                 `json:"asset_kind"`
+	UploadMode           string                 `json:"upload_mode"`
+	Filename             string                 `json:"filename"`
+	FileName             string                 `json:"file_name"`
+	ExpectedSize         optionalInt64JSONField `json:"expected_size"`
+	FileSize             optionalInt64JSONField `json:"file_size"`
+	MimeType             string                 `json:"mime_type"`
+	FileHash             string                 `json:"file_hash"`
+	Remark               string                 `json:"remark"`
+	TargetSKUCode        string                 `json:"target_sku_code"`
+	OwnerModuleKey       string                 `json:"owner_module_key"`
+	UploadPolicy         string                 `json:"upload_policy"`
+	RetouchRequirementID optionalInt64JSONField `json:"retouch_requirement_id"`
+}
+
+func (p createTaskAssetUploadSessionPayload) toRequest() createTaskAssetUploadSessionReq {
+	return createTaskAssetUploadSessionReq{
+		TaskID:               p.TaskID.Ptr(),
+		CreatedBy:            p.CreatedBy.Ptr(),
+		AssetID:              p.AssetID.Ptr(),
+		SourceAssetID:        p.SourceAssetID.Ptr(),
+		AssetType:            p.AssetType,
+		AssetKind:            p.AssetKind,
+		UploadMode:           p.UploadMode,
+		Filename:             p.Filename,
+		FileName:             p.FileName,
+		ExpectedSize:         p.ExpectedSize.Ptr(),
+		FileSize:             p.FileSize.Ptr(),
+		MimeType:             p.MimeType,
+		FileHash:             p.FileHash,
+		Remark:               p.Remark,
+		TargetSKUCode:        p.TargetSKUCode,
+		OwnerModuleKey:       p.OwnerModuleKey,
+		UploadPolicy:         p.UploadPolicy,
+		RetouchRequirementID: p.RetouchRequirementID.Ptr(),
+	}
+}
+
+func bindCreateTaskAssetUploadSessionReq(c *gin.Context) (createTaskAssetUploadSessionReq, *domain.AppError) {
+	var payload createTaskAssetUploadSessionPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		return createTaskAssetUploadSessionReq{}, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil)
+	}
+	return payload.toRequest(), nil
 }
 
 type completeTaskAssetUploadSessionReq struct {
@@ -60,6 +154,31 @@ type completeTaskAssetUploadSessionReq struct {
 type cancelTaskAssetUploadSessionReq struct {
 	CancelledBy *int64 `json:"cancelled_by"`
 	Remark      string `json:"remark"`
+}
+
+type batchGlobalAssetSearchReq struct {
+	Terms        []string `json:"terms"`
+	FormatFilter string   `json:"format_filter"`
+	AssetKind    string   `json:"asset_kind"`
+}
+
+func (h *TaskAssetCenterHandler) BatchDownloadTaskReferenceAssets(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	actor, ok := domain.RequestActorFromContext(c.Request.Context())
+	if !ok || actor.ID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeUnauthorized, "actor context required", nil))
+		return
+	}
+	manifest, appErr := h.svc.BuildTaskReferenceBatchDownloadManifest(c.Request.Context(), taskID, actor.ID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, manifest)
 }
 
 func (h *TaskAssetCenterHandler) ListAssets(c *gin.Context) {
@@ -140,12 +259,43 @@ func (h *TaskAssetCenterHandler) SearchGlobalAssets(c *gin.Context) {
 	})
 }
 
+func (h *TaskAssetCenterHandler) BatchSearchGlobalAssets(c *gin.Context) {
+	if h.globalSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+		return
+	}
+	var req batchGlobalAssetSearchReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.globalSvc.BatchSearch(c.Request.Context(), assetcenter.BatchSearchRequest{
+		Terms:        req.Terms,
+		FormatFilter: req.FormatFilter,
+		AssetKind:    req.AssetKind,
+	})
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *TaskAssetCenterHandler) GetGlobalAsset(c *gin.Context) {
 	if h.globalSvc == nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
 		return
 	}
 	assetID, err := parseInt64(strings.TrimSpace(c.Param("asset_id")))
+	if externalID, ok := domain.ParseExternalAssetResourceID(c.Param("asset_id")); ok {
+		detail, appErr := h.globalSvc.GetExternalDetail(c.Request.Context(), externalID)
+		if appErr != nil {
+			respondAssetCenterError(c, appErr)
+			return
+		}
+		respondOK(c, detail)
+		return
+	}
 	if err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset id", nil))
 		return
@@ -164,6 +314,15 @@ func (h *TaskAssetCenterHandler) DownloadGlobalAsset(c *gin.Context) {
 		return
 	}
 	assetID, err := parseInt64(strings.TrimSpace(c.Param("asset_id")))
+	if externalID, ok := domain.ParseExternalAssetResourceID(c.Param("asset_id")); ok {
+		info, appErr := h.globalSvc.DownloadExternal(c.Request.Context(), externalID)
+		if appErr != nil {
+			respondAssetCenterError(c, appErr)
+			return
+		}
+		respondOK(c, info)
+		return
+	}
 	if err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset id", nil))
 		return
@@ -329,6 +488,19 @@ func (h *TaskAssetCenterHandler) DownloadAssetResource(c *gin.Context) {
 
 func (h *TaskAssetCenterHandler) PreviewAssetResource(c *gin.Context) {
 	assetID, err := parseInt64(strings.TrimSpace(c.Param("asset_id")))
+	if externalID, ok := domain.ParseExternalAssetResourceID(c.Param("asset_id")); ok {
+		if h.globalSvc == nil {
+			respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+			return
+		}
+		info, appErr := h.globalSvc.PreviewExternal(c.Request.Context(), externalID)
+		if appErr != nil {
+			respondAssetCenterError(c, appErr)
+			return
+		}
+		respondOK(c, info)
+		return
+	}
 	if err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset id", nil))
 		return
@@ -464,9 +636,9 @@ func (h *TaskAssetCenterHandler) CreateUploadSession(c *gin.Context) {
 }
 
 func (h *TaskAssetCenterHandler) CreateAssetUploadSession(c *gin.Context) {
-	var req createTaskAssetUploadSessionReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+	req, bindErr := bindCreateTaskAssetUploadSessionReq(c)
+	if bindErr != nil {
+		respondError(c, bindErr)
 		return
 	}
 	if req.TaskID == nil || *req.TaskID <= 0 {
@@ -595,9 +767,9 @@ func (h *TaskAssetCenterHandler) AbortUploadSession(c *gin.Context) {
 }
 
 func (h *TaskAssetCenterHandler) createUploadSession(c *gin.Context, taskID int64, mode domain.DesignAssetUploadMode, topLevel bool) {
-	var req createTaskAssetUploadSessionReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+	req, bindErr := bindCreateTaskAssetUploadSessionReq(c)
+	if bindErr != nil {
+		respondError(c, bindErr)
 		return
 	}
 	h.createUploadSessionWithRequest(c, taskID, mode, req, topLevel)
@@ -616,17 +788,20 @@ func (h *TaskAssetCenterHandler) createUploadSessionWithRequest(c *gin.Context, 
 		expectedSize = req.FileSize
 	}
 	params := service.CreateTaskAssetUploadSessionParams{
-		TaskID:        taskID,
-		AssetID:       req.AssetID,
-		SourceAssetID: req.SourceAssetID,
-		CreatedBy:     createdBy,
-		AssetType:     domain.TaskAssetType(assetType),
-		Filename:      filename,
-		ExpectedSize:  expectedSize,
-		MimeType:      strings.TrimSpace(req.MimeType),
-		FileHash:      strings.TrimSpace(req.FileHash),
-		Remark:        strings.TrimSpace(req.Remark),
-		TargetSKUCode: strings.TrimSpace(req.TargetSKUCode),
+		TaskID:               taskID,
+		AssetID:              req.AssetID,
+		SourceAssetID:        req.SourceAssetID,
+		CreatedBy:            createdBy,
+		AssetType:            domain.TaskAssetType(assetType),
+		Filename:             filename,
+		ExpectedSize:         expectedSize,
+		MimeType:             strings.TrimSpace(req.MimeType),
+		FileHash:             strings.TrimSpace(req.FileHash),
+		Remark:               strings.TrimSpace(req.Remark),
+		TargetSKUCode:        strings.TrimSpace(req.TargetSKUCode),
+		OwnerModuleKey:       strings.TrimSpace(req.OwnerModuleKey),
+		UploadPolicy:         strings.TrimSpace(req.UploadPolicy),
+		RetouchRequirementID: parseOptionalPositiveInt64(req.RetouchRequirementID, c.Query("retouch_requirement_id")),
 	}
 	resolvedMode := mode
 	if resolvedMode == "" {
@@ -694,11 +869,14 @@ func normalizeAssetTypeInput(primary, fallback string) string {
 
 func parseAssetSearchQuery(c *gin.Context) (domain.AssetSearchQuery, *domain.AppError) {
 	query := domain.AssetSearchQuery{
-		Keyword:       strings.TrimSpace(c.Query("keyword")),
-		ModuleKey:     strings.TrimSpace(c.Query("module_key")),
-		OwnerTeamCode: strings.TrimSpace(c.Query("owner_team_code")),
-		IsArchived:    domain.AssetArchiveFilter(strings.TrimSpace(c.DefaultQuery("is_archived", string(domain.AssetArchiveFilterFalse)))),
-		TaskStatus:    domain.AssetTaskStatusFilter(strings.TrimSpace(c.DefaultQuery("task_status", string(domain.AssetTaskStatusFilterAll)))),
+		Keyword:        strings.TrimSpace(c.Query("keyword")),
+		ModuleKey:      strings.TrimSpace(c.Query("module_key")),
+		OwnerTeamCode:  strings.TrimSpace(c.Query("owner_team_code")),
+		IsArchived:     domain.AssetArchiveFilter(strings.TrimSpace(c.DefaultQuery("is_archived", string(domain.AssetArchiveFilterFalse)))),
+		TaskStatus:     domain.AssetTaskStatusFilter(strings.TrimSpace(c.DefaultQuery("task_status", string(domain.AssetTaskStatusFilterAll)))),
+		Source:         domain.NormalizeAssetResourceSource(firstNonEmptyTrimmed(c.Query("source"), c.Query("resource_source"))),
+		UsableState:    domain.AssetUsableStateFilter(strings.TrimSpace(c.DefaultQuery("usable_state", string(domain.AssetUsableStateFilterAll)))),
+		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(c.DefaultQuery("format_category", string(domain.AssetFormatCategoryAll)))),
 	}
 	if raw := strings.TrimSpace(c.Query("created_from")); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
@@ -757,4 +935,19 @@ func firstNonEmptyTrimmed(values ...string) string {
 
 func int64ToString(value int64) string {
 	return strconv.FormatInt(value, 10)
+}
+
+func parseOptionalPositiveInt64(bodyValue *int64, queryValue string) *int64 {
+	if bodyValue != nil && *bodyValue > 0 {
+		return bodyValue
+	}
+	queryValue = strings.TrimSpace(queryValue)
+	if queryValue == "" {
+		return nil
+	}
+	parsed, err := parseInt64(queryValue)
+	if err != nil || parsed <= 0 {
+		return nil
+	}
+	return &parsed
 }

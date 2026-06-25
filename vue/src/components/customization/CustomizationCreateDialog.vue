@@ -68,7 +68,15 @@
               <h4 class="section-title">附件</h4>
               <p class="section-subtitle">源文件可选，参考图建议上传 1~3 张</p>
             </div>
-            <div class="source-upload-card">
+            <div
+              class="source-upload-card"
+              tabindex="0"
+              @focusin="activateSourceFileReceiver"
+              @pointerenter="activateSourceFileReceiver"
+              @dragover.prevent="onSourceDragOver"
+              @drop.prevent="onSourceDrop"
+              @paste="onSourcePaste"
+            >
               <div class="source-upload-head">
                 <span class="source-upload-title">源文件（可选）</span>
                 <button
@@ -77,7 +85,7 @@
                   :disabled="submitting"
                   @click="triggerSourcePick"
                 >
-                  选择源文件
+                  选择/拖拽/粘贴源文件
                 </button>
               </div>
               <p class="source-upload-hint">
@@ -215,28 +223,23 @@
                     type="text"
                     class="field-input"
                     placeholder="请输入目标产品名称"
+                    :maxlength="ERP_PRODUCT_NAME_MAX_LENGTH"
                     :disabled="submitting"
                   />
                   <p v-if="showValidationError && !form.productName.trim()" class="field-hint field-hint-error">
                     请填写产品名称
                   </p>
+                  <p class="field-hint" :class="{ 'field-hint-error': isErpProductNameTooLong(form.productName) }">
+                    {{ erpProductNameHint(form.productName) }}
+                  </p>
                 </div>
 
                 <div class="field-group">
-                  <label class="field-label">产品简称 *</label>
-                  <input
-                    v-model.trim="form.productShortName"
-                    type="text"
-                    class="field-input"
-                    placeholder="请输入产品简称"
-                    :disabled="submitting"
-                  />
-                  <p
-                    v-if="showValidationError && !form.productShortName.trim()"
-                    class="field-hint field-hint-error"
-                  >
-                    请填写产品简称
-                  </p>
+                  <label class="field-label">产品简称</label>
+                  <div class="field-readonly" :title="form.productName || '填写产品名称后自动同步'">
+                    {{ form.productName || '填写产品名称后自动同步' }}
+                  </div>
+                  <p class="field-hint">系统会把产品名称同步为 ERP 简称，两个名称保持一致。</p>
                 </div>
               </div>
             </template>
@@ -334,9 +337,20 @@ import { createCustomizationTask, type CustomizationTaskCreatePayload } from '@/
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import { usePermissionsStore } from '@/stores/permissions'
-import { humanizeTaskCreateFields, pickFieldWhitelistViolations } from '@/domain/task-create-fields'
+import { humanizeTaskCreateFields, humanizeViolationCode, pickFieldWhitelistViolations } from '@/domain/task-create-fields'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
+import {
+  ERP_PRODUCT_NAME_MAX_LENGTH,
+  erpProductNameHint,
+  isErpProductNameTooLong,
+} from '@/domain/erp-product-name'
 import { getBeijingDateString, toBeijingEndOfDayISO } from '@/utils/date'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 
 type CreateTaskType = 'ORIGINAL_PRODUCT_DEV' | 'NEW_PRODUCT_DEV'
 type SourceUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed'
@@ -400,6 +414,13 @@ const submitError = ref('')
 const showValidationError = ref(false)
 const sourceInputRef = ref<HTMLInputElement | null>(null)
 const sourceFiles = ref<SourceFileItem[]>([])
+
+const { activateFileReceiver: activateSourceFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => props.modelValue && !submitting.value),
+  onFiles: (files) => {
+    addSourceFiles(files)
+  },
+})
 
 const form = reactive({
   orderNumber: '',
@@ -518,7 +539,7 @@ const canSubmit = computed(() => {
   return Boolean(
     form.newCategoryCode.trim() &&
       form.productName.trim() &&
-      form.productShortName.trim(),
+      !isErpProductNameTooLong(form.productName),
   )
 })
 
@@ -612,6 +633,7 @@ function onProductSelect(product: Product) {
 }
 
 function triggerSourcePick() {
+  activateSourceFileReceiver()
   sourceInputRef.value?.click()
 }
 
@@ -622,8 +644,35 @@ function buildSourceFileKey(file: File): string {
 function onSourceFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   const files = input.files
+  if (files?.length) addSourceFiles(files)
+  input.value = ''
+}
+
+function onSourceDragOver(event: DragEvent) {
+  if (submitting.value || !hasFileDataTransfer(event.dataTransfer)) return
+  activateSourceFileReceiver()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onSourceDrop(event: DragEvent) {
+  if (submitting.value) return
+  const files = getFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) return
+  activateSourceFileReceiver()
+  addSourceFiles(files)
+}
+
+function onSourcePaste(event: ClipboardEvent) {
+  if (submitting.value) return
+  const files = getFilesFromClipboardEvent(event)
+  if (!files.length) return
+  event.preventDefault()
+  activateSourceFileReceiver()
+  addSourceFiles(files)
+}
+
+function addSourceFiles(files: FileList | File[]) {
   if (!files?.length) {
-    input.value = ''
     return
   }
   const existing = new Set(sourceFiles.value.map((item) => item.key))
@@ -641,7 +690,6 @@ function onSourceFileChange(event: Event) {
     sourceFiles.value.push({ key, file, status: 'pending' })
     existing.add(key)
   }
-  input.value = ''
 }
 
 function removeSourceFile(key: string) {
@@ -693,7 +741,7 @@ function buildCreatePayload(): CustomizationTaskCreatePayload {
   } else {
     payload.category_code = form.newCategoryCode
     payload.product_name = form.productName
-    payload.product_short_name = form.productShortName
+    payload.product_short_name = form.productName
   }
   return payload
 }
@@ -754,9 +802,14 @@ async function submit() {
     const violations = Array.isArray(details.violations)
       ? (details.violations as Array<Record<string, unknown>>)
       : []
+    const humanizedMessages = violations
+      .map((v) => humanizeViolationCode(String(v.code ?? ''), String(v.field ?? '')))
+      .filter((message) => message.length > 0)
     const forbiddenFields = pickFieldWhitelistViolations(violations)
     const denyCode = String((err.deny_code ?? err.code ?? details.deny_code) ?? '')
-    if (forbiddenFields.length > 0) {
+    if (humanizedMessages.length > 0) {
+      submitError.value = humanizedMessages.slice(0, 3).join('；')
+    } else if (forbiddenFields.length > 0) {
       const cn = humanizeTaskCreateFields(forbiddenFields).join('、')
       // eslint-disable-next-line no-console
       console.error('[POST /v1/tasks · customization · field_not_allowed_for_task_type]', {
@@ -914,6 +967,17 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 0.36rem;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.source-upload-card:focus-within,
+.source-upload-card:hover {
+  border-color: #60a5fa;
+  background: #f8fbff;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.12);
 }
 .source-upload-head {
   display: flex;
@@ -1086,6 +1150,19 @@ async function submit() {
 .field-textarea:disabled {
   background: #f8fafc;
   cursor: not-allowed;
+}
+.field-readonly {
+  min-height: 2.05rem;
+  display: flex;
+  align-items: center;
+  border: 1px solid #d7deea;
+  border-radius: 0.58rem;
+  background: #f8fafc;
+  padding: 0.38rem 0.62rem;
+  color: #475569;
+  font-size: 0.78rem;
+  line-height: 1.2rem;
+  word-break: break-word;
 }
 .select-wrap {
   position: relative;

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -67,6 +68,51 @@ func TestTaskHandlerCreateBindsERPProductSnapshotFromJSON(t *testing.T) {
 	}
 }
 
+func TestTaskHandlerCreateBindsExplicitSyncERPOnCreateFalse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	taskSvc := &taskServiceCaptureStub{
+		createResult: &domain.Task{ID: 1},
+	}
+	handler := NewTaskHandler(taskSvc, nil, nil)
+	router.POST("/v1/tasks", handler.Create)
+
+	body := map[string]interface{}{
+		"task_type":          "new_product_development",
+		"source_mode":        "new_product",
+		"creator_id":         9,
+		"owner_team":         "总经办组",
+		"due_at":             "2026-03-20T00:00:00Z",
+		"category_code":      "LIGHTBOX",
+		"material_mode":      "preset",
+		"material":           "铝型材",
+		"product_name":       "New Lightbox",
+		"product_short_name": "Lightbox",
+		"design_requirement": "need design",
+		"new_sku":            "NEW-SKU-001",
+		"sync_erp_on_create": false,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /v1/tasks code = %d, want 201 body=%s", rec.Code, rec.Body.String())
+	}
+	if !taskSvc.createParams.SyncERPOnCreateSet {
+		t.Fatal("SyncERPOnCreateSet = false, want true for explicit sync_erp_on_create:false")
+	}
+	if taskSvc.createParams.SyncERPOnCreate {
+		t.Fatal("SyncERPOnCreate = true, want false")
+	}
+}
+
 func TestTaskHandlerCreateAcceptsStringProductIDAsERPFacadeKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -114,6 +160,63 @@ func TestTaskHandlerCreateAcceptsStringProductIDAsERPFacadeKey(t *testing.T) {
 	}
 	if taskSvc.createParams.ProductSelection.ERPProduct.ProductName != "ERP String Product" {
 		t.Fatalf("captured erp product_name = %+v", taskSvc.createParams.ProductSelection.ERPProduct)
+	}
+}
+
+func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	originalDeadline := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
+	originalFiledAt := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
+	costPrice := 12.3
+	taskSvc := &taskServiceCaptureStub{}
+	detailSvc := &taskDetailAggregateCaptureStub{
+		aggregate: &domain.TaskDetailAggregate{
+			Task: &domain.Task{
+				ID:         9107,
+				DeadlineAt: &originalDeadline,
+			},
+			TaskDetail: &domain.TaskDetail{
+				TaskID:                   9107,
+				CostPrice:                &costPrice,
+				ManualCostOverride:       true,
+				ManualCostOverrideReason: "warehouse maintained",
+				FiledAt:                  &originalFiledAt,
+			},
+		},
+	}
+	handler := NewTaskHandler(taskSvc, nil, detailSvc)
+	router.PATCH("/v1/tasks/:id/business-info", handler.UpdateBusinessInfo)
+
+	body := map[string]interface{}{
+		"operator_id": 1,
+		"deadline_at": "2026-06-12T10:00:00Z",
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/tasks/9107/business-info", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH /v1/tasks/:id/business-info code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	params := taskSvc.updateBusinessInfoParams
+	if !params.DeadlineAtSet || params.DeadlineAt == nil || params.DeadlineAt.Format(time.RFC3339) != "2026-06-12T10:00:00Z" {
+		t.Fatalf("deadline params = set:%t value:%+v", params.DeadlineAtSet, params.DeadlineAt)
+	}
+	if params.CostPrice == nil || *params.CostPrice != costPrice {
+		t.Fatalf("cost_price = %+v, want %v", params.CostPrice, costPrice)
+	}
+	if !params.ManualCostOverride || params.ManualCostOverrideReason != "warehouse maintained" {
+		t.Fatalf("manual override = %t / %q", params.ManualCostOverride, params.ManualCostOverrideReason)
+	}
+	if params.FiledAt != nil {
+		t.Fatalf("filed_at = %+v, want nil when request omits filed_at", params.FiledAt)
 	}
 }
 
@@ -654,10 +757,12 @@ func TestTaskCreateOriginalProductDevelopmentResponseEchoesChangeRequest(t *test
 }
 
 type taskServiceCaptureStub struct {
-	createParams service.CreateTaskParams
-	createResult *domain.Task
-	readResult   *domain.TaskReadModel
-	appErr       *domain.AppError
+	createParams             service.CreateTaskParams
+	updateBusinessInfoParams service.UpdateTaskBusinessInfoParams
+	createResult             *domain.Task
+	readResult               *domain.TaskReadModel
+	listFilter               service.TaskFilter
+	appErr                   *domain.AppError
 }
 
 func (s *taskServiceCaptureStub) Create(_ context.Context, p service.CreateTaskParams) (*domain.Task, *domain.AppError) {
@@ -665,7 +770,8 @@ func (s *taskServiceCaptureStub) Create(_ context.Context, p service.CreateTaskP
 	return s.createResult, s.appErr
 }
 
-func (s *taskServiceCaptureStub) List(context.Context, service.TaskFilter) ([]*domain.TaskListItem, domain.PaginationMeta, *domain.AppError) {
+func (s *taskServiceCaptureStub) List(_ context.Context, filter service.TaskFilter) ([]*domain.TaskListItem, domain.PaginationMeta, *domain.AppError) {
+	s.listFilter = filter
 	return nil, domain.PaginationMeta{}, nil
 }
 
@@ -689,7 +795,12 @@ func (s *taskServiceCaptureStub) TriggerFiling(context.Context, service.TriggerT
 	return nil, nil
 }
 
-func (s *taskServiceCaptureStub) UpdateBusinessInfo(context.Context, service.UpdateTaskBusinessInfoParams) (*domain.TaskDetail, *domain.AppError) {
+func (s *taskServiceCaptureStub) UpdateBusinessInfo(_ context.Context, p service.UpdateTaskBusinessInfoParams) (*domain.TaskDetail, *domain.AppError) {
+	s.updateBusinessInfoParams = p
+	return &domain.TaskDetail{TaskID: p.TaskID}, nil
+}
+
+func (s *taskServiceCaptureStub) UpdateSKUItemInfo(context.Context, service.UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError) {
 	return nil, nil
 }
 
@@ -735,10 +846,57 @@ func (s *taskServiceCaptureStub) GetCustomizationJob(context.Context, int64) (*d
 
 var _ service.TaskService = (*taskServiceCaptureStub)(nil)
 
+type taskDetailAggregateCaptureStub struct {
+	aggregate *domain.TaskDetailAggregate
+	appErr    *domain.AppError
+}
+
+func (s *taskDetailAggregateCaptureStub) GetByTaskID(context.Context, int64) (*domain.TaskDetailAggregate, *domain.AppError) {
+	return s.aggregate, s.appErr
+}
+
 func testHandlerReferenceImageDataURI(sizeBytes int) string {
 	if sizeBytes <= 0 {
 		return "data:image/png;base64,"
 	}
 	raw := strings.Repeat("a", sizeBytes)
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte(raw))
+}
+
+func TestTaskHandlerListAppliesMineFilterToCurrentActorOwnership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	taskSvc := &taskServiceCaptureStub{
+		createResult: &domain.Task{ID: 1},
+	}
+	handler := NewTaskHandler(taskSvc, nil, nil)
+	router.GET("/v1/tasks", handler.List)
+
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       88,
+		Roles:    []domain.Role{domain.RoleOps},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	ctx = domain.WithRouteAccessMeta(ctx, domain.RouteAccessMeta{
+		Readiness:     domain.APIReadinessReadyForFrontend,
+		RequiredRoles: []domain.Role{domain.RoleOps},
+		AuthMode:      domain.AuthModeSessionTokenRoleEnforced,
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks?filter=mine", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/tasks?filter=mine code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if taskSvc.listFilter.CreatorID != nil {
+		t.Fatalf("captured list filter creator_id = %v, want nil (mine uses MineActorID)", taskSvc.listFilter.CreatorID)
+	}
+	if taskSvc.listFilter.MineActorID == nil {
+		t.Fatalf("captured list filter mine_actor_id is nil, want actor id")
+	}
+	if got, want := *taskSvc.listFilter.MineActorID, int64(88); got != want {
+		t.Fatalf("captured list filter mine_actor_id = %d, want %d", got, want)
+	}
 }

@@ -21,6 +21,7 @@ config/*.local.json
 dist/
 /vue/dist/
 /vue/node_modules/
+*.tsbuildinfo
 /vue/coverage/
 bin/
 *.exe

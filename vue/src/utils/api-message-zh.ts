@@ -53,7 +53,7 @@ export const API_DENY_CODE_ZH: Record<string, string> = {
   module_state_mismatch: '模块状态已变化，请刷新后重试',
   module_claim_conflict: '该任务已被他人领取',
   module_blueprint_missing_team: '池组配置缺失，请联系管理员',
-  task_already_claimed: '任务已被其他人接单',
+  task_already_claimed: '任务已被接单，无法作废',
 }
 
 /**
@@ -84,6 +84,8 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   'request failed with status code 404': '请求的资源不存在',
   'request failed with status code 409': '与已有数据冲突，请更换后重试',
   'request failed with status code 500': '服务暂时不可用，请稍后重试',
+  'erp product name length validation failed': '产品名称将同步为 ERP 简称，最多可填写 40 个字，请精简后再提交',
+  'erp product name exceeds length limit': '产品名称将同步为 ERP 简称，最多可填写 40 个字，请精简后再提交',
   /** GET /v1/assets/{id}/preview 等：409 + INVALID_STATE_TRANSITION 常见英文文案 */
   'asset preview is not available': '资产预览不可用',
   'asset preview is not available.': '资产预览不可用',

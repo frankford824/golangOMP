@@ -32,7 +32,14 @@ func (s *codeRuleService) List(ctx context.Context) ([]*domain.CodeRule, *domain
 	if err != nil {
 		return nil, infraError("list code rules", err)
 	}
-	return rules, nil
+	activeRules := make([]*domain.CodeRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule != nil && rule.RuleType == domain.CodeRuleTypeNewSKU {
+			continue
+		}
+		activeRules = append(activeRules, rule)
+	}
+	return activeRules, nil
 }
 
 func (s *codeRuleService) Preview(ctx context.Context, ruleID int64) (*domain.CodePreview, *domain.AppError) {
@@ -43,12 +50,18 @@ func (s *codeRuleService) Preview(ctx context.Context, ruleID int64) (*domain.Co
 	if rule == nil {
 		return nil, domain.ErrNotFound
 	}
+	if rule.RuleType == domain.CodeRuleTypeNewSKU {
+		return nil, legacyNewSKUCodeRuleArchivedError()
+	}
 	// seq=0 for preview — does NOT increment the counter (spec V7 §5.3).
 	preview := buildCode(rule, 0)
 	return &domain.CodePreview{RuleID: ruleID, Preview: preview, IsPreview: true}, nil
 }
 
 func (s *codeRuleService) GenerateCode(ctx context.Context, ruleType domain.CodeRuleType) (string, *domain.AppError) {
+	if ruleType == domain.CodeRuleTypeNewSKU {
+		return "", legacyNewSKUCodeRuleArchivedError()
+	}
 	rule, err := s.codeRuleRepo.GetEnabledByType(ctx, ruleType)
 	if err != nil {
 		return "", infraError("get enabled code rule", err)
@@ -61,18 +74,17 @@ func (s *codeRuleService) GenerateCode(ctx context.Context, ruleType domain.Code
 }
 
 func (s *codeRuleService) GenerateSKU(ctx context.Context, ruleID int64) (string, *domain.AppError) {
-	rule, err := s.codeRuleRepo.GetByID(ctx, ruleID)
-	if err != nil {
-		return "", infraError("get rule for sku generation", err)
-	}
-	if rule == nil {
-		return "", domain.ErrNotFound
-	}
-	if rule.RuleType != domain.CodeRuleTypeNewSKU {
-		return "", domain.NewAppError(domain.ErrCodeInvalidRequest,
-			fmt.Sprintf("rule %d is type %q, not new_sku", ruleID, rule.RuleType), nil)
-	}
-	return s.generate(ctx, rule)
+	return "", legacyNewSKUCodeRuleArchivedError()
+}
+
+func legacyNewSKUCodeRuleArchivedError() *domain.AppError {
+	return domain.NewAppError(domain.ErrCodeInvalidRequest,
+		"legacy CodeRule new_sku is archived; use task product-code allocation instead",
+		map[string]interface{}{
+			"archived_rule_type": "new_sku",
+			"replacement":        "POST /v1/tasks/prepare-product-codes or POST /v1/tasks default product-code allocation",
+		},
+	)
 }
 
 func (s *codeRuleService) generate(ctx context.Context, rule *domain.CodeRule) (string, *domain.AppError) {

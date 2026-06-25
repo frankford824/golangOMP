@@ -2,7 +2,7 @@
   <button
     type="button"
     class="relative inline-flex items-center rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs font-bold text-neutral-900 shadow-sm transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/35 focus-visible:ring-offset-2"
-    @click="$emit('open')"
+    @click="openNotifications"
   >
     通知
     <span
@@ -15,22 +15,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { useWebSocket } from '@/composables/useWebSocket'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useNotificationsStore } from '@/stores/notifications.store'
+import { useRealtimeStore } from '@/stores/realtime.store'
 
-defineEmits<{ open: [] }>()
+const emit = defineEmits<{ open: [] }>()
 const notificationsStore = useNotificationsStore()
+const realtimeStore = useRealtimeStore()
 const unreadCount = computed(() => notificationsStore.unreadCount)
 
-useWebSocket({
-  onMessage(event) {
-    if (event.type === 'notification_arrived') {
-      notificationsStore.applyUnreadCount(event.payload.unread_count)
-    }
-  },
-  onFallbackPoll: notificationsStore.refreshUnreadCount,
+async function openNotifications(): Promise<void> {
+  await realtimeStore.requestBrowserPermission().catch(() => undefined)
+  emit('open')
+}
+
+function syncNotifications(): void {
+  void notificationsStore.load()
+}
+
+function handleVisibilityChange(): void {
+  if (document.visibilityState === 'visible') syncNotifications()
+}
+
+onMounted(() => {
+  syncNotifications()
+  window.addEventListener('focus', syncNotifications)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
-onMounted(notificationsStore.refreshUnreadCount)
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', syncNotifications)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 </script>

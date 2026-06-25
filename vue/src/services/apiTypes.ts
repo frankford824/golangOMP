@@ -59,14 +59,21 @@ export interface FrontendAccess {
 /** 后端用户对象 */
 export interface BackendUser {
   id: string
+  account?: string
   username: string
   display_name: string
+  name?: string
+  real_name?: string
   department: string
   team: string
   roles: string[]
   frontend_access: FrontendAccess
   mobile?: string
+  phone?: string
   email?: string
+  avatar?: string
+  avatar_url?: string
+  last_login_at?: string
 }
 
 /** POST /v1/auth/login 响应 */
@@ -113,6 +120,8 @@ export interface RegisterPayload {
 export interface ChangePasswordPayload {
   old_password: string
   new_password: string
+  confirm?: string
+  password_confirmation?: string
 }
 
 // ─── 任务 ─────────────────────────────────────────────────────────────────────
@@ -157,6 +166,8 @@ export interface TaskListParams {
   assignee_id?: string
   /** v0.9：按设计师筛选列表（与 designer_* 读模型一致） */
   designer_id?: string
+  /** 定制泳道「未指派美工」：仅 designer_id 为空（勿与 status=PendingAssign 混用） */
+  designer_empty?: boolean
   group_id?: string
   department?: string
   /** 规范归属：部门筛选 */
@@ -282,6 +293,7 @@ export interface OperationLogEntry {
   event_type: string
   summary: string
   actor_id: number | null
+  actor_username?: string
   actor_type: string
   status?: string
   payload?: Record<string, unknown> | unknown
@@ -314,6 +326,48 @@ export interface ServerLog {
   created_at: string
 }
 
+/** GET /v1/trace-events 单条全链路事件 */
+export interface WorkflowTraceEvent {
+  id: number
+  event_id: string
+  trace_id?: string
+  event_source: 'api' | 'frontend' | 'system' | 'integration' | string
+  event_type: 'api_request' | 'page_view' | 'user_action' | string
+  action?: string
+  actor_id?: number | null
+  actor_username?: string
+  actor_source?: string
+  actor_auth_mode?: string
+  actor_roles?: string[]
+  actor_department?: string
+  actor_team?: string
+  route_method?: string
+  route_path?: string
+  route_full_path?: string
+  http_status?: number | null
+  latency_ms?: number | null
+  client_ip?: string
+  user_agent?: string
+  page_url?: string
+  page_name?: string
+  component_id?: string
+  task_id?: number | null
+  task_module_id?: number | null
+  module_key?: string
+  sku_code?: string
+  task_sku_item_id?: number | null
+  asset_id?: number | null
+  design_asset_id?: number | null
+  task_asset_id?: number | null
+  integration_call_log_id?: number | null
+  resource_type?: string
+  resource_id?: string
+  outcome?: 'succeeded' | 'failed' | string
+  payload?: Record<string, unknown> | unknown
+  occurred_at: string
+  created_at: string
+}
+
 // ─── 资产与访问策略（live v0.4）──────────────────────────────────────────────────
 
 /** 资产访问策略（后端返回，前端按此展示下载方式） */
@@ -327,15 +381,24 @@ export interface AssetAccessPolicy {
 
 /** canonical 下载模式：当前主链优先 `direct`，`proxy` 仅兼容 fallback。 */
 export type AssetDownloadMode = 'direct' | 'proxy' | 'public' | 'private_network'
+export type AssetResourceSource = 'system' | 'external' | 'all'
 
 /** 资产版本（含访问策略）
  * v0.6 对齐：必须仅根据 preview_available 与 download_mode 决策 UI */
 export interface BackendAssetVersion {
   id: string
+  version_id?: string | number
   file_role: string
   version?: number
   file_name?: string
   created_at?: string
+  flow_review_status?: string
+  usable_state?: string
+  usable_label?: string
+  approved_at?: string
+  rejected_at?: string
+  superseded_at?: string
+  cleanup_after_at?: string
   /** 规范业务文件访问入口（列表嵌套版本时由后端下发） */
   download_url?: string
   lan_url?: string
@@ -347,12 +410,31 @@ export interface BackendAssetVersion {
   preview_available?: boolean
   /** canonical 下载方式；旧 `public/private_network` 仅作兼容读取 */
   download_mode?: AssetDownloadMode
+  created_by?: {
+    user_id?: string | number
+    username?: string
+    name?: string
+  }
   [key: string]: unknown
 }
 
 /** 后端资产项 */
 export interface BackendAsset {
   id: string
+  /** 统一资源 ID：系统资产为数字字符串，外部资源为 ext-{id}。 */
+  resource_id?: string
+  /** UI 只展示 system/external 两类来源，避免泄露挂载细节。 */
+  source_type?: 'system' | 'external' | string
+  source_label?: string
+  external_kind?: 'netdisk' | 'nas_local' | string
+  external_mount_path?: string
+  external_driver?: string
+  origin_path?: string
+  oss_sync_status?: string
+  external_preview_status?: string
+  last_prepare_error?: string
+  download_url?: string
+  preview_available?: boolean
   task_id?: string
   file_role: string
   previous_asset_id?: string | number | null
@@ -360,6 +442,28 @@ export interface BackendAsset {
   replacement_actor_id?: string | number | null
   workflow_lane?: 'normal' | 'customization' | string
   source_department?: string | null
+  task_no?: string
+  sku_code?: string
+  primary_sku_code?: string
+  scope_sku_code?: string
+  product_name?: string
+  task_creator_id?: string | number
+  task_creator_username?: string
+  task_creator_name?: string
+  created_by_username?: string
+  created_by_name?: string
+  mime_type?: string
+  file_name?: string
+  original_filename?: string
+  asset_type?: string
+  asset_kind?: string
+  flow_review_status?: string
+  usable_state?: string
+  usable_label?: string
+  approved_at?: string
+  rejected_at?: string
+  superseded_at?: string
+  cleanup_after_at?: string
   versions?: BackendAssetVersion[]
   approved_version?: number
   warehouse_ready_version?: number
@@ -425,6 +529,8 @@ export interface CustomizationJobRaw {
   assigned_operator_id?: number | string | null
   last_operator_id?: number | string | null
   replacement_actor_id?: number | string | null
+  replacement_actor_name?: string | null
+  replacement_actor_username?: string | null
   /**
    * pricing identity（定价身份），不是权限角色。
    * 后端可能返回 `employment_type`，也可能返回历史字段 `pricing_worker_type`。

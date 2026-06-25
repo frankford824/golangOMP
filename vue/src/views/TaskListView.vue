@@ -16,6 +16,13 @@
           <BaseButton v-if="can('task.create')" variant="primary" @click="goCreate">
             创建任务
           </BaseButton>
+          <BaseButton
+            v-if="can('task.create')"
+            variant="secondary"
+            @click="goExcelAssistCreate"
+          >
+            Excel 辅助创建
+          </BaseButton>
         </div>
       </div>
       <div class="task-category-switch" aria-label="任务分类">
@@ -45,14 +52,34 @@
       <div class="toolbar">
         <BaseInput
           v-model="searchKeyword"
-          placeholder="搜索任务号、SKU、产品名称"
+          placeholder="搜索任务号、SKU、任务名、子项名称或设计要求"
           class="search-input w-72"
           @input="debouncedSearch"
         />
+        <BaseButton
+          size="sm"
+          variant="secondary"
+          class="advanced-filter-toggle"
+          :class="{
+            'advanced-filter-toggle--active': advancedFilterOpen || activeAdvancedFilterCount > 0,
+          }"
+          @click="advancedFilterOpen = !advancedFilterOpen"
+        >
+          {{
+            advancedFilterOpen
+              ? '收起筛选'
+              : activeAdvancedFilterCount > 0
+                ? `筛选 ${activeAdvancedFilterCount}`
+                : '高级筛选'
+          }}
+        </BaseButton>
       </div>
-      <div class="filter-bar-wrap">
+      <div v-show="advancedFilterOpen" class="filter-bar-wrap">
         <TaskFilterBar v-model:filters="filters" @update:filters="page = 1" />
       </div>
+      <p v-if="tabStatusScopeHint" class="tab-status-scope-hint" role="status">
+        {{ tabStatusScopeHint }}
+      </p>
     </div>
 
     <!-- 批量操作条（有选中时滑出） -->
@@ -92,6 +119,7 @@
       </div>
     </Transition>
     <p v-if="listActionError" class="list-action-error">{{ listActionError }}</p>
+    <p v-if="listActionSuccess" class="list-action-success">{{ listActionSuccess }}</p>
 
     <!-- 主内容区（三态统一包裹） -->
     <AsyncStateWrapper
@@ -120,7 +148,15 @@
           v-for="task in pagedList"
           :key="task.id"
           class="task-card"
-          @click="goDetail(task)"
+          :class="{
+            'task-card--selected': selectedIds.has(task.id),
+            'task-card--overdue': isOverdue(task),
+            'task-card--claimable': canClaimTask(task),
+            'task-card--customization': isCustomizationTask(task),
+          }"
+          @pointerdown="onTaskCardPointerDown"
+          @pointermove="onTaskCardPointerMove"
+          @click="onTaskCardClick($event, task)"
         >
           <div class="card-row card-row-top">
             <label class="card-check" @click.stop>
@@ -142,17 +178,78 @@
               <TaskTypeBadge :type="task.businessType ?? task.taskType" />
             </div>
           </div>
-          <div class="card-no-row">
+          <div class="card-copy-toolbar" data-card-no-nav="true" @click.stop>
+            <button
+              v-if="canCopyTaskField(task.taskNo)"
+              type="button"
+              :aria-label="`复制任务号 ${task.taskNo}`"
+              title="复制任务号"
+              @click="copyTaskCardText(task.taskNo, '任务号')"
+            >
+              单号
+            </button>
+            <button
+              v-if="canCopyTaskField(taskCardTitle(task))"
+              type="button"
+              :aria-label="`复制任务名称 ${taskCardTitle(task)}`"
+              title="复制任务名称"
+              @click="copyTaskCardText(taskCardTitle(task), '任务名称')"
+            >
+              名称
+            </button>
+            <button
+              v-if="canCopyTaskField(displaySku(task))"
+              type="button"
+              :aria-label="`复制 SKU ${displaySku(task)}`"
+              title="复制 SKU"
+              @click="copyTaskCardText(displaySku(task), 'SKU')"
+            >
+              SKU
+            </button>
+          </div>
+          <div class="card-no-row task-copy-zone" data-card-copy-zone>
             <span class="card-no">{{ task.taskNo }}</span>
           </div>
-          <div
-            class="card-product"
-            :title="task.productName?.trim() ? task.productName : undefined"
-          >
-            {{ task.productName }}
+          <div class="card-product-wrap">
+            <div
+              class="card-product task-copy-zone"
+              :title="taskCardTitle(task)"
+              data-card-copy-zone
+            >
+              {{ taskCardTitle(task) }}
+            </div>
+            <span v-if="isBatchCard(task)" class="batch-count-pill">共 {{ batchItemCount(task) }} 项</span>
           </div>
-          <div class="flex flex-wrap items-center gap-1 mt-1">
-            <TaskMainStatusBadge v-if="task.mainStatus" :status="task.mainStatus" />
+          <div
+            v-if="isBatchCard(task)"
+            class="batch-preview"
+            data-card-no-nav="true"
+            @click.stop
+          >
+            <div
+              v-for="(item, index) in batchPreviewItems(task)"
+              :key="batchItemKey(item, index)"
+              class="batch-preview-item"
+              :title="batchItemSummary(item)"
+            >
+              <span class="batch-preview-index">{{ item.sequenceNo ?? index + 1 }}</span>
+              <span class="batch-preview-text">{{ batchItemSummary(item) }}</span>
+            </div>
+            <button
+              v-if="batchItemCount(task) > batchPreviewLimit"
+              type="button"
+              class="batch-preview-more"
+              @click="openBatchItemsModal(task)"
+            >
+              查看全部 {{ batchItemCount(task) }} 项
+            </button>
+          </div>
+          <div class="card-status-row flex flex-wrap items-center gap-1 mt-1">
+            <TaskMainStatusBadge
+              v-if="task.mainStatus"
+              :status="task.mainStatus"
+              :label-override="getTaskCenterCardStatusLabel(task) ?? undefined"
+            />
             <TaskStatusTag v-else :status="task.status" />
             <FilingStatusBadge
               v-if="task.filing_status || isRetouchTask(task)"
@@ -169,7 +266,9 @@
             </div>
             <div class="card-meta-line card-meta-line--sku">
               <span class="card-meta-key">SKU</span>
-              <span class="card-meta-value" :title="displaySku(task)">{{ displaySku(task) }}</span>
+              <span class="card-meta-value task-copy-zone" :title="displaySku(task)" data-card-copy-zone>
+                {{ displaySku(task) }}
+              </span>
             </div>
             <div class="card-meta-line card-meta-line--creator">
               <span class="card-meta-key">创建</span>
@@ -177,7 +276,10 @@
                 taskCreatorDisplayName(task)
               }}</span>
             </div>
-            <div class="card-meta-line card-meta-line--design">
+            <div
+              v-if="shouldShowDesignerMetaOnTaskCenterCard(task)"
+              class="card-meta-line card-meta-line--design"
+            >
               <span class="card-meta-key">设计</span>
               <span class="card-meta-value" :title="taskDesignerDisplayName(task)">{{
                 taskDesignerDisplayName(task)
@@ -197,7 +299,7 @@
               :disabled="Boolean(claimingTaskId)"
               @click.stop="claimTask(task)"
             >
-              {{ claimingTaskId === task.id ? '接单中...' : '接单' }}
+              {{ taskCenterClaimButtonLabel(task, claimingTaskId === task.id) }}
             </BaseButton>
           </div>
         </div>
@@ -280,6 +382,35 @@
       :loading="batchDesignersLoading"
       @confirm="onBatchAssignConfirm"
     />
+
+    <BaseModal
+      v-model="batchItemsModalOpen"
+      title="批量任务明细"
+      :show-confirm="false"
+      cancel-text="关闭"
+      panel-class="max-w-[min(780px,94vw)]"
+    >
+      <div v-if="batchItemsModalTask" class="batch-items-modal">
+        <div class="batch-items-modal-header">
+          <p class="batch-items-modal-title">{{ taskCardTitle(batchItemsModalTask) }}</p>
+          <span class="batch-count-pill">共 {{ batchItemCount(batchItemsModalTask) }} 项</span>
+        </div>
+        <div class="batch-items-modal-list">
+          <div
+            v-for="(item, index) in batchModalItems"
+            :key="batchItemKey(item, index)"
+            class="batch-items-modal-row"
+          >
+            <span class="batch-modal-index">{{ item.sequenceNo ?? index + 1 }}</span>
+            <div class="batch-modal-main">
+              <p class="batch-modal-name">{{ batchItemDisplayName(item) }}</p>
+              <p v-if="batchItemSubText(item)" class="batch-modal-sub">{{ batchItemSubText(item) }}</p>
+            </div>
+            <span class="batch-modal-sku">{{ item.skuCode || '-' }}</span>
+          </div>
+        </div>
+      </div>
+    </BaseModal>
   </div>
 </template>
 
@@ -288,8 +419,8 @@ import { ref, computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
-import type { Task, LegacyTaskStatus } from '@/domain/types/task'
-import { isDoneStatus } from '@/domain/task-actions'
+import type { Task, TaskSkuItem, LegacyTaskStatus } from '@/domain/types/task'
+import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterBar.vue'
 import TaskFilterBar from '@/components/task/TaskFilterBar.vue'
@@ -301,6 +432,7 @@ import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
+import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import TaskCreateModal from '@/components/task/TaskCreateModal.vue'
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
@@ -308,12 +440,21 @@ import { tasksApi } from '@/services/api/tasksApi'
 import type { TaskListParams } from '@/services/apiTypes'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import {
-  formatDateOnlyBeijing,
-  isOverdueByBeijingDay as checkOverdue,
+  formatTaskDueAtDisplay,
+  isOverdueByTimestamp as checkOverdue,
 } from '@/utils/date'
 import { getTaskOwnershipDisplay } from '@/domain/task-ownership'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
+import { getTaskCenterCardStatusLabel } from '@/domain/task-center-card-status'
+import { expandTaskListStatusFilter } from '@/domain/task-list-status-filter'
+import {
+  canClaimTaskFromCenter,
+  isCustomizationModuleClaimTask,
+  taskCenterClaimButtonLabel,
+  userCanActAsCustomizationClaimActor,
+  userIsPureDesignerForCustomizationClaim,
+} from '@/domain/task-center-claim'
 import { PermissionEnum } from '@/types'
 
 const router = useRouter()
@@ -414,7 +555,17 @@ const showBatchAssign = ref(false)
 const batchReminding = ref(false)
 const batchReceiving = ref(false)
 const refreshingList = ref(false)
+const advancedFilterOpen = ref(false)
 const claimingTaskId = ref<string | null>(null)
+const batchPreviewLimit = 3
+const batchItemsModalTask = ref<Task | null>(null)
+const batchItemsModalOpen = computed({
+  get: () => batchItemsModalTask.value != null,
+  set: (open: boolean) => {
+    if (!open) batchItemsModalTask.value = null
+  },
+})
+const batchModalItems = computed(() => batchSkuItems(batchItemsModalTask.value))
 const jumpPage = ref<number | string>(page.value)
 const {
   designers: batchDesignerOptions,
@@ -426,7 +577,15 @@ const {
   requiredActions: ['task.assign', 'task.assign.team', 'task.assign.department'],
 })
 const listActionError = ref('')
+const listActionSuccess = ref('')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let listActionSuccessTimer: ReturnType<typeof setTimeout> | null = null
+let listActionSeq = 0
+const taskCardPointerState = {
+  x: 0,
+  y: 0,
+  moved: false,
+}
 
 const canBatchAssign = computed(
   () =>
@@ -457,25 +616,6 @@ function selectedIdsAsNumericOrError(): number[] | null {
     return null
   }
   return nums
-}
-
-const STATUS_FILTER_EXPANSION: Partial<Record<LegacyTaskStatus, LegacyTaskStatus[]>> = {
-  PendingAuditA: ['PendingAuditA', 'PendingAuditB'],
-  RejectedByAuditA: ['RejectedByAuditA', 'RejectedByAuditB'],
-  Outsourcing: ['Outsourcing', 'PendingOutsourceReview', 'PendingCustomizationReview'],
-}
-
-function expandStatusFilter(statuses: LegacyTaskStatus[]): LegacyTaskStatus[] {
-  const out = new Set<LegacyTaskStatus>()
-  for (const status of statuses) {
-    const expanded = STATUS_FILTER_EXPANSION[status]
-    if (expanded?.length) {
-      for (const item of expanded) out.add(item)
-      continue
-    }
-    out.add(status)
-  }
-  return Array.from(out)
 }
 
 const defaultTaskFilters: TaskListFilters = {
@@ -511,6 +651,85 @@ const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
   ...(savedFiltersRaw as Partial<TaskListFilters>),
 })
+
+const CUSTOMIZATION_REVIEWER_ROLES = [
+  'CustomizationReviewer',
+  'customization_reviewer',
+  'customizationreviewer',
+] as const
+const NORMAL_AUDIT_ROLES = ['Audit_A', 'Audit_B', 'audit_a', 'audit_b', 'auditor'] as const
+const TASK_LIST_SCOPE_QUERY_KEYS = [
+  'tab',
+  'task_category',
+  'status',
+  'q',
+  'task_type',
+  'priority',
+  'creator_id',
+  'owner_department',
+  'owner_org_team',
+  'warehouse_status',
+  'date_from',
+  'date_to',
+  'overdue',
+] as const
+
+function queryHasTaskListScope(query: Record<string, unknown>): boolean {
+  return TASK_LIST_SCOPE_QUERY_KEYS.some((key) => {
+    if (!(key in query) || query[key] == null) return false
+    return queryString(query[key]).trim() !== ''
+  })
+}
+
+function applyAuditRoleDefaultScope() {
+  if (queryHasTaskListScope(route.query as Record<string, unknown>)) return
+  const canReviewCustomization = permissionsStore.hasAnyRole(CUSTOMIZATION_REVIEWER_ROLES)
+  const canReviewNormal = permissionsStore.hasAnyRole(NORMAL_AUDIT_ROLES)
+  if (!canReviewCustomization && !canReviewNormal) return
+
+  activeTab.value = 'all'
+  if (canReviewCustomization && !canReviewNormal) {
+    filters.value = {
+      ...filters.value,
+      taskCategory: 'customization',
+      status: ['PendingCustomizationReview', 'PendingEffectReview'],
+    }
+    return
+  }
+  if (canReviewNormal && !canReviewCustomization) {
+    filters.value = {
+      ...filters.value,
+      taskCategory: 'normal',
+      status: ['PendingAuditA', 'PendingAuditB'],
+    }
+    return
+  }
+  filters.value = {
+    ...filters.value,
+    taskCategory: '',
+    status: ['PendingAuditA', 'PendingAuditB', 'PendingCustomizationReview', 'PendingEffectReview'],
+  }
+}
+
+applyAuditRoleDefaultScope()
+
+const activeAdvancedFilterCount = computed(() => {
+  const f = filters.value
+  let count = 0
+  if (f.taskCategory) count += 1
+  if (f.status.length > 0) count += 1
+  if (f.taskType) count += 1
+  if (f.priority) count += 1
+  if (f.ownerDepartment) count += 1
+  if (f.ownerOrgTeam) count += 1
+  if (f.creatorId) count += 1
+  if (f.assigneeId) count += 1
+  if (f.warehouseStatus) count += 1
+  if (f.dateFrom || f.dateTo) count += 1
+  if (f.overdueOnly) count += 1
+  return count
+})
+
 if (typeof route.query.owner_department === 'string') {
   filters.value.ownerDepartment = route.query.owner_department
 }
@@ -558,7 +777,32 @@ if (typeof route.query.sort === 'string') {
 
 function setTaskTab(tab: TaskListTab) {
   if (activeTab.value === tab) return
+  if (filters.value.status.length > 0) {
+    filters.value = { ...filters.value, status: [] }
+  }
   activeTab.value = tab
+}
+
+const tabStatusScopeHint = computed(() => {
+  if (!filters.value.status.length) return ''
+  if (activeTab.value === 'pool') {
+    return '当前处于未指派任务页签，手动选择任务状态可能会替换页签默认范围。'
+  }
+  if (activeTab.value === 'archived' || activeTab.value === 'terminated') {
+    return '当前页签默认限定特定状态范围，手动选择任务状态后将按所选状态筛选。'
+  }
+  return ''
+})
+
+function queryHasNonEmptyParam(query: Record<string, unknown>, key: string): boolean {
+  if (!(key in query) || query[key] == null) return false
+  return queryString(query[key]).trim() !== ''
+}
+
+function parseOverdueQuery(query: Record<string, unknown>): boolean {
+  if (!queryHasNonEmptyParam(query, 'overdue')) return false
+  const raw = queryString(query.overdue).trim().toLowerCase()
+  return raw === 'true' || raw === '1'
 }
 
 function setTaskCategory(category: string) {
@@ -577,17 +821,20 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
   if (kw) params.keyword = kw
   if (activeTab.value === 'mine') params.filter = 'mine'
   if (activeTab.value === 'pool') {
-    params.status = 'PendingAssign'
+    if (f.taskCategory === 'customization') {
+      params.designer_empty = true
+    } else {
+      params.status = 'PendingAssign'
+    }
   }
   if (activeTab.value === 'archived' && !f.status.length) {
     params.status = ARCHIVED_TAB_DEFAULT_STATUSES.join(',')
   }
   if (activeTab.value === 'terminated') {
-    const terminatedStatus = f.status.length ? expandStatusFilter(f.status).join(',') : 'Cancelled'
+    const terminatedStatus = f.status.length ? expandTaskListStatusFilter(f.status).join(',') : 'Cancelled'
     params.status = terminatedStatus
-    params.task_status = terminatedStatus
   } else if (f.status.length) {
-    params.status = expandStatusFilter(f.status).join(',')
+    params.status = expandTaskListStatusFilter(f.status).join(',')
   }
   if (f.taskType) {
     const map: Record<string, string> = {
@@ -720,10 +967,13 @@ function isOverdue(task: Task): boolean {
   return checkOverdue(task.dueAt, isDoneStatus(task))
 }
 
+function isCustomizationTask(task: Task): boolean {
+  const lane = String(task.workflowLane ?? '').trim().toLowerCase()
+  return task.customizationRequired === true || lane === 'customization'
+}
+
 function taskCategoryLabel(task: Task): string {
-  return task.customizationRequired === true || task.workflowLane === 'customization'
-    ? '定制任务'
-    : '常规任务'
+  return isCustomizationTask(task) ? '定制任务' : '常规任务'
 }
 
 /**
@@ -734,8 +984,7 @@ function shouldShowWorkflowLaneTagOnCard(task: Task): boolean {
   const lane = String(task.workflowLane ?? '').trim().toLowerCase()
   if (lane !== 'normal' && lane !== 'customization') return false
 
-  const categoryIsCustomization =
-    task.customizationRequired === true || task.workflowLane === 'customization'
+  const categoryIsCustomization = isCustomizationTask(task)
 
   if (categoryIsCustomization && lane === 'customization') return false
   if (!categoryIsCustomization && lane === 'normal') return false
@@ -743,7 +992,7 @@ function shouldShowWorkflowLaneTagOnCard(task: Task): boolean {
 }
 
 function taskCategoryClass(task: Task): string {
-  return task.customizationRequired === true || task.workflowLane === 'customization'
+  return isCustomizationTask(task)
     ? 'task-category-pill-custom'
     : 'task-category-pill-normal'
 }
@@ -753,8 +1002,172 @@ function isRetouchTask(task: Task): boolean {
   return type === 'RETOUCH_TASK'
 }
 
+function normalizeCardText(value: unknown): string {
+  return String(value ?? '').trim()
+}
+
+function batchSkuItems(task: Task | null | undefined): TaskSkuItem[] {
+  return Array.isArray(task?.skuItems) ? task.skuItems.filter(Boolean) : []
+}
+
+function batchItemCount(task: Task): number {
+  const apiCount =
+    typeof task.batchItemCount === 'number' && Number.isFinite(task.batchItemCount)
+      ? task.batchItemCount
+      : 0
+  return Math.max(apiCount, batchSkuItems(task).length, task.isBatchTask === true ? 1 : 0)
+}
+
+function isBatchCard(task: Task): boolean {
+  return task.isBatchTask === true || batchItemCount(task) > 1
+}
+
+function batchItemDisplayName(item: TaskSkuItem | null | undefined): string {
+  if (!item) return ''
+  return (
+    normalizeCardText(item.productNameSnapshot) ||
+    normalizeCardText(item.productShortName) ||
+    normalizeCardText(item.designRequirement) ||
+    normalizeCardText(item.skuCode)
+  )
+}
+
+function batchItemSubText(item: TaskSkuItem | null | undefined): string {
+  if (!item) return ''
+  const design = normalizeCardText(item.designRequirement)
+  const shortName = normalizeCardText(item.productShortName)
+  const main = batchItemDisplayName(item)
+  if (design && design !== main) return design
+  if (shortName && shortName !== main) return shortName
+  return ''
+}
+
+function batchItemSummary(item: TaskSkuItem): string {
+  const name = batchItemDisplayName(item) || `子项 ${item.sequenceNo ?? ''}`.trim()
+  const sub = batchItemSubText(item)
+  return sub ? `${name} · ${sub}` : name
+}
+
+function batchItemKey(item: TaskSkuItem, index: number): string {
+  return `${item.id ?? item.skuCode ?? item.sequenceNo ?? index}-${index}`
+}
+
+function batchPreviewItems(task: Task): TaskSkuItem[] {
+  return batchSkuItems(task).slice(0, batchPreviewLimit)
+}
+
+function taskCardTitle(task: Task): string {
+  const taskName = normalizeCardText(task.productName)
+  if (!isBatchCard(task)) return taskName || task.taskNo
+  return taskName || batchItemDisplayName(batchSkuItems(task)[0]) || task.taskNo
+}
+
+function filingStatusOfItem(item: TaskSkuItem): string {
+  return normalizeCardText(item.erp_sync_status || item.filing_status).toLowerCase()
+}
+
+function batchSkuSummary(task: Task): string {
+  const items = batchSkuItems(task)
+  const count = batchItemCount(task)
+  const filed = items.filter((item) => filingStatusOfItem(item) === 'filed').length
+  const failed = items.filter((item) => filingStatusOfItem(item) === 'filing_failed').length
+  if (filed > 0 || failed > 0) {
+    return `${count}个SKU · 已同步${filed} · 失败${failed}`
+  }
+  const firstSku = items.map((item) => normalizeCardText(item.skuCode)).find(Boolean)
+  return firstSku ? `${count}个SKU · ${firstSku}等` : `${count}个SKU`
+}
+
 function displaySku(task: Task): string {
+  if (isBatchCard(task)) return batchSkuSummary(task)
   return task.primarySkuCode ?? task.sku ?? '-'
+}
+
+function openBatchItemsModal(task: Task) {
+  batchItemsModalTask.value = task
+}
+
+function canCopyTaskField(value: string | null | undefined): boolean {
+  const text = String(value ?? '').trim()
+  return text !== '' && text !== '-' && text !== '—'
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    const ok = document.execCommand('copy')
+    if (!ok) throw new Error('copy command failed')
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
+function flashListActionSuccess(message: string) {
+  if (listActionSuccessTimer) {
+    clearTimeout(listActionSuccessTimer)
+    listActionSuccessTimer = null
+  }
+  listActionSuccess.value = message
+  listActionSuccessTimer = setTimeout(() => {
+    listActionSuccess.value = ''
+    listActionSuccessTimer = null
+  }, 1800)
+}
+
+async function copyTaskCardText(value: string | null | undefined, label: string) {
+  const text = String(value ?? '').trim()
+  if (!canCopyTaskField(text)) return
+  listActionError.value = ''
+  try {
+    await writeClipboardText(text)
+    flashListActionSuccess(`已复制${label}`)
+  } catch {
+    listActionError.value = `复制${label}失败，请手动选择复制`
+  }
+}
+
+function onTaskCardPointerDown(event: PointerEvent) {
+  taskCardPointerState.x = event.clientX
+  taskCardPointerState.y = event.clientY
+  taskCardPointerState.moved = false
+}
+
+function onTaskCardPointerMove(event: PointerEvent) {
+  if (taskCardPointerState.moved) return
+  const dx = Math.abs(event.clientX - taskCardPointerState.x)
+  const dy = Math.abs(event.clientY - taskCardPointerState.y)
+  taskCardPointerState.moved = dx > 4 || dy > 4
+}
+
+function hasActiveTextSelection(): boolean {
+  const selected = window.getSelection?.()?.toString().trim()
+  return Boolean(selected)
+}
+
+function shouldIgnoreTaskCardClick(event: MouseEvent): boolean {
+  if (taskCardPointerState.moved || hasActiveTextSelection()) return true
+  const target = event.target instanceof HTMLElement ? event.target : null
+  return Boolean(
+    target?.closest(
+      'button,a,input,label,select,textarea,[role="button"],[contenteditable="true"],[data-card-no-nav="true"]',
+    ),
+  )
+}
+
+function onTaskCardClick(event: MouseEvent, task: Task) {
+  if (shouldIgnoreTaskCardClick(event)) return
+  goDetail(task)
 }
 
 /** 池中「接单」仅面向设计侧；单靠 design:work 会漏掉只下发 task.asset_upload / task.design_submit 的普通设计师 */
@@ -766,31 +1179,45 @@ function userCanClaimFromDesignerPool(): boolean {
   return permissionsStore.hasAnyRole(['Designer', 'CustomizationOperator'])
 }
 
+function userCanClaimCustomizationFromPool(): boolean {
+  const hasRole = (roles: readonly string[]) => permissionsStore.hasAnyRole(roles)
+  if (userIsPureDesignerForCustomizationClaim(hasRole)) return false
+  return userCanActAsCustomizationClaimActor(hasRole, permissionsStore.isCustomizationOperator)
+}
+
+function taskCenterClaimGate(): {
+  canActAsCustomizationClaimActor: boolean
+  canClaimFromDesignerPool: boolean
+  activeTabIsPool: boolean
+} {
+  return {
+    canActAsCustomizationClaimActor: userCanClaimCustomizationFromPool(),
+    canClaimFromDesignerPool: userCanClaimFromDesignerPool(),
+    activeTabIsPool: activeTab.value === 'pool',
+  }
+}
+
 function canClaimTask(task: Task): boolean {
-  if (activeTab.value !== 'pool') return false
-  // 接单 = 设计师从池认领；仓库/审核等非设计岗位不因「未指派」Tab 而出现按钮
-  if (!userCanClaimFromDesignerPool()) return false
-  const status = String(task.status ?? '').toLowerCase()
-  const isPendingAssignStatus =
-    status === 'pendingassign' ||
-    status === 'pending_assign' ||
-    status === 'pendingclaim' ||
-    status === 'pending_claim'
-  return isPendingAssignStatus && !task.designerId && !task.currentHandlerId
+  return canClaimTaskFromCenter(task, taskCenterClaimGate())
 }
 
 async function claimTask(task: Task) {
   if (!canClaimTask(task) || claimingTaskId.value) return
-  const me = permissionsStore.currentUser
-  if (!me) return
-  const currentUserId = Number.parseInt(String(me.id ?? ''), 10)
-  if (Number.isNaN(currentUserId)) {
-    listActionError.value = '当前账号信息异常，无法接单，请重新登录后重试'
-    return
-  }
   claimingTaskId.value = task.id
   listActionError.value = ''
   try {
+    if (isCustomizationModuleClaimTask(task)) {
+      await tasksStore.claimCustomizationModule(task.id)
+      await refreshList(true)
+      return
+    }
+    const me = permissionsStore.currentUser
+    if (!me) return
+    const currentUserId = Number.parseInt(String(me.id ?? ''), 10)
+    if (Number.isNaN(currentUserId)) {
+      listActionError.value = '当前账号信息异常，无法接单，请重新登录后重试'
+      return
+    }
     await tasksApi.assign(task.id, {
       designer_id: currentUserId,
       designer_name: me.name,
@@ -808,7 +1235,7 @@ async function claimTask(task: Task) {
 }
 
 function formatDate(iso: string): string {
-  return formatDateOnlyBeijing(iso)
+  return formatTaskDueAtDisplay(iso)
 }
 
 function goCreate() {
@@ -819,6 +1246,12 @@ function goCreate() {
   } else {
     showCreateModal.value = true
   }
+}
+
+function goExcelAssistCreate() {
+  if (!can('task.create')) return
+  saveState()
+  void router.push({ name: 'TaskExcelAssistCreate' })
 }
 
 function goDetail(task: Task) {
@@ -833,15 +1266,19 @@ async function goToPage(p: number) {
   if (targetPage === page.value && tasksStore.list.length > 0) return
   page.value = targetPage
   saveState()
-  if (refreshingList.value) return
+  const seq = ++listActionSeq
   refreshingList.value = true
   listActionError.value = ''
   try {
     await tasksStore.loadTaskListForView(buildListParams({ page: targetPage }))
   } catch (error) {
-    listActionError.value = error instanceof Error ? error.message : '加载失败'
+    if (seq === listActionSeq) {
+      listActionError.value = error instanceof Error ? error.message : '加载失败'
+    }
   } finally {
-    refreshingList.value = false
+    if (seq === listActionSeq) {
+      refreshingList.value = false
+    }
   }
 }
 
@@ -856,7 +1293,7 @@ function jumpToPage() {
 
 /** 方案 B：服务端分页 + 搜索，统一走 loadTaskListForView */
 async function refreshList(_force?: boolean) {
-  if (refreshingList.value) return
+  const seq = ++listActionSeq
   refreshingList.value = true
   listActionError.value = ''
   try {
@@ -864,9 +1301,13 @@ async function refreshList(_force?: boolean) {
     saveState()
     await tasksStore.loadTaskListForView(buildListParams({ page: 1 }))
   } catch (error) {
-    listActionError.value = error instanceof Error ? error.message : '刷新任务列表失败'
+    if (seq === listActionSeq) {
+      listActionError.value = error instanceof Error ? error.message : '刷新任务列表失败'
+    }
   } finally {
-    refreshingList.value = false
+    if (seq === listActionSeq) {
+      refreshingList.value = false
+    }
   }
 }
 
@@ -881,7 +1322,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  listActionSeq += 1
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  if (listActionSuccessTimer) clearTimeout(listActionSuccessTimer)
 })
 
 // 根据路由控制创建任务弹窗（支持侧边栏 /tasks/create 与 ?create=1 深链接）
@@ -1004,9 +1447,13 @@ watch(
       warehouseStatus: queryString(query.warehouse_status),
       taskType: queryString(query.task_type),
       creatorId: queryString(query.creator_id),
+      assigneeId: queryHasNonEmptyParam(query, 'designer_id')
+        ? queryString(query.designer_id)
+        : '',
       priority: queryString(query.priority),
       dateFrom: queryString(query.date_from),
       dateTo: queryString(query.date_to),
+      overdueOnly: parseOverdueQuery(query),
     }
     const nextKeyword = queryString(query.q)
     let changed = false
@@ -1068,6 +1515,12 @@ watch(totalPages, (value) => {
   padding-top: 0.5rem;
   margin-top: 0.25rem;
 }
+.tab-status-scope-hint {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: rgb(100 116 139);
+}
 .task-tabs,
 .task-category-switch {
   display: inline-flex;
@@ -1097,7 +1550,7 @@ watch(totalPages, (value) => {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 800;
-  font-family: Manrope, sans-serif;
+  font-family: var(--yb-font-display);
   color: rgb(28 25 23);
 }
 .toolbar {
@@ -1133,6 +1586,16 @@ watch(totalPages, (value) => {
   border: 1px solid rgb(254 202 202);
   color: rgb(185 28 28);
   font-size: 0.8125rem;
+}
+.list-action-success {
+  margin: 0;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(187 247 208);
+  background: rgb(240 253 244);
+  color: rgb(22 101 52);
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 .batch-bar-slide-enter-active,
 .batch-bar-slide-leave-active {
@@ -1221,7 +1684,7 @@ watch(totalPages, (value) => {
   font-weight: 600;
   font-size: 0.75rem;
   color: rgb(51 65 85);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--yb-font-data);
   letter-spacing: 0.01em;
 }
 .card-product {
@@ -1356,5 +1819,1469 @@ watch(totalPages, (value) => {
 }
 .page-jump-input {
   width: 5rem;
+}
+
+/* Light admin task list skin. Style-only. */
+.task-list-view {
+  color: #374151;
+  background: transparent;
+}
+
+.header-card,
+.batch-action-bar,
+.task-card,
+.footer-card {
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+}
+
+.header-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.header-card::before {
+  display: none;
+}
+
+.page-title {
+  position: relative;
+  color: #111827 !important;
+  font-size: clamp(1.8rem, 2.6vw, 3rem);
+  font-weight: 900;
+}
+
+.filter-bar-wrap,
+.task-category-switch,
+.card-no-row {
+  border-color: #e5e7eb !important;
+}
+
+.task-tabs,
+.task-category-switch,
+.toolbar,
+.filter-bar-wrap,
+.page-header {
+  position: relative;
+}
+
+.task-tab-active,
+.task-category-active {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+}
+
+.task-card {
+  overflow: hidden;
+}
+
+.task-card:hover {
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+}
+
+.card-no,
+.card-product,
+.batch-count {
+  color: #111827 !important;
+}
+
+.card-meta-value,
+.card-updated,
+.card-due,
+.pager-info,
+.footer-card,
+.page-jump {
+  color: #6b7280 !important;
+}
+
+.card-meta-key {
+  color: #6b7280 !important;
+}
+
+.task-category-pill-normal,
+.task-category-pill-custom {
+  background: #f3f4f6 !important;
+  border-color: #e5e7eb !important;
+  color: #374151 !important;
+}
+
+.checkbox {
+  accent-color: #2563eb;
+}
+
+.list-action-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+/* Task center tokens: light admin system. */
+.task-list-view {
+  --tc-page: #f5f6f8;
+  --tc-panel: #ffffff;
+  --tc-panel-strong: #ffffff;
+  --tc-card: #ffffff;
+  --tc-card-soft: #f9fafb;
+  --tc-border: #e5e7eb;
+  --tc-border-strong: #d1d5db;
+  --tc-text: #111827;
+  --tc-muted: #6b7280;
+  --tc-faint: #9ca3af;
+  --tc-cyan: #2563eb;
+  --tc-blue: #2563eb;
+  --tc-green: #15803d;
+  --tc-amber: #b45309;
+  --tc-pink: #db2777;
+  background: #f5f6f8;
+}
+
+.header-card,
+.batch-action-bar,
+.footer-card {
+  border-color: var(--tc-border) !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+}
+
+.header-card {
+  border-radius: 1.1rem;
+  padding: 1.1rem;
+}
+
+.page-title {
+  font-size: clamp(1.75rem, 2.4vw, 2.85rem);
+  line-height: 1.05;
+}
+
+.toolbar {
+  align-items: stretch;
+}
+
+.search-input {
+  width: min(32rem, 100%) !important;
+}
+
+.task-category-switch,
+.task-tabs {
+  gap: 0.4rem;
+}
+
+.task-category-switch :deep(button),
+.task-tabs :deep(button),
+.toolbar :deep(button),
+.batch-action-bar :deep(button),
+.footer-card :deep(button) {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+}
+
+.task-tab-active,
+.task-category-active {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
+}
+
+.filter-bar-wrap {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+}
+
+.filter-bar-wrap :deep(.filter-bar) {
+  gap: 0.65rem;
+}
+
+.filter-bar-wrap :deep(.field-label) {
+  color: var(--tc-muted) !important;
+  font-weight: 750;
+}
+
+.task-cards {
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 0.9rem;
+}
+
+@media (min-width: 1600px) {
+  .task-cards {
+    grid-template-columns: repeat(auto-fill, minmax(390px, 1fr));
+  }
+}
+
+.task-card {
+  position: relative;
+  display: flex;
+  min-height: 16.2rem;
+  flex-direction: column;
+  gap: 0.48rem;
+  overflow: hidden;
+  border-color: var(--tc-border) !important;
+  border-radius: 0.95rem;
+  padding: 0.95rem;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+}
+
+.task-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #2563eb;
+  opacity: 1;
+}
+
+.task-card:hover {
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+}
+
+.task-card--selected {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  box-shadow: 0 0 0 1px #bfdbfe, 0 4px 12px rgba(37, 99, 235, 0.12) !important;
+}
+
+.task-card--selected::before {
+  width: 4px;
+  background: #2563eb;
+  opacity: 1;
+}
+
+.task-card--overdue {
+  border-color: #fcd34d !important;
+}
+
+.task-card--overdue::before {
+  background: #f59e0b;
+  opacity: 1;
+}
+
+.card-row-top {
+  position: relative;
+  z-index: 1;
+  min-height: 1.7rem;
+  margin-bottom: 0.2rem;
+}
+
+.card-check {
+  border-radius: 0.42rem;
+}
+
+.checkbox {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 0.28rem;
+  accent-color: var(--tc-cyan);
+}
+
+.card-tags {
+  gap: 0.35rem;
+}
+
+.card-tags :deep(*) {
+  max-width: 100%;
+}
+
+.task-category-pill,
+.card-tags :deep(.task-type-badge),
+.card-tags :deep(.workflow-lane-tag) {
+  border: 1px solid #e5e7eb !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+  font-weight: 850 !important;
+}
+
+.task-category-pill-normal {
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.task-category-pill-custom {
+  background: #fffbeb !important;
+  color: #b45309 !important;
+}
+
+.card-no-row {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 0.2rem;
+  border-color: rgba(210, 229, 255, 0.13) !important;
+}
+
+.card-no {
+  color: #6b7280 !important;
+  font-family: var(--yb-font-data);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.card-product {
+  position: relative;
+  z-index: 1;
+  min-height: calc(1.38em * 2);
+  color: #111827 !important;
+  font-size: 0.96rem;
+  font-weight: 850;
+  line-height: 1.38;
+}
+
+.card-meta-block {
+  position: relative;
+  z-index: 1;
+  margin-top: 0.2rem;
+  gap: 0.25rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.62rem;
+  background: #f9fafb;
+}
+
+.card-meta-line {
+  grid-template-columns: 2.6rem minmax(0, 1fr);
+  column-gap: 0.55rem;
+  font-size: 0.77rem;
+}
+
+.card-meta-key {
+  color: #6b7280 !important;
+  font-weight: 850;
+}
+
+.card-meta-value {
+  color: #374151 !important;
+  font-weight: 650;
+}
+
+.card-row-bottom {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+  gap: 0.55rem 0.75rem;
+  border-top: 1px solid rgba(210, 229, 255, 0.1);
+  padding-top: 0.55rem;
+}
+
+.card-updated,
+.card-due {
+  color: var(--tc-muted) !important;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.card-due-overdue {
+  color: #b45309 !important;
+  font-weight: 850;
+}
+
+.card-row-bottom :deep(button) {
+  min-height: 1.9rem;
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.footer-card {
+  border-radius: 1rem;
+}
+
+@media (max-width: 760px) {
+  .task-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .toolbar,
+  .page-header,
+  .footer-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-input {
+    width: 100% !important;
+  }
+}
+
+/* Task center correction: readable density and stable wide-screen columns. */
+.task-list-view {
+  gap: 1rem;
+  padding-inline: clamp(0.75rem, 1vw, 1.25rem);
+}
+
+.header-card {
+  gap: 0.82rem !important;
+  border-radius: 1rem !important;
+  padding: 1rem !important;
+}
+
+.header-card::before {
+  opacity: 0.48;
+}
+
+.page-header {
+  min-height: 3.1rem;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.7rem;
+}
+
+.page-title {
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem) !important;
+  line-height: 1.04 !important;
+}
+
+.page-header-actions :deep(button) {
+  min-height: 2.15rem;
+}
+
+.task-category-switch {
+  padding-top: 0.55rem !important;
+}
+
+.task-tabs {
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.55rem;
+}
+
+.task-category-switch :deep(button),
+.task-tabs :deep(button) {
+  min-height: 1.85rem;
+  padding-inline: 0.72rem;
+  font-size: 0.75rem;
+}
+
+.toolbar {
+  gap: 0.7rem;
+}
+
+.search-input {
+  width: min(27rem, 100%) !important;
+}
+
+.filter-bar-wrap {
+  margin-top: 0 !important;
+  padding-top: 0.75rem !important;
+}
+
+.filter-bar-wrap :deep(.filter-bar) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.25rem, 1fr));
+  gap: 0.68rem;
+  align-items: end;
+}
+
+.filter-bar-wrap :deep(.filter-field) {
+  min-width: 0;
+  width: auto;
+}
+
+.filter-bar-wrap :deep(.filter-field-wide) {
+  min-width: 0;
+}
+
+.filter-bar-wrap :deep(.filter-bar-trailing) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.task-cards {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 1rem !important;
+}
+
+@media (min-width: 900px) {
+  .task-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  .task-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1680px) {
+  .task-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+.task-card {
+  min-height: 14.8rem;
+  gap: 0.52rem;
+  border-radius: 1rem;
+  padding: 1rem;
+  background: #ffffff !important;
+}
+
+.task-card--claimable:not(.task-card--overdue)::before {
+  background: #2563eb;
+}
+
+.card-row-top {
+  min-height: 1.55rem;
+  margin-bottom: 0.05rem;
+}
+
+.card-no-row {
+  margin-bottom: 0.12rem;
+  padding-bottom: 0.5rem;
+}
+
+.card-no {
+  font-size: 0.76rem;
+  color: #6b7280 !important;
+}
+
+.card-product {
+  min-height: calc(1.42em * 2);
+  font-size: 1rem;
+  line-height: 1.42;
+}
+
+.card-meta-block {
+  margin-top: 0.12rem;
+  border-color: #e5e7eb;
+  padding: 0.58rem 0.66rem;
+  background: #f9fafb;
+}
+
+.card-meta-line {
+  grid-template-columns: 2.45rem minmax(0, 1fr);
+  font-size: 0.78rem;
+}
+
+.card-row-bottom {
+  min-height: 2rem;
+  padding-top: 0.58rem;
+}
+
+.card-row-bottom :deep(button) {
+  min-height: 1.85rem;
+  padding-inline: 0.72rem;
+}
+
+/* Task center defect pass: badges, filters, card scale, and icon/button language. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.advanced-filter-toggle {
+  min-width: 6.25rem;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+}
+
+.advanced-filter-toggle--active {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.filter-bar-wrap {
+  border-top: 1px solid #e5e7eb !important;
+  padding-top: 0.72rem !important;
+  background: #ffffff !important;
+}
+
+.filter-bar-wrap :deep(.filter-bar) {
+  grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
+  gap: 0.58rem;
+}
+
+.filter-bar-wrap :deep(.field-label) {
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+.filter-bar-wrap :deep(.filter-overdue) {
+  color: #cbd5e1;
+}
+
+.filter-bar-wrap :deep(.filter-overdue-input) {
+  accent-color: var(--tc-cyan);
+}
+
+.task-cards {
+  gap: 0.78rem !important;
+}
+
+.task-card {
+  min-height: 12.9rem;
+  gap: 0.4rem;
+  border-color: #e5e7eb !important;
+  border-radius: 0.86rem;
+  padding: 0.82rem;
+  background: #ffffff !important;
+}
+
+.task-card:hover {
+  border-color: #d1d5db !important;
+}
+
+.task-card--selected {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+}
+
+.card-tags {
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.task-category-pill,
+.card-tags :deep(.task-type-badge),
+.card-tags :deep(.lane-tag) {
+  display: inline-flex !important;
+  height: 1.25rem;
+  align-items: center;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 999px;
+  padding: 0 0.45rem !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+  font-size: 0.66rem !important;
+  font-weight: 750 !important;
+  line-height: 1 !important;
+}
+
+.task-category-pill-normal,
+.task-category-pill-custom,
+.card-tags :deep(.badge-new),
+.card-tags :deep(.badge-original),
+.card-tags :deep(.badge-purchase),
+.card-tags :deep(.badge-retouch),
+.card-tags :deep(.is-normal),
+.card-tags :deep(.is-customization) {
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.card-tags :deep(.badge-new) {
+  border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
+  color: #15803d !important;
+}
+
+.task-category-pill-custom,
+.card-tags :deep(.is-customization) {
+  border-color: #fcd34d !important;
+  background: #fffbeb !important;
+  color: #92400e !important;
+}
+
+.card-status-row {
+  gap: 0.32rem !important;
+  margin-top: 0 !important;
+}
+
+.card-status-row :deep(.inline-flex),
+.card-status-row :deep(.filing-status-badge) {
+  min-height: 1.28rem;
+  border-color: #e5e7eb !important;
+  border-radius: 999px;
+  padding: 0.1rem 0.48rem !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+  font-size: 0.68rem !important;
+  font-weight: 780 !important;
+  line-height: 1 !important;
+}
+
+.card-status-row :deep(.bg-emerald-100),
+.card-status-row :deep(.text-emerald-800),
+.card-status-row :deep(.border-emerald-200) {
+  border-color: #bbf7d0 !important;
+  background: #ecfdf5 !important;
+  color: #15803d !important;
+}
+
+.card-status-row :deep(.bg-blue-100),
+.card-status-row :deep(.text-blue-800),
+.card-status-row :deep(.border-blue-200) {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.card-status-row :deep(.bg-amber-100),
+.card-status-row :deep(.text-amber-800),
+.card-status-row :deep(.border-amber-200) {
+  border-color: #fde68a !important;
+  background: #fffbeb !important;
+  color: #b45309 !important;
+}
+
+.card-status-row :deep(.bg-red-100),
+.card-status-row :deep(.text-red-800),
+.card-status-row :deep(.border-red-200) {
+  border-color: #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+}
+
+.card-no-row {
+  padding-bottom: 0.4rem;
+}
+
+.card-no {
+  font-size: 0.72rem;
+}
+
+.card-product {
+  min-height: calc(1.36em * 2);
+  font-size: 0.93rem;
+  line-height: 1.36;
+}
+
+.card-meta-block {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.28rem 0.58rem;
+  border-color: #e5e7eb;
+  border-radius: 0.66rem;
+  padding: 0.48rem 0.56rem;
+  background: #f9fafb;
+}
+
+.card-meta-line {
+  min-width: 0;
+  grid-template-columns: 2.15rem minmax(0, 1fr);
+  column-gap: 0.38rem;
+  font-size: 0.7rem;
+}
+
+.card-row-bottom {
+  min-height: 1.55rem;
+  gap: 0.35rem 0.55rem;
+  padding-top: 0.42rem;
+}
+
+.card-updated,
+.card-due {
+  font-size: 0.68rem;
+}
+
+.page-header-actions :deep(button),
+.toolbar :deep(button),
+.card-row-bottom :deep(button),
+.footer-card :deep(button) {
+  border-radius: 0.62rem !important;
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: none !important;
+}
+
+.page-header-actions :deep(button:hover),
+.toolbar :deep(button:hover),
+.card-row-bottom :deep(button:hover),
+.footer-card :deep(button:hover) {
+  border-color: #d1d5db !important;
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+.page-header-actions :deep(button svg),
+.toolbar :deep(button svg),
+.footer-card :deep(button svg) {
+  width: 1rem;
+  height: 1rem;
+  color: #6b7280;
+  stroke-width: 2;
+}
+
+/* Narrow viewport repair: prevent the left rail from eating content. */
+.task-list-view,
+.header-card,
+.task-card,
+.card-product,
+.card-no-row,
+.card-meta-block,
+.card-row-bottom {
+  min-width: 0;
+}
+
+.task-list-view {
+  overflow-x: hidden;
+}
+
+.card-no,
+.card-meta-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-product {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .task-list-view {
+    gap: 0.75rem;
+    padding-inline: 0.35rem;
+  }
+
+  .header-card {
+    border-radius: 0.82rem !important;
+    padding: 0.72rem !important;
+  }
+
+  .page-header {
+    gap: 0.65rem;
+    align-items: flex-start;
+  }
+
+  .page-title {
+    font-size: clamp(1.75rem, 10vw, 2.35rem) !important;
+  }
+
+  .page-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .task-category-switch,
+  .task-tabs {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .task-category-switch::-webkit-scrollbar,
+  .task-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .toolbar {
+    align-items: stretch;
+  }
+
+  .search-input {
+    width: 100% !important;
+    flex: 1 1 100%;
+  }
+
+  .advanced-filter-toggle {
+    width: 100%;
+  }
+
+  .task-cards {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .task-card {
+    min-height: auto;
+    padding: 0.72rem;
+  }
+
+  .card-row-top {
+    align-items: flex-start;
+    gap: 0.45rem;
+  }
+
+  .card-tags {
+    min-width: 0;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+
+  .card-product {
+    display: -webkit-box;
+    min-height: auto;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .card-meta-block {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .card-meta-line {
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+  }
+
+  .card-row-bottom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* Edge and radius repair: keep a consistent gutter so rounded glass corners render cleanly. */
+.task-list-view {
+  padding-inline: clamp(0.45rem, 0.7vw, 0.75rem) !important;
+}
+
+.header-card,
+.task-card,
+.batch-action-bar,
+.footer-card {
+  isolation: isolate;
+  background-clip: padding-box !important;
+  contain: paint;
+  transform: translateZ(0);
+}
+
+.header-card::before,
+.task-card::before {
+  border-radius: inherit;
+}
+
+@media (max-width: 720px) {
+  .task-list-view {
+    padding-inline: 0.35rem !important;
+  }
+}
+
+/* Final task-center layout stabilization under the persistent sidebar. */
+.task-list-view {
+  padding-inline: 0 !important;
+}
+
+.task-cards {
+  grid-template-columns: minmax(0, 1fr) !important;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .task-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  .task-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1680px) {
+  .task-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 2200px) {
+  .task-cards {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+}
+
+.header-card,
+.task-card,
+.batch-action-bar,
+.footer-card {
+  overflow: hidden;
+  clip-path: inset(0 round 1rem);
+}
+
+.task-card {
+  clip-path: inset(0 round 0.86rem);
+  align-self: start;
+}
+
+.batch-action-bar,
+.footer-card {
+  clip-path: inset(0 round 1rem);
+}
+
+/* Legacy dark-corner patches neutralized for light shell. */
+.header-card,
+.batch-action-bar,
+.footer-card {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+}
+
+.header-card::before {
+  display: none !important;
+}
+
+.task-card {
+  background: #ffffff !important;
+}
+
+.task-card:hover {
+  background: #ffffff !important;
+}
+
+/* Phase 2: align task center with light shell — final overrides win over legacy dark patches. */
+.task-list-view {
+  margin: 0 !important;
+  min-height: auto;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.header-card,
+.batch-action-bar,
+.footer-card,
+.task-card {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.header-card::before {
+  display: none !important;
+}
+
+.page-header {
+  border-bottom-color: #e5e7eb !important;
+}
+
+.filter-bar-wrap {
+  background: #ffffff !important;
+}
+
+.advanced-filter-toggle {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+}
+
+.advanced-filter-toggle--active {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.task-card,
+.task-card:hover,
+.task-card--selected {
+  background: #ffffff !important;
+}
+
+.task-card--customization {
+  border-color: #fde68a !important;
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.96) 0%, rgba(255, 255, 255, 0.98) 58%, #ffffff 100%) !important;
+}
+
+.task-card--customization::before {
+  background: #d97706;
+  opacity: 1;
+}
+
+.task-card--customization:hover {
+  border-color: #fcd34d !important;
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.98) 0%, rgba(255, 255, 255, 0.99) 58%, #ffffff 100%) !important;
+}
+
+.task-card--customization.task-card--selected {
+  border-color: #93c5fd !important;
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.95) 0%, rgba(239, 246, 255, 0.96) 64%, #ffffff 100%) !important;
+}
+
+.task-card--customization.task-card--selected::before,
+.task-card--customization.task-card--claimable:not(.task-card--overdue)::before {
+  background: #d97706;
+}
+
+.task-card--customization.task-card--overdue {
+  border-color: #f59e0b !important;
+}
+
+.task-card--customization.task-card--overdue::before {
+  background: #f59e0b;
+}
+
+.card-no {
+  color: #6b7280 !important;
+}
+
+.card-product {
+  color: #111827 !important;
+}
+
+.card-meta-block {
+  background: #f9fafb !important;
+  border-color: #e5e7eb !important;
+}
+
+.card-status-row :deep(.inline-flex),
+.card-status-row :deep(.filing-status-badge),
+.card-status-row :deep(.bg-emerald-100),
+.card-status-row :deep(.bg-blue-100),
+.card-status-row :deep(.bg-amber-100),
+.card-status-row :deep(.bg-red-100) {
+  border-color: #e5e7eb !important;
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.card-status-row :deep(.text-emerald-800) {
+  color: #15803d !important;
+}
+
+.card-status-row :deep(.text-blue-800) {
+  color: #1d4ed8 !important;
+}
+
+.card-status-row :deep(.text-amber-800) {
+  color: #b45309 !important;
+}
+
+.card-status-row :deep(.text-red-800) {
+  color: #b91c1c !important;
+}
+
+.page-header-actions :deep(button),
+.toolbar :deep(button),
+.card-row-bottom :deep(button),
+.footer-card :deep(button) {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: none !important;
+}
+
+.page-header-actions :deep(button:hover),
+.toolbar :deep(button:hover),
+.card-row-bottom :deep(button:hover),
+.footer-card :deep(button:hover) {
+  border-color: #d1d5db !important;
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+.page-header-actions :deep(button svg),
+.toolbar :deep(button svg),
+.footer-card :deep(button svg) {
+  color: #6b7280;
+}
+
+/* Task center filter tabs: explicit default / hover / active (beats generic :deep(button) resets). */
+.task-category-switch :deep(button:not(.task-category-active)),
+.task-tabs :deep(button:not(.task-tab-active)) {
+  border: 1px solid #dbe3ef !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+}
+
+.task-category-switch :deep(button:not(.task-category-active):hover),
+.task-tabs :deep(button:not(.task-tab-active):hover) {
+  border-color: #93c5fd !important;
+  background: #f8fafc !important;
+  color: #1e293b !important;
+  box-shadow: none !important;
+}
+
+.task-category-switch :deep(button.task-category-active),
+.task-tabs :deep(button.task-tab-active) {
+  border: 1px solid #2563eb !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.16) !important;
+}
+
+.task-category-switch :deep(button.task-category-active:hover),
+.task-tabs :deep(button.task-tab-active:hover) {
+  border-color: #1d4ed8 !important;
+  background: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.22) !important;
+}
+
+/* Copy-friendly task cards: text can be selected; copy controls appear only on hover/focus. */
+.task-card {
+  user-select: text;
+}
+
+.task-card :deep(button),
+.task-card .card-check,
+.task-card .card-tags {
+  user-select: none;
+}
+
+.task-copy-zone {
+  position: relative;
+  min-width: 0;
+  cursor: text;
+  user-select: text;
+}
+
+.card-meta-value.task-copy-zone {
+  display: block;
+}
+
+.card-copy-toolbar {
+  position: absolute;
+  top: 2.55rem;
+  right: 0.75rem;
+  z-index: 8;
+  display: inline-flex;
+  gap: 0.2rem;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 999px;
+  padding: 0.16rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-0.25rem);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+
+.task-card:hover .card-copy-toolbar,
+.task-card:focus-within .card-copy-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.card-copy-toolbar button {
+  min-height: 1.45rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.14rem 0.46rem;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.card-copy-toolbar button:hover,
+.card-copy-toolbar button:focus-visible {
+  background: #dbeafe;
+  color: #1d4ed8;
+  outline: none;
+}
+
+.card-product-wrap {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.card-product-wrap .card-product {
+  flex: 1 1 auto;
+  min-height: calc(1.36em * 2);
+}
+
+.batch-count-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 1.25rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.batch-preview {
+  display: grid;
+  gap: 0.22rem;
+  margin-top: 0.45rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.66rem;
+  padding: 0.42rem 0.5rem;
+  background: #f8fafc;
+}
+
+.batch-preview-item {
+  display: grid;
+  grid-template-columns: 1.35rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.32rem;
+  min-width: 0;
+  color: #475569;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.batch-preview-index,
+.batch-modal-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-family: var(--yb-font-data);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.batch-preview-index {
+  width: 1.18rem;
+  height: 1.18rem;
+}
+
+.batch-preview-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #475569;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-preview-more {
+  justify-self: start;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.12rem 0.1rem;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.batch-preview-more:hover,
+.batch-preview-more:focus-visible {
+  color: #1d4ed8;
+  text-decoration: underline;
+  outline: none;
+}
+
+.batch-items-modal {
+  display: grid;
+  gap: 0.85rem;
+  padding-bottom: 0.75rem;
+}
+
+.batch-items-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.75rem;
+}
+
+.batch-items-modal-title {
+  min-width: 0;
+  margin: 0;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.batch-items-modal-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.batch-items-modal-row {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr) minmax(5rem, auto);
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.7rem;
+  padding: 0.62rem 0.7rem;
+  background: #ffffff;
+}
+
+.batch-modal-index {
+  width: 1.45rem;
+  height: 1.45rem;
+}
+
+.batch-modal-main {
+  min-width: 0;
+}
+
+.batch-modal-name,
+.batch-modal-sub {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-modal-name {
+  color: #111827;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.batch-modal-sub {
+  margin-top: 0.15rem;
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.batch-modal-sku {
+  justify-self: end;
+  min-width: 0;
+  max-width: 10rem;
+  overflow: hidden;
+  color: #475569;
+  font-family: var(--yb-font-data);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .card-copy-toolbar {
+    top: 2.35rem;
+    right: 0.55rem;
+  }
+
+  .card-product-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .batch-items-modal-header {
+    display: grid;
+  }
+
+  .batch-items-modal-row {
+    grid-template-columns: 1.8rem minmax(0, 1fr);
+  }
+
+  .batch-modal-sku {
+    grid-column: 2;
+    justify-self: start;
+    max-width: 100%;
+  }
 }
 </style>

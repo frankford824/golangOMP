@@ -10,6 +10,7 @@ func taskEventBasePayload(task *domain.Task) map[string]interface{} {
 	payload["task_no"] = task.TaskNo
 	payload["task_type"] = string(task.TaskType)
 	payload["source_mode"] = string(task.SourceMode)
+	payload["business_lane"] = string(domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired))
 	payload["workflow_lane"] = string(task.WorkflowLane())
 	payload["source_department"] = taskSourceDepartment(task)
 	payload["sku_code"] = task.SKUCode

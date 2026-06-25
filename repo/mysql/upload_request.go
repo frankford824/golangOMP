@@ -20,7 +20,7 @@ func NewUploadRequestRepo(db *DB) repo.UploadRequestRepo {
 }
 
 const uploadRequestSelectCols = `
-	request_id, owner_type, owner_id, task_id, asset_id, source_asset_id, target_sku_code, task_asset_type, storage_adapter, upload_mode, ref_type,
+	request_id, owner_type, owner_id, task_id, asset_id, source_asset_id, target_sku_code, retouch_requirement_id, task_asset_type, storage_adapter, upload_mode, ref_type,
 	file_name, mime_type, file_size, expected_size, checksum_hint, storage_provider, status, session_status, remote_upload_id, remote_file_id,
 	is_placeholder, bound_asset_id, bound_ref_id, created_by, expires_at, last_synced_at, remark, created_at, updated_at`
 
@@ -64,10 +64,10 @@ func (r *uploadRequestRepo) Create(ctx context.Context, tx repo.Tx, request *dom
 	}
 	_, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO upload_requests (
-			request_id, owner_type, owner_id, task_id, asset_id, source_asset_id, target_sku_code, task_asset_type, storage_adapter, upload_mode, ref_type,
+			request_id, owner_type, owner_id, task_id, asset_id, source_asset_id, target_sku_code, retouch_requirement_id, task_asset_type, storage_adapter, upload_mode, ref_type,
 			file_name, mime_type, file_size, expected_size, checksum_hint, storage_provider, status, session_status, remote_upload_id, remote_file_id,
 			is_placeholder, bound_asset_id, bound_ref_id, created_by, expires_at, last_synced_at, remark, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		requestID,
 		string(request.OwnerType),
 		request.OwnerID,
@@ -75,6 +75,7 @@ func (r *uploadRequestRepo) Create(ctx context.Context, tx repo.Tx, request *dom
 		toNullInt64(request.AssetID),
 		toNullInt64(request.SourceAssetID),
 		strings.TrimSpace(request.TargetSKUCode),
+		toNullInt64(request.RetouchRequirementID),
 		sql.NullString{String: taskAssetType, Valid: taskAssetType != ""},
 		string(request.StorageAdapter),
 		string(request.UploadMode),
@@ -290,7 +291,7 @@ func scanUploadRequest(scanner interface {
 }) (*domain.UploadRequest, error) {
 	request := &domain.UploadRequest{}
 	var taskAssetType sql.NullString
-	var taskID, assetID, sourceAssetID, fileSize, expectedSize, boundAssetID, createdBy sql.NullInt64
+	var taskID, assetID, sourceAssetID, retouchRequirementID, fileSize, expectedSize, boundAssetID, createdBy sql.NullInt64
 	var targetSKUCode, uploadMode, storageProvider, sessionStatus, remoteUploadID, remoteFileID sql.NullString
 	var expiresAt, lastSyncedAt sql.NullTime
 	if err := scanner.Scan(
@@ -301,6 +302,7 @@ func scanUploadRequest(scanner interface {
 		&assetID,
 		&sourceAssetID,
 		&targetSKUCode,
+		&retouchRequirementID,
 		&taskAssetType,
 		&request.StorageAdapter,
 		&uploadMode,
@@ -333,6 +335,7 @@ func scanUploadRequest(scanner interface {
 	if targetSKUCode.Valid {
 		request.TargetSKUCode = targetSKUCode.String
 	}
+	request.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 	request.FileSize = fromNullInt64(fileSize)
 	request.ExpectedSize = fromNullInt64(expectedSize)
 	request.BoundAssetID = fromNullInt64(boundAssetID)

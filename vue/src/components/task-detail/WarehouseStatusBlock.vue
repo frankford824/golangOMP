@@ -43,7 +43,10 @@
 import { ref, computed } from 'vue'
 import type { Task } from '@/domain/types/task'
 import { getWarehouseSubStatusLabel } from '@/domain/enums/task-status'
-import { getTaskActionAvailability } from '@/domain/task-action-availability'
+import {
+  getTaskActionAvailability,
+  shouldHideWarehouseReceiveActions,
+} from '@/domain/task-action-availability'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { usePermission } from '@/composables/usePermission'
 import { useSubmitGuard } from '@/composables/useSubmitGuard'
@@ -59,16 +62,22 @@ const actionError = ref('')
 // v4.2 修复：老板要求 + 仓库退回缺少真实接口时不再允许本地改状态
 const unsupportedWarehouseActionHint = '当前系统暂不支持仓库退回操作，请先在任务详情中查看状态。'
 
-const canReceive = computed(() =>
-  getTaskActionAvailability(props.task).canShowWarehouseActions &&
-  (props.task.warehouseSubStatus === 'PENDING_RECEIVE' ||
-    props.task.warehouseReceiveStatus === 'pending'),
-)
-const canReturn = computed(() =>
-  getTaskActionAvailability(props.task).canShowWarehouseActions &&
-  (props.task.warehouseSubStatus === 'RECEIVED' ||
-    props.task.warehouseReceiveStatus === 'received'),
-)
+const canReceive = computed(() => {
+  if (shouldHideWarehouseReceiveActions(props.task)) return false
+  return (
+    getTaskActionAvailability(props.task).canShowWarehouseActions &&
+    (props.task.warehouseSubStatus === 'PENDING_RECEIVE' ||
+      props.task.warehouseReceiveStatus === 'pending')
+  )
+})
+const canReturn = computed(() => {
+  if (shouldHideWarehouseReceiveActions(props.task)) return false
+  return (
+    getTaskActionAvailability(props.task).canShowWarehouseActions &&
+    (props.task.warehouseSubStatus === 'RECEIVED' ||
+      props.task.warehouseReceiveStatus === 'received')
+  )
+})
 
 const statusBadgeClass = computed(() => {
   const s = props.task.warehouseSubStatus

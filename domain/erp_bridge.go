@@ -23,6 +23,7 @@ type ERPProduct struct {
 	ImageURL         string   `json:"image_url"`
 	Price            *float64 `json:"price,omitempty"`
 	SPrice           *float64 `json:"s_price,omitempty"`
+	CostPrice        *float64 `json:"cost_price,omitempty"`
 	WMSCoID          string   `json:"wms_co_id,omitempty"`
 	Currency         string   `json:"currency,omitempty"`
 }
@@ -184,23 +185,34 @@ type ERPTaskBusinessInfoSnapshot struct {
 // audit/event context. It is intentionally additive and tolerant because the
 // upstream bridge may expose several response envelopes.
 type ERPProductUpsertResult struct {
-	ProductID        string   `json:"product_id,omitempty"`
-	SKUID            string   `json:"sku_id,omitempty"`
-	IID              string   `json:"i_id,omitempty"`
-	SKUCode          string   `json:"sku_code,omitempty"`
-	Name             string   `json:"name,omitempty"`
-	ProductName      string   `json:"product_name,omitempty"`
-	ShortName        string   `json:"short_name,omitempty"`
-	CategoryID       string   `json:"category_id,omitempty"`
-	CategoryCode     string   `json:"category_code,omitempty"`
-	CategoryName     string   `json:"category_name,omitempty"`
-	ProductShortName string   `json:"product_short_name,omitempty"`
-	SPrice           *float64 `json:"s_price,omitempty"`
-	WMSCoID          string   `json:"wms_co_id,omitempty"`
-	Route            string   `json:"route,omitempty"`
-	SyncLogID        string   `json:"sync_log_id,omitempty"`
-	Status           string   `json:"status,omitempty"`
-	Message          string   `json:"message,omitempty"`
+	ProductID        string                     `json:"product_id,omitempty"`
+	SKUID            string                     `json:"sku_id,omitempty"`
+	IID              string                     `json:"i_id,omitempty"`
+	SKUCode          string                     `json:"sku_code,omitempty"`
+	Name             string                     `json:"name,omitempty"`
+	ProductName      string                     `json:"product_name,omitempty"`
+	ShortName        string                     `json:"short_name,omitempty"`
+	CategoryID       string                     `json:"category_id,omitempty"`
+	CategoryCode     string                     `json:"category_code,omitempty"`
+	CategoryName     string                     `json:"category_name,omitempty"`
+	ProductShortName string                     `json:"product_short_name,omitempty"`
+	SPrice           *float64                   `json:"s_price,omitempty"`
+	WMSCoID          string                     `json:"wms_co_id,omitempty"`
+	Route            string                     `json:"route,omitempty"`
+	SyncLogID        string                     `json:"sync_log_id,omitempty"`
+	Status           string                     `json:"status,omitempty"`
+	Message          string                     `json:"message,omitempty"`
+	CostVerification *ERPCostVerificationResult `json:"cost_verification,omitempty"`
+}
+
+type ERPCostVerificationResult struct {
+	Status          string      `json:"status"`
+	SKUID           string      `json:"sku_id,omitempty"`
+	ExpectedCost    *float64    `json:"expected_cost,omitempty"`
+	ActualCost      *float64    `json:"actual_cost,omitempty"`
+	CheckedAt       *time.Time  `json:"checked_at,omitempty"`
+	Message         string      `json:"message,omitempty"`
+	ObservedProduct *ERPProduct `json:"observed_product,omitempty"`
 }
 
 // ERPItemStyleUpdatePayload maps to OpenWeb item style update route.
@@ -268,6 +280,35 @@ type ERPSyncLog struct {
 type ERPSyncLogListResponse struct {
 	Items      []*ERPSyncLog  `json:"items"`
 	Pagination PaginationMeta `json:"pagination"`
+}
+
+// ERPOrderActionLogFilter is the read-only facade contract for JST OpenWeb
+// /open/order/action/query.
+type ERPOrderActionLogFilter struct {
+	PageIndex     int    `json:"page_index"`
+	PageSize      int    `json:"page_size"`
+	ModifiedBegin string `json:"modified_begin,omitempty"`
+	ModifiedEnd   string `json:"modified_end,omitempty"`
+	InternalOID   string `json:"o_id,omitempty"`
+	OnlineSOID    string `json:"so_id,omitempty"`
+	ActionName    string `json:"action_name,omitempty"`
+}
+
+type ERPOrderActionLog struct {
+	InternalOID string          `json:"o_id,omitempty"`
+	OnlineSOID  string          `json:"so_id,omitempty"`
+	Action      string          `json:"action,omitempty"`
+	Content     string          `json:"content,omitempty"`
+	Operator    string          `json:"operator,omitempty"`
+	Modified    string          `json:"modified,omitempty"`
+	Raw         json.RawMessage `json:"raw,omitempty"`
+}
+
+type ERPOrderActionLogListResponse struct {
+	Items             []*ERPOrderActionLog    `json:"items"`
+	Pagination        PaginationMeta          `json:"pagination"`
+	NormalizedFilters ERPOrderActionLogFilter `json:"normalized_filters"`
+	Raw               json.RawMessage         `json:"raw,omitempty"`
 }
 
 type ERPProductBatchMutationItem struct {

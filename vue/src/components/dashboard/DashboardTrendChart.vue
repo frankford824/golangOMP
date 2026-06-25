@@ -16,7 +16,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
-import * as echarts from 'echarts'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+
+use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const props = withDefaults(
   defineProps<{
@@ -30,30 +35,46 @@ const props = withDefaults(
 )
 
 const chartRef = ref<HTMLDivElement | null>(null)
-let chart: echarts.ECharts | null = null
+let chart: ECharts | null = null
+const chartFontFamily = 'YB Source Han Sans'
 
-const option = computed(() => ({
-  color: ['#5470C6', '#91CC75', '#EE6666'],
+const option = computed<EChartsCoreOption>(() => ({
+  color: ['#6f8cff', '#8ee27f', '#ff6b6b'],
+  textStyle: { fontFamily: chartFontFamily },
   grid: { left: 8, right: 8, top: 36, bottom: 8, containLabel: true },
-  tooltip: { trigger: 'axis' as const },
+  tooltip: {
+    trigger: 'axis' as const,
+    className: 'echarts-tooltip',
+    backgroundColor: 'rgba(18, 20, 28, 0.94)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderWidth: 1,
+    padding: [10, 12],
+    textStyle: {
+      color: '#dce6ff',
+      fontFamily: chartFontFamily,
+      fontSize: 12,
+      fontWeight: 600,
+    },
+    extraCssText: 'border-radius:12px;box-shadow:0 18px 50px -24px rgba(0,0,0,.95);backdrop-filter:blur(18px);',
+  },
   legend: {
     data: ['新建', '完成', '当日截止'],
     type: 'scroll' as const,
     top: 0,
     left: 'center',
-    textStyle: { color: '#64748b', fontSize: 10 },
+    textStyle: { color: '#aab5cc', fontFamily: chartFontFamily, fontSize: 10 },
   },
   xAxis: {
     type: 'category' as const,
     data: props.labels,
-    axisLine: { lineStyle: { color: '#e2e8f0' } },
-    axisLabel: { color: '#64748b', fontSize: 10, interval: 0 },
+    axisLine: { lineStyle: { color: 'rgba(220, 230, 255, 0.42)' } },
+    axisLabel: { color: 'rgba(220, 230, 255, 0.56)', fontFamily: chartFontFamily, fontSize: 10, interval: 0 },
   },
   yAxis: {
     type: 'value' as const,
     minInterval: 1,
-    splitLine: { lineStyle: { color: '#f1f5f9' } },
-    axisLabel: { color: '#94a3b8', fontSize: 10 },
+    splitLine: { lineStyle: { color: 'rgba(220, 230, 255, 0.18)' } },
+    axisLabel: { color: 'rgba(220, 230, 255, 0.62)', fontFamily: chartFontFamily, fontSize: 10 },
   },
   series: [
     { name: '新建', type: 'bar' as const, data: props.created, barMaxWidth: 16 },
@@ -69,7 +90,7 @@ function resize() {
 function render() {
   if (!chartRef.value) return
   if (!chart) {
-    chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' })
+    chart = init(chartRef.value, undefined, { renderer: 'canvas' })
   }
   chart.setOption(option.value, { notMerge: true })
 }

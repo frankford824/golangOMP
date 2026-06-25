@@ -13,11 +13,20 @@ const (
 )
 
 type Service struct {
-	repo repo.SearchRepo
+	repo     repo.SearchRepo
+	external ExternalAssetSearchProvider
 }
 
 func NewService(repo repo.SearchRepo) *Service {
 	return &Service{repo: repo}
+}
+
+type ExternalAssetSearchProvider interface {
+	SearchGlobal(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error)
+}
+
+func (s *Service) SetExternalAssetSearchProvider(provider ExternalAssetSearchProvider) {
+	s.external = provider
 }
 
 func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q string, scope string, limit int) (*domain.SearchResultGroup, *domain.AppError) {
@@ -51,6 +60,9 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 		if result.Assets, err = s.repo.SearchAssets(ctx, q, limit); err != nil {
 			return nil, internalErr(err)
 		}
+		if err = s.appendExternalAssets(ctx, result, q, limit); err != nil {
+			return nil, internalErr(err)
+		}
 		if result.Products, err = s.repo.SearchProducts(ctx, q, limit); err != nil {
 			return nil, internalErr(err)
 		}
@@ -64,6 +76,9 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 		}
 	case "assets":
 		if result.Assets, err = s.repo.SearchAssets(ctx, q, limit); err != nil {
+			return nil, internalErr(err)
+		}
+		if err = s.appendExternalAssets(ctx, result, q, limit); err != nil {
 			return nil, internalErr(err)
 		}
 	case "products":
@@ -80,6 +95,21 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 	}
 	normalizeNilSlices(result)
 	return result, nil
+}
+
+func (s *Service) appendExternalAssets(ctx context.Context, result *domain.SearchResultGroup, q string, limit int) error {
+	if s.external == nil {
+		return nil
+	}
+	items, err := s.external.SearchGlobal(ctx, q, limit)
+	if err != nil {
+		return nil
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	result.Assets = append(result.Assets, items...)
+	return nil
 }
 
 func (s *Service) searchUsers(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchUser, error) {

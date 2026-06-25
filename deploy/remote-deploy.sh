@@ -66,11 +66,13 @@ done
 RUNTIME_ENV_PATH="${RUNTIME_ENV_PATH:-$REMOTE_BASE_DIR/shared/main.env}"
 BRIDGE_ENV_PATH="${BRIDGE_ENV_PATH:-$REMOTE_BASE_DIR/shared/bridge.env}"
 RELEASE_DIR="$REMOTE_BASE_DIR/releases/$VERSION"
+SHARED_AVATAR_DIR="$REMOTE_BASE_DIR/shared/avatars"
 
 mkdir -p \
   "$REMOTE_BASE_DIR/incoming" \
   "$REMOTE_BASE_DIR/releases" \
   "$REMOTE_BASE_DIR/shared" \
+  "$SHARED_AVATAR_DIR" \
   "$REMOTE_BASE_DIR/logs" \
   "$REMOTE_BASE_DIR/run" \
   "$REMOTE_BASE_DIR/scripts"
@@ -113,6 +115,9 @@ if [ "$PARALLEL" = "true" ]; then
   if main_env_uses_db_field_model "$CANDIDATE_ENV_PATH"; then
     remove_env_key "$CANDIDATE_ENV_PATH" "MYSQL_DSN"
   fi
+  if ! env_has_key "$CANDIDATE_ENV_PATH" "USER_AVATAR_DIR"; then
+    upsert_env_value "$CANDIDATE_ENV_PATH" "USER_AVATAR_DIR" "$SHARED_AVATAR_DIR"
+  fi
   if env_has_key "$CANDIDATE_ENV_PATH" "PORT"; then
     upsert_env_value "$CANDIDATE_ENV_PATH" "PORT" "$PARALLEL_PORT"
     remove_env_key "$CANDIDATE_ENV_PATH" "SERVER_PORT"
@@ -153,6 +158,9 @@ else
   if main_env_uses_db_field_model "$RUNTIME_ENV_PATH"; then
     remove_env_key "$RUNTIME_ENV_PATH" "MYSQL_DSN"
   fi
+  if ! env_has_key "$RUNTIME_ENV_PATH" "USER_AVATAR_DIR"; then
+    upsert_env_value "$RUNTIME_ENV_PATH" "USER_AVATAR_DIR" "$SHARED_AVATAR_DIR"
+  fi
   if main_env_uses_db_field_model "$BRIDGE_ENV_PATH"; then
     remove_env_key "$BRIDGE_ENV_PATH" "MYSQL_DSN"
   fi
@@ -161,6 +169,7 @@ else
     if [ "$MAIN_ENV_CREATED" = "true" ] || [ "$BRIDGE_ENV_CREATED" = "true" ]; then
       RESULT_STATUS="deployed_waiting_for_env"
     else
+      "$RELEASE_DIR/deploy/run-pending-migrations.sh" --base-dir "$REMOTE_BASE_DIR"
       "$REMOTE_BASE_DIR/scripts/stop-main.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
       "$REMOTE_BASE_DIR/scripts/stop-bridge.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
       "$REMOTE_BASE_DIR/scripts/start-main.sh" --base-dir "$REMOTE_BASE_DIR" --env-file "$RUNTIME_ENV_PATH" >/dev/null

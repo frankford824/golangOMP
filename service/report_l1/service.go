@@ -11,8 +11,15 @@ import (
 const CodeInvalidDateRange = "invalid_date_range"
 
 type Service struct {
-	repo     repo.ReportL1Repo
-	auditLog repo.PermissionLogRepo
+	repo                       repo.ReportL1Repo
+	kpiAnalysisRepo            repo.KPIAnalysisRepo
+	kpiAnalysisGenerator       KPIAnalysisGenerator
+	businessTrendRepo          repo.BusinessTrendRepo
+	businessTrendGenerator     BusinessTrendAnalysisGenerator
+	businessTrendProviders     []TrendProvider
+	businessTrendProviderNames []string
+	businessTrendJobs          *businessTrendDeepJobStore
+	auditLog                   repo.PermissionLogRepo
 }
 
 type Option func(*Service)
@@ -21,8 +28,31 @@ func WithPermissionLogRepo(auditLog repo.PermissionLogRepo) Option {
 	return func(s *Service) { s.auditLog = auditLog }
 }
 
+func WithKPIAnalysisRepo(kpiRepo repo.KPIAnalysisRepo) Option {
+	return func(s *Service) { s.kpiAnalysisRepo = kpiRepo }
+}
+
+func WithKPIAnalysisGenerator(generator KPIAnalysisGenerator) Option {
+	return func(s *Service) { s.kpiAnalysisGenerator = generator }
+}
+
+func WithBusinessTrendRepo(trendRepo repo.BusinessTrendRepo) Option {
+	return func(s *Service) { s.businessTrendRepo = trendRepo }
+}
+
+func WithBusinessTrendGenerator(generator BusinessTrendAnalysisGenerator) Option {
+	return func(s *Service) { s.businessTrendGenerator = generator }
+}
+
+func WithBusinessTrendProviders(providers []TrendProvider, expectedNames []string) Option {
+	return func(s *Service) {
+		s.businessTrendProviders = append([]TrendProvider{}, providers...)
+		s.businessTrendProviderNames = append([]string{}, expectedNames...)
+	}
+}
+
 func NewService(repo repo.ReportL1Repo, opts ...Option) *Service {
-	s := &Service{repo: repo}
+	s := &Service{repo: repo, businessTrendJobs: newBusinessTrendDeepJobStore()}
 	for _, opt := range opts {
 		opt(s)
 	}

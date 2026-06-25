@@ -78,9 +78,20 @@ func (s *ClaimService) Claim(ctx context.Context, actor domain.RequestActor, tas
 	if confirmPoolTeamCode == "" && tm.PoolTeamCode != nil {
 		confirmPoolTeamCode = *tm.PoolTeamCode
 	}
+	moduleKey = strings.TrimSpace(moduleKey)
+	if moduleKey == domain.ModuleKeyCustomization {
+		if dec := validateCustomizationModuleClaim(actor, task, tm); !dec.OK {
+			return dec
+		}
+	}
 	claimedTeam := matchedTeam(actor, confirmPoolTeamCode)
 	if claimedTeam == "" {
-		return permission.Deny(domain.DenyModuleOutOfScope, "actor is not in pool team")
+		if moduleKey == domain.ModuleKeyCustomization && claimActorMayBypassCustomizationPoolScope(actor) {
+			claimedTeam = resolveClaimedTeamFallback(confirmPoolTeamCode, tm)
+		}
+		if claimedTeam == "" {
+			return permission.Deny(domain.DenyModuleOutOfScope, "actor is not in pool team")
+		}
 	}
 	snapshot := actorSnapshot(actor)
 	err = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
@@ -148,9 +159,12 @@ func (s *ClaimService) claimTaskIfUnassigned(ctx context.Context, tx repo.Tx, ta
 			return err
 		}
 	}
-	if strings.TrimSpace(moduleKey) == domain.ModuleKeyDesign && task.DesignerID == nil {
-		if err := updater.UpdateDesigner(ctx, tx, task.ID, &actorID); err != nil {
-			return err
+	switch strings.TrimSpace(moduleKey) {
+	case domain.ModuleKeyDesign, domain.ModuleKeyCustomization:
+		if task.DesignerID == nil {
+			if err := updater.UpdateDesigner(ctx, tx, task.ID, &actorID); err != nil {
+				return err
+			}
 		}
 	}
 	if task.TaskStatus == domain.TaskStatusPendingAssign {
@@ -201,6 +215,72 @@ func matchedTeam(actor domain.RequestActor, pool string) string {
 				return team
 			}
 		}
+	}
+	return ""
+}
+
+func validateCustomizationModuleClaim(actor domain.RequestActor, task *domain.Task, tm *domain.TaskModule) permission.Decision {
+	if task == nil || tm == nil {
+		return permission.Deny(domain.ErrCodeInternalError, "task or module is missing")
+	}
+	if !task.CustomizationRequired {
+		return permission.Deny(domain.DenyModuleActionRoleDenied, "customization module claim requires a customization task")
+	}
+	if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
+		return permission.Deny(domain.DenyModuleStateMismatch, "customization module claim requires PendingCustomizationProduction")
+	}
+	if tm.State != domain.ModuleStatePendingClaim {
+		return permission.Deny(domain.DenyModuleStateMismatch, "customization module is not pending claim")
+	}
+	if claimActorIsPureDesigner(actor) {
+		return permission.Deny(domain.DenyModuleActionRoleDenied, "designer role cannot claim customization module")
+	}
+	if !claimActorMayClaimCustomizationModule(actor) {
+		return permission.Deny(domain.DenyModuleActionRoleDenied, "customization module claim requires customization operator or admin role")
+	}
+	return permission.Allow()
+}
+
+func claimActorMayClaimCustomizationModule(actor domain.RequestActor) bool {
+	return claimActorMayBypassCustomizationPoolScope(actor) ||
+		claimActorHasRole(actor, domain.RoleCustomizationOperator)
+}
+
+func claimActorMayBypassCustomizationPoolScope(actor domain.RequestActor) bool {
+	return claimActorHasAnyRole(actor, domain.RoleAdmin, domain.RoleSuperAdmin)
+}
+
+func claimActorIsPureDesigner(actor domain.RequestActor) bool {
+	if !claimActorHasRole(actor, domain.RoleDesigner) {
+		return false
+	}
+	return !claimActorMayClaimCustomizationModule(actor)
+}
+
+func claimActorHasRole(actor domain.RequestActor, target domain.Role) bool {
+	for _, role := range actor.Roles {
+		if role == target {
+			return true
+		}
+	}
+	return false
+}
+
+func claimActorHasAnyRole(actor domain.RequestActor, targets ...domain.Role) bool {
+	for _, target := range targets {
+		if claimActorHasRole(actor, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveClaimedTeamFallback(confirmPoolTeamCode string, tm *domain.TaskModule) string {
+	if code := strings.TrimSpace(confirmPoolTeamCode); code != "" {
+		return code
+	}
+	if tm != nil && tm.PoolTeamCode != nil {
+		return strings.TrimSpace(*tm.PoolTeamCode)
 	}
 	return ""
 }

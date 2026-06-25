@@ -32,6 +32,21 @@ export default defineConfig(({ mode }) => {
     build: {
       // `vite build --mode test` 输出到 `dist-test/`，避免覆盖生产 `dist/`
       outDir: mode === 'test' ? 'dist-test' : 'dist',
+      chunkSizeWarningLimit: 1100,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (id.includes('/echarts/')) return 'charts'
+            if (id.includes('/exceljs/')) return 'excel'
+            if (id.includes('/jszip/')) return 'zip'
+            if (id.includes('/vue/') || id.includes('/vue-router/') || id.includes('/pinia/')) {
+              return 'vue-vendor'
+            }
+            return 'vendor'
+          },
+        },
+      },
     },
   }
 })

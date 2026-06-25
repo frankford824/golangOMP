@@ -2,47 +2,73 @@
   <div ref="rootEl" class="relative">
     <button
       type="button"
-      class="inline-flex items-center rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs font-bold text-neutral-900 shadow-sm transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/35 focus-visible:ring-offset-2"
+      class="avatar-trigger"
       :aria-expanded="open"
       aria-haspopup="menu"
       :aria-controls="open ? userMenuId : undefined"
       @click="open = !open"
     >
-      {{ userName }}
+      <span class="avatar-trigger__photo">
+        <img v-if="userAvatar" :src="userAvatar" alt="头像" />
+        <span v-else>{{ userInitial }}</span>
+      </span>
+      <span class="avatar-trigger__name">{{ userName }}</span>
+      <ChevronDown :size="15" aria-hidden="true" />
     </button>
-    <div
-      v-show="open"
-      :id="userMenuId"
-      role="menu"
-      class="avatar-dropdown-menu absolute right-0 top-[calc(100%+10px)] z-[200] flex w-[17rem] flex-col gap-1.5 rounded-[1.25rem] border border-neutral-200/90 bg-white px-2 pb-2 pt-2 shadow-[var(--v1-xhs-card-shadow)]"
-    >
-      <router-link
-        v-for="item in accountItems"
-        :key="item.to"
-        role="menuitem"
-        :to="item.to"
-        :class="['avatar-menu-row', { 'avatar-menu-row--current': linkIsCurrent(item.to) }]"
-        active-class=""
-        exact-active-class=""
-        @click="closeMenu"
-      >
-        {{ item.label }}
-      </router-link>
-      <div class="avatar-menu-sep avatar-menu-sep--subtle" aria-hidden="true" />
-      <router-link
-        v-for="item in taskItems"
-        :key="item.to"
-        role="menuitem"
-        :to="item.to"
-        :class="['avatar-menu-row', { 'avatar-menu-row--current': linkIsCurrent(item.to) }]"
-        active-class=""
-        exact-active-class=""
-        @click="closeMenu"
-      >
-        {{ item.label }}
-      </router-link>
-      <div class="avatar-menu-sep" aria-hidden="true" />
-      <button type="button" role="menuitem" class="avatar-menu-logout" @click="logout">退出</button>
+
+    <div v-show="open" :id="userMenuId" role="menu" class="avatar-dropdown-menu">
+      <div class="avatar-summary" aria-hidden="true">
+        <span class="avatar-summary__photo">
+          <img v-if="userAvatar" :src="userAvatar" alt="" />
+          <span v-else>{{ userInitial }}</span>
+        </span>
+        <div>
+          <strong>{{ userName }}</strong>
+          <small>{{ accountLabel }}</small>
+        </div>
+      </div>
+
+      <section class="avatar-menu-group" aria-label="账户">
+        <router-link
+          v-for="item in accountItems"
+          :key="item.to"
+          role="menuitem"
+          :to="item.to"
+          :class="['avatar-menu-row', { 'avatar-menu-row--current': linkIsCurrent(item.to) }]"
+          active-class=""
+          exact-active-class=""
+          @click="closeMenu"
+        >
+          <component :is="item.icon" :size="15" aria-hidden="true" />
+          <span>{{ item.label }}</span>
+        </router-link>
+      </section>
+
+      <section class="avatar-task-group" aria-label="我的任务">
+        <div class="avatar-task-group__title">
+          <ClipboardList :size="15" aria-hidden="true" />
+          <span>我的任务</span>
+        </div>
+        <div class="avatar-task-tabs">
+          <router-link
+            v-for="item in taskStatusItems"
+            :key="item.key"
+            role="menuitem"
+            :to="item.to"
+            :class="{ 'avatar-task-tabs__item--current': taskItemIsCurrent(item) }"
+            active-class=""
+            exact-active-class=""
+            @click="closeMenu"
+          >
+            {{ item.label }}
+          </router-link>
+        </div>
+      </section>
+
+      <button type="button" role="menuitem" class="avatar-menu-logout" @click="logout">
+        <LogOut :size="15" aria-hidden="true" />
+        <span>退出登录</span>
+      </button>
     </div>
   </div>
 </template>
@@ -50,7 +76,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import {
+  Bell,
+  Building2,
+  ChevronDown,
+  ClipboardList,
+  LockKeyhole,
+  LogOut,
+  UserRound,
+} from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
+
+interface TaskStatusItem {
+  key: string
+  label: string
+  to: string
+  status?: string
+  draft?: boolean
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -60,29 +103,58 @@ const rootEl = ref<HTMLElement | null>(null)
 const userMenuId = 'avatar-user-menu'
 
 const userName = computed(() => permissionsStore.currentUser?.name ?? '未登录')
+const userAvatar = computed(() => permissionsStore.currentUser?.avatarUrl || permissionsStore.currentUser?.avatar || '')
+const userInitial = computed(() => userName.value.trim().slice(0, 1).toUpperCase() || '我')
+const accountLabel = computed(
+  () => permissionsStore.currentUser?.account || permissionsStore.currentUser?.username || permissionsStore.currentUser?.id || '账号',
+)
 
-/** 与 pencil 稿一致：账户与任务分区，避免整块视觉混在一团 */
 const accountItems = [
-  { label: '个人中心', to: '/me' },
-  { label: '安全设置', to: '/me/security' },
-  { label: '我的组织', to: '/me/org' },
-  { label: '通知中心', to: '/me/notifications' },
+  { label: '个人中心', to: '/me', icon: UserRound },
+  { label: '安全设置', to: '/me/security', icon: LockKeyhole },
+  { label: '我的组织', to: '/me/org', icon: Building2 },
+  { label: '通知中心', to: '/me/notifications', icon: Bell },
 ]
 
-const taskItems = [
-  { label: '我的任务 · 进行中', to: '/tasks?tab=mine&status=InProgress' },
-  { label: '我的任务 · 已完成', to: '/tasks?tab=mine&status=Completed' },
-  { label: '我的任务 · 已终止', to: '/tasks?tab=terminated&status=Cancelled' },
-  { label: '我的任务 · 草稿', to: '/me/task-drafts' },
+const taskStatusItems: TaskStatusItem[] = [
+  { key: 'all', label: '全部', to: '/tasks?tab=mine' },
+  { key: 'progress', label: '进行中', to: '/tasks?tab=mine&status=InProgress', status: 'InProgress' },
+  {
+    key: 'audit',
+    label: '待审核',
+    to: '/tasks?tab=mine&status=PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
+    status: 'PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
+  },
+  {
+    key: 'warehouse',
+    label: '待仓库',
+    to: '/tasks?tab=mine&status=PendingWarehouseQC,PendingWarehouseReceive',
+    status: 'PendingWarehouseQC,PendingWarehouseReceive',
+  },
+  { key: 'completed', label: '已完成', to: '/tasks?tab=mine&status=Completed', status: 'Completed' },
+  { key: 'cancelled', label: '已终止', to: '/tasks?tab=mine&status=Cancelled', status: 'Cancelled' },
+  { key: 'drafts', label: '草稿', to: '/me/task-drafts', draft: true },
 ]
 
-/** 仅当前地址与链接解析结果 fullPath 完全一致时高亮，避免出现多个「我的任务」同时带左条 */
 function linkIsCurrent(to: string): boolean {
   try {
     return router.resolve(to).fullPath === route.fullPath
   } catch {
     return false
   }
+}
+
+function normalizeStatus(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(',')
+  return String(value ?? '')
+}
+
+function taskItemIsCurrent(item: TaskStatusItem): boolean {
+  if (item.draft) return route.path === '/me/task-drafts'
+  if (route.path !== '/tasks' || route.query.tab !== 'mine') return false
+  const currentStatus = normalizeStatus(route.query.status)
+  if (!item.status) return currentStatus === ''
+  return currentStatus === item.status
 }
 
 function closeMenu(): void {
@@ -130,90 +202,248 @@ function logout(): void {
 </script>
 
 <style scoped>
-/* designs/xiaohongshu-menu.pen：顶栏胶囊石灰中性；品牌色用于下拉当前行与面板内主操作 */
-.avatar-dropdown-menu :deep(a.avatar-menu-row) {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  position: relative;
-  text-decoration: none !important;
-  border-radius: 0.875rem;
-  border: 1px solid #ebebee;
+.avatar-trigger {
+  display: inline-flex;
+  max-width: 220px;
+  height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
   background: #fff;
-  padding: 0.5rem 0.7rem;
-  padding-left: 0.75rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: left;
-  color: #1c1c1e !important;
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease;
-}
-
-.avatar-dropdown-menu :deep(a.avatar-menu-row:hover),
-.avatar-dropdown-menu :deep(a.avatar-menu-row:focus-visible) {
-  outline: none;
-  text-decoration: none !important;
-  background-color: var(--v1-xhs-brand-soft);
-  border-color: var(--v1-xhs-brand-border);
-  color: #1c1c1e !important;
-}
-
-.avatar-dropdown-menu :deep(a.avatar-menu-row--current) {
-  background-color: var(--v1-xhs-brand-soft);
-  border-color: var(--v1-xhs-brand-border-strong);
+  padding: 3px 10px 3px 4px;
+  color: #0f172a;
+  font-size: 13px;
   font-weight: 800;
-  color: #1c1c1e !important;
-  padding-left: 0.85rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
 }
 
-.avatar-dropdown-menu :deep(a.avatar-menu-row--current::before) {
-  content: '';
+.avatar-trigger:hover,
+.avatar-trigger:focus-visible {
+  border-color: #bfdbfe;
+  background: #f8fafc;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  outline: none;
+}
+
+.avatar-trigger__photo,
+.avatar-summary__photo {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #14b8a6);
+  color: #fff;
+  font-weight: 900;
+}
+
+.avatar-trigger__photo {
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+}
+
+.avatar-summary__photo {
+  width: 42px;
+  height: 42px;
+  font-size: 16px;
+}
+
+.avatar-trigger__photo img,
+.avatar-summary__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-trigger__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar-dropdown-menu {
   position: absolute;
-  left: 0.4rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 0.9375rem;
-  border-radius: 1px;
-  background: var(--v1-xhs-brand);
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 7300;
+  display: flex;
+  width: 21rem;
+  max-width: min(92vw, 21rem);
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: #fff;
+  padding: 12px;
+  box-shadow: 0 22px 44px -20px rgba(15, 23, 42, 0.24);
 }
 
-.avatar-menu-sep {
-  margin-top: 0.05rem;
-  margin-bottom: 0;
-  border-top: 1px solid #e8e8ec;
+.avatar-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 10px;
 }
 
-.avatar-menu-sep--subtle {
-  opacity: 1;
+.avatar-summary div {
+  min-width: 0;
+}
+
+.avatar-summary strong,
+.avatar-summary small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar-summary strong {
+  color: var(--v1-text-primary);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.avatar-summary small {
+  margin-top: 3px;
+  color: var(--v1-text-secondary);
+  font-size: 12px;
+}
+
+.avatar-menu-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.avatar-menu-row,
+.avatar-menu-logout,
+.avatar-task-tabs a {
+  text-decoration: none !important;
+}
+
+.avatar-menu-row {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 9px 10px;
+  color: #334155 !important;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.avatar-menu-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar-menu-row:hover,
+.avatar-menu-row:focus-visible,
+.avatar-menu-row--current {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8 !important;
+  outline: none;
+}
+
+.avatar-task-group {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.avatar-task-group__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.avatar-task-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.avatar-task-tabs a {
+  display: inline-flex;
+  min-height: 30px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0 8px;
+  color: #475569 !important;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.avatar-task-tabs a:hover,
+.avatar-task-tabs a:focus-visible,
+.avatar-task-tabs__item--current {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  outline: none;
 }
 
 .avatar-menu-logout {
-  display: block;
+  display: inline-flex;
   width: 100%;
-  box-sizing: border-box;
-  cursor: pointer;
-  border-radius: 0.875rem;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   border: 1px solid #fecaca;
+  border-radius: 10px;
   background: #fff;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: var(--v1-danger);
-  text-align: left;
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .avatar-menu-logout:hover,
 .avatar-menu-logout:focus-visible {
-  outline: none;
-  border-color: #f87171;
+  border-color: #fca5a5;
   background: #fef2f2;
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .avatar-trigger {
+    max-width: 172px;
+  }
+
+  .avatar-dropdown-menu {
+    right: -8px;
+  }
+
+  .avatar-menu-group,
+  .avatar-task-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

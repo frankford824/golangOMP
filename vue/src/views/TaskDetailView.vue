@@ -52,6 +52,13 @@
           <span>{{ createProcurementSyncWarningMessage }}</span>
           <button type="button" class="banner-dismiss" @click="dismissCreateBanner">×</button>
         </div>
+        <div
+          v-if="createRetouchRequirementUploadWarningVisible"
+          class="create-success-banner banner-warning"
+        >
+          <span>{{ createRetouchRequirementUploadWarningMessage }}</span>
+          <button type="button" class="banner-dismiss" @click="dismissCreateBanner">×</button>
+        </div>
         <!-- V4：圆角卡片 + 模块内就地操作；右侧仅动态与评论 -->
         <div class="detail-v6-surface">
         <!-- Pencil 对齐：任务身份 + 流程 + 全局动作 -->
@@ -108,6 +115,7 @@
                   size="sm"
                   @click="navigateBackToTaskList"
                 >
+                  <ArrowLeft class="detail-top-chip-icon" aria-hidden="true" />
                   返回
                 </BaseButton>
                 <BaseButton
@@ -116,7 +124,23 @@
                   variant="ghost"
                   size="sm"
                   @click="refreshDetail"
-                >刷新</BaseButton>
+                >
+                  <RotateCcw class="detail-top-chip-icon" aria-hidden="true" />
+                  刷新
+                </BaseButton>
+                <BaseButton
+                  v-if="task && !isTempId"
+                  type="button"
+                  class="detail-top-chip"
+                  variant="ghost"
+                  size="sm"
+                  :loading="aiSummaryLoading"
+                  :disabled="aiSummaryLoading"
+                  @click="openAiSummary"
+                >
+                  <Sparkles class="detail-top-chip-icon" aria-hidden="true" />
+                  AI 摘要
+                </BaseButton>
                 <BaseButton
                   v-if="task && !isTempId"
                   type="button"
@@ -125,7 +149,21 @@
                   size="sm"
                   @click="eventLogOpen = true"
                 >
+                  <ScrollText class="detail-top-chip-icon" aria-hidden="true" />
                   事件日志
+                </BaseButton>
+                <BaseButton
+                  v-if="showErpFilingRetryButton"
+                  type="button"
+                  class="detail-top-chip"
+                  variant="secondary"
+                  size="sm"
+                  :loading="erpFilingRetrying"
+                  :disabled="erpFilingRetrying"
+                  @click="onErpFilingRetry"
+                >
+                  <RefreshCcw class="detail-top-chip-icon" aria-hidden="true" />
+                  重试同步
                 </BaseButton>
                 <BaseButton
                   v-if="canAccessPage('task_assets')"
@@ -135,6 +173,7 @@
                   size="sm"
                   @click="openTaskAssetsPage"
                 >
+                  <Images class="detail-top-chip-icon" aria-hidden="true" />
                   任务资产页
                 </BaseButton>
                 <button
@@ -143,6 +182,7 @@
                   class="detail-top-chip detail-top-chip--danger"
                   @click="openCancel = true"
                 >
+                  <XCircle class="detail-top-chip-icon" aria-hidden="true" />
                   终止任务
                 </button>
                 <button
@@ -151,12 +191,39 @@
                   class="detail-top-chip detail-top-chip--primary"
                   @click="doClose"
                 >
+                  <CheckCircle2 class="detail-top-chip-icon" aria-hidden="true" />
                   结单
                 </button>
               </div>
             </div>
           </div>
         </header>
+
+        <section v-if="taskPredictionSuggestions.length" class="detail-prediction-panel">
+          <div class="detail-prediction-head">
+            <div>
+              <p>预测提示</p>
+              <h2>系统建议的下一步</h2>
+            </div>
+            <button type="button" :disabled="taskPredictionLoading" @click="loadTaskPredictions">
+              {{ taskPredictionLoading ? '刷新中' : '刷新提示' }}
+            </button>
+          </div>
+          <div class="detail-prediction-list">
+            <button
+              v-for="item in taskPredictionSuggestions"
+              :key="item.id"
+              type="button"
+              class="detail-prediction-item"
+              @click="handleTaskPrediction(item)"
+            >
+              <span>{{ item.source || '流程状态' }}</span>
+              <strong>{{ item.title }}</strong>
+              <small v-if="item.detail">{{ item.detail }}</small>
+              <em>{{ item.action_label || '查看' }}</em>
+            </button>
+          </div>
+        </section>
 
         <!-- 主区 V3：业务模块纵向展开，操作留在对应模块内部 -->
         <main class="detail-main detail-main-v6">
@@ -247,26 +314,49 @@
                     </article>
 
                     <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">需求说明</p>
+                      <p class="detail-v3-card-kicker">{{ detailRequirementKicker }}</p>
                       <p class="detail-v3-card-text">{{ detailRequirementLabel }}</p>
                     </article>
+
+                    <RetouchRequirementsBlock
+                      v-if="showRetouchRequirementsBlock"
+                      :requirements="task!.retouchRequirements ?? []"
+                      :task-title="detailRetouchDownloadTitle"
+                      class="detail-v3-retouch-requirements"
+                    />
 
                     <article class="detail-v3-info-card">
                       <p class="detail-v3-card-kicker">运营备注</p>
                       <p class="detail-v3-card-text">{{ detailNoteLabel }}</p>
                     </article>
 
-                    <article class="detail-v3-info-card detail-v3-info-card--refs">
+                    <article
+                      class="detail-v3-info-card detail-v3-info-card--refs"
+                      :class="{ 'detail-v3-file-drop-active': isActiveDetailUploadTarget('reference') }"
+                      :tabindex="canUploadReferenceFromOps ? 0 : undefined"
+                      @focusin="activateDetailFileReceiver('reference')"
+                      @pointerenter="activateDetailFileReceiver('reference')"
+                      @dragover.prevent="onDetailUploadDragOver('reference', $event)"
+                      @drop.prevent="onDetailUploadDrop('reference', $event)"
+                      @paste="onDetailUploadPaste('reference', $event)"
+                    >
                       <p class="detail-v3-card-kicker">
                         {{ isBatchTask ? '全部参考图汇总（母任务）' : '参考图 / 附件' }}
                       </p>
                       <p class="detail-v3-card-text">{{ detailReferenceLabel }}</p>
-                      <AssetThumbStrip :items="opsReferenceThumbItems" empty-text="暂无参考图" size="sm" />
-                      <details v-if="isBatchTask" class="detail-v3-summary-fold">
-                        <summary>展开母任务汇总参考图</summary>
-                        <AssetThumbStrip :items="topLevelReferenceThumbItems" empty-text="暂无母任务汇总图" size="sm" />
-                      </details>
-                      <div class="detail-v3-ref-actions">
+                      <AssetThumbStrip
+                        v-if="opsReferenceThumbItems.length > 0"
+                        :items="opsReferenceThumbItems"
+                        empty-text="暂无参考图"
+                        size="md"
+                      />
+                      <div
+                        v-if="
+                          canUploadReferenceFromOps ||
+                          opsReferenceThumbItems.length > 0
+                        "
+                        class="detail-v3-ref-actions"
+                      >
                         <input
                           ref="opsReferenceUploadInputRef"
                           type="file"
@@ -279,16 +369,34 @@
                           v-if="canUploadReferenceFromOps"
                           type="button"
                           class="detail-v3-upload-ref-btn"
+                          @focusin="activateDetailFileReceiver('reference')"
+                          @pointerenter="activateDetailFileReceiver('reference')"
                           @click="opsReferenceUploadInputRef?.click()"
                         >
-                          上传参考图
+                          上传/拖拽/粘贴参考图
                         </button>
-                        <button type="button" class="detail-v3-link-btn" @click="focusReferenceSectionFromDetail">
+                        <button
+                          v-if="opsReferenceThumbItems.length > 0"
+                          type="button"
+                          class="detail-v3-link-btn"
+                          @click="focusReferenceSectionFromDetail"
+                        >
                           查看全部
+                        </button>
+                        <button
+                          v-if="totalReferenceCount > 0"
+                          type="button"
+                          class="detail-v3-link-btn"
+                          :disabled="referenceBatchDownloading"
+                          @click="handleReferenceBatchDownload"
+                        >
+                          {{ referenceBatchDownloading ? '打包中...' : `下载全部参考图（${totalReferenceCount}）` }}
                         </button>
                       </div>
                       <p v-if="opsReferenceUploadStatus" class="detail-v3-ref-status">{{ opsReferenceUploadStatus }}</p>
                       <p v-if="opsReferenceUploadError" class="detail-v3-ref-error">{{ opsReferenceUploadError }}</p>
+                      <p v-if="referenceBatchDownloadStatus" class="detail-v3-ref-status">{{ referenceBatchDownloadStatus }}</p>
+                      <p v-if="referenceBatchDownloadError" class="detail-v3-ref-error">{{ referenceBatchDownloadError }}</p>
                     </article>
 
                     <article class="detail-v3-info-card">
@@ -326,7 +434,151 @@
                           <dt>数量</dt>
                           <dd>{{ detailQuantityLabel }}</dd>
                         </div>
+                        <div>
+                          <dt>成本状态</dt>
+                          <dd>{{ detailCostStatusLabel }}</dd>
+                        </div>
+                        <div>
+                          <dt>覆盖原因</dt>
+                          <dd>{{ detailCostOverrideReasonLabel }}</dd>
+                        </div>
+                        <div>
+                          <dt>最新操作</dt>
+                          <dd>{{ detailCostLatestActionLabel }}</dd>
+                        </div>
+                        <div v-if="detailErpSyncStatusLabel">
+                          <dt>ERP 同步</dt>
+                          <dd :class="detailErpSyncStatusToneClass">{{ detailErpSyncStatusLabel }}</dd>
+                        </div>
+                        <div v-if="detailErpSyncFailureMessage">
+                          <dt>同步失败原因</dt>
+                          <dd class="detail-erp-sync-error">{{ detailErpSyncFailureMessage }}</dd>
+                        </div>
                       </dl>
+                      <div v-if="showErpFilingRetryButton" class="detail-v3-erp-retry-row">
+                        <BaseButton
+                          variant="secondary"
+                          size="sm"
+                          :loading="erpFilingRetrying"
+                          :disabled="erpFilingRetrying"
+                          @click="onErpFilingRetry"
+                        >
+                          重试同步
+                        </BaseButton>
+                      </div>
+                    </article>
+
+                    <article
+                      v-if="showProductManagementPanel"
+                      class="detail-v3-info-card detail-product-management-card"
+                    >
+                      <input
+                        ref="productManagementUploadInput"
+                        class="detail-product-management-file-input"
+                        type="file"
+                        accept="image/*,.jpg,.jpeg,.png,.webp,.gif"
+                        @change="onProductManagementImagePicked"
+                      />
+                      <div class="detail-product-management-head">
+                        <div>
+                          <p class="detail-v3-card-kicker">ERP 商品资料</p>
+                          <strong>{{ productManagementRecords.length }} 个 SKU 对照记录</strong>
+                        </div>
+                        <button type="button" class="detail-v3-link-btn" @click="openProductManagement()">
+                          进入产品管理
+                        </button>
+                      </div>
+                      <p v-if="isPurchaseTask" class="detail-v3-card-text detail-product-management-hint">
+                        采购任务不会自动产生设计成品图；如需同步 ERP 图片，请上传 ERP 商品图。
+                      </p>
+                      <p v-if="productManagementLoading" class="detail-v3-card-text">产品管理状态加载中...</p>
+                      <p v-else-if="productManagementError" class="detail-v3-ref-error">{{ productManagementError }}</p>
+                      <div v-else class="detail-product-management-list">
+                        <div
+                          v-for="record in productManagementPreviewRecords"
+                          :key="record.id"
+                          class="detail-product-management-item"
+                        >
+                          <div
+                            class="detail-product-management-preview"
+                            :class="{ 'is-missing': !productManagementPreviewLoadable(record) }"
+                          >
+                            <AssetPreviewMedia
+                              v-if="productManagementPreviewLoadable(record)"
+                              :asset-id="productManagementPreviewAssetID(record) || null"
+                              :resolved-preview-url="productManagementPreviewURL(record) || null"
+                              :fallback-src="directProductManagementPreviewURL(record.image_preview_url) || null"
+                              :alt="record.sku_code"
+                              img-class="detail-product-management-apm"
+                              inner-img-class="detail-product-management-img"
+                              @open-full="(url, context) => openProductManagementImagePreview(record, url, context)"
+                            />
+                            <span v-else>待补图</span>
+                          </div>
+                          <div class="detail-product-management-meta">
+                            <strong>{{ record.sku_code || '-' }}</strong>
+                            <small>款式：{{ productManagementERPIID(record) }}</small>
+                            <small>{{ formatProductManagementCost(record) }} · {{ record.image_source_label }}</small>
+                            <small
+                              v-if="record.image_sync_source === 'auto_on_close' && record.image_sync_status === 'synced'"
+                              class="detail-product-management-success"
+                            >
+                              已在结单后自动同步 ERP 图片
+                            </small>
+                            <small v-else-if="record.image_sync_status === 'waiting_image'" class="detail-product-management-warning">
+                              {{ record.image_missing_reason || '未找到最终成品图，可上传 ERP 商品图' }}
+                            </small>
+                            <small class="detail-product-management-sync">
+                              基础资料：{{ productManagementSyncStatusLabel(record.base_sync_status || record.erp_sync_status) }}
+                            </small>
+                            <small class="detail-product-management-sync">
+                              ERP 图片：{{ productManagementSyncStatusLabel(record.image_sync_status || record.erp_sync_status) }}
+                            </small>
+                            <small v-if="record.base_sync_error" class="detail-product-management-error">{{ record.base_sync_error }}</small>
+                            <small v-if="record.image_sync_error" class="detail-product-management-error">{{ record.image_sync_error }}</small>
+                          </div>
+                          <div class="detail-product-management-actions">
+                            <button type="button" class="detail-v3-link-btn" @click="openProductManagement(record)">
+                              打开
+                            </button>
+                            <button type="button" class="detail-v3-link-btn" @click="openProductManagement(record)">
+                              选图
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_maintain_image || productManagementUploadingID === record.id"
+                              @click="startProductManagementImageUpload(record)"
+                            >
+                              {{ productManagementUploadingID === record.id ? '上传中' : '上传 ERP 图' }}
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_maintain_image"
+                              @click="reparseProductManagementImage(record)"
+                            >
+                              重解析
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_sync_erp"
+                              @click="syncProductManagementBaseRecord(record)"
+                            >
+                              同步基础
+                            </button>
+                            <button
+                              type="button"
+                              class="detail-v3-link-btn"
+                              :disabled="!record.can_sync_erp || !record.image_asset_id"
+                              @click="syncProductManagementImageRecord(record)"
+                            >
+                              同步图片
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </article>
                   </div>
                   <p class="detail-v3-module-note">
@@ -338,7 +590,10 @@
                   v-if="isBatchTask && batchSkuItems.length > 0"
                   :items="batchSkuItems"
                   :filing-status="task.filing_status ?? null"
+                  :can-edit="canEditSkuItemInfo"
                   :can-upload-design="canDirectSkuDesignUpload"
+                  :upload-design-label="skuUploadDesignLabel"
+                  :disabled-upload-title="skuUploadDisabledTitle"
                   @edit="openSkuItemEdit"
                   @upload-design="openSkuDesignUpload"
                 />
@@ -361,19 +616,19 @@
                         v-if="showAssignDesignerButton"
                         variant="secondary"
                         size="sm"
-                        title="任务尚无负责人时，在待指派阶段指定设计师（首次指派）"
+                        :title="assignDesignerTitle"
                         @click="doAssign"
                       >
-                        指派设计师
+                        {{ assignDesignerLabel }}
                       </BaseButton>
                       <BaseButton
                         v-if="showReassignDesignerButton"
                         variant="secondary"
                         size="sm"
-                        title="设计阶段任务调度：在进入审核责任链前更换设计负责人"
+                        :title="reassignDesignerTitle"
                         @click="doReassign"
                       >
-                        重新指派设计师
+                        {{ reassignDesignerLabel }}
                       </BaseButton>
                     </div>
                   </div>
@@ -396,47 +651,86 @@
                     <article class="detail-v3-info-card detail-v3-info-card--wide">
                       <DesignAssetBlock />
                     </article>
-                    <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">设计负责人</p>
-                      <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
-                      <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
-                    </article>
-                    <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">上传设计稿</p>
-                      <p class="detail-v3-card-text">请在上方"设计与资产"区域上传文件</p>
-                    </article>
-                    <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">设计资产版本</p>
-                      <p class="detail-v3-card-text">{{ designVersionSummary }}</p>
-                    </article>
-                    <article class="detail-v3-info-card detail-v3-info-card--refs">
-                      <template v-if="isRetouchTask">
-                        <p class="detail-v3-card-kicker">精修任务操作</p>
-                        <template v-if="showRetouchClaimAction">
-                          <p class="detail-v3-card-text">精修任务尚未领取，请先领取后再上传设计稿并提交。</p>
-                          <button
-                            type="button"
-                            class="detail-v3-dark-btn"
-                            :disabled="actionLoading === 'claim-retouch'"
-                            @click="claimRetouchFromDetail"
-                          >
-                            {{ actionLoading === 'claim-retouch' ? '领取中...' : '领取精修任务' }}
-                          </button>
+                    <template v-if="isDesignOrRetouchModuleResultState">
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">
+                          {{ designOwnerLabel }}
+                        </p>
+                        <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
+                        <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">
+                          {{ designAssetVersionLabel }}
+                        </p>
+                        <p class="detail-v3-card-text">
+                          {{ isRetouchTask ? retouchVersionSummary : designVersionSummary }}
+                        </p>
+                        <p class="detail-v3-card-muted">
+                          {{ designAssetVersionHint }}
+                        </p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">结果状态</p>
+                        <p class="detail-v3-card-text">{{ designStatusText }}</p>
+                      </article>
+                      <article class="detail-v3-info-card detail-v3-info-card--refs">
+                        <p class="detail-v3-card-kicker">资产操作</p>
+                        <p class="detail-v3-card-text">
+                          在上方{{ designAssetPreviewAreaLabel }}区预览或下载当前版本文件。
+                        </p>
+                        <button
+                          type="button"
+                          class="detail-v3-link-btn"
+                          @click="openTaskAssetsPage"
+                        >
+                          打开任务资产页
+                        </button>
+                      </article>
+                    </template>
+                    <template v-else>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">{{ designOwnerLabel }}</p>
+                        <p class="detail-v3-card-text">{{ detailDesignerLabel }}</p>
+                        <p class="detail-v3-card-muted">组：{{ detailOwnerLabel }}</p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">{{ uploadDesignCardTitle }}</p>
+                        <p class="detail-v3-card-text">请在上方"{{ designAssetPanelName }}"区域上传文件</p>
+                      </article>
+                      <article class="detail-v3-info-card">
+                        <p class="detail-v3-card-kicker">{{ designAssetVersionLabel }}</p>
+                        <p class="detail-v3-card-text">{{ designVersionSummary }}</p>
+                      </article>
+                      <article class="detail-v3-info-card detail-v3-info-card--refs">
+                        <template v-if="isRetouchTask">
+                          <p class="detail-v3-card-kicker">精修任务操作</p>
+                          <template v-if="showRetouchClaimAction">
+                            <p class="detail-v3-card-text">精修任务尚未领取，请先领取后再上传设计稿并提交。</p>
+                            <button
+                              type="button"
+                              class="detail-v3-dark-btn"
+                              :disabled="actionLoading === 'claim-retouch'"
+                              @click="claimRetouchFromDetail"
+                            >
+                              {{ actionLoading === 'claim-retouch' ? '领取中...' : '领取精修任务' }}
+                            </button>
+                          </template>
+                          <template v-else>
+                            <p class="detail-v3-card-text">
+                              请在上方"{{ designAssetPanelName }}"区域上传精修稿后点击"提交精修"按钮完成任务。
+                            </p>
+                          </template>
                         </template>
                         <template v-else>
+                          <p class="detail-v3-card-kicker">{{ submitAuditCardTitle }}</p>
                           <p class="detail-v3-card-text">
-                            请在上方"设计与资产"区域上传精修稿后点击"提交精修"按钮完成任务。
+                            请在上方“{{ designAssetPanelName }}”区域选择交付文件后{{ submitAuditActionText }}。
                           </p>
+                          <p class="detail-v3-card-muted">{{ submitAuditCardHint }}</p>
                         </template>
-                      </template>
-                      <template v-else>
-                        <p class="detail-v3-card-kicker">提交审核</p>
-                        <p class="detail-v3-card-text">
-                          请在上方“设计与资产”区域选择交付文件后提交审核。
-                        </p>
-                        <p class="detail-v3-card-muted">提交动作统一由设计与资产面板处理。</p>
-                      </template>
-                    </article>
+                      </article>
+                    </template>
                   </div>
                 </section>
 
@@ -447,11 +741,11 @@
                 >
                   <div class="detail-v3-module-head">
                     <div>
-                      <p class="detail-v3-eyebrow">审核侧</p>
-                      <h2 class="detail-v3-module-title">审核模块</h2>
+                      <p class="detail-v3-eyebrow">{{ auditModuleEyebrow }}</p>
+                      <h2 class="detail-v3-module-title">{{ auditModuleTitle }}</h2>
                     </div>
                     <span class="detail-v3-state-pill detail-v3-state-pill--warning">
-                      通过 / 打回 / 审核参考
+                      {{ auditModulePillText }}
                     </span>
                   </div>
                   <div v-if="isBatchTask && batchSkuItems.length > 1" class="batch-sku-switcher">
@@ -471,7 +765,7 @@
                   </div>
                   <div class="detail-v3-workflow-grid detail-v3-workflow-grid--audit">
                     <article class="detail-v3-info-card">
-                      <p class="detail-v3-card-kicker">待审核稿件</p>
+                      <p class="detail-v3-card-kicker">{{ auditPendingAssetTitle }}</p>
                       <p class="detail-v3-card-text">{{ designVersionSummary }}</p>
                       <p class="detail-v3-card-muted">点击预览 / 下载 / 对比历史版本</p>
                       <AssetThumbStrip
@@ -480,21 +774,35 @@
                         size="sm"
                       />
                     </article>
-                    <article class="detail-v3-info-card">
+                    <article class="detail-v3-info-card detail-v3-info-card--audit-comment">
                       <p class="detail-v3-card-kicker">审核意见</p>
-                      <div class="detail-v3-fake-textarea">填写通过说明或打回原因...</div>
+                      <BaseSelect
+                        v-model="auditRejectReasonCategory"
+                        label="驳回分类"
+                        placeholder="打回时请选择"
+                        :options="AUDIT_REJECT_REASON_OPTIONS"
+                        :disabled="!showActiveAuditActionButtons || Boolean(actionLoading)"
+                        clearable
+                      />
+                      <BaseTextarea
+                        v-model="auditComment"
+                        :placeholder="auditRejectReasonCategory === AUDIT_REJECT_REASON_OTHER ? '填写其他具体理由...' : '填写通过说明或补充修改建议...'"
+                        :rows="4"
+                        :disabled="!showActiveAuditActionButtons || Boolean(actionLoading)"
+                        :error="auditCommentError"
+                      />
                     </article>
                     <article class="detail-v3-info-card detail-v3-info-card--audit">
-                      <p class="detail-v3-card-kicker">审核动作</p>
-                      <p class="detail-v3-card-text">通过后进入仓库；打回后回到设计模块。</p>
-                      <div v-if="showAuditActionButtons" class="detail-v3-inline-actions">
+                      <p class="detail-v3-card-kicker">{{ auditActionCardTitle }}</p>
+                      <p class="detail-v3-card-text">{{ auditActionDescription }}</p>
+                      <div v-if="showActiveAuditActionButtons" class="detail-v3-inline-actions">
                         <button
                           type="button"
                           class="detail-v3-dark-btn"
                           :disabled="actionLoading === 'audit-pass'"
                           @click="passAuditFromDetail"
                         >
-                          {{ actionLoading === 'audit-pass' ? '通过中...' : '通过' }}
+                          {{ actionLoading === 'audit-pass' ? '通过中...' : approveButtonLabel }}
                         </button>
                         <button
                           type="button"
@@ -502,7 +810,7 @@
                           :disabled="actionLoading === 'audit-reject'"
                           @click="rejectAuditFromDetail"
                         >
-                          {{ actionLoading === 'audit-reject' ? '打回中...' : '打回' }}
+                          {{ actionLoading === 'audit-reject' ? '打回中...' : rejectButtonLabel }}
                         </button>
                       </div>
                       <p v-else class="detail-v3-card-muted">当前不在审核处理阶段，仅展示审核结果与稿件。</p>
@@ -519,7 +827,7 @@
                         <input
                           ref="auditDeliveryUploadInputRef"
                           type="file"
-                          accept=".jpg,.jpeg,.png,.webp"
+                          accept="image/*,.jpg,.jpeg,.png,.webp"
                           multiple
                           class="detail-v3-hidden-file-input"
                           @change="(event) => handleAuditAssetUpload(event, 'delivery')"
@@ -529,17 +837,27 @@
                             type="button"
                             class="detail-v3-light-btn"
                             :disabled="actionLoading === 'audit-upload'"
+                            @focusin="activateDetailFileReceiver('audit-source')"
+                            @pointerenter="activateDetailFileReceiver('audit-source')"
+                            @dragover.prevent="onDetailUploadDragOver('audit-source', $event)"
+                            @drop.prevent="onDetailUploadDrop('audit-source', $event)"
+                            @paste="onDetailUploadPaste('audit-source', $event)"
                             @click="auditSourceUploadInputRef?.click()"
                           >
-                            上传修订源文件
+                            上传/拖拽/粘贴修订源文件
                           </button>
                           <button
                             type="button"
                             class="detail-v3-dark-btn"
                             :disabled="actionLoading === 'audit-upload'"
+                            @focusin="activateDetailFileReceiver('audit-delivery')"
+                            @pointerenter="activateDetailFileReceiver('audit-delivery')"
+                            @dragover.prevent="onDetailUploadDragOver('audit-delivery', $event)"
+                            @drop.prevent="onDetailUploadDrop('audit-delivery', $event)"
+                            @paste="onDetailUploadPaste('audit-delivery', $event)"
                             @click="auditDeliveryUploadInputRef?.click()"
                           >
-                            上传最终成品图
+                            上传/拖拽/粘贴最终成品图
                           </button>
                         </div>
                         <p v-if="auditAssetUploadStatus" class="detail-v3-ref-status">{{ auditAssetUploadStatus }}</p>
@@ -610,7 +928,11 @@
                           :disabled="actionLoading === 'warehouse-archive'"
                           @click="archiveWarehouseFromDetail"
                         >
-                          {{ actionLoading === 'warehouse-archive' ? '结单中...' : '结单' }}
+                          {{
+                            actionLoading === 'warehouse-archive'
+                              ? '完成中...'
+                              : '完成仓库处理'
+                          }}
                         </button>
                       </div>
                       <p v-else class="detail-v3-card-muted">当前不在仓库可操作阶段，仅展示仓库状态。</p>
@@ -655,6 +977,12 @@
       v-model="assignDialogVisible"
       :designers="designerOptions"
       :loading="designersLoading"
+      :title="assignDialogTitle"
+      :description="assignDialogDescription"
+      :loading-label="assignDialogLoadingLabel"
+      :empty-hint="assignDialogEmptyHint"
+      :confirm-label="assignDialogConfirmLabel"
+      :assignee-role-label="assignDialogAssigneeRoleLabel"
       :current-assignee-id="
         task?.designerId != null
           ? String(task.designerId)
@@ -666,6 +994,76 @@
     />
 
     <EventLogDrawer v-model="eventLogOpen" :task-id="taskId" />
+
+    <BaseModal
+      v-model="aiSummaryOpen"
+      title="任务全链路 AI 摘要"
+      :show-confirm="false"
+      panel-class="max-w-5xl"
+    >
+      <section class="ai-summary-modal">
+        <div v-if="aiSummaryLoading" class="ai-summary-loading" role="status">
+          <div class="ai-summary-loading-dot" aria-hidden="true" />
+          <div>
+            <p class="ai-summary-loading-title">正在生成摘要</p>
+            <p class="ai-summary-loading-sub">系统正在读取任务、SKU、资产、ERP 与成本链路。</p>
+          </div>
+        </div>
+
+        <div v-else-if="aiSummaryError" class="ai-summary-error">
+          <p>{{ aiSummaryError }}</p>
+          <BaseButton size="sm" variant="primary" @click="loadAiSummary">重新生成</BaseButton>
+        </div>
+
+        <div v-else-if="aiSummary" class="ai-summary-content ai-summary-content--compact">
+          <header class="ai-summary-hero">
+            <p class="ai-summary-eyebrow">AI 处置建议</p>
+            <h3>{{ aiSummaryDecision }}</h3>
+            <p>{{ aiSummaryImpact }}</p>
+          </header>
+
+          <div class="ai-summary-action-grid">
+            <article class="ai-summary-panel ai-summary-panel--risk">
+              <h4>当前卡点</h4>
+              <div class="ai-summary-blocker">
+                <strong>{{ aiSummaryBlocker.title }}</strong>
+                <p>{{ aiSummaryBlocker.reason || '系统暂未识别到明确原因。' }}</p>
+                <span v-if="aiSummaryBlocker.owner">责任方：{{ aiSummaryBlocker.owner }}</span>
+              </div>
+            </article>
+
+            <article class="ai-summary-panel">
+              <h4>下一步动作</h4>
+              <ol v-if="aiSummaryActionList.length" class="ai-summary-next-actions">
+                <li v-for="action in aiSummaryActionList" :key="`${action.role}-${action.action}`">
+                  <span>{{ action.timing || '下一步' }}</span>
+                  <strong>{{ action.role || '相关责任人' }}</strong>
+                  <p>{{ action.action }}</p>
+                </li>
+              </ol>
+              <p v-else class="ai-summary-muted">系统暂未识别到明确动作。</p>
+            </article>
+          </div>
+
+          <details class="ai-summary-evidence">
+            <summary>查看证据</summary>
+            <ul v-if="aiSummaryEvidenceLines.length">
+              <li v-for="line in aiSummaryEvidenceLines" :key="line">{{ line }}</li>
+            </ul>
+            <p v-else>系统暂无可展示证据。</p>
+          </details>
+        </div>
+      </section>
+      <template #footer>
+        <footer class="ai-summary-footer">
+          <span v-if="aiSummary" class="ai-summary-meta">{{ aiSummary.model || 'AI' }} · 简短处置卡片</span>
+          <div class="ai-summary-footer-actions">
+            <BaseButton size="sm" variant="secondary" :disabled="aiSummaryLoading" @click="aiSummaryOpen = false">关闭</BaseButton>
+            <BaseButton size="sm" variant="primary" :loading="aiSummaryLoading" :disabled="aiSummaryLoading" @click="loadAiSummary">重新生成</BaseButton>
+          </div>
+        </footer>
+      </template>
+    </BaseModal>
 
     <ReassignDesignerDialog
       v-model="reassignDialogVisible"
@@ -707,10 +1105,12 @@
       :sku-item="editingSkuItem"
       @saved="onSkuItemEditSaved"
     />
-
-    <div v-if="lightboxSrc" class="lightbox-overlay" @click="lightboxSrc = null">
-      <img :src="lightboxSrc" alt="预览大图" class="lightbox-img" @click.stop />
-    </div>
+    <ImagePreviewLightbox
+      v-model="lightboxOpen"
+      :items="lightboxItems"
+      :initial-index="lightboxInitialIndex"
+      fallback-title="预览大图"
+    />
   </div>
 </template>
 
@@ -726,13 +1126,23 @@ import {
 } from '@/domain/task-close-eligibility'
 import {
   canAssign,
+  canAssignCustomizationArtOperator,
+  canSubmitAudit,
   canUploadDesignDelivery,
   canReassignDesigner,
+  isInCustomizationArtReassignmentPhase,
+  isInDesignerReassignmentPhase,
+  isCustomizationTask as isCustomizationTaskByDomain,
   isLegacyTaskStatusInDesignerEditablePhase,
+  canMaintainTaskProductInfoAtAnyStage,
   taskHasRecordedDesignOutput,
   taskHasAssignee,
 } from '@/domain/task-actions'
-import { getTaskActionAvailability } from '@/domain/task-action-availability'
+import {
+  getTaskActionAvailability,
+  shouldHideWarehouseCompleteAction,
+  shouldHideWarehouseReceiveActions,
+} from '@/domain/task-action-availability'
 import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import {
   canUserScheduleDesignerAssignment,
@@ -743,31 +1153,64 @@ import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
 import { useAuth } from '@/composables/useAuth'
 import { useTaskCancel } from '@/composables/useTaskCancel'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 import { isReferenceUrlExpiringSoon } from '@/utils/referenceUrl'
 import { tasksApi } from '@/services/api/tasksApi'
+import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
-import type { AssetKind } from '@/services/api/assetsApi'
+import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
+import {
+  productManagementApi,
+  type ProductManagementRecord,
+  type ProductSyncStatus,
+} from '@/services/api/productManagementApi'
+import { fetchAssetPreviewMeta } from '@/domain/asset-access'
+import type { BackendAsset } from '@/services/apiTypes'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
+import { buildTimestampedZipFilename, downloadBatchAsZip, sanitizeZipEntryName } from '@/utils/batchZipDownload'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import {
   TASK_DETAIL_PRODUCT_INDEX_KEY,
   type TaskDetailProductIndexContext,
 } from '@/composables/task-detail-product-index'
 import {
+  assetVersionMatchesActiveSku,
   parallelProductTabCount,
   selectionFromProductIndex,
   targetSkuCodeForUpload,
+  taskHasSkuItemsForBatchUi,
 } from '@/domain/task-batch-assets'
 import { latestDeliveryBatchVersionsForSelection } from '@/domain/task-final-delivery'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
-import { formatDateOnlyBeijing, formatMonthDayTimeBeijingOffsetAware } from '@/utils/date'
+import { formatDateOnlyBeijing, formatMonthDayTimeBeijingOffsetAware, formatTaskDueAtDisplay } from '@/utils/date'
 import {
+  extractCostOverrideEventsList,
   extractTaskEventsList,
+  mapCostOverrideEventToRecentEvent,
   mapTaskEventRowToRecentEvent,
 } from '@/domain/mappers/task-events-from-api'
 import { workflowGateReasonLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { canUserRetryErpFiling, taskNeedsErpFilingRetry } from '@/domain/erp-filing-retry'
+import {
+  getTaskFilingStatusLabel,
+  getTaskFilingStatusTone,
+} from '@/utils/filing-status'
+import {
+  dedupeReferenceFileRefs,
+  isTaskLevelBackendReferenceAsset,
+  mergeReferenceFileRefsPreferBackend,
+  referenceFileRefsFromBackendReferenceAssets,
+} from '@/domain/mappers/reference-file-refs'
+import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { RecentEvent } from '@/domain/types/dashboard'
-import type { TaskSkuItem } from '@/domain/types/task'
+import type { Task, TaskSkuItem } from '@/domain/types/task'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import {
   REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
@@ -777,9 +1220,22 @@ import {
 } from '@/domain/constants/reference-upload'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile, isBitmapDeliveryFile } from '@/domain/constants/upload-types'
 import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES, designUploadTooLargeMessage } from '@/domain/copy/design-upload'
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Images,
+  RefreshCcw,
+  RotateCcw,
+  ScrollText,
+  Sparkles,
+  XCircle,
+} from 'lucide-vue-next'
 
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
+import BaseModal from '@/components/base/BaseModal.vue'
+import BaseSelect from '@/components/base/BaseSelect.vue'
+import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import SequenceGapBanner from '@/components/business/SequenceGapBanner.vue'
 import CASConflictModal from '@/components/business/CASConflictModal.vue'
 import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
@@ -788,9 +1244,11 @@ import {
   getMainTaskStatusLabel,
   getWarehouseSubStatusLabel,
 } from '@/domain/enums/task-status'
+import { getCustomizationDetailStatusLabel } from '@/domain/task-center-card-status'
 
 // ── 子区块（通过 provide/inject 访问 task，无 prop drilling）──────────────
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
+import RetouchRequirementsBlock from '@/components/task-detail/RetouchRequirementsBlock.vue'
 import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue'
 import EventLogDrawer from '@/components/logs/EventLogDrawer.vue'
 import CancelReasonModal from '@/components/task-detail/CancelReasonModal.vue'
@@ -799,11 +1257,17 @@ import SkuItemsTable from '@/components/task-detail/SkuItemsTable.vue'
 import SkuItemEditModal from '@/components/task-detail/SkuItemEditModal.vue'
 import DesignAssetBlock from '@/components/task-detail/DesignAssetBlock.vue'
 import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/AssetThumbStrip.vue'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightboxOptions,
+} from '@/components/media/imagePreviewLightbox'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { warehouseBlockingReasonLine } from '@/utils/warehouse-blocking'
+import type { TaskAiSummaryResponse } from '@/services/api/tasksApi'
 // v0.5 对齐：FRONTEND_ALIGNMENT_v0.5.md 第 D 节，任务详情内指派弹窗使用 GET /v1/users/designers
-
-const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
 /** 与 /me `frontend_access.actions` 对齐：审核岗可能仅有细粒度 key（如 task.audit.review），未带历史 PermissionEnum `task:audit`。 */
 const AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS = [
@@ -830,6 +1294,7 @@ const WAREHOUSE_FLOW_COMPLETE_PERMISSION_KEYS = [
   'task.warehouse.complete',
   'warehouse.complete',
 ] as const
+const COST_OVERRIDE_TIMELINE_ROLES = ['Ops', 'Warehouse', 'Admin', 'SuperAdmin'] as const
 
 const route = useRoute()
 const router = useRouter()
@@ -844,6 +1309,8 @@ const { cancel, needForceConfirm } = useTaskCancel()
 const taskId = computed(() => route.params.id as string)
 const isTempId = computed(() => taskId.value?.startsWith('t-'))
 const task = computed(() => tasksStore.getById(taskId.value) ?? null)
+const taskPredictionSuggestions = ref<PredictionSuggestion[]>([])
+const taskPredictionLoading = ref(false)
 const basicInfoModuleSummary = computed(() =>
   task.value?.moduleSummaries?.find((module) => module.module_key === 'basic_info'),
 )
@@ -859,8 +1326,28 @@ const auditModuleSummary = computed(() =>
 const warehouseModuleSummary = computed(() =>
   task.value?.moduleSummaries?.find((module) => module.module_key === 'warehouse'),
 )
+const customizationModuleSummary = computed(() =>
+  task.value?.moduleSummaries?.find((module) => module.module_key === 'customization'),
+)
 const isBatchTask = computed(() => task.value?.isBatchTask === true)
 const batchSkuItems = computed(() => task.value?.skuItems ?? [])
+const productManagementRecords = ref<ProductManagementRecord[]>([])
+const productManagementLoading = ref(false)
+const productManagementError = ref('')
+const productManagementPreviewURLs = ref<Record<number, string>>({})
+const productManagementUploadInput = ref<HTMLInputElement | null>(null)
+const productManagementUploadTarget = ref<ProductManagementRecord | null>(null)
+const productManagementUploadingID = ref<number | null>(null)
+const productManagementPreviewRecords = computed(() =>
+  productManagementRecords.value.slice(0, isBatchTask.value ? 6 : 1),
+)
+const showProductManagementPanel = computed(
+  () =>
+    canAccessPage('product_management') &&
+    (productManagementLoading.value ||
+      productManagementError.value ||
+      productManagementRecords.value.length > 0),
+)
 
 const isPurchaseTask = computed(
   () =>
@@ -874,19 +1361,31 @@ const isRetouchTask = computed(
 )
 const isCustomizationTask = computed(
   () =>
-    !!task.value &&
-    (task.value.workflowLane === 'customization' ||
-      task.value.customizationRequired === true ||
-      Boolean(task.value.customizationSourceType)),
+    !!task.value && (
+      isCustomizationTaskByDomain(task.value) ||
+      Boolean(task.value.customizationSourceType)
+    ),
 )
-/** 与 CostPriceBlock 展示条件一致，避免原品任务下空占位 */
+/** 成本同步已经覆盖原品、新品、采购；P 图等任务有成本数据时也展示。 */
 const showCostInDetail = computed(
-  () =>
-    !!task.value &&
-    (task.value.businessType === 'NEW_PRODUCT_DEV' ||
-      task.value.taskType === 'NEW_PRODUCT_DEV' ||
-      task.value.businessType === 'PURCHASE_TASK' ||
-      task.value.taskType === 'PURCHASE_TASK'),
+  () => {
+    const t = task.value
+    if (!t) return false
+    if (
+      t.businessType === 'ORIGINAL_PRODUCT_DEV' ||
+      t.taskType === 'ORIGINAL_PRODUCT_DEV' ||
+      t.businessType === 'NEW_PRODUCT_DEV' ||
+      t.taskType === 'NEW_PRODUCT_DEV' ||
+      t.businessType === 'PURCHASE_TASK' ||
+      t.taskType === 'PURCHASE_TASK'
+    ) {
+      return true
+    }
+    return Boolean(t.costPrice || t.costOverrideSummary || t.governanceAuditSummary || t.procurementSummary)
+  },
+)
+const canReadCostOverrideTimeline = computed(() =>
+  permissionsStore.hasAnyRole(COST_OVERRIDE_TIMELINE_ROLES),
 )
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -899,16 +1398,96 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 }
 
 const designModuleTitle = computed(() => {
-  if (isCustomizationTask.value) return '定制模块'
+  if (isCustomizationTask.value) return '美工提交设计稿'
   if (isRetouchTask.value) return '精修模块'
   return '设计模块'
 })
 
 const designModuleEyebrow = computed(() => {
-  if (isCustomizationTask.value) return '定制侧'
+  if (isCustomizationTask.value) return '定制美工侧'
   if (isRetouchTask.value) return '精修侧'
   return '设计侧'
 })
+
+const designOwnerLabel = computed(() => {
+  if (isCustomizationTask.value) return '美工处理人'
+  if (isRetouchTask.value) return '精修负责人'
+  return '设计负责人'
+})
+const designAssetPanelName = computed(() => isCustomizationTask.value ? '定制稿与资产' : '设计与资产')
+const uploadDesignCardTitle = computed(() => isCustomizationTask.value ? '上传定制设计稿' : '上传设计稿')
+const submitAuditCardTitle = computed(() => isCustomizationTask.value ? '提交定制审核' : '提交审核')
+const submitAuditActionText = computed(() => isCustomizationTask.value ? '提交定制审核' : '提交审核')
+const submitAuditCardHint = computed(() =>
+  isCustomizationTask.value
+    ? '提交动作统一由定制稿与资产面板处理。'
+    : '提交动作统一由设计与资产面板处理。',
+)
+const designAssetVersionLabel = computed(() => isCustomizationTask.value ? '定制稿版本' : '设计资产版本')
+const designAssetVersionHint = computed(() =>
+  isRetouchTask.value
+    ? '切换上方时间线可查看各版本精修稿件'
+    : isCustomizationTask.value
+      ? '切换上方时间线可查看各版本定制稿件'
+      : '切换上方时间线可查看各版本设计稿件',
+)
+const designAssetPreviewAreaLabel = computed(() =>
+  isRetouchTask.value ? '精修稿件' : isCustomizationTask.value ? '定制稿件' : '设计稿件',
+)
+const assignDesignerLabel = computed(() => isCustomizationTask.value ? '指派美工' : '指派设计师')
+const reassignDesignerLabel = computed(() => isCustomizationTask.value ? '重新指派美工' : '重新指派设计师')
+const assignDialogTitle = computed(() => assignDesignerLabel.value)
+const assignDialogDescription = computed(() =>
+  isCustomizationTask.value
+    ? '请选择本次任务的负责美工，后续定制审核与交班将以此为基础。'
+    : '请选择本次任务的负责设计师，后续审核与交班将以此为基础。',
+)
+const assignDialogLoadingLabel = computed(() =>
+  isCustomizationTask.value ? '加载美工列表...' : '加载设计师列表...',
+)
+const assignDialogEmptyHint = computed(() =>
+  isCustomizationTask.value
+    ? '暂无可指派的美工，请先在用户管理中配置定制美工角色'
+    : '暂无可指派的设计师，请先在用户管理中配置设计师角色',
+)
+const assignDialogConfirmLabel = computed(() =>
+  isCustomizationTask.value ? '确认指派美工' : '确认指派',
+)
+const assignDialogAssigneeRoleLabel = computed(() =>
+  isCustomizationTask.value ? '美工' : '设计师',
+)
+const assignDesignerTitle = computed(() =>
+  isCustomizationTask.value
+    ? '任务尚无美工处理人时，在待处理阶段指定美工'
+    : '任务尚无负责人时，在待指派阶段指定设计师（首次指派）',
+)
+const reassignDesignerTitle = computed(() =>
+  isCustomizationTask.value
+    ? '定制任务调度：在进入定制审核前更换美工处理人'
+    : '设计阶段任务调度：在进入审核责任链前更换设计负责人',
+)
+const skuUploadDesignLabel = computed(() => isCustomizationTask.value ? '上传定制设计稿' : '上传设计稿')
+const skuUploadDisabledTitle = computed(() =>
+  isCustomizationTask.value ? '当前状态不可上传定制设计稿' : '当前状态不可上传设计稿',
+)
+const auditModuleEyebrow = computed(() => isCustomizationTask.value ? '定制审核侧' : '审核侧')
+const auditModuleTitle = computed(() => isCustomizationTask.value ? '定制审核' : '审核模块')
+const auditModulePillText = computed(() =>
+  isCustomizationTask.value ? '定制审核 / 打回美工处理' : '通过 / 打回 / 审核参考',
+)
+const auditPendingAssetTitle = computed(() => isCustomizationTask.value ? '待审核定制稿' : '待审核稿件')
+const auditActionCardTitle = computed(() => isCustomizationTask.value ? '定制审核动作' : '审核动作')
+const auditActionDescription = computed(() =>
+  isCustomizationTask.value
+    ? '通过后进入仓库接收；打回后回到美工处理。'
+    : '通过后进入仓库；打回后回到设计模块。',
+)
+const approveButtonLabel = computed(() =>
+  isCustomizationTask.value ? '审核通过' : '通过',
+)
+const rejectButtonLabel = computed(() =>
+  isCustomizationTask.value ? '打回美工处理' : '打回',
+)
 
 /** 顶栏左列副标题：类型 · 主状态 · 团队（与右侧徽标呼应，避免一行堆满徽标） */
 const headerSubtitle = computed(() => {
@@ -963,13 +1542,18 @@ const detailOwnerLabel = computed(() => {
 })
 const detailDueLabel = computed(() => {
   const due = task.value?.dueAt
-  return due ? formatDateOnlyBeijing(due) : '无截止时间'
+  return due ? formatTaskDueAtDisplay(due) : '无截止时间'
 })
 const activeSkuItem = computed(() => task.value?.skuItems?.[detailProductIndex.value] ?? null)
 const detailSkuLabel = computed(() => dash(activeSkuItem.value?.skuCode ?? task.value?.sku))
 const detailProductNameLabel = computed(() =>
   dash(task.value?.productName ?? task.value?.productNameSnapshot ?? activeSkuItem.value?.productNameSnapshot),
 )
+const detailRetouchDownloadTitle = computed(() => {
+  const product = detailProductNameLabel.value
+  if (product && product !== '-') return product
+  return dash(task.value?.taskNo)
+})
 
 /** V4 标题副线：优先产品名，否则任务类型 */
 const detailHeadlineSuffix = computed(() => {
@@ -984,17 +1568,30 @@ const detailShowTypeBadge = computed(() => {
   return !!(p && p !== '-')
 })
 
-const detailCategoryLabel = computed(() =>
-  dash(
-    task.value?.newProductCategoryCode ??
-      task.value?.category ??
-      task.value?.erpCategoryCode ??
-      task.value?.categoryName ??
-      task.value?.erpCategoryName ??
-      activeSkuItem.value?.categoryCode ??
-      task.value?.erpIId,
-  ),
+function formatCategoryNameWithCode(name?: string | null, code?: string | null): string {
+  const n = String(name ?? '').trim()
+  const c = String(code ?? '').trim()
+  if (n && c && n !== c) return `${n}（${c}）`
+  return n || c
+}
+
+const detailCategoryLabel = computed(() => {
+  const t = task.value
+  const code = activeSkuItem.value?.categoryCode ?? t?.newProductCategoryCode ?? t?.erpCategoryCode ?? t?.erpIId
+  const name = t?.categoryName ?? t?.category ?? t?.erpCategoryName
+  return dash(formatCategoryNameWithCode(name, code))
+})
+const showRetouchRequirementsBlock = computed(
+  () =>
+    isRetouchTask.value &&
+    Array.isArray(task.value?.retouchRequirements) &&
+    task.value.retouchRequirements.length > 0,
 )
+
+const detailRequirementKicker = computed(() =>
+  showRetouchRequirementsBlock.value ? '任务总述' : '需求说明',
+)
+
 /** 设计/修改需求与文案，不含运营 note（见 detailNoteLabel） */
 const detailRequirementLabel = computed(() => {
   // 非批量任务优先使用任务级 designRequirement（编辑弹窗写入目标），
@@ -1009,18 +1606,31 @@ const detailNoteLabel = computed(() => dash(task.value?.note))
 const detailSpecLabel = computed(() => {
   const t = task.value
   if (!t) return '-'
-  const parts = [t.specText, t.sizeText].map((x) => String(x ?? '').trim()).filter(Boolean)
+  const seen = new Set<string>()
+  const parts = [t.specText, t.sizeText]
+    .map((x) => String(x ?? '').trim())
+    .filter((x) => {
+      if (!x || seen.has(x)) return false
+      seen.add(x)
+      return true
+    })
   return parts.length > 0 ? parts.join('；') : '-'
 })
 const detailCostLabel = computed(() => {
   const t = task.value
   const amount = t?.costPrice?.amount ?? t?.newProductCostUnitPrice
   if (amount == null) return '-'
-  return `${amount} ${t?.costPrice?.currency ?? 'CNY'}`
+  return `${Number(amount).toFixed(3)} ${t?.costPrice?.currency ?? 'CNY'}`
 })
 const detailCostModeLabel = computed(() => {
   const mode = String(task.value?.costPriceMode ?? '').trim().toLowerCase()
-  if (!mode) return '-'
+  if (!mode) {
+    const active = task.value?.costOverrideSummary?.current_override_active ??
+      task.value?.costOverrideSummary?.currentOverrideActive
+    if (active === true) return '手动录入'
+    if (task.value?.costPrice) return '按系统规则计算'
+    return '-'
+  }
   if (mode === 'manual') return '手动录入'
   if (mode === 'template') return '按模板/系统计算'
   return dash(task.value?.costPriceMode)
@@ -1028,27 +1638,204 @@ const detailCostModeLabel = computed(() => {
 const detailQuantityLabel = computed(() =>
   dash(activeSkuItem.value?.quantity ?? task.value?.newProductQuantity),
 )
-const topLevelReferenceThumbItems = computed((): AssetThumbItem[] =>
-  (task.value?.referenceFileRefs ?? [])
+function recordField(record: Record<string, unknown> | undefined, ...keys: string[]): unknown {
+  if (!record) return undefined
+  for (const key of keys) {
+    const value = record[key]
+    if (value != null && String(value).trim() !== '') return value
+  }
+  return undefined
+}
+
+function costGovernanceStatusLabel(value: unknown, kind: 'review' | 'finance'): string {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) return ''
+  const labels: Record<string, string> = {
+    pending: kind === 'review' ? '待审核确认' : '待财务确认',
+    approved: '已确认',
+    rejected: '已驳回',
+    not_required: '无需确认',
+    notrequired: '无需确认',
+    ready_for_view: '已完成',
+    readyforview: '已完成',
+  }
+  return labels[raw] ?? dash(value)
+}
+
+function costOverrideReasonBusinessLabel(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  const normalized = raw.toLowerCase()
+  if (!raw) return '-'
+  if (normalized === 'manual cost override' || normalized.includes('manual') && normalized.includes('override')) {
+    return '人工维护成本'
+  }
+  if (normalized.includes('warehouse')) return '仓库维护成本'
+  if (normalized.includes('supplier')) return '供应商特殊成本'
+  return raw
+}
+
+function costOverrideActorBusinessLabel(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const operatorMatch = raw.match(/^operator:(\d+)$/i)
+  if (operatorMatch) {
+    const operatorID = operatorMatch[1]
+    const creatorID = String(task.value?.creatorId ?? '').trim()
+    if (operatorID && creatorID && operatorID === creatorID) return detailCreatorLabel.value
+    return `操作人 #${operatorID}`
+  }
+  return raw
+}
+
+const detailCostStatusLabel = computed(() => {
+  const t = task.value
+  const summary = t?.costOverrideSummary
+  const active = recordField(summary, 'current_override_active', 'currentOverrideActive')
+  const finance = recordField(t?.costOverrideBoundary, 'finance_status', 'financeStatus')
+  const review = recordField(t?.costOverrideBoundary, 'review_status', 'reviewStatus')
+  const bits: string[] = []
+  if (active === true) bits.push('人工覆盖生效')
+  else if (active === false) bits.push('系统规则成本')
+  if (review) bits.push(`审核：${costGovernanceStatusLabel(review, 'review')}`)
+  if (finance) bits.push(`财务：${costGovernanceStatusLabel(finance, 'finance')}`)
+  return bits.length > 0 ? bits.join('；') : '-'
+})
+const detailCostOverrideReasonLabel = computed(() =>
+  costOverrideReasonBusinessLabel(recordField(task.value?.costOverrideSummary, 'current_override_reason', 'currentOverrideReason')),
+)
+const detailCostLatestActionLabel = computed(() => {
+  const summary = task.value?.costOverrideSummary
+  const latest = recordField(summary, 'latest_audit_event', 'latestAuditEvent')
+  if (!latest || typeof latest !== 'object') return '-'
+  const row = latest as Record<string, unknown>
+  const eventType = String(row.event_type ?? row.eventType ?? '').trim()
+  const actor = String(row.actor ?? row.override_actor ?? row.overrideActor ?? '').trim()
+  const at = String(row.occurred_at ?? row.occurredAt ?? row.override_at ?? row.overrideAt ?? '').trim()
+  const typeLabel =
+    eventType === 'override_applied'
+      ? '人工覆盖'
+      : eventType === 'override_updated'
+        ? '覆盖更新'
+        : eventType === 'override_released'
+          ? '解除覆盖'
+          : eventType || '成本操作'
+  const actorLabel = costOverrideActorBusinessLabel(actor)
+  const timeLabel = at ? formatMonthDayTimeBeijingOffsetAware(at) : ''
+  return [typeLabel, actorLabel, timeLabel].filter(Boolean).join(' · ') || '-'
+})
+function mergeTaskAndSkuReferenceRefs(detailTask: {
+  referenceFileRefs?: ReferenceFileRef[]
+  skuItems?: Array<{ referenceFileRefs?: ReferenceFileRef[] }>
+}): ReferenceFileRef[] {
+  const rootRefs = detailTask.referenceFileRefs ?? []
+  const skuRefs = detailTask.skuItems?.flatMap((item) => item.referenceFileRefs ?? []) ?? []
+  return [...rootRefs, ...skuRefs]
+}
+
+/** 基础信息区「参考图/母任务汇总」展示用：批量仅 task union；单品 task+sku 去重。 */
+function motherTaskReferenceRefsForOps(detailTask: {
+  referenceFileRefs?: ReferenceFileRef[]
+  skuItems?: Array<{ referenceFileRefs?: ReferenceFileRef[] }>
+} | null | undefined, batch: boolean): ReferenceFileRef[] {
+  if (!detailTask) return []
+  if (batch) {
+    return dedupeReferenceFileRefs(detailTask.referenceFileRefs ?? [])
+  }
+  return dedupeReferenceFileRefs(mergeTaskAndSkuReferenceRefs(detailTask))
+}
+
+function referenceRefsToThumbItems(
+  refs: ReferenceFileRef[],
+  keyPrefix: string,
+  labelFallback: string,
+): AssetThumbItem[] {
+  return refs
     .map((ref, index) => {
       const src = String(ref?.download_url ?? '').trim()
-      if (!src) return null
+      const previewAssetId = referenceRefPreviewAssetId(ref)
+      if (!src && !previewAssetId) return null
       const filename = String(ref?.filename ?? '').trim()
       return {
-        key: `task-level-ref-${index}-${src}`,
+        key: `${keyPrefix}-${index}-${src || previewAssetId}`,
         src,
-        alt: filename || `汇总参考图 ${index + 1}`,
-        label: filename || `汇总参考图 ${index + 1}`,
+        previewAssetId,
+        downloadUrl: src,
+        alt: filename || `${labelFallback} ${index + 1}`,
+        label: filename || `${labelFallback} ${index + 1}`,
       }
     })
-    .filter((row) => row != null) as AssetThumbItem[],
+    .filter((row) => row != null) as AssetThumbItem[]
+}
+
+function referenceRefPreviewAssetId(ref: ReferenceFileRef): string | undefined {
+  const id = String(ref.asset_id ?? ref.ref_id ?? '').trim()
+  return id || undefined
+}
+
+/** 任务详情 GET /v1/tasks/{id}/assets 中的 reference，用于合并运营侧顶部参考图展示 */
+const opsReferenceBackendAssets = ref<BackendAsset[]>([])
+
+function backendAssetID(asset: BackendAsset | undefined): string | undefined {
+  if (!asset) return undefined
+  const rec = asset as Record<string, unknown>
+  const raw = rec.asset_id ?? rec.assetId ?? asset.id
+  const id = String(raw ?? '').trim()
+  return id || undefined
+}
+
+function unwrapOpsReferenceBackendAssetList(data: unknown): BackendAsset[] {
+  if (Array.isArray(data)) return data as BackendAsset[]
+  if (data && typeof data === 'object') {
+    const root = data as Record<string, unknown>
+    const inner = root.data ?? root.items
+    if (Array.isArray(inner)) return inner as BackendAsset[]
+    if (inner && typeof inner === 'object') {
+      const mid = inner as Record<string, unknown>
+      if (Array.isArray(mid.items)) return mid.items as BackendAsset[]
+      if (Array.isArray(mid.data)) return mid.data as BackendAsset[]
+    }
+  }
+  return []
+}
+
+async function loadOpsReferenceBackendAssets(): Promise<void> {
+  const id = taskId.value
+  if (!id || isTempId.value) {
+    opsReferenceBackendAssets.value = []
+    return
+  }
+  try {
+    const res = await assetsApi.list(id)
+    opsReferenceBackendAssets.value = unwrapOpsReferenceBackendAssetList(res?.data)
+  } catch {
+    opsReferenceBackendAssets.value = []
+  }
+}
+
+const motherTaskOpsReferenceRefs = computed((): ReferenceFileRef[] => {
+  const detailTask = task.value
+  if (!detailTask) return []
+  const legacyRefs = motherTaskReferenceRefsForOps(detailTask, isBatchTask.value)
+  const assetRefs = referenceFileRefsFromBackendReferenceAssets(opsReferenceBackendAssets.value)
+  return mergeReferenceFileRefsPreferBackend(legacyRefs, assetRefs)
+})
+
+const taskLevelReferenceBackendAssets = computed(() =>
+  opsReferenceBackendAssets.value.filter(isTaskLevelBackendReferenceAsset),
 )
+
+const replaceableOpsReferenceAssetID = computed((): string | undefined => {
+  const assets = taskLevelReferenceBackendAssets.value
+  if (!assets.length) return undefined
+  if (isBatchTask.value && assets.length !== 1) return undefined
+  return backendAssetID(assets[0])
+})
+
 const detailReferenceLabel = computed(() => {
-  const taskRefs = task.value?.referenceFileRefs?.length ?? 0
-  const skuRefs = task.value?.skuItems?.reduce((sum, item) => sum + (item.referenceFileRefs?.length ?? 0), 0) ?? 0
-  const total = taskRefs + skuRefs
+  const total = motherTaskOpsReferenceRefs.value.length
   return total > 0 ? `${total} 张图片 · 单文件 <= 300MB` : '暂无参考附件'
 })
+const totalReferenceCount = computed(() => motherTaskOpsReferenceRefs.value.length)
 const RETOUCH_MODULE_STATE_LABELS: Record<string, string> = {
   pending_claim: '待领取',
   in_progress: '精修中',
@@ -1075,6 +1862,10 @@ const effectiveRetouchLabel = computed(() => {
 })
 const designStatusText = computed(() => {
   if (isRetouchTask.value) return effectiveRetouchLabel.value
+  const customizationLabel = task.value
+    ? getCustomizationDetailStatusLabel(task.value)
+    : null
+  if (customizationLabel) return customizationLabel
   const status = task.value?.designSubStatus
   if (status) return getDesignSubStatusLabel(status)
   if (isCustomizationTask.value) return '定制待处理'
@@ -1086,6 +1877,54 @@ const designVersionSummary = computed(() => {
   return versions
     .slice(-2)
     .map((v) => `v${v.rootVersionNo ?? 1} ${v.assetNo ?? v.note ?? '设计稿'}`)
+    .join('；')
+})
+
+function isTimelineEligibleAssetKind(kind: string | undefined): boolean {
+  const k = (kind ?? '').trim().toLowerCase()
+  return k === 'delivery' || k === 'source'
+}
+
+const detailScopedAssetVersionCount = computed(() => {
+  const t = task.value
+  if (!t) return 0
+  const all = (t.assetVersions ?? []).filter((v) => isTimelineEligibleAssetKind(v.assetKind))
+  if (!taskHasSkuItemsForBatchUi(t) || isPurchaseTask.value) return all.length
+  const sel = selectionFromProductIndex(t, detailProductIndex.value)
+  return all.filter((v) => assetVersionMatchesActiveSku(v, sel, t)).length
+})
+
+const isDesignModuleResultState = computed(() => {
+  if (!task.value || isPurchaseTask.value || isRetouchTask.value) return false
+  if (detailScopedAssetVersionCount.value === 0) return false
+  if (canUploadDesignDelivery(task.value)) return false
+  if (canSubmitAudit(task.value) && !isCustomizationTask.value) return false
+  return true
+})
+
+const isRetouchModuleResultState = computed(() => {
+  if (!task.value || !isRetouchTask.value) return false
+  if (detailScopedAssetVersionCount.value === 0) return false
+  const state = retouchModuleState.value
+  if (state === 'submitted' || state === 'closed' || state === 'completed') return true
+  const ts = task.value.status
+  if (ts === 'PendingAuditA' || ts === 'PendingAuditB' || ts === 'Completed' || ts === 'Archived') {
+    return true
+  }
+  return false
+})
+
+const isDesignOrRetouchModuleResultState = computed(
+  () => isDesignModuleResultState.value || isRetouchModuleResultState.value,
+)
+
+const retouchVersionSummary = computed(() => {
+  if (!isRetouchTask.value) return designVersionSummary.value
+  const versions = task.value?.assetVersions ?? []
+  if (!versions.length) return '暂无精修稿版本'
+  return versions
+    .slice(-2)
+    .map((v) => `v${v.rootVersionNo ?? 1} ${v.assetNo ?? v.note ?? '精修稿'}`)
     .join('；')
 })
 /** `warehouse_receive_status` 过渡期读模型枚举，仅 UI 映射 */
@@ -1123,6 +1962,7 @@ const auditPendingThumbItems = computed((): AssetThumbItem[] => {
       .map((src, index) => ({
         key: `${version.id}-audit-${index}`,
         src,
+        downloadUrl: src,
         alt: `${versionPrefix} 稿件 ${index + 1}`,
         label: `${versionPrefix} 图 ${index + 1}`,
       }))
@@ -1144,38 +1984,58 @@ const warehouseProofThumbItems = computed((): AssetThumbItem[] => {
   return []
 })
 const opsReferenceThumbItems = computed((): AssetThumbItem[] =>
-  (isBatchTask.value ? task.value?.referenceFileRefs ?? [] : collectTaskReferenceRefs())
-    .map((ref, index) => {
-      const src = String((ref as { download_url?: string })?.download_url ?? '').trim()
-      if (!src) return null
-      const filename = String((ref as { filename?: string })?.filename ?? '').trim()
-      return {
-        key: `ops-ref-${index}-${src}`,
-        src,
-        alt: filename || `参考图 ${index + 1}`,
-        label: filename || `参考图 ${index + 1}`,
-      }
-    })
-    .filter((item) => item != null)
-    .slice(0, 6) as AssetThumbItem[],
+  referenceRefsToThumbItems(motherTaskOpsReferenceRefs.value, 'ops-ref', '参考图').slice(0, 6),
 )
 const opsReferenceUploadInputRef = ref<HTMLInputElement | null>(null)
 const opsReferenceUploadError = ref('')
 const opsReferenceUploadStatus = ref('')
+const referenceBatchDownloading = ref(false)
+const referenceBatchDownloadStatus = ref('')
+const referenceBatchDownloadError = ref('')
 const auditSourceUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditDeliveryUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditAssetUploadError = ref('')
 const auditAssetUploadStatus = ref('')
+type DetailUploadTarget = 'reference' | 'audit-source' | 'audit-delivery'
+const activeDetailUploadTarget = ref<DetailUploadTarget | null>(null)
 
 // provide：让所有子区块无需 props 直接注入 task
 provide(TASK_DETAIL_KEY, task)
-const lightboxSrc = ref<string | null>(null)
-function openLightbox(src: string) {
-  const url = String(src ?? '').trim()
-  if (!url) return
-  lightboxSrc.value = url
+const lightboxOpen = ref(false)
+const lightboxItems = ref<ImagePreviewLightboxItem[]>([])
+const lightboxInitialIndex = ref(0)
+
+function normalizeLightboxItems(src: string, options?: OpenImagePreviewLightboxOptions): ImagePreviewLightboxItem[] {
+  const fallbackTitle = options?.title?.trim() || '预览大图'
+  const normalized = (options?.items ?? [])
+    .map((item) => ({
+      ...item,
+      src: String(item.src ?? '').trim(),
+      previewAssetId: String(item.previewAssetId ?? '').trim(),
+      fallbackAssetId: String(item.fallbackAssetId ?? '').trim(),
+      fallbackSrc: String(item.fallbackSrc ?? '').trim(),
+      resolvedPreviewUrl: String(item.resolvedPreviewUrl ?? '').trim(),
+      title: String(item.title ?? '').trim(),
+      alt: String(item.alt ?? '').trim(),
+      downloadUrl: String(item.downloadUrl ?? '').trim(),
+    }))
+    .filter((item) =>
+      Boolean(item.src || item.previewAssetId || item.fallbackAssetId || item.fallbackSrc || item.resolvedPreviewUrl || item.downloadUrl),
+    )
+  if (normalized.length > 0) return normalized
+  return src ? [{ src, title: fallbackTitle, alt: fallbackTitle, downloadUrl: src }] : []
 }
-provide(OPEN_LIGHTBOX_KEY, openLightbox)
+
+function openLightbox(src: string, options?: OpenImagePreviewLightboxOptions) {
+  const url = String(src ?? '').trim()
+  const items = normalizeLightboxItems(url, options)
+  if (!url && items.length === 0) return
+  const requestedIndex = typeof options?.index === 'number' ? options.index : items.findIndex((item) => item.src === url)
+  lightboxItems.value = items
+  lightboxInitialIndex.value = Math.max(0, requestedIndex >= 0 ? requestedIndex : 0)
+  lightboxOpen.value = true
+}
+provide(IMAGE_PREVIEW_LIGHTBOX_KEY, openLightbox)
 
 const detailProductIndex = ref(0)
 const productIndexContext: TaskDetailProductIndexContext = {
@@ -1193,12 +2053,11 @@ watch(
   },
 )
 
-function collectTaskReferenceRefs() {
+/** URL 刷新：覆盖任务级与各 SKU 参考图（去重），不影响母任务区展示计数。 */
+function collectTaskReferenceRefs(): ReferenceFileRef[] {
   const detailTask = task.value
   if (!detailTask) return []
-  const rootRefs = detailTask.referenceFileRefs ?? []
-  const skuRefs = detailTask.skuItems?.flatMap((item) => item.referenceFileRefs ?? []) ?? []
-  return [...rootRefs, ...skuRefs]
+  return dedupeReferenceFileRefs(mergeTaskAndSkuReferenceRefs(detailTask))
 }
 
 watchEffect(() => {
@@ -1215,8 +2074,14 @@ function onVisibilityChangeForRefs() {
     tasksStore.refreshReferenceUrls(taskId.value)
   }
 }
+let successClearTimer: ReturnType<typeof setTimeout> | null = null
+let postEditRefreshTimer: ReturnType<typeof setTimeout> | null = null
 onMounted(() => document.addEventListener('visibilitychange', onVisibilityChangeForRefs))
-onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibilityChangeForRefs))
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChangeForRefs)
+  if (successClearTimer) clearTimeout(successClearTimer)
+  if (postEditRefreshTimer) clearTimeout(postEditRefreshTimer)
+})
 
 const storeLoading = computed(() => tasksStore.loading)
 const storeError = computed(() => tasksStore.loadError)
@@ -1231,6 +2096,11 @@ const createPrefillSyncWarningMessage =
 const createProcurementSyncWarningVisible = computed(() => route.query.procurementSyncFailed === '1')
 const createProcurementSyncWarningMessage =
   '任务已创建，但采购记录同步失败，请先补齐采购价、数量和供应商并完成采购流程，再执行交仓。'
+const createRetouchRequirementUploadWarningVisible = computed(
+  () => route.query.retouchRequirementUploadFailed === '1',
+)
+const createRetouchRequirementUploadWarningMessage =
+  '任务已创建，但部分 P 图需求附件上传失败，请检查需求明细并补传。'
 
 const createSuccessMessage = computed(() => {
   const t = task.value
@@ -1286,11 +2156,27 @@ const showAuditActionButtons = computed(
     // 跨组发起的任务常被审核账号处理，但若审核员既非责任人又非同组，`canAccessTask` 为 false，
     // 会误藏「通过/打回」；门禁以 RBAC + 模块 allowed_actions / 任务状态兜底为准，与 showReassignDesignerButton 口径一致。
     if (!task.value || !can([...AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS])) return false
+    if (isCustomizationTask.value) return false
     if (hasModuleActionProjection(auditModuleSummary.value)) {
       return hasModuleAction(auditModuleSummary.value, ['approve', 'reject'])
     }
     return Boolean(actionAvailability.value?.canShowAuditActions)
   },
+)
+const showCustomizationReviewActionButtons = computed(() => {
+  if (!task.value || !isCustomizationTask.value) return false
+  if (task.value.status !== 'PendingCustomizationReview') return false
+  return (
+    can('task.customization.review') ||
+    permissionsStore.hasAnyRole([
+      'CustomizationReviewer',
+      'customization_reviewer',
+      'customizationreviewer',
+    ])
+  )
+})
+const showActiveAuditActionButtons = computed(
+  () => showAuditActionButtons.value || showCustomizationReviewActionButtons.value,
 )
 const retouchModuleState = computed(() => retouchModuleSummary.value?.state ?? '')
 
@@ -1336,6 +2222,7 @@ const showWarehouseReceiveActionButtons = computed(
   () => {
     // 与审核条一致：仓管常跨组处理「待仓库接收」任务，不因 owner_department 拦截。
     if (!task.value || !can([...WAREHOUSE_RECEIVE_PERMISSION_KEYS])) return false
+    if (shouldHideWarehouseReceiveActions(task.value)) return false
     if (isPurchaseTask.value) return purchaseWorkflowCanPrepareWarehouse.value
     if (hasModuleActionProjection(warehouseModuleSummary.value)) {
       return hasModuleAction(warehouseModuleSummary.value, ['receive', 'submit'])
@@ -1346,6 +2233,7 @@ const showWarehouseReceiveActionButtons = computed(
 const showWarehouseReturnActionButton = computed(
   () => {
     if (!task.value || !can([...WAREHOUSE_RETURN_PERMISSION_KEYS])) return false
+    if (shouldHideWarehouseReceiveActions(task.value)) return false
     if (isPurchaseTask.value) return false
     if (hasModuleActionProjection(warehouseModuleSummary.value)) {
       return hasModuleAction(warehouseModuleSummary.value, ['reject', 'return'])
@@ -1359,6 +2247,7 @@ const showWarehouseActionButtons = computed(
 const showWarehouseCompleteActionButton = computed(
   () => {
     if (!task.value || !can([...WAREHOUSE_FLOW_COMPLETE_PERMISSION_KEYS])) return false
+    if (shouldHideWarehouseCompleteAction(task.value)) return false
     // 与后端 maintenance scope（如 role_plus_maintenance_scope / task_out_of_department_scope）对齐
     if (!canOperateTask(task.value)) return false
     if (isPurchaseTask.value) return purchaseWorkflowCanClose.value
@@ -1369,9 +2258,66 @@ const showWarehouseCompleteActionButton = computed(
   },
 )
 
+const showErpFilingRetryButton = computed(() => {
+  if (!task.value || !hasTaskScopeAccess.value) return false
+  if (!canUserRetryErpFiling((roles) => permissionsStore.hasAnyRole(roles))) return false
+  return taskNeedsErpFilingRetry(task.value)
+})
+
+const erpFilingRetrying = ref(false)
+
+const detailErpSyncStatusLabel = computed(() => {
+  const t = task.value
+  if (!t?.filing_status && !t?.erp_sync_required && !t?.filing_error_message) return ''
+  return getTaskFilingStatusLabel(t.filing_status, t.businessType ?? t.taskType)
+})
+
+const detailErpSyncStatusToneClass = computed(() => {
+  const tone = getTaskFilingStatusTone(
+    task.value?.filing_status,
+    task.value?.businessType ?? task.value?.taskType,
+  )
+  if (tone === 'error') return 'detail-erp-sync-status--error'
+  if (tone === 'warning') return 'detail-erp-sync-status--warning'
+  if (tone === 'success') return 'detail-erp-sync-status--success'
+  return ''
+})
+
+const detailErpSyncFailureMessage = computed(() =>
+  formatErpSyncFailureMessage(task.value?.filing_error_message ?? ''),
+)
+
+async function onErpFilingRetry() {
+  const id = taskId.value
+  if (!id || isTempId.value || erpFilingRetrying.value) return
+  erpFilingRetrying.value = true
+  actionError.value = ''
+  try {
+    await tasksApi.retryFiling(id)
+    await tasksStore.loadTaskById(id)
+    flashSuccess('已发起 ERP 同步重试')
+  } catch (err) {
+    actionError.value = resolveApiUserMessage(err, {
+      fallback: 'ERP 同步重试失败，请稍后重试',
+    })
+  } finally {
+    erpFilingRetrying.value = false
+  }
+}
+
 const canEditBasicInfo = computed(
   () => {
-    if (!task.value || !hasTaskScopeAccess.value || !can('task.edit')) return false
+    // 运营维护入口以 basic_info.allowed_actions 为准，不与通用 task.edit 绑定：
+    // Ops 创建人常具备 update_basic_info 投影但无 task.edit，强绑会导致「编辑信息 / 重传参考图」误隐藏。
+    if (!task.value || !hasTaskScopeAccess.value) return false
+    if (
+      canMaintainTaskProductInfoAtAnyStage(
+        (roles) => permissionsStore.hasAnyRole(roles),
+        hasTaskScopeAccess.value,
+      )
+    ) {
+      return true
+    }
     if (hasModuleActionProjection(basicInfoModuleSummary.value)) {
       return hasModuleAction(basicInfoModuleSummary.value, [
         'update_basic_info',
@@ -1381,11 +2327,92 @@ const canEditBasicInfo = computed(
     return isLegacyTaskStatusInDesignerEditablePhase(task.value)
   },
 )
-const canUploadReferenceFromOps = computed(() => canEditBasicInfo.value)
+const canUploadReferenceFromOps = computed(() => {
+  if (!task.value || !hasTaskScopeAccess.value) return false
+  if (hasModuleActionProjection(basicInfoModuleSummary.value)) {
+    return hasModuleAction(basicInfoModuleSummary.value, ['update_reference_files'])
+  }
+  return isLegacyTaskStatusInDesignerEditablePhase(task.value)
+})
+const canEditSkuItemInfo = computed(() => {
+  if (!task.value || !hasTaskScopeAccess.value) return false
+  return canMaintainTaskProductInfoAtAnyStage(
+    (roles) => permissionsStore.hasAnyRole(roles),
+    hasTaskScopeAccess.value,
+  )
+})
+function detailUploadTargetEnabled(target: DetailUploadTarget | null): boolean {
+  if (target === 'reference') return canUploadReferenceFromOps.value
+  if (target === 'audit-source' || target === 'audit-delivery') {
+    return canUploadAuditAssets.value && actionLoading.value !== 'audit-upload'
+  }
+  return false
+}
+
+const { activateFileReceiver: activateDetailGlobalFileReceiver } = useFileDropPasteReceiver({
+  enabled: () => detailUploadTargetEnabled(activeDetailUploadTarget.value),
+  onFiles: (files) => {
+    const target = activeDetailUploadTarget.value
+    if (target === 'reference') {
+      void handleOpsReferenceFiles(files)
+      return
+    }
+    if (target === 'audit-source') {
+      void handleAuditAssetFiles(files, 'source')
+      return
+    }
+    if (target === 'audit-delivery') {
+      void handleAuditAssetFiles(files, 'delivery')
+    }
+  },
+})
+
+function activateDetailFileReceiver(target: DetailUploadTarget) {
+  if (!detailUploadTargetEnabled(target)) return
+  activeDetailUploadTarget.value = target
+  activateDetailGlobalFileReceiver()
+}
+
+function isActiveDetailUploadTarget(target: DetailUploadTarget): boolean {
+  return activeDetailUploadTarget.value === target && detailUploadTargetEnabled(target)
+}
+
+function onDetailUploadDragOver(target: DetailUploadTarget, event: DragEvent) {
+  if (!detailUploadTargetEnabled(target) || !hasFileDataTransfer(event.dataTransfer)) return
+  activateDetailFileReceiver(target)
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onDetailUploadDrop(target: DetailUploadTarget, event: DragEvent) {
+  if (!detailUploadTargetEnabled(target)) return
+  const files = getFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) return
+  activateDetailFileReceiver(target)
+  if (target === 'reference') {
+    void handleOpsReferenceFiles(files)
+  } else {
+    void handleAuditAssetFiles(files, target === 'audit-delivery' ? 'delivery' : 'source')
+  }
+}
+
+function onDetailUploadPaste(target: DetailUploadTarget, event: ClipboardEvent) {
+  if (!detailUploadTargetEnabled(target)) return
+  const files = getFilesFromClipboardEvent(event)
+  if (!files.length) return
+  event.preventDefault()
+  activateDetailFileReceiver(target)
+  if (target === 'reference') {
+    void handleOpsReferenceFiles(files)
+  } else {
+    void handleAuditAssetFiles(files, target === 'audit-delivery' ? 'delivery' : 'source')
+  }
+}
+
 const canDirectSkuDesignUpload = computed(() => {
   if (!task.value || isPurchaseTask.value || !hasTaskScopeAccess.value) return false
   if (!can('design.upload')) return false
   if (isRetouchTask.value) return showRetouchSubmitAction.value
+  if (isCustomizationTask.value && !permissionsStore.isCustomizationOperator) return false
   return canUploadDesignDelivery(task.value)
 })
 
@@ -1399,6 +2426,11 @@ function openBasicEdit() {
 }
 
 function openSkuItemEdit(payload: { item: TaskSkuItem; index: number }) {
+  if (!canEditSkuItemInfo.value) {
+    actionError.value = '当前账号不可维护子项商品资料'
+    return
+  }
+  actionError.value = ''
   editingSkuItem.value = payload.item
   skuItemEditOpen.value = true
 }
@@ -1406,31 +2438,31 @@ function openSkuItemEdit(payload: { item: TaskSkuItem; index: number }) {
 function openSkuDesignUpload(payload: { item: TaskSkuItem; index: number }) {
   if (!task.value) return
   if (!canDirectSkuDesignUpload.value) {
-    actionError.value = '当前状态不可上传设计稿'
+    actionError.value = isCustomizationTask.value ? '当前状态不可上传定制设计稿' : '当前状态不可上传设计稿'
     return
   }
   actionError.value = ''
   detailProductIndex.value = Math.max(0, payload.index)
   const skuCode = String(payload.item.skuCode ?? '').trim()
   const skuSuffix = skuCode ? `（${skuCode}）` : ''
-  flashSuccess(`已切换到子项 ${payload.index + 1}${skuSuffix}，请在设计模块上传设计稿`)
+  flashSuccess(`已切换到子项 ${payload.index + 1}${skuSuffix}，请在${designModuleTitle.value}上传${isCustomizationTask.value ? '定制设计稿' : '设计稿'}`)
   void nextTick(() => {
     focusReferenceSectionFromDetail()
   })
 }
 
-async function onTaskInfoEditSaved() {
+async function onTaskInfoEditSaved(patch?: Partial<Task>) {
   const id = taskId.value
   if (!id || isTempId.value) return
-  await tasksStore.loadTaskById(id)
+  await refreshTaskAfterEdit(id, patch)
   flashSuccess('任务信息已更新')
 }
 
 async function onSkuItemEditSaved() {
   const id = taskId.value
   if (!id || isTempId.value) return
-  await tasksStore.loadTaskById(id)
-  flashSuccess('SKU 子项已更新')
+  await refreshTaskAfterEdit(id)
+  flashSuccess('子项商品资料已更新')
 }
 
 function dismissCreateBanner() {
@@ -1447,17 +2479,22 @@ const canAssignPermission = computed(() => {
   })
 })
 
-const showAssignDesignerButton = computed(
-  () => {
-    if (!task.value || isPurchaseTask.value || taskHasAssignee(task.value)) return false
-    if (designModuleAllowsAssign.value) return true
-    return (
-      canAssignPermission.value &&
-      Boolean(actionAvailability.value?.canShowAssign) &&
-      canAssign(task.value)
-    )
-  },
-)
+const showAssignCustomizationArtButton = computed(() => {
+  if (!task.value || !isCustomizationTask.value || isPurchaseTask.value) return false
+  if (!canAssignPermission.value || !canAssignCustomizationArtOperator(task.value)) return false
+  return Boolean(actionAvailability.value?.canShowAssign)
+})
+
+const showAssignDesignerButton = computed(() => {
+  if (showAssignCustomizationArtButton.value) return true
+  if (!task.value || isPurchaseTask.value || taskHasAssignee(task.value)) return false
+  if (designModuleAllowsAssign.value) return true
+  return (
+    canAssignPermission.value &&
+    Boolean(actionAvailability.value?.canShowAssign) &&
+    canAssign(task.value)
+  )
+})
 
 const canReassignPermission = computed(() => {
   if (!task.value || !currentUser.value) return false
@@ -1486,6 +2523,15 @@ const retouchModuleAllowsReassign = computed(() =>
     'task.reassign.department',
   ]),
 )
+const customizationModuleAllowsReassign = computed(() =>
+  hasModuleAction(customizationModuleSummary.value, [
+    'reassign',
+    'pool_reassign',
+    'task.reassign',
+    'task.reassign.team',
+    'task.reassign.department',
+  ]),
+)
 
 /** 换人：设计阶段可调度，但进入审核责任链及之后阶段不可重派（见 canReassignDesigner） */
 const showReassignDesignerButton = computed(
@@ -1494,8 +2540,22 @@ const showReassignDesignerButton = computed(
     // 这里不再强依赖 hasTaskScopeAccess（owner_department 口径），
     // 改由 canReassignPermission + 状态门禁 + 后端 allowed_actions 共同控制。
     if (!task.value || isPurchaseTask.value) return false
-    if (!taskHasAssignee(task.value)) return false
+    if (
+      !taskHasAssignee(task.value) &&
+      !isInCustomizationArtReassignmentPhase(task.value)
+    ) {
+      return false
+    }
+    // design/retouch 模块 reassign 投影：与历史逻辑一致，模块有动作即展示。
     if (designModuleAllowsReassign.value || retouchModuleAllowsReassign.value) return true
+    // customization 模块仅加速展示；缺模块时走下方权限+状态兜底（历史任务 807 等）。
+    if (
+      customizationModuleAllowsReassign.value &&
+      (isInCustomizationArtReassignmentPhase(task.value) ||
+        isInDesignerReassignmentPhase(task.value))
+    ) {
+      return true
+    }
     return (
       canReassignPermission.value &&
       Boolean(actionAvailability.value?.canShowReassign) &&
@@ -1551,7 +2611,7 @@ function findDesignAssetSection(): HTMLElement | null {
 function focusReferenceSectionFromDetail(): void {
   const section = findDesignAssetSection()
   if (!section) {
-    actionError.value = '设计与资产区尚未渲染完成，请稍后重试'
+    actionError.value = `${designAssetPanelName.value}区尚未渲染完成，请稍后重试`
     return
   }
   actionError.value = ''
@@ -1570,10 +2630,15 @@ function triggerReferenceUploadFromDetail(): void {
 
 async function handleOpsReferenceUpload(e: Event) {
   const input = e.target as HTMLInputElement
-  const currentTask = task.value
-  if (!input.files?.length || !currentTask?.id) return
-  const picked = Array.from(input.files)
+  const files = input.files
   input.value = ''
+  await handleOpsReferenceFiles(files ?? [])
+}
+
+async function handleOpsReferenceFiles(files: FileList | File[]) {
+  const currentTask = task.value
+  if (!files.length || !currentTask?.id) return
+  const picked = Array.from(files)
   opsReferenceUploadError.value = ''
   opsReferenceUploadStatus.value = ''
 
@@ -1605,14 +2670,122 @@ async function handleOpsReferenceUpload(e: Event) {
 
   opsReferenceUploadStatus.value = '上传中...'
   try {
+    await loadOpsReferenceBackendAssets()
+    const replaceAssetId = validFiles.length === 1 ? replaceableOpsReferenceAssetID.value : undefined
     for (const file of validFiles) {
-      await uploadTaskReferenceFileViaAssetSession(currentTask.id, file)
+      await uploadTaskReferenceFileViaAssetSession(currentTask.id, file, {
+        assetId: replaceAssetId,
+        ownerModuleKey: 'basic_info',
+        uploadPolicy: replaceAssetId ? 'replace' : 'append_only',
+      })
     }
-    opsReferenceUploadStatus.value = '上传完成'
+    opsReferenceUploadStatus.value = replaceAssetId ? '参考图已替换' : '参考图已上传'
     await tasksStore.loadTaskById(currentTask.id)
+    await loadOpsReferenceBackendAssets()
   } catch (err) {
     opsReferenceUploadError.value = formatUploadFailureMessage('reference_upload', err)
     opsReferenceUploadStatus.value = ''
+  }
+}
+
+function formatTaskReferenceBatchFailure(item: {
+  reason?: string
+  key?: string
+  source_kind?: string
+  filename?: string
+  asset_id?: number | null
+  ref_id?: string | null
+}): string {
+  const bits = [
+    item.key ? `key=${item.key}` : '',
+    item.source_kind ? `source=${item.source_kind}` : '',
+    item.asset_id != null ? `asset_id=${item.asset_id}` : '',
+    item.ref_id ? `ref_id=${item.ref_id}` : '',
+    item.filename ? `filename=${item.filename}` : '',
+    `reason=${item.reason || 'unavailable'}`,
+  ]
+  return bits.filter(Boolean).join(' ')
+}
+
+function readTaskBatchDownloadField(source: unknown, keys: string[]): string {
+  if (!source || typeof source !== 'object') return ''
+  const record = source as Record<string, unknown>
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function resolveTaskReferenceBatchZipFilename(currentTask: unknown): string {
+  const sku = readTaskBatchDownloadField(currentTask, ['sku', 'skuCode', 'sku_code', 'primarySkuCode', 'primary_sku_code'])
+  const product = readTaskBatchDownloadField(currentTask, [
+    'productName',
+    'product_name',
+    'productNameSnapshot',
+    'product_name_snapshot',
+    'taskName',
+    'task_name',
+  ])
+  const businessName = [sku, product].filter(Boolean).join('-')
+  return buildTimestampedZipFilename(sanitizeZipEntryName(businessName ? `task-references-${businessName}` : 'task-references', 'task-references'))
+}
+
+async function handleReferenceBatchDownload() {
+  if (referenceBatchDownloading.value) return
+  const currentTask = task.value
+  if (!currentTask?.id) {
+    referenceBatchDownloadError.value = '任务 ID 缺失，无法下载参考图'
+    return
+  }
+  if (totalReferenceCount.value <= 0) {
+    referenceBatchDownloadError.value = '暂无参考图可下载'
+    return
+  }
+  referenceBatchDownloading.value = true
+  referenceBatchDownloadStatus.value = ''
+  referenceBatchDownloadError.value = ''
+  try {
+    const response = await tasksApi.batchDownloadTaskReferences(currentTask.id)
+    const manifest = response.data?.data
+    const items = Array.isArray(manifest?.items) ? manifest.items : []
+    if (!items.length) {
+      referenceBatchDownloadError.value = '没有可下载的参考图'
+      return
+    }
+    const failures = Array.isArray(manifest?.failures) ? manifest.failures : []
+    const result = await downloadBatchAsZip({
+      items: items.map((item, index) => ({
+        key: item.key || `ref-${index + 1}`,
+        filename: item.filename,
+        downloadURL: item.download_url,
+        fallbackName: item.asset_id ? `asset-${item.asset_id}` : `ref-${index + 1}`,
+        failureHint: formatTaskReferenceBatchFailure({
+          key: item.key,
+          source_kind: item.source_kind,
+          asset_id: item.asset_id ?? null,
+          ref_id: item.ref_id ?? null,
+          filename: item.filename,
+          reason: 'fetch_failed',
+        }),
+      })),
+      zipFilename: resolveTaskReferenceBatchZipFilename(currentTask),
+      serverFailures: failures.map((entry) => formatTaskReferenceBatchFailure(entry)),
+      onStatus: (message) => {
+        referenceBatchDownloadStatus.value = message
+      },
+    })
+    referenceBatchDownloadStatus.value = `已生成 ZIP，共 ${items.length} 个文件`
+    if (result.failureCount > 0) {
+      referenceBatchDownloadError.value = `部分文件下载失败（${result.failureCount} 项），ZIP 内已附带 download_errors.txt`
+    } else {
+      flashSuccess(`参考图打包完成（${items.length} 个）`)
+    }
+  } catch (err) {
+    referenceBatchDownloadError.value = resolveApiUserMessage(err, { fallback: '下载参考图失败，请稍后重试' })
+    referenceBatchDownloadStatus.value = ''
+  } finally {
+    referenceBatchDownloading.value = false
   }
 }
 
@@ -1659,10 +2832,15 @@ function validateAuditUploadFiles(files: File[], kind: AssetKind): { validFiles:
 
 async function handleAuditAssetUpload(e: Event, kind: AssetKind) {
   const input = e.target as HTMLInputElement
-  const currentTask = task.value
-  if (!input.files?.length || !currentTask?.id) return
-  const picked = Array.from(input.files)
+  const files = input.files
   input.value = ''
+  await handleAuditAssetFiles(files ?? [], kind)
+}
+
+async function handleAuditAssetFiles(files: FileList | File[], kind: AssetKind) {
+  const currentTask = task.value
+  if (!files.length || !currentTask?.id) return
+  const picked = Array.from(files)
   auditAssetUploadError.value = ''
   auditAssetUploadStatus.value = ''
 
@@ -1707,6 +2885,241 @@ function navigateBackToTaskList() {
   void router.push('/tasks')
 }
 
+function openProductManagement(record?: ProductManagementRecord): void {
+  const keyword = String(record?.sku_code || task.value?.taskNo || '').trim()
+  void router.push({
+    name: 'ProductManagement',
+    query: keyword ? { keyword, issue_scope: 'all' } : { issue_scope: 'all' },
+  })
+}
+
+async function loadProductManagementRecords(): Promise<void> {
+  const currentID = Number(taskId.value)
+  if (!currentID || Number.isNaN(currentID) || !canAccessPage('product_management')) {
+    productManagementRecords.value = []
+    productManagementError.value = ''
+    return
+  }
+  productManagementLoading.value = true
+  productManagementError.value = ''
+  try {
+    productManagementRecords.value = await productManagementApi.listByTask(currentID)
+    void resolveProductManagementPreviewURLs(productManagementRecords.value)
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '读取产品管理状态失败' })
+  } finally {
+    productManagementLoading.value = false
+  }
+}
+
+function replaceProductManagementRecord(next: ProductManagementRecord): void {
+  const idx = productManagementRecords.value.findIndex((item) => item.id === next.id)
+  if (idx >= 0) {
+    productManagementRecords.value.splice(idx, 1, next)
+  }
+  void resolveProductManagementPreviewURLs([next])
+}
+
+async function reparseProductManagementImage(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceProductManagementRecord(await productManagementApi.reparseImage(record.id))
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '重新解析 ERP 图片失败' })
+  }
+}
+
+async function syncProductManagementBaseRecord(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceProductManagementRecord(await productManagementApi.requestBaseSync(record.id))
+    flashSuccess('已提交 ERP 基础资料同步')
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '提交 ERP 基础资料同步失败' })
+  }
+}
+
+async function syncProductManagementImageRecord(record: ProductManagementRecord): Promise<void> {
+  try {
+    replaceProductManagementRecord(await productManagementApi.requestImageSync(record.id))
+    flashSuccess('已提交 ERP 图片同步')
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '提交 ERP 图片同步失败' })
+  }
+}
+
+function startProductManagementImageUpload(record: ProductManagementRecord): void {
+  productManagementError.value = ''
+  productManagementUploadTarget.value = record
+  if (productManagementUploadInput.value) {
+    productManagementUploadInput.value.value = ''
+    productManagementUploadInput.value.click()
+  }
+}
+
+async function onProductManagementImagePicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  const record = productManagementUploadTarget.value
+  if (!file || !record || !task.value?.id) return
+  productManagementUploadingID.value = record.id
+  productManagementError.value = ''
+  try {
+    const uploaded = await uploadTaskFileViaAssetSession(String(task.value.id), file, {
+      asset_kind: 'erp_product_image',
+      target_sku_code: record.sku_code || undefined,
+      remark: `ERP 商品图：${record.sku_code || record.task_no || file.name}`,
+    })
+    const assetID = extractProductManagementUploadedAssetID(uploaded)
+    if (!assetID) {
+      throw new Error('上传完成但未返回资产 ID')
+    }
+    const updated = await productManagementApi.setManualImage(record.id, assetID)
+    replaceProductManagementRecord(updated)
+    flashSuccess('ERP 商品图已上传并绑定')
+  } catch (err) {
+    productManagementError.value = resolveApiUserMessage(err, { fallback: '上传 ERP 商品图失败' })
+  } finally {
+    productManagementUploadingID.value = null
+    productManagementUploadTarget.value = null
+    if (input) input.value = ''
+  }
+}
+
+function extractProductManagementUploadedAssetID(uploaded: unknown): number | null {
+  const root = (uploaded && typeof uploaded === 'object' ? uploaded : {}) as Record<string, unknown>
+  const asset = (root.asset && typeof root.asset === 'object' ? root.asset : {}) as Record<string, unknown>
+  const raw = asset.id ?? asset.asset_id
+  const id = Number(raw)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function formatProductManagementCost(record: ProductManagementRecord): string {
+  const value = record.cost_price
+  if (typeof value !== 'number' || value <= 0) return '成本待维护'
+  return `￥${value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
+}
+
+function productManagementERPIID(record: ProductManagementRecord): string {
+  return record.erp_i_id?.trim() || record.product_i_id?.trim() || '未绑定 ERP 款式'
+}
+
+function productManagementPreviewURL(record: ProductManagementRecord): string {
+  return productManagementPreviewURLs.value[record.id] || directProductManagementPreviewURL(record.image_preview_url) || ''
+}
+
+function productManagementPreviewAssetID(record: ProductManagementRecord): string | undefined {
+  const raw = record.image_asset_id ?? productManagementAssetIDFromPreviewPath(record.image_preview_url)
+  const id = Number(raw)
+  return Number.isSafeInteger(id) && id > 0 ? String(id) : undefined
+}
+
+function productManagementPreviewLoadable(record: ProductManagementRecord): boolean {
+  return Boolean(productManagementPreviewAssetID(record) || productManagementPreviewURL(record))
+}
+
+function productManagementLightboxItems(activeRecord?: ProductManagementRecord): ImagePreviewLightboxItem[] {
+  return productManagementPreviewRecords.value
+    .map((record) => {
+      const src = record.id === activeRecord?.id ? '' : productManagementPreviewURL(record)
+      const assetId = productManagementPreviewAssetID(record)
+      if (!src && !assetId) return null
+      const title = record.sku_code || record.task_no || 'ERP 商品图'
+      return {
+        src,
+        previewAssetId: assetId,
+        resolvedPreviewUrl: src || undefined,
+        fallbackSrc: directProductManagementPreviewURL(record.image_preview_url) || undefined,
+        title,
+        alt: title,
+        preferredFilename: title,
+        downloadUrl: src || directProductManagementPreviewURL(record.image_preview_url) || '',
+      }
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[]
+}
+
+function openProductManagementImagePreview(
+  record: ProductManagementRecord,
+  url: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+): void {
+  const activeUrl = url.trim()
+  if (!activeUrl) return
+  const title = record.sku_code || record.task_no || 'ERP 商品图'
+  const items = productManagementLightboxItems(record)
+  const index = Math.max(0, items.findIndex((item) => item.previewAssetId === productManagementPreviewAssetID(record)))
+  const activeItem: ImagePreviewLightboxItem = {
+    src: activeUrl,
+    previewAssetId: context?.assetId || productManagementPreviewAssetID(record),
+    fallbackAssetId: context?.fallbackAssetId,
+    fallbackSrc: context?.fallbackSrc || directProductManagementPreviewURL(record.image_preview_url) || undefined,
+    resolvedPreviewUrl: context?.resolvedPreviewUrl || productManagementPreviewURL(record) || undefined,
+    title,
+    alt: title,
+    preferredFilename: title,
+    downloadUrl: productManagementPreviewURL(record) || activeUrl,
+  }
+  const nextItems = items.length > 0 ? [...items] : [activeItem]
+  nextItems[Math.min(index, nextItems.length - 1)] = activeItem
+  openLightbox(activeUrl, {
+    title,
+    items: nextItems,
+    index,
+  })
+}
+
+async function resolveProductManagementPreviewURLs(items: ProductManagementRecord[]): Promise<void> {
+  const next = { ...productManagementPreviewURLs.value }
+  await Promise.all(
+    items.map(async (item) => {
+      const assetID = item.image_asset_id ?? productManagementAssetIDFromPreviewPath(item.image_preview_url)
+      const url = await resolveProductManagementAssetPreviewURL(assetID, item.image_preview_url)
+      if (url) next[item.id] = url
+      else delete next[item.id]
+    }),
+  )
+  productManagementPreviewURLs.value = next
+}
+
+async function resolveProductManagementAssetPreviewURL(assetID?: number | null, fallback?: string): Promise<string> {
+  const direct = directProductManagementPreviewURL(fallback)
+  if (direct) return direct
+  if (!assetID || assetID <= 0) return ''
+  const result = await fetchAssetPreviewMeta(String(assetID)).catch(() => null)
+  return result?.status === 'ok' && result.displayUrl ? result.displayUrl : ''
+}
+
+function directProductManagementPreviewURL(raw?: string): string {
+  const value = String(raw ?? '').trim()
+  if (!value) return ''
+  if (/^(https?:|data:|blob:)/i.test(value)) return value
+  return ''
+}
+
+function productManagementAssetIDFromPreviewPath(raw?: string): number | undefined {
+  const match = String(raw ?? '').match(/\/v1\/assets\/(\d+)\/preview\b/)
+  if (!match) return undefined
+  const id = Number(match[1])
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined
+}
+
+function productManagementSyncStatusLabel(status: ProductSyncStatus): string {
+  const labels: Record<ProductSyncStatus, string> = {
+    pending_sync: '待同步',
+    queued: '已入队',
+    syncing: '同步中',
+    synced: '已同步',
+    failed: '同步失败',
+    cooling_down: '冷却中',
+    waiting_image: '待上传 ERP 图',
+  }
+  return labels[status] ?? status
+}
+
 async function loadTask() {
   if (!taskId.value) return
 
@@ -1736,6 +3149,46 @@ async function loadTask() {
   }
 
   detailLoading.value = false
+  if (taskId.value && !isTempId.value) {
+    void loadOpsReferenceBackendAssets()
+    void loadTaskPredictions()
+    void loadProductManagementRecords()
+  } else {
+    opsReferenceBackendAssets.value = []
+    taskPredictionSuggestions.value = []
+    productManagementRecords.value = []
+  }
+}
+
+async function loadTaskPredictions(): Promise<void> {
+  if (!taskId.value || isTempId.value) {
+    taskPredictionSuggestions.value = []
+    return
+  }
+  taskPredictionSuggestions.value = []
+  taskPredictionLoading.value = true
+  try {
+    const bundle = await predictionsApi.taskNextActions(taskId.value, { limit: 5 })
+    taskPredictionSuggestions.value = bundle.suggestions
+  } catch {
+    taskPredictionSuggestions.value = []
+  } finally {
+    taskPredictionLoading.value = false
+  }
+}
+
+function handleTaskPrediction(item: PredictionSuggestion): void {
+  if (item.action_type === 'open_task_assets') {
+    openTaskAssetsPage()
+    return
+  }
+  if (item.target_type === 'asset' && item.target_id) {
+    void router.push({ name: 'AssetDetail', params: { id: item.target_id } })
+    return
+  }
+  if (item.target_type === 'task' && item.target_id && item.target_id !== taskId.value) {
+    void router.push({ name: 'TaskDetail', params: { id: item.target_id } })
+  }
 }
 
 async function refreshDetail() {
@@ -1746,6 +3199,23 @@ async function refreshDetail() {
 
 const actionError = ref('')
 const actionSuccess = ref('')
+const AUDIT_REJECT_REASON_OTHER = '其他'
+const AUDIT_REJECT_REASON_OPTIONS = [
+  { value: '文案错误', label: '文案错误' },
+  { value: '图片错误', label: '图片错误' },
+  { value: '保存格式错误', label: '保存格式错误' },
+  { value: '尺寸错误', label: '尺寸错误' },
+  { value: '订单备注错误', label: '订单备注错误' },
+  { value: '无边框线', label: '无边框线' },
+  { value: '边框线没闭合', label: '边框线没闭合' },
+  { value: '排版错误', label: '排版错误' },
+  { value: '缺少素材', label: '缺少素材' },
+  { value: '素材模糊', label: '素材模糊' },
+  { value: AUDIT_REJECT_REASON_OTHER, label: '其他' },
+]
+const auditRejectReasonCategory = ref('')
+const auditComment = ref('')
+const auditCommentError = ref('')
 const actionLoading = ref<
   | ''
   | 'claim-retouch'
@@ -1760,6 +3230,10 @@ const actionLoading = ref<
 const assignDialogVisible = ref(false)
 const reassignDialogVisible = ref(false)
 const eventLogOpen = ref(false)
+const aiSummaryOpen = ref(false)
+const aiSummaryLoading = ref(false)
+const aiSummaryError = ref('')
+const aiSummary = ref<TaskAiSummaryResponse | null>(null)
 const openCancel = ref(false)
 const cancelErrorText = ref('')
 const cancelSuggestForce = ref(false)
@@ -1798,9 +3272,34 @@ async function loadSideEvents() {
   }
   sideEventsLoading.value = true
   try {
-    const res = await tasksApi.listTaskEvents(tid)
-    const list = extractTaskEventsList(res.data)
-    sideEvents.value = list.map((row) => mapTaskEventRowToRecentEvent(row, tid))
+    const shouldLoadCostEvents = canReadCostOverrideTimeline.value
+    const [taskEventsResult, costEventsResult] = await Promise.allSettled([
+      tasksApi.listTaskEvents(tid),
+      shouldLoadCostEvents ? tasksApi.getCostOverrides(tid) : Promise.resolve(null),
+    ])
+    if (
+      taskEventsResult.status === 'rejected' &&
+      (!shouldLoadCostEvents || costEventsResult.status === 'rejected')
+    ) {
+      throw taskEventsResult.reason
+    }
+    const taskEvents =
+      taskEventsResult.status === 'fulfilled'
+        ? extractTaskEventsList(taskEventsResult.value.data).map((row) =>
+            mapTaskEventRowToRecentEvent(row, tid),
+          )
+        : []
+    const costEvents =
+      shouldLoadCostEvents && costEventsResult.status === 'fulfilled' && costEventsResult.value
+        ? extractCostOverrideEventsList(costEventsResult.value.data).map((row) =>
+            mapCostOverrideEventToRecentEvent(row, tid, task.value?.taskNo),
+          )
+        : []
+    sideEvents.value = [...costEvents, ...taskEvents].sort((a, b) => {
+      const at = a.createdAtIso ? Date.parse(a.createdAtIso) : 0
+      const bt = b.createdAtIso ? Date.parse(b.createdAtIso) : 0
+      return bt - at
+    })
   } catch (e) {
     sideEventsError.value = e instanceof Error ? e.message : '事件加载失败'
   } finally {
@@ -1808,10 +3307,120 @@ async function loadSideEvents() {
   }
 }
 
+function unwrapAiSummaryResponse(payload: unknown): TaskAiSummaryResponse | null {
+  if (!payload || typeof payload !== 'object') return null
+  const root = payload as Record<string, unknown>
+  const nested = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : root
+  return nested as unknown as TaskAiSummaryResponse
+}
+
+async function openAiSummary() {
+  aiSummaryOpen.value = true
+  if (!aiSummary.value && !aiSummaryLoading.value) {
+    await loadAiSummary()
+  }
+}
+
+async function loadAiSummary() {
+  const tid = taskId.value
+  if (!tid || isTempId.value) return
+  aiSummaryLoading.value = true
+  aiSummaryError.value = ''
+  try {
+    const response = await tasksApi.generateAiSummary(tid)
+    const summary = unwrapAiSummaryResponse(response.data)
+    if (!summary) throw new Error('AI 摘要返回为空')
+    aiSummary.value = {
+      ...summary,
+      actions: Array.isArray(summary.actions) ? summary.actions : [],
+      evidence: Array.isArray(summary.evidence) ? summary.evidence : [],
+      people: Array.isArray(summary.people) ? summary.people : [],
+      timeline: Array.isArray(summary.timeline) ? summary.timeline : [],
+      stuck_points: Array.isArray(summary.stuck_points) ? summary.stuck_points : [],
+      sku_asset_erp_cost: Array.isArray(summary.sku_asset_erp_cost) ? summary.sku_asset_erp_cost : [],
+      next_actions: Array.isArray(summary.next_actions) ? summary.next_actions : [],
+    }
+  } catch (e) {
+    aiSummaryError.value = resolveApiUserMessage(e) || 'AI 摘要生成失败'
+  } finally {
+    aiSummaryLoading.value = false
+  }
+}
+
+const aiSummaryDecision = computed(() => {
+  const summary = aiSummary.value
+  return summary?.decision?.trim() || summary?.headline?.trim() || '系统暂无明确判断'
+})
+
+const aiSummaryImpact = computed(() => {
+  const summary = aiSummary.value
+  return summary?.impact?.trim() || summary?.current_status?.trim() || '系统暂无影响说明。'
+})
+
+const aiSummaryBlocker = computed(() => {
+  const summary = aiSummary.value
+  const blocker = summary?.primary_blocker
+  if (blocker && (blocker.title || blocker.reason || blocker.owner)) {
+    return {
+      title: blocker.title || '待确认卡点',
+      owner: blocker.owner || '',
+      reason: blocker.reason || '',
+    }
+  }
+  const point = summary?.stuck_points?.[0]
+  if (point) {
+    return {
+      title: point.title || '待确认卡点',
+      owner: point.owner || '',
+      reason: point.reason || '',
+    }
+  }
+  return { title: '暂未识别主卡点', owner: '', reason: '系统暂无明确异常证据。' }
+})
+
+const aiSummaryActionList = computed(() => {
+  const summary = aiSummary.value
+  const actions = summary?.actions?.filter((item) => item && item.action?.trim()) ?? []
+  if (actions.length) return actions.slice(0, 3)
+  return (summary?.next_actions ?? [])
+    .filter((action) => action?.trim())
+    .slice(0, 3)
+    .map((action) => ({ role: '相关责任人', action, timing: '下一步' }))
+})
+
+const aiSummaryEvidenceLines = computed(() => {
+  const summary = aiSummary.value
+  const direct = summary?.evidence?.filter((line) => line?.trim()) ?? []
+  if (direct.length) return direct.slice(0, 4)
+  const lines: string[] = []
+  for (const item of summary?.sku_asset_erp_cost ?? []) {
+    const line = [item.sku, item.erp_status, item.cost_status, item.asset_status].filter(Boolean).join(' · ')
+    if (line) lines.push(line)
+  }
+  for (const item of summary?.timeline ?? []) {
+    const line = [item.stage, item.actor, item.summary].filter(Boolean).join(' · ')
+    if (line) lines.push(line)
+  }
+  return [...new Set(lines)].slice(0, 4)
+})
+
 watch(taskId, () => {
   if (!taskId.value || isTempId.value) return
+  aiSummary.value = null
+  aiSummaryError.value = ''
+  auditRejectReasonCategory.value = ''
+  auditComment.value = ''
+  auditCommentError.value = ''
   void loadSideEvents()
 })
+
+watch(auditComment, () => {
+  if (auditCommentError.value) auditCommentError.value = ''
+})
+const assignDesignerWorkflowLane = computed(() =>
+  isCustomizationTask.value ? ('customization' as const) : undefined,
+)
+
 const {
   designers: designerOptions,
   loading: designersLoading,
@@ -1828,9 +3437,9 @@ const {
     'task.reassign.department',
     'task.create',
   ],
+  workflowLane: assignDesignerWorkflowLane,
 })
 
-let successClearTimer: ReturnType<typeof setTimeout> | null = null
 function flashSuccess(message: string) {
   actionError.value = ''
   actionSuccess.value = message
@@ -1841,12 +3450,33 @@ function flashSuccess(message: string) {
   }, 6000)
 }
 
+async function refreshTaskAfterEdit(id: string, patch?: Partial<Task>) {
+  if (postEditRefreshTimer) {
+    clearTimeout(postEditRefreshTimer)
+    postEditRefreshTimer = null
+  }
+  if (patch && Object.keys(patch).length > 0) {
+    tasksStore.updateTask(id, patch)
+  }
+  await loadTask()
+  if (patch && Object.keys(patch).length > 0) {
+    tasksStore.updateTask(id, patch)
+  }
+  void loadSideEvents()
+  postEditRefreshTimer = setTimeout(() => {
+    postEditRefreshTimer = null
+    if (taskId.value !== id || isTempId.value) return
+    void loadTask()
+    void loadSideEvents()
+  }, 900)
+}
+
 function doAssign() {
-  if (!task.value) return
+  if (!task.value || !showAssignDesignerButton.value) return
   actionError.value = ''
   actionSuccess.value = ''
   assignDialogVisible.value = true
-  if (designerOptions.value.length === 0) loadDesigners()
+  void loadDesigners()
 }
 
 function doReassign() {
@@ -1898,20 +3528,37 @@ async function claimRetouchFromDetail(): Promise<void> {
       }
       throw err
     }
-    flashSuccess('已领取精修任务，可以开始上传设计稿并提交')
+    flashSuccess('已领取精修任务，可以开始上传精修稿并提交')
     void loadSideEvents()
   })
 }
 
 async function passAuditFromDetail(): Promise<void> {
   if (!task.value) return
-  if (!showAuditActionButtons.value) return
+  if (!showActiveAuditActionButtons.value) return
+  auditCommentError.value = ''
+  const comment = auditComment.value.trim() || '审核通过'
+  if (showCustomizationReviewActionButtons.value) {
+    await runDetailAction('audit-pass', '定制审核通过失败', async () => {
+      await tasksStore.submitCustomizationReview(task.value!.id, {
+        customization_review_decision: 'approved',
+        customization_note: comment,
+      })
+      auditRejectReasonCategory.value = ''
+      auditComment.value = ''
+      flashSuccess('定制审核已通过，任务已进入仓库接收')
+      void loadSideEvents()
+    })
+    return
+  }
   await runDetailAction('audit-pass', '审核通过失败', async () => {
     await tasksStore.passAudit(task.value!.id, {
       stage: auditStageForTask(),
       next_status: 'PendingWarehouseReceive',
-      comment: '审核通过',
+      comment,
     })
+    auditRejectReasonCategory.value = ''
+    auditComment.value = ''
     flashSuccess('已审核通过')
     void loadSideEvents()
   })
@@ -1919,13 +3566,41 @@ async function passAuditFromDetail(): Promise<void> {
 
 async function rejectAuditFromDetail(): Promise<void> {
   if (!task.value) return
-  if (!showAuditActionButtons.value) return
+  if (!showActiveAuditActionButtons.value) return
+  const category = auditRejectReasonCategory.value.trim()
+  const comment = auditComment.value.trim()
+  if (!category) {
+    auditCommentError.value = '请选择驳回分类'
+    return
+  }
+  if (category === AUDIT_REJECT_REASON_OTHER && !comment) {
+    auditCommentError.value = '选择其他时请填写具体理由'
+    return
+  }
+  const rejectComment = comment ? `${category}：${comment}` : category
+  auditCommentError.value = ''
+  if (showCustomizationReviewActionButtons.value) {
+    await runDetailAction('audit-reject', '定制审核打回失败', async () => {
+      await tasksStore.submitCustomizationReview(task.value!.id, {
+        reviewer_id: currentUser.value?.id ?? '',
+        customization_review_decision: 'return_to_designer',
+        customization_note: rejectComment,
+      })
+      auditRejectReasonCategory.value = ''
+      auditComment.value = ''
+      flashSuccess('已打回美工处理')
+      void loadSideEvents()
+    })
+    return
+  }
   await runDetailAction('audit-reject', '审核打回失败', async () => {
     await tasksStore.rejectAudit(task.value!.id, {
       stage: auditStageForTask(),
-      comment: '审核打回',
+      comment: rejectComment,
     })
-    flashSuccess('已打回设计')
+    auditRejectReasonCategory.value = ''
+    auditComment.value = ''
+    flashSuccess('已打回设计处理')
     void loadSideEvents()
   })
 }
@@ -1969,8 +3644,7 @@ async function receiveWarehouseFromDetail(): Promise<void> {
         }
       }
       try {
-        await tasksApi.warehouseComplete(currentTask.id)
-        await tasksStore.loadTaskById(currentTask.id)
+        await tasksStore.completeWarehouseFlow(currentTask.id)
       } catch (err: unknown) {
         if (isWarehouseProgressConflictError(err)) {
           await tasksStore.loadTaskById(currentTask.id)
@@ -2004,7 +3678,7 @@ async function rejectWarehouseFromDetail(): Promise<void> {
 async function archiveWarehouseFromDetail(): Promise<void> {
   if (!task.value) return
   if (!showWarehouseCompleteActionButton.value && !canCloseTask.value) return
-  await runDetailAction('warehouse-archive', '结单失败', async () => {
+  await runDetailAction('warehouse-archive', '仓库处理或结单失败', async () => {
     if (isPurchaseTask.value) {
       const currentTask = task.value!
       if (currentTask.workflowCanClose === true) {
@@ -2045,8 +3719,7 @@ async function archiveWarehouseFromDetail(): Promise<void> {
         }
       }
       try {
-        await tasksApi.warehouseComplete(currentTask.id)
-        await tasksStore.loadTaskById(currentTask.id)
+        await tasksStore.completeWarehouseFlow(currentTask.id)
       } catch (err) {
         if (isWarehouseProgressConflictError(err)) {
           await tasksStore.loadTaskById(currentTask.id)
@@ -2065,7 +3738,11 @@ async function archiveWarehouseFromDetail(): Promise<void> {
     } else {
       await tasksStore.archiveTask(task.value!.id)
     }
-    flashSuccess('已结单')
+    flashSuccess(
+      task.value?.status === 'PendingClose' || task.value?.status === 'Completed'
+        ? '已结单'
+        : '已完成仓库处理，请使用顶部「结单」完成归档',
+    )
     void loadSideEvents()
   })
 }
@@ -2139,11 +3816,12 @@ function isWarehouseProgressConflictError(err: unknown): boolean {
 }
 
 async function onAssignConfirm(payload: { assigneeId: string; assigneeName: string }) {
-  if (!task.value) return
+  if (!task.value || !showAssignDesignerButton.value) return
   try {
     await tasksStore.assignTask(task.value.id, payload)
     assignDialogVisible.value = false
-    flashSuccess(`已指派给 ${payload.assigneeName}`)
+    const roleNoun = isCustomizationTask.value ? '美工' : '设计师'
+    flashSuccess(`已指派${roleNoun} ${payload.assigneeName}`)
   } catch (e) {
     actionError.value = formatTaskActionDenyMessage(e, '指派失败')
   }
@@ -2491,27 +4169,44 @@ watch(taskId, (id) => {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
+  max-width: 100%;
 }
 .detail-top-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 2.125rem;
-  padding: 0 0.9rem;
+  gap: 0.35rem;
+  min-width: 4.75rem;
+  height: 2rem;
+  padding: 0 0.7rem;
   border: none;
   border-radius: var(--dv-r-control);
   background: #f2f4f7;
   color: #475467;
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
+}
+.detail-top-chip :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  white-space: nowrap;
 }
 .detail-top-chip:hover {
   background: #e9edf3;
   color: #1f2937;
+}
+.detail-top-chip-icon {
+  width: 0.86rem;
+  height: 0.86rem;
+  flex: 0 0 auto;
 }
 .detail-top-chip:focus-visible {
   outline: 2px solid #98a2b3;
@@ -2526,13 +4221,324 @@ watch(taskId, (id) => {
   color: #9f1239;
 }
 .detail-top-chip--primary {
-  background: #151a21;
+  background: #2563eb;
   color: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
 }
 .detail-top-chip--primary:hover {
-  background: #0f1218;
+  background: #1d4ed8;
   color: #fff;
+}
+
+.ai-summary-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+}
+.ai-summary-loading,
+.ai-summary-error {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-height: 8rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  padding: 1rem;
+}
+.ai-summary-error {
+  justify-content: space-between;
+  color: #991b1b;
+  background: #fff5f5;
+  border-color: #fecaca;
+}
+.ai-summary-loading-dot {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  border: 2px solid #c7d2fe;
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: ai-summary-spin 0.8s linear infinite;
+}
+.ai-summary-loading-title {
+  margin: 0;
+  color: #111827;
+  font-weight: 800;
+}
+.ai-summary-loading-sub {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+.ai-summary-content {
+  display: grid;
+  gap: 0.9rem;
+}
+.ai-summary-content--compact {
+  gap: 0.75rem;
+}
+.ai-summary-hero,
+.ai-summary-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  padding: 1rem;
+}
+.ai-summary-hero {
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+  border-color: #bfdbfe;
+}
+.ai-summary-eyebrow {
+  margin: 0 0 0.35rem;
+  color: #2563eb;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.ai-summary-hero h3,
+.ai-summary-panel h4 {
+  margin: 0;
+  color: #0f172a;
+  font-weight: 850;
+}
+.ai-summary-hero h3 {
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+.ai-summary-hero p:last-child {
+  margin: 0.45rem 0 0;
+  color: #475569;
+  line-height: 1.7;
+}
+.ai-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.9rem;
+}
+.ai-summary-action-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 0.75rem;
+}
+.ai-summary-blocker {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+.ai-summary-blocker strong {
+  color: #111827;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.ai-summary-blocker p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-blocker span {
+  color: #b45309;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+.ai-summary-next-actions {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ai-action;
+}
+.ai-summary-next-actions li {
+  counter-increment: ai-action;
+  display: grid;
+  grid-template-columns: auto minmax(4rem, auto) minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.6rem;
+  background: #f8fbff;
+}
+.ai-summary-next-actions li::before {
+  content: counter(ai-action);
+  display: inline-flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+.ai-summary-next-actions span {
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.ai-summary-next-actions strong {
+  min-width: 0;
+  color: #111827;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+.ai-summary-next-actions p {
+  grid-column: 2 / -1;
+  margin: 0;
+  color: #334155;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-evidence {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  padding: 0.75rem 0.9rem;
+}
+.ai-summary-evidence summary {
+  cursor: pointer;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+.ai-summary-evidence ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.7rem 0 0;
+  padding-left: 1rem;
+  color: #64748b;
+  line-height: 1.55;
+}
+.ai-summary-evidence p {
+  margin: 0.7rem 0 0;
+  color: #94a3b8;
+}
+.ai-summary-panel ul,
+.ai-summary-actions {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ai-summary-panel li {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.ai-summary-panel li span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+.ai-summary-panel li strong,
+.ai-summary-sku-row strong,
+.ai-summary-timeline strong {
+  min-width: 0;
+  color: #111827;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.ai-summary-panel li small,
+.ai-summary-sku-row small {
+  color: #64748b;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-panel--risk {
+  border-color: #fed7aa;
+  background: #fffaf5;
+}
+.ai-summary-sku-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.ai-summary-sku-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1.1fr) repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.6rem;
+  background: #f8fafc;
+}
+.ai-summary-sku-row span {
+  min-width: 0;
+  color: #475569;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+.ai-summary-sku-row small {
+  grid-column: 1 / -1;
+}
+.ai-summary-timeline {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ai-summary-timeline li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.ai-summary-timeline time {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+.ai-summary-timeline div {
+  display: grid;
+  gap: 0.2rem;
+}
+.ai-summary-timeline span {
+  color: #475569;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-summary-actions li {
+  padding-left: 0.7rem;
+  border-left: 3px solid #2563eb;
+  color: #334155;
+  line-height: 1.55;
+}
+.ai-summary-muted {
+  margin: 0.75rem 0 0;
+  color: #94a3b8;
+}
+.ai-summary-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+.ai-summary-meta {
+  min-width: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.ai-summary-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+@keyframes ai-summary-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 顶栏 WorkflowProgress 的 Pencil 风格覆写：色点 + 内联文字 */
@@ -2676,8 +4682,8 @@ watch(taskId, (id) => {
   background: #f2f4f7;
 }
 .detail-v3-edit-base-btn {
-  background: #151a21 !important;
-  border-color: #151a21 !important;
+  background: #2563eb !important;
+  border-color: #2563eb !important;
   color: #fff !important;
   border-radius: 0.625rem !important;
 }
@@ -2721,6 +4727,9 @@ watch(taskId, (id) => {
   min-width: 0;
   align-items: stretch;
 }
+.detail-v3-retouch-requirements {
+  grid-column: 1 / -1;
+}
 .detail-v3-info-card {
   min-width: 0;
   min-height: 8.5rem;
@@ -2736,13 +4745,170 @@ watch(taskId, (id) => {
   background: #eef5ff;
   border-color: #dbeafe;
 }
+.detail-v3-file-drop-active {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.14);
+  outline: none;
+}
 .detail-v3-info-card--cost {
   background: #fffaf0;
   border-color: #ffedd4;
 }
+.detail-product-management-card {
+  grid-column: 1 / -1;
+  background: #f8fbff;
+  border-color: #bfdbfe;
+  color: #111827;
+}
+.detail-product-management-file-input {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.detail-product-management-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.detail-product-management-head strong {
+  display: block;
+  color: #111827;
+  font-size: 0.92rem;
+}
+.detail-product-management-hint {
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #fed7aa;
+  border-radius: 0.75rem;
+  color: #9a3412;
+  background: #fff7ed;
+}
+.detail-product-management-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.65rem;
+}
+.detail-product-management-item {
+  display: grid;
+  grid-template-columns: 5.75rem minmax(0, 1fr) minmax(9rem, auto);
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.55rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.875rem;
+  background: #ffffff;
+}
+.detail-product-management-preview {
+  display: grid;
+  place-items: center;
+  width: 5.75rem;
+  height: 4.5rem;
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.625rem;
+  color: #dc2626;
+  background: #f8fafc;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.detail-product-management-preview :deep(.detail-product-management-apm),
+.detail-product-management-preview :deep(.apm),
+.detail-product-management-preview :deep(.apm-img),
+.detail-product-management-preview :deep(.detail-product-management-img) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #ffffff;
+}
+.detail-product-management-preview :deep(.apm-placeholder),
+.detail-product-management-preview :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.25rem;
+}
+.detail-product-management-preview.is-missing {
+  border-style: dashed;
+}
+.detail-product-management-meta {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+.detail-product-management-meta strong {
+  overflow: hidden;
+  color: #111827;
+  font-family: var(--yb-font-data);
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-product-management-meta small {
+  overflow: hidden;
+  color: #4b5563;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-product-management-success {
+  color: #047857 !important;
+  font-weight: 800;
+}
+.detail-product-management-warning {
+  color: #b45309 !important;
+  font-weight: 800;
+}
+.detail-product-management-error {
+  color: #b91c1c !important;
+  font-weight: 800;
+}
+.detail-product-management-sync {
+  color: #1e40af !important;
+}
+.detail-product-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+.detail-product-management-actions .detail-v3-link-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.detail-v3-erp-retry-row {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #ffedd4;
+}
+.detail-erp-sync-error {
+  color: #b42318;
+}
+.detail-erp-sync-status--error {
+  color: #b42318;
+  font-weight: 600;
+}
+.detail-erp-sync-status--warning {
+  color: #b54708;
+  font-weight: 600;
+}
+.detail-erp-sync-status--success {
+  color: #027a48;
+  font-weight: 600;
+}
 .detail-v3-info-card--audit,
 .detail-v3-info-card--warehouse {
   background: #f4f6fa;
+}
+.detail-v3-info-card--audit-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
 }
 .detail-v3-info-card--wide {
   grid-column: 1 / -1;
@@ -2842,18 +5008,18 @@ watch(taskId, (id) => {
 }
 .detail-v3-upload-ref-btn {
   min-height: 2.25rem;
-  border: 1px solid #151a21;
+  border: 1px solid #2563eb;
   padding: 0.5rem 0.85rem;
   font-size: 0.75rem;
   font-weight: 800;
   cursor: pointer;
   border-radius: var(--dv-r-control, 0.625rem);
-  background: #151a21;
+  background: #2563eb;
   color: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
 }
 .detail-v3-upload-ref-btn:hover {
-  background: #0f1218;
+  background: #1d4ed8;
 }
 .detail-v3-hidden-file-input {
   position: absolute;
@@ -2888,9 +5054,9 @@ watch(taskId, (id) => {
 }
 .detail-v3-dark-btn {
   margin-top: 0.6rem;
-  background: #151a21;
+  background: #2563eb;
   color: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
 }
 .detail-v3-danger-btn {
   margin-top: 0.6rem;
@@ -3264,6 +5430,56 @@ watch(taskId, (id) => {
     border-left: none;
   }
 }
+
+@media (max-width: 760px) {
+  .detail-top-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .detail-top-chip {
+    min-width: 0;
+    width: 100%;
+  }
+  .detail-top-chip :deep(span) {
+    min-width: 0;
+  }
+  .detail-top-chip :deep(span),
+  .detail-top-chip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ai-summary-action-grid,
+  .ai-summary-grid,
+  .ai-summary-sku-row {
+    grid-template-columns: 1fr;
+  }
+  .ai-summary-next-actions li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .ai-summary-next-actions span {
+    grid-column: 2;
+  }
+  .ai-summary-next-actions strong,
+  .ai-summary-next-actions p {
+    grid-column: 2;
+  }
+  .ai-summary-timeline li {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .ai-summary-footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 0.85rem 1rem;
+  }
+  .ai-summary-footer-actions {
+    justify-content: stretch;
+  }
+  .ai-summary-footer-actions :deep(button) {
+    flex: 1 1 7rem;
+  }
+}
 .action-error {
   width: 100%;
   margin: 0 0 0.5rem;
@@ -3333,22 +5549,6 @@ watch(taskId, (id) => {
 .banner-dismiss:hover {
   opacity: 1;
 }
-.lightbox-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  cursor: zoom-out;
-}
-.lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 6px;
-}
 .batch-sku-switcher {
   display: flex;
   align-items: center;
@@ -3381,7 +5581,7 @@ watch(taskId, (id) => {
   color: #475467;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--yb-font-data);
   letter-spacing: 0.01em;
 }
 .batch-sku-tab:hover {
@@ -3389,12 +5589,909 @@ watch(taskId, (id) => {
   background: #f1f5f9;
 }
 .batch-sku-tab--active {
-  background: #151a21;
+  background: #2563eb;
   color: #fff;
-  border-color: #151a21;
+  border-color: #2563eb;
 }
 .batch-sku-tab--active:hover {
-  background: #0f1218;
-  border-color: #0f1218;
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+/* Phase 3: light admin task detail — final overrides (style-only). */
+.task-detail-view {
+  color: #374151;
+  background: transparent !important;
+  overflow-x: hidden;
+}
+
+.detail-v6-surface {
+  --dv-border-soft: #e5e7eb;
+  --dw-title: #111827;
+  --dw-label: #6b7280;
+  --dv-surface-elev: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.detail-top-unified.detail-top-v6,
+.detail-v3-module,
+.detail-v3-side,
+.detail-v3-info-card,
+.detail-merge-card--center,
+.batch-sku-switcher,
+.create-success-banner {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.detail-top-unified.detail-top-v6::before {
+  display: none !important;
+}
+
+.detail-top-taskno,
+.detail-v3-module-title,
+.detail-v3-side-title,
+.detail-v3-card-kicker,
+.detail-v3-side-event-title,
+.detail-v6-surface :deep(.block-title) {
+  color: #111827 !important;
+}
+
+.detail-top-sub,
+.detail-v3-card-text,
+.detail-v3-card-muted,
+.detail-v3-side-event-desc,
+.detail-v3-module-note,
+.detail-v3-side-desc,
+.detail-v3-kv-list dt,
+.detail-v3-kv-list dd,
+.detail-v6-surface :deep(dt),
+.detail-v6-surface :deep(.field-label),
+.detail-v6-surface :deep(.section-label) {
+  color: #6b7280 !important;
+}
+
+.detail-v3-kv-list dd,
+.detail-v6-surface :deep(dd),
+.detail-v6-surface :deep(.field-value),
+.detail-v6-surface :deep(.value) {
+  color: #111827 !important;
+}
+
+.detail-top-flow-shell,
+.detail-v3-requirement-box,
+.detail-v3-fake-textarea,
+.detail-v3-side-event,
+.detail-v3-side-empty,
+.detail-v6-surface :deep(section.detail-block),
+.detail-col--right :deep(.detail-block),
+.detail-col--left :deep(section.detail-block),
+.detail-v3-layout :deep(section.detail-block) {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+}
+
+.detail-top-status-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.detail-v3-link-chip,
+.detail-v3-link-btn,
+.detail-v3-ref-status,
+.detail-top-flow-shell :deep(.step-current .step-label) {
+  color: #2563eb !important;
+}
+
+.action-success,
+.create-success-banner.banner-info {
+  border: 1px solid #bbf7d0 !important;
+  background: #ecfdf5 !important;
+  color: #15803d !important;
+}
+
+.action-error,
+.create-success-banner.banner-error {
+  border: 1px solid #fecaca !important;
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+}
+
+.create-success-banner.banner-warning {
+  border: 1px solid #fde68a !important;
+  background: #fffbeb !important;
+  color: #b45309 !important;
+}
+
+.detail-col--left,
+.detail-col--center,
+.detail-col--right,
+.detail-design-band {
+  background: #f9fafb !important;
+  border-color: #e5e7eb !important;
+}
+
+.detail-v3-info-card {
+  background: #f9fafb !important;
+  border-color: #e5e7eb !important;
+}
+
+.detail-v3-info-card--refs {
+  background: #eff6ff !important;
+  border-color: #dbeafe !important;
+}
+
+.detail-v3-info-card--cost {
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+}
+
+.detail-v3-module {
+  position: relative;
+  overflow: hidden;
+}
+
+.detail-v3-module--design {
+  border-color: #bfdbfe !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+}
+
+.detail-v3-module--design::before {
+  display: none;
+}
+
+.detail-v3-module--design .detail-v3-module-head,
+.detail-v3-module--design .batch-sku-switcher,
+.detail-v3-module--design .detail-v3-workflow-grid {
+  position: relative;
+}
+
+.detail-v3-module--design .detail-v3-dark-btn,
+.detail-v3-module--design .detail-v3-upload-ref-btn {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
+}
+
+.detail-v3-module--audit,
+.detail-v3-module--warehouse {
+  border-color: #e5e7eb !important;
+  background: #ffffff !important;
+  opacity: 1;
+}
+
+.detail-v3-module--audit .detail-v3-info-card,
+.detail-v3-module--warehouse .detail-v3-info-card,
+.detail-v3-module--audit :deep(section.detail-block),
+.detail-v3-module--warehouse :deep(section.detail-block) {
+  background: #ffffff !important;
+  border-color: #e5e7eb !important;
+}
+
+.detail-v3-side {
+  background: #ffffff !important;
+}
+
+.detail-v3-side-events {
+  position: relative;
+  gap: 0.5rem;
+  padding-left: 0.9rem;
+}
+
+.detail-v3-side-events::before {
+  content: '';
+  position: absolute;
+  left: 0.25rem;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  width: 1px;
+  background: #e5e7eb;
+}
+
+.detail-v3-side-event {
+  position: relative;
+  gap: 0.28rem;
+  padding: 0.72rem 0.78rem;
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
+  opacity: 1;
+}
+
+.detail-v3-side-event::before {
+  content: '';
+  position: absolute;
+  left: -0.92rem;
+  top: 1rem;
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 999px;
+  background: #9ca3af;
+  box-shadow: none;
+}
+
+.detail-v3-side-event:first-child {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+}
+
+.detail-v3-side-event:first-child::before {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.detail-v3-side-event:hover {
+  border-color: #d1d5db !important;
+  background: #ffffff !important;
+}
+
+.detail-v3-side-event-title {
+  color: #111827 !important;
+  font-weight: 750;
+}
+
+.detail-v3-side-event:not(:first-child) .detail-v3-side-event-title {
+  color: #374151 !important;
+}
+
+.detail-top-flow-shell {
+  border-color: #e5e7eb !important;
+  background: #f9fafb !important;
+  box-shadow: none !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal) {
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.detail-top-flow-shell :deep(.step-chip) {
+  min-height: 2.15rem;
+}
+
+.detail-top-flow-shell :deep(.step-dot--sm) {
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid #d1d5db;
+  background: #e5e7eb;
+}
+
+.detail-top-flow-shell :deep(.step-done .step-dot--sm) {
+  background: #22c55e;
+  border-color: #86efac;
+  box-shadow: none;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-dot--sm) {
+  background: #2563eb;
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal .step-label) {
+  color: #6b7280;
+  font-size: 0.75rem;
+}
+
+.detail-top-flow-shell :deep(.step-done .step-label) {
+  color: #15803d !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-label) {
+  color: #2563eb !important;
+}
+
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  display: inline;
+  color: #9ca3af;
+}
+
+.detail-top-flow-shell :deep(.step-sep) {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-summary-loading-dot,
+  .detail-v3-side-event,
+  .detail-top-flow-shell :deep(.step-chip),
+  .detail-top-flow-shell :deep(.step-dot--sm),
+  .detail-top-flow-shell :deep(.step-sep::after) {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.batch-sku-tab--active,
+.detail-v6-surface :deep(.product-tab-active) {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #fff !important;
+}
+
+/* Final workflow rail pass: no legacy green, no scrollbar, compact equal-width stage rail. */
+.detail-top-flow-shell {
+  overflow: hidden !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal) {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  gap: clamp(0.25rem, 0.7vw, 0.55rem) !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  padding: 0.35rem 0.2rem !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip) {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  min-height: 2rem !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  padding: 0.15rem 0.32rem !important;
+  background: transparent !important;
+  opacity: 1 !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip.step-current) {
+  background: #eff6ff !important;
+}
+
+.detail-top-flow-shell :deep(.step-dot--sm) {
+  width: 0.72rem !important;
+  height: 0.72rem !important;
+  background: #e5e7eb !important;
+  border-color: #d1d5db !important;
+  box-shadow: none !important;
+}
+
+.detail-top-flow-shell :deep(.step-done .step-dot--sm) {
+  background: #22c55e !important;
+  border-color: #86efac !important;
+  box-shadow: none !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-dot--sm) {
+  background: #2563eb !important;
+  border-color: #93c5fd !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+}
+
+.detail-top-flow-shell :deep(.step-skipped .step-dot--sm),
+.detail-top-flow-shell :deep(.step-pending .step-dot--sm) {
+  background: #e5e7eb !important;
+  border-color: #d1d5db !important;
+  box-shadow: none !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal .step-label) {
+  color: #6b7280 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.detail-top-flow-shell :deep(.step-done .step-label) {
+  color: #15803d !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-label) {
+  color: #2563eb !important;
+}
+
+.detail-top-flow-shell :deep(.step-pending .step-label),
+.detail-top-flow-shell :deep(.step-skipped .step-label) {
+  color: #9ca3af !important;
+}
+
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  display: none !important;
+}
+
+.detail-top-flow-shell :deep(.step-current .step-sublabel-inline) {
+  display: inline !important;
+  max-width: min(7.5rem, 45%) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  color: #9ca3af !important;
+}
+
+.detail-top-flow-shell :deep(.step-sep) {
+  flex: 0 1 clamp(0.8rem, 2vw, 2.4rem) !important;
+  width: auto !important;
+  min-width: 0.55rem !important;
+  height: 0.125rem !important;
+  background: #d1d5db !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip.step-done + .step-sep) {
+  background: #93c5fd !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip.step-current + .step-sep) {
+  background: #bfdbfe !important;
+}
+
+/* Task detail alignment repair: prevent the top card from inheriting oversized three-column minimums. */
+.task-detail-view {
+  background: transparent !important;
+  overflow-x: hidden;
+}
+
+.detail-shell {
+  max-width: 100%;
+  padding: 0.9rem clamp(0.9rem, 1.4vw, 1.35rem) 1.35rem !important;
+  overflow-x: hidden;
+}
+
+.detail-v6-surface {
+  max-width: 100%;
+  overflow: visible;
+}
+
+.detail-top-unified.detail-top-v6 {
+  max-width: 100%;
+  margin: 0 !important;
+  padding: clamp(0.95rem, 1.25vw, 1.2rem) !important;
+  border-radius: 1rem !important;
+  background: #ffffff !important;
+  border-color: #e5e7eb !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.detail-top-unified.detail-top-v6::before {
+  display: none !important;
+}
+
+.detail-top-grid {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: clamp(0.75rem, 1vw, 1rem) !important;
+  width: 100%;
+  min-width: 0;
+  align-items: start !important;
+}
+
+.detail-top-left,
+.detail-top-mid,
+.detail-top-right,
+.detail-top-identity {
+  min-width: 0;
+}
+
+.detail-top-taskno {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.detail-top-sub,
+.detail-top-current.detail-top-status-pill {
+  max-width: 100%;
+}
+
+.detail-top-flow-shell {
+  max-width: 100% !important;
+  min-width: 0;
+}
+
+.detail-top-mid {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: stretch;
+  width: 100%;
+}
+
+.detail-top-right {
+  justify-self: end;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal) {
+  justify-content: center !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  margin-inline: auto !important;
+  overflow: visible !important;
+}
+
+.detail-top-flow-shell :deep(.step-chip) {
+  flex: 0 0 auto !important;
+  justify-content: flex-start !important;
+  min-width: auto !important;
+  max-width: none !important;
+  padding: 0.2rem 0.3rem !important;
+  background: transparent !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--horizontal .step-label),
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
+.detail-top-flow-shell :deep(.step-sublabel-inline) {
+  display: inline !important;
+}
+
+.detail-top-flow-shell :deep(.step-sep) {
+  flex: 1 1 clamp(1.5rem, 5vw, 5rem) !important;
+  max-width: 5.5rem !important;
+}
+
+.detail-v3-info-card--refs .detail-v3-link-btn {
+  min-height: 2rem !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 0.625rem !important;
+  background: #f9fafb !important;
+  color: #2563eb !important;
+  box-shadow: none !important;
+}
+
+.detail-v3-info-card--refs .detail-v3-link-btn:hover {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+.detail-v3-info-card--refs .detail-v3-card-text {
+  color: #6b7280 !important;
+}
+
+.detail-v3-module-note {
+  background: #f9fafb !important;
+  border: 1px solid #e5e7eb !important;
+  color: #6b7280 !important;
+  box-shadow: none !important;
+}
+
+.detail-v3-module-note::before {
+  color: #111827 !important;
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe !important;
+}
+
+/* Naive Steps redraw: remove the old black wrapper and keep the rail aligned with the global glass skin. */
+.detail-top-flow-shell {
+  width: auto !important;
+  max-width: 100% !important;
+  padding: 0.16rem 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive.workflow-progress--horizontal) {
+  width: auto !important;
+  max-width: 100% !important;
+  margin-inline: auto !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: visible !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step) {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: max-content !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content) {
+  min-width: 0 !important;
+  overflow: visible !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content-header__title),
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content__description) {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
+.detail-top-flow-shell :deep(.workflow-progress--naive .n-step-splitor) {
+  flex: 0 0 clamp(1.25rem, 2.4vw, 2.6rem) !important;
+  width: clamp(1.25rem, 2.4vw, 2.6rem) !important;
+  min-width: clamp(1.25rem, 2.4vw, 2.6rem) !important;
+  background: #d1d5db !important;
+}
+
+.detail-prediction-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.85rem 0 0;
+  padding: 0.85rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.08), rgba(37, 99, 235, 0.08)),
+    #eff6ff;
+  background-size: 220% 100%;
+  animation: detail-stream-panel 8s linear infinite;
+}
+
+.detail-prediction-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.detail-prediction-head p {
+  margin: 0;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.detail-prediction-head h2 {
+  margin: 0.12rem 0 0;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.detail-prediction-head button {
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.detail-prediction-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.625rem;
+}
+
+.detail-prediction-item {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 6rem;
+  padding: 0.7rem;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 0.625rem;
+  background: #ffffff;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  animation: detail-card-enter 420ms ease both;
+}
+
+.detail-prediction-item:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 14px 28px -22px rgba(37, 99, 235, 0.75);
+}
+
+.detail-prediction-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(59, 130, 246, 0.13) 42%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+}
+
+.detail-prediction-item:hover::after {
+  transform: translateX(120%);
+}
+
+.detail-prediction-item span {
+  color: #2563eb;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.detail-prediction-item strong {
+  color: #111827;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.detail-prediction-item small {
+  color: #475569;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.detail-prediction-item em {
+  width: max-content;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.6875rem;
+  font-style: normal;
+}
+
+@keyframes detail-stream-panel {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+@keyframes detail-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-prediction-panel,
+  .detail-prediction-item {
+    animation: none !important;
+  }
+
+  .detail-prediction-item,
+  .detail-prediction-item::after {
+    transition: none !important;
+  }
+}
+
+@media (max-width: 1280px) {
+  .detail-top-grid {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: start !important;
+  }
+
+  .detail-top-mid {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .detail-top-right {
+    justify-self: end;
+  }
+}
+
+@media (max-width: 1100px) {
+  .detail-top-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.85rem !important;
+  }
+
+  .detail-top-left,
+  .detail-top-mid,
+  .detail-top-right,
+  .detail-top-identity {
+    width: 100%;
+    justify-self: stretch !important;
+  }
+
+  .detail-top-right {
+    justify-content: flex-start;
+  }
+
+  .detail-top-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+    width: 100%;
+    justify-content: stretch !important;
+  }
+
+  .detail-top-chip {
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .detail-top-unified.detail-top-v6 {
+    padding: 0.95rem !important;
+  }
+
+  .detail-top-taskno {
+    font-size: 1.35rem;
+    line-height: 1.2;
+  }
+
+  .detail-top-sub {
+    overflow-wrap: anywhere;
+  }
+
+  .detail-top-current.detail-top-status-pill {
+    width: 100%;
+    align-items: flex-start;
+    border-radius: 0.85rem;
+    white-space: normal;
+  }
+
+  .detail-top-flow-shell {
+    overflow-x: hidden !important;
+    padding-bottom: 0 !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--horizontal),
+  .detail-top-flow-shell :deep(.workflow-progress--naive.workflow-progress--horizontal) {
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+    gap: 0.02rem !important;
+    padding: 0.36rem 0.28rem !important;
+    overflow: hidden !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step) {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step--process-status) {
+    padding: 0.18rem 0.45rem 0.18rem 0.25rem !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content) {
+    flex: 0 0 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    padding-left: 0 !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step--process-status .n-step-content) {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    padding-left: 0.18rem !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content-header__title) {
+    display: none !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step--process-status .n-step-content-header__title) {
+    display: block !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    max-width: 2.4rem !important;
+    overflow: hidden !important;
+    font-size: 0.7rem !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-content__description) {
+    display: none !important;
+  }
+
+  .detail-top-flow-shell :deep(.workflow-progress--naive .n-step-splitor) {
+    flex: 0 0 0.38rem !important;
+    width: 0.38rem !important;
+    min-width: 0.38rem !important;
+    margin-inline: 0.04rem !important;
+  }
+
+  .detail-top-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .detail-top-chip {
+    min-height: 2.15rem;
+    height: auto;
+    padding: 0.45rem 0.55rem;
+  }
 }
 </style>

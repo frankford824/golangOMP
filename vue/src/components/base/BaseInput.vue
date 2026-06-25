@@ -8,6 +8,7 @@
       :value="modelValue"
       :placeholder="placeholder"
       :disabled="disabled"
+      :maxlength="maxlength"
       class="w-full h-11 rounded-xl border border-stone-200 bg-stone-50/80 px-3 text-sm text-stone-800 placeholder:text-stone-400 outline-none transition focus:border-stone-400 focus:ring-1 focus:ring-stone-300 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
       @input="onInput"
     />
@@ -28,6 +29,7 @@ withDefaults(
     placeholder?: string
     type?: string
     disabled?: boolean
+    maxlength?: number | string
     hint?: string
     error?: string
   }>(),
@@ -47,4 +49,3 @@ function onInput(e: Event) {
   emit('update:modelValue', target.value)
 }
 </script>
-

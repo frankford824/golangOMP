@@ -25,6 +25,7 @@ func (s *templateService) Generate(ctx context.Context, taskType domain.TaskType
 	if !ok {
 		return nil, unsupportedTaskTypeError(taskType)
 	}
+	itemSheetFields := expandTemplateReferenceColumns(fields)
 
 	f := excelize.NewFile()
 	defer f.Close()
@@ -40,14 +41,14 @@ func (s *templateService) Generate(ctx context.Context, taskType domain.TaskType
 	}
 	f.SetActiveSheet(0)
 
-	for i, field := range fields {
+	for i, field := range itemSheetFields {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		if err := f.SetCellValue(itemsSheet, cell, field.Column); err != nil {
 			return nil, excelAppError("write template header", err)
 		}
 	}
-	writePlaceholderRow(f, fields, taskType, 2, 0)
-	writePlaceholderRow(f, fields, taskType, 3, 1)
+	writePlaceholderRow(f, itemSheetFields, taskType, 2, 0)
+	writePlaceholderRow(f, itemSheetFields, taskType, 3, 1)
 	if appErr := writeSchemaSheet(f, fields); appErr != nil {
 		return nil, appErr
 	}
@@ -60,6 +61,22 @@ func (s *templateService) Generate(ctx context.Context, taskType domain.TaskType
 		return nil, excelAppError("write template", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func expandTemplateReferenceColumns(fields []FieldSpec) []FieldSpec {
+	out := make([]FieldSpec, 0, len(fields)+3)
+	for _, field := range fields {
+		if field.Key != "reference_image" {
+			out = append(out, field)
+			continue
+		}
+		for i := 1; i <= 4; i++ {
+			cloned := field
+			cloned.Column = fmt.Sprintf("参考图%d", i)
+			out = append(out, cloned)
+		}
+	}
+	return out
 }
 
 func writePlaceholderRow(f *excelize.File, fields []FieldSpec, taskType domain.TaskType, row int, sampleIdx int) {

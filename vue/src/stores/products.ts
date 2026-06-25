@@ -36,6 +36,8 @@ export const useProductsStore = defineStore('products', () => {
   const page = ref(1)
   const pageSize = ref(20)
   const total = ref(0)
+  let loadSeq = 0
+  let loadAbort: AbortController | null = null
 
   const list = computed(() => items.value)
   const totalPages = computed(() => (pageSize.value > 0 ? Math.max(1, Math.ceil(total.value / pageSize.value)) : 1))
@@ -43,6 +45,10 @@ export const useProductsStore = defineStore('products', () => {
 
   /** 调用 GET /v1/erp/products 查询产品，支持 keyword、category 等筛选与分页 */
   async function loadProducts(params?: { keyword?: string; category?: string; sku_code?: string; page?: number }) {
+    loadAbort?.abort()
+    const seq = ++loadSeq
+    const abortController = new AbortController()
+    loadAbort = abortController
     loading.value = true
     searchError.value = null
     try {
@@ -53,7 +59,8 @@ export const useProductsStore = defineStore('products', () => {
         category: params?.category,
         sku_code: params?.sku_code,
       }
-      const res = await erpApi.getProducts(mergedParams)
+      const res = await erpApi.getProducts(mergedParams, abortController.signal)
+      if (abortController.signal.aborted || seq !== loadSeq) return
       const data = res?.data
       const body = data?.data ?? data
       const rawList = Array.isArray(body) ? body : (body?.items ?? body?.products ?? [])
@@ -66,11 +73,17 @@ export const useProductsStore = defineStore('products', () => {
         total.value = items.value.length
       }
     } catch (e) {
+      if (abortController.signal.aborted || seq !== loadSeq) return
       searchError.value = e instanceof Error ? e.message : '加载产品列表失败'
       items.value = []
       total.value = 0
     } finally {
-      loading.value = false
+      if (loadAbort === abortController) {
+        loadAbort = null
+      }
+      if (seq === loadSeq) {
+        loading.value = false
+      }
     }
   }
 

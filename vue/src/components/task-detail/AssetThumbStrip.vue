@@ -7,31 +7,30 @@
         :key="item.key"
         type="button"
         class="thumb-btn"
-        :class="[{ 'thumb-btn--sm': size === 'sm', 'thumb-btn--md': size === 'md' }, item.unavailable ? 'thumb-btn--placeholder' : '']"
+        :class="[
+          { 'thumb-btn--sm': size === 'sm', 'thumb-btn--md': size === 'md' },
+          item.unavailable || !item.imageLike ? 'thumb-btn--placeholder' : '',
+        ]"
         :title="item.label || item.alt"
         role="listitem"
         @click="onThumbClick(item)"
       >
-        <img
-          v-if="item.src && !item.previewAssetId && !item.unavailable"
-          :src="item.src"
-          :alt="item.alt"
-          class="thumb-img"
-          loading="lazy"
-        />
         <AssetPreviewMedia
-          v-else-if="item.previewAssetId && !item.unavailable"
+          v-if="!item.unavailable && item.imageLike"
           class="thumb-media"
-          :asset-id="item.previewAssetId"
+          :asset-id="item.previewAssetId || null"
           :fallback-asset-id="item.fallbackAssetId || null"
           :fallback-src="item.src || null"
+          :resolved-preview-url="item.previewAssetId ? null : (item.src || null)"
           :alt="item.alt"
           img-class="thumb-media-shell"
           inner-img-class="thumb-img"
           :defer-until-visible="true"
-          @open-full="openLightbox"
+          @open-full="(url, context) => openThumbPreview(item, url, context)"
         />
-        <span v-else class="thumb-placeholder">{{ item.label || '文件' }}</span>
+        <span v-else class="thumb-placeholder">
+          {{ item.extension ? item.extension.toUpperCase() : (item.label || '文件') }}
+        </span>
       </button>
     </div>
   </div>
@@ -40,6 +39,12 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
+import { normalizePreviewAssetId } from '@/domain/asset-preview-image'
 
 export type AssetThumbItem = {
   key: string
@@ -51,8 +56,6 @@ export type AssetThumbItem = {
   label?: string
   unavailable?: boolean
 }
-
-const OPEN_LIGHTBOX_KEY = 'task-detail-open-lightbox'
 
 const props = withDefaults(
   defineProps<{
@@ -69,28 +72,146 @@ const emit = defineEmits<{
   select: [key: string]
 }>()
 
+const IMAGE_EXTENSIONS = new Set([
+  'jpg',
+  'jpeg',
+  'png',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'avif',
+  'heic',
+  'heif',
+])
+
+function extractExtensionFromPath(input: string): string {
+  const raw = input.trim()
+  if (!raw) return ''
+  const clean = raw.split('?')[0].split('#')[0]
+  const file = clean.split('/').pop() ?? clean
+  const idx = file.lastIndexOf('.')
+  if (idx <= 0 || idx === file.length - 1) return ''
+  return file.slice(idx + 1).toLowerCase()
+}
+
+function detectFileExtension(item: AssetThumbItem): string {
+  const fromLabel = extractExtensionFromPath(item.label ?? '')
+  if (fromLabel) return fromLabel
+  const fromDownload = extractExtensionFromPath(item.downloadUrl ?? '')
+  if (fromDownload) return fromDownload
+  return extractExtensionFromPath(item.src ?? '')
+}
+
+function isImageLike(item: AssetThumbItem, ext: string): boolean {
+  if (item.previewAssetId?.trim()) return true
+  if (!item.src?.trim()) return false
+  if (!ext) return true
+  return IMAGE_EXTENSIONS.has(ext)
+}
+
 const normalizedItems = computed(() =>
   props.items
     .map((item) => ({
       ...item,
       src: (item.src ?? '').trim(),
-      previewAssetId: (item.previewAssetId ?? '').trim(),
-      fallbackAssetId: (item.fallbackAssetId ?? '').trim(),
+      previewAssetId: normalizePreviewAssetId(item.previewAssetId),
+      fallbackAssetId: normalizePreviewAssetId(item.fallbackAssetId),
       downloadUrl: (item.downloadUrl ?? '').trim(),
       label: (item.label ?? '').trim(),
     }))
+    .map((item) => {
+      const extension = detectFileExtension(item)
+      const imageLike = isImageLike(item, extension)
+      return {
+        ...item,
+        extension,
+        imageLike,
+        openHref: item.downloadUrl || item.src,
+      }
+    })
     .filter((item) => item.key.trim().length > 0),
 )
 
-const openLightbox = inject<(src: string) => void>(OPEN_LIGHTBOX_KEY, () => {})
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
+
+function thumbGalleryItems(activeKey: string, activeSrc: string): ImagePreviewLightboxItem[] {
+  const out: ImagePreviewLightboxItem[] = normalizedItems.value
+    .filter(
+      (item) =>
+        !item.unavailable &&
+        item.imageLike &&
+        (item.src || item.previewAssetId || item.fallbackAssetId || item.key === activeKey),
+    )
+    .map((item) => ({
+      src: item.key === activeKey ? activeSrc : item.src,
+      previewAssetId: item.previewAssetId || undefined,
+      fallbackAssetId: item.fallbackAssetId || undefined,
+      fallbackSrc: item.src || undefined,
+      resolvedPreviewUrl: item.previewAssetId ? undefined : item.src || undefined,
+      title: item.label || item.alt,
+      alt: item.alt,
+      preferredFilename: item.label || item.alt,
+      downloadUrl: item.downloadUrl || item.src,
+    }))
+    .filter((item) => item.src.trim().length > 0 || item.previewAssetId || item.fallbackAssetId)
+  if (!out.some((item) => item.src === activeSrc)) {
+    out.unshift({
+      src: activeSrc,
+      fallbackSrc: activeSrc,
+      resolvedPreviewUrl: activeSrc,
+      title: activeSrc,
+      alt: activeSrc,
+      preferredFilename: activeSrc,
+      downloadUrl: activeSrc,
+    })
+  }
+  return out
+}
+
+function openThumbPreview(
+  item: AssetThumbItem,
+  src: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
+  const url = String(src ?? '').trim()
+  if (!url) return
+  const items = thumbGalleryItems(item.key, url)
+  const index = Math.max(0, items.findIndex((row) => row.src === url))
+  openLightbox(url, {
+    title: item.label || item.alt,
+    items: items.map((row, rowIndex) =>
+      rowIndex === index
+        ? {
+            ...row,
+            previewAssetId: context?.assetId || row.previewAssetId,
+            fallbackAssetId: context?.fallbackAssetId || row.fallbackAssetId,
+            fallbackSrc: context?.fallbackSrc || row.fallbackSrc,
+            resolvedPreviewUrl: context?.resolvedPreviewUrl || row.resolvedPreviewUrl,
+          }
+        : row,
+    ),
+    index,
+  })
+}
 
 function onThumbClick(item: AssetThumbItem) {
   emit('select', item.key)
-  if (item.unavailable && item.downloadUrl) {
-    window.open(item.downloadUrl, '_blank', 'noopener')
+  const ext = detectFileExtension(item)
+  const imageLike = isImageLike(item, ext)
+  const openHref = (item.downloadUrl ?? '').trim() || (item.src ?? '').trim()
+  if ((item.unavailable || !imageLike) && openHref) {
+    window.open(openHref, '_blank', 'noopener')
     return
   }
-  if (item.src) openLightbox(item.src)
+  if (item.src || item.previewAssetId || item.fallbackAssetId) {
+    openThumbPreview(item, item.src || '')
+  }
 }
 </script>
 

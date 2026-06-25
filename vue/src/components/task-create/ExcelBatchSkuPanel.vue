@@ -20,7 +20,15 @@
       </li>
     </ol>
 
-    <div class="excel-actions-card">
+    <div
+      class="excel-actions-card"
+      tabindex="0"
+      @focusin="activateExcelFileReceiver"
+      @pointerenter="activateExcelFileReceiver"
+      @dragover.prevent="onExcelDragOver"
+      @drop.prevent="onExcelDrop"
+      @paste="onExcelPaste"
+    >
       <button
         type="button"
         class="hh-btn hh-btn-primary"
@@ -43,7 +51,7 @@
         class="hh-btn hh-btn-file"
         @click="openFilePicker"
       >
-        选择文件
+        选择/拖拽/粘贴文件
       </button>
 
       <button
@@ -72,7 +80,9 @@
       </p>
       <p v-if="templateName" class="template-line">模板：{{ templateName }}</p>
       <p class="rule-line">
-        必填列：产品名称、设计要求；可选：产品i_id（聚水潭款式编码，与模板一致；下方预览表头写作「产品款式编码」）、参考图（图片需放在对应产品行内）。最多 200 行。
+        请按模板填写后上传，最多支持 200 行。<br>
+        必填：产品名称、设计要求；可选：产品款式编码、参考图。<br>
+        参考图请放在对应产品所在行。
       </p>
     </div>
 
@@ -124,7 +134,7 @@
               </td>
               <td>
                 <span v-for="err in rowErrors(idx + 1)" :key="err.column + err.code" class="err-tag">
-                  {{ err.column }} · {{ err.message || err.code }}
+                  {{ batchViolationText(err) }}
                 </span>
                 <span v-if="rowErrors(idx + 1).length === 0">—</span>
               </td>
@@ -140,9 +150,15 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { batchSkuApi, normalizeBatchPreviewRow } from '@/services/api/batchSkuApi'
+import { batchSkuApi, formatBatchViolationMessage, normalizeBatchPreviewRow } from '@/services/api/batchSkuApi'
 import type { BatchPreviewRow, BatchViolation } from '@/services/api/batchSkuApi'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 
 type PreviewRow = BatchPreviewRow
 type Violation = BatchViolation
@@ -172,6 +188,14 @@ const preview = ref<PreviewRow[]>([])
 const violations = ref<Violation[]>([])
 const errorText = ref('')
 
+const { activateFileReceiver: activateExcelFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => !parsing.value),
+  onFiles: (files) => {
+    const file = files[0] ?? null
+    if (file) selectFile(file)
+  },
+})
+
 const stepItems = [
   { value: 1, label: '模板' },
   { value: 2, label: '说明' },
@@ -188,6 +212,7 @@ const activeStep = computed(() => {
 const selectedFileName = computed(() => selectedFile.value?.name ?? '未选择任何文件')
 
 function openFilePicker(): void {
+  activateExcelFileReceiver()
   fileInput.value?.click()
 }
 
@@ -199,7 +224,7 @@ async function downloadTemplate(): Promise<void> {
   downloading.value = true
   errorText.value = ''
   try {
-    const res = await batchSkuApi.downloadTemplate()
+    const res = await batchSkuApi.downloadTemplate(props.taskType)
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data as BlobPart])
     const disposition = String(res.headers?.['content-disposition'] ?? '')
     const match = disposition.match(/filename\\*?=(?:UTF-8'')?\"?([^\";]+)/i)
@@ -219,14 +244,54 @@ async function downloadTemplate(): Promise<void> {
 
 function onFileChange(event: Event): void {
   const file = (event.target as HTMLInputElement).files?.[0] ?? null
+  selectFile(file)
+}
+
+function isExcelFile(file: File): boolean {
+  return /\.(xlsx|xls|csv)$/i.test(file.name)
+}
+
+function selectFile(file: File | null): void {
   selectedFile.value = file
   preview.value = []
   violations.value = []
   errorText.value = ''
+  if (file && !isExcelFile(file)) {
+    selectedFile.value = null
+    errorText.value = '仅支持上传 xlsx、xls 或 csv 文件'
+  }
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+function onExcelDragOver(event: DragEvent): void {
+  if (parsing.value || !hasFileDataTransfer(event.dataTransfer)) return
+  activateExcelFileReceiver()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onExcelDrop(event: DragEvent): void {
+  if (parsing.value) return
+  const file = getFilesFromDataTransfer(event.dataTransfer)[0] ?? null
+  if (!file) return
+  activateExcelFileReceiver()
+  selectFile(file)
+}
+
+function onExcelPaste(event: ClipboardEvent): void {
+  if (parsing.value) return
+  const file = getFilesFromClipboardEvent(event)[0] ?? null
+  if (!file) return
+  event.preventDefault()
+  activateExcelFileReceiver()
+  selectFile(file)
 }
 
 function isImage(mimeType: string): boolean {
   return mimeType.startsWith('image/')
+}
+
+function batchViolationText(err: Violation): string {
+  return formatBatchViolationMessage(err)
 }
 
 async function parseFile(): Promise<void> {
@@ -360,6 +425,15 @@ function reset(): void {
   border: 1px solid #e6eaf0;
   background: #f7f8fa;
   padding: 0.55rem;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.excel-actions-card:focus-within,
+.excel-actions-card:hover {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.12);
 }
 .hh-btn {
   display: inline-flex;
@@ -534,5 +608,120 @@ function reset(): void {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* Phase 4: light admin Excel batch panel skin. Style-only. */
+.excel-panel {
+  border-color: #e5e7eb;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.excel-eyebrow,
+.excel-status,
+.preview-header span,
+.rule-line,
+.template-line {
+  color: #6b7280;
+}
+
+.excel-title,
+.preview-header p,
+.file-line {
+  color: #111827;
+}
+
+.excel-status,
+.excel-step,
+.excel-actions-card,
+.excel-meta,
+.preview-card {
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.excel-step.is-active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.excel-step.is-done {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.step-index {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.hh-btn-primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+  box-shadow: none;
+}
+
+.hh-btn-primary:not(:disabled):hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.hh-btn-file,
+.hh-btn-secondary,
+.hh-btn-ghost {
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #374151;
+}
+
+.hh-btn-file:not(:disabled):hover,
+.hh-btn-secondary:not(:disabled):hover,
+.hh-btn-ghost:not(:disabled):hover {
+  border-color: #93c5fd;
+  background: #f9fafb;
+  color: #111827;
+}
+
+.file-dot {
+  background: #2563eb;
+  box-shadow: none;
+}
+
+.preview-table th {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.preview-table td {
+  color: #111827;
+}
+
+.preview-table th,
+.preview-table td {
+  border-top-color: #e5e7eb;
+}
+
+.preview-table tr.has-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.ref-thumb-img {
+  border-color: #e5e7eb;
+  background: #ffffff;
+}
+
+.ref-thumb-file {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.excel-error {
+  color: #b91c1c;
 }
 </style>

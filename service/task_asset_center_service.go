@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,17 +17,20 @@ import (
 )
 
 type CreateTaskAssetUploadSessionParams struct {
-	TaskID        int64
-	AssetID       *int64
-	SourceAssetID *int64
-	CreatedBy     int64
-	AssetType     domain.TaskAssetType
-	Filename      string
-	ExpectedSize  *int64
-	MimeType      string
-	FileHash      string
-	Remark        string
-	TargetSKUCode string
+	TaskID               int64
+	AssetID              *int64
+	SourceAssetID        *int64
+	CreatedBy            int64
+	AssetType            domain.TaskAssetType
+	Filename             string
+	ExpectedSize         *int64
+	MimeType             string
+	FileHash             string
+	Remark               string
+	TargetSKUCode        string
+	OwnerModuleKey       string
+	UploadPolicy         string
+	RetouchRequirementID *int64
 }
 
 type CompleteTaskAssetUploadSessionParams struct {
@@ -87,6 +91,8 @@ type TaskAssetCenterService interface {
 	CompleteUploadSession(ctx context.Context, params CompleteTaskAssetUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError)
 	CancelUploadSessionByID(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
 	CancelUploadSession(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
+	BuildTaskReferenceBatchDownloadManifest(ctx context.Context, taskID int64, actorID int64) (*TaskReferenceBatchDownloadManifest, *domain.AppError)
+	EnsureDerivedPreviewAssets(ctx context.Context, taskID, sourceAssetID, actorID int64) *domain.AppError
 }
 
 type taskAssetCenterService struct {
@@ -97,21 +103,31 @@ type taskAssetCenterService struct {
 	assetStorageRefRepo       repo.AssetStorageRefRepo
 	taskEventRepo             repo.TaskEventRepo
 	taskModuleRepo            repo.TaskModuleRepo
+	customizationJobRepo      repo.CustomizationJobRepo
 	txRunner                  repo.TxRunner
 	uploadClient              UploadServiceClient
 	ossDirectService          *OSSDirectService
 	nowFn                     func() time.Time
 	runAsyncFn                func(func())
 	derivedPreviewGracePeriod time.Duration
+	previewRenderer           AssetPreviewRenderer
 	dataScopeResolver         DataScopeResolver
 	scopeUserRepo             repo.UserRepo
 	userDisplayNameResolver   UserDisplayNameResolver
+	workflowRules             designSubmissionWorkflowEngine
+	retouchRequirementRepo    repo.TaskRetouchRequirementRepo
+	referenceFileRefFlatRepo  repo.ReferenceFileRefFlatRepo
 }
 
 const (
-	taskAssetVersionUniqueKey     = "uq_task_assets_task_version"
-	assetVersionRaceRetryDenyCode = "asset_version_race_retry"
+	taskAssetVersionUniqueKey        = "uq_task_assets_task_version"
+	assetVersionRaceRetryDenyCode    = "asset_version_race_retry"
+	assetVersionReplacementRetention = 15 * 24 * time.Hour
 )
+
+type taskAssetVersionSupersedeRepo interface {
+	MarkAssetVersionSuperseded(ctx context.Context, tx repo.Tx, versionID, supersededByVersionID int64, supersededAt, cleanupAfterAt time.Time) error
+}
 
 type TaskAssetCenterServiceOption func(*taskAssetCenterService)
 
@@ -140,11 +156,18 @@ func NewTaskAssetCenterService(
 			go fn()
 		},
 		derivedPreviewGracePeriod: 3 * time.Second,
+		previewRenderer:           NewExternalAssetPreviewRenderer(),
 	}
 	for _, opt := range options {
 		opt(svc)
 	}
 	return svc
+}
+
+func WithTaskAssetCenterPreviewRenderer(renderer AssetPreviewRenderer) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.previewRenderer = renderer
+	}
 }
 
 func WithOSSDirectService(ossDirect *OSSDirectService) func(*taskAssetCenterService) {
@@ -156,6 +179,12 @@ func WithOSSDirectService(ossDirect *OSSDirectService) func(*taskAssetCenterServ
 func WithTaskAssetCenterModuleRepo(moduleRepo repo.TaskModuleRepo) TaskAssetCenterServiceOption {
 	return func(s *taskAssetCenterService) {
 		s.taskModuleRepo = moduleRepo
+	}
+}
+
+func WithTaskAssetCenterCustomizationJobRepo(customizationJobRepo repo.CustomizationJobRepo) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.customizationJobRepo = customizationJobRepo
 	}
 }
 
@@ -174,6 +203,24 @@ func WithTaskAssetCenterScopeUserRepo(userRepo repo.UserRepo) TaskAssetCenterSer
 func WithTaskAssetCenterUserDisplayNameResolver(resolver UserDisplayNameResolver) TaskAssetCenterServiceOption {
 	return func(s *taskAssetCenterService) {
 		s.userDisplayNameResolver = resolver
+	}
+}
+
+func WithTaskAssetCenterBlueprintRuleEngine(rules designSubmissionWorkflowEngine) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.workflowRules = rules
+	}
+}
+
+func WithTaskAssetCenterRetouchRequirementRepo(retouchRequirementRepo repo.TaskRetouchRequirementRepo) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.retouchRequirementRepo = retouchRequirementRepo
+	}
+}
+
+func WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo repo.ReferenceFileRefFlatRepo) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) {
+		s.referenceFileRefFlatRepo = referenceFileRefFlatRepo
 	}
 }
 
@@ -313,13 +360,28 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 		return nil, domain.ErrNotFound
 	}
 	if !asset.CurrentVersion.PreviewAvailable {
-		if asset.AssetType.IsSource() {
-			info, resolveErr := s.resolveSourceDerivedPreviewInfo(ctx, asset)
-			if resolveErr != nil {
-				return nil, resolveErr
+		info, resolveErr := s.resolveDerivedPreviewInfo(ctx, asset)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if info != nil {
+			return info, nil
+		}
+		if isDerivedPreviewGenerationCandidate(asset.CurrentVersion) {
+			actorID := asset.CurrentVersion.UploadedBy
+			if actorID <= 0 {
+				actorID = asset.CreatedBy
 			}
-			if info != nil {
-				return info, nil
+			if err := s.ensureDerivedPreviewAssets(ctx, asset.TaskID, asset.ID, actorID); err != nil {
+				log.Printf("source_preview_derive_on_demand_failed task_id=%d source_asset_id=%d error=%v", asset.TaskID, asset.ID, err)
+			} else {
+				info, resolveErr = s.resolveDerivedPreviewInfo(ctx, asset)
+				if resolveErr != nil {
+					return nil, resolveErr
+				}
+				if info != nil {
+					return info, nil
+				}
 			}
 		}
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "asset preview is not available", map[string]interface{}{
@@ -490,6 +552,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	}
 	requestAssetType := domain.NormalizeTaskAssetType(*request.TaskAssetType)
 	scopeSKUCode := strings.TrimSpace(request.TargetSKUCode)
+	retouchRequirementID := domain.CloneInt64Ptr(request.RetouchRequirementID)
 
 	checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
 	var err error
@@ -525,6 +588,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	storageRefID := uuid.NewString()
 	var asset *domain.DesignAsset
 	attemptedTimelineVersionNo := 0
+	var previousCurrentVersionID *int64
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if request.AssetID != nil {
@@ -546,20 +610,30 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					"upload_session_id": request.RequestID,
 				})
 			}
+			if !retouchRequirementIDsEqual(existingAsset.RetouchRequirementID, retouchRequirementID) {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "retouch_requirement_id does not match existing asset scope", map[string]interface{}{
+					"retouch_requirement_id":       retouchRequirementID,
+					"asset_retouch_requirement_id": existingAsset.RetouchRequirementID,
+					"asset_id":                     existingAsset.ID,
+					"upload_session_id":            request.RequestID,
+				})
+			}
 			asset = existingAsset
 			assetID = existingAsset.ID
+			previousCurrentVersionID = domain.CloneInt64Ptr(existingAsset.CurrentVersionID)
 		} else {
 			assetNo, err := s.designAssetRepo.NextAssetNo(ctx, tx, params.TaskID)
 			if err != nil {
 				return fmt.Errorf("next design asset no: %w", err)
 			}
 			asset = &domain.DesignAsset{
-				TaskID:        params.TaskID,
-				AssetNo:       assetNo,
-				SourceAssetID: request.SourceAssetID,
-				ScopeSKUCode:  scopeSKUCode,
-				AssetType:     requestAssetType,
-				CreatedBy:     params.CompletedBy,
+				TaskID:               params.TaskID,
+				AssetNo:              assetNo,
+				SourceAssetID:        request.SourceAssetID,
+				ScopeSKUCode:         scopeSKUCode,
+				RetouchRequirementID: retouchRequirementID,
+				AssetType:            requestAssetType,
+				CreatedBy:            params.CompletedBy,
 			}
 			id, err := s.designAssetRepo.Create(ctx, tx, asset)
 			if err != nil {
@@ -581,29 +655,35 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 
 		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
 		previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
+		flowReviewStatus := domain.TaskAssetFlowReviewStatusNotApplicable
+		if requestAssetType.IsDelivery() {
+			flowReviewStatus = domain.TaskAssetFlowReviewStatusPendingReview
+		}
 		taskAsset := &domain.TaskAsset{
-			TaskID:          params.TaskID,
-			AssetID:         &assetID,
-			ScopeSKUCode:    optionalStringPtr(scopeSKUCode),
-			AssetType:       requestAssetType,
-			VersionNo:       timelineVersionNo,
-			AssetVersionNo:  &assetVersionNo,
-			UploadMode:      optionalStringPtr(string(request.UploadMode)),
-			UploadRequestID: &request.RequestID,
-			StorageRefID:    &storageRefID,
-			FileName:        request.FileName,
-			OriginalName:    optionalStringPtr(request.FileName),
-			RemoteFileID:    meta.FileID,
-			MimeType:        optionalStringPtr(firstNonEmpty(meta.MimeType, request.MimeType)),
-			FileSize:        firstNonNilInt64(meta.FileSize, request.ExpectedSize, request.FileSize),
-			StorageKey:      optionalStringPtr(resolvedStorageKey),
-			WholeHash:       meta.FileHash,
-			UploadStatus:    &uploadStatus,
-			PreviewStatus:   &previewStatus,
-			UploadedBy:      params.CompletedBy,
-			UploadedAt:      &now,
-			Remark:          firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
-			SourceModuleKey: designAssetSourceModuleKeyForTask(task, requestAssetType),
+			TaskID:               params.TaskID,
+			AssetID:              &assetID,
+			ScopeSKUCode:         optionalStringPtr(scopeSKUCode),
+			RetouchRequirementID: retouchRequirementID,
+			AssetType:            requestAssetType,
+			VersionNo:            timelineVersionNo,
+			AssetVersionNo:       &assetVersionNo,
+			UploadMode:           optionalStringPtr(string(request.UploadMode)),
+			UploadRequestID:      &request.RequestID,
+			StorageRefID:         &storageRefID,
+			FileName:             request.FileName,
+			OriginalName:         optionalStringPtr(request.FileName),
+			RemoteFileID:         meta.FileID,
+			MimeType:             optionalStringPtr(firstNonEmpty(meta.MimeType, request.MimeType)),
+			FileSize:             firstNonNilInt64(meta.FileSize, request.ExpectedSize, request.FileSize),
+			StorageKey:           optionalStringPtr(resolvedStorageKey),
+			WholeHash:            meta.FileHash,
+			UploadStatus:         &uploadStatus,
+			PreviewStatus:        &previewStatus,
+			UploadedBy:           params.CompletedBy,
+			UploadedAt:           &now,
+			Remark:               firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
+			SourceModuleKey:      designAssetSourceModuleKeyForTask(task, requestAssetType),
+			FlowReviewStatus:     flowReviewStatus,
 		}
 		id, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
 		if err != nil {
@@ -630,8 +710,21 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		if _, err := s.assetStorageRefRepo.Create(ctx, tx, ref); err != nil {
 			return fmt.Errorf("create asset storage ref: %w", err)
 		}
+		if requestAssetType.IsReference() {
+			if err := s.insertRetouchRequirementReferenceFlat(ctx, tx, params.TaskID, retouchRequirementID, storageRefID); err != nil {
+				return err
+			}
+		}
 		if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
 			return fmt.Errorf("update design asset current version: %w", err)
+		}
+		if previousCurrentVersionID != nil && *previousCurrentVersionID > 0 && *previousCurrentVersionID != versionID {
+			if supersedeRepo, ok := s.taskAssetRepo.(taskAssetVersionSupersedeRepo); ok {
+				cleanupAfter := now.Add(assetVersionReplacementRetention)
+				if err := supersedeRepo.MarkAssetVersionSuperseded(ctx, tx, *previousCurrentVersionID, versionID, now, cleanupAfter); err != nil {
+					return err
+				}
+			}
 		}
 		if err := s.uploadRequestRepo.UpdateBinding(ctx, tx, request.RequestID, &versionID, storageRefID, domain.UploadRequestStatusBound, taskAsset.Remark); err != nil {
 			return fmt.Errorf("update upload request binding: %w", err)
@@ -649,9 +742,17 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}
 		shouldAppendDesignSubmitted := false
 		if requestAssetType.IsDelivery() {
+			if task.CustomizationRequired && task.TaskStatus == domain.TaskStatusPendingCustomizationProduction &&
+				!submitDesignActorCanUseCustomizationLane(ctx) {
+				return domain.NewAppError(domain.ErrCodePermissionDenied, "customization submit-design requires a customization operator, operation, or management role", map[string]interface{}{
+					"task_id":   task.ID,
+					"deny_code": "missing_customization_submit_role",
+					"action":    string(TaskActionSubmitDesign),
+				})
+			}
 			switch task.TaskStatus {
-			case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB:
-				advance, gateErr := s.shouldAdvanceTaskToPendingAuditA(ctx, task, scopeSKUCode)
+			case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusPendingCustomizationProduction:
+				advance, gateErr := s.shouldAdvanceTaskToPendingAuditA(ctx, task, scopeSKUCode, request)
 				if gateErr != nil {
 					return fmt.Errorf("check design submit gate: %w", gateErr)
 				}
@@ -665,6 +766,12 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 					}
 					if err := s.markDesignSubmissionModuleState(ctx, tx, params.TaskID, transition); err != nil {
 						return fmt.Errorf("mark design module submitted after delivery upload: %w", err)
+					}
+					if err := applyDesignSubmissionWorkflow(ctx, tx, s.workflowRules, task, transition, params.CompletedBy); err != nil {
+						return fmt.Errorf("apply design submission workflow after delivery upload: %w", err)
+					}
+					if err := syncCustomizationDesignSubmission(ctx, tx, s.taskRepo, s.customizationJobRepo, task, params.CompletedBy); err != nil {
+						return fmt.Errorf("sync customization submission after delivery upload: %w", err)
 					}
 					shouldAppendDesignSubmitted = true
 				}
@@ -707,7 +814,8 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		if shouldAppendDesignSubmitted {
 			_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventDesignSubmitted, &params.CompletedBy, map[string]interface{}{
 				"asset_type": string(requestAssetType), "asset_id": assetID, "designer_id": task.DesignerID,
-				"upload_session_id": request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
+				"last_customization_operator_id": submittedCustomizationOperatorID(task, params.CompletedBy),
+				"upload_session_id":              request.RequestID, "uploaded_by": params.CompletedBy, "target_sku_code": scopeSKUCode,
 			})
 			if err != nil {
 				return fmt.Errorf("append design submitted event: %w", err)
@@ -736,7 +844,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	if appErr != nil {
 		return nil, appErr
 	}
-	if requestAssetType.IsSource() && result != nil {
+	if result != nil {
 		s.scheduleDerivedPreviewGeneration(params.TaskID, assetID, params.CompletedBy, result.Version)
 	}
 	return result, nil
@@ -952,6 +1060,12 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr := rejectConflictingRetouchAssetScopes(params.TargetSKUCode, params.RetouchRequirementID); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := validateRetouchRequirementAssetScope(ctx, task, params.RetouchRequirementID, s.retouchRequirementRepo); appErr != nil {
+		return nil, appErr
+	}
 	if appErr := s.requireScopedBatchAsset(ctx, params.TaskID, normalizedAssetType, params.TargetSKUCode); appErr != nil {
 		return nil, appErr
 	}
@@ -966,11 +1080,11 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if !decision.Allowed {
 		return nil, taskActionDecisionAppError(TaskActionAssetUploadSessionCreate, decision)
 	}
-	if appErr := validateAuditStageUploadAssetType(task, params.AssetType); appErr != nil {
+	if appErr := validateAuditStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey); appErr != nil {
 		return nil, appErr
 	}
 	taskRef := strings.TrimSpace(task.TaskNo)
-	identity, appErr := s.freezeUploadAssetIdentity(ctx, params.TaskID, params.AssetID, params.SourceAssetID, params.TargetSKUCode, params.AssetType, params.CreatedBy)
+	identity, appErr := s.freezeUploadAssetIdentity(ctx, params.TaskID, params.AssetID, params.SourceAssetID, params.TargetSKUCode, params.RetouchRequirementID, params.AssetType, params.CreatedBy)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -1023,33 +1137,34 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	now := s.nowFn().UTC()
 	requiredContentType := normalizeRequiredUploadContentType(params.MimeType)
 	request := &domain.UploadRequest{
-		OwnerType:       domain.AssetOwnerTypeTask,
-		OwnerID:         params.TaskID,
-		TaskID:          params.TaskID,
-		AssetID:         params.AssetID,
-		SourceAssetID:   params.SourceAssetID,
-		TargetSKUCode:   params.TargetSKUCode,
-		TaskAssetType:   &params.AssetType,
-		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
-		UploadMode:      mode,
-		RefType:         domain.AssetStorageRefTypeTaskAssetObject,
-		FileName:        strings.TrimSpace(params.Filename),
-		MimeType:        requiredContentType,
-		FileSize:        params.ExpectedSize,
-		ExpectedSize:    params.ExpectedSize,
-		ChecksumHint:    strings.TrimSpace(params.FileHash),
-		Status:          domain.UploadRequestStatusRequested,
-		StorageProvider: domain.DesignAssetStorageProviderOSS,
-		SessionStatus:   domain.DesignAssetSessionStatusCreated,
-		RemoteUploadID:  remote.UploadID,
-		RemoteFileID:    valueOrEmpty(remote.FileID),
-		IsPlaceholder:   remote.IsStub,
-		CreatedBy:       params.CreatedBy,
-		ExpiresAt:       remote.ExpiresAt,
-		LastSyncedAt:    firstNonNilTime(remote.LastSyncedAt, &now),
-		Remark:          strings.TrimSpace(params.Remark),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		OwnerType:            domain.AssetOwnerTypeTask,
+		OwnerID:              params.TaskID,
+		TaskID:               params.TaskID,
+		AssetID:              params.AssetID,
+		SourceAssetID:        params.SourceAssetID,
+		TargetSKUCode:        params.TargetSKUCode,
+		RetouchRequirementID: domain.CloneInt64Ptr(params.RetouchRequirementID),
+		TaskAssetType:        &params.AssetType,
+		StorageAdapter:       domain.AssetStorageAdapterOSSUploadService,
+		UploadMode:           mode,
+		RefType:              domain.AssetStorageRefTypeTaskAssetObject,
+		FileName:             strings.TrimSpace(params.Filename),
+		MimeType:             requiredContentType,
+		FileSize:             params.ExpectedSize,
+		ExpectedSize:         params.ExpectedSize,
+		ChecksumHint:         strings.TrimSpace(params.FileHash),
+		Status:               domain.UploadRequestStatusRequested,
+		StorageProvider:      domain.DesignAssetStorageProviderOSS,
+		SessionStatus:        domain.DesignAssetSessionStatusCreated,
+		RemoteUploadID:       remote.UploadID,
+		RemoteFileID:         valueOrEmpty(remote.FileID),
+		IsPlaceholder:        remote.IsStub,
+		CreatedBy:            params.CreatedBy,
+		ExpiresAt:            remote.ExpiresAt,
+		LastSyncedAt:         firstNonNilTime(remote.LastSyncedAt, &now),
+		Remark:               strings.TrimSpace(params.Remark),
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		created, err := s.uploadRequestRepo.Create(ctx, tx, request)
@@ -1058,17 +1173,20 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		}
 		request = created
 		_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCreated, &params.CreatedBy, map[string]interface{}{
-			"upload_session_id": request.RequestID,
-			"asset_id":          params.AssetID,
-			"asset_type":        string(params.AssetType),
-			"target_sku_code":   params.TargetSKUCode,
-			"filename":          request.FileName,
-			"expected_size":     request.ExpectedSize,
-			"mime_type":         request.MimeType,
-			"upload_mode":       string(mode),
-			"storage_provider":  string(request.StorageProvider),
-			"remote_upload_id":  request.RemoteUploadID,
-			"expires_at":        request.ExpiresAt,
+			"upload_session_id":      request.RequestID,
+			"asset_id":               params.AssetID,
+			"asset_type":             string(params.AssetType),
+			"target_sku_code":        params.TargetSKUCode,
+			"owner_module_key":       strings.TrimSpace(params.OwnerModuleKey),
+			"upload_policy":          strings.TrimSpace(params.UploadPolicy),
+			"retouch_requirement_id": params.RetouchRequirementID,
+			"filename":               request.FileName,
+			"expected_size":          request.ExpectedSize,
+			"mime_type":              request.MimeType,
+			"upload_mode":            string(mode),
+			"storage_provider":       string(request.StorageProvider),
+			"remote_upload_id":       request.RemoteUploadID,
+			"expires_at":             request.ExpiresAt,
 		})
 		return err
 	})
@@ -1179,12 +1297,13 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 	if version == nil {
 		return nil
 	}
+	filename := resolveDesignAssetDownloadFilename(version)
 	if ossDirect != nil && ossDirect.Enabled() && strings.TrimSpace(version.StorageKey) != "" {
 		key := strings.TrimSpace(version.StorageKey)
 		var info *OSSDirectDownloadInfo
 		mimeType := version.MimeType
 		if preview {
-			if process, ok := buildOSSIMGPreviewProcessForSource(version); ok {
+			if process, ok := buildOSSIMGPreviewProcessForVersion(version); ok {
 				info = ossDirect.PresignPreviewURLWithProcess(key, process)
 				if strings.Contains(process, "format,jpg") {
 					mimeType = "image/jpeg"
@@ -1193,7 +1312,7 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 				info = ossDirect.PresignPreviewURL(key)
 			}
 		} else {
-			info = ossDirect.PresignDownloadURL(key)
+			info = ossDirect.PresignDownloadURLWithFilename(key, filename)
 		}
 		if info != nil && strings.TrimSpace(info.DownloadURL) != "" {
 			downloadURL := info.DownloadURL
@@ -1206,7 +1325,7 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 				DownloadURL:      &downloadURL,
 				AccessHint:       "oss_presigned",
 				PreviewAvailable: version.PreviewAvailable,
-				Filename:         version.OriginalFilename,
+				Filename:         filename,
 				FileSize:         fileSize,
 				MimeType:         mimeType,
 				ExpiresAt:        &info.ExpiresAt,
@@ -1220,14 +1339,15 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 	if version == nil {
 		return nil
 	}
+	filename := resolveDesignAssetDownloadFilename(version)
 	downloadMode := domain.AssetDownloadModeProxy
 	downloadURL := version.DownloadURL
 	if uploadClient != nil {
 		if directURL := uploadClient.BuildBrowserFileURL(version.StorageKey); directURL != nil && strings.TrimSpace(*directURL) != "" {
 			urlValue := strings.TrimSpace(*directURL)
+			downloadURL = directURL
 			if isDirectBrowserURL(urlValue) {
 				downloadMode = domain.AssetDownloadModeDirect
-				downloadURL = directURL
 			}
 		}
 	}
@@ -1236,6 +1356,10 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 		if strings.HasPrefix(urlValue, "http://") || strings.HasPrefix(urlValue, "https://") {
 			downloadMode = domain.AssetDownloadModeDirect
 		}
+	}
+	if downloadMode == domain.AssetDownloadModeProxy && downloadURL != nil {
+		urlValue := AppendProxyDownloadFilenameQuery(*downloadURL, filename)
+		downloadURL = &urlValue
 	}
 	fileSize := int64(0)
 	if version.FileSize != nil {
@@ -1246,10 +1370,22 @@ func buildAssetDownloadInfo(version *domain.DesignAssetVersion, uploadClient Upl
 		DownloadURL:      downloadURL,
 		AccessHint:       version.AccessHint,
 		PreviewAvailable: version.PreviewAvailable,
-		Filename:         version.OriginalFilename,
+		Filename:         filename,
 		FileSize:         fileSize,
 		MimeType:         version.MimeType,
 	}
+}
+
+func resolveDesignAssetDownloadFilename(version *domain.DesignAssetVersion) string {
+	if version == nil {
+		return "asset"
+	}
+	originalName := ""
+	if version.OriginalNameExplicit {
+		originalName = strings.TrimSpace(version.OriginalFilename)
+	}
+	fileName := firstNonEmpty(strings.TrimSpace(version.FileName), strings.TrimSpace(version.OriginalFilename))
+	return ResolveAssetDownloadFilenameForSingle(originalName, fileName, version.AssetID, version.ScopeSKUCode)
 }
 
 func isDirectBrowserURL(urlValue string) bool {
@@ -1259,6 +1395,11 @@ func isDirectBrowserURL(urlValue string) bool {
 	}
 	if strings.HasPrefix(urlValue, "/v1/assets/files/") || strings.HasPrefix(urlValue, "/files/") {
 		return false
+	}
+	if parsed, err := url.Parse(urlValue); err == nil && parsed.Path != "" {
+		if strings.HasPrefix(parsed.Path, "/v1/assets/files/") || strings.HasPrefix(parsed.Path, "/files/") {
+			return false
+		}
 	}
 	return strings.HasPrefix(urlValue, "http://") || strings.HasPrefix(urlValue, "https://") || strings.HasPrefix(urlValue, "/")
 }
@@ -1273,7 +1414,16 @@ func allowPostTransitionUploadSessionComplete(
 	if strings.TrimSpace(decision.DenyCode) != "task_status_not_actionable" {
 		return false
 	}
-	if task == nil || task.TaskStatus != domain.TaskStatusPendingAuditA {
+	if task == nil {
+		return false
+	}
+	switch task.TaskStatus {
+	case domain.TaskStatusPendingAuditA:
+	case domain.TaskStatusCompleted:
+		if task.TaskType != domain.TaskTypeRetouchTask {
+			return false
+		}
+	default:
 		return false
 	}
 	if !isPrecreatedCompletableUploadSession(request) {
@@ -1451,7 +1601,7 @@ func inferTaskAssetUploadMode(assetType domain.TaskAssetType) (domain.DesignAsse
 	return domain.DesignAssetUploadModeMultipart, nil
 }
 
-func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType) *domain.AppError {
+func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType, ownerModuleKey string) *domain.AppError {
 	if task == nil || !isAuditStageTaskStatus(task.TaskStatus) {
 		return nil
 	}
@@ -1459,14 +1609,19 @@ func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskA
 	if normalized == domain.TaskAssetTypeSource || normalized == domain.TaskAssetTypeDelivery {
 		return nil
 	}
-	return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit-stage uploads only support source or delivery assets", map[string]interface{}{
-		"deny_code":   "audit_stage_asset_type_not_allowed",
-		"task_status": string(task.TaskStatus),
-		"asset_type":  string(assetType),
+	if normalized == domain.TaskAssetTypeReference && strings.TrimSpace(ownerModuleKey) == string(domain.ModuleKeyBasicInfo) {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit-stage uploads only support source, delivery, or basic_info reference assets", map[string]interface{}{
+		"deny_code":        "audit_stage_asset_type_not_allowed",
+		"task_status":      string(task.TaskStatus),
+		"asset_type":       string(assetType),
+		"owner_module_key": strings.TrimSpace(ownerModuleKey),
 		"allowed_asset_types": []string{
 			string(domain.TaskAssetTypeSource),
 			string(domain.TaskAssetTypeDelivery),
 		},
+		"allowed_reference_owner_module_key": string(domain.ModuleKeyBasicInfo),
 	})
 }
 
@@ -1615,12 +1770,39 @@ type frozenUploadAssetIdentity struct {
 	AssetNo string
 }
 
+func (s *taskAssetCenterService) insertRetouchRequirementReferenceFlat(
+	ctx context.Context,
+	tx repo.Tx,
+	taskID int64,
+	retouchRequirementID *int64,
+	refID string,
+) error {
+	if s.referenceFileRefFlatRepo == nil || retouchRequirementID == nil || *retouchRequirementID <= 0 {
+		return nil
+	}
+	refID = strings.TrimSpace(refID)
+	if refID == "" {
+		return nil
+	}
+	if _, err := s.referenceFileRefFlatRepo.InsertFlat(ctx, tx, &domain.ReferenceFileRefFlat{
+		TaskID:               taskID,
+		RetouchRequirementID: retouchRequirementID,
+		RefID:                refID,
+		OwnerModuleKey:       string(domain.ModuleKeyBasicInfo),
+		Context:              stringPtr("retouch_requirement_reference"),
+	}); err != nil {
+		return fmt.Errorf("insert retouch requirement reference_file_ref flat row: %w", err)
+	}
+	return nil
+}
+
 func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 	ctx context.Context,
 	taskID int64,
 	requestedAssetID *int64,
 	sourceAssetID *int64,
 	targetSKUCode string,
+	retouchRequirementID *int64,
 	assetType domain.TaskAssetType,
 	createdBy int64,
 ) (*frozenUploadAssetIdentity, *domain.AppError) {
@@ -1649,6 +1831,13 @@ func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 				"asset_id":        asset.ID,
 			})
 		}
+		if !retouchRequirementIDsEqual(asset.RetouchRequirementID, retouchRequirementID) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "retouch_requirement_id does not match existing asset scope", map[string]interface{}{
+				"retouch_requirement_id":       retouchRequirementID,
+				"asset_retouch_requirement_id": asset.RetouchRequirementID,
+				"asset_id":                     asset.ID,
+			})
+		}
 		return &frozenUploadAssetIdentity{
 			AssetID: asset.ID,
 			AssetNo: strings.TrimSpace(asset.AssetNo),
@@ -1662,12 +1851,13 @@ func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 			return err
 		}
 		asset := &domain.DesignAsset{
-			TaskID:        taskID,
-			AssetNo:       assetNo,
-			SourceAssetID: sourceAssetID,
-			ScopeSKUCode:  strings.TrimSpace(targetSKUCode),
-			AssetType:     assetType,
-			CreatedBy:     createdBy,
+			TaskID:               taskID,
+			AssetNo:              assetNo,
+			SourceAssetID:        sourceAssetID,
+			ScopeSKUCode:         strings.TrimSpace(targetSKUCode),
+			RetouchRequirementID: domain.CloneInt64Ptr(retouchRequirementID),
+			AssetType:            assetType,
+			CreatedBy:            createdBy,
 		}
 		assetID, err := s.designAssetRepo.Create(ctx, tx, asset)
 		if err != nil {

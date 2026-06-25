@@ -23,9 +23,14 @@
         v-model.number="costPriceInput"
         type="number"
         min="0"
-        step="0.01"
+        step="0.001"
         label="成本价（CNY）"
         placeholder="请输入产品成本价"
+      />
+      <BaseInput
+        v-model="costOverrideReason"
+        label="成本维护原因"
+        placeholder="如：仓库维护成本价"
       />
     </div>
     <BaseTextarea
@@ -35,14 +40,17 @@
       :rows="compact ? 2 : 3"
       placeholder="请填写规格、尺寸、工艺等信息"
     />
+    <p class="mt-2 text-xs leading-relaxed text-stone-600">
+      成本价保存后将作为人工维护成本，并请求同步 ERP；后续仍可再次修改。
+    </p>
     <div
       class="rounded-md border border-slate-200 bg-white/80 text-xs text-slate-700"
       :class="compact ? 'mt-2 p-1.5' : 'mt-3 p-2'"
     >
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span class="font-medium text-slate-800">建档 / ERP</span>
-        <span v-if="task.filing_status" class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.65rem]">
-          {{ task.filing_status }}
+        <span v-if="task.filing_status" class="rounded bg-slate-100 px-1.5 py-0.5 text-[0.65rem]">
+          {{ filingStatusLabel }}
         </span>
         <span v-if="task.last_filed_at" class="text-slate-500">
           最近建档：{{ task.last_filed_at }}
@@ -61,7 +69,7 @@
           保存并刷新
         </BaseButton>
       </div>
-      <p v-if="task.filing_error_message" class="mt-1 text-red-600">{{ task.filing_error_message }}</p>
+      <p v-if="businessFilingErrorMessage" class="mt-1 text-red-600">{{ businessFilingErrorMessage }}</p>
     </div>
     <p v-if="saveError" class="mt-2 text-xs text-red-600">{{ saveError }}</p>
   </div>
@@ -80,6 +88,8 @@ import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
+import { getTaskFilingStatusLabel } from '@/utils/filing-status'
 
 const props = withDefaults(
   defineProps<{
@@ -131,11 +141,16 @@ function isOriginal(t: Task): boolean {
 
 const categoryModel = ref('')
 const specText = ref('')
+const costOverrideReason = ref('')
 const costPriceInput = ref<number | undefined>(undefined)
 
 const saving = ref(false)
 const filingLoading = ref(false)
 const saveError = ref('')
+const businessFilingErrorMessage = computed(() => formatErpSyncFailureMessage(props.task.filing_error_message ?? ''))
+const filingStatusLabel = computed(() =>
+  getTaskFilingStatusLabel(props.task.filing_status, props.task.businessType ?? props.task.taskType),
+)
 
 function hydrateFromTask(t: Task) {
   const cat = isNewProduct(t)
@@ -143,6 +158,7 @@ function hydrateFromTask(t: Task) {
     : (t.erpIId ?? t.erpCategoryName ?? t.erpCategoryCode ?? t.categoryName ?? t.category ?? '')
   categoryModel.value = typeof cat === 'string' ? cat : ''
   specText.value = t.designRequirement ?? ''
+  costOverrideReason.value = ''
   const cp = t.costPrice?.amount
   const npc = t.newProductCostUnitPrice
   const n = typeof cp === 'number' && Number.isFinite(cp) ? cp : typeof npc === 'number' && Number.isFinite(npc) ? npc : undefined
@@ -163,11 +179,18 @@ async function save() {
     const cat = categoryModel.value.trim()
     const spec = specText.value.trim()
     const cost = costPriceInput.value
+    const reason = costOverrideReason.value.trim() || '仓库维护成本价'
 
     const bizPatch: Record<string, unknown> = {}
     Object.assign(bizPatch, buildCategoryPatchFields(cat))
     if (spec) bizPatch.spec_text = spec
-    if (typeof cost === 'number' && Number.isFinite(cost)) bizPatch.cost_price = cost
+    if (typeof cost === 'number' && Number.isFinite(cost)) {
+      bizPatch.cost_price = cost
+      bizPatch.manual_cost_override = true
+      bizPatch.manual_cost_override_reason = reason
+      bizPatch.trigger_filing = true
+      bizPatch.remark = reason
+    }
 
     if (Object.keys(bizPatch).length === 0) {
       saveError.value = '请至少填写或修改一项后再保存'

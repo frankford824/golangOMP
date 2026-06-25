@@ -1,13 +1,69 @@
 package handler
 
 import (
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
 	"workflow/service"
 )
+
+// AssetFilesTokenCookie carries the session token for browser-native asset
+// loads (<img> src, direct download links) that cannot attach an Authorization
+// header. It is HttpOnly and path-scoped to the asset file proxy only.
+const (
+	AssetFilesTokenCookie     = "wf_asset_token"
+	assetFilesTokenCookiePath = "/v1/assets/files"
+	WSTokenCookie             = "wf_ws_token"
+	wsTokenCookiePath         = "/ws"
+)
+
+func setAssetFilesTokenCookie(c *gin.Context, result *domain.AuthResult) {
+	if result == nil || result.Session == nil || strings.TrimSpace(result.Session.Token) == "" {
+		return
+	}
+	maxAge := int(time.Until(result.Session.ExpiresAt).Seconds())
+	if maxAge <= 0 {
+		return
+	}
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(AssetFilesTokenCookie, result.Session.Token, maxAge, assetFilesTokenCookiePath, "", secure, true)
+	c.SetCookie(WSTokenCookie, result.Session.Token, maxAge, wsTokenCookiePath, "", secure, true)
+}
+
+func setAssetFilesRawTokenCookie(c *gin.Context, token string, maxAge int) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return
+	}
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(AssetFilesTokenCookie, token, maxAge, assetFilesTokenCookiePath, "", secure, true)
+	c.SetCookie(WSTokenCookie, token, maxAge, wsTokenCookiePath, "", secure, true)
+}
+
+func clearAssetFilesTokenCookie(c *gin.Context) {
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(AssetFilesTokenCookie, "", -1, assetFilesTokenCookiePath, "", secure, true)
+	c.SetCookie(WSTokenCookie, "", -1, wsTokenCookiePath, "", secure, true)
+}
+
+func bearerTokenFromHeader(header string) string {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return ""
+	}
+	fields := strings.Fields(header)
+	if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
+		return strings.TrimSpace(fields[1])
+	}
+	return ""
+}
 
 type AuthHandler struct {
 	svc service.IdentityService
@@ -41,9 +97,10 @@ type loginReq struct {
 }
 
 type changePasswordReq struct {
-	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required"`
-	Confirm     string `json:"confirm"`
+	OldPassword          string `json:"old_password" binding:"required"`
+	NewPassword          string `json:"new_password" binding:"required"`
+	Confirm              string `json:"confirm"`
+	PasswordConfirmation string `json:"password_confirmation"`
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -67,6 +124,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
+	setAssetFilesTokenCookie(c, result)
 	respondCreated(c, result)
 }
 
@@ -93,7 +151,30 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
+	setAssetFilesTokenCookie(c, result)
 	respondOK(c, result)
+}
+
+func (h *AuthHandler) RefreshAssetCookie(c *gin.Context) {
+	if actor, ok := domain.RequestActorFromContext(c.Request.Context()); !ok || !domain.IsSessionBackedRequestActor(actor) {
+		respondError(c, domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil))
+		return
+	}
+	token, ok := domain.RequestBearerTokenFromContext(c.Request.Context())
+	if !ok {
+		token = bearerTokenFromHeader(c.GetHeader("Authorization"))
+	}
+	if token == "" {
+		respondError(c, domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil))
+		return
+	}
+	setAssetFilesRawTokenCookie(c, token, 0)
+	respondOK(c, gin.H{"status": "ok"})
+}
+
+func (h *AuthHandler) Logout(c *gin.Context) {
+	clearAssetFilesTokenCookie(c)
+	respondOK(c, gin.H{"status": "ok"})
 }
 
 func (h *AuthHandler) Me(c *gin.Context) {
@@ -114,7 +195,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	if appErr := h.svc.ChangePassword(c.Request.Context(), service.ChangePasswordParams{
 		OldPassword: req.OldPassword,
 		NewPassword: req.NewPassword,
-		Confirm:     req.Confirm,
+		Confirm:     firstNonEmpty(req.Confirm, req.PasswordConfirmation),
 	}); appErr != nil {
 		respondError(c, appErr)
 		return

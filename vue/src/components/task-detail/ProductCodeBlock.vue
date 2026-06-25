@@ -36,22 +36,20 @@
       <div v-if="task.productSource === 'existing'" class="product-thumb-row">
         <div
           class="product-thumb-wrap"
-          :class="{ 'cursor-zoom-in': showImage && !imageLoadFailed }"
-          @click="showImage && !imageLoadFailed ? (lightboxSrc = task.productImageUrl!) : null"
+          :class="{ 'cursor-zoom-in': showImage }"
         >
-          <img
-            v-if="showImage && !imageLoadFailed"
-            :src="task.productImageUrl"
+          <AssetPreviewMedia
+            v-if="showImage"
+            :resolved-preview-url="task.productImageUrl || null"
+            :fallback-src="task.productImageUrl || null"
             alt="原产品图"
-            class="product-thumb-img"
-            @error="onImageError"
+            img-class="product-thumb-media"
+            inner-img-class="product-thumb-img"
+            @open-full="(url, context) => openProductImage(url, context)"
           />
           <span v-else class="product-thumb-placeholder">无图</span>
         </div>
         <span class="product-thumb-label">原产品图</span>
-      </div>
-      <div v-if="lightboxSrc" class="lightbox-overlay" @click="lightboxSrc = null">
-        <img :src="lightboxSrc" alt="原产品图大图" class="lightbox-img" />
       </div>
       <dl class="info-grid" :class="{ 'info-grid--compact': compactLayout }">
         <div class="info-row">
@@ -92,16 +90,18 @@
           <button
             type="button"
             class="main-ref-hero-btn"
-            :class="{ 'main-ref-hero-btn--failed': activeRefUrl && refLoadFailedSet.has(activeRefUrl) }"
             :title="'放大查看参考图 ' + (activeRefIdx + 1)"
-            @click="activeRefUrl && !refLoadFailedSet.has(activeRefUrl) && (lightboxSrc = activeRefUrl)"
+            @click="() => openCurrentReferencePreview()"
           >
-            <img
-              v-if="activeRefUrl && !refLoadFailedSet.has(activeRefUrl)"
-              :src="activeRefUrl"
+            <AssetPreviewMedia
+              v-if="activeReferenceRef"
+              :asset-id="activeReferenceAssetId || null"
+              :resolved-preview-url="activeRefUrl || null"
+              :fallback-src="activeRefUrl || null"
               :alt="`参考图 ${activeRefIdx + 1}`"
-              class="main-ref-hero-img"
-              @error="onRefImageError(activeRefUrl!)"
+              img-class="main-ref-hero-media"
+              inner-img-class="main-ref-hero-img"
+              @open-full="(url, context) => openCurrentReferencePreview(url, context)"
             />
             <span v-else class="main-ref-hero-placeholder">参考图加载失败</span>
           </button>
@@ -121,21 +121,21 @@
               :class="{ 'main-ref-strip-btn-active': i === activeRefIdx }"
               @click="activeRefIdx = i"
             >
-              <img
-                v-if="!refLoadFailedSet.has(refUrl)"
-                :src="refUrl"
+              <AssetPreviewMedia
+                v-if="currentReferenceDisplayRefs[i]"
+                :asset-id="referencePreviewAssetId(currentReferenceDisplayRefs[i]) || null"
+                :resolved-preview-url="refUrl || null"
+                :fallback-src="refUrl || null"
                 :alt="`参考 ${i + 1}`"
-                class="main-ref-strip-img"
-                @error="onRefImageError(refUrl)"
+                img-class="main-ref-strip-media"
+                inner-img-class="main-ref-strip-img"
+                @open-full="activeRefIdx = i"
               />
               <span v-else class="main-ref-strip-placeholder">{{ i + 1 }}</span>
             </button>
           </div>
         </div>
         <p v-else class="main-ref-empty">暂无参考图</p>
-      </div>
-      <div v-if="lightboxSrc" class="lightbox-overlay" @click="lightboxSrc = null">
-        <img :src="lightboxSrc" alt="参考图大图" class="lightbox-img" @click.stop />
       </div>
       <dl class="info-grid" :class="{ 'info-grid--compact': compactLayout }">
         <div class="info-row">
@@ -171,10 +171,36 @@
           }}</a>
         </p>
       </div>
-      <div v-if="currentRow.skuStatus" class="status-pill-row">
-        <span class="status-pill-label">状态</span>
-        <span class="status-pill">{{ skuStatusDisplay }}</span>
-      </div>
+        <div v-if="currentRow.skuStatus" class="status-pill-row">
+          <span class="status-pill-label">状态</span>
+          <span class="status-pill">{{ skuStatusDisplay }}</span>
+        </div>
+        <div v-if="showSkuCostPanel" class="sku-cost-panel">
+          <div class="sku-cost-head">
+            <div>
+              <span class="sku-cost-label">子项成本</span>
+              <strong>{{ formatCostMoney(currentRow.costPrice) }}</strong>
+            </div>
+            <span class="sku-cost-mode">{{ skuCostModeLabel }}</span>
+          </div>
+          <div class="sku-cost-edit">
+            <input
+              v-model.number="skuCostDraft"
+              type="number"
+              min="0"
+              step="0.001"
+              class="sku-cost-input"
+              placeholder="维护成本"
+            />
+            <button type="button" class="sku-cost-save" :disabled="savingSkuCost" @click="saveSkuCost">
+              {{ savingSkuCost ? '保存中' : '保存成本' }}
+            </button>
+          </div>
+          <p v-if="skuCostError" class="sku-cost-error">{{ skuCostError }}</p>
+          <p v-else class="sku-cost-hint">
+            {{ skuCostHint }}
+          </p>
+        </div>
       </div>
     </template>
 
@@ -201,7 +227,37 @@
           <dt>基本售价</dt>
           <dd>{{ currentRow.baseSalePrice }}</dd>
         </div>
+        <div class="info-row">
+          <dt>成本</dt>
+          <dd>{{ formatCostMoney(currentRow.costPrice) }}</dd>
+        </div>
       </dl>
+      <div v-if="showSkuCostPanel" class="sku-cost-panel">
+        <div class="sku-cost-head">
+          <div>
+            <span class="sku-cost-label">子项成本</span>
+            <strong>{{ formatCostMoney(currentRow.costPrice) }}</strong>
+          </div>
+          <span class="sku-cost-mode">{{ skuCostModeLabel }}</span>
+        </div>
+        <div class="sku-cost-edit">
+          <input
+            v-model.number="skuCostDraft"
+            type="number"
+            min="0"
+            step="0.001"
+            class="sku-cost-input"
+            placeholder="维护成本"
+          />
+          <button type="button" class="sku-cost-save" :disabled="savingSkuCost" @click="saveSkuCost">
+            {{ savingSkuCost ? '保存中' : '保存成本' }}
+          </button>
+        </div>
+        <p v-if="skuCostError" class="sku-cost-error">{{ skuCostError }}</p>
+        <p v-else class="sku-cost-hint">
+          {{ skuCostHint }}
+        </p>
+      </div>
       <div v-if="currentRow.skuStatus" class="status-pill-row">
         <span class="status-pill-label">状态</span>
         <span class="status-pill">{{ skuStatusDisplay }}</span>
@@ -221,6 +277,14 @@ import { buildParallelProductRows, type TaskParallelProductRow } from '@/domain/
 import { materialModeLabelCn, skuItemStatusLabelCn } from '@/domain/mappers/read-model-labels-cn'
 import { useCategoryOptions } from '@/composables/useCategoryOptions'
 import { useTasksStore } from '@/stores/tasks'
+import { tasksApi } from '@/services/api/tasksApi'
+import { getTaskFilingStatusLabel } from '@/utils/filing-status'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
 
 withDefaults(
   defineProps<{
@@ -234,10 +298,9 @@ const injected = inject<ComputedRef<Task | null>>(TASK_DETAIL_KEY)
 if (!injected) throw new Error('[ProductCodeBlock] 必须在 TaskDetailView 内使用')
 
 const productCtx = inject(TASK_DETAIL_PRODUCT_INDEX_KEY, null)
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 const task = computed(() => injected.value!)
-const lightboxSrc = ref<string | null>(null)
-const imageLoadFailed = ref(false)
 const showImage = computed(() => !!task.value?.productImageUrl)
 
 const isOriginal = computed(
@@ -275,26 +338,100 @@ watch(
 )
 
 const tasksStore = useTasksStore()
+const skuCostDraft = ref<number | undefined>(undefined)
+const savingSkuCost = ref(false)
+const skuCostError = ref('')
 
 const showReferenceBlock = computed(() => isNewProduct.value)
 const currentReferenceRefs = computed((): ReferenceFileRef[] => currentRow.value?.referenceFileRefs ?? [])
-const currentReferenceUrls = computed(() => currentReferenceRefs.value.map((r) => r.download_url ?? '').filter(Boolean))
+const currentReferenceDisplayRefs = computed(() =>
+  currentReferenceRefs.value.filter((r) => String(r.download_url ?? '').trim() || referencePreviewAssetId(r)),
+)
+const currentReferenceUrls = computed(() =>
+  currentReferenceDisplayRefs.value.map((r) => String(r.download_url ?? '').trim()),
+)
+const currentReferencePreviewItems = computed((): ImagePreviewLightboxItem[] =>
+  currentReferenceDisplayRefs.value
+    .map((refObj, index) => {
+      const src = String(refObj.download_url ?? '').trim()
+      const title = refObj.filename?.trim() || `参考图 ${index + 1}`
+      const previewAssetId = referencePreviewAssetId(refObj)
+      return src || previewAssetId
+        ? {
+            src,
+            previewAssetId,
+            resolvedPreviewUrl: src || undefined,
+            fallbackSrc: src || undefined,
+            title,
+            alt: title,
+            preferredFilename: title,
+            downloadUrl: src,
+          }
+        : null
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[],
+)
 
-const refLoadFailedSet = ref(new Set<string>())
-const retriedRefIds = ref(new Set<string>())
-
-function refKey(refObj: ReferenceFileRef): string {
-  return refObj.asset_id ?? refObj.download_url ?? ''
+function referencePreviewAssetId(refObj: ReferenceFileRef | undefined): string | undefined {
+  const id = String(refObj?.asset_id ?? refObj?.ref_id ?? '').trim()
+  return id || undefined
 }
 
-function onRefImageError(url: string) {
-  refLoadFailedSet.value.add(url)
-  const refObj = currentReferenceRefs.value.find((r) => r.download_url === url)
-  if (!refObj) return
-  const key = refKey(refObj)
-  if (!key || retriedRefIds.value.has(key)) return
-  retriedRefIds.value.add(key)
-  tasksStore.refreshReferenceUrls(task.value.id)
+function openProductImage(
+  url?: string,
+  context?: {
+    resolvedPreviewUrl?: string
+    fallbackSrc?: string
+  },
+) {
+  const src = String(url || task.value.productImageUrl || '').trim()
+  if (!showImage.value || !src) return
+  openLightbox(src, {
+    title: '原产品图',
+    items: [
+      {
+        src,
+        resolvedPreviewUrl: context?.resolvedPreviewUrl || task.value.productImageUrl || undefined,
+        fallbackSrc: context?.fallbackSrc || task.value.productImageUrl || undefined,
+        title: '原产品图',
+        alt: '原产品图',
+        preferredFilename: '原产品图',
+        downloadUrl: task.value.productImageUrl || src,
+      },
+    ],
+    index: 0,
+  })
+}
+
+function openCurrentReferencePreview(
+  url?: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
+  const src = String(url || activeRefUrl.value || '').trim()
+  if (!src && !activeReferenceAssetId.value) return
+  const items = currentReferencePreviewItems.value
+  const activeItem = items[activeRefIdx.value]
+  const nextItems = items.length ? [...items] : []
+  if (activeItem) {
+    nextItems[activeRefIdx.value] = {
+      ...activeItem,
+      src: src || activeItem.src,
+      previewAssetId: context?.assetId || activeItem.previewAssetId,
+      fallbackAssetId: context?.fallbackAssetId || activeItem.fallbackAssetId,
+      fallbackSrc: context?.fallbackSrc || activeItem.fallbackSrc,
+      resolvedPreviewUrl: context?.resolvedPreviewUrl || activeItem.resolvedPreviewUrl,
+    }
+  }
+  openLightbox(src, {
+    title: `参考图 ${activeRefIdx.value + 1}`,
+    items: nextItems,
+    index: activeRefIdx.value,
+  })
 }
 
 /** 与「设计工作台」一致：多参考图时主预览 + 底部缩略条切换 */
@@ -305,14 +442,14 @@ const activeRefUrl = computed((): string | null => {
   const i = Math.min(Math.max(0, activeRefIdx.value), urls.length - 1)
   return urls[i] ?? null
 })
+const activeReferenceRef = computed(() => currentReferenceDisplayRefs.value[activeRefIdx.value] ?? null)
+const activeReferenceAssetId = computed(() => referencePreviewAssetId(activeReferenceRef.value ?? undefined))
 
 watch(
   () =>
     [task.value?.id, safeProductIndex.value, currentReferenceUrls.value.join('|')] as const,
   () => {
     activeRefIdx.value = 0
-    refLoadFailedSet.value = new Set()
-    retriedRefIds.value = new Set()
   },
 )
 
@@ -347,25 +484,79 @@ const categoryLabelByCode = computed(() => {
 const categoryCodeDisplay = computed(() => {
   const code = currentRow.value.categoryCode?.trim()
   if (!code) return '—'
-  const label = categoryLabelByCode.value.get(code)?.trim()
+  const directTaskCode = task.value.newProductCategoryCode?.trim()
+  const directTaskLabel =
+    directTaskCode === code
+      ? (task.value.categoryName?.trim() || task.value.category?.trim() || '')
+      : ''
+  const label = categoryLabelByCode.value.get(code)?.trim() || directTaskLabel
   if (!label || label === code) return code
   return `${label}（${code}）`
 })
 
 const skuStatusDisplay = computed(() => skuItemStatusLabelCn(currentRow.value.skuStatus))
 
+const showSkuCostPanel = computed(() => (isNewProduct.value || isPurchase.value) && currentRow.value.id != null)
+const skuCostModeLabel = computed(() => {
+  if (currentRow.value.manualCostOverride === true || currentRow.value.costPriceMode === 'manual') return '手动维护'
+  if (currentRow.value.requiresManualReview === true && currentRow.value.costPrice == null) return '缺尺寸，成本待维护'
+  if (currentRow.value.requiresManualReview === true) return '需人工确认'
+  if (currentRow.value.costPrice != null) return '系统计算'
+  return '未生成'
+})
+const skuCostHint = computed(() => {
+  if (currentRow.value.requiresManualReview === true && currentRow.value.costPrice == null) {
+    return '缺尺寸，成本待维护；保存成本后该 SKU 会重新同步 ERP c_price。'
+  }
+  return `估算 ${formatCostMoney(currentRow.value.estimatedCost)}；保存后该 SKU 将按子项成本同步 ERP。`
+})
+
+function formatCostMoney(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  return `${value.toFixed(3)} CNY`
+}
+
+async function saveSkuCost() {
+  const skuItemID = currentRow.value.id
+  if (skuItemID == null) return
+  const value = Number(skuCostDraft.value)
+  if (!Number.isFinite(value) || value < 0) {
+    skuCostError.value = '请输入有效成本'
+    return
+  }
+  savingSkuCost.value = true
+  skuCostError.value = ''
+  try {
+    await tasksApi.patchSkuItemCostInfo(task.value.id, skuItemID, {
+      cost_price: value,
+      manual_cost_override: true,
+      manual_cost_override_reason: '仓库/运营手动维护子项成本',
+      remark: `维护子项成本 ${currentRow.value.skuCode ?? ''}`.trim(),
+    })
+    await tasksStore.loadTaskById(task.value.id)
+  } catch (err) {
+    skuCostError.value = err instanceof Error ? err.message : '保存失败'
+  } finally {
+    savingSkuCost.value = false
+  }
+}
+
 const materialLineDisplay = computed(() =>
   materialModeLabelCn(currentRow.value.materialMode, task.value.newProductMaterialOther),
 )
 
+watch(
+  () => [task.value?.id, safeProductIndex.value, currentRow.value.costPrice] as const,
+  () => {
+    skuCostDraft.value = currentRow.value.costPrice ?? currentRow.value.estimatedCost
+    skuCostError.value = ''
+  },
+  { immediate: true },
+)
+
 function filingStatusLabel(status: string | undefined): string {
-  const raw = String(status ?? '').trim()
-  if (!raw) return '未建档'
-  if (raw === 'filed') return '已建档'
-  if (raw === 'filing') return '建档中'
-  if (raw === 'pending_filing') return '待建档'
-  if (raw === 'filing_failed') return '建档失败'
-  return raw
+  const label = getTaskFilingStatusLabel(status)
+  return label === '--' ? '未同步' : label
 }
 
 function productTabTitle(row: TaskParallelProductRow): string {
@@ -376,16 +567,6 @@ function productTabTitle(row: TaskParallelProductRow): string {
   return `${sku} · ${name} · ${filing} · ${req}`
 }
 
-function onImageError() {
-  imageLoadFailed.value = true
-}
-
-watch(
-  () => [task.value?.id, task.value?.productImageUrl] as const,
-  () => {
-    imageLoadFailed.value = false
-  },
-)
 </script>
 
 <style scoped>
@@ -489,6 +670,81 @@ watch(
   color: rgb(51 65 85);
   font-size: 0.75rem;
 }
+.sku-cost-panel {
+  margin-top: 0.75rem;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.625rem;
+  background: rgb(248 250 252);
+  padding: 0.75rem;
+}
+.sku-cost-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: rgb(15 23 42);
+}
+.sku-cost-label,
+.sku-cost-mode {
+  display: block;
+  font-size: 0.7rem;
+  line-height: 1rem;
+  color: rgb(100 116 139);
+}
+.sku-cost-mode {
+  white-space: nowrap;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgb(226 232 240);
+  padding: 0.1rem 0.45rem;
+}
+.sku-cost-edit {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
+}
+.sku-cost-input {
+  min-width: 0;
+  flex: 1;
+  height: 2rem;
+  border: 1px solid rgb(203 213 225);
+  border-radius: 0.5rem;
+  background: #fff;
+  padding: 0 0.625rem;
+  font-size: 0.8125rem;
+  outline: none;
+}
+.sku-cost-input:focus {
+  border-color: rgb(37 99 235);
+  box-shadow: 0 0 0 2px rgb(191 219 254);
+}
+.sku-cost-save {
+  flex: 0 0 auto;
+  height: 2rem;
+  border: 1px solid rgb(37 99 235);
+  border-radius: 0.5rem;
+  background: rgb(37 99 235);
+  color: #fff;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.sku-cost-save:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.sku-cost-hint,
+.sku-cost-error {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.15rem;
+}
+.sku-cost-hint {
+  color: rgb(100 116 139);
+}
+.sku-cost-error {
+  color: rgb(220 38 38);
+}
 .info-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -506,9 +762,10 @@ watch(
   flex-direction: column;
   gap: 0.75rem;
 }
-/* 任务详情紧凑模式：主预览高度与设计资产区接近 */
-.product-new-body--compact.product-new-body--has-ref .main-ref-hero-img {
-  max-height: min(32vh, 280px);
+/* 任务详情紧凑模式：提高参考图优先级，避免关键图片被压成小缩略图 */
+.product-new-body--compact.product-new-body--has-ref .main-ref-hero-img,
+.product-new-body--compact.product-new-body--has-ref :deep(.main-ref-hero-img) {
+  max-height: min(46vh, 420px);
 }
 @media (min-width: 720px) {
   .product-new-body--compact.product-new-body--has-ref {
@@ -518,9 +775,9 @@ watch(
     gap: 0.65rem 1rem;
   }
   .product-new-body--compact.product-new-body--has-ref .main-sku-ref-block {
-    flex: 0 0 min(40%, 17.5rem);
-    min-width: 11rem;
-    max-width: 19rem;
+    flex: 0 0 min(52%, 32rem);
+    min-width: 18rem;
+    max-width: 36rem;
     width: 100%;
     margin-bottom: 0;
   }
@@ -632,7 +889,7 @@ dd {
   display: block;
   width: 100%;
   padding: 0;
-  min-height: 10rem;
+  min-height: 14rem;
   border: 2px solid rgb(203 213 225);
   border-radius: 0.75rem;
   background: rgb(248 250 252);
@@ -647,11 +904,24 @@ dd {
 .main-ref-hero-img {
   width: 100%;
   height: 100%;
-  min-height: 10rem;
-  max-height: min(40vh, 360px);
+  min-height: 14rem;
+  max-height: min(52vh, 480px);
   object-fit: contain;
   display: block;
   background: rgb(248 250 252);
+}
+.main-ref-hero-media,
+.main-ref-hero-btn :deep(.main-ref-hero-media),
+.main-ref-hero-btn :deep(.apm) {
+  width: 100%;
+  height: 100%;
+  min-height: 14rem;
+}
+.main-ref-hero-btn :deep(.apm-placeholder),
+.main-ref-hero-btn :deep(.apm-empty) {
+  min-height: 14rem;
+  border: 0;
+  border-radius: 0;
 }
 .main-ref-hero-btn--failed {
   cursor: default;
@@ -671,8 +941,8 @@ dd {
   gap: 0.5rem;
 }
 .main-ref-strip-btn {
-  width: 3rem;
-  height: 3rem;
+  width: 3.75rem;
+  height: 3.75rem;
   padding: 0;
   border-radius: 0.5rem;
   border: 2px solid rgb(226 232 240);
@@ -694,6 +964,20 @@ dd {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.main-ref-strip-media,
+.main-ref-strip-btn :deep(.main-ref-strip-media),
+.main-ref-strip-btn :deep(.apm) {
+  width: 100%;
+  height: 100%;
+}
+.main-ref-strip-btn :deep(.apm-placeholder),
+.main-ref-strip-btn :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem;
 }
 .main-ref-strip-placeholder {
   display: flex;
@@ -737,6 +1021,20 @@ dd {
   height: 100%;
   object-fit: cover;
 }
+.product-thumb-media,
+.product-thumb-wrap :deep(.product-thumb-media),
+.product-thumb-wrap :deep(.apm) {
+  width: 100%;
+  height: 100%;
+}
+.product-thumb-wrap :deep(.apm-placeholder),
+.product-thumb-wrap :deep(.apm-empty) {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem;
+}
 .product-thumb-placeholder {
   font-size: 0.75rem;
   color: rgb(148 163 184);
@@ -748,20 +1046,34 @@ dd {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.lightbox-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  cursor: zoom-out;
-}
-.lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 6px;
+
+@media (max-width: 719px) {
+  .product-new-body--compact.product-new-body--has-ref .main-sku-ref-block {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .main-ref-hero-btn,
+  .main-ref-hero-img,
+  .main-ref-hero-media,
+  .main-ref-hero-btn :deep(.apm) {
+    min-height: min(62vw, 22rem);
+  }
+
+  .main-ref-hero-img {
+    max-height: min(64vh, 520px);
+  }
+
+  .main-ref-film-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .main-ref-strip-btn {
+    width: 4rem;
+    height: 4rem;
+  }
 }
 </style>

@@ -49,12 +49,14 @@ type taskAssetService struct {
 	taskAssetRepo           repo.TaskAssetRepo
 	taskEventRepo           repo.TaskEventRepo
 	taskModuleRepo          repo.TaskModuleRepo
+	customizationJobRepo    repo.CustomizationJobRepo
 	uploadRequestRepo       repo.UploadRequestRepo
 	assetStorageRefRepo     repo.AssetStorageRefRepo
 	txRunner                repo.TxRunner
 	dataScopeResolver       DataScopeResolver
 	scopeUserRepo           repo.UserRepo
 	userDisplayNameResolver UserDisplayNameResolver
+	workflowRules           designSubmissionWorkflowEngine
 }
 
 type TaskAssetServiceOption func(*taskAssetService)
@@ -80,6 +82,18 @@ func WithTaskAssetUserDisplayNameResolver(resolver UserDisplayNameResolver) Task
 func WithTaskAssetModuleRepo(moduleRepo repo.TaskModuleRepo) TaskAssetServiceOption {
 	return func(s *taskAssetService) {
 		s.taskModuleRepo = moduleRepo
+	}
+}
+
+func WithTaskAssetCustomizationJobRepo(customizationJobRepo repo.CustomizationJobRepo) TaskAssetServiceOption {
+	return func(s *taskAssetService) {
+		s.customizationJobRepo = customizationJobRepo
+	}
+}
+
+func WithTaskAssetBlueprintRuleEngine(rules designSubmissionWorkflowEngine) TaskAssetServiceOption {
+	return func(s *taskAssetService) {
+		s.workflowRules = rules
 	}
 }
 
@@ -177,34 +191,50 @@ func (s *taskAssetService) SubmitDesign(ctx context.Context, p SubmitDesignParam
 	if task.TaskType == domain.TaskTypePurchaseTask {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "purchase_task does not support submit-design", nil)
 	}
-	if task.DesignerID == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task must have designer_id before submit-design", nil)
-	}
-	if !taskActionDecisionHasElevatedScope(decision) &&
-		(task.CurrentHandlerID == nil || *task.CurrentHandlerID != p.UploadedBy) &&
-		(task.DesignerID == nil || *task.DesignerID != p.UploadedBy) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "submit-design requires the assigned designer or current handler", map[string]interface{}{
-			"task_id":            task.ID,
-			"deny_code":          "task_not_assigned_to_actor",
-			"deny_reason":        "task_not_assigned_to_actor",
-			"current_handler_id": cloneInt64Ptr(task.CurrentHandlerID),
-			"designer_id":        cloneInt64Ptr(task.DesignerID),
-			"uploaded_by":        p.UploadedBy,
-			"action":             string(TaskActionSubmitDesign),
-			"owner_department":   task.OwnerDepartment,
-			"owner_org_team":     task.OwnerOrgTeam,
-			"scope_source":       decision.ScopeSource,
-			"matched_rule":       decision.MatchedRule,
-		})
-	}
-	if task.TaskStatus != domain.TaskStatusInProgress &&
-		task.TaskStatus != domain.TaskStatusRejectedByAuditA &&
-		task.TaskStatus != domain.TaskStatusRejectedByAuditB {
-		return nil, domain.NewAppError(
-			domain.ErrCodeInvalidStateTransition,
-			fmt.Sprintf("task %d is in status %q, must be InProgress, RejectedByAuditA, or RejectedByAuditB", p.TaskID, task.TaskStatus),
-			nil,
-		)
+	if task.CustomizationRequired {
+		if !submitDesignActorCanUseCustomizationLane(ctx) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "customization submit-design requires a customization operator, operation, or management role", map[string]interface{}{
+				"task_id":   task.ID,
+				"deny_code": "missing_customization_submit_role",
+				"action":    string(TaskActionSubmitDesign),
+			})
+		}
+		if !taskActionDecisionHasElevatedScope(decision) &&
+			task.CurrentHandlerID != nil && *task.CurrentHandlerID != p.UploadedBy {
+			return nil, submitDesignAssignedActorError(task, p.UploadedBy, decision, "customization submit-design requires the current customization handler")
+		}
+		if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
+			return nil, domain.NewAppError(
+				domain.ErrCodeInvalidStateTransition,
+				fmt.Sprintf("customization task %d is in status %q, must be PendingCustomizationProduction", p.TaskID, task.TaskStatus),
+				nil,
+			)
+		}
+	} else {
+		if !submitDesignActorCanUseNormalLane(ctx) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "normal submit-design requires a designer, operation, or management role", map[string]interface{}{
+				"task_id":   task.ID,
+				"deny_code": "missing_normal_submit_role",
+				"action":    string(TaskActionSubmitDesign),
+			})
+		}
+		if task.DesignerID == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task must have designer_id before submit-design", nil)
+		}
+		if !taskActionDecisionHasElevatedScope(decision) &&
+			(task.CurrentHandlerID == nil || *task.CurrentHandlerID != p.UploadedBy) &&
+			(task.DesignerID == nil || *task.DesignerID != p.UploadedBy) {
+			return nil, submitDesignAssignedActorError(task, p.UploadedBy, decision, "submit-design requires the assigned designer or current handler")
+		}
+		if task.TaskStatus != domain.TaskStatusInProgress &&
+			task.TaskStatus != domain.TaskStatusRejectedByAuditA &&
+			task.TaskStatus != domain.TaskStatusRejectedByAuditB {
+			return nil, domain.NewAppError(
+				domain.ErrCodeInvalidStateTransition,
+				fmt.Sprintf("task %d is in status %q, must be InProgress, RejectedByAuditA, or RejectedByAuditB", p.TaskID, task.TaskStatus),
+				nil,
+			)
+		}
 	}
 
 	advanceStatus := p.AssetType.IsDelivery()
@@ -339,9 +369,16 @@ func (s *taskAssetService) createAsset(
 			if err := s.markDesignSubmissionModuleState(ctx, tx, taskID, transition); err != nil {
 				return err
 			}
+			if err := applyDesignSubmissionWorkflow(ctx, tx, s.workflowRules, task, transition, uploadedBy); err != nil {
+				return err
+			}
+			if err := syncCustomizationDesignSubmission(ctx, tx, s.taskRepo, s.customizationJobRepo, task, uploadedBy); err != nil {
+				return err
+			}
 			eventType = domain.TaskEventDesignSubmitted
 			payload = taskTransitionEventPayload(task, fromStatus, transition.TaskStatus, task.CurrentHandlerID, nil, payload)
 			payload["designer_id"] = cloneInt64Ptr(task.DesignerID)
+			payload["last_customization_operator_id"] = submittedCustomizationOperatorID(task, uploadedBy)
 			payload["uploaded_by"] = uploadedBy
 		}
 
@@ -497,7 +534,8 @@ func validateTaskAssetType(assetType domain.TaskAssetType) *domain.AppError {
 	case domain.TaskAssetTypeReference,
 		domain.TaskAssetTypeSource,
 		domain.TaskAssetTypeDelivery,
-		domain.TaskAssetTypePreview:
+		domain.TaskAssetTypePreview,
+		domain.TaskAssetTypeERPProduct:
 		return nil
 	default:
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset_type", nil)
@@ -512,6 +550,51 @@ func validateSubmitDesignType(assetType domain.TaskAssetType) *domain.AppError {
 	default:
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "submit-design only allows source or delivery", nil)
 	}
+}
+
+func submitDesignActorCanUseNormalLane(ctx context.Context) bool {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 {
+		return true
+	}
+	return domain.ActorHasAnyRole(actor, append([]domain.Role{domain.RoleDesigner, domain.RoleOps}, taskSubmitManagementRoles()...))
+}
+
+func submitDesignActorCanUseCustomizationLane(ctx context.Context) bool {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 {
+		return true
+	}
+	return domain.ActorHasAnyRole(actor, append([]domain.Role{domain.RoleCustomizationOperator, domain.RoleOps}, taskSubmitManagementRoles()...))
+}
+
+func taskSubmitManagementRoles() []domain.Role {
+	return []domain.Role{
+		domain.RoleAdmin,
+		domain.RoleSuperAdmin,
+		domain.RoleHRAdmin,
+		domain.RoleRoleAdmin,
+		domain.RoleDeptAdmin,
+		domain.RoleTeamLead,
+		domain.RoleDesignDirector,
+	}
+}
+
+func submitDesignAssignedActorError(task *domain.Task, uploadedBy int64, decision TaskActionDecision, message string) *domain.AppError {
+	return domain.NewAppError(domain.ErrCodePermissionDenied, message, map[string]interface{}{
+		"task_id":                        task.ID,
+		"deny_code":                      "task_not_assigned_to_actor",
+		"deny_reason":                    "task_not_assigned_to_actor",
+		"current_handler_id":             cloneInt64Ptr(task.CurrentHandlerID),
+		"designer_id":                    cloneInt64Ptr(task.DesignerID),
+		"last_customization_operator_id": cloneInt64Ptr(task.LastCustomizationOperatorID),
+		"uploaded_by":                    uploadedBy,
+		"action":                         string(TaskActionSubmitDesign),
+		"owner_department":               task.OwnerDepartment,
+		"owner_org_team":                 task.OwnerOrgTeam,
+		"scope_source":                   decision.ScopeSource,
+		"matched_rule":                   decision.MatchedRule,
+	})
 }
 
 func resolveTaskAssetUploadMode(assetType domain.TaskAssetType, request *domain.UploadRequest) domain.DesignAssetUploadMode {

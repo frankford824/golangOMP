@@ -35,6 +35,12 @@ import {
 import { canCloseTaskForArchive } from '@/domain/task-close-eligibility'
 import { checkTaskCompletion } from '@/domain/task-completion'
 import { sanitizeCreateTaskPayload } from '@/domain/task-create-fields'
+import { mapRetouchRequirementsFromApi } from '@/domain/mappers/retouch-requirements-from-api'
+import {
+  buildRetouchRequirementsPayload,
+  resolveRetouchTaskDesignRequirementText,
+} from '@/domain/retouch-requirements'
+import type { RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
 import { buildClearDesignerAssigneePayload } from '@/domain/task-assignment-payload'
 import type { PurchaseInfo } from '@/domain/types/purchase'
 import { DesignSubStatusEnum } from '@/domain/enums/task-status'
@@ -63,6 +69,100 @@ function parseCostPriceFromRaw(raw: unknown): Task['costPrice'] | undefined {
   return undefined
 }
 
+function objectOrUndefined(raw: unknown): Record<string, unknown> | undefined {
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : undefined
+}
+
+function parseObjectJSON(raw: unknown): Record<string, unknown> | undefined {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>
+  }
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function pickTrimmedString(source: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!source) return undefined
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (text !== '') return text
+    }
+  }
+  return undefined
+}
+
+function pickFiniteNumber(source: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  if (!source) return undefined
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return undefined
+}
+
+function mergeReadModelCostGovernanceFields(
+  target: Record<string, unknown>,
+  readModel: Record<string, unknown> | undefined,
+) {
+  if (!readModel) return
+  for (const key of [
+    'procurement_summary',
+    'procurementSummary',
+    'matched_rule_governance',
+    'matchedRuleGovernance',
+    'override_summary',
+    'overrideSummary',
+    'governance_audit_summary',
+    'governanceAuditSummary',
+    'override_governance_boundary',
+    'overrideGovernanceBoundary',
+    'platform_entry_boundary',
+    'platformEntryBoundary',
+  ] as const) {
+    if (readModel[key] != null) target[key] = readModel[key]
+  }
+  for (const key of [
+    'cost_price',
+    'costPrice',
+    'cost_price_mode',
+    'costPriceMode',
+    'estimated_cost',
+    'estimatedCost',
+    'base_sale_price',
+    'baseSalePrice',
+    'quantity',
+    'manual_cost_override',
+    'manualCostOverride',
+    'manual_cost_override_reason',
+    'manualCostOverrideReason',
+    'override_actor',
+    'overrideActor',
+    'override_at',
+    'overrideAt',
+    'erp_sync_required',
+    'erpSyncRequired',
+    'erp_sync_version',
+    'erpSyncVersion',
+  ] as const) {
+    if (target[key] == null && readModel[key] != null) target[key] = readModel[key]
+  }
+}
+
 function parseModuleSummariesFromEnvelope(envelope: unknown): ModuleSummary[] | undefined {
   if (!envelope || typeof envelope !== 'object') return undefined
   const modules = (envelope as Record<string, unknown>).modules
@@ -85,9 +185,13 @@ function backendAllowsDesignerReassignment(task: Task): boolean {
   ] as const
   const designModule = task.moduleSummaries?.find((module) => module.module_key === 'design')
   const retouchModule = task.moduleSummaries?.find((module) => module.module_key === 'retouch')
+  const customizationModule = task.moduleSummaries?.find(
+    (module) => module.module_key === 'customization',
+  )
   return (
     hasModuleAction(designModule, [...keys]) ||
-    hasModuleAction(retouchModule, [...keys])
+    hasModuleAction(retouchModule, [...keys]) ||
+    hasModuleAction(customizationModule, [...keys])
   )
 }
 
@@ -242,6 +346,14 @@ function normalizeOptionalUserId(raw: unknown): string | null {
   return s === '' ? null : s
 }
 
+function normalizeTaskLane(raw: unknown): 'normal' | 'customization' | undefined {
+  const lane = String(raw ?? '').trim().toLowerCase()
+  if (lane === 'normal' || lane === 'customization') {
+    return lane
+  }
+  return undefined
+}
+
 const DESIGN_SUB_STATUS_SET = new Set<string>([
   'NOT_REQUIRED',
   'PENDING_ASSIGN',
@@ -321,6 +433,45 @@ function parseOptionalWarehouseSubStatus(raw: unknown): WarehouseSubStatus | und
   return WAREHOUSE_SUB_STATUS_SET.has(v) ? (v as WarehouseSubStatus) : undefined
 }
 
+function mapWarehouseFieldsFromWorkflow(
+  raw: Record<string, unknown>,
+): Partial<Pick<Task, 'warehouseReceiveStatus' | 'warehouseSubStatus'>> {
+  const workflow = raw.workflow as Record<string, unknown> | undefined
+  const subStatus = workflow?.sub_status as Record<string, unknown> | undefined
+  const wh = subStatus?.warehouse as Record<string, unknown> | undefined
+  const codeRaw = wh?.code
+  if (typeof codeRaw !== 'string' || !codeRaw.trim()) return {}
+  const code = codeRaw.trim().toLowerCase().replace(/-/g, '_')
+
+  const terminalWarehouseCodes = new Set(['done', 'complete', 'completed', 'warehouse_complete'])
+  if (terminalWarehouseCodes.has(code)) {
+    return {
+      warehouseSubStatus: 'DONE',
+      warehouseReceiveStatus: 'archived',
+    }
+  }
+
+  const workflowMap: Record<
+    string,
+    { warehouseSubStatus: WarehouseSubStatus; warehouseReceiveStatus?: Task['warehouseReceiveStatus'] }
+  > = {
+    pending_receive: { warehouseSubStatus: 'PENDING_RECEIVE', warehouseReceiveStatus: 'pending' },
+    received: { warehouseSubStatus: 'RECEIVED', warehouseReceiveStatus: 'received' },
+    returned: { warehouseSubStatus: 'RETURNED', warehouseReceiveStatus: 'returned' },
+    packing: { warehouseSubStatus: 'PACKING' },
+    done: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    completed: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    warehouse_complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
+    not_required: { warehouseSubStatus: 'NOT_REQUIRED' },
+    not_triggered: { warehouseSubStatus: 'NOT_REQUIRED' },
+  }
+
+  const mapped = workflowMap[code]
+  if (mapped) return mapped
+  return {}
+}
+
 /**
  * 从扁平字段或 workflow.sub_status.warehouse.code 解析仓库维度（读模型常见为后者）。
  * 见后端 task read model：workflow.sub_status.warehouse.code = pending_receive 等。
@@ -328,6 +479,12 @@ function parseOptionalWarehouseSubStatus(raw: unknown): WarehouseSubStatus | und
 function parseWarehouseFieldsFromApi(raw: Record<string, unknown>): Partial<
   Pick<Task, 'warehouseReceiveStatus' | 'warehouseSubStatus'>
 > {
+  const fromWorkflow = mapWarehouseFieldsFromWorkflow(raw)
+  const workflowWarehouseTerminal = fromWorkflow.warehouseReceiveStatus === 'archived'
+  if (workflowWarehouseTerminal) {
+    return fromWorkflow
+  }
+
   const flatSub = parseOptionalWarehouseSubStatus(
     raw.warehouse_sub_status ?? raw.warehouseSubStatus,
   )
@@ -339,6 +496,9 @@ function parseWarehouseFieldsFromApi(raw: Record<string, unknown>): Partial<
       fromFlat.warehouseReceiveStatus = 'pending'
       fromFlat.warehouseSubStatus = flatSub ?? 'PENDING_RECEIVE'
     } else if (fr === 'received') {
+      if (fromWorkflow.warehouseReceiveStatus === 'archived') {
+        return fromWorkflow
+      }
       fromFlat.warehouseReceiveStatus = 'received'
       fromFlat.warehouseSubStatus = flatSub ?? 'RECEIVED'
     } else if (fr === 'returned') {
@@ -356,34 +516,13 @@ function parseWarehouseFieldsFromApi(raw: Record<string, unknown>): Partial<
     }
   }
   if (flatSub != null) {
+    if (fromWorkflow.warehouseReceiveStatus === 'archived') {
+      return fromWorkflow
+    }
     return { warehouseSubStatus: flatSub }
   }
 
-  const workflow = raw.workflow as Record<string, unknown> | undefined
-  const subStatus = workflow?.sub_status as Record<string, unknown> | undefined
-  const wh = subStatus?.warehouse as Record<string, unknown> | undefined
-  const codeRaw = wh?.code
-  if (typeof codeRaw !== 'string' || !codeRaw.trim()) return {}
-  const code = codeRaw.trim().toLowerCase().replace(/-/g, '_')
-
-  const workflowMap: Record<
-    string,
-    { warehouseSubStatus: WarehouseSubStatus; warehouseReceiveStatus?: Task['warehouseReceiveStatus'] }
-  > = {
-    pending_receive: { warehouseSubStatus: 'PENDING_RECEIVE', warehouseReceiveStatus: 'pending' },
-    received: { warehouseSubStatus: 'RECEIVED', warehouseReceiveStatus: 'received' },
-    returned: { warehouseSubStatus: 'RETURNED', warehouseReceiveStatus: 'returned' },
-    packing: { warehouseSubStatus: 'PACKING' },
-    done: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    warehouse_complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    not_required: { warehouseSubStatus: 'NOT_REQUIRED' },
-    not_triggered: { warehouseSubStatus: 'NOT_REQUIRED' },
-  }
-
-  const mapped = workflowMap[code]
-  if (mapped) return mapped
-  return {}
+  return fromWorkflow
 }
 
 function parseWorkflowCloseFields(raw: Record<string, unknown>): Partial<
@@ -578,9 +717,12 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
         ? 'new'
         : 'existing'
 
-  const procurementSummary = (raw.procurement_summary ?? raw.procurementSummary) as
-    | Record<string, unknown>
-    | undefined
+  const procurementSummary = objectOrUndefined(raw.procurement_summary ?? raw.procurementSummary)
+  const costOverrideSummary = objectOrUndefined(raw.override_summary ?? raw.overrideSummary)
+  const governanceAuditSummary = objectOrUndefined(raw.governance_audit_summary ?? raw.governanceAuditSummary)
+  const costOverrideBoundary = objectOrUndefined(
+    raw.override_governance_boundary ?? raw.overrideGovernanceBoundary,
+  )
   const procurementRaw = raw.procurement as Record<string, unknown> | undefined
   const procurementApiStatus =
     typeof procurementRaw?.status === 'string' ? procurementRaw.status : undefined
@@ -666,6 +808,9 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     mergeProcurementSummaryIntoPurchase(purchaseInfo, procurementSummary) ?? purchaseInfo
 
   let costPrice = parseCostPriceFromRaw(raw.cost_price ?? raw.costPrice)
+  if (!costPrice && costOverrideSummary && typeof costOverrideSummary.current_cost_price === 'number') {
+    costPrice = { amount: costOverrideSummary.current_cost_price, currency: 'CNY' }
+  }
   if (!costPrice && procurementSummary && typeof procurementSummary.cost_price === 'number') {
     costPrice = { amount: procurementSummary.cost_price, currency: 'CNY' }
   }
@@ -691,6 +836,22 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     if (cpm === 'manual' || cpm === 'template') costPriceMode = cpm as Task['costPriceMode']
     if (costPriceMode == null && ps.manual_cost_override === true) costPriceMode = 'manual'
   }
+  if (costPriceMode == null) {
+    const manualOverride = raw.manual_cost_override ?? raw.manualCostOverride ?? costOverrideSummary?.current_override_active
+    if (manualOverride === true) costPriceMode = 'manual'
+  }
+  const estimatedCostRaw = raw.estimated_cost ?? raw.estimatedCost
+  const estimatedCost =
+    typeof estimatedCostRaw === 'number' && Number.isFinite(estimatedCostRaw) ? estimatedCostRaw : undefined
+  const costRuleIdRaw = raw.cost_rule_id ?? raw.costRuleId
+  const costRuleId =
+    typeof costRuleIdRaw === 'number' && Number.isFinite(costRuleIdRaw) ? costRuleIdRaw : undefined
+  const requiresManualReviewRaw = raw.requires_manual_review ?? raw.requiresManualReview
+  const requiresManualReview =
+    typeof requiresManualReviewRaw === 'boolean' ? requiresManualReviewRaw : undefined
+  const manualCostOverrideRaw = raw.manual_cost_override ?? raw.manualCostOverride
+  const manualCostOverride =
+    typeof manualCostOverrideRaw === 'boolean' ? manualCostOverrideRaw : undefined
 
   const isRetouchType = String(rawTaskType).toLowerCase() === 'retouch_task'
   const designSubStatusFromApi =
@@ -710,12 +871,31 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
           (o.change_request as string | undefined)?.trim() ||
           (o.changeRequest as string | undefined)?.trim() ||
           undefined
+        const variantJson = parseObjectJSON(o.variant_json ?? o.variantJson)
+        const itemSpecText =
+          pickTrimmedString(o, ['spec_text', 'specText']) ??
+          pickTrimmedString(variantJson, ['spec_text', 'specText'])
+        const itemSizeText =
+          pickTrimmedString(o, ['size_text', 'sizeText']) ??
+          pickTrimmedString(variantJson, ['size_text', 'sizeText'])
+        const itemWidth =
+          pickFiniteNumber(o, ['width', 'width_m']) ??
+          pickFiniteNumber(variantJson, ['width', 'width_m'])
+        const itemHeight =
+          pickFiniteNumber(o, ['height', 'height_m']) ??
+          pickFiniteNumber(variantJson, ['height', 'height_m'])
+        const itemArea =
+          pickFiniteNumber(o, ['area', 'area_m2']) ??
+          pickFiniteNumber(variantJson, ['area', 'area_m2'])
+        const itemQuantity =
+          pickFiniteNumber(o, ['quantity']) ??
+          pickFiniteNumber(variantJson, ['quantity', 'qty'])
         return {
-          id: typeof o.id === 'number' ? o.id : undefined,
-          sequenceNo: typeof o.sequence_no === 'number' ? o.sequence_no : undefined,
-          skuCode: typeof o.sku_code === 'string' ? o.sku_code : undefined,
-          quantity:
-            typeof o.quantity === 'number' && Number.isFinite(o.quantity) ? o.quantity : undefined,
+	          id: typeof o.id === 'number' ? o.id : undefined,
+	          sequenceNo: typeof o.sequence_no === 'number' ? o.sequence_no : undefined,
+	          skuCode: typeof o.sku_code === 'string' ? o.sku_code : undefined,
+	          skuCodeType: typeof o.sku_code_type === 'string' ? o.sku_code_type : undefined,
+	          quantity: itemQuantity,
           skuStatus: typeof o.sku_status === 'string' ? o.sku_status : undefined,
           productNameSnapshot:
             typeof o.product_name_snapshot === 'string' ? o.product_name_snapshot : undefined,
@@ -731,6 +911,49 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
           erpProductId: typeof o.erp_product_id === 'string' ? o.erp_product_id : undefined,
           categoryCode: typeof o.category_code === 'string' ? o.category_code : undefined,
           materialMode: typeof o.material_mode === 'string' ? o.material_mode : undefined,
+          costPriceMode: typeof o.cost_price_mode === 'string' ? o.cost_price_mode : undefined,
+          costPrice:
+            typeof o.cost_price === 'number' && Number.isFinite(o.cost_price) ? o.cost_price : undefined,
+          estimatedCost:
+            typeof o.estimated_cost === 'number' && Number.isFinite(o.estimated_cost)
+              ? o.estimated_cost
+              : undefined,
+          costRuleId:
+            typeof o.cost_rule_id === 'number' && Number.isFinite(o.cost_rule_id)
+              ? o.cost_rule_id
+              : undefined,
+          costRuleName: typeof o.cost_rule_name === 'string' ? o.cost_rule_name : undefined,
+          costRuleSource: typeof o.cost_rule_source === 'string' ? o.cost_rule_source : undefined,
+          matchedRuleVersion:
+            typeof o.matched_rule_version === 'number' && Number.isFinite(o.matched_rule_version)
+              ? o.matched_rule_version
+              : undefined,
+          prefillSource: typeof o.prefill_source === 'string' ? o.prefill_source : undefined,
+          prefillAt:
+            typeof o.prefill_at === 'string'
+              ? o.prefill_at
+              : o.prefill_at === null
+                ? null
+                : undefined,
+          requiresManualReview:
+            typeof o.requires_manual_review === 'boolean' ? o.requires_manual_review : undefined,
+          manualCostOverride:
+            typeof o.manual_cost_override === 'boolean' ? o.manual_cost_override : undefined,
+          manualCostOverrideReason:
+            typeof o.manual_cost_override_reason === 'string' ? o.manual_cost_override_reason : undefined,
+          overrideActor: typeof o.override_actor === 'string' ? o.override_actor : undefined,
+          overrideAt:
+            typeof o.override_at === 'string'
+              ? o.override_at
+              : o.override_at === null
+                ? null
+                : undefined,
+          specText: itemSpecText,
+          sizeText: itemSizeText,
+          width: itemWidth,
+          height: itemHeight,
+          area: itemArea,
+          ...(variantJson !== undefined ? { variantJson } : {}),
           filing_status: typeof o.filing_status === 'string' ? o.filing_status : undefined,
           erp_sync_status: typeof o.erp_sync_status === 'string' ? o.erp_sync_status : undefined,
           erp_sync_required:
@@ -844,6 +1067,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       String(raw.workflow_lane ?? raw.workflowLane).trim() !== ''
         ? (String(raw.workflow_lane ?? raw.workflowLane).trim() as Task['workflowLane'])
         : undefined,
+    businessLane: normalizeTaskLane(raw.business_lane ?? raw.businessLane),
     sourceDepartment:
       typeof (raw.source_department ?? raw.sourceDepartment) === 'string' &&
       String(raw.source_department ?? raw.sourceDepartment).trim() !== ''
@@ -857,6 +1081,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     // 保证原品/新品两路数据都能映射到同一个展示字段。
     // 使用 || 而非 ?? —— 后端可能同时返回 design_requirement="" 和 change_request="有值"，
     // ?? 不穿透空字符串，导致读到空值。
+    retouchRequirements: mapRetouchRequirementsFromApi(raw.retouch_requirements ?? raw.retouchRequirements),
     designRequirement:
       (raw.design_requirement as string | undefined)?.trim() ||
       (raw.designRequirement as string | undefined)?.trim() ||
@@ -918,10 +1143,14 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       typeof (raw.batch_mode ?? raw.batchMode) === 'string'
         ? String(raw.batch_mode ?? raw.batchMode)
         : undefined,
-    primarySkuCode:
-      typeof (raw.primary_sku_code ?? raw.primarySkuCode) === 'string'
-        ? String(raw.primary_sku_code ?? raw.primarySkuCode)
-        : undefined,
+	    primarySkuCode:
+	      typeof (raw.primary_sku_code ?? raw.primarySkuCode) === 'string'
+	        ? String(raw.primary_sku_code ?? raw.primarySkuCode)
+	        : undefined,
+	    skuCodeType:
+	      typeof (raw.sku_code_type ?? raw.skuCodeType) === 'string'
+	        ? String(raw.sku_code_type ?? raw.skuCodeType)
+	        : undefined,
     skuGenerationStatus:
       typeof (raw.sku_generation_status ?? raw.skuGenerationStatus) === 'string'
         ? String(raw.sku_generation_status ?? raw.skuGenerationStatus)
@@ -931,6 +1160,23 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     purchaseInfo,
     basePriceAmount,
     costPriceMode,
+    ...(estimatedCost != null ? { estimatedCost } : {}),
+    ...(costRuleId != null ? { costRuleId } : {}),
+    ...(typeof (raw.cost_rule_name ?? raw.costRuleName) === 'string'
+      ? { costRuleName: String(raw.cost_rule_name ?? raw.costRuleName) }
+      : {}),
+    ...(typeof (raw.cost_rule_source ?? raw.costRuleSource) === 'string'
+      ? { costRuleSource: String(raw.cost_rule_source ?? raw.costRuleSource) }
+      : {}),
+    ...(requiresManualReview != null ? { requiresManualReview } : {}),
+    ...(manualCostOverride != null ? { manualCostOverride } : {}),
+    ...(typeof (raw.manual_cost_override_reason ?? raw.manualCostOverrideReason) === 'string'
+      ? { manualCostOverrideReason: String(raw.manual_cost_override_reason ?? raw.manualCostOverrideReason) }
+      : {}),
+    ...(procurementSummary != null ? { procurementSummary } : {}),
+    ...(costOverrideSummary != null ? { costOverrideSummary } : {}),
+    ...(governanceAuditSummary != null ? { governanceAuditSummary } : {}),
+    ...(costOverrideBoundary != null ? { costOverrideBoundary } : {}),
     ...(designSubStatusFromApi != null ? { designSubStatus: designSubStatusFromApi } : {}),
     ...parseWarehouseFieldsFromApi(raw),
     ...(canPrepareWarehouse !== undefined ? { canPrepareWarehouse } : {}),
@@ -985,15 +1231,27 @@ function nonEmptyTrimmed(s: string | null | undefined): boolean {
   return s != null && String(s).trim() !== ''
 }
 
+function isAtLeastAsFresh(candidate: string | null | undefined, baseline: string | null | undefined): boolean {
+  const candidateMs = Date.parse(String(candidate ?? ''))
+  const baselineMs = Date.parse(String(baseline ?? ''))
+  if (!Number.isFinite(candidateMs)) return false
+  if (!Number.isFinite(baselineMs)) return true
+  return candidateMs >= baselineMs
+}
+
 /**
  * 整表拉列表（GET /v1/tasks）后，列表行常为瘦模型；若内存中已有同 id 的详情 GET 结果，合并保留
  * reference_file_refs / sku_items / asset_versions / 负责人 / 发起人等，避免覆盖成详情「空白态」。
  */
 function mergeListRowWithCachedDetail(prev: Task | undefined, listRow: Task): Task {
   if (!prev || prev.id !== listRow.id) return listRow
+  const listRowIsFresh = isAtLeastAsFresh(listRow.updatedAt, prev.updatedAt)
 
   const base: Task = {
     ...listRow,
+    // 详情页保存截止时间后会立即写入本地 Task；随后若任务列表瘦模型仍是旧更新时间，
+    // 不允许整表刷新把「任务设置」卡片覆盖回旧截止时间。
+    dueAt: listRowIsFresh ? (listRow.dueAt ?? prev.dueAt) : (prev.dueAt ?? listRow.dueAt),
     designerId: listRow.designerId ?? prev.designerId ?? null,
     designerName: listRow.designerName ?? prev.designerName ?? null,
     creatorId: listRow.creatorId ?? prev.creatorId ?? null,
@@ -1031,6 +1289,7 @@ function mergeListRowWithCachedDetail(prev: Task | undefined, listRow: Task): Ta
       listRow.cannotCloseReasons !== undefined ? listRow.cannotCloseReasons : prev.cannotCloseReasons,
     workflowMainStatus:
       listRow.workflowMainStatus !== undefined ? listRow.workflowMainStatus : prev.workflowMainStatus,
+    businessLane: listRow.businessLane ?? prev.businessLane,
   }
 
   const strEmpty = (s: string | null | undefined) => s == null || String(s).trim() === ''
@@ -1172,12 +1431,16 @@ export const useTasksStore = defineStore('tasks', () => {
    */
   const initialized = ref(false)
   let queuedForceRefreshParams: TaskListParams | undefined
+  let taskListAbort: AbortController | null = null
+  let taskListSeq = 0
 
   const list = computed(() => items.value)
   /** 非 append 的列表拉取成功并整表替换 items 后递增；单条 loadTaskById 不递增。供设计工作台在整表刷新后重建「待设计」快照 */
   const fullListReplaceGeneration = ref(0)
   /** 服务端分页：当前查询条件下的总条数（来自 pagination.total） */
   const listTotal = ref(0)
+  /** 任务中心最近一次列表请求参数（含 page/page_size），供导出中心等复用筛选条件 */
+  const lastListQueryParams = ref<TaskListParams | null>(null)
   const getById = (id: string) => items.value.find((t) => t.id === id)
 
   const mainStatusOf = (id: string) => getById(id)?.mainStatus
@@ -1188,8 +1451,11 @@ export const useTasksStore = defineStore('tasks', () => {
 
   /** 方案 B：服务端分页 + 搜索。拉取任务列表（append 逻辑在 fetchAndApplyTaskList）
    * 后端 TaskListResponse: { data: [...], pagination: { total, page, page_size } } */
-  async function loadTaskList(params: TaskListParams = {}): Promise<{ items: Task[]; total: number }> {
-    const res = await tasksApi.list(params)
+  async function loadTaskList(
+    params: TaskListParams = {},
+    signal?: AbortSignal,
+  ): Promise<{ items: Task[]; total: number }> {
+    const res = await tasksApi.list(params, signal)
     const data = res?.data
     const body = (typeof data === 'object' && data !== null) ? data : {}
     const rawItems = Array.isArray(body.data)
@@ -1215,11 +1481,20 @@ export const useTasksStore = defineStore('tasks', () => {
     options?: { append?: boolean },
   ) {
     const isAppend = options?.append === true
-    if (loading.value && !isAppend) return
+    const requestSeq = isAppend ? taskListSeq : taskListSeq + 1
+    let abortController: AbortController | null = null
+    if (!isAppend) {
+      taskListAbort?.abort()
+      taskListSeq = requestSeq
+      abortController = new AbortController()
+      taskListAbort = abortController
+    }
     if (!isAppend) loading.value = true
     loadError.value = null
     try {
-      const { items: tasks, total } = await loadTaskList(params)
+      const { items: tasks, total } = await loadTaskList(params, abortController?.signal)
+      if (abortController?.signal.aborted || (!isAppend && requestSeq !== taskListSeq)) return
+      lastListQueryParams.value = { ...params }
       listTotal.value = total
       if (isAppend) {
         const ids = new Set(items.value.map((t) => t.id))
@@ -1232,10 +1507,15 @@ export const useTasksStore = defineStore('tasks', () => {
       }
       initialized.value = true
     } catch (e) {
+      if (abortController?.signal.aborted || (!isAppend && requestSeq !== taskListSeq)) return
       loadError.value = e instanceof Error ? e.message : '加载任务列表失败'
       throw e
     } finally {
       if (!isAppend) {
+        if (taskListAbort === abortController) {
+          taskListAbort = null
+        }
+        if (requestSeq !== taskListSeq) return
         loading.value = false
         // 无论本次加载由谁触发，只要期间有 forceRefresh 排队，都在此统一补跑，避免刷新请求被吞掉。
         if (queuedForceRefreshParams) {
@@ -1285,6 +1565,17 @@ export const useTasksStore = defineStore('tasks', () => {
         envelope && typeof envelope === 'object' && 'task' in (envelope as Record<string, unknown>)
           ? mergeDetailEnvelopeIntoTaskRaw(envelope as Record<string, unknown>)
           : (envelope as Record<string, unknown>)
+      let richEnvelope: Record<string, unknown> | undefined
+      try {
+        const richRes = await tasksApi.getById(id)
+        const richData = richRes?.data?.data ?? richRes?.data ?? richRes
+        if (richData && typeof richData === 'object') {
+          richEnvelope = richData as Record<string, unknown>
+          mergeReadModelCostGovernanceFields(raw, richEnvelope)
+        }
+      } catch {
+        // 成本治理补充读模型失败不阻塞详情主流程，详情仍使用 /detail 主响应。
+      }
       const moduleSummaries = parseModuleSummariesFromEnvelope(envelope)
       const parsed = normalizeBackendTask(raw)
       const needsSkuItemsBackfill =
@@ -1293,8 +1584,6 @@ export const useTasksStore = defineStore('tasks', () => {
       if (needsSkuItemsBackfill) {
         try {
           // /detail 未返回 sku_items 时，仅对子项做一次 rich detail 回填。
-          const richRes = await tasksApi.getById(id)
-          const richEnvelope = richRes?.data?.data ?? richRes?.data ?? richRes
           if (richEnvelope && typeof richEnvelope === 'object') {
             const richParsed = normalizeBackendTask(richEnvelope as Record<string, unknown>)
             if (Array.isArray(richParsed.skuItems) && richParsed.skuItems.length > 0) {
@@ -1307,10 +1596,14 @@ export const useTasksStore = defineStore('tasks', () => {
       }
       const idx = items.value.findIndex((t) => t.id === id)
       const existing = idx !== -1 ? items.value[idx] : null
+      const parsedIsFresh = isAtLeastAsFresh(parsed.updatedAt, existing?.updatedAt)
       // 详情若未带 designer_id / assignee_id，勿用 null 覆盖列表已有设计师，否则设计工作台左侧队列会误筛掉该行
       // design_sub_status 合并见 mergeDesignSubStatusOnLoad
       const base: Task = {
         ...parsed,
+        // 保存任务信息后，本地会立即写入最新 dueAt；若随后的详情刷新读到旧快照，
+        // 不允许把「任务设置」里的截止时间刷回旧值。
+        dueAt: parsedIsFresh ? (parsed.dueAt ?? existing?.dueAt ?? null) : (existing?.dueAt ?? parsed.dueAt ?? null),
         designerId: parsed.designerId ?? existing?.designerId ?? null,
         designerName: parsed.designerName ?? existing?.designerName ?? null,
         creatorId: parsed.creatorId ?? existing?.creatorId ?? null,
@@ -1357,6 +1650,7 @@ export const useTasksStore = defineStore('tasks', () => {
         // （AuditQueuePanel.matchesLane）会在详情刷入后把 `undefined` 当作
         // `'normal'` 处理，导致已选中的定制任务从定制 Tab 中瞬间消失。
         workflowLane: parsed.workflowLane ?? existing?.workflowLane,
+        businessLane: parsed.businessLane ?? existing?.businessLane,
         moduleSummaries: moduleSummaries ?? existing?.moduleSummaries,
       }
       const updated = enrichTaskDomainFields(base)
@@ -1410,8 +1704,13 @@ export const useTasksStore = defineStore('tasks', () => {
     const taskType = TASK_TYPE_TO_BACKEND[frontendTaskType] ?? frontendTaskType
     const isOriginal = frontendTaskType === 'ORIGINAL_PRODUCT_DEV'
     const isRetouch = frontendTaskType === 'RETOUCH_TASK'
+    const businessLane =
+      normalizeTaskLane(t.businessLane ?? t.workflowLane) ??
+      (Boolean(t.customizationRequired ?? task.customizationRequired) ? 'customization' : 'normal')
+    const normalizedLaneSkuCodeType = businessLane === 'customization' ? 'customization' : 'regular'
     const skuModeRaw = (t.skuMode ?? 'single') as string
-    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
+	    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
+	    const skuCodeType = normalizedLaneSkuCodeType
 
     const ownerTeam = t.groupId ?? task.groupId ?? ''
     const ownerDepartment =
@@ -1454,8 +1753,13 @@ export const useTasksStore = defineStore('tasks', () => {
       // Legacy compatibility: keep owner_team for old backend branches.
       owner_team: ownerTeam,
       deadline_at: t.dueAt ?? task.dueAt ?? null,
-      priority,
-      customization_required: Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
+	      priority,
+	      business_lane: businessLane,
+	      workflow_lane: businessLane,
+	      sku_code_type: skuCodeType,
+	      customization_required:
+          businessLane === 'customization' ||
+          Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
       customization_source_type:
         (t.customizationRequired ?? task.customizationRequired)
           ? (t.customizationSourceType ?? task.customizationSourceType ?? undefined)
@@ -1498,11 +1802,19 @@ export const useTasksStore = defineStore('tasks', () => {
         : undefined)
 
     if (isRetouch) {
-      const retouchRequirement = t.designRequirement ?? task.designRequirement ?? ''
+      const retouchDrafts = (t.retouchRequirements ?? task.retouchRequirements ?? []) as RetouchRequirementDraft[]
+      const retouchSummary = resolveRetouchTaskDesignRequirementText({
+        designRequirement: String(t.designRequirement ?? task.designRequirement ?? ''),
+        retouchRequirements: retouchDrafts,
+      })
       payload.product_name = productName || '修图任务名称'
       payload.product_name_snapshot = productNameSnapshot || '修图任务名称'
-      payload.demand_text = retouchRequirement
-      payload.design_requirement = retouchRequirement
+      payload.demand_text = retouchSummary
+      payload.design_requirement = retouchSummary
+      const retouchRequirements = buildRetouchRequirementsPayload(retouchDrafts)
+      if (retouchRequirements.length > 0) {
+        payload.retouch_requirements = retouchRequirements
+      }
     } else if (isOriginal) {
       const productIdRaw = t.productId ?? task.productId
       const productIdNum =
@@ -1553,10 +1865,11 @@ export const useTasksStore = defineStore('tasks', () => {
       if (taskType === 'purchase_task' && topCategoryCode) payload.i_id = topCategoryCode
       const rawBatchItems = Array.isArray(t.batchItems) ? t.batchItems : []
       payload.batch_items = rawBatchItems.map((itemRaw) => {
-        const item = itemRaw as Record<string, unknown>
-        const baseItem: Record<string, unknown> = {
-          product_name: item.productName ?? '',
-        }
+	        const item = itemRaw as Record<string, unknown>
+	        const baseItem: Record<string, unknown> = {
+	          product_name: item.productName ?? '',
+	          sku_code_type: normalizedLaneSkuCodeType,
+	        }
         if (taskType === 'new_product_development') {
           baseItem.design_requirement = item.designRequirement ?? undefined
           if (item.productIId) baseItem.product_i_id = item.productIId
@@ -1574,7 +1887,7 @@ export const useTasksStore = defineStore('tasks', () => {
           baseItem.base_sale_price = item.baseSalePrice ?? undefined
           if (item.productChannel) baseItem.product_channel = item.productChannel
           if (item.costPriceMode === 'manual' && item.costPriceAmount != null && !Number.isNaN(item.costPriceAmount)) {
-            baseItem.cost_unit_price = item.costPriceAmount
+            baseItem.cost_price = item.costPriceAmount
           }
           const refs = item.referenceFileRefs as unknown[] | undefined
           if (Array.isArray(refs) && refs.length) {
@@ -1698,7 +2011,12 @@ export const useTasksStore = defineStore('tasks', () => {
     // prepare-product-codes 与 create-task 的字段白名单不同：
     // - 单个模式：必须有顶层 category_code（当前端点尚未切 i_id 字段名）
     // - 批量模式：每个 batch_items[i] 必须有 category_code
-    const preparePayload: Record<string, unknown> = { task_type: payloadTaskType }
+	    const preparePayload: Record<string, unknown> = { task_type: payloadTaskType }
+	    const businessLane = normalizeTaskLane(payload.business_lane ?? payload.workflow_lane) ?? 'normal'
+	    const skuCodeType = businessLane === 'customization' ? 'customization' : 'regular'
+	    preparePayload.business_lane = businessLane
+	    preparePayload.workflow_lane = businessLane
+	    preparePayload.sku_code_type = skuCodeType
     const rawBatchItems = Array.isArray((task as Record<string, unknown>).batchItems)
       ? ((task as Record<string, unknown>).batchItems as Array<Record<string, unknown>>)
       : []
@@ -1713,7 +2031,10 @@ export const useTasksStore = defineStore('tasks', () => {
         if (!categoryCode) {
           throw new Error(`批量第 ${idx + 1} 行缺少产品款式编码，无法预展示 SKU`)
         }
-        return { category_code: categoryCode }
+	        return {
+	          category_code: categoryCode,
+	          sku_code_type: skuCodeType,
+	        }
       })
       preparePayload.batch_items = batch_items
     } else {
@@ -1794,18 +2115,6 @@ export const useTasksStore = defineStore('tasks', () => {
     return true
   }
 
-  /** 指派任务给设计师，调用 POST /v1/tasks/{id}/assign（后端 designer_id 为 int64） */
-  function assignPayloadToRetouchModuleBody(payload: AssignTaskPayload): Record<string, unknown> {
-    const body: Record<string, unknown> = { designer_id: payload.designer_id }
-    if (payload.designer_name != null && String(payload.designer_name).trim() !== '') {
-      body.designer_name = payload.designer_name
-    }
-    if (payload.remark != null && String(payload.remark).trim() !== '') {
-      body.remark = payload.remark
-    }
-    return body
-  }
-
   async function assignTask(taskId: string, payload: { assigneeId: string; assigneeName: string }) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
@@ -1817,11 +2126,7 @@ export const useTasksStore = defineStore('tasks', () => {
       designer_id: designerIdNum,
       designer_name: payload.assigneeName,
     }
-    if (isRetouchTask(task)) {
-      await tasksApi.reassignModule(taskId, 'retouch', assignPayloadToRetouchModuleBody(assignPayload))
-    } else {
-      await tasksApi.assign(taskId, assignPayload)
-    }
+    await tasksApi.assign(taskId, assignPayload)
     await loadTaskById(taskId)
   }
 
@@ -1849,11 +2154,7 @@ export const useTasksStore = defineStore('tasks', () => {
       designer_id: designerIdNum,
       designer_name: payload.assigneeName,
     }
-    if (isRetouchTask(task)) {
-      await tasksApi.reassignModule(taskId, 'retouch', assignPayloadToRetouchModuleBody(assignPayload))
-    } else {
-      await tasksApi.assign(taskId, assignPayload)
-    }
+    await tasksApi.assign(taskId, assignPayload)
     await loadTaskById(taskId)
   }
 
@@ -1866,11 +2167,7 @@ export const useTasksStore = defineStore('tasks', () => {
       throw new Error('当前状态不可重新指派')
     }
     const clearPayload = buildClearDesignerAssigneePayload(remark)
-    if (isRetouchTask(task)) {
-      await tasksApi.reassignModule(taskId, 'retouch', assignPayloadToRetouchModuleBody(clearPayload))
-    } else {
-      await tasksApi.assign(taskId, clearPayload)
-    }
+    await tasksApi.assign(taskId, clearPayload)
     await loadTaskById(taskId)
   }
 
@@ -1893,6 +2190,14 @@ export const useTasksStore = defineStore('tasks', () => {
     if (!task) throw new Error('任务不存在')
     if (!isRetouchTask(task)) throw new Error('当前任务不是 P 图任务')
     await tasksApi.claimModule(taskId, 'retouch')
+    await loadTaskById(taskId)
+  }
+
+  /** 定制美工模块领取：POST /v1/tasks/{id}/modules/customization/claim */
+  async function claimCustomizationModule(taskId: string) {
+    const task = getById(taskId)
+    if (!task) throw new Error('任务不存在')
+    await tasksApi.claimModule(taskId, 'customization')
     await loadTaskById(taskId)
   }
 
@@ -2118,9 +2423,23 @@ export const useTasksStore = defineStore('tasks', () => {
     if (task) {
       if (!task.sku) throw new Error('任务无 SKU，无法仓库接收')
       if (task.warehouseReceiveStatus === 'returned') throw new Error('该任务已退回，无法再次接收')
-      if (task.warehouseReceiveStatus === 'received') return
+      const alreadyReceived =
+        task.warehouseReceiveStatus === 'received' ||
+        task.warehouseReceiveStatus === 'archived' ||
+        task.warehouseSubStatus === 'RECEIVED' ||
+        task.warehouseSubStatus === 'DONE'
+      if (alreadyReceived) {
+        await loadTaskById(taskId)
+        return
+      }
     }
     await tasksApi.warehouseReceive(taskId)
+    await loadTaskById(taskId)
+  }
+
+  /** 仓库完成（推进到 PendingClose），成功后刷新任务详情 */
+  async function completeWarehouseFlow(taskId: string) {
+    await tasksApi.warehouseComplete(taskId)
     await loadTaskById(taskId)
   }
 
@@ -2168,8 +2487,7 @@ export const useTasksStore = defineStore('tasks', () => {
     if (task.status !== 'PendingProductionTransfer') {
       throw new Error('当前状态不可结单')
     }
-    await tasksApi.warehouseComplete(taskId)
-    await loadTaskById(taskId)
+    await completeWarehouseFlow(taskId)
     const refreshed = getById(taskId)
     if (refreshed?.status !== 'PendingClose') {
       throw new Error('仓库流转已完成，但任务尚未进入待结单状态，请刷新后重试')
@@ -2239,6 +2557,8 @@ export const useTasksStore = defineStore('tasks', () => {
     items.value = []
     initialized.value = false
     loadError.value = null
+    lastListQueryParams.value = null
+    listTotal.value = 0
   }
 
   return {
@@ -2246,6 +2566,7 @@ export const useTasksStore = defineStore('tasks', () => {
     loadTaskListSnapshot: loadTaskList,
     fullListReplaceGeneration,
     listTotal,
+    lastListQueryParams,
     loading,
     loadError,
     getById,
@@ -2269,6 +2590,7 @@ export const useTasksStore = defineStore('tasks', () => {
     clearDesignerAssignee,
     submitDesign,
     claimRetouchModule,
+    claimCustomizationModule,
     submitRetouch,
     claimAudit,
     passAudit,
@@ -2284,6 +2606,7 @@ export const useTasksStore = defineStore('tasks', () => {
     rejectAfterOutsourceReview,
     resubmitAuditB,
     receiveInWarehouse,
+    completeWarehouseFlow,
     rejectInWarehouse,
     markCompleted,
     archiveTask,

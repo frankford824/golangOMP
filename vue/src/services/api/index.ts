@@ -21,6 +21,13 @@ export { logsApi } from './logsApi'
 
 // 任务资产（reference/delivery/source 上传与列表）
 export { assetsApi } from './assetsApi'
+export { productManagementApi } from './productManagementApi'
+export type {
+  ProductImageCandidate,
+  ProductManagementListParams,
+  ProductManagementRecord,
+  ProductSyncStatus,
+} from './productManagementApi'
 
 // 设计稿交付 / 任务内参考图上传（POST /v1/assets/upload-sessions，供 design.store 使用）
 export {

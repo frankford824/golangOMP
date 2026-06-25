@@ -1,0 +1,46 @@
+name: Guard changed files
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev/external-developer
+  push:
+    branches:
+      - main
+      - dev/external-developer
+
+permissions:
+  contents: read
+
+jobs:
+  guard-changed-files:
+    name: Block mock/package/lock changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine diff range
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            before="${{ github.event.before }}"
+            after="${{ github.sha }}"
+            if [[ "$before" == "0000000000000000000000000000000000000000" ]]; then
+              before="$(git rev-list --max-parents=0 "$after" | tail -n 1)"
+            fi
+            echo "base=$before" >> "$GITHUB_OUTPUT"
+            echo "head=$after" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reject forbidden files
+        shell: bash
+        run: bash ./.github/scripts/guard-changed-files.sh "${{ steps.diff.outputs.base }}" "${{ steps.diff.outputs.head }}"

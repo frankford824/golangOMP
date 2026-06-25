@@ -61,9 +61,18 @@ Core variables include:
 - `REDIS_PASSWORD`
 - `REDIS_DB`
 - `AUTH_SETTINGS_FILE`
+- `AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS` (keep `false` outside isolated local bootstrap/test runs)
 - `FRONTEND_ACCESS_SETTINGS_FILE`
+- `AGENT_API_TOKEN` (required by `/v1/agent/*` machine clients via `X-Agent-Token` or `Authorization: Bearer`)
+- `WS_ALLOWED_ORIGINS` (only needed for cross-origin WebSocket clients; same host is allowed by default)
 - `ERP_BRIDGE_BASE_URL`
 - `UPLOAD_SERVICE_*`
+
+`config/auth_identity.json` is allowed to omit `password` for existing
+config-managed administrators. In that mode startup synchronizes organization,
+role, and status metadata without resetting the existing password hash. A real
+password is still required when bootstrapping a brand-new config-managed
+administrator.
 
 ## Run Locally
 
@@ -127,4 +136,3 @@ python scripts/docs/generate_frontend_docs.py
 - Do not commit real credentials, production tokens, or local `.env` files.
 - Prefer one logical change per commit.
 - Use `AGENTS.md` for the full agent and governance workflow.
-

@@ -10,11 +10,19 @@ import (
 )
 
 func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError) {
+	priorities, appErr := parseTaskPriorities(c, "priority")
+	if appErr != nil {
+		return service.TaskFilter{}, appErr
+	}
+
+	mineFilterEnabled := strings.EqualFold(strings.TrimSpace(c.Query("filter")), "mine")
 	filter := service.TaskFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
 			Statuses:                     parseTaskStatuses(c, "status"),
+			Priorities:                   priorities,
 			TaskTypes:                    parseTaskTypes(c, "task_type"),
 			SourceModes:                  parseTaskSourceModes(c, "source_mode"),
+			BusinessLanes:                parseTaskBusinessLanes(c, "business_lane"),
 			WorkflowLanes:                parseWorkflowLanes(c, "workflow_lane"),
 			MainStatuses:                 parseTaskMainStatuses(c, "main_status"),
 			SubStatusCodes:               parseTaskSubStatusCodes(c, "sub_status_code"),
@@ -37,12 +45,27 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		}
 		filter.CreatorID = &id
 	}
+	if mineFilterEnabled {
+		actorID, appErr := actorIDOrRequestValue(c, nil, "creator_id")
+		if appErr != nil {
+			return service.TaskFilter{}, appErr
+		}
+		// "mine" includes tasks where the actor is creator, assigned designer, or current handler.
+		filter.MineActorID = &actorID
+	}
 	if raw := c.Query("designer_id"); raw != "" {
 		id, err := parseInt64(raw)
 		if err != nil {
 			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "designer_id must be an integer", nil)
 		}
 		filter.DesignerID = &id
+	}
+	if raw := c.Query("designer_empty"); raw != "" {
+		value, err := parseBool(raw)
+		if err != nil {
+			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "designer_empty must be true/false/1/0", nil)
+		}
+		filter.DesignerEmpty = &value
 	}
 	if raw := c.Query("need_outsource"); raw != "" {
 		value, err := parseBool(raw)
@@ -90,6 +113,39 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 	return filter, nil
 }
 
+func parseTaskPriorities(c *gin.Context, key string) ([]domain.TaskPriority, *domain.AppError) {
+	values := readQueryList(c, key)
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make([]domain.TaskPriority, 0, len(values))
+	seen := make(map[domain.TaskPriority]struct{}, len(values))
+	for _, value := range values {
+		priority := domain.TaskPriority(strings.ToLower(strings.TrimSpace(value)))
+		if !validListTaskPriority(priority) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_priority_invalid", map[string]interface{}{
+				"field": "priority",
+				"value": value,
+			})
+		}
+		if _, exists := seen[priority]; exists {
+			continue
+		}
+		seen[priority] = struct{}{}
+		out = append(out, priority)
+	}
+	return out, nil
+}
+
+func validListTaskPriority(priority domain.TaskPriority) bool {
+	switch priority {
+	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
+		return true
+	default:
+		return false
+	}
+}
+
 func parseTaskStatuses(c *gin.Context, key string) []domain.TaskStatus {
 	values := readQueryList(c, key)
 	out := make([]domain.TaskStatus, 0, len(values))
@@ -131,6 +187,15 @@ func parseWorkflowLanes(c *gin.Context, key string) []domain.WorkflowLane {
 	out := make([]domain.WorkflowLane, 0, len(values))
 	for _, value := range values {
 		out = append(out, domain.WorkflowLane(value))
+	}
+	return out
+}
+
+func parseTaskBusinessLanes(c *gin.Context, key string) []domain.TaskBusinessLane {
+	values := readQueryList(c, key)
+	out := make([]domain.TaskBusinessLane, 0, len(values))
+	for _, value := range values {
+		out = append(out, domain.TaskBusinessLane(value))
 	}
 	return out
 }

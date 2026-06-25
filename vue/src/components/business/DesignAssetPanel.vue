@@ -90,9 +90,18 @@
         v-if="multiBucketSubmitStats && !designStore.isSubmitting && !deliverySession"
         class="batch-submit-summary"
       >
-        待提交汇总：{{ multiBucketSubmitStats.products }} 个商品 · {{ multiBucketSubmitStats.files }} 个文件（提交审核时一并上传）
+        待提交汇总：{{ multiBucketSubmitStats.products }} 个商品 · {{ multiBucketSubmitStats.files }} 个文件（{{ submitActionLabel }}时一并上传）
       </p>
-      <div v-if="pendingFiles.length > 0" class="staging-area">
+      <div
+        v-if="pendingFiles.length > 0"
+        class="staging-area"
+        tabindex="0"
+        @focusin="activateFileReceiver"
+        @pointerenter="activateFileReceiver"
+        @dragover.prevent="onDragOver"
+        @drop.prevent="onDrop"
+        @paste="handlePaste"
+      >
         <div class="staging-header">
           <span class="staging-label">
             {{ DESIGN_UPLOAD_COPY.pendingLabel }}（{{ pendingFiles.length }}）
@@ -140,6 +149,8 @@
           <div
             class="staging-add"
             :class="{ 'cursor-not-allowed opacity-50': blockInteraction }"
+            @focusin="activateFileReceiver"
+            @pointerenter="activateFileReceiver"
             @dragover.prevent="onDragOver"
             @drop.prevent="onDrop"
             @click="!blockInteraction && fileInputRef?.click()"
@@ -162,6 +173,12 @@
         v-else
         class="upload-area"
         :class="{ 'cursor-not-allowed opacity-50': blockInteraction }"
+        tabindex="0"
+        @focusin="activateFileReceiver"
+        @pointerenter="activateFileReceiver"
+        @dragover.prevent="onDragOver"
+        @drop.prevent="onDrop"
+        @paste="handlePaste"
         @click="!blockInteraction && openEmptyPicker()"
       >
         <input
@@ -174,7 +191,7 @@
           @change="handleFileChange"
         />
         <span class="upload-icon-text">+</span>
-        <span class="upload-hint">上传本次设计稿（可多选）</span>
+        <span class="upload-hint">{{ uploadButtonLabel }}</span>
         <span v-if="readingLocal" class="upload-uploading">{{ DESIGN_UPLOAD_COPY.reading }}</span>
       </div>
       <p v-if="uploadPickError" class="upload-pick-error">{{ uploadPickError }}</p>
@@ -201,7 +218,7 @@
         {{ submitError }}
       </span>
       <span v-else class="submit-hint text-sm text-slate-400">
-        {{ DESIGN_UPLOAD_COPY.submitHintIdle }}
+        {{ submitHintIdle }}
       </span>
     </div>
   </section>
@@ -230,6 +247,12 @@ import {
   getUploadFileExtension,
   isAllowedUploadFile,
 } from '@/domain/constants/upload-types'
+import {
+  getFilesFromClipboardEvent,
+  getFilesFromDataTransfer,
+  hasFileDataTransfer,
+  useFileDropPasteReceiver,
+} from '@/composables/useFileDropPasteReceiver'
 
 const EMPTY_PENDING: DesignPendingFile[] = []
 
@@ -253,6 +276,8 @@ const props = withDefaults(
     resolveStagingTargetSku?: (bucketKey: string) => string | undefined
     /** 覆盖提交按钮文案（默认使用「提交审核」） */
     submitButtonLabel?: string
+    uploadButtonLabel?: string
+    submitHintIdle?: string
   }>(),
   {
     accept: UPLOAD_ACCEPT_ATTRIBUTE,
@@ -263,6 +288,8 @@ const props = withDefaults(
     getDeliveryRemarkSuffixBySku: undefined,
     resolveStagingTargetSku: undefined,
     submitButtonLabel: '',
+    uploadButtonLabel: '上传本次稿件（可多选/压缩包）',
+    submitHintIdle: '',
   },
 )
 
@@ -274,6 +301,8 @@ const designStore = useDesignStore()
 const { session: deliverySession } = storeToRefs(designStore)
 /** 多商品分桶提交：有 stagingBucketKey 即启用（与 activeSkuCode 解耦，避免无 SKU 时串桶） */
 const isMultiSkuBucketMode = computed(() => !!props.stagingBucketKey?.trim())
+const submitActionLabel = computed(() => props.submitButtonLabel || DESIGN_UPLOAD_COPY.submitAudit)
+const submitHintIdle = computed(() => props.submitHintIdle || DESIGN_UPLOAD_COPY.submitHintIdle)
 
 const serverPercentRounded = computed(() => {
   const s = deliverySession.value
@@ -352,6 +381,13 @@ const blockInteraction = computed(
     pickAnimating.value ||
     (deliverySession.value != null && deliverySession.value.phase !== 'error'),
 )
+
+const { activateFileReceiver } = useFileDropPasteReceiver({
+  enabled: computed(() => props.canUpload && !blockInteraction.value),
+  onFiles: (files) => {
+    readIntoPending(files)
+  },
+})
 
 function cancelPickAnimation() {
   if (pickRafId) cancelAnimationFrame(pickRafId)
@@ -439,14 +475,27 @@ function openEmptyPicker() {
 }
 
 function onDragOver(e: DragEvent) {
-  if (blockInteraction.value) return
+  if (blockInteraction.value || !hasFileDataTransfer(e.dataTransfer)) return
+  activateFileReceiver()
   e.preventDefault()
 }
 
 function onDrop(e: DragEvent) {
   if (blockInteraction.value) return
-  const files = e.dataTransfer?.files
-  if (files?.length) readIntoPending(files)
+  const files = getFilesFromDataTransfer(e.dataTransfer)
+  if (files.length) {
+    activateFileReceiver()
+    readIntoPending(files)
+  }
+}
+
+function handlePaste(e: ClipboardEvent) {
+  if (blockInteraction.value) return
+  const files = getFilesFromClipboardEvent(e)
+  if (!files.length) return
+  e.preventDefault()
+  activateFileReceiver()
+  readIntoPending(files)
 }
 
 function handleFileChange(e: Event) {
@@ -456,7 +505,7 @@ function handleFileChange(e: Event) {
   input.value = ''
 }
 
-function readIntoPending(files: FileList) {
+function readIntoPending(files: FileList | File[]) {
   const pickedFiles = Array.from(files)
   const oversizedFiles = pickedFiles.filter((file) => file.size > DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES)
   const unsupportedFiles = pickedFiles.filter((file) => !isAllowedUploadFile(file.name))

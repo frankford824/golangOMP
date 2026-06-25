@@ -31,6 +31,11 @@ type CleanupResult struct {
 	Candidates []*repo.TaskAssetCleanupCandidate
 }
 
+type supersededCleanupRepo interface {
+	ListSupersededEligibleForCleanup(ctx context.Context, cutoff time.Time, limit int) ([]*repo.TaskAssetCleanupCandidate, error)
+	MarkSupersededAutoCleaned(ctx context.Context, tx repo.Tx, versionID int64, cleanedAt time.Time) error
+}
+
 func NewCleanupJob(lifecycleRepo repo.TaskAssetLifecycleRepo, txRunner repo.TxRunner, deleter ObjectDeleter, logger *log.Logger) *CleanupJob {
 	return &CleanupJob{lifecycleRepo: lifecycleRepo, txRunner: txRunner, deleter: deleter, logger: logger, now: time.Now}
 }
@@ -51,6 +56,13 @@ func (j *CleanupJob) Run(ctx context.Context, opts CleanupOptions) (*CleanupResu
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
+	if supersededRepo, ok := j.lifecycleRepo.(supersededCleanupRepo); ok {
+		superseded, err := supersededRepo.ListSupersededEligibleForCleanup(ctx, j.now().UTC(), opts.Limit)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		}
+		candidates = append(candidates, superseded...)
+	}
 	result := &CleanupResult{DryRun: opts.DryRun, Scanned: len(candidates), Candidates: candidates}
 	j.logf("dry_run=%t scanned=%d cutoff=%s", opts.DryRun, len(candidates), cutoff.Format(time.RFC3339))
 	if opts.DryRun {
@@ -60,14 +72,26 @@ func (j *CleanupJob) Run(ctx context.Context, opts CleanupOptions) (*CleanupResu
 		if candidate == nil {
 			continue
 		}
-		if j.deleter != nil && j.deleter.Enabled() && candidate.StorageKey != "" {
-			if err := j.deleter.DeleteObject(ctx, candidate.StorageKey); err != nil {
-				return result, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		if j.deleter != nil && j.deleter.Enabled() {
+			for _, key := range cleanupStorageKeys(candidate) {
+				if err := j.deleter.DeleteObject(ctx, key); err != nil {
+					return result, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+				}
 			}
 		}
 		err := j.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-			if err := j.lifecycleRepo.MarkAutoCleaned(ctx, tx, candidate.VersionID, j.now().UTC()); err != nil {
-				return err
+			if candidate.CleanupReason == "superseded" {
+				if supersededRepo, ok := j.lifecycleRepo.(supersededCleanupRepo); ok {
+					if err := supersededRepo.MarkSupersededAutoCleaned(ctx, tx, candidate.VersionID, j.now().UTC()); err != nil {
+						return err
+					}
+				} else if err := j.lifecycleRepo.MarkAutoCleaned(ctx, tx, candidate.VersionID, j.now().UTC()); err != nil {
+					return err
+				}
+			} else {
+				if err := j.lifecycleRepo.MarkAutoCleaned(ctx, tx, candidate.VersionID, j.now().UTC()); err != nil {
+					return err
+				}
 			}
 			if candidate.SourceTaskModuleID == nil || *candidate.SourceTaskModuleID <= 0 {
 				return domain.NewAppError(domain.ErrCodeInvalidRequest, "cleanup candidate missing source_task_module_id", map[string]interface{}{"version_id": candidate.VersionID})
@@ -88,6 +112,29 @@ func (j *CleanupJob) Run(ctx context.Context, opts CleanupOptions) (*CleanupResu
 	}
 	j.logf("cleaned=%d", result.Cleaned)
 	return result, nil
+}
+
+func cleanupStorageKeys(candidate *repo.TaskAssetCleanupCandidate) []string {
+	if candidate == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := []string{}
+	add := func(key string) {
+		if key == "" {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	add(candidate.StorageKey)
+	for _, key := range candidate.RelatedStorageKeys {
+		add(key)
+	}
+	return out
 }
 
 func (j *CleanupJob) logf(format string, args ...interface{}) {

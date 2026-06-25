@@ -11,6 +11,8 @@ import type {
 import { RoleEnum, DataScopeEnum, PermissionEnum } from '@/types'
 import { authApi } from '@/services/api/authApi'
 import { setToken, clearToken } from '@/services/http'
+import { useNotificationsStore } from '@/stores/notifications.store'
+import { useRealtimeStore } from '@/stores/realtime.store'
 import { useTasksStore } from '@/stores/tasks'
 import type { BackendUser, FrontendAccess, LoginResponse } from '@/services/apiTypes'
 
@@ -27,6 +29,13 @@ type AuthMePayload =
   | BackendUser
   | { data?: BackendUser | { user?: BackendUser; frontend_access?: FrontendAccess } | { frontend_access?: FrontendAccess } }
   | { user?: BackendUser }
+
+interface CurrentUserProfileMeta {
+  account?: string
+  username?: string
+  avatar?: string
+  avatar_url?: string
+}
 
 function normalizeUniqueKeys(keys: unknown): string[] {
   if (!Array.isArray(keys)) return []
@@ -302,11 +311,21 @@ export const usePermissionsStore = defineStore('permissions', () => {
     if (!access) throw new Error('会话恢复失败：缺少 frontend_access')
     // /v1/auth/me canonical user fields are id + display_name; keep alias fallback only for read-compat.
     // 某些环境（如 v1.4 后端）只返回 `username`，这里兜底避免 AppShell 顶栏空名。
+    const rawUser = user as BackendUser & { user_id?: string; displayName?: string }
     applyFrontendAccess(
-      String(user.id ?? user.user_id ?? ''),
-      String(user.display_name ?? user.displayName ?? user.username ?? ''),
+      String(rawUser.id ?? rawUser.user_id ?? ''),
+      String(rawUser.display_name ?? rawUser.displayName ?? rawUser.name ?? rawUser.username ?? ''),
       normalizeFrontendAccess(access),
+      {
+        account: rawUser.account,
+        username: rawUser.username,
+        avatar: rawUser.avatar,
+        avatar_url: rawUser.avatar_url,
+      },
     )
+    void authApi.refreshAssetCookie().catch(() => undefined)
+    void useNotificationsStore().load().catch(() => undefined)
+    useRealtimeStore().start()
   }
 
   /**
@@ -317,6 +336,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
     userId: string,
     displayName: string,
     access: FrontendAccess,
+    profile: CurrentUserProfileMeta = {},
   ): void {
     const rawActions = normalizeUniqueKeys(access.actions ?? [])
     const allActions = mergeBackendActionAliases(rawActions)
@@ -404,7 +424,11 @@ export const usePermissionsStore = defineStore('permissions', () => {
 
     currentUser.value = {
       id: userId,
+      account: String(profile.account ?? profile.username ?? '').trim() || undefined,
+      username: String(profile.username ?? profile.account ?? '').trim() || undefined,
       name: displayName,
+      avatar: String(profile.avatar ?? profile.avatar_url ?? '').trim() || undefined,
+      avatarUrl: String(profile.avatar_url ?? profile.avatar ?? '').trim() || undefined,
       role,
       departmentId,
       groupId,
@@ -435,7 +459,10 @@ export const usePermissionsStore = defineStore('permissions', () => {
   }
 
   function logout() {
+    void authApi.logout().catch(() => undefined)
     clearToken()
+    useRealtimeStore().stop()
+    useNotificationsStore().reset()
     currentUser.value = null
     menus.value = []
     pages.value = []

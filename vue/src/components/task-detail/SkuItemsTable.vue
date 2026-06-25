@@ -18,7 +18,9 @@
             <th class="sku-th">SKU</th>
             <th class="sku-th">产品名称</th>
             <th class="sku-th">款式编码</th>
+            <th class="sku-th sku-th--wide">规格尺寸</th>
             <th class="sku-th sku-th--wide">设计要求</th>
+            <th class="sku-th">成本</th>
             <th class="sku-th">参考图</th>
             <th class="sku-th">状态</th>
             <th class="sku-th">ERP 同步</th>
@@ -35,7 +37,21 @@
             <td class="sku-td sku-td--mono">{{ dash(item.skuCode) }}</td>
             <td class="sku-td">{{ dash(item.productNameSnapshot) }}</td>
             <td class="sku-td sku-td--mono">{{ dash(item.productIId) }}</td>
+            <td class="sku-td sku-td--spec">
+              <div class="sku-spec-cell" :title="skuSpecTooltip(item)">
+                <span class="sku-spec-main">{{ skuSpecMain(item) }}</span>
+                <span v-if="skuSpecMeta(item)" class="sku-spec-meta">{{ skuSpecMeta(item) }}</span>
+              </div>
+            </td>
             <td class="sku-td sku-td--req">{{ trunc(item.designRequirement) }}</td>
+            <td class="sku-td sku-td--cost">
+              <div class="sku-cost-cell" :title="skuCostTooltip(item)">
+                <span class="sku-cost-value" :class="{ 'sku-cost-value--empty': skuCostAmount(item) == null }">
+                  {{ formatSkuCost(item) }}
+                </span>
+                <span v-if="skuCostMeta(item)" class="sku-cost-meta">{{ skuCostMeta(item) }}</span>
+              </div>
+            </td>
             <td class="sku-td">
               <div v-if="toThumbItems(item).length" class="sku-refs-cell">
                 <AssetThumbStrip :items="toThumbItems(item)" size="sm" empty-text="未上传" />
@@ -50,7 +66,7 @@
                 <FilingStatusBadge
                   v-if="item.erp_sync_required !== false"
                   :status="resolvedSkuFilingStatus(item)"
-                  :error-message="item.filing_error_message"
+                  :error-message="skuFilingErrorMessage(item)"
                 />
                 <span v-else class="sku-sync-not-required">无需同步</span>
                 <span v-if="item.erp_sync_version != null" class="sku-sync-meta">
@@ -67,17 +83,19 @@
                   type="button"
                   class="sku-action-btn sku-action-btn--primary"
                   :disabled="!canUploadDesign"
-                  :title="canUploadDesign ? '' : '当前状态不可上传设计稿'"
+                  :title="canUploadDesign ? '' : disabledUploadTitle"
                   @click="$emit('upload-design', { item, index })"
                 >
-                  上传设计稿
+                  {{ uploadDesignLabel }}
                 </button>
                 <button
                   type="button"
                   class="sku-action-btn"
+                  :disabled="!canEdit"
+                  :title="canEdit ? '' : disabledEditTitle"
                   @click="$emit('edit', { item, index })"
                 >
-                  编辑
+                  编辑资料/成本
                 </button>
               </div>
             </td>
@@ -94,11 +112,16 @@ import AssetThumbStrip, { type AssetThumbItem } from '@/components/task-detail/A
 import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
 import type { TaskSkuItem } from '@/domain/types/task'
 import { skuItemStatusLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { formatErpSyncFailureMessage } from '@/utils/business-copy'
+import { getTaskFilingStatusLabel, getTaskFilingStatusTone } from '@/utils/filing-status'
 
 const props = defineProps<{
   items: TaskSkuItem[]
   filingStatus?: string | null
+  canEdit?: boolean
   canUploadDesign?: boolean
+  uploadDesignLabel?: string
+  disabledUploadTitle?: string
 }>()
 
 defineEmits<{
@@ -107,22 +130,21 @@ defineEmits<{
 }>()
 
 const canUploadDesign = computed(() => props.canUploadDesign !== false)
+const canEdit = computed(() => props.canEdit !== false)
+const uploadDesignLabel = computed(() => props.uploadDesignLabel || '上传设计稿')
+const disabledUploadTitle = computed(() => props.disabledUploadTitle || '当前状态不可上传设计稿')
+const disabledEditTitle = computed(() => '当前账号不可维护子项商品资料')
 
 const filingStatusLabel = computed(() => {
-  const raw = String(props.filingStatus ?? '').trim()
-  if (!raw) return '未建档'
-  if (raw === 'filed') return '建档完成'
-  if (raw === 'filing') return '同步中'
-  if (raw === 'pending_filing') return '待同步'
-  if (raw === 'filing_failed') return '同步失败'
-  return raw
+  const label = getTaskFilingStatusLabel(props.filingStatus)
+  return label === '--' ? '未同步' : label
 })
 
 const filingBadgeClass = computed(() => {
-  const raw = String(props.filingStatus ?? '').trim()
-  if (raw === 'filed') return 'sku-filing-badge--done'
-  if (raw === 'filing') return 'sku-filing-badge--progress'
-  if (raw === 'filing_failed') return 'sku-filing-badge--error'
+  const tone = getTaskFilingStatusTone(props.filingStatus)
+  if (tone === 'success') return 'sku-filing-badge--done'
+  if (tone === 'info') return 'sku-filing-badge--progress'
+  if (tone === 'error') return 'sku-filing-badge--error'
   return 'sku-filing-badge--default'
 })
 
@@ -137,15 +159,97 @@ function trunc(value: unknown): string {
   return text.length > 36 ? `${text.slice(0, 36)}...` : text
 }
 
+function formatCompactNumber(value: number, precision = 4): string {
+  if (!Number.isFinite(value)) return ''
+  return value.toFixed(precision).replace(/\.?0+$/, '')
+}
+
+function skuSpecMain(item: TaskSkuItem): string {
+  const parts = uniqueTextParts(item.specText, item.sizeText)
+  if (parts.length > 0) return trunc(parts.join('；'))
+  if (typeof item.width === 'number' && Number.isFinite(item.width) && typeof item.height === 'number' && Number.isFinite(item.height)) {
+    return `${formatCompactNumber(item.width)} x ${formatCompactNumber(item.height)}m`
+  }
+  if (typeof item.area === 'number' && Number.isFinite(item.area)) {
+    return `${formatCompactNumber(item.area)}㎡`
+  }
+  return '-'
+}
+
+function uniqueTextParts(...values: unknown[]): string[] {
+  const seen = new Set<string>()
+  return values
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => {
+      if (!value || seen.has(value)) return false
+      seen.add(value)
+      return true
+    })
+}
+
+function skuSpecMeta(item: TaskSkuItem): string {
+  const parts: string[] = []
+  if (typeof item.quantity === 'number' && Number.isFinite(item.quantity)) {
+    parts.push(`数量 ${formatCompactNumber(item.quantity, 0)}`)
+  }
+  if (typeof item.area === 'number' && Number.isFinite(item.area) && !String(item.specText ?? '').trim().includes('㎡')) {
+    parts.push(`面积 ${formatCompactNumber(item.area)}㎡`)
+  }
+  return parts.join(' / ')
+}
+
+function skuSpecTooltip(item: TaskSkuItem): string {
+  const parts = [
+    String(item.specText ?? '').trim() ? `规格：${String(item.specText ?? '').trim()}` : '',
+    String(item.sizeText ?? '').trim() ? `尺寸：${String(item.sizeText ?? '').trim()}` : '',
+    typeof item.width === 'number' && Number.isFinite(item.width) ? `宽：${formatCompactNumber(item.width)}m` : '',
+    typeof item.height === 'number' && Number.isFinite(item.height) ? `高：${formatCompactNumber(item.height)}m` : '',
+    typeof item.area === 'number' && Number.isFinite(item.area) ? `面积：${formatCompactNumber(item.area)}㎡` : '',
+    typeof item.quantity === 'number' && Number.isFinite(item.quantity) ? `数量：${formatCompactNumber(item.quantity, 0)}` : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join('；') : '未维护规格尺寸'
+}
+
+function skuCostAmount(item: TaskSkuItem): number | undefined {
+  if (typeof item.costPrice === 'number' && Number.isFinite(item.costPrice)) return item.costPrice
+  if (typeof item.estimatedCost === 'number' && Number.isFinite(item.estimatedCost)) return item.estimatedCost
+  return undefined
+}
+
+function formatSkuCost(item: TaskSkuItem): string {
+  const amount = skuCostAmount(item)
+  if (amount == null) return item.requiresManualReview ? '待补成本' : '-'
+  return `¥${amount.toFixed(3)}`
+}
+
+function skuCostMeta(item: TaskSkuItem): string {
+  if (item.manualCostOverride === true || item.costPriceMode === 'manual') return '手动'
+  if (typeof item.costPrice === 'number' && Number.isFinite(item.costPrice)) return '已计算'
+  if (typeof item.estimatedCost === 'number' && Number.isFinite(item.estimatedCost)) return '预估'
+  if (item.requiresManualReview === true) return '待补'
+  return ''
+}
+
+function skuCostTooltip(item: TaskSkuItem): string {
+  const amount = skuCostAmount(item)
+  const ruleName = String(item.costRuleName ?? '').trim()
+  if (amount == null) return item.requiresManualReview ? '成本待补充后再同步 ERP' : '暂无成本'
+  const source = skuCostMeta(item) || '成本'
+  return ruleName ? `${source} ${amount.toFixed(3)}；规则：${ruleName}` : `${source} ${amount.toFixed(3)}`
+}
+
 function toThumbItems(item: TaskSkuItem): AssetThumbItem[] {
   const refs = item.referenceFileRefs ?? []
   return refs
     .map((ref, idx) => {
       const src = String(ref.download_url ?? '').trim()
-      if (!src) return null
+      const previewAssetId = String(ref.asset_id ?? ref.ref_id ?? '').trim() || undefined
+      if (!src && !previewAssetId) return null
       return {
         key: `sku-ref-${item.id ?? item.skuCode ?? 'row'}-${idx}`,
         src,
+        previewAssetId,
+        downloadUrl: src,
         alt: String(ref.filename ?? `参考图 ${idx + 1}`),
         label: String(ref.filename ?? `图 ${idx + 1}`),
       }
@@ -159,6 +263,10 @@ function resolvedSkuFilingStatus(item: TaskSkuItem): string | undefined {
   const skuStatus = String(item.filing_status ?? '').trim()
   if (skuStatus) return skuStatus
   return undefined
+}
+
+function skuFilingErrorMessage(item: TaskSkuItem): string {
+  return formatErpSyncFailureMessage(item.filing_error_message ?? '')
 }
 
 function formatFiledAt(value: string): string {
@@ -254,7 +362,7 @@ function formatFiledAt(value: string): string {
 
 .sku-table {
   width: 100%;
-  min-width: 860px;
+  min-width: 1080px;
   border-collapse: collapse;
 }
 
@@ -290,7 +398,7 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-td--mono {
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.75rem;
   letter-spacing: 0.01em;
 }
@@ -299,6 +407,61 @@ function formatFiledAt(value: string): string {
   min-width: 140px;
   max-width: 220px;
   color: #475467;
+}
+
+.sku-td--spec {
+  min-width: 130px;
+  max-width: 210px;
+}
+
+.sku-spec-cell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.sku-spec-main {
+  color: #344054;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sku-spec-meta {
+  color: #667085;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.sku-td--cost {
+  min-width: 92px;
+}
+
+.sku-cost-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  white-space: nowrap;
+}
+
+.sku-cost-value {
+  font-weight: 800;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+.sku-cost-value--empty {
+  color: #98a2b3;
+  font-weight: 700;
+}
+
+.sku-cost-meta {
+  color: #667085;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .sku-row {

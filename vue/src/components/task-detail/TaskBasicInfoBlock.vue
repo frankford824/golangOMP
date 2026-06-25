@@ -111,7 +111,7 @@ import type { Task } from '@/domain/types/task'
 import { isDoneStatus } from '@/domain/task-actions'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
 import TaskTypeBadge from '@/components/task/TaskTypeBadge.vue'
-import { formatDateOnlyBeijing, isOverdueByBeijingDay as checkOverdue } from '@/utils/date'
+import { formatTaskDueAtDisplay, isOverdueByTimestamp as checkOverdue } from '@/utils/date'
 import { getTaskOwnershipDisplay } from '@/domain/task-ownership'
 import { parallelProductTabCount } from '@/domain/task-batch-assets'
 import {
@@ -205,7 +205,7 @@ const productSelectionMatchDisplay = computed(() =>
 )
 
 function formatDate(iso: string): string {
-  return formatDateOnlyBeijing(iso)
+  return formatTaskDueAtDisplay(iso)
 }
 </script>
 

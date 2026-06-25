@@ -23,9 +23,11 @@ import (
 type ERPBridgeClient interface {
 	SearchProducts(ctx context.Context, filter domain.ERPProductSearchFilter) (*domain.ERPProductListResponse, error)
 	GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, error)
+	QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error)
 	ListCategories(ctx context.Context) ([]*domain.ERPCategory, error)
 	ListSyncLogs(ctx context.Context, filter domain.ERPSyncLogFilter) (*domain.ERPSyncLogListResponse, error)
 	GetSyncLogByID(ctx context.Context, id string) (*domain.ERPSyncLog, error)
+	QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error)
 	UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error)
 	UpdateItemStyle(ctx context.Context, payload domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, error)
 	ShelveProductsBatch(ctx context.Context, payload domain.ERPProductBatchMutationPayload) (*domain.ERPProductBatchMutationResult, error)
@@ -168,6 +170,31 @@ func (c *erpBridgeClient) GetProductByID(ctx context.Context, id string) (*domai
 	return decodeERPProduct(payload)
 }
 
+func (c *erpBridgeClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
+	query := url.Values{}
+	if strings.TrimSpace(filter.SKUIDs) != "" {
+		query.Set("sku_ids", strings.TrimSpace(filter.SKUIDs))
+	}
+	if strings.TrimSpace(filter.ModifiedBegin) != "" {
+		query.Set("modified_begin", strings.TrimSpace(filter.ModifiedBegin))
+	}
+	if strings.TrimSpace(filter.ModifiedEnd) != "" {
+		query.Set("modified_end", strings.TrimSpace(filter.ModifiedEnd))
+	}
+	if filter.PageIndex > 0 {
+		query.Set("page_index", strconv.Itoa(filter.PageIndex))
+		query.Set("page", strconv.Itoa(filter.PageIndex))
+	}
+	if filter.PageSize > 0 {
+		query.Set("page_size", strconv.Itoa(filter.PageSize))
+	}
+	payload, err := c.doGET(ctx, "/v1/erp/combine-skus", query)
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSTCombineSKUList(payload, filter.PageIndex, filter.PageSize)
+}
+
 func (c *erpBridgeClient) ListCategories(ctx context.Context) ([]*domain.ERPCategory, error) {
 	payload, err := c.doGET(ctx, "/v1/erp/categories", nil)
 	if err != nil {
@@ -213,6 +240,37 @@ func (c *erpBridgeClient) GetSyncLogByID(ctx context.Context, id string) (*domai
 		return nil, err
 	}
 	return decodeERPSyncLog(payload)
+}
+
+func (c *erpBridgeClient) QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
+	query := url.Values{}
+	if filter.PageIndex > 0 {
+		query.Set("page_index", strconv.Itoa(filter.PageIndex))
+		query.Set("page", strconv.Itoa(filter.PageIndex))
+	}
+	if filter.PageSize > 0 {
+		query.Set("page_size", strconv.Itoa(filter.PageSize))
+	}
+	if strings.TrimSpace(filter.ModifiedBegin) != "" {
+		query.Set("modified_begin", strings.TrimSpace(filter.ModifiedBegin))
+	}
+	if strings.TrimSpace(filter.ModifiedEnd) != "" {
+		query.Set("modified_end", strings.TrimSpace(filter.ModifiedEnd))
+	}
+	if strings.TrimSpace(filter.InternalOID) != "" {
+		query.Set("o_id", strings.TrimSpace(filter.InternalOID))
+	}
+	if strings.TrimSpace(filter.OnlineSOID) != "" {
+		query.Set("so_id", strings.TrimSpace(filter.OnlineSOID))
+	}
+	if strings.TrimSpace(filter.ActionName) != "" {
+		query.Set("action_name", strings.TrimSpace(filter.ActionName))
+	}
+	payload, err := c.doGET(ctx, "/v1/erp/order-action-logs", query)
+	if err != nil {
+		return nil, err
+	}
+	return decodeERPOrderActionLogList(payload, filter.PageIndex, filter.PageSize)
 }
 
 func (c *erpBridgeClient) GetCompanyUsers(ctx context.Context, filter domain.JSTUserListFilter) (*domain.JSTUserListResponse, error) {
@@ -626,6 +684,32 @@ func decodeERPSyncLog(payload []byte) (*domain.ERPSyncLog, error) {
 	return syncLog, nil
 }
 
+func decodeERPOrderActionLogList(payload []byte, fallbackPage, fallbackPageSize int) (*domain.ERPOrderActionLogListResponse, error) {
+	root, err := decodeERPBridgePayload(payload)
+	if err != nil {
+		return nil, err
+	}
+	container := unwrapERPBridgePayload(root)
+	itemsRaw := extractCollection(container)
+	if len(itemsRaw) == 0 {
+		itemsRaw = extractCollection(root)
+	}
+	items := make([]*domain.ERPOrderActionLog, 0, len(itemsRaw))
+	for _, item := range itemsRaw {
+		if log := adaptERPOrderActionLog(item); log != nil {
+			items = append(items, log)
+		}
+	}
+	if items == nil {
+		items = []*domain.ERPOrderActionLog{}
+	}
+	return &domain.ERPOrderActionLogListResponse{
+		Items:      items,
+		Pagination: adaptERPPagination(root, container, fallbackPage, fallbackPageSize, int64(len(items))),
+		Raw:        marshalERPBridgeRawJSON(root),
+	}, nil
+}
+
 func decodeERPBatchMutationResult(payload []byte, action string, fallbackTotal int) (*domain.ERPProductBatchMutationResult, error) {
 	result := &domain.ERPProductBatchMutationResult{
 		Action:   strings.TrimSpace(action),
@@ -1010,9 +1094,10 @@ func adaptERPProduct(root interface{}) *domain.ERPProduct {
 		CategoryCode:     firstString(mapped, "category_code", "categoryCode", "cat_code", "class_code"),
 		CategoryName:     firstString(mapped, "category_name", "category", "cat_name", "category_full_name", "class_name"),
 		ProductShortName: firstString(mapped, "product_short_name", "productShortName", "short_name", "shortName", "short_title", "shortTitle", "simple_name"),
-		ImageURL:         firstString(mapped, "image_url", "image", "main_image", "cover", "cover_url", "pic_url", "pic", "thumbnail", "thumb", "imageUrl"),
+		ImageURL:         firstString(mapped, "sku_pic", "skuPic", "pic_big", "picBig", "image_url", "image", "main_image", "cover", "cover_url", "pic_url", "pic", "thumbnail", "thumb", "imageUrl"),
 		Price:            firstFloatPtr(mapped, "price", "sale_price", "sales_price", "market_price", "unit_price", "amount", "min_price", "retail_price"),
 		SPrice:           firstFloatPtr(mapped, "s_price", "sale_price", "sales_price", "price"),
+		CostPrice:        firstFloatPtr(mapped, "cost_price", "c_price"),
 		WMSCoID:          firstString(mapped, "wms_co_id", "warehouse_code"),
 		Currency:         firstString(mapped, "currency", "currency_code", "currencyCode"),
 	}
@@ -1103,6 +1188,26 @@ func adaptERPSyncLog(root interface{}) *domain.ERPSyncLog {
 	}
 	if updatedAt, ok := firstTime(mapped, "updated_at", "updatedAt", "status_updated_at", "statusUpdatedAt", "finished_at", "finishedAt"); ok {
 		log.UpdatedAt = &updatedAt
+	}
+	return log
+}
+
+func adaptERPOrderActionLog(root interface{}) *domain.ERPOrderActionLog {
+	mapped, ok := root.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	log := &domain.ERPOrderActionLog{
+		InternalOID: firstString(mapped, "o_id", "oid", "order_id", "orderId", "internal_order_id"),
+		OnlineSOID:  firstString(mapped, "so_id", "soid", "shop_order_id", "shopOrderId", "online_order_no", "onlineOrderNo"),
+		Action:      firstString(mapped, "action", "action_name", "actionName", "operation", "type"),
+		Content:     firstString(mapped, "content", "memo", "remark", "message", "msg", "desc", "description"),
+		Operator:    firstString(mapped, "operator", "operator_name", "operatorName", "user_name", "userName", "name"),
+		Modified:    firstString(mapped, "modified", "modified_at", "modifiedAt", "modified_time", "modifiedTime", "time", "created", "created_at", "createdAt"),
+		Raw:         marshalERPBridgeRawJSON(mapped),
+	}
+	if log.InternalOID == "" && log.OnlineSOID == "" && log.Action == "" && log.Content == "" && log.Operator == "" && log.Modified == "" {
+		return nil
 	}
 	return log
 }
@@ -1331,6 +1436,14 @@ func firstRawJSON(root map[string]interface{}, keys ...string) json.RawMessage {
 		}
 	}
 	return nil
+}
+
+func marshalERPBridgeRawJSON(value interface{}) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 func firstTime(root map[string]interface{}, keys ...string) (time.Time, bool) {

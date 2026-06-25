@@ -1,34 +1,75 @@
 <template>
-  <section class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
-    <h1 class="text-base font-semibold text-[var(--v1-text-primary)]">我的组织</h1>
-    <dl class="mt-3 space-y-2 text-sm text-[var(--v1-text-secondary)]">
-      <div class="flex items-center justify-between">
-        <dt>部门</dt>
-        <dd>{{ departmentLabel }}</dd>
+  <section class="org-page">
+    <header class="org-hero">
+      <div class="org-hero__icon">
+        <Building2 :size="24" aria-hidden="true" />
       </div>
-      <div class="flex items-center justify-between">
-        <dt>团队</dt>
-        <dd>{{ teamLabel }}</dd>
+      <div>
+        <p>我的组织</p>
+        <h1>{{ departmentLabel }}</h1>
+        <span>{{ teamLabel }}</span>
       </div>
-      <div class="flex items-center justify-between">
-        <dt>角色</dt>
-        <dd>{{ roleText }}</dd>
+    </header>
+
+    <div class="org-summary">
+      <section class="org-card">
+        <div class="org-card__icon org-card__icon--blue">
+          <Building2 :size="20" aria-hidden="true" />
+        </div>
+        <span>所属部门</span>
+        <strong>{{ departmentLabel }}</strong>
+      </section>
+      <section class="org-card">
+        <div class="org-card__icon org-card__icon--green">
+          <UsersRound :size="20" aria-hidden="true" />
+        </div>
+        <span>所属团队</span>
+        <strong>{{ teamLabel }}</strong>
+      </section>
+      <section class="org-card">
+        <div class="org-card__icon org-card__icon--amber">
+          <BadgeCheck :size="20" aria-hidden="true" />
+        </div>
+        <span>当前角色</span>
+        <strong>{{ roleText }}</strong>
+      </section>
+    </div>
+
+    <section class="org-panel">
+      <div class="section-heading">
+        <div>
+          <h2>可管理部门</h2>
+          <p>{{ managedDepartments.length ? `共 ${managedDepartments.length} 个部门` : '暂无部门管理范围' }}</p>
+        </div>
+        <ShieldCheck :size="20" aria-hidden="true" />
       </div>
-      <div class="flex items-center justify-between">
-        <dt>可管理部门</dt>
-        <dd>{{ managedDepartmentLabel }}</dd>
+      <div v-if="managedDepartments.length" class="chip-list">
+        <span v-for="item in managedDepartments" :key="item">{{ item }}</span>
       </div>
-      <div class="flex items-center justify-between">
-        <dt>可管理团队</dt>
-        <dd>{{ managedTeamLabel }}</dd>
+      <p v-else class="org-empty">当前账号未配置部门管理范围</p>
+    </section>
+
+    <section class="org-panel">
+      <div class="section-heading">
+        <div>
+          <h2>可管理团队</h2>
+          <p>{{ managedTeams.length ? `共 ${managedTeams.length} 个团队` : '暂无团队管理范围' }}</p>
+        </div>
+        <UsersRound :size="20" aria-hidden="true" />
       </div>
-    </dl>
-    <p v-if="message" class="mt-3 text-xs text-[var(--v1-danger)]">{{ message }}</p>
+      <div v-if="managedTeams.length" class="chip-list chip-list--team">
+        <span v-for="item in managedTeams" :key="item">{{ item }}</span>
+      </div>
+      <p v-else class="org-empty">当前账号未配置团队管理范围</p>
+    </section>
+
+    <p v-if="message" class="org-message">{{ message }}</p>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { BadgeCheck, Building2, ShieldCheck, UsersRound } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
 import { meApi } from '@/services/api/meApi'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -39,6 +80,7 @@ const permissionsStore = usePermissionsStore()
 const user = computed(() => permissionsStore.currentUser)
 const orgProfile = ref<MeOrgProfile | null>(null)
 const message = ref('')
+
 const roleText = computed(() => {
   const fromOrg = orgProfile.value?.roles
   if (fromOrg?.length) return formatWorkflowRolesForDisplay(fromOrg)
@@ -49,28 +91,27 @@ const departmentLabel = computed(() => {
   if (orgProfile.value?.department) return orgProfile.value.department
   if (permissionsStore.actorDepartment) return permissionsStore.actorDepartment
   const id = user.value?.departmentId
-  if (!id) return '-'
+  if (!id) return '未配置部门'
   return permissionsStore.departments.find((d) => d.id === id)?.name ?? id
 })
 
 const teamLabel = computed(() => {
   if (orgProfile.value?.teams?.length) return orgProfile.value.teams.join('、')
-  const orgTeam = orgProfile.value?.team
-  if (orgTeam) return orgTeam
+  if (orgProfile.value?.team) return orgProfile.value.team
   if (permissionsStore.actorTeam) return permissionsStore.actorTeam
   const id = user.value?.groupId
-  if (!id) return '-'
+  if (!id) return '未配置团队'
   return permissionsStore.groups.find((g) => g.id === id)?.name ?? id
 })
 
-const managedDepartmentLabel = computed(() => {
+const managedDepartments = computed(() => {
   const values = orgProfile.value?.managed_departments ?? permissionsStore.managedDepartments
-  return values.length ? values.join('、') : '-'
+  return values.filter((item) => String(item ?? '').trim() !== '')
 })
 
-const managedTeamLabel = computed(() => {
+const managedTeams = computed(() => {
   const values = orgProfile.value?.managed_teams ?? permissionsStore.managedTeams
-  return values.length ? values.join('、') : '-'
+  return values.filter((item) => String(item ?? '').trim() !== '')
 })
 
 function unwrapOrg(raw: unknown): MeOrgProfile | null {
@@ -91,3 +132,195 @@ async function loadMyOrg(): Promise<void> {
 
 onMounted(loadMyOrg)
 </script>
+
+<style scoped>
+.org-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.org-hero,
+.org-card,
+.org-panel {
+  border: 1px solid var(--v1-border);
+  background: #fff;
+  box-shadow: 0 16px 36px -28px rgba(15, 23, 42, 0.28);
+}
+
+.org-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-radius: 18px;
+  padding: 22px;
+  background:
+    linear-gradient(135deg, rgba(240, 253, 250, 0.95), rgba(255, 255, 255, 0.94) 54%),
+    #fff;
+}
+
+.org-hero__icon,
+.org-card__icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.org-hero__icon {
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.org-hero p {
+  margin: 0;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.org-hero h1 {
+  margin: 3px 0 0;
+  color: var(--v1-text-primary);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.org-hero span {
+  display: block;
+  margin-top: 5px;
+  color: var(--v1-text-secondary);
+  font-size: 13px;
+}
+
+.org-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.org-card {
+  min-width: 0;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.org-card__icon {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 12px;
+  border-radius: 11px;
+}
+
+.org-card__icon--blue {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.org-card__icon--green {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.org-card__icon--amber {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.org-card span {
+  display: block;
+  color: var(--v1-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.org-card strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 6px;
+  color: var(--v1-text-primary);
+  font-size: 16px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.org-panel {
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: #64748b;
+}
+
+.section-heading h2 {
+  margin: 0;
+  color: var(--v1-text-primary);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.section-heading p {
+  margin: 4px 0 0;
+  color: var(--v1-text-secondary);
+  font-size: 12px;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.chip-list span {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  padding: 6px 10px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chip-list--team span {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.org-empty {
+  margin: 16px 0 0;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 18px;
+  color: var(--v1-text-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.org-message {
+  margin: 0;
+  color: var(--v1-danger);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .org-summary {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

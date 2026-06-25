@@ -227,7 +227,14 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 				},
 			},
 		}
-		h := NewAuditV7Handler(service.NewAuditV7Service(taskRepo, &routeAuditRepo{}, &routeTaskEventRepo{}, nil, routeTxRunner{}), nil)
+		h := NewAuditV7Handler(service.NewAuditV7Service(taskRepo, &routeAuditRepo{}, &routeTaskEventRepo{}, nil, routeTxRunner{},
+			service.WithAuditV7DataScopeResolver(service.NewRoleBasedDataScopeResolver()),
+			service.WithAuditV7ScopeUserRepo(&routeUserRepo{
+				users: map[int64]*domain.User{
+					401: {ID: 401, DisplayName: "马雨琪", Roles: []domain.Role{domain.RoleDeptAdmin}},
+					402: {ID: 402, DisplayName: "章鹏鹏", Roles: []domain.Role{domain.RoleDeptAdmin}},
+				},
+			})), nil)
 
 		router := gin.New()
 		router.Use(routeActor(domain.RequestActor{ID: 401, Roles: []domain.Role{domain.RoleDeptAdmin}, Department: "ops"}))
@@ -249,7 +256,7 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		router.Use(routeActor(domain.RequestActor{ID: 402, Roles: []domain.Role{domain.RoleDeptAdmin}, Department: "design"}))
 		router.POST("/v1/tasks/:id/audit/approve", h.Approve)
 		rec = performJSON(router, http.MethodPost, "/v1/tasks/4/audit/approve", `{"stage":"A","next_status":"PendingAuditB","auditor_id":402}`)
-		assertTaskPermissionDenied(t, rec, "task_out_of_stage_scope")
+		assertTaskPermissionDenied(t, rec, "audit_lane_forbidden")
 	})
 
 	t.Run("audit_stage_and_role_are_stage_specific", func(t *testing.T) {
@@ -647,6 +654,12 @@ func (r *routeTaskRepo) ListBoardCandidates(context.Context, repo.TaskBoardCandi
 }
 func (r *routeTaskRepo) UpdateDetailBusinessInfo(_ context.Context, _ repo.Tx, detail *domain.TaskDetail) error {
 	r.details[detail.TaskID] = cloneRouteDetail(detail)
+	return nil
+}
+func (r *routeTaskRepo) UpdatePriority(_ context.Context, _ repo.Tx, id int64, priority domain.TaskPriority) error {
+	if task := r.tasks[id]; task != nil {
+		task.Priority = priority
+	}
 	return nil
 }
 func (r *routeTaskRepo) UpdateProductBinding(_ context.Context, _ repo.Tx, task *domain.Task) error {

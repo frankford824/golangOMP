@@ -70,6 +70,65 @@ export function taskBeijingDateKey(iso: string | null | undefined): string {
   return beijingDateKeyOf(d)
 }
 
+function beijingDateTimeParts(date: Date): {
+  year: string
+  month: string
+  day: string
+  hour: string
+  minute: string
+  second: string
+} {
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: BEIJING_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? ''
+  return {
+    year: pick('year'),
+    month: pick('month'),
+    day: pick('day'),
+    hour: pick('hour'),
+    minute: pick('minute'),
+    second: pick('second'),
+  }
+}
+
+/**
+ * 历史任务兼容识别：
+ * - 纯日期（YYYY-MM-DD）视作历史日期粒度；
+ * - 旧前端按“北京时间当天结束”提交（23:59:59）也视作日期粒度。
+ */
+export function isLegacyDateOnlyDueAt(iso: string | null | undefined): boolean {
+  const raw = String(iso ?? '').trim()
+  if (!raw) return false
+  if (DATE_ONLY_RE.test(raw)) return true
+  const d = parseBackendInstant(raw)
+  if (Number.isNaN(d.getTime())) return false
+  const parts = beijingDateTimeParts(d)
+  return parts.hour === '23' && parts.minute === '59'
+}
+
+/**
+ * 读取任务截止时间在北京时间的小时（0-23）。
+ * 历史日期粒度（纯日期 / 23:59 语义）返回 null，由业务层决定默认小时。
+ */
+export function taskBeijingHour(iso: string | null | undefined): number | null {
+  const raw = String(iso ?? '').trim()
+  if (!raw || isLegacyDateOnlyDueAt(raw)) return null
+  const d = parseBackendInstant(raw)
+  if (Number.isNaN(d.getTime())) return null
+  const hour = Number.parseInt(beijingDateTimeParts(d).hour, 10)
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null
+  return hour
+}
+
 /**
  * 将 ISO 时间戳格式化为北京时间显示（短格式：年/月/日 时:分）
  */
@@ -109,6 +168,20 @@ export function formatDateOnlyBeijing(iso: string | null | undefined): string {
     month: '2-digit',
     day: '2-digit',
   })
+}
+
+/**
+ * 任务截止时间展示：
+ * - 新任务（包含明确小时）显示 YYYY/MM/DD HH:00；
+ * - 历史任务（仅日期语义）仅显示 YYYY/MM/DD。
+ */
+export function formatTaskDueAtDisplay(iso: string | null | undefined): string {
+  if (!iso) return ''
+  if (isLegacyDateOnlyDueAt(iso)) return formatDateOnlyBeijing(iso)
+  const d = parseBackendInstant(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const parts = beijingDateTimeParts(d)
+  return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:00`
 }
 
 /** 资产版本上传时间等：按 ISO 偏移解析后再格式化为北京时间显示（短 dateStyle + timeStyle） */
@@ -201,6 +274,29 @@ export function isOverdueByBeijingDay(
 }
 
 /**
+ * 判断任务是否逾期（精确到时间戳）：
+ * - 历史日期粒度任务按“北京时间当天 23:59:59.999”比较，兼容旧语义；
+ * - 新任务按提交的实际截止时刻比较。
+ */
+export function isOverdueByTimestamp(
+  dueAt: string | null | undefined,
+  isDone: boolean,
+  now: Date = new Date(),
+): boolean {
+  if (!dueAt || isDone) return false
+  const raw = String(dueAt).trim()
+  if (!raw) return false
+  let dueMs: number
+  if (DATE_ONLY_RE.test(raw)) {
+    dueMs = endOfBeijingDayMs(raw)
+  } else {
+    dueMs = taskInstantMs(raw)
+  }
+  if (Number.isNaN(dueMs)) return false
+  return dueMs < now.getTime()
+}
+
+/**
  * 判断是否“今天到期”（北京日语义）。
  */
 export function isDueTodayBeijing(
@@ -253,6 +349,22 @@ export function toBeijingEndOfDayISO(ymd: string | null | undefined): string | n
   const raw = String(ymd ?? '').trim()
   if (!DATE_ONLY_RE.test(raw)) return null
   const dt = new Date(`${raw}T23:59:59.999+08:00`)
+  if (Number.isNaN(dt.getTime())) return null
+  return dt.toISOString()
+}
+
+/**
+ * 将 YYYY-MM-DD + 小时（0-23）转换为北京时间整点 ISO 字符串。
+ */
+export function toBeijingHourISO(
+  ymd: string | null | undefined,
+  hour: number,
+): string | null {
+  const raw = String(ymd ?? '').trim()
+  if (!DATE_ONLY_RE.test(raw)) return null
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null
+  const hh = String(hour).padStart(2, '0')
+  const dt = new Date(`${raw}T${hh}:00:00+08:00`)
   if (Number.isNaN(dt.getTime())) return null
   return dt.toISOString()
 }

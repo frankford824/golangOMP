@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"sync"
 	"time"
 
 	gws "github.com/gorilla/websocket"
@@ -21,10 +22,17 @@ type Connection struct {
 	conn     *gws.Conn
 	send     chan domain.WebSocketEvent
 	hub      *Hub
+	// closeOnce guards send-channel close: Unregister can be reached both from
+	// ReadPump teardown and from the slow-consumer path in Hub.broadcast.
+	closeOnce sync.Once
 }
 
 func NewConnection(hub *Hub, conn *gws.Conn, userID int64, teamCode string) *Connection {
 	return &Connection{hub: hub, conn: conn, UserID: userID, TeamCode: teamCode, send: make(chan domain.WebSocketEvent, sendBuffer)}
+}
+
+func (c *Connection) closeSend() {
+	c.closeOnce.Do(func() { close(c.send) })
 }
 
 func (c *Connection) ReadPump() {

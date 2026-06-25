@@ -1,5 +1,7 @@
 import type { TaskCreateFormModel, TaskKind } from './types'
+import { hasValidRetouchRequirementDrafts } from '@/domain/retouch-requirements'
 import { endOfBeijingDayMs, taskInstantMs } from '@/utils/date'
+import { erpProductNameLimitMessage, isErpProductNameTooLong } from '@/domain/erp-product-name'
 
 function dueAtMs(value: string): number {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) ? endOfBeijingDayMs(value) : taskInstantMs(value)
@@ -19,7 +21,9 @@ export function canSubmitTask(kind: TaskKind, form: TaskCreateFormModel, now: Da
   if (isBatchMode && (kind === 'ORIGINAL_PRODUCT_DEV' || kind === 'RETOUCH_TASK')) return false
   if (isBatchMode && kind !== 'ORIGINAL_PRODUCT_DEV' && kind !== 'RETOUCH_TASK') {
     if (!Array.isArray(form.batchItems) || form.batchItems.length < 2) return false
+    if (form.batchItems.some((item) => isErpProductNameTooLong(item.productName))) return false
   }
+  if (!isBatchMode && isErpProductNameTooLong(form.productName)) return false
 
   let base = false
 
@@ -72,11 +76,7 @@ export function canSubmitTask(kind: TaskKind, form: TaskCreateFormModel, now: Da
       if (form.costPriceAmount == null || Number.isNaN(form.costPriceAmount)) return false
     }
   } else if (kind === 'RETOUCH_TASK') {
-    base = !!(
-      form.referenceFileRefs.length > 0 &&
-      form.designRequirement.trim() &&
-      form.dueAt
-    )
+    base = !!(hasValidRetouchRequirementDrafts(form) && form.dueAt)
   }
 
   if (!base) return false
@@ -109,6 +109,12 @@ export function getTaskCreateCompletionHint(
   if (isBatchMode && (!Array.isArray(form.batchItems) || form.batchItems.length < 2)) {
     return '批量模式至少需要 2 个商品'
   }
+  if (isBatchMode && form.batchItems?.some((item) => isErpProductNameTooLong(item.productName))) {
+    return erpProductNameLimitMessage('批量商品产品名称')
+  }
+  if (!isBatchMode && isErpProductNameTooLong(form.productName)) {
+    return erpProductNameLimitMessage('产品名称')
+  }
 
   if (canSubmitTask(kind, form, now)) return '可提交'
 
@@ -121,7 +127,7 @@ export function getTaskCreateCompletionHint(
   } else if (kind === 'PURCHASE_TASK') {
     base = !!(form.productName && form.category)
   } else if (kind === 'RETOUCH_TASK') {
-    base = !!(form.referenceFileRefs.length > 0 && form.designRequirement.trim())
+    base = hasValidRetouchRequirementDrafts(form)
   }
 
   if (base && form.dueAt) {
@@ -163,12 +169,10 @@ export function getTaskCreateCompletionHint(
   }
 
   if (kind === 'RETOUCH_TASK') {
-    if (form.referenceFileRefs.length === 0) return '请上传图片/附件'
-    if (!form.designRequirement.trim()) return '请填写修改要求'
+    if (!hasValidRetouchRequirementDrafts(form)) return '请至少填写 1 条 P 图需求描述'
     if (!form.dueAt) return '请填写截止时间'
     return '请完善 P 图任务必填信息'
   }
 
   return '请完善必填信息'
 }
-

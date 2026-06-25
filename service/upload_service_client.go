@@ -35,6 +35,7 @@ type UploadServiceClient interface {
 	AbortUploadSession(ctx context.Context, req RemoteAbortUploadRequest) error
 	GetFileMeta(ctx context.Context, req RemoteGetFileMetaRequest) (*RemoteFileMeta, error)
 	ProbeStoredFile(ctx context.Context, req RemoteProbeStoredFileRequest) (*RemoteStoredFileProbe, error)
+	OpenStoredFile(ctx context.Context, req RemoteProbeStoredFileRequest) (io.ReadCloser, error)
 	BuildBrowserFileURL(storageKey string) *string
 }
 
@@ -748,6 +749,42 @@ func (c *httpUploadServiceClient) ProbeStoredFile(ctx context.Context, req Remot
 		"probe_response_validated": true,
 	})
 	return probe, nil
+}
+
+func (c *httpUploadServiceClient) OpenStoredFile(ctx context.Context, req RemoteProbeStoredFileRequest) (io.ReadCloser, error) {
+	if err := c.ensureEnabled(); err != nil {
+		return nil, err
+	}
+	storageKey := strings.TrimSpace(req.StorageKey)
+	if storageKey == "" {
+		return nil, fmt.Errorf("upload service open_stored_file requires storage_key")
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
+	defer cancel()
+
+	requestURL, err := domain.BuildAbsoluteEscapedURLPath(c.cfg.BaseURL, "/files", storageKey)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.applyCommonHeaders(httpReq, false)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("upload service open_stored_file request failed: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+		_ = resp.Body.Close()
+		return nil, &UploadServiceHTTPError{
+			Operation:  "open_stored_file",
+			StatusCode: resp.StatusCode,
+			Body:       string(raw),
+		}
+	}
+	return resp.Body, nil
 }
 
 func (c *httpUploadServiceClient) ensureEnabled() error {

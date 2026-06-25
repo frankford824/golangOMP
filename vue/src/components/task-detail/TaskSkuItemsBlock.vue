@@ -93,47 +93,57 @@
 
       <div class="sub-ref-section">
         <span class="sub-ref-label">当前子项参考图</span>
-        <div v-if="subItemReferenceUrls.length > 0" class="sub-ref-thumb-grid">
+        <div v-if="subItemReferenceRefs.length > 0" class="sub-ref-thumb-grid">
           <button
-            v-for="(ref, i) in subItemReferenceUrls"
+            v-for="(refObj, i) in subItemReferenceRefs"
             :key="'sref-' + i"
             type="button"
             class="sub-ref-thumb-btn"
-            @click="subRefLightbox = ref"
+            @click="openSubReferencePreview(i)"
           >
-            <img :src="ref" :alt="`子项参考图 ${i + 1}`" class="sub-ref-thumb-img" @error="onSubRefImageError(ref)" />
+            <AssetPreviewMedia
+              :asset-id="referencePreviewAssetId(refObj) || null"
+              :resolved-preview-url="refObj.download_url || null"
+              :fallback-src="refObj.download_url || null"
+              :alt="`子项参考图 ${i + 1}`"
+              img-class="sub-ref-thumb-media"
+              inner-img-class="sub-ref-thumb-img"
+              :defer-until-visible="true"
+              @open-full="(url, context) => openSubReferencePreview(i, url, context)"
+            />
           </button>
         </div>
         <p v-else class="sub-ref-empty">暂无参考图</p>
       </div>
     </div>
 
-    <div v-if="subRefLightbox" class="sub-ref-lightbox" @click="subRefLightbox = null">
-      <img :src="subRefLightbox" alt="参考图大图" class="sub-ref-lightbox-img" />
-    </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
 import type { ComputedRef } from 'vue'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import type { Task, TaskSkuItem } from '@/domain/types/task'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import { TASK_DETAIL_KEY } from '@/composables/task-detail-key'
-import { useTasksStore } from '@/stores/tasks'
+import {
+  IMAGE_PREVIEW_LIGHTBOX_KEY,
+  type ImagePreviewLightboxItem,
+  type OpenImagePreviewLightbox,
+} from '@/components/media/imagePreviewLightbox'
 
 const injected = inject<ComputedRef<Task | null>>(TASK_DETAIL_KEY)
 if (!injected) throw new Error('[TaskSkuItemsBlock] 必须在 TaskDetailView 内使用')
 
 const taskRef = injected
-const tasksStore = useTasksStore()
+const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
 
 const task = computed(() => taskRef.value!)
 const items = computed<TaskSkuItem[]>(() => task.value.skuItems ?? [])
 const totalItems = computed(() => items.value.length)
 
 const currentIndex = ref(0)
-const subRefLightbox = ref<string | null>(null)
 
 const currentDisplayIndex = computed(() => (totalItems.value === 0 ? 0 : currentIndex.value + 1))
 
@@ -173,18 +183,60 @@ const itemDesignRequirement = computed(() => {
 })
 
 const subItemReferenceRefs = computed((): ReferenceFileRef[] => currentItem.value?.referenceFileRefs ?? [])
-const subItemReferenceUrls = computed(() =>
-  subItemReferenceRefs.value.map((r) => r.download_url ?? '').filter(Boolean),
+const subItemReferencePreviewItems = computed((): ImagePreviewLightboxItem[] =>
+  subItemReferenceRefs.value
+    .map((refObj, index) => {
+      const src = String(refObj.download_url ?? '').trim()
+      const title = refObj.filename?.trim() || `子项参考图 ${index + 1}`
+      const previewAssetId = referencePreviewAssetId(refObj)
+      return src || previewAssetId
+        ? {
+            src,
+            previewAssetId,
+            resolvedPreviewUrl: src || undefined,
+            fallbackSrc: src || undefined,
+            title,
+            alt: title,
+            preferredFilename: title,
+            downloadUrl: src,
+          }
+        : null
+    })
+    .filter((item) => item != null) as ImagePreviewLightboxItem[],
 )
-const retriedRefIds = ref(new Set<string>())
 
-function onSubRefImageError(url: string) {
-  const refObj = subItemReferenceRefs.value.find((r) => r.download_url === url)
-  if (!refObj) return
-  const key = refObj.asset_id ?? url
-  if (retriedRefIds.value.has(key)) return
-  retriedRefIds.value.add(key)
-  tasksStore.refreshReferenceUrls(task.value.id)
+function referencePreviewAssetId(refObj: ReferenceFileRef | undefined): string | undefined {
+  const id = String(refObj?.asset_id ?? refObj?.ref_id ?? '').trim()
+  return id || undefined
+}
+
+function openSubReferencePreview(
+  index: number,
+  url?: string,
+  context?: {
+    assetId?: string
+    fallbackAssetId?: string
+    fallbackSrc?: string
+    resolvedPreviewUrl?: string
+  },
+) {
+  const item = subItemReferencePreviewItems.value[index]
+  const src = String(url || item?.src || '').trim()
+  if (!item || (!src && !item.previewAssetId)) return
+  const items = [...subItemReferencePreviewItems.value]
+  items[index] = {
+    ...item,
+    src: src || item.src,
+    previewAssetId: context?.assetId || item.previewAssetId,
+    fallbackAssetId: context?.fallbackAssetId || item.fallbackAssetId,
+    fallbackSrc: context?.fallbackSrc || item.fallbackSrc,
+    resolvedPreviewUrl: context?.resolvedPreviewUrl || item.resolvedPreviewUrl,
+  }
+  openLightbox(src, {
+    title: item.title,
+    items,
+    index,
+  })
 }
 
 const attributeRows = computed(() => {
@@ -233,7 +285,6 @@ watch(
     } else if (currentIndex.value >= totalItems.value) {
       currentIndex.value = totalItems.value - 1
     }
-    retriedRefIds.value = new Set()
   },
   { immediate: true },
 )
@@ -363,7 +414,7 @@ watch(
   color: #0f172a;
 }
 .core-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.75rem;
 }
 .attr-grid {
@@ -492,6 +543,9 @@ watch(
   border-radius: 6px;
   overflow: hidden;
 }
+.sub-ref-thumb-media,
+.sub-ref-thumb-btn :deep(.sub-ref-thumb-media),
+.sub-ref-thumb-btn :deep(.apm),
 .sub-ref-thumb-img {
   width: 100%;
   aspect-ratio: 1;
@@ -501,26 +555,16 @@ watch(
   background: #fff;
   display: block;
 }
+.sub-ref-thumb-btn :deep(.apm-placeholder),
+.sub-ref-thumb-btn :deep(.apm-empty) {
+  min-height: 0;
+  height: auto;
+  aspect-ratio: 1;
+  padding: 0.2rem;
+}
 .sub-ref-empty {
   margin: 0;
   font-size: 0.8125rem;
   color: #94a3b8;
 }
-.sub-ref-lightbox {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.72);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  cursor: zoom-out;
-}
-.sub-ref-lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 6px;
-}
 </style>
-

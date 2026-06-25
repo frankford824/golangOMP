@@ -1,26 +1,28 @@
 <template>
   <section class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
     <h1 class="text-base font-semibold text-[var(--v1-text-primary)]">用户管理</h1>
-    <table class="mt-3 w-full border-collapse text-sm">
-      <thead class="bg-[var(--v1-bg-surface-soft)] text-[var(--v1-text-secondary)]">
-        <tr>
-          <th class="px-2 py-1 text-left">姓名</th>
-          <th class="px-2 py-1 text-left">部门</th>
-          <th class="px-2 py-1 text-left">团队</th>
-          <th class="px-2 py-1 text-left">角色</th>
-          <th class="px-2 py-1 text-left">状态</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="item in users" :key="item.id" class="border-t border-[var(--v1-border)]">
-          <td class="px-2 py-1">{{ item.name }}</td>
-          <td class="px-2 py-1">{{ item.department }}</td>
-          <td class="px-2 py-1">{{ item.team }}</td>
-          <td class="px-2 py-1">{{ formatUserRoleForDisplay(item.role) }}</td>
-          <td class="px-2 py-1">{{ item.is_active ? '启用' : '停用' }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="mt-3 overflow-x-auto">
+      <table class="w-full min-w-[40rem] border-collapse text-sm">
+        <thead class="bg-[var(--v1-bg-surface-soft)] text-[var(--v1-text-secondary)]">
+          <tr>
+            <th class="px-2 py-1 text-left">姓名</th>
+            <th class="px-2 py-1 text-left">部门</th>
+            <th class="px-2 py-1 text-left">团队</th>
+            <th class="px-2 py-1 text-left">角色</th>
+            <th class="px-2 py-1 text-left">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in users" :key="item.id" class="border-t border-[var(--v1-border)]">
+            <td class="px-2 py-1">{{ item.name }}</td>
+            <td class="px-2 py-1">{{ item.department }}</td>
+            <td class="px-2 py-1">{{ item.team }}</td>
+            <td class="px-2 py-1">{{ formatUserRoleForDisplay(item.role) }}</td>
+            <td class="px-2 py-1">{{ item.is_active ? '启用' : '停用' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 </template>
 

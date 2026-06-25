@@ -14,14 +14,181 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `101` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `114` 个 `/v1` path；同一路径多 method 合并在同一节。
+
+## GET /v1/trace-events
+
+### 简介
+支持方法: GET, POST。
+
+- `GET`: Query the lightweight full-chain event ledger for business tracing and AI insight use cases. Supports filtering by people, department, task, SKU, asset, ERP/integration call, event source, outcome, trace ID, and occurred time range.
+- `POST`: Authenticated frontend endpoint for recording page-view and user-action events. The server enriches the record with session actor, client IP, user agent, and request trace ID.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### GET 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `trace_id` | query | string | 否 | - |
+| `event_source` | query | enum(api/frontend/system/integration) | 否 | - |
+| `event_type` | query | string | 否 | - |
+| `action` | query | string | 否 | - |
+| `actor_id` | query | integer | 否 | - |
+| `actor_username` | query | string | 否 | Contains match on logged-in username/display name snapshot. |
+| `actor_source` | query | enum(session_token/anonymous/header_placeholder/header_roles_placeholder/system_fallback) | 否 | Filter by actor source; business dashboards typically use session_token. |
+| `actor_department` | query | string | 否 | - |
+| `actor_team` | query | string | 否 | - |
+| `route_path` | query | string | 否 | - |
+| `task_id` | query | integer | 否 | - |
+| `module_key` | query | string | 否 | - |
+| `sku_code` | query | string | 否 | - |
+| `asset_id` | query | integer | 否 | - |
+| `design_asset_id` | query | integer | 否 | - |
+| `task_asset_id` | query | integer | 否 | - |
+| `integration_call_log_id` | query | integer | 否 | - |
+| `resource_type` | query | string | 否 | - |
+| `resource_id` | query | string | 否 | - |
+| `outcome` | query | enum(succeeded/failed) | 否 | - |
+| `business_only` | query | boolean | 否 | Excludes low-value technical traffic such as auth, polling, websocket, and log-center routes. |
+| `from` | query | string | 否 | - |
+| `since` | query | string | 否 | - |
+| `to` | query | string | 否 | - |
+| `until` | query | string | 否 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "event_id": "...",
+      "trace_id": "...",
+      "event_source": "..."
+    }
+  ],
+  "pagination": {
+    "page": 123,
+    "page_size": 123,
+    "total": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<WorkflowTraceEvent> | 否 | - |
+| `pagination` | PaginationMeta | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+##### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/trace-events \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### POST 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `event_type` | string | 是 | - |
+| `action` | string | 否 | - |
+| `page_url` | string | 否 | - |
+| `page_name` | string | 否 | - |
+| `component_id` | string | 否 | - |
+| `task_id` | integer | 否 | - |
+| `task_module_id` | integer | 否 | - |
+| `module_key` | string | 否 | - |
+| `sku_code` | string | 否 | - |
+| `task_sku_item_id` | integer | 否 | - |
+| `asset_id` | integer | 否 | - |
+| `design_asset_id` | integer | 否 | - |
+| `task_asset_id` | integer | 否 | - |
+| `integration_call_log_id` | integer | 否 | - |
+| `resource_type` | string | 否 | - |
+| `resource_id` | string | 否 | - |
+| `outcome` | string | 否 | - |
+| `payload` | object | 否 | - |
+| `occurred_at` | string | 否 | - |
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "event_id": "string",
+    "trace_id": "string",
+    "event_source": "api"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | WorkflowTraceEvent | 否 | Lightweight business trace event used by the business tracing and AI insight page. |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+##### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/trace-events \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/tasks/prepare-product-codes
 
 ### 简介
 支持方法: POST。
 
-- `POST`: Allocates unique default product codes for task-create UIs. Default format is fixed to `NS + {CATEGORY_CODE} + {6-digit sequence}`. This endpoint does not require frontend code-rule/template selection and is available for `new_product_development` and `purchase_task`.
+- `POST`: Allocates unique default product codes for task-create UIs. Default format is selected by `sku_code_type`: `regular` allocates `CG + {CATEGORY_LETTER} + {6-digit sequence}` and `customization` allocates `DZ + {CATEGORY_LETTER} + {6-digit sequence}`. This endpoint does not require frontend code-rule/template selection and is available for `new_product_development` and `purchase_task`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -38,7 +205,10 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `task_type` | enum(new_product_development/purchase_task) | 是 | - |
+| `business_lane` | enum(normal/customization) | 否 | Canonical lane selector. Controls default SKU prefix (`CG` for `normal`, `DZ` for `customization`). |
+| `workflow_lane` | enum(normal/customization) | 否 | Compatibility alias of `business_lane`. |
 | `category_code` | string | 否 | Required when `batch_items` is omitted. |
+| `sku_code_type` | enum(regular/customization) | 否 | Automatic SKU code type. `regular` allocates `CG` codes; `customization` allocates `DZ` codes. |
 | `count` | integer | 否 | Defaults to 1 when omitted. Used only when `batch_items` is omitted. |
 | `batch_items` | array<object> | 否 | If provided, backend allocates one code per item and ignores top-level `count`. |
 
@@ -87,7 +257,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 支持方法: GET, POST。
 
 - `GET`: Returns the frontend-oriented task list with projected `workflow`, aggregated `warehouse_status`, stable `product_selection` summary, `procurement_summary`, canonical actor/source fields `requester_id/requester_name`, `creator_id/creator_name`, `designer_id/designer_name`, `current_handler_id/current_handler_name`, and task org ownership fields `owner_team`, `owner_department`, and `owner_org_team`. Default ordering is latest updated first (`updated_at DESC, id DESC`). For `purchase_task`, `procurement_summary` carries procurement-to-warehouse coordination state plus lightweight product-selection provenance. Board queue `query_template` payloads are designed to be consumed directly by this endpoint. `workflow_lane` is the canonical list/workbench split selector for distinguishing the normal lane from the customization lane. Main task-flow list reads are globally visible to task-facing authenticated roles; use query filters for workbench/pool/tab slicing. Mutating actions such as assign/reassign, upload, submit, audit, filing, procurement, warehouse, close, and cancel remain action-gated by role, status, handler/assignee, and organization scope.
-- `POST`: Creates one task. For `original_product_development`, narrow by category or `search_entry_code`, call `GET /v1/erp/products`, choose one product, and submit that result through `product_selection`. Legacy `product_id`, `sku_code`, and `product_name_snapshot` fields remain accepted for compatibility. Current create rules: - `original_product_development` is existing-product only. - when `product_id` is null, backend resolves ERP/local binding before create-tx using this priority: `product_id` -> `product_selection.erp_product.product_id` -> `product_selection.erp_product.sku_code` -> top-level `sku_code`. - ERP-side codes are treated as bridge binding keys and are normalized to a local `products.id`; they are not used as local primary keys directly. - frontend should not send `source_mode`; backend infers it from `task_type`. - `new_product_development` infers `source_mode=new_product` and auto-generates `sku_code` when omitted. - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately. - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, does not enter audit, and is completed immediately after the retouch/design worker submits the retouched image. - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime. - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationReview` immediately and does not pass through the normal design workbench first. - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors. - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval. - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels. - default task product-code rule is backend-only and fixed to `NS + category_short_code(2 uppercase letters) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation. - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> KT`), otherwise first two alphabet letters from `category_code` (uppercased), then deterministic fallback to two letters. - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique. - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`. - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned. - batch mode writes one mother task plus multiple `task_sku_items` in one transaction and keeps `sku_code` / `primary_sku_code` aligned to the first child SKU for compatibility. - create now also appends `task.created`, and multi-SKU creates additionally append `task.batch_items_created`. - `reference_images` is no longer accepted. If present, backend returns `400 INVALID_REQUEST` and requires the reference-upload flow. - `reference_file_refs` must be objects returned by `POST /v1/tasks/reference-upload` or the compatibility task-create asset-center flow; forged, missing, incomplete, or unauthorized refs return `400 INVALID_REQUEST` with `invalid_reference_file_refs`.
+- `POST`: Creates one task. For `original_product_development`, narrow by category or `search_entry_code`, call `GET /v1/erp/products`, choose one product, and submit that result through `product_selection`. Legacy `product_id`, `sku_code`, and `product_name_snapshot` fields remain accepted for compatibility. Current create rules: - `original_product_development` is existing-product only. - when `product_id` is null, backend resolves ERP/local binding before create-tx using this priority: `product_id` -> `product_selection.erp_product.product_id` -> `product_selection.erp_product.sku_code` -> top-level `sku_code`. - ERP-side codes are treated as bridge binding keys and are normalized to a local `products.id`; they are not used as local primary keys directly. - frontend should not send `source_mode`; backend infers it from `task_type`. - `new_product_development` infers `source_mode=new_product` and auto-generates `sku_code` when omitted. - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately. - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, does not enter audit, and is completed immediately after the retouch/design worker submits the retouched image. - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime. - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationProduction` first as the compatible "waiting for customization operator design submission" state and does not pass through the normal design workbench. - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors. - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval. - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels. - default task product-code rule is backend-only: `sku_code_type=regular` generates `CG + category_short_code(1 uppercase letter) + 6-digit sequence`, while `sku_code_type=customization` generates `DZ + category_short_code(1 uppercase letter) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation. - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> K`), otherwise first alphabet letter from `category_code` (uppercased), then deterministic fallback to one letter. - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique. - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`. - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned. - batch mode writes one mother task plus multiple `task_sku_items` in one transaction and keeps `sku_code` / `primary_sku_code` aligned to the first child SKU for compatibility. - create now also appends `task.created`, and multi-SKU creates additionally append `task.batch_items_created`. - `reference_images` is no longer accepted. If present, backend returns `400 INVALID_REQUEST` and requires the reference-upload flow. - `reference_file_refs` must be objects returned by `POST /v1/tasks/reference-upload` or the compatibility task-create asset-center flow; forged, missing, incomplete, or unauthorized refs return `400 INVALID_REQUEST` with `invalid_reference_file_refs`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -115,9 +285,11 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `warehouse_blocking_reason_code` | query | array<string> | 否 | Filters tasks that currently contain any of the given `workflow.warehouse_blocking_reasons.code` values. Supports comma-separated multi-value queries. |
 | `creator_id` | query | integer | 否 | - |
 | `designer_id` | query | integer | 否 | - |
+| `priority` | query | array<enum(low/normal/high/critical)> | 否 | Filters by task priority (`t.priority`). Supports comma-separated multi-value queries such as `priority=critical,high`. |
+| `designer_empty` | query | boolean | 否 | When `true`, returns only tasks with no designer assignment (`designer_id` IS NULL or `0`). Use with `workflow_lane=customization` for customization-lane unassigned-artwork filtering; do not combine with `status=PendingAssign` for that case. |
 | `need_outsource` | query | boolean | 否 | - |
 | `overdue` | query | boolean | 否 | When `true`, filters `deadline_at < now` and excludes `Completed`/`Archived`/`Cancelled`; when `false`, returns the complement set. |
-| `keyword` | query | string | 否 | Matches `task_no`, `sku_code`, or `product_name_snapshot`. |
+| `keyword` | query | string | 否 | Matches task no, task SKU, batch SKU, product name, owner department/team, task id, and related actor display names/usernames (creator, requester, designer, current handler). |
 | `owner_department` | query | array<string> | 否 | Filters by canonical task owner department. Supports comma-separated multi-value queries. |
 | `owner_org_team` | query | array<string> | 否 | Filters by canonical task owner org team. Supports comma-separated multi-value queries. |
 | `page` | query | integer | 否 | - |
@@ -177,7 +349,9 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `task_type` | enum(original_product_development/new_product_development/purchase_task/retouch_task/customer_customization/regular_customization) | 是 | - |
+| `task_type` | enum(original_product_development/new_product_development/purchase_task/retouch_task) | 是 | - |
+| `business_lane` | enum(normal/customization) | 否 | Canonical task lane selector (`normal` or `customization`). Drives audit-domain routing. |
+| `workflow_lane` | enum(normal/customization) | 否 | Compatibility alias of `business_lane`. |
 | `source_mode` | enum(existing_product/new_product) | 否 | - |
 | `owner_team` | string | 是 | Required compatibility owner-team input. Supported `/v1/org/options` org-team values with deterministic task mappings may be normalized before validation and persisted into canonical ownership fields. Unsupported values return `invalid_owner_team`. |
 | `owner_department` | string | 否 | Optional canonical task owner department hint. When provided with `owner_org_team` or a compatible org-team `owner_team`, backend validates consistency before create. |
@@ -195,6 +369,7 @@ Content-Type: `application/json`
 | `remark` | string | 否 | - |
 | `note` | string | 否 | - |
 | `batch_sku_mode` | enum(single/multiple) | 否 | - |
+| `sku_code_type` | enum(regular/customization) | 否 | Automatic SKU code type for generated new-product/purchase task SKUs. `regular` generates `CG` + one category letter + six digits; `customization` generates `DZ` + one category letter + six digits. Historical SKU strings are not rewritten. |
 | `source_draft_id` | integer | 否 | Optional task draft source linkage. Source: V1_INFORMATION_ARCHITECTURE §3.5.9. |
 | `batch_items` | array<CreateTaskBatchItem> | 否 | - |
 | `product_id` | integer | 否 | - |
@@ -212,6 +387,7 @@ Content-Type: `application/json`
 | `product_name` | string | 否 | - |
 | `product_short_name` | string | 否 | - |
 | `design_requirement` | string | 否 | - |
+| `retouch_requirements` | array<CreateTaskRetouchRequirementItem> | 否 | Structured demand lines for `retouch_task` only. Other task types must omit this field or receive `400 INVALID_REQUEST` with violation code `field_not_allowed_for_task_type`. |
 | `cost_price_mode` | enum(manual/template) | 否 | - |
 | `cost_price` | number | 否 | - |
 | `quantity` | integer | 否 | - |
@@ -248,6 +424,69 @@ curl -X POST https://api.example.com/v1/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/tasks/filter-options
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns task-derived creator and designer options for the task center advanced filters. The source is historical task actor usage, not the user-management directory, so ordinary task roles can filter by people who appear in tasks without requiring `/v1/users` access.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "creators": [
+      "..."
+    ],
+    "designers": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | TaskFilterOptions | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
+| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
+| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
+| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
+| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/filter-options \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践
@@ -302,6 +541,68 @@ curl -X POST https://api.example.com/v1/tasks \
 ### curl 示例
 ```bash
 curl -X GET https://api.example.com/v1/tasks/<id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/tasks/{id}/predictions
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns deterministic next-action suggestions for a task detail page based on current task status, task modules, task assets, cost, and ERP filing state. This endpoint does not call the AI provider.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+| `limit` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "suggestions": [
+      "..."
+    ],
+    "generated_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | PredictionBundle | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid task id |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/<id>/predictions \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -565,6 +866,149 @@ curl -X PATCH https://api.example.com/v1/tasks/<id>/cost-info \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## PATCH /v1/tasks/{id}/sku-items/{sku_item_id}
+
+### 简介
+支持方法: PATCH。
+
+- `PATCH`: Updates row-scoped batch SKU fields such as product name, ERP product i_id, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `PATCH` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+| `sku_item_id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `operator_id` | integer | 否 | - |
+| `product_name` | string | 否 | - |
+| `i_id` | string | 否 | - |
+| `product_i_id` | string | 否 | - |
+| `design_requirement` | string | 否 | - |
+| `reference_file_refs` | array<ReferenceFileRef> | 否 | - |
+| `trigger_filing` | boolean | 否 | - |
+| `remark` | string | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "task_id": 123,
+    "sequence_no": 123,
+    "sku_code": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | TaskSKUItem | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. |
+
+### curl 示例
+```bash
+curl -X PATCH https://api.example.com/v1/tasks/<id>/sku-items/<sku_item_id> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## PATCH /v1/tasks/{id}/sku-items/{sku_item_id}/cost-info
+
+### 简介
+支持方法: PATCH。
+
+- `PATCH`: Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `PATCH` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+| `sku_item_id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `operator_id` | integer | 否 | - |
+| `cost_price` | number | 否 | - |
+| `manual_cost_override` | boolean | 否 | - |
+| `manual_cost_override_reason` | string | 否 | - |
+| `remark` | string | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "task_id": 123,
+    "sequence_no": 123,
+    "sku_code": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | TaskSKUItem | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. |
+
+### curl 示例
+```bash
+curl -X PATCH https://api.example.com/v1/tasks/<id>/sku-items/<sku_item_id>/cost-info \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## POST /v1/tasks/{id}/cost-quote/preview
 
 ### 简介
@@ -695,6 +1139,7 @@ Content-Type: `application/json`
 | `manual_cost_override_reason` | string | 否 | - |
 | `trigger_filing` | boolean | 否 | Legacy compatibility switch. Prefer backend auto-policy; this flag forces one filing evaluation. |
 | `filed_at` | string | 否 | Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source. |
+| `priority` | enum(low/normal/high/critical) | 否 | Task priority. When provided, updates `tasks.priority` without requiring other business-info fields. |
 | `remark` | string | 否 | - |
 
 ### 响应体 schema
@@ -1284,7 +1729,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/fin
 ### 简介
 支持方法: POST。
 
-- `POST`: `POST /v1/tasks/{id}/assign` now carries two bounded semantics under the same route: - `PendingAssign`: assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. - `InProgress`: the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`. - `purchase_task` cannot be assigned or reassigned to a designer.
+- `POST`: `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route: - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`. - `PendingCustomizationProduction` (customization lane): Ops/Admin/SuperAdmin (and other existing assign scopes) may assign an active `CustomizationOperator` as `designer_id`. Success writes `designer_id` and `current_handler_id`, keeps `task_status` at `PendingCustomizationProduction`, and syncs the `customization` module to `in_progress` (not the `design` module). Pure `Designer` targets are rejected with `target_assignee_not_customization_operator`. Customization operators self-claim through `POST /v1/tasks/{id}/modules/customization/claim` instead of this route. - `InProgress` (regular lane): the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. Target user must remain an active `Designer`. - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`. - `purchase_task` cannot be assigned or reassigned to a designer.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1302,7 +1747,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `designer_id` | integer | 否 | Designer/assignee user id. Omit or send null on a single-task reassign to clear the assignee and return an InProgress task to PendingAssign. |
+| `designer_id` | integer | 否 | Designer or customization-operator user id (same field for both lanes). Regular tasks expect an active `Designer` target; customization tasks in `PendingCustomizationProduction` expect an active `CustomizationOperator` target. Omit or send null on a single-task reassign to clear the assignee and return an InProgress task to PendingAssign. |
 | `assigned_by` | integer | 否 | Optional override for compatibility. Defaults to the current authenticated actor. |
 | `remark` | string | 否 | - |
 
@@ -1475,7 +1920,7 @@ curl -X POST https://api.example.com/v1/tasks/batch/remind \
 ### 简介
 支持方法: POST。
 
-- `POST`: Supports two submit modes: 1) Compatibility single-asset submit (`asset_type` + `file_name`) which creates one `task_assets` record. 2) Batch submit (`assets[]`) which completes multiple upload sessions in a single action and persists canonical `design_assets`/`asset_versions` with SKU scope. Re-entry is allowed from `RejectedByAuditA` and `RejectedByAuditB`. Delivery upload-session completion advances normal design task status to `PendingAuditA` when current status is one of `PendingAssign`, `Assigned`, `InProgress`, `RejectedByAuditA`, or `RejectedByAuditB`, and for multi-SKU batch tasks the gate waits until required SKU-scoped delivery assets are complete. For `retouch_task`, delivery submission completes the task directly (`task_status=Completed`), clears `current_handler_id`, marks the `retouch` module completed, and never triggers audit. `purchase_task` cannot submit design. This action uses minimum role plus org or handler gating.
+- `POST`: Supports two submit modes: 1) Compatibility single-asset submit (`asset_type` + `file_name`) which creates one `task_assets` record. 2) Batch submit (`assets[]`) which completes multiple upload sessions in a single action and persists canonical `design_assets`/`asset_versions` with SKU scope. Re-entry is allowed from `RejectedByAuditA` and `RejectedByAuditB`. Delivery upload-session completion advances normal design task status to `PendingAuditA` when current status is one of `PendingAssign`, `Assigned`, `InProgress`, `RejectedByAuditA`, or `RejectedByAuditB`, and for multi-SKU batch tasks the gate waits until required SKU-scoped delivery assets are complete. Customization-lane tasks also use this endpoint: `CustomizationOperator` submits the customization design/delivery from `PendingCustomizationProduction`, the backend records/updates `last_customization_operator_id`, and successful delivery submission advances the task to `PendingCustomizationReview`. Customization tasks then continue through `POST /v1/tasks/{id}/customization/review`; they must not be sent through the normal audit endpoints. For `retouch_task`, delivery submission completes the task directly (`task_status=Completed`), clears `current_handler_id`, marks the `retouch` module completed, and never triggers audit. `purchase_task` cannot submit design. This action uses minimum role plus org or handler gating.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1570,6 +2015,76 @@ curl -X POST https://api.example.com/v1/tasks/<id>/submit-design \
 ```bash
 curl -X GET https://api.example.com/v1/tasks/<id>/assets \
   -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/tasks/{id}/reference-assets/batch-download
+
+### 简介
+支持方法: POST。
+
+- `POST`: Return a task-scoped direct-download manifest that aggregates all reference images visible on task detail: - formalized reference assets under task asset center - legacy reference_file_refs persisted on task detail or sku_items The backend does not build ZIP packages; frontend should use JSZip.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | TaskReferenceBatchDownloadRequest | 视接口 | Reserved for future filters. Send `{}` for now. |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ],
+    "success_count": 123,
+    "failure_count": 123,
+    "total_size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | TaskReferenceBatchDownloadManifest | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | Task not found |
+| 500 | 见 `error.code` | 见 `deny_code` | Internal error while building manifest |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/<id>/reference-assets/batch-download \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
 ```
 
 ### 前端最佳实践
@@ -1877,6 +2392,7 @@ Content-Type: `application/json`
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
+| `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
 ### 响应体 schema
 成功响应: `201 application/json`
@@ -2184,6 +2700,7 @@ Content-Type: `application/json`
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
+| `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
 ### 响应体 schema
 成功响应: `201 application/json`
@@ -5046,7 +5563,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/complete \
 ### 简介
 支持方法: POST。
 
-- `POST`: Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review writes business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`), moves approved tasks into customization production, and keeps `return_to_designer` tasks inside the customization review lane instead of sending them through the normal design workbench. Review does not freeze execution settlement pricing.
+- `POST`: Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5066,8 +5583,8 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `reviewer_id` | integer | 否 | - |
 | `source_asset_id` | integer | 否 | - |
-| `customization_level_code` | string | 否 | Business-entered review reference level code. |
-| `customization_level_name` | string | 否 | Business-entered review reference level name. |
+| `customization_level_code` | string | 否 | Optional business-entered review reference level code. Omitted for lightweight approved reviews. |
+| `customization_level_name` | string | 否 | Optional business-entered review reference level name. Omitted for lightweight approved reviews. |
 | `customization_price` | number | 否 | Business-entered review reference unit price. Not the execution freeze snapshot. |
 | `customization_weight_factor` | number | 否 | Business-entered review reference weight factor. Not the execution freeze snapshot. |
 | `customization_note` | string | 否 | Reviewer-entered business note for this review record. |
@@ -5089,7 +5606,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid decision or missing required review fields |
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid customization_review_decision |
 | 409 | 见 `error.code` | 见 `deny_code` | Invalid workflow state transition |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
 | 404 | 见 `error.code` | 见 `deny_code` | Task not found |
@@ -5643,7 +6160,7 @@ curl -X GET https://api.example.com/v1/code-rules/<id>/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Generate SKU code
+- `POST`: Archived. Legacy CodeRule new_sku generation is disabled. Use POST /v1/tasks/prepare-product-codes or task creation default product-code allocation instead.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5662,18 +6179,14 @@ Content-Type: `application/json`
 | `rule_id` | integer | 是 | - |
 
 ### 响应体 schema
-成功响应: `200`
+成功响应: `见 OpenAPI responses`
 
 无 JSON 响应体或响应体由文件流承载。
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
+| 400 | 见 `error.code` | 见 `deny_code` | Legacy new_sku CodeRule is archived |
 
 ### curl 示例
 ```bash
@@ -7065,6 +7578,454 @@ Content-Type: `application/json`
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/tasks/excel-assist/template.xlsx
+
+### 简介
+支持方法: GET。
+
+- `GET`: Downloads the Excel assist workbook for creating one task at a time with `mode=single`. `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required); optional `规格尺寸`, `材质`, `材质备注`, `备注`. `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`. `task_type=original_product_development` columns: `SKU编码`, `修改要求` (required); optional `规格尺寸`, `备注`. Product name and category are enriched from ERP during `parse-excel`, not collected in the template. The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `task_type` | query | enum(new_product_development/purchase_task/original_product_development) | 是 | - |
+| `mode` | query | enum(single) | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+```json
+"string"
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | string | 视接口 | OpenAPI 声明的整体对象。 |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid task_type or mode |
+| 401 | 见 `error.code` | 见 `deny_code` | Authentication required |
+| 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/excel-assist/template.xlsx \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/tasks/excel-assist/parse-excel
+
+### 简介
+支持方法: POST。
+
+- `POST`: Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`. For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`. For `original_product_development`, required: `SKU编码`, `修改要求`; optional `规格尺寸`, `备注`. Parsed `sku_code` values are resolved through ERP product search; unknown SKU returns `product_not_found`. More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`. Parsed `product_i_id` values (new/purchase only) are validated against ERP i_id options when configured.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `multipart/form-data`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `task_type` | enum(new_product_development/purchase_task/original_product_development) | 是 | - |
+| `mode` | enum(single) | 是 | - |
+| `file` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "task_type": "new_product_development",
+    "mode": "single",
+    "draft": {
+      "product_i_id": "...",
+      "product_name": "...",
+      "design_requirement": "...",
+      "sku_code": "..."
+    },
+    "violations": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | ExcelAssistParseResult | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid upload or parse error |
+| 401 | 见 `error.code` | 见 `deny_code` | Authentication required |
+| 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
+| 413 | 见 `error.code` | 见 `deny_code` | File too large |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/excel-assist/parse-excel \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@example.xlsx"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/predictions/search
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns deterministic suggestions for the global search overlay. Empty `q` returns recent personal workflow trace suggestions; non-empty `q` returns task / asset / product suggestions. This endpoint uses existing OMP data only and does not call the AI provider.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `q` | query | string | 否 | Optional keyword. When omitted, returns recent personal suggestions. |
+| `scope` | query | enum(all/tasks/assets/products/users) | 否 | - |
+| `limit` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "suggestions": [
+      "..."
+    ],
+    "generated_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | PredictionBundle | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/predictions/search \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/predictions/task-create
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns deterministic form-fill suggestions from historical task detail fields. This endpoint is lightweight and does not call the AI provider.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `keyword` | query | string | 否 | Optional form context keyword. Alias `q` is also accepted by the backend. |
+| `q` | query | string | 否 | Compatibility alias for `keyword`. |
+| `task_type` | query | string | 否 | Optional task type filter. |
+| `limit` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "suggestions": [
+      "..."
+    ],
+    "generated_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | PredictionBundle | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/predictions/task-create \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/predictions/assets
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns deterministic asset suggestions sorted by asset usable state and recency. This endpoint uses task asset records only and does not call the AI provider.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `q` | query | string | 否 | Optional keyword. Alias `keyword` is also accepted by the backend. |
+| `keyword` | query | string | 否 | Compatibility alias for `q`. |
+| `limit` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "suggestions": [
+      "..."
+    ],
+    "generated_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | PredictionBundle | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/predictions/assets \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/predictions/management
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns deterministic management attention points for the KPI/data-center page. This endpoint does not call the AI provider; it aggregates tasks, task details, and task assets.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `from` | query | string | 否 | Start date, inclusive. Defaults to seven days before now. |
+| `to` | query | string | 否 | End date, inclusive. Defaults to now. |
+| `limit` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "suggestions": [
+      "..."
+    ],
+    "generated_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | PredictionBundle | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid date range |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/predictions/management \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/notifications/broadcast
+
+### 简介
+支持方法: POST。
+
+- `POST`: Creates persistent `system_broadcast` notifications for active recipients. Selected-user broadcasts are available to Admin, SuperAdmin, HRAdmin, and DepartmentAdmin. Full-system broadcasts are restricted to Admin, SuperAdmin, and HRAdmin.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `audience` | enum(all/users) | 是 | - |
+| `user_ids` | array<integer> | 否 | Required when `audience = users`. |
+| `title` | string | 是 | - |
+| `content` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "notification_count": 123,
+    "recipient_count": 123,
+    "recipient_ids": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid audience, content, or inactive recipient |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Actor is not allowed to broadcast to the requested audience |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/notifications/broadcast \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'

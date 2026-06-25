@@ -31,10 +31,10 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		INSERT INTO tasks
 		  (task_no, source_mode, product_id, sku_code, product_name_snapshot,
 		   task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		   task_status, priority, deadline_at, need_outsource, is_outsource, customization_required, customization_source_type,
+		   task_status, priority, deadline_at, need_outsource, is_outsource, business_lane, customization_required, customization_source_type,
 		   last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		   is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.TaskNo,
 		string(task.SourceMode),
 		toNullInt64(task.ProductID),
@@ -54,6 +54,7 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		toNullTime(task.DeadlineAt),
 		task.NeedOutsource,
 		task.IsOutsource,
+		string(domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired)),
 		task.CustomizationRequired,
 		string(task.CustomizationSourceType),
 		toNullInt64(task.LastCustomizationOperatorID),
@@ -80,13 +81,13 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		   source_product_id, source_product_name, source_search_entry_code, source_match_type, source_match_rule,
 		   matched_category_code, matched_search_entry_code, matched_mapping_rule_json, product_selection_snapshot_json,
 		   change_request, design_requirement, product_short_name, material_mode, material_other,
-		   cost_price_mode, base_sale_price, product_channel, reference_images_json, reference_file_refs_json, reference_link,
+			   cost_price_mode, base_sale_price, product_channel, sku_code_type, reference_images_json, reference_file_refs_json, reference_link,
 		   spec_text, material, size_text, craft_text,
 		   width, height, area, quantity, process,
 		   procurement_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name, cost_rule_source,
 		   matched_rule_version, prefill_source, prefill_at,
 		   requires_manual_review, manual_cost_override, manual_cost_override_reason, override_actor, override_at, filing_status, filing_error_message, filed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID,
 		detail.DemandText,
 		detail.CopyText,
@@ -115,6 +116,7 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		detail.CostPriceMode,
 		toNullFloat64(detail.BaseSalePrice),
 		detail.ProductChannel,
+		string(detail.SKUCodeType),
 		detail.ReferenceImagesJSON,
 		detail.ReferenceFileRefsJSON,
 		detail.ReferenceLink,
@@ -162,9 +164,12 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 	stmt, err := sqlTx.PrepareContext(ctx, `
 		INSERT INTO task_sku_items
 		  (task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
-		   product_name_snapshot, product_short_name, category_code, material_mode,
-		   cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, reference_file_refs_json, dedupe_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			   product_name_snapshot, product_short_name, category_code, material_mode,
+			   cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+		   cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
+		   manual_cost_override, manual_cost_override_reason, override_actor, override_at,
+			   design_requirement, variant_json, reference_file_refs_json, dedupe_key, sku_code_type)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert task_sku_items: %w", err)
 	}
@@ -189,10 +194,24 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 			item.CostPriceMode,
 			toNullInt64(item.Quantity),
 			toNullFloat64(item.BaseSalePrice),
+			toNullFloat64(item.CostPrice),
+			toNullFloat64(item.EstimatedCost),
+			toNullInt64(item.CostRuleID),
+			item.CostRuleName,
+			item.CostRuleSource,
+			toNullInt(item.MatchedRuleVersion),
+			item.PrefillSource,
+			toNullTime(item.PrefillAt),
+			item.RequiresManualReview,
+			item.ManualCostOverride,
+			item.ManualCostOverrideReason,
+			item.OverrideActor,
+			toNullTime(item.OverrideAt),
 			item.DesignRequirement,
 			toNullJSONString(item.VariantJSON),
 			marshalReferenceFileRefs(item.ReferenceFileRefs),
 			item.DedupeKey,
+			string(item.SKUCodeType),
 		)
 		if err != nil {
 			return fmt.Errorf("insert task_sku_item: %w", err)
@@ -208,7 +227,7 @@ func (r *taskRepo) GetByID(ctx context.Context, id int64) (*domain.Task, error) 
 	row := r.db.db.QueryRowContext(ctx, `
 		SELECT id, task_no, source_mode, product_id, sku_code, product_name_snapshot,
 		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		       task_status, priority, deadline_at, need_outsource, is_outsource, customization_required, customization_source_type,
+		       task_status, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
 		       last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		       is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status,
 		       created_at, updated_at
@@ -223,7 +242,7 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		       source_product_id, source_product_name, source_search_entry_code, source_match_type, source_match_rule,
 		       matched_category_code, matched_search_entry_code, matched_mapping_rule_json, product_selection_snapshot_json,
 		       change_request, design_requirement, product_short_name, material_mode, material_other,
-		       cost_price_mode, base_sale_price, product_channel, reference_images_json, COALESCE(reference_file_refs_json, ''), reference_link,
+			       cost_price_mode, base_sale_price, product_channel, COALESCE(sku_code_type, ''), reference_images_json, COALESCE(reference_file_refs_json, ''), reference_link,
 		       spec_text, material, size_text, craft_text,
 		       width, height, area, quantity, process,
 		       procurement_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name, cost_rule_source,
@@ -247,7 +266,7 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		&sourceProductID, &detail.SourceProductName, &detail.SourceSearchEntryCode, &detail.SourceMatchType, &detail.SourceMatchRule,
 		&detail.MatchedCategoryCode, &detail.MatchedSearchEntryCode, &detail.MatchedMappingRuleJSON, &detail.ProductSelectionSnapshotJSON,
 		&detail.ChangeRequest, &detail.DesignRequirement, &detail.ProductShortName, &detail.MaterialMode, &detail.MaterialOther,
-		&detail.CostPriceMode, &baseSalePrice, &detail.ProductChannel, &detail.ReferenceImagesJSON, &detail.ReferenceFileRefsJSON, &detail.ReferenceLink,
+		&detail.CostPriceMode, &baseSalePrice, &detail.ProductChannel, &detail.SKUCodeType, &detail.ReferenceImagesJSON, &detail.ReferenceFileRefsJSON, &detail.ReferenceLink,
 		&detail.SpecText,
 		&detail.Material, &detail.SizeText, &detail.CraftText,
 		&width, &height, &area, &quantity, &detail.Process,
@@ -287,6 +306,9 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		detail.ERPSyncVersion = erpSyncVersion.Int64
 	}
 	detail.FiledAt = fromNullTime(filedAt)
+	if !detail.SKUCodeType.Valid() {
+		detail.SKUCodeType = domain.TaskSKUCodeTypeRegular
+	}
 	if !detail.FilingStatus.Valid() {
 		if detail.FiledAt != nil {
 			detail.FilingStatus = domain.FilingStatusFiled
@@ -302,8 +324,11 @@ func (r *taskRepo) GetSKUItemBySKUCode(ctx context.Context, skuCode string) (*do
 		SELECT id, task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
 		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version, last_filed_at, COALESCE(filing_error_message, ''),
 		       product_name_snapshot, product_short_name, category_code, material_mode,
-		       cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
-		       dedupe_key, created_at, updated_at
+		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
+		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
+			       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+			       dedupe_key, COALESCE(sku_code_type, ''), created_at, updated_at
 		FROM task_sku_items
 		WHERE sku_code = ?`, skuCode)
 	item, err := scanTaskSKUItem(row)
@@ -321,8 +346,11 @@ func (r *taskRepo) ListSKUItemsByTaskID(ctx context.Context, taskID int64) ([]*d
 		SELECT id, task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
 		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version, last_filed_at, COALESCE(filing_error_message, ''),
 		       product_name_snapshot, product_short_name, category_code, material_mode,
-		       cost_price_mode, quantity, base_sale_price, design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
-		       dedupe_key, created_at, updated_at
+		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
+		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
+			       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+			       dedupe_key, COALESCE(sku_code_type, ''), created_at, updated_at
 		FROM task_sku_items
 		WHERE task_id = ?
 		ORDER BY sequence_no ASC, id ASC`, taskID)
@@ -380,6 +408,104 @@ func (r *taskRepo) UpdateSKUItemsFilingProjection(ctx context.Context, tx repo.T
 	return nil
 }
 
+func (r *taskRepo) UpdateSKUItemFilingProjection(ctx context.Context, tx repo.Tx, taskID, skuItemID int64, filingStatus domain.FilingStatus, syncRequired bool, syncVersion int64, lastFiledAt *time.Time, errorMessage string) error {
+	sqlTx := Unwrap(tx)
+	skuStatus := domain.TaskSKUStatusGenerated
+	switch filingStatus {
+	case domain.FilingStatusFiled:
+		skuStatus = domain.TaskSKUStatusFiled
+	case domain.FilingStatusFilingFailed:
+		skuStatus = domain.TaskSKUStatusFilingFailed
+	}
+	_, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_sku_items
+		SET sku_status = ?,
+		    filing_status = ?,
+		    erp_sync_status = ?,
+		    erp_sync_required = ?,
+		    erp_sync_version = ?,
+		    last_filed_at = ?,
+		    filing_error_message = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE task_id = ? AND id = ?`,
+		string(skuStatus),
+		string(filingStatus),
+		string(filingStatus),
+		syncRequired,
+		syncVersion,
+		toNullTime(lastFiledAt),
+		errorMessage,
+		taskID,
+		skuItemID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task_sku_item filing projection: %w", err)
+	}
+	return nil
+}
+
+func (r *taskRepo) UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error {
+	if item == nil {
+		return fmt.Errorf("update task_sku_item cost info: item is nil")
+	}
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx, `
+			UPDATE task_sku_items
+			SET product_name_snapshot = ?,
+			    product_short_name = ?,
+			    category_code = ?,
+			    material_mode = ?,
+			    cost_price_mode = ?,
+			    quantity = ?,
+			    base_sale_price = ?,
+			    design_requirement = ?,
+			    cost_price = ?,
+			    estimated_cost = ?,
+			    cost_rule_id = ?,
+		    cost_rule_name = ?,
+		    cost_rule_source = ?,
+		    matched_rule_version = ?,
+		    prefill_source = ?,
+		    prefill_at = ?,
+		    requires_manual_review = ?,
+		    manual_cost_override = ?,
+		    manual_cost_override_reason = ?,
+		    override_actor = ?,
+		    override_at = ?,
+		    erp_sync_required = 1,
+		    erp_sync_version = erp_sync_version + 1,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND task_id = ?`,
+		item.ProductNameSnapshot,
+		item.ProductShortName,
+		item.CategoryCode,
+		item.MaterialMode,
+		item.CostPriceMode,
+		toNullInt64(item.Quantity),
+		toNullFloat64(item.BaseSalePrice),
+		item.DesignRequirement,
+		toNullFloat64(item.CostPrice),
+		toNullFloat64(item.EstimatedCost),
+		toNullInt64(item.CostRuleID),
+		item.CostRuleName,
+		item.CostRuleSource,
+		toNullInt(item.MatchedRuleVersion),
+		item.PrefillSource,
+		toNullTime(item.PrefillAt),
+		item.RequiresManualReview,
+		item.ManualCostOverride,
+		item.ManualCostOverrideReason,
+		item.OverrideActor,
+		toNullTime(item.OverrideAt),
+		item.ID,
+		item.TaskID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task_sku_item cost info: %w", err)
+	}
+	return nil
+}
+
 func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
 	spec, err := buildTaskListQuerySpec(filter, nil)
 	if err != nil {
@@ -399,9 +525,9 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 		SELECT t.id, t.task_no, t.product_id, t.sku_code, t.product_name_snapshot,
 		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
-		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, t.customization_required, COALESCE(t.customization_source_type, ''),
+		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, COALESCE(t.business_lane, ''), t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
-		       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''),
+			       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''), COALESCE(td.sku_code_type, ''),
 		       td.category, td.category_code, td.category_name,
 		       td.source_product_id, td.source_product_name, td.source_search_entry_code, td.source_match_type, td.source_match_rule,
 		       td.matched_category_code, td.matched_search_entry_code, td.product_selection_snapshot_json,
@@ -439,7 +565,92 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
+	if err := r.hydrateTaskListSKUItems(ctx, items); err != nil {
+		return nil, 0, err
+	}
 	return items, total, nil
+}
+
+func (r *taskRepo) ListFilterOptions(ctx context.Context) (*domain.TaskFilterOptions, error) {
+	creators, err := r.listTaskActorFilterOptions(ctx, "creator_id")
+	if err != nil {
+		return nil, fmt.Errorf("list task creator filter options: %w", err)
+	}
+	designers, err := r.listTaskActorFilterOptions(ctx, "designer_id")
+	if err != nil {
+		return nil, fmt.Errorf("list task designer filter options: %w", err)
+	}
+	return &domain.TaskFilterOptions{
+		Creators:  creators,
+		Designers: designers,
+	}, nil
+}
+
+func (r *taskRepo) listTaskActorFilterOptions(ctx context.Context, actorColumn string) ([]domain.TaskFilterActorOption, error) {
+	switch actorColumn {
+	case "creator_id", "designer_id":
+	default:
+		return nil, fmt.Errorf("unsupported task actor filter column %q", actorColumn)
+	}
+	query := fmt.Sprintf(`
+		SELECT actor_id,
+		       COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), CAST(actor_id AS CHAR)) AS name,
+		       COALESCE(u.username, '') AS username,
+		       COALESCE(u.display_name, '') AS display_name,
+		       COALESCE(u.department, '') AS department,
+		       COALESCE(u.team, '') AS team,
+		       COUNT(*) AS task_count,
+		       MAX(actor_tasks.updated_at) AS last_used_at
+		  FROM (
+		        SELECT t.%s AS actor_id, t.updated_at
+		          FROM tasks t
+		         WHERE t.%s IS NOT NULL AND t.%s > 0
+		       ) actor_tasks
+		  LEFT JOIN users u ON u.id = actor_tasks.actor_id
+		 GROUP BY actor_id, u.username, u.display_name, u.department, u.team
+		 ORDER BY last_used_at DESC, task_count DESC, actor_id DESC
+		 LIMIT 500`, actorColumn, actorColumn, actorColumn)
+	rows, err := r.db.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	options := make([]domain.TaskFilterActorOption, 0, 64)
+	for rows.Next() {
+		var option domain.TaskFilterActorOption
+		var username, displayName, department, team sql.NullString
+		var lastUsedAt sql.NullTime
+		if err := rows.Scan(
+			&option.ID,
+			&option.Name,
+			&username,
+			&displayName,
+			&department,
+			&team,
+			&option.TaskCount,
+			&lastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		if username.Valid {
+			option.Username = username.String
+		}
+		if displayName.Valid {
+			option.DisplayName = displayName.String
+		}
+		if department.Valid {
+			option.Department = department.String
+		}
+		if team.Valid {
+			option.Team = team.String
+		}
+		option.LastUsedAt = fromNullTime(lastUsedAt)
+		options = append(options, option)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return options, nil
 }
 
 func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
@@ -456,9 +667,9 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 		SELECT t.id, t.task_no, t.product_id, t.sku_code, t.product_name_snapshot,
 		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
-		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, t.customization_required, COALESCE(t.customization_source_type, ''),
+		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, COALESCE(t.business_lane, ''), t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
-		       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''),
+			       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''), COALESCE(td.sku_code_type, ''),
 		       td.category, td.category_code, td.category_name,
 		       td.source_product_id, td.source_product_name, td.source_search_entry_code, td.source_match_type, td.source_match_rule,
 		       td.matched_category_code, td.matched_search_entry_code, td.product_selection_snapshot_json,
@@ -499,10 +710,63 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 
 func taskActorNameJoins() string {
 	return `
-		LEFT JOIN users requester_user ON requester_user.id = t.requester_id
-		LEFT JOIN users creator_user ON creator_user.id = t.creator_id
-		LEFT JOIN users designer_user ON designer_user.id = t.designer_id
-		LEFT JOIN users handler_user ON handler_user.id = t.current_handler_id`
+			LEFT JOIN users requester_user ON requester_user.id = t.requester_id
+			LEFT JOIN users creator_user ON creator_user.id = t.creator_id
+			LEFT JOIN users designer_user ON designer_user.id = t.designer_id
+			LEFT JOIN users handler_user ON handler_user.id = t.current_handler_id`
+}
+
+func (r *taskRepo) hydrateTaskListSKUItems(ctx context.Context, items []*domain.TaskListItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	taskIDs := make([]int64, 0, len(items))
+	byID := make(map[int64]*domain.TaskListItem, len(items))
+	for _, item := range items {
+		if item == nil || item.ID <= 0 {
+			continue
+		}
+		taskIDs = append(taskIDs, item.ID)
+		byID[item.ID] = item
+	}
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(taskIDs)), ",")
+	args := make([]interface{}, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	rows, err := r.db.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, task_id, sequence_no, sku_code, sku_status,
+		       product_name_snapshot, product_short_name, design_requirement,
+		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version,
+		       last_filed_at, COALESCE(filing_error_message, ''),
+		       created_at, updated_at
+		  FROM task_sku_items
+		 WHERE task_id IN (%s)
+		 ORDER BY task_id ASC, sequence_no ASC, id ASC`, placeholders), args...)
+	if err != nil {
+		return fmt.Errorf("hydrate task list sku items: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		item, err := scanTaskListSKUItemRow(rows)
+		if err != nil {
+			return err
+		}
+		if taskItem := byID[item.TaskID]; taskItem != nil {
+			taskItem.SKUItems = append(taskItem.SKUItems, item)
+			if taskItem.BatchItemCount == 0 {
+				taskItem.BatchItemCount = len(taskItem.SKUItems)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("hydrate task list sku items rows: %w", err)
+	}
+	return nil
 }
 
 func (r *taskRepo) UpdateStatus(ctx context.Context, tx repo.Tx, id int64, status domain.TaskStatus) error {
@@ -516,6 +780,66 @@ func (r *taskRepo) UpdateStatus(ctx context.Context, tx repo.Tx, id int64, statu
 	}
 	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (r *taskRepo) UpdateSKUItemBusinessInfo(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error {
+	if item == nil {
+		return fmt.Errorf("update task_sku_item business info: item is nil")
+	}
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx, `
+			UPDATE task_sku_items
+			SET product_name_snapshot = ?,
+			    product_short_name = ?,
+			    category_code = ?,
+			    quantity = ?,
+			    design_requirement = ?,
+			    cost_price = ?,
+			    estimated_cost = ?,
+			    cost_rule_id = ?,
+			    cost_rule_name = ?,
+			    cost_rule_source = ?,
+			    matched_rule_version = ?,
+			    prefill_source = ?,
+			    prefill_at = ?,
+			    requires_manual_review = ?,
+			    manual_cost_override = ?,
+			    manual_cost_override_reason = ?,
+			    override_actor = ?,
+			    override_at = ?,
+			    variant_json = ?,
+			    reference_file_refs_json = ?,
+			    erp_sync_required = 1,
+			    erp_sync_version = erp_sync_version + 1,
+			    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND task_id = ?`,
+		item.ProductNameSnapshot,
+		item.ProductShortName,
+		item.CategoryCode,
+		toNullInt64(item.Quantity),
+		item.DesignRequirement,
+		toNullFloat64(item.CostPrice),
+		toNullFloat64(item.EstimatedCost),
+		toNullInt64(item.CostRuleID),
+		item.CostRuleName,
+		item.CostRuleSource,
+		toNullInt(item.MatchedRuleVersion),
+		item.PrefillSource,
+		toNullTime(item.PrefillAt),
+		item.RequiresManualReview,
+		item.ManualCostOverride,
+		item.ManualCostOverrideReason,
+		item.OverrideActor,
+		toNullTime(item.OverrideAt),
+		toNullJSONString(item.VariantJSON),
+		marshalReferenceFileRefs(item.ReferenceFileRefs),
+		item.ID,
+		item.TaskID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task_sku_item business info: %w", err)
 	}
 	return nil
 }
@@ -547,6 +871,7 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 		    product_selection_snapshot_json = ?,
 		    change_request = ?,
 		    design_requirement = ?,
+		    product_short_name = ?,
 		    note = ?,
 		    reference_file_refs_json = ?,
 		    reference_link = ?,
@@ -600,6 +925,7 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 		detail.ProductSelectionSnapshotJSON,
 		detail.ChangeRequest,
 		detail.DesignRequirement,
+		detail.ProductShortName,
 		detail.Note,
 		detail.ReferenceFileRefsJSON,
 		detail.ReferenceLink,
@@ -642,6 +968,36 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 		return fmt.Errorf("update task detail business info: %w", err)
 	}
 	if err := reindexTaskSearchDocument(ctx, sqlTx, detail.TaskID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *taskRepo) UpdatePriority(ctx context.Context, tx repo.Tx, id int64, priority domain.TaskPriority) error {
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx,
+		`UPDATE tasks SET priority = ? WHERE id = ?`,
+		string(priority), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update task priority: %w", err)
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *taskRepo) UpdateDeadline(ctx context.Context, tx repo.Tx, id int64, deadlineAt *time.Time) error {
+	sqlTx := Unwrap(tx)
+	_, err := sqlTx.ExecContext(ctx,
+		`UPDATE tasks SET deadline_at = ? WHERE id = ?`,
+		toNullTime(deadlineAt), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update task deadline: %w", err)
+	}
+	if err := reindexTaskSearchDocument(ctx, sqlTx, id); err != nil {
 		return err
 	}
 	return nil
@@ -765,12 +1121,12 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 	var t domain.Task
 	var productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var deadlineAt sql.NullTime
-	var ownerDepartment, ownerOrgTeam, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var ownerDepartment, ownerOrgTeam, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var primarySKUCode sql.NullString
 	err := row.Scan(
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
 		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &t.CreatorID, &requesterID, &designerID, &currentHandlerID,
-		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &t.CustomizationRequired, &customizationSourceType,
+		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
 		&t.IsBatchTask, &t.BatchItemCount, &t.BatchMode, &primarySKUCode, &t.SKUGenerationStatus,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -794,6 +1150,11 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 		t.OwnerOrgTeam = ownerOrgTeam.String
 	}
 	t.DeadlineAt = fromNullTime(deadlineAt)
+	if businessLane.Valid {
+		t.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), t.CustomizationRequired)
+	} else {
+		t.BusinessLane = domain.TaskBusinessLaneFromLegacy(t.CustomizationRequired)
+	}
 	if customizationSourceType.Valid {
 		t.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
 	}
@@ -829,12 +1190,12 @@ func scanTaskRow(rows *sql.Rows) (*domain.Task, error) {
 	var t domain.Task
 	var productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var deadlineAt sql.NullTime
-	var ownerDepartment, ownerOrgTeam, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
+	var ownerDepartment, ownerOrgTeam, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var primarySKUCode sql.NullString
 	err := rows.Scan(
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
 		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &t.CreatorID, &requesterID, &designerID, &currentHandlerID,
-		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &t.CustomizationRequired, &customizationSourceType,
+		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
 		&t.IsBatchTask, &t.BatchItemCount, &t.BatchMode, &primarySKUCode, &t.SKUGenerationStatus,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -855,6 +1216,11 @@ func scanTaskRow(rows *sql.Rows) (*domain.Task, error) {
 		t.OwnerOrgTeam = ownerOrgTeam.String
 	}
 	t.DeadlineAt = fromNullTime(deadlineAt)
+	if businessLane.Valid {
+		t.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), t.CustomizationRequired)
+	} else {
+		t.BusinessLane = domain.TaskBusinessLaneFromLegacy(t.CustomizationRequired)
+	}
 	if customizationSourceType.Valid {
 		t.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
 	}
@@ -893,7 +1259,7 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	var deadlineAt sql.NullTime
 	var batchMode sql.NullString
 	var primarySKUCode sql.NullString
-	var customizationSourceType sql.NullString
+	var businessLane, customizationSourceType sql.NullString
 	var lastCustomizationOperatorID sql.NullInt64
 	var warehouseRejectReason sql.NullString
 	var warehouseRejectCategory sql.NullString
@@ -922,9 +1288,9 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 		&item.ID, &item.TaskNo, &productID, &item.SKUCode, &item.ProductNameSnapshot,
 		&item.TaskType, &item.SourceMode, &item.OwnerTeam, &item.OwnerDepartment, &item.OwnerOrgTeam, &item.Priority, &item.CreatorID, &requesterID, &designerID, &currentHandlerID,
 		&requesterName, &creatorName, &designerName, &currentHandlerName,
-		&item.TaskStatus, &item.CreatedAt, &item.UpdatedAt, &deadlineAt, &item.NeedOutsource, &item.IsOutsource, &item.CustomizationRequired, &customizationSourceType,
+		&item.TaskStatus, &item.CreatedAt, &item.UpdatedAt, &deadlineAt, &item.NeedOutsource, &item.IsOutsource, &businessLane, &item.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
-		&item.IsBatchTask, &item.BatchItemCount, &batchMode, &primarySKUCode,
+		&item.IsBatchTask, &item.BatchItemCount, &batchMode, &primarySKUCode, &item.SKUCodeType,
 		&category, &categoryCode, &categoryName,
 		&sourceProductID, &sourceProductName, &sourceSearchEntryCode, &sourceMatchType, &sourceMatchRule,
 		&matchedCategoryCode, &matchedSearchEntryCode, &productSelectionSnapshotJSON,
@@ -944,7 +1310,12 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	item.DesignerID = fromNullInt64(designerID)
 	item.CurrentHandlerID = fromNullInt64(currentHandlerID)
 	item.DeadlineAt = fromNullTime(deadlineAt)
-	item.WorkflowLane = domain.WorkflowLaneFromCustomizationRequired(item.CustomizationRequired)
+	if businessLane.Valid {
+		item.BusinessLane = domain.NormalizeTaskBusinessLane(domain.TaskBusinessLane(businessLane.String), item.CustomizationRequired)
+	} else {
+		item.BusinessLane = domain.TaskBusinessLaneFromLegacy(item.CustomizationRequired)
+	}
+	item.WorkflowLane = item.BusinessLane.WorkflowLane()
 	item.LastCustomizationOperatorID = fromNullInt64(lastCustomizationOperatorID)
 	if customizationSourceType.Valid {
 		item.CustomizationSourceType = domain.CustomizationSourceType(customizationSourceType.String)
@@ -966,6 +1337,9 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	}
 	if item.PrimarySKUCode == "" {
 		item.PrimarySKUCode = item.SKUCode
+	}
+	if !item.SKUCodeType.Valid() {
+		item.SKUCodeType = domain.TaskSKUCodeTypeRegular
 	}
 	if item.BatchItemCount == 0 && item.SKUCode != "" {
 		item.BatchItemCount = 1
@@ -1111,8 +1485,11 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	var filingStatus string
 	var erpSyncStatus string
 	var lastFiledAt sql.NullTime
+	var prefillAt, overrideAt sql.NullTime
 	var quantity sql.NullInt64
-	var baseSalePrice sql.NullFloat64
+	var baseSalePrice, costPrice, estimatedCost sql.NullFloat64
+	var costRuleID sql.NullInt64
+	var matchedRuleVersion sql.NullInt64
 	var variantJSON []byte
 	var referenceFileRefsJSON sql.NullString
 	if err := scanner.Scan(
@@ -1136,10 +1513,24 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 		&item.CostPriceMode,
 		&quantity,
 		&baseSalePrice,
+		&costPrice,
+		&estimatedCost,
+		&costRuleID,
+		&item.CostRuleName,
+		&item.CostRuleSource,
+		&matchedRuleVersion,
+		&item.PrefillSource,
+		&prefillAt,
+		&item.RequiresManualReview,
+		&item.ManualCostOverride,
+		&item.ManualCostOverrideReason,
+		&item.OverrideActor,
+		&overrideAt,
 		&item.DesignRequirement,
 		&variantJSON,
 		&referenceFileRefsJSON,
 		&item.DedupeKey,
+		&item.SKUCodeType,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
@@ -1150,6 +1541,9 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	}
 	item.ProductID = fromNullInt64(productID)
 	item.ERPProductID = fromNullString(erpProductID)
+	if !item.SKUCodeType.Valid() {
+		item.SKUCodeType = domain.TaskSKUCodeTypeRegular
+	}
 	item.FilingStatus = domain.FilingStatus(filingStatus)
 	if !item.FilingStatus.Valid() {
 		item.FilingStatus = domain.FilingStatusPending
@@ -1161,6 +1555,12 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	item.LastFiledAt = fromNullTime(lastFiledAt)
 	item.Quantity = fromNullInt64(quantity)
 	item.BaseSalePrice = fromNullFloat64(baseSalePrice)
+	item.CostPrice = fromNullFloat64(costPrice)
+	item.EstimatedCost = fromNullFloat64(estimatedCost)
+	item.CostRuleID = fromNullInt64(costRuleID)
+	item.MatchedRuleVersion = fromNullInt(matchedRuleVersion)
+	item.PrefillAt = fromNullTime(prefillAt)
+	item.OverrideAt = fromNullTime(overrideAt)
 	if len(variantJSON) > 0 {
 		item.VariantJSON = append(item.VariantJSON[:0], variantJSON...)
 		item.ProductIID = productIIDFromVariantJSON(variantJSON)
@@ -1170,6 +1570,50 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 	}
 	if item.ReferenceFileRefs == nil {
 		item.ReferenceFileRefs = []domain.ReferenceFileRef{}
+	}
+	return &item, nil
+}
+
+func scanTaskListSKUItemRow(scanner interface{ Scan(...interface{}) error }) (*domain.TaskSKUItem, error) {
+	var item domain.TaskSKUItem
+	var filingStatus string
+	var erpSyncStatus string
+	var lastFiledAt sql.NullTime
+	if err := scanner.Scan(
+		&item.ID,
+		&item.TaskID,
+		&item.SequenceNo,
+		&item.SKUCode,
+		&item.SKUStatus,
+		&item.ProductNameSnapshot,
+		&item.ProductShortName,
+		&item.DesignRequirement,
+		&filingStatus,
+		&erpSyncStatus,
+		&item.ERPSyncRequired,
+		&item.ERPSyncVersion,
+		&lastFiledAt,
+		&item.FilingErrorMessage,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("scan task list sku item: %w", err)
+	}
+	item.FilingStatus = domain.FilingStatus(filingStatus)
+	item.ERPSyncStatus = domain.FilingStatus(erpSyncStatus)
+	item.LastFiledAt = fromNullTime(lastFiledAt)
+	if !item.SKUStatus.Valid() {
+		item.SKUStatus = domain.TaskSKUStatusReserved
+	}
+	if !item.FilingStatus.Valid() {
+		if item.LastFiledAt != nil {
+			item.FilingStatus = domain.FilingStatusFiled
+		} else {
+			item.FilingStatus = domain.FilingStatusNotFiled
+		}
+	}
+	if !item.ERPSyncStatus.Valid() {
+		item.ERPSyncStatus = item.FilingStatus
 	}
 	return &item, nil
 }
@@ -1243,13 +1687,20 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 		args = append(args, clauseArgs...)
 	}
 
-	if filter.CreatorID != nil {
+	if filter.MineActorID != nil {
+		actorID := *filter.MineActorID
+		where = append(where, "(t.creator_id = ? OR t.designer_id = ? OR t.current_handler_id = ?)")
+		args = append(args, actorID, actorID, actorID)
+	} else if filter.CreatorID != nil {
 		where = append(where, "t.creator_id = ?")
 		args = append(args, *filter.CreatorID)
 	}
 	if filter.DesignerID != nil {
 		where = append(where, "t.designer_id = ?")
 		args = append(args, *filter.DesignerID)
+	}
+	if filter.DesignerEmpty != nil && *filter.DesignerEmpty {
+		where = append(where, "(t.designer_id IS NULL OR t.designer_id = 0)")
 	}
 	if filter.NeedOutsource != nil {
 		where = append(where, "t.need_outsource = ?")
@@ -1266,9 +1717,69 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 		}
 	}
 	if filter.Keyword != "" {
-		like := "%" + filter.Keyword + "%"
-		where = append(where, "(t.task_no LIKE ? OR t.sku_code LIKE ? OR t.product_name_snapshot LIKE ? OR t.owner_team LIKE ? OR COALESCE(t.owner_department, '') LIKE ? OR COALESCE(t.owner_org_team, '') LIKE ? OR CAST(t.id AS CHAR) = ?)")
-		args = append(args, like, like, like, like, like, like, filter.Keyword)
+		kw := normalizeSearchKeyword(filter.Keyword)
+		keywordClauses := []string{
+			"t.product_name_snapshot LIKE ?",
+			"t.owner_team LIKE ?",
+			"COALESCE(t.owner_department, '') LIKE ?",
+			"COALESCE(t.owner_org_team, '') LIKE ?",
+			`EXISTS (
+				SELECT 1
+				  FROM users task_keyword_actor
+				 WHERE task_keyword_actor.id IN (t.creator_id, t.requester_id, t.designer_id, t.current_handler_id)
+					   AND (
+						task_keyword_actor.display_name LIKE ?
+						OR task_keyword_actor.username LIKE ?
+					   )
+			)`,
+			`EXISTS (
+				SELECT 1
+				  FROM task_sku_items tsi_text
+				 WHERE tsi_text.task_id = t.id
+				   AND (
+					tsi_text.product_name_snapshot LIKE ?
+					OR tsi_text.product_short_name LIKE ?
+					OR tsi_text.design_requirement LIKE ?
+				   )
+			)`,
+		}
+		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like}
+		if kw.HasInt64 {
+			keywordClauses = append(keywordClauses, "t.id = ?")
+			keywordArgs = append(keywordArgs, kw.Int64)
+		}
+		if kw.IsCode {
+			keywordClauses = append(keywordClauses,
+				"t.task_no = ?",
+				"t.sku_code = ?",
+				"t.primary_sku_code = ?",
+				"t.task_no LIKE ?",
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				`EXISTS (
+					SELECT 1
+					  FROM task_sku_items tsi
+					 WHERE tsi.task_id = t.id
+					   AND (tsi.sku_code = ? OR tsi.sku_code LIKE ?)
+				)`,
+			)
+			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper, kw.Upper+"%")
+		} else {
+			keywordClauses = append(keywordClauses,
+				"t.task_no LIKE ?",
+				"t.sku_code LIKE ?",
+				"t.primary_sku_code LIKE ?",
+				`EXISTS (
+					SELECT 1
+					  FROM task_sku_items tsi
+					 WHERE tsi.task_id = t.id
+					   AND tsi.sku_code LIKE ?
+				)`,
+			)
+			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+		}
+		where = append(where, "("+strings.Join(keywordClauses, " OR ")+")")
+		args = append(args, keywordArgs...)
 	}
 	appendTaskDataScopeWhere(&where, &args, filter)
 
@@ -1395,11 +1906,15 @@ func buildManagedUserScopeClause(userColumn, ownerExpr string, values []string) 
 }
 
 func workflowLaneConditionSQL(lane domain.WorkflowLane) string {
+	return businessLaneConditionSQL(domain.TaskBusinessLaneFromWorkflowLane(lane))
+}
+
+func businessLaneConditionSQL(lane domain.TaskBusinessLane) string {
 	switch lane {
-	case domain.WorkflowLaneCustomization:
-		return "t.customization_required = 1"
-	case domain.WorkflowLaneNormal:
-		return "t.customization_required = 0"
+	case domain.TaskBusinessLaneCustomization:
+		return "COALESCE(t.business_lane, '') = 'customization'"
+	case domain.TaskBusinessLaneNormal:
+		return "(COALESCE(t.business_lane, '') = '' OR t.business_lane = 'normal')"
 	default:
 		return ""
 	}
@@ -1435,8 +1950,10 @@ func stringsToSlice(values []string) []string {
 
 func appendTaskQueryDefinitionWhere(where *[]string, args *[]interface{}, filter domain.TaskQueryFilterDefinition, exprs taskListQueryExpressions) error {
 	appendInClause(where, args, "t.task_status", comparableValuesToStrings(filter.Statuses))
+	appendInClause(where, args, "t.priority", comparableValuesToStrings(filter.Priorities))
 	appendInClause(where, args, "t.task_type", comparableValuesToStrings(filter.TaskTypes))
 	appendInClause(where, args, "t.source_mode", comparableValuesToStrings(filter.SourceModes))
+	appendBusinessLaneClause(where, args, filter.BusinessLanes)
 	appendWorkflowLaneClause(where, args, filter.WorkflowLanes)
 	appendInClause(where, args, "t.owner_department", stringsToSlice(filter.OwnerDepartments))
 	appendInClause(where, args, "t.owner_org_team", stringsToSlice(filter.OwnerOrgTeams))
@@ -1508,11 +2025,30 @@ func appendWorkflowLaneClause(where *[]string, args *[]interface{}, lanes []doma
 			continue
 		}
 		seen[lane] = struct{}{}
-		switch lane {
-		case domain.WorkflowLaneCustomization:
-			conditions = append(conditions, "t.customization_required = 1")
-		case domain.WorkflowLaneNormal:
-			conditions = append(conditions, "t.customization_required = 0")
+		if cond := businessLaneConditionSQL(domain.TaskBusinessLaneFromWorkflowLane(lane)); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+	if len(conditions) == 0 {
+		return
+	}
+	*where = append(*where, "("+strings.Join(conditions, " OR ")+")")
+}
+
+func appendBusinessLaneClause(where *[]string, args *[]interface{}, lanes []domain.TaskBusinessLane) {
+	if len(lanes) == 0 {
+		return
+	}
+	seen := map[domain.TaskBusinessLane]struct{}{}
+	conditions := make([]string, 0, len(lanes))
+	for _, lane := range lanes {
+		lane = domain.TaskBusinessLane(strings.TrimSpace(string(lane)))
+		if _, exists := seen[lane]; exists {
+			continue
+		}
+		seen[lane] = struct{}{}
+		if cond := businessLaneConditionSQL(lane); cond != "" {
+			conditions = append(conditions, cond)
 		}
 	}
 	if len(conditions) == 0 {

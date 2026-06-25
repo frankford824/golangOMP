@@ -166,6 +166,7 @@ type User struct {
 	Account            string             `db:"-"                      json:"account"`
 	DisplayName        string             `db:"display_name"           json:"display_name"`
 	Name               string             `db:"-"                      json:"name"`
+	RealName           string             `db:"-"                      json:"real_name,omitempty"`
 	Department         Department         `db:"department"             json:"department"`
 	Team               string             `db:"team"                   json:"team,omitempty"`
 	Group              string             `db:"-"                      json:"group,omitempty"`
@@ -174,6 +175,8 @@ type User struct {
 	Mobile             string             `db:"mobile"                 json:"mobile"`
 	Phone              string             `db:"-"                      json:"phone"`
 	Email              string             `db:"email"                  json:"email,omitempty"`
+	AvatarURL          string             `db:"avatar_url"             json:"avatar_url,omitempty"`
+	Avatar             string             `db:"-"                      json:"avatar,omitempty"`
 	PasswordHash       string             `db:"password_hash"          json:"-"`
 	Status             UserStatus         `db:"status"                 json:"status"`
 	EmploymentType     EmploymentType     `db:"employment_type"        json:"employment_type"`

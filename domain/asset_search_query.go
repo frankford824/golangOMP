@@ -19,16 +19,43 @@ const (
 	AssetTaskStatusFilterAll      AssetTaskStatusFilter = "all"
 )
 
+type AssetUsableStateFilter string
+
+const (
+	AssetUsableStateFilterAll           AssetUsableStateFilter = "all"
+	AssetUsableStateFilterEditable      AssetUsableStateFilter = "editable"
+	AssetUsableStateFilterReadyForUse   AssetUsableStateFilter = "ready_for_use"
+	AssetUsableStateFilterPendingReview AssetUsableStateFilter = "pending_review"
+	AssetUsableStateFilterRejected      AssetUsableStateFilter = "rejected"
+	AssetUsableStateFilterHistory       AssetUsableStateFilter = "history"
+	AssetUsableStateFilterCleaned       AssetUsableStateFilter = "cleaned"
+	AssetUsableStateFilterOther         AssetUsableStateFilter = "not_applicable"
+)
+
+type AssetFormatCategoryFilter string
+
+const (
+	AssetFormatCategoryAll     AssetFormatCategoryFilter = "all"
+	AssetFormatCategoryImage   AssetFormatCategoryFilter = "image"
+	AssetFormatCategoryDesign  AssetFormatCategoryFilter = "design"
+	AssetFormatCategoryPDF     AssetFormatCategoryFilter = "pdf"
+	AssetFormatCategoryVideo   AssetFormatCategoryFilter = "video"
+	AssetFormatCategoryArchive AssetFormatCategoryFilter = "archive"
+)
+
 type AssetSearchQuery struct {
-	Keyword       string
-	ModuleKey     string
-	OwnerTeamCode string
-	CreatedFrom   *time.Time
-	CreatedTo     *time.Time
-	Page          int
-	Size          int
-	IsArchived    AssetArchiveFilter
-	TaskStatus    AssetTaskStatusFilter
+	Keyword        string
+	ModuleKey      string
+	OwnerTeamCode  string
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
+	Page           int
+	Size           int
+	IsArchived     AssetArchiveFilter
+	TaskStatus     AssetTaskStatusFilter
+	Source         AssetResourceSource
+	UsableState    AssetUsableStateFilter
+	FormatCategory AssetFormatCategoryFilter
 }
 
 func (q AssetSearchQuery) Normalized() AssetSearchQuery {
@@ -50,6 +77,31 @@ func (q AssetSearchQuery) Normalized() AssetSearchQuery {
 	case AssetTaskStatusFilterOpen, AssetTaskStatusFilterClosed, AssetTaskStatusFilterArchived:
 	default:
 		q.TaskStatus = AssetTaskStatusFilterAll
+	}
+	switch q.Source {
+	case AssetResourceSourceSystem, AssetResourceSourceExternal:
+	default:
+		q.Source = AssetResourceSourceAll
+	}
+	switch q.UsableState {
+	case AssetUsableStateFilterEditable,
+		AssetUsableStateFilterReadyForUse,
+		AssetUsableStateFilterPendingReview,
+		AssetUsableStateFilterRejected,
+		AssetUsableStateFilterHistory,
+		AssetUsableStateFilterCleaned,
+		AssetUsableStateFilterOther:
+	default:
+		q.UsableState = AssetUsableStateFilterAll
+	}
+	switch q.FormatCategory {
+	case AssetFormatCategoryImage,
+		AssetFormatCategoryDesign,
+		AssetFormatCategoryPDF,
+		AssetFormatCategoryVideo,
+		AssetFormatCategoryArchive:
+	default:
+		q.FormatCategory = AssetFormatCategoryAll
 	}
 	return q
 }

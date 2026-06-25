@@ -7,13 +7,15 @@
 
 import axios from 'axios'
 import http from '@/services/http'
-import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
+import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 
-export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'design_thumb'
+export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'design_thumb' | 'erp_product_image'
 
 /** POST /v1/assets/upload-sessions 请求体（新集成，不传 upload_mode） */
 export interface CreateAssetUploadSessionPayload {
   task_id?: string | number
+  /** Existing design asset id. When present, the upload replaces that asset's current version. */
+  asset_id?: string | number
   asset_kind: AssetKind
   /** 规范字段名 */
   file_name: string
@@ -22,6 +24,8 @@ export interface CreateAssetUploadSessionPayload {
   file_hash?: string
   remark?: string
   source_asset_id?: string | number
+  /** P 图需求明细 ID；非空表示资产绑定到该条 retouch requirement */
+  retouch_requirement_id?: number
   target_sku_code?: string
   owner_module_key?: string
   upload_policy?: 'append_only' | 'replace' | string
@@ -221,6 +225,139 @@ export interface AssetListQuery {
   [key: string]: unknown
 }
 
+export interface AssetSearchQuery {
+  keyword?: string
+  source?: AssetResourceSource
+  resource_source?: AssetResourceSource
+  page?: number
+  size?: number
+  module_key?: string
+  owner_team_code?: string
+  is_archived?: 'true' | 'false' | 'all'
+  task_status?: 'open' | 'closed' | 'archived' | 'all'
+  created_from?: string
+  created_to?: string
+  format_category?: 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
+  [key: string]: unknown
+}
+
+export interface AssetSearchResponse {
+  data: BackendAsset[]
+  total: number
+  page: number
+  size: number
+}
+
+export type AssetBatchSearchStatus = 'matched' | 'not_found' | 'error'
+
+export interface AssetBatchSearchPayload {
+  terms: string[]
+  format_filter?: 'jpg_png' | 'jpg' | 'png' | 'webp' | 'image' | 'design' | 'pdf' | 'archive' | 'all'
+  asset_kind?: 'auto' | 'all' | 'delivery' | 'reference' | 'source' | 'preview' | 'other'
+}
+
+export interface AssetBatchSearchResult {
+  term: string
+  status: AssetBatchSearchStatus
+  message: string
+  candidates: number
+  asset?: BackendAsset
+}
+
+export interface AssetBatchSearchManifest {
+  results: AssetBatchSearchResult[]
+  matched_count: number
+  failed_count: number
+}
+
+export interface AssetBatchSearchResponse {
+  data?: AssetBatchSearchManifest
+}
+
+export interface AssetBatchDownloadPayload {
+  asset_ids: number[]
+  naming_mode?: 'original' | 'business'
+}
+
+export interface AssetBatchDownloadItem {
+  asset_id: number
+  task_id: number
+  filename: string
+  file_size: number
+  mime_type?: string
+  download_url: string
+  expires_at?: string | null
+}
+
+export interface AssetBatchDownloadFailure {
+  asset_id: number
+  task_id?: number
+  filename?: string
+  reason: string
+}
+
+export interface AssetBatchDownloadManifest {
+  items: AssetBatchDownloadItem[]
+  failures?: AssetBatchDownloadFailure[]
+  success_count: number
+  failure_count: number
+  total_size: number
+  expires_at?: string | null
+}
+
+export interface AssetBatchDownloadResponse {
+  data?: AssetBatchDownloadManifest
+}
+
+export interface AssetExcelPackageRow {
+  row_number?: number
+  order_no: string
+  sku_code: string
+  sku_name?: string
+  quantity: number
+  keyword?: string
+}
+
+export interface AssetExcelPackageItem {
+  row_number?: number
+  order_no: string
+  sku_code: string
+  sku_name?: string
+  quantity: number
+  asset_id: number
+  task_id: number
+  task_no?: string
+  filename: string
+  file_size: number
+  mime_type?: string
+  download_url: string
+  expires_at?: string | null
+}
+
+export interface AssetExcelPackageFailure {
+  row_number?: number
+  order_no?: string
+  sku_code?: string
+  sku_name?: string
+  quantity?: number
+  reason: string
+  message: string
+}
+
+export interface AssetExcelPackageManifest {
+  items: AssetExcelPackageItem[]
+  failures?: AssetExcelPackageFailure[]
+  success_count: number
+  failure_count: number
+  total_files: number
+  total_size: number
+  expires_at?: string | null
+}
+
+export interface AssetExcelPackagePreviewResponse {
+  data?: AssetExcelPackageManifest
+}
+
 export const assetsApi = {
   /**
    * 任务上下文资产列表
@@ -275,16 +412,33 @@ export const assetsApi = {
       signal,
     }),
 
-  searchAssets: (params?: AssetListQuery, signal?: AbortSignal) =>
-    http.get('/v1/assets/search', {
-      params: params
-        ? {
-            ...params,
-            ...(params.size == null && params.page_size != null ? { size: params.page_size } : {}),
-          }
-        : undefined,
+  searchAssets: (params?: AssetSearchQuery, signal?: AbortSignal) =>
+    http.get<AssetSearchResponse>('/v1/assets/search', {
+      params,
       signal,
     }),
+
+  batchSearchAssets: (payload: AssetBatchSearchPayload, signal?: AbortSignal) =>
+    http.post<AssetBatchSearchResponse>('/v1/assets/search/batch', payload, {
+      signal,
+    }),
+
+  batchDownload: (
+    assetIds: number[],
+    options?: { namingMode?: 'original' | 'business'; signal?: AbortSignal },
+  ) =>
+    http.post<AssetBatchDownloadResponse>(
+      '/v1/assets/batch-download',
+      { asset_ids: assetIds, naming_mode: options?.namingMode } as AssetBatchDownloadPayload,
+      { signal: options?.signal },
+    ),
+
+  excelPackagePreview: (rows: AssetExcelPackageRow[], signal?: AbortSignal) =>
+    http.post<AssetExcelPackagePreviewResponse>(
+      '/v1/assets/excel-package/preview',
+      { rows },
+      { signal },
+    ),
 
   /** GET /v1/assets/{id} */
   getAsset: (assetId: string, signal?: AbortSignal) =>

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -21,24 +22,30 @@ import (
 	"workflow/policy"
 	mysqlrepo "workflow/repo/mysql"
 	"workflow/service"
+	aiagentsvc "workflow/service/aiagent"
 	assetcenter "workflow/service/asset_center"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	"workflow/service/asset_lifecycle/scheduler"
 	"workflow/service/blueprint"
 	designsourcesvc "workflow/service/design_source"
 	erpproductsvc "workflow/service/erp_product"
+	externalassets "workflow/service/external_assets"
 	r3module "workflow/service/module_action"
 	notificationsvc "workflow/service/notification"
 	orgmovesvc "workflow/service/org_move_request"
+	predictionsvc "workflow/service/prediction"
 	reportl1svc "workflow/service/report_l1"
 	searchsvc "workflow/service/search"
 	"workflow/service/task_aggregator"
+	taskaisummarysvc "workflow/service/task_ai_summary"
 	taskbatchexcel "workflow/service/task_batch_excel"
 	"workflow/service/task_cancel"
 	taskdraftsvc "workflow/service/task_draft"
 	tasklifecycle "workflow/service/task_lifecycle"
 	"workflow/service/task_pool"
+	tasksingleexcel "workflow/service/task_single_excel"
 	wsservice "workflow/service/websocket"
+	wecombotsvc "workflow/service/wecombot"
 	"workflow/transport"
 	"workflow/transport/handler"
 	transportws "workflow/transport/ws"
@@ -95,11 +102,14 @@ func main() {
 	userSessionRepo := mysqlrepo.NewUserSessionRepo(mdb)
 	permissionLogRepo := mysqlrepo.NewPermissionLogRepo(mdb)
 	productRepo := mysqlrepo.NewProductRepo(mdb)
+	productManagementRepo := mysqlrepo.NewProductManagementRepo(mdb)
 	categoryRepo := mysqlrepo.NewCategoryRepo(mdb)
 	categoryERPMappingRepo := mysqlrepo.NewCategoryERPMappingRepo(mdb)
 	costRuleRepo := mysqlrepo.NewCostRuleRepo(mdb)
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
+	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
+	skuComboRepo := mysqlrepo.NewSKUComboRepo(mdb)
 	procurementRepo := mysqlrepo.NewProcurementRepo(mdb)
 	taskCostOverrideEventRepo := mysqlrepo.NewTaskCostOverrideEventRepo(mdb)
 	taskCostOverrideReviewRepo := mysqlrepo.NewTaskCostOverrideReviewRepo(mdb)
@@ -128,8 +138,11 @@ func main() {
 	taskModuleRepo := mysqlrepo.NewTaskModuleRepo(mdb)
 	taskModuleEventRepo := mysqlrepo.NewTaskModuleEventRepo(mdb)
 	referenceFileRefFlatRepo := mysqlrepo.NewReferenceFileRefFlatRepo(mdb)
+	taskRetouchRequirementRepo := mysqlrepo.NewTaskRetouchRequirementRepo(mdb)
+	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
+	externalAssetRepo := mysqlrepo.NewExternalAssetRepo(mdb)
 	taskAutoArchiveRepo := mysqlrepo.NewTaskAutoArchiveRepo(mdb)
 	orgMoveRequestRepo := mysqlrepo.NewOrgMoveRequestRepo(mdb)
 	taskDraftRepo := mysqlrepo.NewTaskDraftRepo(mdb)
@@ -137,7 +150,11 @@ func main() {
 	designSourceRepo := mysqlrepo.NewDesignSourceRepo(mdb)
 	moduleNotificationRepo := mysqlrepo.NewModuleNotificationRepo(mdb)
 	searchRepo := mysqlrepo.NewSearchRepo(mdb)
+	predictionRepo := mysqlrepo.NewPredictionRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
+	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
+	businessTrendRepo := mysqlrepo.NewBusinessTrendRepo(mdb)
+	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
 
 	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
 	auditSvc := service.NewAuditService(auditRepo, skuRepo, assetVersionRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
@@ -210,6 +227,24 @@ func main() {
 		}
 	}
 	erpBridgeSvc := service.NewERPBridgeService(erpBridgeClient, productRepo, mdb)
+	productManagementERPBridgeSvc := erpBridgeSvc
+	if cfg.Server.Port != "8081" &&
+		strings.TrimSpace(cfg.ERPRemote.BaseURL) != "" &&
+		strings.EqualFold(strings.TrimSpace(cfg.ERPRemote.AuthMode), "openweb") {
+		productManagementRemoteClient, remoteErr := service.NewRemoteERPBridgeClient(erpRemoteServiceConfig(cfg, logger.Named("product_management_erp_remote")))
+		if remoteErr != nil {
+			logger.Warn("product management direct ERP client disabled", zap.Error(remoteErr))
+		} else {
+			productManagementClient := service.NewHybridERPBridgeClient(
+				localERPBridgeClient,
+				productManagementRemoteClient,
+				cfg.ERPRemote.FallbackToLocalOnError,
+				logger.Named("product_management_erp"),
+			)
+			productManagementERPBridgeSvc = service.NewERPBridgeService(productManagementClient, productRepo, mdb)
+			logger.Info("Product management ERP sync uses direct OpenWeb client for background jobs")
+		}
+	}
 	var erpProvider service.ERPProductProvider
 	switch strings.ToLower(strings.TrimSpace(cfg.ERP.SourceMode)) {
 	case "jst", "jst_openweb", "remote_jst":
@@ -226,6 +261,14 @@ func main() {
 		Logger:           logger.Named("erp_sync"),
 	})
 	taskDataScopeResolver := service.NewRoleBasedDataScopeResolver()
+	taskReferenceAssetFormalizer := service.NewTaskReferenceAssetFormalizer(
+		designAssetRepo,
+		taskAssetRepo,
+		assetStorageRefRepo,
+		taskReferenceAssetBindingRepo,
+		taskEventRepo,
+		mdb,
+	)
 	ossDirectSvc := service.NewOSSDirectService(service.OSSDirectConfig{
 		Enabled:         cfg.OSSDirect.Enabled,
 		Endpoint:        cfg.OSSDirect.Endpoint,
@@ -241,32 +284,17 @@ func main() {
 			zap.String("bucket", cfg.OSSDirect.Bucket),
 			zap.String("endpoint", cfg.OSSDirect.Endpoint))
 	}
-	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
-		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
-		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
-		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
-		service.WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
-		service.WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
-		service.WithTaskReferenceFileRefsOSSDirectService(ossDirectSvc),
-		service.WithTaskDesignAssetReadModel(designAssetRepo),
-		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
-		service.WithTaskCustomizationJobRepo(customizationJobRepo),
-		service.WithTaskCustomizationPricingRuleRepo(customizationPricingRuleRepo),
-		service.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
-		service.WithTaskDataScopeResolver(taskDataScopeResolver),
-		service.WithTaskScopeUserRepo(userRepo),
-		service.WithTaskBlueprintRuleEngine(blueprintRules))
-	taskBoardSvc := service.NewTaskBoardService(taskSvc)
-	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
-	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
-	exportCenterSvc := service.NewExportCenterService(exportJobRepo, exportJobDispatchRepo, exportJobAttemptRepo, exportJobEventRepo, mdb)
-	integrationCenterSvc := service.NewIntegrationCenterService(integrationCallLogRepo, integrationExecutionRepo, mdb)
-	taskAssetSvc := service.NewTaskAssetService(taskRepo, taskAssetRepo, taskEventRepo, uploadRequestRepo, assetStorageRefRepo, mdb,
-		service.WithTaskAssetModuleRepo(taskModuleRepo),
-		service.WithTaskAssetDataScopeResolver(taskDataScopeResolver),
-		service.WithTaskAssetScopeUserRepo(userRepo),
-		service.WithTaskAssetUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
-	assetUploadSvc := service.NewAssetUploadService(taskRepo, uploadRequestRepo, mdb)
+	erpImageProxySigner := service.NewERPImageProxySigner(service.ERPImageProxyConfig{
+		PublicBaseURL: cfg.ERPImageProxy.PublicBaseURL,
+		SigningSecret: cfg.ERPImageProxy.SigningSecret,
+		TokenTTL:      cfg.ERPImageProxy.TokenTTL,
+	})
+	if erpImageProxySigner.Enabled() {
+		logger.Info("ERP product image short proxy enabled",
+			zap.String("public_base_url", cfg.ERPImageProxy.PublicBaseURL),
+			zap.Duration("token_ttl", cfg.ERPImageProxy.TokenTTL))
+	}
+	externalAssetSvc := externalassets.NewService(externalAssetRepo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirectSvc)
 	uploadClient := service.NewUploadServiceClient(service.UploadServiceClientConfig{
 		Enabled:                 cfg.UploadService.Enabled,
 		BaseURL:                 cfg.UploadService.BaseURL,
@@ -276,6 +304,61 @@ func main() {
 		InternalToken:           cfg.UploadService.InternalToken,
 		StorageProvider:         cfg.UploadService.StorageProvider,
 	})
+	wsHub := wsservice.NewHub(logger.Named("websocket"))
+	wecomSender := wecombotsvc.NewSender(wecombotsvc.Config{
+		Enabled:       cfg.WeCom.AiBotEnabled,
+		BotID:         cfg.WeCom.AiBotBotID,
+		Secret:        cfg.WeCom.AiBotSecret,
+		DefaultChatID: cfg.WeCom.AiBotDefaultChatID,
+		WSURL:         cfg.WeCom.AiBotWSURL,
+		QueueSize:     cfg.WeCom.AiBotQueueSize,
+	}, logger.Named("wecom_aibot"))
+	wecomNotifier := notificationsvc.NewWeComNotifier(wecomSender, taskRepo, userRepo, logger.Named("wecom_notification"))
+	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"),
+		notificationsvc.WithUserRepo(userRepo),
+		notificationsvc.WithTaskRepo(taskRepo),
+		notificationsvc.WithTxRunner(mdb),
+		notificationsvc.WithExternalNotifier(wecomNotifier))
+	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
+		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
+		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
+		service.WithProductManagementERPImageProxy(erpImageProxySigner),
+		service.WithProductManagementTaskEventRepo(taskEventRepo),
+		service.WithProductManagementSKUComboRepo(skuComboRepo))
+	skuComboSyncSvc := service.NewSKUComboSyncService(productManagementERPBridgeSvc, skuComboRepo, mdb)
+	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
+		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
+		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
+		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
+		service.WithTaskSKUTraceRepo(skuTraceRepo),
+		service.WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
+		service.WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
+		service.WithTaskReferenceAssetFormalizer(taskReferenceAssetFormalizer),
+		service.WithTaskReferenceFileRefsOSSDirectService(ossDirectSvc),
+		service.WithTaskDesignAssetReadModel(designAssetRepo),
+		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
+		service.WithTaskCustomizationJobRepo(customizationJobRepo),
+		service.WithTaskCustomizationPricingRuleRepo(customizationPricingRuleRepo),
+		service.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
+		service.WithTaskDataScopeResolver(taskDataScopeResolver),
+		service.WithTaskScopeUserRepo(userRepo),
+		service.WithTaskBlueprintRuleEngine(blueprintRules),
+		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
+		service.WithTaskProductManagementCloseSyncer(productManagementSvc),
+		service.WithTaskNotificationService(notificationSvc))
+	taskBoardSvc := service.NewTaskBoardService(taskSvc)
+	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
+	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
+	exportCenterSvc := service.NewExportCenterService(exportJobRepo, exportJobDispatchRepo, exportJobAttemptRepo, exportJobEventRepo, mdb)
+	integrationCenterSvc := service.NewIntegrationCenterService(integrationCallLogRepo, integrationExecutionRepo, mdb)
+	taskAssetSvc := service.NewTaskAssetService(taskRepo, taskAssetRepo, taskEventRepo, uploadRequestRepo, assetStorageRefRepo, mdb,
+		service.WithTaskAssetModuleRepo(taskModuleRepo),
+		service.WithTaskAssetCustomizationJobRepo(customizationJobRepo),
+		service.WithTaskAssetBlueprintRuleEngine(blueprintRules),
+		service.WithTaskAssetDataScopeResolver(taskDataScopeResolver),
+		service.WithTaskAssetScopeUserRepo(userRepo),
+		service.WithTaskAssetUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
+	assetUploadSvc := service.NewAssetUploadService(taskRepo, uploadRequestRepo, mdb)
 	taskCreateReferenceUploadSvc := service.NewTaskCreateReferenceUploadService(
 		uploadRequestRepo,
 		assetStorageRefRepo,
@@ -284,23 +367,36 @@ func main() {
 		service.WithTaskCreateReferenceOSSDirectService(ossDirectSvc),
 	)
 	taskBatchParseSvc := taskbatchexcel.NewParseServiceWithDependencies(taskCreateReferenceUploadSvc, erpBridgeSvc)
+	taskSingleTemplateSvc := tasksingleexcel.NewTemplateService()
+	taskSingleParseSvc := tasksingleexcel.NewParseServiceWithDependencies(erpBridgeSvc)
 	taskAssetCenterSvc := service.NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, assetStorageRefRepo, taskEventRepo, mdb, uploadClient,
 		service.WithOSSDirectService(ossDirectSvc),
 		service.WithTaskAssetCenterModuleRepo(taskModuleRepo),
+		service.WithTaskAssetCenterCustomizationJobRepo(customizationJobRepo),
+		service.WithTaskAssetCenterBlueprintRuleEngine(blueprintRules),
 		service.WithTaskAssetCenterDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssetCenterScopeUserRepo(userRepo),
-		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
+		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
+		service.WithTaskAssetCenterRetouchRequirementRepo(taskRetouchRequirementRepo),
+		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo))
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient)
+	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
+	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)
 	taskDetailSvc := service.NewTaskDetailAggregateService(taskRepo, procurementRepo, productRepo, costRuleRepo, auditV7Repo, outsourceRepo, taskAssetRepo, warehouseRepo, taskEventRepo, taskCostOverrideEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo,
 		service.WithTaskDetailScopeUserRepo(userRepo),
 		service.WithTaskDetailUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskDetailDesignAssetReadModel(designAssetRepo))
 	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo)
-	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb,
+	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
 		service.WithAuditV7ScopeUserRepo(userRepo),
-		service.WithAuditV7FilingTrigger(taskSvc))
+		service.WithAuditV7FilingTrigger(taskSvc),
+	}
+	if assetFlowRepo, ok := taskAssetRepo.(service.AuditAssetFlowRepo); ok {
+		auditV7Options = append(auditV7Options, service.WithAuditV7AssetFlowRepo(assetFlowRepo))
+	}
+	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb, auditV7Options...)
 	outsourceSvc := service.NewOutsourceService(outsourceRepo, taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb)
 	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
 		service.WithTaskEventUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
@@ -310,8 +406,6 @@ func main() {
 		service.WithWarehouseCustomizationJobRepo(customizationJobRepo),
 		service.WithWarehouseFilingTrigger(taskSvc))
 	operationLogSvc := service.NewOperationLogService(taskEventRepo, exportJobEventRepo, integrationCallLogRepo)
-	wsHub := wsservice.NewHub(logger.Named("websocket"))
-	notificationSvc := notificationsvc.NewService(notificationRepo, permissionLogRepo, wsHub, logger.Named("notification"))
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
 	blueprintRules.SetNotificationGenerator(notificationGen)
 	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,
@@ -323,15 +417,51 @@ func main() {
 	erpProductSvc := erpproductsvc.NewService(erpBridgeSvc)
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
 	searchSvc := searchsvc.NewService(searchRepo)
-	reportL1Svc := reportl1svc.NewService(reportL1Repo, reportl1svc.WithPermissionLogRepo(permissionLogRepo))
+	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
+	predictionSvc := predictionsvc.NewService(predictionRepo)
+	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
 	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen))
 	r3CancelSvc := task_cancel.NewService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb)
 	r3DetailSvc := task_aggregator.NewDetailService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo,
 		task_aggregator.WithTaskAssetRepo(taskAssetRepo),
+		task_aggregator.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
 		task_aggregator.WithReferenceFileRefEnricher(service.NewReferenceFileRefsEnricher(ossDirectSvc, nil)),
 		task_aggregator.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
+	aiSummaryClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
+		Enabled:         cfg.AI.Enabled,
+		Provider:        cfg.AI.Provider,
+		BaseURL:         cfg.AI.BaseURL,
+		APIKey:          cfg.AI.APIKey,
+		Model:           cfg.AI.Model,
+		Timeout:         cfg.AI.Timeout,
+		MaxTokens:       cfg.AI.MaxTokens,
+		RateLimitWindow: cfg.AI.RateLimitWindow,
+		RateLimitMax:    cfg.AI.RateLimitMax,
+		RateLimiter:     aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
+	}, logger.Named("ai_agent"))
+	trendProviders, expectedTrendSources := reportl1svc.NewDefaultTrendProviders(reportl1svc.TrendProviderConfig{
+		ChinaHotURL:         cfg.BusinessTrend.ChinaHotURL,
+		ApifyToken:          cfg.BusinessTrend.ApifyToken,
+		ApifyBaseURL:        cfg.BusinessTrend.ApifyBaseURL,
+		ApifyDouyinHotActor: cfg.BusinessTrend.ApifyDouyinHotActor,
+		ApifyDouyinActor:    cfg.BusinessTrend.ApifyDouyinActor,
+		ApifyRedNoteActor:   cfg.BusinessTrend.ApifyRedNoteActor,
+		Apify1688Actor:      cfg.BusinessTrend.Apify1688Actor,
+		ApifyTaobaoActor:    cfg.BusinessTrend.ApifyTaobaoActor,
+		Timeout:             cfg.BusinessTrend.Timeout,
+		MaxExternalKeywords: cfg.BusinessTrend.MaxExternalKeywords,
+		MaxExternalItems:    cfg.BusinessTrend.MaxExternalItems,
+	}, logger.Named("business_trends"))
+	reportL1Svc := reportl1svc.NewService(reportL1Repo,
+		reportl1svc.WithPermissionLogRepo(permissionLogRepo),
+		reportl1svc.WithKPIAnalysisRepo(kpiAnalysisRepo),
+		reportl1svc.WithKPIAnalysisGenerator(aiSummaryClient),
+		reportl1svc.WithBusinessTrendRepo(businessTrendRepo),
+		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
+		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
+	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
 
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
@@ -340,11 +470,12 @@ func main() {
 	policyH := handler.NewPolicyHandler(policySvc)
 	authH := handler.NewAuthHandler(identitySvc)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()
-	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc)
+	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc, workflowTraceEventSvc)
 
 	// V7 handlers
 	erpBridgeH := handler.NewERPBridgeHandler(erpBridgeSvc)
 	productH := handler.NewProductHandler(productSvc)
+	productManagementH := handler.NewProductManagementHandler(productManagementSvc)
 	categoryH := handler.NewCategoryHandler(categorySvc)
 	categoryMappingH := handler.NewCategoryERPMappingHandler(categoryMappingSvc)
 	costRuleH := handler.NewCostRuleHandler(costRuleSvc)
@@ -358,11 +489,23 @@ func main() {
 	taskCreateReferenceUploadH := handler.NewTaskCreateReferenceUploadHandler(taskCreateReferenceUploadSvc)
 	assetUploadH := handler.NewAssetUploadHandler(assetUploadSvc)
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
+	assetFilesH.SetERPImageProxy(taskAssetRepo, erpImageProxySigner)
+	assetFilesTaskAssetRepo, ok := taskAssetRepo.(handler.AssetFilesTaskAssetRepo)
+	if !ok {
+		logger.Fatal("task asset repo does not support asset file access checks")
+	}
+	assetFilesStorageRefRepo, ok := assetStorageRefRepo.(handler.AssetFilesStorageRefRepo)
+	if !ok {
+		logger.Fatal("asset storage ref repo does not support asset file access checks")
+	}
+	assetFilesH.SetFileAccessPolicy(taskRepo, assetFilesTaskAssetRepo, assetFilesStorageRefRepo, userRepo)
 	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
+	taskAISummaryH := handler.NewTaskAISummaryHandler(taskAISummarySvc)
 	taskCostOverrideH := handler.NewTaskCostOverrideHandler(taskCostOverrideSvc)
 	taskBoardH := handler.NewTaskBoardHandler(taskBoardSvc)
 	taskBatchExcelH := handler.NewTaskBatchExcelHandler(taskBatchTemplateSvc, taskBatchParseSvc)
+	taskSingleExcelH := handler.NewTaskSingleExcelHandler(taskSingleTemplateSvc, taskSingleParseSvc)
 	workbenchH := handler.NewWorkbenchHandler(workbenchSvc)
 	exportCenterH := handler.NewExportCenterHandler(exportCenterSvc)
 	integrationCenterH := handler.NewIntegrationCenterHandler(integrationCenterSvc)
@@ -384,15 +527,20 @@ func main() {
 	designSourceH := handler.NewDesignSourceHandler(designSourceSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
 	reportL1H := handler.NewReportL1Handler(reportL1Svc, permissionLogRepo)
+	predictionH := handler.NewPredictionHandler(predictionSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskCostOverrideH, taskBoardH, taskBatchExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, wsH, routeAccessCatalog, identitySvc, identitySvc, logger)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
-	workers.NewGroup(db, rdb, logger, erpSyncSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	workers.NewGroup(db, rdb, logger, erpSyncSvc, productManagementSvc, skuComboSyncSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	if wecomSender.Start(workerCtx) {
+		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
+	}
+	startExternalAssetRefresh(workerCtx, externalAssetSvc, logger.Named("external_assets"))
 	logger.Info("background workers started")
 
 	// ── 7.1 Cron(R6.A.2) ─────────────────────────────────────────────────────
@@ -434,6 +582,44 @@ func main() {
 			logger.Fatal("cron auto-archive add failed", zap.Error(err))
 		}
 		logger.Info("cron auto-archive enabled", zap.String("spec", archiveSpec))
+	}
+	if os.Getenv("ENABLE_CRON_WAREHOUSE_AUTO_RELEASE") == "1" {
+		releaseSpec := envOr("CRON_SCHEDULE_WAREHOUSE_AUTO_RELEASE", "*/5 * * * *")
+		autoReleaseCandidateRepo, ok := taskAssetRepo.(service.WarehouseAutoReleaseCandidateRepo)
+		if !ok {
+			logger.Fatal("cron warehouse-auto-release requires candidate repo support")
+		}
+		autoReleaseJob := service.NewWarehouseAutoReleaseJob(
+			autoReleaseCandidateRepo,
+			taskRepo,
+			warehouseRepo,
+			taskEventRepo,
+			mdb,
+			log.New(os.Stderr, "[WAREHOUSE-AUTO-RELEASE-CRON] ", log.LstdFlags),
+			service.WithWarehouseAutoReleaseModuleRepos(taskModuleRepo, taskModuleEventRepo),
+			service.WithWarehouseAutoReleaseProductManagementCloseSyncer(productManagementSvc),
+			service.WithWarehouseAutoReleaseNotificationService(notificationSvc),
+		)
+		if err := cronInst.Add("warehouse-auto-release", releaseSpec, func(ctx context.Context) error {
+			result, appErr := autoReleaseJob.Run(ctx, service.WarehouseAutoReleaseOptions{
+				Limit:         envInt("WAREHOUSE_AUTO_RELEASE_LIMIT", 100),
+				GracePeriod:   time.Duration(envInt("WAREHOUSE_AUTO_RELEASE_GRACE_MINUTES", 30)) * time.Minute,
+				SystemActorID: int64(envInt("WAREHOUSE_AUTO_RELEASE_SYSTEM_ACTOR_ID", 0)),
+			})
+			if appErr != nil {
+				return fmt.Errorf("%s: %s", appErr.Code, appErr.Message)
+			}
+			logger.Info("cron warehouse-auto-release run",
+				zap.Int("scanned", result.Scanned),
+				zap.Int("released", result.Released),
+				zap.Int("skipped", result.Skipped),
+				zap.Time("cutoff", result.Cutoff),
+			)
+			return nil
+		}); err != nil {
+			logger.Fatal("cron warehouse-auto-release add failed", zap.Error(err))
+		}
+		logger.Info("cron warehouse-auto-release enabled", zap.String("spec", releaseSpec))
 	}
 	cronInst.Start()
 	logger.Info("cron started", zap.Int("entries", len(cronInst.Entries())))
@@ -489,6 +675,97 @@ func buildLogger(level string) *zap.Logger {
 	return logger
 }
 
+func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service, logger *zap.Logger) {
+	if svc == nil || !svc.Enabled() {
+		return
+	}
+	go func() {
+		interval := svc.SyncInterval()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		logger.Info("external asset refresh worker started", zap.Duration("interval", interval))
+		runRefresh := func() {
+			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+			defer cancel()
+			if svc.FullSyncReady() {
+				full, err := svc.SyncFullIndex(refreshCtx)
+				if err != nil {
+					logger.Warn("external full index refresh finished with error", zap.Error(err))
+				}
+				if full != nil && (len(full.Mounts) > 0 || full.ScannedCount > 0 || full.UpsertedCount > 0) {
+					logger.Info("external full index refresh finished",
+						zap.Int("mounts", len(full.Mounts)),
+						zap.Int("scanned", full.ScannedCount),
+						zap.Int("upserted", full.UpsertedCount),
+					)
+				}
+			}
+			keywords := []string{"jpg", "jpeg", "png", "webp", "psd", "psb", "ai", "pdf", "tif", "tiff", "2026", "2025"}
+			seen := map[string]struct{}{}
+			for _, keyword := range keywords {
+				seen[keyword] = struct{}{}
+			}
+			for _, keyword := range svc.RecentKeywords(50) {
+				if _, ok := seen[keyword]; ok {
+					continue
+				}
+				seen[keyword] = struct{}{}
+				keywords = append(keywords, keyword)
+			}
+			for _, keyword := range keywords {
+				if err := svc.SyncKeyword(refreshCtx, keyword, 200); err != nil {
+					logger.Warn("external keyword refresh failed", zap.String("keyword", keyword), zap.Error(err))
+				}
+			}
+			ready, failed, err := svc.RefreshDirectURLs(refreshCtx, 100)
+			if err != nil {
+				logger.Warn("external direct url refresh failed", zap.Error(err))
+			} else if ready > 0 || failed > 0 {
+				logger.Info("external direct url refresh finished", zap.Int("ready", ready), zap.Int("failed", failed))
+			}
+		}
+		runRefresh()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runRefresh()
+			}
+		}
+	}()
+	go func() {
+		interval := 2 * time.Minute
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		logger.Info("external asset prepare worker started", zap.Duration("interval", interval))
+		runPrepare := func() {
+			prepareCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+			defer cancel()
+			ossDone, err := svc.ProcessPendingOSS(prepareCtx, 5)
+			if err != nil {
+				logger.Warn("external oss prepare failed", zap.Error(err))
+			}
+			previewDone, err := svc.ProcessPendingPreview(prepareCtx, 5)
+			if err != nil {
+				logger.Warn("external preview prepare failed", zap.Error(err))
+			}
+			if ossDone > 0 || previewDone > 0 {
+				logger.Info("external asset prepare finished", zap.Int("oss_done", ossDone), zap.Int("preview_done", previewDone))
+			}
+		}
+		runPrepare()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runPrepare()
+			}
+		}
+	}()
+}
+
 func erpRemoteServiceConfig(cfg *config.Config, log *zap.Logger) service.ERPRemoteClientConfig {
 	return service.ERPRemoteClientConfig{
 		BaseURL:                  cfg.ERPRemote.BaseURL,
@@ -500,6 +777,8 @@ func erpRemoteServiceConfig(cfg *config.Config, log *zap.Logger) service.ERPRemo
 		SyncLogsPath:             cfg.ERPRemote.SyncLogsPath,
 		GetCompanyUsersPath:      cfg.ERPRemote.GetCompanyUsersPath,
 		SkuQueryPath:             cfg.ERPRemote.SkuQueryPath,
+		CombineSKUQueryPath:      cfg.ERPRemote.CombineSKUQueryPath,
+		OrderActionQueryPath:     cfg.ERPRemote.OrderActionQueryPath,
 		OpenWebCharset:           cfg.ERPRemote.OpenWebCharset,
 		OpenWebVersion:           cfg.ERPRemote.OpenWebVersion,
 		Timeout:                  cfg.ERPRemote.Timeout,
@@ -542,6 +821,18 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 func connectRedis(cfg config.RedisConfig) (*redis.Client, error) {

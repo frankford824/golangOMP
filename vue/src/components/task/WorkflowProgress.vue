@@ -1,40 +1,22 @@
 <template>
   <!-- 横向：任务详情顶栏嵌入，收窄不独占全宽 -->
-  <div
+  <NSteps
     v-if="variant === 'horizontal'"
-    class="workflow-progress workflow-progress--horizontal"
-    role="list"
+    class="workflow-progress workflow-progress--horizontal workflow-progress--naive"
+    :current="naiveCurrent"
+    status="process"
+    size="small"
+    content-placement="right"
+    :theme-overrides="stepThemeOverrides"
   >
-    <template v-for="(step, i) in steps" :key="step.key">
-      <div
-        class="step-chip"
-        role="listitem"
-        :class="{
-          'step-done': step.state === 'done',
-          'step-current': step.state === 'current',
-          'step-pending': step.state === 'pending',
-          'step-skipped': step.state === 'skipped',
-        }"
-      >
-        <span class="step-dot step-dot--sm">
-          <svg v-if="step.state === 'done'" viewBox="0 0 12 12" fill="none" class="step-check">
-            <path
-              d="M2 6l3 3 5-5"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </span>
-        <span class="step-chip-text">
-          <span class="step-label">{{ step.label }}</span>
-          <span v-if="step.subLabel" class="step-sublabel-inline">{{ step.subLabel }}</span>
-        </span>
-      </div>
-      <span v-if="i < steps.length - 1" class="step-sep" aria-hidden="true">›</span>
-    </template>
-  </div>
+    <NStep
+      v-for="step in steps"
+      :key="step.key"
+      :title="step.label"
+      :description="step.subLabel || ''"
+      :status="naiveStepStatus(step)"
+    />
+  </NSteps>
   <!-- 纵向：原时间线 -->
   <div v-else class="workflow-progress">
     <div
@@ -66,6 +48,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { NStep, NSteps } from 'naive-ui'
 import type { Task } from '@/domain/types/task'
 import {
   getDesignSubStatusLabel,
@@ -74,6 +57,7 @@ import {
 } from '@/domain/enums/task-status'
 
 type StepState = 'done' | 'current' | 'pending' | 'skipped'
+type NaiveStepStatus = 'process' | 'finish' | 'error' | 'wait'
 
 interface Step {
   key: string
@@ -95,36 +79,11 @@ const isPurchase = computed(() => props.task.businessType === 'PURCHASE_TASK')
 const isRetouch = computed(
   () => props.task.businessType === 'RETOUCH_TASK' || props.task.taskType === 'RETOUCH_TASK',
 )
-const isCustomization = computed(() => props.task.workflowLane === 'customization')
-
-const CUSTOMIZATION_STEP_ORDER = [
-  'PendingCustomizationReview',
-  'PendingCustomizationProduction',
-  'PendingEffectReview',
-  'PendingEffectRevision',
-  'PendingProductionTransfer',
-  'PendingWarehouseQC',
-  'RejectedByWarehouse',
-  'PendingWarehouseReceive',
-  'Completed',
-] as const
-
-function resolveCustomizationStepState(
-  activeStatuses: readonly string[],
-  doneStatuses: readonly string[],
-  legacyStatus?: string,
-  mainStatus?: string,
-): StepState {
-  if (mainStatus === 'CLOSED' || legacyStatus === 'Completed') return 'done'
-  if (doneStatuses.includes(legacyStatus ?? '')) return 'done'
-  if (mainStatus && ['READY_TO_CLOSE', 'CLOSED'].includes(mainStatus)) return 'done'
-  if (activeStatuses.includes(legacyStatus ?? '')) return 'current'
-  if (mainStatus && ['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING'].includes(mainStatus)) {
-    if (activeStatuses.some((s) => s.startsWith('PendingWarehouse') || s === 'RejectedByWarehouse')) return 'current'
-    return 'done'
-  }
-  return 'pending'
-}
+const isCustomization = computed(() =>
+  props.task.workflowLane === 'customization' ||
+  props.task.businessLane === 'customization' ||
+  props.task.customizationRequired === true,
+)
 
 const steps = computed((): Step[] => {
   const t = props.task
@@ -160,12 +119,28 @@ const steps = computed((): Step[] => {
   if (isCustomization.value) {
     const ls = legacyStatus ?? ''
     const custStatus = ls
-    const idx = CUSTOMIZATION_STEP_ORDER.indexOf(custStatus as typeof CUSTOMIZATION_STEP_ORDER[number])
-    const pastStep = (stepStatuses: readonly string[]): boolean =>
-      idx >= 0 && stepStatuses.every((s) => {
-        const si = CUSTOMIZATION_STEP_ORDER.indexOf(s as typeof CUSTOMIZATION_STEP_ORDER[number])
-        return si >= 0 && idx > si
-      })
+    // 定制 lane 的 Legacy status 会映射到 mainStatus=WAREHOUSE_PENDING（含生产/审核），
+    // 流程条必须以 task_status 为准，不能用 mainStatus 判断仓库节点是否进行中。
+    const customizationWarehouseActiveStatuses = [
+      'PendingWarehouseReceive',
+      'PendingWarehouseQC',
+      'PendingProductionTransfer',
+      'RejectedByWarehouse',
+    ] as const
+    const isCustomizationWarehouseActive = customizationWarehouseActiveStatuses.includes(
+      custStatus as (typeof customizationWarehouseActiveStatuses)[number],
+    ) || mainStatus === 'WAREHOUSE_PROCESSING'
+    const isCustomizationWarehouseDone =
+      custStatus === 'PendingClose' ||
+      legacyStatus === 'Completed' ||
+      legacyStatus === 'Archived' ||
+      mainStatus === 'READY_TO_CLOSE' ||
+      mainStatus === 'CLOSED'
+    const warehouseStepState: StepState = isCustomizationWarehouseDone
+      ? 'done'
+      : isCustomizationWarehouseActive
+        ? 'current'
+        : 'pending'
 
     return [
       {
@@ -174,55 +149,35 @@ const steps = computed((): Step[] => {
         state: mainStatus && mainStatus !== 'DRAFT' ? 'done' : 'current',
       },
       {
+        key: 'customization_submit',
+        label: '美工提交设计稿',
+        subLabel: custStatus === 'PendingCustomizationProduction' ? '待美工提交' : undefined,
+        state: custStatus === 'PendingCustomizationProduction' ? 'current' : 'done',
+      },
+      {
         key: 'cust_review',
         label: '定制审核',
-        state: resolveCustomizationStepState(
-          ['PendingCustomizationReview'],
-          pastStep(['PendingCustomizationReview']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
-      },
-      {
-        key: 'cust_production',
-        label: '定制作图',
-        state: resolveCustomizationStepState(
-          ['PendingCustomizationProduction'],
-          pastStep(['PendingCustomizationProduction']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
-      },
-      {
-        key: 'effect_review',
-        label: '效果审核',
-        state: resolveCustomizationStepState(
-          ['PendingEffectReview', 'PendingEffectRevision'],
-          pastStep(['PendingEffectReview', 'PendingEffectRevision']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
-      },
-      {
-        key: 'production_transfer',
-        label: '转生产',
-        state: resolveCustomizationStepState(
-          ['PendingProductionTransfer'],
-          pastStep(['PendingProductionTransfer']) ? [custStatus] : [],
-          custStatus, mainStatus,
-        ),
+        subLabel: custStatus === 'PendingCustomizationReview' ? '待审核' : undefined,
+        state: custStatus === 'PendingCustomizationProduction'
+          ? 'pending'
+          : custStatus === 'PendingCustomizationReview'
+            ? 'current'
+            : 'done',
       },
       {
         key: 'warehouse',
-        label: '云仓接收',
-        subLabel: t.warehouseSubStatus ? getWarehouseSubStatusLabel(t.warehouseSubStatus) : undefined,
-        state: resolveCustomizationStepState(
-          ['PendingWarehouseQC', 'RejectedByWarehouse', 'PendingWarehouseReceive'],
-          [],
-          custStatus, mainStatus,
-        ),
+        label: '仓库接收',
+        subLabel: customizationWarehouseSubLabel(warehouseStepState, t.warehouseSubStatus),
+        state: warehouseStepState,
       },
       {
         key: 'close',
         label: '结单',
-        state: mainStatus === 'CLOSED' || legacyStatus === 'Completed' ? 'done' : mainStatus === 'READY_TO_CLOSE' ? 'current' : 'pending',
+        state: mainStatus === 'CLOSED' || legacyStatus === 'Completed' || legacyStatus === 'Archived'
+          ? 'done'
+          : mainStatus === 'READY_TO_CLOSE' || custStatus === 'PendingClose'
+            ? 'current'
+            : 'pending',
       },
     ]
   }
@@ -266,6 +221,9 @@ const steps = computed((): Step[] => {
     ]
   }
 
+  const designStepState = resolveNormalDesignStepState(t, mainStatus, legacyStatus)
+  const auditStepState = resolveNormalAuditStepState(t, mainStatus, legacyStatus)
+
   return [
     {
       key: 'created',
@@ -275,8 +233,8 @@ const steps = computed((): Step[] => {
     {
       key: 'design',
       label: '设计',
-      subLabel: t.designSubStatus ? getDesignSubStatusLabel(t.designSubStatus) : undefined,
-      state: resolveStepState(['INFO_PENDING'], ['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'], mainStatus),
+      subLabel: normalDesignProgressSubLabel(t, designStepState),
+      state: designStepState,
     },
     {
       key: 'audit',
@@ -285,7 +243,7 @@ const steps = computed((): Step[] => {
       state:
         t.auditSubStatus === 'NOT_REQUIRED'
           ? 'skipped'
-          : resolveStepState(['INFO_PENDING'], ['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'], mainStatus),
+          : auditStepState,
     },
     {
       key: 'warehouse',
@@ -301,6 +259,46 @@ const steps = computed((): Step[] => {
   ]
 })
 
+const naiveCurrent = computed(() => {
+  const index = steps.value.findIndex((step) => step.state === 'current')
+  if (index >= 0) return index + 1
+  const lastDoneFromEnd = [...steps.value].reverse().findIndex((step) => step.state === 'done')
+  if (lastDoneFromEnd >= 0) return steps.value.length - lastDoneFromEnd
+  return 1
+})
+
+function naiveStepStatus(step: Step): NaiveStepStatus {
+  if (step.state === 'done') return 'finish'
+  if (step.state === 'current') return 'process'
+  return 'wait'
+}
+
+const stepThemeOverrides = {
+  stepHeaderFontWeight: '800',
+  stepHeaderFontSizeSmall: '13px',
+  indicatorSizeSmall: '20px',
+  indicatorIconSizeSmall: '13px',
+  indicatorIndexFontSizeSmall: '11px',
+  indicatorColorFinish: '#22c55e',
+  indicatorColorProcess: '#2563eb',
+  indicatorColorWait: '#e5e7eb',
+  indicatorBorderColorFinish: '#86efac',
+  indicatorBorderColorProcess: '#93c5fd',
+  indicatorBorderColorWait: '#d1d5db',
+  indicatorTextColorFinish: '#ffffff',
+  indicatorTextColorProcess: '#ffffff',
+  indicatorTextColorWait: '#6b7280',
+  headerTextColorFinish: '#15803d',
+  headerTextColorProcess: '#2563eb',
+  headerTextColorWait: '#6b7280',
+  descriptionTextColorFinish: '#16a34a',
+  descriptionTextColorProcess: '#1d4ed8',
+  descriptionTextColorWait: '#9ca3af',
+  splitorColorFinish: '#93c5fd',
+  splitorColorProcess: '#bfdbfe',
+  splitorColorWait: '#d1d5db',
+}
+
 function resolveStepState(
   activeStatuses: string[],
   doneStatuses: string[],
@@ -310,6 +308,94 @@ function resolveStepState(
   if (doneStatuses.includes(mainStatus)) return 'done'
   if (activeStatuses.includes(mainStatus)) return 'current'
   return 'pending'
+}
+
+function resolveNormalDesignStepState(
+  task: Task,
+  mainStatus?: string,
+  legacyStatus?: string,
+): StepState {
+  if (['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'].includes(mainStatus ?? '')) {
+    return 'done'
+  }
+  if (legacyStatus === 'PendingAuditA' || legacyStatus === 'PendingAuditB') {
+    return 'done'
+  }
+  switch (task.designSubStatus) {
+    case 'PENDING_AUDIT':
+    case 'APPROVED':
+    case 'FINALIZED':
+      return 'done'
+    case 'PENDING_ASSIGN':
+    case 'IN_PROGRESS':
+    case 'REJECTED':
+      return 'current'
+    case 'NOT_REQUIRED':
+      return 'skipped'
+    default:
+      return mainStatus === 'INFO_PENDING' ? 'current' : 'pending'
+  }
+}
+
+function resolveNormalAuditStepState(
+  task: Task,
+  mainStatus?: string,
+  legacyStatus?: string,
+): StepState {
+  if (['WAREHOUSE_PENDING', 'WAREHOUSE_PROCESSING', 'READY_TO_CLOSE', 'CLOSED'].includes(mainStatus ?? '')) {
+    return 'done'
+  }
+  if (legacyStatus === 'PendingAuditA' || legacyStatus === 'PendingAuditB') {
+    return 'current'
+  }
+  switch (task.auditSubStatus) {
+    case 'PENDING':
+    case 'IN_PROGRESS':
+      return 'current'
+    case 'PASSED':
+    case 'TRANSFERRED':
+    case 'HANDED_OVER':
+      return 'done'
+    case 'REJECTED':
+      return 'pending'
+    case 'NOT_REQUIRED':
+      return 'skipped'
+    default:
+      return 'pending'
+  }
+}
+
+function normalDesignProgressSubLabel(task: Task, state: StepState): string | undefined {
+  switch (task.designSubStatus) {
+    case 'PENDING_ASSIGN':
+      return '待指派'
+    case 'IN_PROGRESS':
+      return '设计中'
+    case 'REJECTED':
+      return '需修改'
+    case 'PENDING_AUDIT':
+      return '已提交'
+    case 'APPROVED':
+      return '已通过'
+    case 'FINALIZED':
+      return '已定稿'
+    case 'NOT_REQUIRED':
+      return state === 'skipped' ? '无需设计' : undefined
+    default:
+      return task.designSubStatus ? getDesignSubStatusLabel(task.designSubStatus) : undefined
+  }
+}
+
+/** 定制任务：仓库未进入流程时不展示 workflow.not_triggered → NOT_REQUIRED 的「无需仓库」。 */
+function customizationWarehouseSubLabel(
+  warehouseStepState: StepState,
+  warehouseSubStatus?: Task['warehouseSubStatus'],
+): string | undefined {
+  if (warehouseStepState === 'pending') return undefined
+  if (!warehouseSubStatus || warehouseSubStatus === 'NOT_REQUIRED') {
+    return warehouseStepState === 'current' ? '待接收' : undefined
+  }
+  return getWarehouseSubStatusLabel(warehouseSubStatus)
 }
 </script>
 
@@ -342,17 +428,24 @@ function resolveStepState(
   border: 2px solid #d1d5db;
   background: #fff;
   color: #9ca3af;
-  transition: border-color 0.2s, background 0.2s;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.18s ease,
+    opacity 0.18s ease;
 }
 .step-done .step-dot {
-  border-color: #059669;
-  background: #059669;
-  color: #fff;
+  border-color: #86efac;
+  background: #22c55e;
+  color: #03120b;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12), 0 8px 18px -14px rgba(34, 197, 94, 0.9);
 }
 .step-current .step-dot {
-  border-color: #1890ff;
-  background: #eff6ff;
-  color: #1890ff;
+  border-color: #93c5fd;
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .step-skipped .step-dot {
   border-color: #e5e7eb;
@@ -363,12 +456,12 @@ function resolveStepState(
   width: 2px;
   flex: 1;
   min-height: 1.25rem;
-  background: #e5e7eb;
+  background: rgba(100, 116, 139, 0.35);
   margin: 2px 0;
 }
 .step-done .step-line,
 .step-done + .step-row .step-line {
-  background: #059669;
+  background: #93c5fd;
 }
 .step-content {
   padding: 0 0 0.875rem 0;
@@ -379,15 +472,15 @@ function resolveStepState(
 .step-label {
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #374151;
+  color: #6b7280;
   line-height: 1.25rem;
 }
-.step-done .step-label { color: #059669; }
-.step-current .step-label { color: #1d4ed8; font-weight: 600; }
+.step-done .step-label { color: #15803d; }
+.step-current .step-label { color: #2563eb; font-weight: 800; }
 .step-skipped .step-label { color: #9ca3af; text-decoration: line-through; }
 .step-sublabel {
   font-size: 0.6875rem;
-  color: #6b7280;
+  color: #9ca3af;
 }
 
 .workflow-progress--horizontal {
@@ -399,42 +492,207 @@ function resolveStepState(
   gap: 0.125rem 0.25rem;
   padding: 0.35rem 0.5rem;
 }
+.workflow-progress--naive {
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 0.28rem;
+  padding: 0.44rem 0.62rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f9fafb;
+  font-family: var(--yb-font-text);
+  box-shadow: none;
+}
+
+.workflow-progress--naive :deep(.n-step),
+.workflow-progress--naive :deep(.n-step-content),
+.workflow-progress--naive :deep(.n-step-content-header__title),
+.workflow-progress--naive :deep(.n-step-content__description) {
+  font-family: var(--yb-font-text) !important;
+}
+
+.workflow-progress--naive :deep(.n-step) {
+  width: auto !important;
+  min-width: 0;
+  flex: 0 1 auto !important;
+  align-items: center;
+}
+
+.workflow-progress--naive :deep(.n-step-indicator) {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  filter: none;
+}
+
+.workflow-progress--naive :deep(.n-step--process-status .n-step-indicator) {
+  filter: none;
+}
+
+.workflow-progress--naive :deep(.n-step-content) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: visible;
+  padding-left: 0.36rem;
+}
+
+.workflow-progress--naive :deep(.n-step-content-header) {
+  min-width: 0;
+  align-items: center;
+  gap: 0;
+}
+
+.workflow-progress--naive :deep(.n-step-content-header__title) {
+  max-width: none;
+  overflow: visible;
+  color: inherit;
+  text-overflow: clip;
+  white-space: nowrap;
+  letter-spacing: 0;
+}
+
+.workflow-progress--naive :deep(.n-step-content__description) {
+  max-width: none;
+  overflow: visible;
+  margin-top: 0.1rem;
+  font-size: 0.625rem;
+  line-height: 1.1;
+  opacity: 0.82;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.workflow-progress--naive :deep(.n-step--process-status) {
+  padding: 0.22rem 0.72rem 0.22rem 0.32rem;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  background: #eff6ff;
+  box-shadow: none;
+}
+
+.workflow-progress--naive :deep(.n-step--finish-status .n-step-content-header__title) {
+  color: #15803d;
+}
+
+.workflow-progress--naive :deep(.n-step--wait-status) {
+  opacity: 0.85;
+}
+
+.workflow-progress--naive :deep(.n-step--wait-status .n-step-content-header__title) {
+  color: #6b7280;
+}
+
+.workflow-progress--naive :deep(.n-step-splitor) {
+  width: clamp(1.25rem, 2.4vw, 2.5rem) !important;
+  min-width: clamp(1.25rem, 2.4vw, 2.5rem) !important;
+  max-width: 2.5rem;
+  flex: 0 0 clamp(1.25rem, 2.4vw, 2.5rem) !important;
+  height: 2px;
+  margin: 0 0.4rem;
+  border-radius: 999px;
+  opacity: 0.86;
+}
+
+.workflow-progress--naive :deep(.n-step--process-status .n-step-splitor) {
+  position: relative;
+  overflow: hidden;
+}
+
+.workflow-progress--naive :deep(.n-step--process-status .n-step-splitor)::after {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .workflow-progress--naive {
+    padding-inline: 0.5rem;
+    gap: 0.1rem;
+  }
+
+  .workflow-progress--naive :deep(.n-step-content) {
+    padding-left: 0.28rem;
+  }
+
+  .workflow-progress--naive :deep(.n-step-content-header__title) {
+    max-width: 3.7rem;
+    font-size: 0.72rem;
+  }
+
+  .workflow-progress--naive :deep(.n-step-content__description) {
+    display: none;
+  }
+
+  .workflow-progress--naive :deep(.n-step-splitor) {
+    width: 0.9rem !important;
+    min-width: 0.9rem !important;
+    flex-basis: 0.9rem !important;
+    margin-inline: 0.18rem;
+  }
+}
+
 .step-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.4rem;
   max-width: 100%;
+  border-radius: 999px;
+  opacity: 0.78;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    color 0.16s ease;
+}
+.step-chip:hover,
+.step-chip:focus-within {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+.step-chip.step-done,
+.step-chip.step-current {
+  opacity: 1;
 }
 .step-dot--sm {
-  width: 1rem;
-  height: 1rem;
+  position: relative;
+  width: 0.95rem;
+  height: 0.95rem;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 2px solid #d1d5db;
-  background: #fff;
-  color: #9ca3af;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(100, 116, 139, 0.22);
+  color: rgba(203, 213, 225, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.18s ease;
 }
 .step-check {
   width: 0.5rem;
   height: 0.5rem;
 }
 .step-done .step-dot--sm {
-  border-color: #059669;
-  background: #059669;
-  color: #fff;
+  border-color: #86efac;
+  background: #22c55e;
+  color: #03120b;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12), 0 8px 18px -14px rgba(34, 197, 94, 0.9);
 }
 .step-current .step-dot--sm {
-  border-color: #1890ff;
-  background: #eff6ff;
-  color: #1890ff;
+  border-color: #93c5fd;
+  background: #2563eb;
+  color: #ffffff;
+  transform: scale(1.05);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .step-skipped .step-dot--sm {
-  border-color: #e5e7eb;
-  background: #f9fafb;
-  color: #d1d5db;
+  border-color: rgba(100, 116, 139, 0.34);
+  background: rgba(71, 85, 105, 0.18);
+  color: rgba(100, 116, 139, 0.7);
 }
 .step-chip-text {
   display: inline-flex;
@@ -444,16 +702,18 @@ function resolveStepState(
   min-width: 0;
 }
 .workflow-progress--horizontal .step-label {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
+  font-weight: 750;
   padding: 0;
   line-height: 1.2;
+  color: #6b7280;
 }
 .workflow-progress--horizontal .step-chip.step-done .step-label {
-  color: #059669;
+  color: #15803d;
 }
 .workflow-progress--horizontal .step-chip.step-current .step-label {
-  color: #1d4ed8;
-  font-weight: 600;
+  color: #2563eb;
+  font-weight: 900;
 }
 .workflow-progress--horizontal .step-chip.step-skipped .step-label {
   color: #9ca3af;
@@ -461,13 +721,59 @@ function resolveStepState(
 }
 .step-sublabel-inline {
   font-size: 0.625rem;
-  color: #6b7280;
-  font-weight: 400;
+  color: #9ca3af;
+  font-weight: 500;
 }
 .step-sep {
-  font-size: 0.75rem;
-  color: #cbd5e1;
+  position: relative;
+  width: clamp(1.25rem, 4vw, 3.75rem);
+  height: 0.25rem;
+  overflow: hidden;
+  border-radius: 999px;
+  color: transparent;
+  background: #d1d5db;
   user-select: none;
-  padding: 0 0.1rem;
+  padding: 0;
+}
+.step-chip.step-done + .step-sep {
+  background: #93c5fd;
+}
+.step-chip.step-done + .step-sep::after,
+.step-chip.step-current + .step-sep::after {
+  display: none;
+}
+
+@keyframes workflow-current-breath {
+  0%,
+  100% {
+    box-shadow: 0 0 0 5px rgba(100, 210, 255, 0.12), 0 0 18px rgba(100, 210, 255, 0.24);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(100, 210, 255, 0.07), 0 0 28px rgba(100, 210, 255, 0.4);
+  }
+}
+
+@keyframes workflow-line-sweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-120%);
+  }
+  18%,
+  72% {
+    opacity: 0.62;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(240%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-current .step-dot,
+  .step-current .step-dot--sm,
+  .step-chip.step-done + .step-sep::after,
+  .step-chip.step-current + .step-sep::after {
+    animation: none !important;
+  }
 }
 </style>

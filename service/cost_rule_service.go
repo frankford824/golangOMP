@@ -440,6 +440,15 @@ func applyFixedUnitPrice(rule *domain.CostRule, area float64, quantity int64) (*
 
 func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes string) (float64, string, bool) {
 	expr := strings.TrimSpace(rule.FormulaExpression)
+	if expr == "size_lookup_required" && costRuleLooksLikeCopperPaper(rule, notes) {
+		side := detectPrintSide(process, notes)
+		price := 0.5
+		if side == "double" {
+			price = 0.6
+		}
+		total := price * float64(quantity)
+		return total, fmt.Sprintf("%s applied copper-paper %s print price %.3f", rule.RuleName, side, total), true
+	}
 	if strings.HasPrefix(expr, "print_side:") {
 		side := detectPrintSide(process, notes)
 		prices := parsePrintSideFormula(expr)
@@ -454,9 +463,17 @@ func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes
 			return 0, "", false
 		}
 		total := price * float64(quantity)
-		return total, fmt.Sprintf("%s applied %s print-side price %.2f", rule.RuleName, side, total), true
+		return total, fmt.Sprintf("%s applied %s print-side price %.3f", rule.RuleName, side, total), true
 	}
 	return 0, "", false
+}
+
+func costRuleLooksLikeCopperPaper(rule *domain.CostRule, notes string) bool {
+	if rule == nil {
+		return false
+	}
+	combined := strings.ToLower(strings.TrimSpace(rule.CategoryCode + " " + rule.RuleName + " " + notes))
+	return strings.Contains(combined, "copper_paper") || strings.Contains(combined, "铜版纸")
 }
 
 func parsePrintSideFormula(expr string) map[string]float64 {

@@ -1,10 +1,10 @@
-# V1 API 速查表(210 path · 一行一条)
+# V1 API 速查表(229 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 210 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 229 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -16,6 +16,8 @@
 | PUT | `/v1/auth/password` | Change current user password | PUT:已登录 / scope-aware | [V1_API_AUTH.md](V1_API_AUTH.md) |
 | GET | `/v1/me/task-drafts` | List my task drafts | GET:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
 | GET, PATCH | `/v1/me` | Get my profile；Update my profile | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
+| POST, DELETE | `/v1/me/avatar` | Upload my avatar；Delete my avatar | POST:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
+| GET | `/v1/me/avatar-files/{filename}` | Read avatar file | GET:公开 | [V1_API_ME.md](V1_API_ME.md) |
 | POST | `/v1/me/change-password` | Change my password | POST:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
 | GET | `/v1/me/org` | Get my org profile | GET:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
 | GET | `/v1/roles` | List role catalog | GET:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
@@ -45,11 +47,16 @@
 | GET | `/v1/org-move-requests` | List org move requests | GET:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org-move-requests/{id}/approve` | Approve an org move request | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org-move-requests/{id}/reject` | Reject an org move request | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
+| GET, POST | `/v1/trace-events` | List business trace events；Record frontend business trace event | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/tasks` | List tasks；Create task | GET:已登录 / 主流程读全量可见; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/filter-options` | Get task center filter options | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}` | Get task read model | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/predictions` | Get task next-action prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/product-info` | Get per-task product information；Patch per-task product information | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/cost-info` | Get per-task cost information；Patch per-task cost information | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/tasks/{id}/sku-items/{sku_item_id}` | Patch one batch SKU item | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/tasks/{id}/sku-items/{sku_item_id}/cost-info` | Patch per-SKU cost information for a batch task item | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-quote/preview` | Preview cost quote for one task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/tasks/{id}/business-info` | Update task business-info and generic cost fields | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/filing-status` | Get task filing status view | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -65,6 +72,7 @@
 | POST | `/v1/tasks/batch/remind` | Batch remind task handlers | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/submit-design` | Submit task design asset | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets` | List task-linked design assets | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/reference-assets/batch-download` | Batch download task reference direct URL manifest | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets/timeline` | List legacy task asset timeline | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets/{asset_id}/versions` | List versions under one design asset | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets/{asset_id}/download` | Get latest version download info for one design asset | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -122,7 +130,7 @@
 | GET | `/v1/tasks/{id}/events` | List task events | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/code-rules` | List code rules | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/code-rules/{id}/preview` | Preview generated code | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/code-rules/generate-sku` | Generate SKU code | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/code-rules/generate-sku` | [ARCHIVED] Legacy CodeRule SKU generation | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/sku/preview_code` | [V6] Preview SKU code | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/sku/list` | [V6] List SKUs | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/sku` | [V6] Create SKU | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -146,6 +154,13 @@
 | POST | `/v1/tasks/{id}/modules/{module_key}/reassign` | Reassign a task module within team scope | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/modules/{module_key}/pool-reassign` | Reassign a task module between pools | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cancel` | Cancel or close a task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/excel-assist/template.xlsx` | Download single-task Excel assist template | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/excel-assist/parse-excel` | Parse a single-task Excel assist file | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/predictions/search` | Get global-search prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/predictions/task-create` | Get task-create form prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/predictions/assets` | Get asset-center prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/predictions/management` | Get management prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/notifications/broadcast` | Broadcast a notification to one, many, or all users | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/task-create/asset-center/upload-sessions` | Create task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/task-create/asset-center/upload-sessions/{session_id}` | Get task-create reference upload session | GET:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/complete` | Complete task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
@@ -163,6 +178,8 @@
 | POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel` | Cancel upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort` | Abort upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/assets` | List assets | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/batch-download` | Batch download asset direct URL manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/excel-package/preview` | Preview Excel image package manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/download` | Get asset download info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/preview` | Get asset preview info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
@@ -174,6 +191,7 @@
 | GET, POST | `/v1/assets/upload-requests` | List asset upload requests；Create asset upload request | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/upload-requests/{id}` | Get asset upload request | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-requests/{id}/advance` | Advance asset upload request | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/search/batch` | Batch search assets by SKU or task number | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/versions/{version_id}/download` | Download a specific asset version | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/{asset_id}/archive` | Archive an asset | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/{asset_id}/restore` | Restore an archived asset | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
@@ -219,3 +237,4 @@
 | GET | `/v1/reports/l1/cards` | Get L1 report cards | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/throughput` | Get L1 throughput report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/module-dwell` | Get L1 module dwell report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
+| GET | `/v1/reports/l1/kpi-events` | Get enriched KPI task events | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |

@@ -31,7 +31,8 @@
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `keyword` | query | string | 否 | Fuzzy match file_name / task_no / task title. |
+| `keyword` | query | string | 否 | Fuzzy match system asset fields and indexed external resource paths/names. |
+| `source` | query | enum(all/system/external) | 否 | Resource source bucket. `all` returns system + external; external resources are read-only and prepared for preview/download on demand. |
 | `module_key` | query | enum(basic_info/design/audit/warehouse/customization/procurement/retouch) | 否 | Restrict to one source module. |
 | `owner_team_code` | query | string | 否 | Restrict to one owner team. |
 | `is_archived` | query | enum(true/false/all) | 否 | Archive filter. Default `false`. `all` returns active + archived. |

@@ -16,13 +16,37 @@ func NewReportL1Repo(db *DB) repo.ReportL1Repo { return &reportL1Repo{db: db} }
 
 func (r *reportL1Repo) GetCards(ctx context.Context) ([]domain.L1Card, error) {
 	var inProgress, completedToday, archivedTotal int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE task_status NOT IN ('closed', 'archived', 'cancelled', 'Draft')`).Scan(&inProgress); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM tasks
+		 WHERE task_status NOT IN ('Draft', 'Completed', 'Archived', 'Cancelled')`).Scan(&inProgress); err != nil {
 		return nil, fmt.Errorf("card in progress: %w", err)
 	}
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT t.id) FROM tasks t JOIN task_modules tm ON tm.task_id=t.id JOIN task_module_events e ON e.task_module_id=tm.id WHERE e.event_type IN ('closed','archived','approved') AND DATE(e.created_at)=UTC_DATE()`).Scan(&completedToday); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT t.id)
+		  FROM tasks t
+		 WHERE t.task_status IN ('Completed', 'Archived')
+		   AND (
+		     DATE(t.updated_at) = UTC_DATE()
+		     OR EXISTS (
+		       SELECT 1
+		         FROM task_event_logs tel
+		        WHERE tel.task_id = t.id
+		          AND tel.event_type IN (
+		            'task.closed',
+		            'task.warehouse.completed',
+		            'task.audit.approved',
+		            'task.customization.reviewed'
+		          )
+		          AND DATE(tel.created_at) = UTC_DATE()
+		     )
+		   )`).Scan(&completedToday); err != nil {
 		return nil, fmt.Errorf("card completed today: %w", err)
 	}
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE task_status IN ('archived', 'closed')`).Scan(&archivedTotal); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM tasks
+		 WHERE task_status IN ('Completed', 'Archived')`).Scan(&archivedTotal); err != nil {
 		return nil, fmt.Errorf("card archived total: %w", err)
 	}
 	return []domain.L1Card{
@@ -35,19 +59,51 @@ func (r *reportL1Repo) GetCards(ctx context.Context) ([]domain.L1Card, error) {
 func (r *reportL1Repo) GetThroughput(ctx context.Context, filter repo.ReportL1Filter) ([]domain.L1ThroughputPoint, error) {
 	where, args := reportFilterWhere(filter, "t")
 	query := `
-		SELECT DATE_FORMAT(e.created_at, '%Y-%m-%d') AS day,
-		       SUM(CASE WHEN e.event_type = 'created' THEN 1 ELSE 0 END) AS created_count,
-		       COUNT(DISTINCT CASE WHEN e.event_type IN ('closed','archived','approved') OR t.task_status IN ('closed','archived') THEN t.id END) AS completed_count,
-		       COUNT(DISTINCT CASE WHEN e.event_type IN ('closed','archived','approved') OR t.task_status IN ('closed','archived') THEN t.id END) AS archived_count
-		  FROM task_module_events e
-		  JOIN task_modules tm ON tm.id = e.task_module_id
-		  JOIN tasks t ON t.id = tm.task_id
-		 WHERE e.created_at >= ? AND e.created_at < ?
-		   AND e.event_type <> 'backfill_placeholder'` + where + `
-		 GROUP BY DATE_FORMAT(e.created_at, '%Y-%m-%d')
+		WITH dates AS (
+			SELECT DATE(t.created_at) AS day
+			  FROM tasks t
+			 WHERE t.created_at >= ? AND t.created_at < ?` + where + `
+			 GROUP BY DATE(t.created_at)
+			UNION
+			SELECT DATE(tel.created_at) AS day
+			  FROM task_event_logs tel
+			  JOIN tasks t ON t.id = tel.task_id
+			 WHERE tel.created_at >= ? AND tel.created_at < ?
+			   AND tel.event_type IN (
+			     'task.audit.approved',
+			     'task.customization.reviewed',
+			     'task.warehouse.completed',
+			     'task.closed'
+			   )` + where + `
+			 GROUP BY DATE(tel.created_at)
+		)
+		SELECT DATE_FORMAT(d.day, '%Y-%m-%d') AS day,
+		       COALESCE(created.created_count, 0) AS created_count,
+		       COALESCE(done.completed_count, 0) AS completed_count,
+		       COALESCE(done.completed_count, 0) AS archived_count
+		  FROM dates d
+		  LEFT JOIN (
+		    SELECT DATE(t.created_at) AS day, COUNT(*) AS created_count
+		      FROM tasks t
+		     WHERE t.created_at >= ? AND t.created_at < ?` + where + `
+		     GROUP BY DATE(t.created_at)
+		  ) created ON created.day = d.day
+		  LEFT JOIN (
+		    SELECT DATE(tel.created_at) AS day, COUNT(DISTINCT tel.task_id) AS completed_count
+		      FROM task_event_logs tel
+		      JOIN tasks t ON t.id = tel.task_id
+		     WHERE tel.created_at >= ? AND tel.created_at < ?
+		       AND tel.event_type IN (
+		         'task.audit.approved',
+		         'task.customization.reviewed',
+		         'task.warehouse.completed',
+		         'task.closed'
+		       )` + where + `
+		     GROUP BY DATE(tel.created_at)
+		  ) done ON done.day = d.day
 		 ORDER BY day ASC`
-	args = append([]interface{}{filter.From, filter.To.AddDate(0, 0, 1)}, args...)
-	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	queryArgs := reportRepeatedRangeArgs(filter, args, 4)
+	rows, err := r.db.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("throughput: %w", err)
 	}
@@ -67,25 +123,75 @@ func (r *reportL1Repo) GetThroughput(ctx context.Context, filter repo.ReportL1Fi
 func (r *reportL1Repo) GetModuleDwell(ctx context.Context, filter repo.ReportL1Filter) ([]domain.L1ModuleDwellPoint, error) {
 	where, args := reportFilterWhere(filter, "t")
 	query := `
-		WITH samples AS (
-			SELECT tm.module_key,
-			       TIMESTAMPDIFF(SECOND, e.created_at, exit_e.created_at) AS dwell_seconds
-			  FROM task_module_events e
-			  JOIN task_modules tm ON tm.id = e.task_module_id
-			  JOIN tasks t ON t.id = tm.task_id
-			  JOIN task_module_events exit_e
-			    ON exit_e.task_module_id = e.task_module_id
-			   AND exit_e.created_at > e.created_at
-			   AND exit_e.event_type IN ('submitted','approved','rejected','closed','archived')
-			 WHERE e.event_type IN ('entered','claimed','created')
-			   AND e.created_at >= ? AND e.created_at < ?
-			   AND e.event_type <> 'backfill_placeholder'` + where + `
+		WITH normalized_events AS (
+			SELECT t.id AS task_id, 'task_detail' AS module_key, t.created_at AS start_at,
+			       COALESCE(
+			         MIN(CASE WHEN tel.event_type IN ('task.assigned', 'task.reassigned', 'task.design.submitted') THEN tel.created_at END),
+			         t.updated_at
+			       ) AS end_at
+			  FROM tasks t
+			  LEFT JOIN task_event_logs tel ON tel.task_id = t.id AND tel.created_at >= t.created_at
+			 WHERE t.created_at >= ? AND t.created_at < ?` + where + `
+			 GROUP BY t.id, t.created_at, t.updated_at
+			UNION ALL
+			SELECT t.id AS task_id, 'design' AS module_key, start_e.created_at AS start_at,
+			       MIN(end_e.created_at) AS end_at
+			  FROM task_event_logs start_e
+			  JOIN tasks t ON t.id = start_e.task_id
+			  JOIN task_event_logs end_e
+			    ON end_e.task_id = start_e.task_id
+			   AND end_e.created_at > start_e.created_at
+			   AND end_e.event_type IN ('task.design.submitted', 'task.reassigned', 'task.audit.approved', 'task.audit.rejected')
+			 WHERE start_e.event_type IN ('task.assigned', 'task.reassigned', 'task.batch_assigned')
+			   AND start_e.created_at >= ? AND start_e.created_at < ?` + where + `
+			 GROUP BY t.id, start_e.created_at
+			UNION ALL
+			SELECT t.id AS task_id, 'audit' AS module_key, start_e.created_at AS start_at,
+			       MIN(end_e.created_at) AS end_at
+			  FROM task_event_logs start_e
+			  JOIN tasks t ON t.id = start_e.task_id
+			  JOIN task_event_logs end_e
+			    ON end_e.task_id = start_e.task_id
+			   AND end_e.created_at > start_e.created_at
+			   AND end_e.event_type IN ('task.audit.approved', 'task.audit.rejected')
+			 WHERE start_e.event_type = 'task.design.submitted'
+			   AND start_e.created_at >= ? AND start_e.created_at < ?` + where + `
+			 GROUP BY t.id, start_e.created_at
+			UNION ALL
+			SELECT t.id AS task_id, 'customization' AS module_key, start_e.created_at AS start_at,
+			       MIN(end_e.created_at) AS end_at
+			  FROM task_event_logs start_e
+			  JOIN tasks t ON t.id = start_e.task_id
+			  JOIN task_event_logs end_e
+			    ON end_e.task_id = start_e.task_id
+			   AND end_e.created_at > start_e.created_at
+			   AND end_e.event_type IN ('task.customization.reviewed', 'task.design.submitted', 'task.audit.approved', 'task.audit.rejected')
+			 WHERE t.customization_required = 1
+			   AND start_e.event_type = 'task.design.submitted'
+			   AND start_e.created_at >= ? AND start_e.created_at < ?` + where + `
+			 GROUP BY t.id, start_e.created_at
+			UNION ALL
+			SELECT t.id AS task_id, 'warehouse' AS module_key, start_e.created_at AS start_at,
+			       MIN(end_e.created_at) AS end_at
+			  FROM task_event_logs start_e
+			  JOIN tasks t ON t.id = start_e.task_id
+			  JOIN task_event_logs end_e
+			    ON end_e.task_id = start_e.task_id
+			   AND end_e.created_at > start_e.created_at
+			   AND end_e.event_type IN ('task.warehouse.received', 'task.warehouse.completed', 'task.closed')
+			 WHERE start_e.event_type IN ('task.audit.approved', 'task.customization.reviewed')
+			   AND start_e.created_at >= ? AND start_e.created_at < ?` + where + `
+			 GROUP BY t.id, start_e.created_at
 		),
 		ranked AS (
 			SELECT module_key, dwell_seconds,
 			       ROW_NUMBER() OVER (PARTITION BY module_key ORDER BY dwell_seconds) AS rn,
 			       COUNT(*) OVER (PARTITION BY module_key) AS cnt
-			  FROM samples
+			  FROM (
+			    SELECT module_key, TIMESTAMPDIFF(SECOND, start_at, end_at) AS dwell_seconds
+			      FROM normalized_events
+			     WHERE end_at IS NOT NULL AND end_at > start_at
+			  ) samples
 			 WHERE dwell_seconds IS NOT NULL AND dwell_seconds >= 0
 		)
 		SELECT module_key,
@@ -94,8 +200,8 @@ func (r *reportL1Repo) GetModuleDwell(ctx context.Context, filter repo.ReportL1F
 		       COUNT(*) AS samples
 		  FROM ranked
 		 GROUP BY module_key`
-	args = append([]interface{}{filter.From, filter.To.AddDate(0, 0, 1)}, args...)
-	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	queryArgs := reportRepeatedRangeArgs(filter, args, 5)
+	rows, err := r.db.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("module dwell: %w", err)
 	}
@@ -149,4 +255,17 @@ func reportFilterWhere(filter repo.ReportL1Filter, taskAlias string) (string, []
 		return "", nil
 	}
 	return " AND " + strings.Join(where, " AND "), args
+}
+
+func reportRepeatedRangeArgs(filter repo.ReportL1Filter, whereArgs []interface{}, count int) []interface{} {
+	if count <= 0 {
+		return nil
+	}
+	rangeEnd := filter.To.AddDate(0, 0, 1)
+	out := make([]interface{}, 0, count*(2+len(whereArgs)))
+	for i := 0; i < count; i++ {
+		out = append(out, filter.From, rangeEnd)
+		out = append(out, whereArgs...)
+	}
+	return out
 }

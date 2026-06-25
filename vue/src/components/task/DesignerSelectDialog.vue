@@ -1,20 +1,20 @@
 <template>
   <BaseModal
     :model-value="modelValue"
-    title="指派设计师"
+    :title="title"
     :show-confirm="false"
     @update:model-value="$emit('update:modelValue', $event)"
   >
     <template #default>
       <div class="space-y-3">
         <p class="text-sm text-slate-600">
-          请选择本次任务的负责设计师，后续审核与交班将以此为基础。
+          {{ description }}
         </p>
         <div v-if="loading" class="designer-loading text-sm text-slate-500 py-4">
-          加载设计师列表...
+          {{ loadingLabel }}
         </div>
         <div v-else-if="!designers.length" class="designer-empty text-sm text-slate-500 py-4">
-          暂无可指派的设计师，请先在用户管理中配置设计师角色
+          {{ emptyHint }}
         </div>
         <div v-else class="designer-list">
           <label
@@ -30,7 +30,7 @@
             />
             <span class="designer-name">{{ designer.name }}</span>
             <span class="designer-role">
-              {{ designer.role === 'lead' ? '主设计' : '设计师' }}
+              {{ designer.role === 'lead' ? leadRoleLabel : assigneeRoleLabel }}
             </span>
           </label>
         </div>
@@ -47,7 +47,7 @@
           :disabled="!selectedDesigner || loading"
           @click="onConfirm"
         >
-          确认指派
+          {{ confirmLabel }}
         </BaseButton>
       </footer>
     </template>
@@ -66,8 +66,24 @@ const props = withDefaults(
     designers: Designer[]
     loading?: boolean
     currentAssigneeId?: string | null
+    title?: string
+    description?: string
+    loadingLabel?: string
+    emptyHint?: string
+    confirmLabel?: string
+    assigneeRoleLabel?: string
+    leadRoleLabel?: string
   }>(),
-  { loading: false },
+  {
+    loading: false,
+    title: '指派设计师',
+    description: '请选择本次任务的负责设计师，后续审核与交班将以此为基础。',
+    loadingLabel: '加载设计师列表...',
+    emptyHint: '暂无可指派的设计师，请先在用户管理中配置设计师角色',
+    confirmLabel: '确认指派',
+    assigneeRoleLabel: '设计师',
+    leadRoleLabel: '主设计',
+  },
 )
 
 const emit = defineEmits<{
@@ -114,28 +130,50 @@ function onConfirm() {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .designer-item:hover {
-  background-color: #f8fafc;
+  background-color: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.designer-item:has(.designer-radio:checked) {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+}
+
+.designer-item:has(.designer-radio:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .designer-radio {
   margin: 0;
+  accent-color: #2563eb;
 }
 
 .designer-name {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #0f172a;
+  color: #111827;
 }
 
 .designer-role {
   margin-left: auto;
   font-size: 0.75rem;
-  color: #64748b;
+  color: #6b7280;
+}
+
+.designer-item:has(.designer-radio:checked) .designer-name {
+  color: #1d4ed8;
+}
+
+.designer-item:has(.designer-radio:checked) .designer-role {
+  color: #2563eb;
 }
 </style>
 

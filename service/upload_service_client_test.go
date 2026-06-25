@@ -355,6 +355,83 @@ func TestUploadServiceClientProbeStoredFileEscapesStorageKeyPath(t *testing.T) {
 	}
 }
 
+func TestUploadServiceClientOpenStoredFileUsesInternalHeadersAndReturnsBody(t *testing.T) {
+	const storageKey = "tasks/T1/assets/A1/v1/source/test.psd"
+	var gotPath string
+	var gotInternalToken string
+	var gotStorageProvider string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		gotInternalToken = r.Header.Get("X-Internal-Token")
+		gotStorageProvider = r.Header.Get("X-Storage-Provider")
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = io.WriteString(w, "payload-123")
+	}))
+	defer server.Close()
+
+	client := NewUploadServiceClient(UploadServiceClientConfig{
+		Enabled:         true,
+		BaseURL:         server.URL,
+		Timeout:         5 * time.Second,
+		InternalToken:   "internal-token",
+		StorageProvider: "oss",
+	})
+
+	stream, err := client.OpenStoredFile(context.Background(), RemoteProbeStoredFileRequest{StorageKey: storageKey})
+	if err != nil {
+		t.Fatalf("OpenStoredFile() error = %v", err)
+	}
+	defer stream.Close()
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("io.ReadAll(stream) error = %v", err)
+	}
+	if string(body) != "payload-123" {
+		t.Fatalf("body = %q, want payload-123", string(body))
+	}
+	if gotPath != "/files/tasks/T1/assets/A1/v1/source/test.psd" {
+		t.Fatalf("request path = %q", gotPath)
+	}
+	if gotInternalToken != "internal-token" {
+		t.Fatalf("X-Internal-Token = %q, want internal-token", gotInternalToken)
+	}
+	if gotStorageProvider != "oss" {
+		t.Fatalf("X-Storage-Provider = %q, want oss", gotStorageProvider)
+	}
+}
+
+func TestUploadServiceClientOpenStoredFileReturnsHTTPErrorOnNon2xx(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "missing object")
+	}))
+	defer server.Close()
+
+	client := NewUploadServiceClient(UploadServiceClientConfig{
+		Enabled: true,
+		BaseURL: server.URL,
+		Timeout: 5 * time.Second,
+	})
+
+	stream, err := client.OpenStoredFile(context.Background(), RemoteProbeStoredFileRequest{StorageKey: "tasks/not-found.psd"})
+	if err == nil {
+		if stream != nil {
+			_ = stream.Close()
+		}
+		t.Fatal("OpenStoredFile() error = nil, want non-nil")
+	}
+	httpErr, ok := err.(*UploadServiceHTTPError)
+	if !ok {
+		t.Fatalf("error type = %T, want *UploadServiceHTTPError", err)
+	}
+	if httpErr.Operation != "open_stored_file" {
+		t.Fatalf("httpErr.Operation = %q", httpErr.Operation)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("httpErr.StatusCode = %d, want 404", httpErr.StatusCode)
+	}
+}
+
 func TestUploadServiceClientSmallSessionUploadUsesPOSTWhenMethodMissing(t *testing.T) {
 	var uploadMethod string
 	var contentType string

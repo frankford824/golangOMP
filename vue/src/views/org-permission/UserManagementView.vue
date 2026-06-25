@@ -8,13 +8,23 @@
           <h2 class="page-title">用户与角色管理</h2>
           <p class="page-sub">维护账号、组织归属与工作流角色</p>
         </div>
-        <BaseButton
-          v-if="canCreateUser"
-          type="button"
-          @click="showCreateModal = true"
-        >
-          新增用户
-        </BaseButton>
+        <div class="page-header-actions">
+          <BaseButton
+            v-if="canManageOrg"
+            type="button"
+            variant="secondary"
+            @click="goOrgPermission"
+          >
+            组织主数据管理
+          </BaseButton>
+          <BaseButton
+            v-if="canCreateUser"
+            type="button"
+            @click="showCreateModal = true"
+          >
+            新增用户
+          </BaseButton>
+        </div>
       </header>
     <div v-if="!canManage" class="mt-6">
       <BaseEmptyState title="无管理权限" description="需要组织管理权限才能访问本页。" />
@@ -258,7 +268,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { usersApi } from '@/services/api/usersApi'
 import {
   departmentsAndGroupsFromOrgOptions,
@@ -278,12 +289,15 @@ import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
 
+const router = useRouter()
 const permissionsStore = usePermissionsStore()
 const { can } = usePermission()
 
 // v1.8 对齐：用户与角色页面同时向 HRAdmin / SuperAdmin 与 DepartmentAdmin 开放。
 // 以下 gate 全部走 action key，不再使用 `|| isDeptAdmin` 之类角色名兜底。
 const canManage = computed(() => can('user.manage') || can('department.manage'))
+// 与 OrgPermissionView 一致：仅持有 org.manage 的用户可进入组织主数据页。
+const canManageOrg = computed(() => can('org.manage'))
 const canCreateUser = computed(() => can('user.manage') || can('department.users.create'))
 const canMoveTeam = computed(() => can('user.manage') || can('department.users.move_team'))
 const canDisableUser = computed(() => can('user.manage') || can('department.users.disable'))
@@ -309,6 +323,10 @@ const canClearMembership = computed(() => can('user.manage'))
 // 只读视图——复选框保留展示当前归属，但被 `:disabled` 并通过 `.roles-grid-readonly` 调灰，
 // 避免"能勾但无处提交"的误导。
 const canAssignRoles = computed(() => can('role.assign'))
+
+function goOrgPermission() {
+  void router.push({ name: 'OrgPermission' })
+}
 
 interface UserRow {
   id: string
@@ -340,6 +358,8 @@ const selectedRoleCodes = ref<string[]>([])
 const membershipForm = ref<{ department: string; team: string }>({ department: '', team: '' })
 const membershipSubmitting = ref(false)
 const roleOptions = ref<RoleOption[]>([])
+let listAbort: AbortController | null = null
+let listSeq = 0
 
 const page = ref(1)
 const pageSize = ref(20)
@@ -465,6 +485,10 @@ async function loadRoleOptions() {
 }
 
 async function loadUsers() {
+  listAbort?.abort()
+  const seq = ++listSeq
+  const abortController = new AbortController()
+  listAbort = abortController
   listLoading.value = true
   listError.value = ''
   try {
@@ -483,7 +507,8 @@ async function loadUsers() {
       ...(roleFilter.value ? { role: roleFilter.value } : {}),
       ...(deptScope ? { department: deptScope } : departmentFilter.value ? { department: departmentFilter.value } : {}),
       ...(teamFilter.value ? { team: teamFilter.value } : {}),
-    })
+    }, abortController.signal)
+    if (abortController.signal.aborted || seq !== listSeq) return
     const data = res?.data
     const list = Array.isArray(data?.data) ? data.data : []
     const p = (data?.pagination ?? {}) as Record<string, unknown>
@@ -496,9 +521,15 @@ async function loadUsers() {
       page_size: typeof p.page_size === 'number' ? p.page_size : pageSize.value,
     }
   } catch (e) {
+    if (abortController.signal.aborted || seq !== listSeq) return
     listError.value = e instanceof Error ? e.message : '加载用户列表失败'
   } finally {
-    listLoading.value = false
+    if (listAbort === abortController) {
+      listAbort = null
+    }
+    if (seq === listSeq) {
+      listLoading.value = false
+    }
   }
 }
 
@@ -727,6 +758,12 @@ onMounted(() => {
     void loadUsers()
   })
 })
+
+onBeforeUnmount(() => {
+  listSeq += 1
+  listAbort?.abort()
+  listAbort = null
+})
 </script>
 
 <style scoped>
@@ -742,6 +779,13 @@ onMounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .page-title {
@@ -957,7 +1001,7 @@ onMounted(() => {
 
 .td-mono {
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  font-family: var(--yb-font-data);
   font-size: 0.8125rem;
   color: #27272a;
 }
@@ -1038,6 +1082,7 @@ onMounted(() => {
   min-width: 4.75rem;
 }
 
+/* —— 弹窗可读性层：浅色后台风格，仅作用于新增用户 / 角色管理 —— */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -1046,30 +1091,180 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(9, 9, 11, 0.45);
-  backdrop-filter: blur(4px);
+  background: rgba(15, 23, 42, 0.45);
 }
 
 .modal-panel {
   min-width: 320px;
   max-width: 92vw;
   width: 640px;
-  background: #fff;
-  border-radius: 0.75rem;
-  padding: 1.25rem;
   max-height: min(90dvh, 900px);
   overflow-y: auto;
 }
 
-.um-modal {
-  box-shadow:
-    0 24px 48px -12px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e4e4e7;
+.modal-panel.um-modal {
+  padding: 1.35rem 1.5rem 1.2rem;
+  border-radius: 0.875rem;
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12) !important;
 }
 
-.modal-actions {
-  margin-top: 1.25rem;
+.um-modal .section-title {
+  margin: 0 0 1.1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #111827 !important;
+  line-height: 1.3;
+}
+
+.um-modal :where(.text-slate-600) {
+  color: #6b7280 !important;
+}
+
+.um-modal .form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.um-modal .roles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid #e5e7eb !important;
+  background: #f9fafb !important;
+  box-shadow: none;
+}
+
+.um-modal .roles-grid-readonly {
+  opacity: 0.72;
+}
+
+.um-modal .roles-grid-readonly .role-check {
+  cursor: not-allowed;
+  background: #f3f4f6 !important;
+  border-color: #e5e7eb !important;
+}
+
+.um-modal .roles-grid-readonly .role-check:hover {
+  border-color: #e5e7eb !important;
+  background: #f3f4f6 !important;
+}
+
+.um-modal .roles-grid-readonly .role-check input {
+  cursor: not-allowed;
+}
+
+.um-modal .role-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.65rem;
+  margin: 0;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.um-modal .role-check:hover {
+  border-color: #93c5fd !important;
+  background: #f9fafb !important;
+}
+
+.um-modal .role-check:has(input:checked) {
+  border-color: #2563eb !important;
+  background: #eff6ff !important;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12);
+}
+
+.um-modal .role-check:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.um-modal .role-check input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.um-modal .input {
+  width: 100%;
+  min-height: 2.5rem;
+  border: 1px solid #d1d5db !important;
+  border-radius: 0.625rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8125rem;
+  color: #111827 !important;
+  background: #ffffff !important;
+  color-scheme: light;
+  box-shadow: none !important;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.um-modal .input::placeholder {
+  color: #9ca3af !important;
+}
+
+.um-modal .input:focus {
+  outline: none;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+}
+
+.um-modal select.input {
+  cursor: pointer;
+  appearance: none;
+  background-color: #ffffff !important;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #6b7280 50%),
+    linear-gradient(135deg, #6b7280 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.1rem) calc(50% + 0.12rem),
+    calc(100% - 0.75rem) calc(50% + 0.12rem);
+  background-size:
+    0.35rem 0.35rem,
+    0.35rem 0.35rem;
+  background-repeat: no-repeat;
+  padding-right: 2rem;
+}
+
+.um-modal .modal-actions-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.35rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.um-modal .modal-actions {
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1077,74 +1272,74 @@ onMounted(() => {
   gap: 0.5rem;
 }
 
-.roles-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.4rem;
+.um-modal .um-btn--ghost {
+  color: #374151 !important;
+  background: #ffffff !important;
+  border-color: #d1d5db !important;
+  box-shadow: none;
 }
 
-.roles-grid-readonly {
-  opacity: 0.6;
+.um-modal .um-btn--ghost:hover:not(:disabled) {
+  color: #111827 !important;
+  background: #f9fafb !important;
+  border-color: #9ca3af !important;
 }
 
-.roles-grid-readonly .role-check {
-  cursor: not-allowed;
+.um-modal .um-btn--primary {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #fff !important;
+  box-shadow: none !important;
 }
 
-.roles-grid-readonly .role-check input {
-  cursor: not-allowed;
+.um-modal .um-btn--primary:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  box-shadow: none !important;
 }
 
-.role-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  color: #3f3f46;
-}
-
-.modal-actions-inline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.password-row {
+.um-modal .password-row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.5rem;
   align-items: center;
+  margin-top: 0.35rem;
+  padding: 0.75rem;
+  border-radius: 0.625rem;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
 
-.membership-row {
+.um-modal .membership-row {
   margin-top: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 0.625rem;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
 
-.membership-grid {
+.um-modal .membership-grid {
   display: grid;
   grid-template-columns: 1fr 1fr auto auto;
   gap: 0.5rem;
   align-items: center;
 }
 
-.role-readonly-hint {
+.um-modal .role-readonly-hint {
   font-size: 0.75rem;
-  color: #71717a;
+  color: #6b7280 !important;
   margin: 0;
 }
 
-.action-msg {
-  margin: 0;
+.um-modal .action-msg {
+  margin: 0.5rem 0 0;
+  padding: 0.45rem 0.65rem;
   font-size: 0.75rem;
-  color: #0d9488;
   font-weight: 500;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
+  color: #1d4ed8 !important;
+  border-radius: 0.5rem;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
 }
 
 @media (max-width: 1024px) {
@@ -1166,12 +1361,12 @@ onMounted(() => {
 }
 
 @media (max-width: 980px) {
-  .roles-grid,
-  .form-grid {
+  .um-modal .roles-grid,
+  .um-modal .form-grid {
     grid-template-columns: 1fr;
   }
 
-  .membership-grid {
+  .um-modal .membership-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -52,7 +52,7 @@
             </div>
             <div>
               <dt>替换人</dt>
-              <dd>{{ e.replacement_actor_name || e.replacement_actor_id || e.actor || '—' }}</dd>
+              <dd>{{ replacementActorText(e) }}</dd>
             </div>
             <div>
               <dt>来源</dt>
@@ -86,6 +86,7 @@ import { ref, watch } from 'vue'
 import type { RecentEvent } from '@/types/dashboard'
 import { tasksApi } from '@/services/api/tasksApi'
 import { extractTaskEventsList, mapTaskEventRowToRecentEvent } from '@/domain/mappers/task-events-from-api'
+import { userAccountDisplay } from '@/domain/user-display'
 
 const props = defineProps<{ modelValue: boolean; taskId?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean] }>()
@@ -135,6 +136,10 @@ function isReplacementEvent(event: RecentEvent): boolean {
   return Boolean(event.previous_asset_id || event.current_asset_id || event.replacement_actor_id)
 }
 
+function replacementActorText(event: RecentEvent): string {
+  return userAccountDisplay(event.replacement_actor_name, event.actor)
+}
+
 function laneAndDepartmentText(lane?: string, department?: string): string {
   const laneText =
     lane === 'customization' ? '定制' : lane === 'normal' ? '普通' : lane?.trim() || '—'
@@ -151,21 +156,25 @@ function handleClose() {
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 7200;
   display: flex;
   justify-content: flex-end;
 }
 .drawer-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 .drawer-panel {
   position: relative;
-  width: 400px;
-  max-width: 100%;
-  background: #fff;
-  box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1);
+  width: min(26rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
+  border-left: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: -20px 0 40px -12px rgba(15, 23, 42, 0.12);
+  color: #374151;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -175,33 +184,37 @@ function handleClose() {
   align-items: center;
   justify-content: space-between;
   padding: 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e5e7eb;
   flex-shrink: 0;
 }
 .drawer-title {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #0f172a;
+  color: #111827;
 }
 .drawer-close {
-  padding: 0.25rem;
+  padding: 0.25rem 0.5rem;
   font-size: 1.25rem;
   line-height: 1;
-  color: #64748b;
-  background: none;
-  border: none;
+  color: #6b7280;
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
   cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .drawer-close:hover {
-  color: #0f172a;
+  color: #374151;
+  border-color: #9ca3af;
+  background: #f3f4f6;
 }
 .drawer-loading,
 .drawer-empty,
 .drawer-error {
   padding: 1rem;
   font-size: 0.875rem;
-  color: #64748b;
+  color: #6b7280;
 }
 .drawer-error {
   color: #b91c1c;
@@ -215,12 +228,12 @@ function handleClose() {
 }
 .event-item {
   padding: 0.5rem 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f3f4f6;
   font-size: 0.8125rem;
 }
 .event-time {
   display: block;
-  color: #64748b;
+  color: #9ca3af;
   margin-bottom: 0.25rem;
 }
 .event-item-main {
@@ -231,16 +244,16 @@ function handleClose() {
 .event-type {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #334155;
+  color: #111827;
 }
 .event-summary {
   margin: 0;
   line-height: 1.45;
-  color: #0f172a;
+  color: #374151;
   font-size: 0.8125rem;
 }
 .event-text {
-  color: #0f172a;
+  color: #374151;
 }
 .event-replacement-grid {
   margin: 0.4rem 0 0;
@@ -250,12 +263,12 @@ function handleClose() {
 }
 .event-replacement-grid dt {
   font-size: 0.6875rem;
-  color: #64748b;
+  color: #9ca3af;
 }
 .event-replacement-grid dd {
   margin: 0;
   font-size: 0.75rem;
-  color: #0f172a;
+  color: #111827;
 }
 .trace-link {
   color: #2563eb;
@@ -263,5 +276,22 @@ function handleClose() {
 }
 .trace-link:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .drawer-overlay {
+    padding: 0.5rem 0 0;
+  }
+
+  .drawer-panel {
+    width: 100%;
+    max-width: 100%;
+    border-left: 0;
+    border-radius: 1rem 1rem 0 0;
+  }
+
+  .event-replacement-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

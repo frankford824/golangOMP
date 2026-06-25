@@ -4,10 +4,29 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
 )
+
+const (
+	auditLanePinnedNormalAuditorName        = "马雨琪"
+	auditLanePinnedCustomizationAuditorName = "章鹏鹏"
+)
+
+type auditLaneAccessSubject struct {
+	UserID int64
+	Label  string
+}
+
+type auditLaneProfile struct {
+	UserID      int64
+	Username    string
+	DisplayName string
+	Allowed     map[domain.TaskBusinessLane]struct{}
+}
 
 type auditV7Service struct {
 	taskRepo          repo.TaskRepo
@@ -18,6 +37,7 @@ type auditV7Service struct {
 	filingTrigger     auditTaskFilingTrigger
 	dataScopeResolver DataScopeResolver
 	scopeUserRepo     repo.UserRepo
+	assetFlowRepo     AuditAssetFlowRepo
 }
 
 type auditTaskFilingTrigger interface {
@@ -26,6 +46,11 @@ type auditTaskFilingTrigger interface {
 
 type taskNeedOutsourceUpdater interface {
 	UpdateNeedOutsource(ctx context.Context, tx repo.Tx, id int64, needOutsource bool) error
+}
+
+type AuditAssetFlowRepo interface {
+	MarkCurrentDeliveryVersionsApprovedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, approvedAt time.Time) (int64, error)
+	MarkCurrentDeliveryVersionsRejectedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, rejectedAt time.Time) (int64, error)
 }
 
 type AuditV7ServiceOption func(*auditV7Service)
@@ -45,6 +70,12 @@ func WithAuditV7DataScopeResolver(resolver DataScopeResolver) AuditV7ServiceOpti
 func WithAuditV7ScopeUserRepo(userRepo repo.UserRepo) AuditV7ServiceOption {
 	return func(s *auditV7Service) {
 		s.scopeUserRepo = userRepo
+	}
+}
+
+func WithAuditV7AssetFlowRepo(assetFlowRepo AuditAssetFlowRepo) AuditV7ServiceOption {
+	return func(s *auditV7Service) {
+		s.assetFlowRepo = assetFlowRepo
 	}
 }
 
@@ -78,6 +109,11 @@ func (s *auditV7Service) taskActionAuthorizer() *taskActionAuthorizer {
 func (s *auditV7Service) Claim(ctx context.Context, p ClaimAuditParams) *domain.AppError {
 	task, appErr := s.getTask(ctx, p.TaskID)
 	if appErr != nil {
+		return appErr
+	}
+	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditClaim), []auditLaneAccessSubject{
+		{UserID: p.AuditorID, Label: "auditor_id"},
+	}); appErr != nil {
 		return appErr
 	}
 	if appErr := s.taskActionAuthorizer().AuthorizeTaskActionWithAttributes(ctx, TaskActionAuditClaim, task, TaskActionAttributes{
@@ -130,6 +166,11 @@ func (s *auditV7Service) Approve(ctx context.Context, p ApproveAuditParams) *dom
 	if appErr != nil {
 		return appErr
 	}
+	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditApprove), []auditLaneAccessSubject{
+		{UserID: p.AuditorID, Label: "auditor_id"},
+	}); appErr != nil {
+		return appErr
+	}
 	authz := s.taskActionAuthorizer()
 	decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditApprove, task, "", "", TaskActionAttributes{
 		AuditStage: p.Stage,
@@ -180,6 +221,11 @@ func (s *auditV7Service) Approve(ctx context.Context, p ApproveAuditParams) *dom
 		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, nextHandlerID); err != nil {
 			return err
 		}
+		if p.NextStatus == domain.TaskStatusPendingWarehouseReceive && s.assetFlowRepo != nil {
+			if _, err := s.assetFlowRepo.MarkCurrentDeliveryVersionsApprovedForTask(ctx, tx, p.TaskID, p.AuditorID, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		eventExtra := map[string]interface{}{
 			"auditor_id":     p.AuditorID,
 			"stage":          string(p.Stage),
@@ -224,6 +270,11 @@ func (s *auditV7Service) Reject(ctx context.Context, p RejectAuditParams) *domai
 	if appErr != nil {
 		return appErr
 	}
+	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditReject), []auditLaneAccessSubject{
+		{UserID: p.AuditorID, Label: "auditor_id"},
+	}); appErr != nil {
+		return appErr
+	}
 	authz := s.taskActionAuthorizer()
 	decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditReject, task, "", "", TaskActionAttributes{
 		AuditStage: p.Stage,
@@ -266,6 +317,11 @@ func (s *auditV7Service) Reject(ctx context.Context, p RejectAuditParams) *domai
 		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, nextHandlerID); err != nil {
 			return err
 		}
+		if s.assetFlowRepo != nil {
+			if _, err := s.assetFlowRepo.MarkCurrentDeliveryVersionsRejectedForTask(ctx, tx, p.TaskID, p.AuditorID, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		rejectExtra := map[string]interface{}{
 			"auditor_id":     p.AuditorID,
 			"stage":          string(p.Stage),
@@ -297,6 +353,12 @@ func (s *auditV7Service) Reject(ctx context.Context, p RejectAuditParams) *domai
 func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *domain.AppError {
 	task, appErr := s.getTask(ctx, p.TaskID)
 	if appErr != nil {
+		return appErr
+	}
+	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditTransfer), []auditLaneAccessSubject{
+		{UserID: p.FromAuditorID, Label: "from_auditor_id"},
+		{UserID: p.ToAuditorID, Label: "to_auditor_id"},
+	}); appErr != nil {
 		return appErr
 	}
 	authz := s.taskActionAuthorizer()
@@ -354,6 +416,12 @@ func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *d
 func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*domain.AuditHandover, *domain.AppError) {
 	task, appErr := s.getTask(ctx, p.TaskID)
 	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditHandover), []auditLaneAccessSubject{
+		{UserID: p.FromAuditorID, Label: "from_auditor_id"},
+		{UserID: p.ToAuditorID, Label: "to_auditor_id"},
+	}); appErr != nil {
 		return nil, appErr
 	}
 	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
@@ -461,6 +529,13 @@ func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, audit
 	if appErr != nil {
 		return appErr
 	}
+	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditTakeover), []auditLaneAccessSubject{
+		{UserID: handover.FromAuditorID, Label: "handover_from_auditor_id"},
+		{UserID: handover.ToAuditorID, Label: "handover_to_auditor_id"},
+		{UserID: auditorID, Label: "auditor_id"},
+	}); appErr != nil {
+		return appErr
+	}
 	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionAuditTakeover, task); appErr != nil {
 		return appErr
 	}
@@ -538,6 +613,195 @@ func (s *auditV7Service) ensureNoPendingHandover(ctx context.Context, taskID int
 		}
 	}
 	return nil
+}
+
+func (s *auditV7Service) ensureAuditLanePolicy(
+	ctx context.Context,
+	task *domain.Task,
+	action string,
+	subjects []auditLaneAccessSubject,
+) *domain.AppError {
+	lane := domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired)
+	if appErr := s.ensureRequestActorLanePolicy(ctx, lane, action); appErr != nil {
+		return appErr
+	}
+	if s.scopeUserRepo == nil {
+		return nil
+	}
+	seen := map[int64]struct{}{}
+	for _, subject := range subjects {
+		if subject.UserID <= 0 {
+			continue
+		}
+		if _, exists := seen[subject.UserID]; exists {
+			continue
+		}
+		seen[subject.UserID] = struct{}{}
+		profile, appErr := s.resolveAuditLaneProfileByUserID(ctx, subject.UserID)
+		if appErr != nil {
+			return appErr
+		}
+		if !profile.allows(lane) {
+			return s.auditLaneDeniedError(action, lane, subject, profile)
+		}
+	}
+	return nil
+}
+
+func (s *auditV7Service) ensureRequestActorLanePolicy(ctx context.Context, lane domain.TaskBusinessLane, action string) *domain.AppError {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 {
+		return nil
+	}
+	profile, appErr := s.resolveAuditLaneProfileForRequestActor(ctx, actor)
+	if appErr != nil {
+		return appErr
+	}
+	if profile == nil || !profile.allows(lane) {
+		subject := auditLaneAccessSubject{UserID: actor.ID, Label: "request_actor"}
+		return s.auditLaneDeniedError(action, lane, subject, profile)
+	}
+	return nil
+}
+
+func (s *auditV7Service) resolveAuditLaneProfileForRequestActor(ctx context.Context, actor domain.RequestActor) (*auditLaneProfile, *domain.AppError) {
+	if actor.ID <= 0 {
+		return nil, nil
+	}
+	if s.scopeUserRepo != nil {
+		user, err := s.scopeUserRepo.GetByID(ctx, actor.ID)
+		if err != nil {
+			return nil, infraError("load request actor for audit lane", err)
+		}
+		if user != nil {
+			if len(user.Roles) == 0 {
+				user.Roles = append([]domain.Role(nil), actor.Roles...)
+			}
+			return buildAuditLaneProfileFromUser(user), nil
+		}
+	}
+	pseudoUser := &domain.User{
+		ID:          actor.ID,
+		Username:    strings.TrimSpace(actor.Username),
+		DisplayName: strings.TrimSpace(actor.Username),
+		Department:  domain.Department(strings.TrimSpace(actor.Department)),
+		Team:        strings.TrimSpace(actor.Team),
+		Roles:       append([]domain.Role(nil), actor.Roles...),
+	}
+	return buildAuditLaneProfileFromUser(pseudoUser), nil
+}
+
+func (s *auditV7Service) resolveAuditLaneProfileByUserID(ctx context.Context, userID int64) (*auditLaneProfile, *domain.AppError) {
+	if s.scopeUserRepo == nil {
+		return nil, nil
+	}
+	user, err := s.scopeUserRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, infraError("load audit subject", err)
+	}
+	if user == nil {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "audit lane policy: auditor not found", map[string]interface{}{
+			"deny_code": "audit_lane_subject_not_found",
+			"user_id":   userID,
+		})
+	}
+	return buildAuditLaneProfileFromUser(user), nil
+}
+
+func (s *auditV7Service) auditLaneDeniedError(
+	action string,
+	lane domain.TaskBusinessLane,
+	subject auditLaneAccessSubject,
+	profile *auditLaneProfile,
+) *domain.AppError {
+	details := map[string]interface{}{
+		"deny_code":     "audit_lane_forbidden",
+		"action":        action,
+		"business_lane": string(lane),
+		"subject":       subject.Label,
+		"user_id":       subject.UserID,
+	}
+	if profile != nil {
+		details["username"] = profile.Username
+		details["display_name"] = profile.DisplayName
+		details["allowed_lanes"] = profile.allowedLaneValues()
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "audit action is outside the auditor business lane", details)
+}
+
+func buildAuditLaneProfileFromUser(user *domain.User) *auditLaneProfile {
+	if user == nil {
+		return nil
+	}
+	profile := &auditLaneProfile{
+		UserID:      user.ID,
+		Username:    strings.TrimSpace(user.Username),
+		DisplayName: strings.TrimSpace(user.DisplayName),
+		Allowed:     map[domain.TaskBusinessLane]struct{}{},
+	}
+	if profile.DisplayName == auditLanePinnedNormalAuditorName || profile.Username == auditLanePinnedNormalAuditorName {
+		profile.Allow(domain.TaskBusinessLaneNormal)
+		return profile
+	}
+	if profile.DisplayName == auditLanePinnedCustomizationAuditorName || profile.Username == auditLanePinnedCustomizationAuditorName {
+		profile.Allow(domain.TaskBusinessLaneCustomization)
+		return profile
+	}
+	team := strings.TrimSpace(user.Team)
+	switch {
+	case strings.Contains(team, "定制"):
+		profile.Allow(domain.TaskBusinessLaneCustomization)
+	case strings.Contains(team, "普通"), strings.Contains(team, "常规"), strings.Contains(team, "设计审核"):
+		profile.Allow(domain.TaskBusinessLaneNormal)
+	}
+	if hasAnyRoleValue(user.Roles, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer) {
+		profile.Allow(domain.TaskBusinessLaneCustomization)
+	}
+	if hasAnyRoleValue(user.Roles, domain.RoleAuditA, domain.RoleAuditB, domain.RoleDesignReviewer) {
+		profile.Allow(domain.TaskBusinessLaneNormal)
+	}
+	if hasAnyRoleValue(user.Roles,
+		domain.RoleAdmin,
+		domain.RoleSuperAdmin,
+		domain.RoleRoleAdmin,
+		domain.RoleHRAdmin,
+		domain.RoleOrgAdmin,
+		domain.RoleDeptAdmin,
+		domain.RoleTeamLead,
+		domain.RoleDesignDirector,
+	) && len(profile.Allowed) == 0 {
+		return profile
+	}
+	return profile
+}
+
+func (p *auditLaneProfile) Allow(lane domain.TaskBusinessLane) {
+	if p == nil || !lane.Valid() {
+		return
+	}
+	if p.Allowed == nil {
+		p.Allowed = map[domain.TaskBusinessLane]struct{}{}
+	}
+	p.Allowed[lane] = struct{}{}
+}
+
+func (p *auditLaneProfile) allows(lane domain.TaskBusinessLane) bool {
+	if p == nil || !lane.Valid() {
+		return false
+	}
+	_, ok := p.Allowed[lane]
+	return ok
+}
+
+func (p *auditLaneProfile) allowedLaneValues() []string {
+	if p == nil || len(p.Allowed) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(p.Allowed))
+	for lane := range p.Allowed {
+		out = append(out, string(lane))
+	}
+	return out
 }
 
 func isClaimableStatus(status domain.TaskStatus, stage domain.AuditRecordStage) bool {

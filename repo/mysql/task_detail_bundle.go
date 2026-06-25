@@ -15,7 +15,7 @@ func (r *taskRepo) GetTaskDetailBundle(ctx context.Context, taskID int64, eventL
 	query := fmt.Sprintf(`
 		SELECT id, task_no, source_mode, product_id, sku_code, product_name_snapshot,
 		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		       task_status, priority, deadline_at, need_outsource, is_outsource, customization_required, customization_source_type,
+		       task_status, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
 		       last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		       is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status,
 		       created_at, updated_at
@@ -53,7 +53,7 @@ func (r *taskRepo) GetTaskDetailBundle(ctx context.Context, taskID int64, eventL
 		ORDER BY task_module_events.created_at DESC, task_module_events.id DESC
 		LIMIT %[2]d;
 
-		SELECT id, task_id, sku_item_id, ref_id, owner_module_key, context, attached_at
+		SELECT id, task_id, sku_item_id, retouch_requirement_id, ref_id, owner_module_key, context, attached_at
 		FROM reference_file_refs
 		WHERE task_id = %[1]d
 		ORDER BY owner_module_key, attached_at ASC, id ASC`, taskID, eventLimit)
@@ -201,12 +201,13 @@ func scanReferenceFileRefFlatRows(rows *sql.Rows) ([]*domain.ReferenceFileRefFla
 	var out []*domain.ReferenceFileRefFlat
 	for rows.Next() {
 		var ref domain.ReferenceFileRefFlat
-		var skuID sql.NullInt64
+		var skuID, retouchRequirementID sql.NullInt64
 		var contextValue sql.NullString
-		if err := rows.Scan(&ref.ID, &ref.TaskID, &skuID, &ref.RefID, &ref.OwnerModuleKey, &contextValue, &ref.AttachedAt); err != nil {
+		if err := rows.Scan(&ref.ID, &ref.TaskID, &skuID, &retouchRequirementID, &ref.RefID, &ref.OwnerModuleKey, &contextValue, &ref.AttachedAt); err != nil {
 			return nil, fmt.Errorf("scan reference_file_ref flat: %w", err)
 		}
 		ref.SKUItemID = fromNullInt64(skuID)
+		ref.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 		ref.Context = fromNullString(contextValue)
 		out = append(out, &ref)
 	}
