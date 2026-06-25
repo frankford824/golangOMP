@@ -7,7 +7,7 @@
       <BaseEmptyState title="无查看权限" description="当前角色无审计日志查看权限，请联系管理员开通。" />
     </div>
     <template v-else>
-      <section class="content-card rounded-lg border border-gray-200 shadow-sm p-6">
+      <section class="content-card rounded-lg border border-[rgb(var(--yb-border))] shadow-sm p-6">
         <h3 class="section-title">筛选条件</h3>
         <div
           class="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:items-center lg:gap-x-4 lg:flex-wrap gap-4"
@@ -39,7 +39,7 @@
         </div>
       </section>
 
-      <section class="content-card mt-4 rounded-lg border border-gray-200 shadow-sm p-6">
+      <section class="content-card mt-4 rounded-lg border border-[rgb(var(--yb-border))] shadow-sm p-6">
         <h3 class="section-title">日志列表</h3>
         <div v-if="loading" class="space-y-2">
           <BaseSkeleton width="100%" height="2rem" />
@@ -89,7 +89,7 @@
             >
               上一页
             </button>
-            <span class="pager-info text-xs text-slate-500">
+            <span class="pager-info text-xs text-[rgb(var(--yb-text-muted))]">
               第 {{ page }} 页 / 共 {{ totalPages }} 页（{{ filteredRecords.length }} 条）
             </span>
             <button
@@ -236,20 +236,20 @@ onMounted(() => {
   margin: 0;
   font-size: 1.125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .content-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 0.75rem;
   padding: 1rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 .section-title {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .simple-table {
   width: 100%;
@@ -264,19 +264,19 @@ onMounted(() => {
   -webkit-overflow-scrolling: touch;
 }
 .simple-table th {
-  background: #f3f4f6;
-  color: #374151;
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-body));
   font-weight: 600;
 }
 .simple-table th,
 .simple-table td {
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   padding: 0.25rem 0.5rem;
   text-align: left;
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 .simple-table tbody tr:hover td {
-  background: #f9fafb;
+  background: rgb(var(--yb-surface-soft));
 }
 .pager {
   margin-top: 0.75rem;
@@ -288,14 +288,14 @@ onMounted(() => {
   padding: 0.25rem 0.75rem;
   font-size: 0.75rem;
   border-radius: 9999px;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #374151;
+  border: 1px solid rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-body));
 }
 .pager-btn:not(:disabled):hover {
-  border-color: #93c5fd;
-  background: #f9fafb;
-  color: #111827;
+  border-color: rgb(var(--yb-brand-border-strong));
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
 }
 .pager-btn:disabled {
   opacity: 0.5;

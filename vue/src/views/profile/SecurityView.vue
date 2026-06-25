@@ -172,8 +172,8 @@ async function submit(): Promise<void> {
 .security-panel {
   border: 1px solid var(--v1-border);
   border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 16px 36px -28px rgba(15, 23, 42, 0.28);
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 16px 36px -28px rgb(var(--yb-shadow) / 0.28);
 }
 
 .security-hero {
@@ -189,15 +189,15 @@ async function submit(): Promise<void> {
   height: 46px;
   place-items: center;
   border-radius: 14px;
-  background: #eff6ff;
-  color: #2563eb;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand));
 }
 
 .security-hero p {
   margin: 0;
   font-size: 12px;
   font-weight: 800;
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
 }
 
 .security-hero h1 {
@@ -222,7 +222,7 @@ async function submit(): Promise<void> {
 }
 
 .password-field > span {
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
   font-size: 12px;
   font-weight: 800;
 }
@@ -232,14 +232,14 @@ async function submit(): Promise<void> {
   grid-template-columns: minmax(0, 1fr) 40px;
   min-height: 42px;
   overflow: hidden;
-  border: 1px solid #dbe3ef;
+  border: 1px solid rgb(var(--yb-border-subtle));
   border-radius: 9px;
-  background: #fff;
+  background: rgb(var(--yb-surface));
 }
 
 .password-input:focus-within {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
 }
 
 .password-input input {
@@ -256,16 +256,16 @@ async function submit(): Promise<void> {
   display: grid;
   place-items: center;
   border: 0;
-  border-left: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
+  border-left: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-soft));
   cursor: pointer;
 }
 
 .password-input button:hover,
 .password-input button:focus-visible {
-  background: #eff6ff;
-  color: #2563eb;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand));
   outline: none;
 }
 
@@ -280,7 +280,7 @@ async function submit(): Promise<void> {
   height: 7px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: rgb(var(--yb-border-slate));
 }
 
 .password-strength__bar span {
@@ -288,7 +288,7 @@ async function submit(): Promise<void> {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: #94a3b8;
+  background: rgb(var(--yb-text-placeholder));
   transition:
     width 0.2s ease,
     background-color 0.2s ease;
@@ -303,17 +303,17 @@ async function submit(): Promise<void> {
 
 .password-strength--weak .password-strength__bar span {
   width: 34%;
-  background: #f97316;
+  background: rgb(var(--yb-warning-orange));
 }
 
 .password-strength--medium .password-strength__bar span {
   width: 67%;
-  background: #eab308;
+  background: rgb(var(--yb-warning-yellow-strong));
 }
 
 .password-strength--strong .password-strength__bar span {
   width: 100%;
-  background: #059669;
+  background: rgb(var(--yb-success-emerald));
 }
 
 .password-rules {
@@ -327,16 +327,16 @@ async function submit(): Promise<void> {
   align-items: center;
   gap: 4px;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
   padding: 5px 9px;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   font-size: 12px;
   font-weight: 700;
 }
 
 .password-rules__item--ok {
-  background: #ecfdf5 !important;
-  color: #047857 !important;
+  background: rgb(var(--yb-success-ui-soft));
+  color: rgb(var(--yb-success-teal));
 }
 
 .security-message {
@@ -347,7 +347,7 @@ async function submit(): Promise<void> {
 }
 
 .security-message--success {
-  color: #047857;
+  color: rgb(var(--yb-success-teal));
 }
 
 .security-message--error {
@@ -376,15 +376,15 @@ async function submit(): Promise<void> {
 }
 
 .security-primary {
-  border: 1px solid #2563eb;
-  background: #2563eb;
-  color: #fff;
+  border: 1px solid rgb(var(--yb-brand));
+  background: rgb(var(--yb-brand));
+  color: rgb(var(--yb-surface));
 }
 
 .security-secondary {
-  border: 1px solid #dbe3ef;
-  background: #fff;
-  color: #475569;
+  border: 1px solid rgb(var(--yb-border-subtle));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-soft));
 }
 
 .security-primary:disabled,
@@ -395,14 +395,14 @@ async function submit(): Promise<void> {
 
 .security-primary:hover:not(:disabled),
 .security-primary:focus-visible:not(:disabled) {
-  border-color: #1d4ed8;
-  background: #1d4ed8;
+  border-color: rgb(var(--yb-brand-strong));
+  background: rgb(var(--yb-brand-strong));
   outline: none;
 }
 
 .security-secondary:hover:not(:disabled),
 .security-secondary:focus-visible:not(:disabled) {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   outline: none;
 }
 

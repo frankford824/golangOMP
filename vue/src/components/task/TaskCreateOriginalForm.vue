@@ -141,10 +141,10 @@ function onImageError(event: Event) {
   gap: 0.75rem;
 }
 .form-card {
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgb(var(--yb-border-context));
   border-radius: 0.875rem;
   padding: 0.75rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   min-height: 5.25rem;
 }
 .product-card {
@@ -155,15 +155,15 @@ function onImageError(event: Event) {
   grid-column: 1 / -1;
 }
 .upload-card {
-  background: #eef5ff;
+  background: rgb(var(--yb-surface-brand-row));
 }
 .field-label {
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .required {
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
 }
 .product-picker-btn {
   width: min(100%, 20rem);
@@ -172,13 +172,13 @@ function onImageError(event: Event) {
 .form-hint {
   margin: 0.25rem 0 0;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .selected-product-card {
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
   display: flex;
   gap: 0.75rem;
   align-items: center;
@@ -191,11 +191,11 @@ function onImageError(event: Event) {
 .form-card :deep(.relative > div) {
   height: 2.75rem;
   border-radius: 0.75rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .form-card :deep(textarea) {
   border-radius: 0.75rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   box-shadow: none;
   resize: vertical;
 }
@@ -203,7 +203,7 @@ function onImageError(event: Event) {
   width: 42px;
   height: 42px;
   border-radius: 6px;
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -217,7 +217,7 @@ function onImageError(event: Event) {
 }
 .selected-thumb-placeholder {
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 .selected-info {
   min-width: 0;
@@ -228,7 +228,7 @@ function onImageError(event: Event) {
 .selected-name {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -238,62 +238,62 @@ function onImageError(event: Event) {
   flex-wrap: wrap;
   gap: 0.5rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 /* Phase 6: light embedded form skin (parent modal already light). Style-only. */
 .form-card {
-  border-color: #e5e7eb;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 
 .upload-card {
-  background: #f9fafb;
-  border-color: #e5e7eb;
+  background: rgb(var(--yb-surface-soft));
+  border-color: rgb(var(--yb-border));
 }
 
 .field-label {
-  color: #374151;
+  color: rgb(var(--yb-text-body));
 }
 
 .form-hint,
 .selected-meta {
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .selected-product-card,
 .selected-thumb {
-  border-color: #e5e7eb;
-  background: #f9fafb;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
 }
 
 .selected-name {
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 
 .selected-thumb-placeholder {
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .form-card :deep(input),
 .form-card :deep(.relative > div),
 .form-card :deep(textarea) {
-  border-color: #d1d5db;
-  background: #ffffff;
-  color: #111827;
+  border-color: rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
 }
 
 .form-card :deep(input::placeholder),
 .form-card :deep(textarea::placeholder) {
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 
 .form-card :deep(input:focus),
 .form-card :deep(textarea:focus) {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
 }
 @media (max-width: 760px) {
   .type-section,

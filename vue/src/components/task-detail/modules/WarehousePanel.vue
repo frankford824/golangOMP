@@ -10,12 +10,12 @@
           <div class="rounded-lg border border-[var(--v1-border)] bg-[var(--v1-bg-surface-soft)] p-3">
             <p>采购状态：{{ procurementStatus }}</p>
             <p>可交仓：{{ canPrepareWarehouse ? '是' : '否' }}</p>
-            <p v-if="blockingMessage" class="mt-1 text-red-600">{{ blockingMessage }}</p>
+            <p v-if="blockingMessage" class="mt-1 text-[rgb(var(--yb-danger))]">{{ blockingMessage }}</p>
           </div>
           <div class="flex justify-end">
             <button
               type="button"
-              class="rounded-md bg-[var(--v1-text-primary)] px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+              class="rounded-md bg-[var(--v1-text-primary)] px-3 py-1.5 text-sm text-[rgb(var(--yb-text-inverse))] disabled:cursor-not-allowed disabled:opacity-50"
               :disabled="readonly || preparing || !canPrepareWarehouse"
               @click="prepareWarehouse"
             >

@@ -2,7 +2,7 @@
   <section class="info-block">
     <h4>采购与仓库</h4>
     <div v-if="!task">
-      <p class="text-xs text-slate-500">任务信息加载中...</p>
+      <p class="text-xs text-[rgb(var(--yb-text-muted))]">任务信息加载中...</p>
     </div>
     <template v-else>
       <p class="hint-text">
@@ -21,21 +21,21 @@
 
       <div
         v-if="showWarehouseHandoffNotice"
-        class="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950"
+        class="mt-3 rounded-md border border-[rgb(var(--yb-warning-border-soft))] bg-[rgb(var(--yb-warning-soft))] px-3 py-2 text-xs text-[rgb(var(--yb-warning-strong))]"
       >
-        <p class="font-medium text-amber-950">尚未进入仓库中心待接收队列</p>
-        <p class="mt-1 leading-relaxed text-amber-900/95">
+        <p class="font-medium text-[rgb(var(--yb-warning-strong))]">尚未进入仓库中心待接收队列</p>
+        <p class="mt-1 leading-relaxed text-[rgb(var(--yb-warning-text))]">
           「已采购」只表示采购记录已完成。仓库中心列表由后端在业务信息齐全后才会展示本任务；下列项未满足时，仓库节点不会触发。
         </p>
-        <ul v-if="blockingLines.length" class="mt-2 list-inside list-disc space-y-0.5 text-amber-900">
+        <ul v-if="blockingLines.length" class="mt-2 list-inside list-disc space-y-0.5 text-[rgb(var(--yb-warning-text))]">
           <li v-for="(line, i) in blockingLines" :key="i">{{ line }}</li>
         </ul>
-        <p v-else class="mt-1 text-amber-800">
+        <p v-else class="mt-1 text-[rgb(var(--yb-warning-text))]">
           当前无法交接仓库，请补全任务业务信息或联系后端确认规则。
         </p>
       </div>
 
-      <p v-if="submitError" class="mt-2 text-xs text-red-600">{{ submitError }}</p>
+      <p v-if="submitError" class="mt-2 text-xs text-[rgb(var(--yb-danger))]">{{ submitError }}</p>
       <div class="mt-4 flex flex-wrap gap-2">
         <BaseButton
           size="sm"
@@ -46,7 +46,7 @@
         >
           标记已采购并提交仓库
         </BaseButton>
-        <span v-if="!canMarkPurchased && markDisabledHint" class="self-center text-xs text-slate-500">
+        <span v-if="!canMarkPurchased && markDisabledHint" class="self-center text-xs text-[rgb(var(--yb-text-muted))]">
           {{ markDisabledHint }}
         </span>
       </div>
@@ -56,7 +56,7 @@
       v-model="showConfirm"
       title="确认标记为已采购"
     >
-      <p class="mb-3 text-sm text-slate-700">
+      <p class="mb-3 text-sm text-[rgb(var(--yb-text-body))]">
         即将把该采购任务标记为「已采购」。若分类、规格、采购价与数量等信息已齐全，后端会将任务推入仓库待接收队列；否则会停留在当前节点，仓库中心可能仍看不到本条任务。请填写原因或备注，便于后续追溯。
       </p>
       <BaseTextarea
@@ -199,18 +199,24 @@ async function onConfirmPurchased() {
 
 <style scoped>
 .info-block {
-  @apply p-4 bg-white border border-slate-200 rounded-lg;
+  padding: 1rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-surface));
 }
 .field {
   @apply space-y-1;
 }
 .field-label {
-  @apply block text-xs font-medium text-slate-600;
+  @apply block text-xs font-medium;
+  color: rgb(var(--yb-text-secondary));
 }
 .status-text {
-  @apply text-sm text-slate-800;
+  @apply text-sm;
+  color: rgb(var(--yb-text-body-strong));
 }
 .hint-text {
-  @apply text-xs text-slate-500 leading-relaxed;
+  @apply text-xs leading-relaxed;
+  color: rgb(var(--yb-text-muted));
 }
 </style>

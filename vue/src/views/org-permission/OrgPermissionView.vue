@@ -84,7 +84,7 @@
     >
       <BaseInput v-model="newDeptInput" label="部门名称" placeholder="请输入部门名称" />
       <template #footer>
-        <div class="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
+        <div class="flex justify-end gap-2 px-5 py-4 border-t border-[rgb(var(--yb-border-quiet))]">
           <BaseButton variant="secondary" size="sm" @click="showNewDeptModal = false">取消</BaseButton>
           <BaseButton variant="primary" size="sm" :disabled="!newDeptInput.trim()" @click="submitNewDept">
             确认
@@ -110,7 +110,7 @@
         :options="deptSelectOptions"
       />
       <template #footer>
-        <div class="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
+        <div class="flex justify-end gap-2 px-5 py-4 border-t border-[rgb(var(--yb-border-quiet))]">
           <BaseButton variant="secondary" size="sm" @click="showCreateGroupModal = false">取消</BaseButton>
           <BaseButton
             variant="primary"
@@ -783,12 +783,12 @@ watch(canManage, (ok) => {
   margin: 0;
   font-size: 1.25rem;
   font-weight: 700;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .page-sub {
   margin: 0.25rem 0 0;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .top-actions {
   display: flex;
@@ -809,10 +809,10 @@ watch(canManage, (ok) => {
   top: 100%;
   margin-top: 4px;
   z-index: 30;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.5rem;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 8px 24px rgb(var(--yb-shadow) / 0.08);
   min-width: 8rem;
   padding: 0.25rem;
 }
@@ -828,15 +828,15 @@ watch(canManage, (ok) => {
   cursor: pointer;
 }
 .dd-item:hover {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .banner {
   margin: 0 0 0.75rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
   border-radius: 0.5rem;
-  background: #eff6ff;
-  color: #1e40af;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-deep));
 }
 .loading-skel {
   margin-top: 0.5rem;
@@ -849,8 +849,8 @@ watch(canManage, (ok) => {
   min-height: calc(100dvh - 8rem);
 }
 .col {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.75rem;
   padding: 0.75rem;
   min-height: 0;
@@ -859,7 +859,7 @@ watch(canManage, (ok) => {
   flex-direction: column;
 }
 .col-center {
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 3px rgb(var(--yb-shadow) / 0.04);
 }
 .modal-user-list {
   max-height: 50vh;
@@ -873,7 +873,7 @@ watch(canManage, (ok) => {
   align-items: center;
   column-gap: 0;
   padding: 0.5rem 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid rgb(var(--yb-surface-slate));
   min-width: 0;
 }
 .modal-user-text {
@@ -911,14 +911,14 @@ watch(canManage, (ok) => {
   font-size: 0.8125rem;
 }
 .muted {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .small {
   font-size: 0.6875rem;
 }
 .remove-copy {
   font-size: 0.8125rem;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
   line-height: 1.5;
 }
 @media (max-width: 1100px) {

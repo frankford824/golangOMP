@@ -60,31 +60,31 @@ const closeLabel = computed(() =>
 
 const designClass = computed(() => {
   const s = props.task.designSubStatus
-  if (s === 'FINALIZED') return 'text-emerald-600'
-  if (s === 'REJECTED') return 'text-red-600'
-  if (s === 'IN_PROGRESS' || s === 'PENDING_AUDIT') return 'text-blue-600'
+  if (s === 'FINALIZED') return 'text-[rgb(var(--yb-success-strong))]'
+  if (s === 'REJECTED') return 'text-[rgb(var(--yb-danger))]'
+  if (s === 'IN_PROGRESS' || s === 'PENDING_AUDIT') return 'text-[rgb(var(--yb-brand))]'
   return ''
 })
 
 const auditClass = computed(() => {
   const s = props.task.auditSubStatus
-  if (s === 'PASSED') return 'text-emerald-600'
-  if (s === 'REJECTED') return 'text-red-600'
-  if (s === 'IN_PROGRESS') return 'text-blue-600'
+  if (s === 'PASSED') return 'text-[rgb(var(--yb-success-strong))]'
+  if (s === 'REJECTED') return 'text-[rgb(var(--yb-danger))]'
+  if (s === 'IN_PROGRESS') return 'text-[rgb(var(--yb-brand))]'
   return ''
 })
 
 const warehouseClass = computed(() => {
   const s = props.task.warehouseSubStatus
-  if (s === 'RECEIVED' || s === 'DONE') return 'text-emerald-600'
-  if (s === 'RETURNED') return 'text-red-600'
+  if (s === 'RECEIVED' || s === 'DONE') return 'text-[rgb(var(--yb-success-strong))]'
+  if (s === 'RETURNED') return 'text-[rgb(var(--yb-danger))]'
   return ''
 })
 
 const closeClass = computed(() => {
   const s = props.task.closeStatus
-  if (s === 'CLOSED') return 'text-emerald-600 font-medium'
-  if (s === 'READY') return 'text-blue-600'
+  if (s === 'CLOSED') return 'text-[rgb(var(--yb-success-strong))] font-medium'
+  if (s === 'READY') return 'text-[rgb(var(--yb-brand))]'
   return ''
 })
 </script>
@@ -100,7 +100,7 @@ const closeClass = computed(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
   margin-bottom: 0.25rem;
 }
 .status-row {
@@ -109,6 +109,6 @@ const closeClass = computed(() => {
   align-items: center;
   font-size: 0.8125rem;
 }
-.row-label { color: #64748b; }
-.row-value { color: #374151; font-weight: 500; }
+.row-label { color: rgb(var(--yb-text-muted-strong)); }
+.row-value { color: rgb(var(--yb-text-body)); font-weight: 500; }
 </style>

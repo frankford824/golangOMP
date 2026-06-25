@@ -55,7 +55,7 @@ defineEmits<{ 'update:modelValue': [boolean]; useServer: []; cancel: [] }>()
 }
 .conflict-hint {
   margin: 0 0 1rem;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .version-cards {
   display: grid;
@@ -65,22 +65,22 @@ defineEmits<{ 'update:modelValue': [boolean]; useServer: []; cancel: [] }>()
 .version-card {
   padding: 0.75rem;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
 }
 .version-card h4 {
   margin: 0 0 0.5rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .version-card p {
   margin: 0.25rem 0;
   font-size: 0.8125rem;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .version-card .label {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   margin-right: 0.25rem;
 }
 </style>

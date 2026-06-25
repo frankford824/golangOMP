@@ -1,17 +1,77 @@
 import type { MockHandler } from './types'
 
+const mockUsers = [
+  {
+    id: 'u_1',
+    username: 'ops_demo',
+    display_name: '王小明',
+    department: '运营部',
+    team: '运营核心组',
+    roles: ['super_admin'],
+    status: 'active',
+  },
+  {
+    id: 'u_2',
+    username: 'design_lead',
+    display_name: '李四',
+    department: '设计部',
+    team: '设计标准组',
+    roles: ['designer'],
+    status: 'active',
+  },
+  {
+    id: 'u_3',
+    username: 'audit_admin',
+    display_name: '张三',
+    department: '审核部',
+    team: '审核标准组',
+    roles: ['dept_admin'],
+    status: 'disabled',
+  },
+]
+
+const mockRoles = [
+  { code: 'super_admin', name: 'super_admin' },
+  { code: 'dept_admin', name: 'dept_admin' },
+  { code: 'designer', name: 'designer' },
+  { code: 'auditor', name: 'auditor' },
+  { code: 'warehouse', name: 'warehouse' },
+]
+
 export const orgHandler: MockHandler = (request) => {
   if (request.method === 'GET' && request.path === '/v1/users') {
     return {
       status: 200,
       data: {
-        items: [
-          { id: 'u_1', name: '王小明', department: '运营部', team: 'ops_core', role: 'member', is_active: true },
-          { id: 'u_2', name: '李四', department: '设计部', team: 'design_standard', role: 'team_lead', is_active: true },
-          { id: 'u_3', name: '张三', department: '审核部', team: 'audit_standard', role: 'dept_admin', is_active: true },
-        ],
+        data: mockUsers,
+        pagination: { total: mockUsers.length, page: 1, page_size: 20 },
       },
     }
+  }
+
+  if (request.method === 'GET' && request.path.startsWith('/v1/users/designers')) {
+    return {
+      status: 200,
+      data: {
+        data: [
+          { id: 2, username: 'design_lead', display_name: '李四' },
+          { id: 4, username: 'designer_wu', display_name: '吴设计' },
+        ],
+        pagination: { total: 2, page: 1, page_size: 20 },
+      },
+    }
+  }
+
+  if (request.method === 'GET' && request.path.match(/^\/v1\/users\/[^/]+$/)) {
+    const id = request.path.split('/').pop()
+    return {
+      status: 200,
+      data: { data: mockUsers.find((user) => user.id === id) ?? mockUsers[0] },
+    }
+  }
+
+  if (request.method === 'GET' && request.path === '/v1/roles') {
+    return { status: 200, data: { data: mockRoles } }
   }
 
   if (request.method === 'POST' && request.path.match(/^\/v1\/users\/[^/]+\/(activate|deactivate)$/)) {

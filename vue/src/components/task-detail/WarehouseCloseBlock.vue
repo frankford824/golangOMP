@@ -1,6 +1,6 @@
 <template>
   <section
-    class="detail-block h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6"
+    class="detail-block h-full flex flex-col rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] shadow-sm p-6"
     :class="{ 'warehouse-close--compact': compactLayout }"
   >
     <div class="block-header">
@@ -165,18 +165,18 @@ async function closeTask() {
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 0.375rem;
-  background: rgb(248 250 252);
-  color: rgb(148 163 184);
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-placeholder));
   font-size: 0.75rem;
   flex-shrink: 0;
 }
-.block-title { font-size: 0.875rem; font-weight: 600; color: rgb(30 41 59); margin: 0; }
+.block-title { font-size: 0.875rem; font-weight: 600; color: rgb(var(--yb-text-deep)); margin: 0; }
 .close-section { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
 .close-action { display: flex; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
 .close-btn { flex-shrink: 0; white-space: nowrap; min-width: 5.5rem; }
-.close-hint { font-size: 0.75rem; color: rgb(156 163 175); min-width: 0; flex: 1; overflow-wrap: anywhere; word-break: break-word; }
-.close-error { font-size: 0.875rem; color: rgb(220 38 38); margin: 0; }
-.close-terminal-note { font-size: 0.8125rem; color: rgb(100 116 139); margin: 0; }
+.close-hint { font-size: 0.75rem; color: rgb(var(--yb-text-faint)); min-width: 0; flex: 1; overflow-wrap: anywhere; word-break: break-word; }
+.close-error { font-size: 0.875rem; color: rgb(var(--yb-danger)); margin: 0; }
+.close-terminal-note { font-size: 0.8125rem; color: rgb(var(--yb-text-muted-strong)); margin: 0; }
 .warehouse-close--compact {
   padding: 0.75rem 0.85rem;
 }

@@ -33,10 +33,10 @@ defineEmits<{
 <style scoped>
 .retouch-submit-btn {
   min-height: 2rem;
-  border: 1px solid #151a21;
+  border: 1px solid rgb(var(--yb-text-ink));
   border-radius: 0.5rem;
-  background: #151a21;
-  color: #fff;
+  background: rgb(var(--yb-text-ink));
+  color: rgb(var(--yb-surface));
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.35rem 0.7rem;

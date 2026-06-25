@@ -1,12 +1,12 @@
 <template>
   <div
     v-if="showBlock"
-    class="supplement rounded-lg border border-stone-200 bg-stone-50 mb-3"
+    class="supplement rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft))] mb-3"
     :class="compact ? 'supplement--compact p-2' : 'p-3'"
   >
-    <h5 class="text-xs font-semibold text-stone-800" :class="compact ? 'mb-0.5' : 'mb-1'">补全结单所需信息</h5>
+    <h5 class="text-xs font-semibold text-[rgb(var(--yb-text-body-strong))]" :class="compact ? 'mb-0.5' : 'mb-1'">补全结单所需信息</h5>
     <p
-      class="text-xs text-stone-600 leading-relaxed"
+      class="text-xs text-[rgb(var(--yb-text-secondary))] leading-relaxed"
       :class="compact ? 'mb-2 line-clamp-2' : 'mb-3'"
       :title="compact ? hintFull : undefined"
     >
@@ -40,19 +40,19 @@
       :rows="compact ? 2 : 3"
       placeholder="请填写规格、尺寸、工艺等信息"
     />
-    <p class="mt-2 text-xs leading-relaxed text-stone-600">
+    <p class="mt-2 text-xs leading-relaxed text-[rgb(var(--yb-text-secondary))]">
       成本价保存后将作为人工维护成本，并请求同步 ERP；后续仍可再次修改。
     </p>
     <div
-      class="rounded-md border border-slate-200 bg-white/80 text-xs text-slate-700"
+      class="rounded-md border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface)/0.8)] text-xs text-[rgb(var(--yb-text-body))]"
       :class="compact ? 'mt-2 p-1.5' : 'mt-3 p-2'"
     >
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span class="font-medium text-slate-800">建档 / ERP</span>
-        <span v-if="task.filing_status" class="rounded bg-slate-100 px-1.5 py-0.5 text-[0.65rem]">
+        <span class="font-medium text-[rgb(var(--yb-text-body-strong))]">建档 / ERP</span>
+        <span v-if="task.filing_status" class="rounded bg-[rgb(var(--yb-surface-muted))] px-1.5 py-0.5 text-[0.65rem]">
           {{ filingStatusLabel }}
         </span>
-        <span v-if="task.last_filed_at" class="text-slate-500">
+        <span v-if="task.last_filed_at" class="text-[rgb(var(--yb-text-muted))]">
           最近建档：{{ task.last_filed_at }}
         </span>
         <BaseButton
@@ -69,9 +69,9 @@
           保存并刷新
         </BaseButton>
       </div>
-      <p v-if="businessFilingErrorMessage" class="mt-1 text-red-600">{{ businessFilingErrorMessage }}</p>
+      <p v-if="businessFilingErrorMessage" class="mt-1 text-[rgb(var(--yb-danger))]">{{ businessFilingErrorMessage }}</p>
     </div>
-    <p v-if="saveError" class="mt-2 text-xs text-red-600">{{ saveError }}</p>
+    <p v-if="saveError" class="mt-2 text-xs text-[rgb(var(--yb-danger))]">{{ saveError }}</p>
   </div>
 </template>
 

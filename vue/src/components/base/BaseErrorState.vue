@@ -1,9 +1,9 @@
 <template>
   <div class="flex flex-col items-center justify-center gap-2 py-8 text-center text-sm">
-    <p class="text-red-600">
+    <p class="text-[rgb(var(--yb-danger))]">
       {{ title }}
     </p>
-    <p v-if="description" class="text-xs text-slate-500">
+    <p v-if="description" class="text-xs text-[rgb(var(--yb-text-muted))]">
       {{ description }}
     </p>
     <BaseButton
@@ -37,4 +37,3 @@ defineEmits<{
   retry: []
 }>()
 </script>
-

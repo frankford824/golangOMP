@@ -49,6 +49,8 @@
           ref="replacementFileInput"
           type="file"
           class="hidden-file-input"
+          aria-label="选择替换资源文件"
+          tabindex="-1"
           @change="handleReplacementFile"
         />
       </div>
@@ -693,7 +695,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 1rem;
   padding: 0.5rem 0 1rem;
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
 }
 .page-header {
   display: flex;
@@ -705,12 +707,12 @@ onMounted(() => {
   margin: 0;
   font-size: 1.125rem;
   font-weight: 700;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .page-subtitle {
   margin: 0.25rem 0 0;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .page-actions {
   display: flex;
@@ -729,32 +731,32 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  border: 1px solid #dbeafe;
+  border: 1px solid rgb(var(--yb-brand-subtle));
   border-radius: 0.875rem;
-  background: #eff6ff;
+  background: rgb(var(--yb-brand-soft));
   padding: 0.65rem 0.85rem;
   font-size: 0.8125rem;
   font-weight: 700;
 }
 .replace-message-ok {
-  color: #1d4ed8;
+  color: rgb(var(--yb-brand-strong));
 }
 .replace-message-error {
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 .detail-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 1rem;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.04);
   padding: 1rem;
 }
 .state-text {
   font-size: 0.875rem;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .state-error {
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 .cell-mono {
   font-family: var(--yb-font-data);
@@ -774,13 +776,13 @@ onMounted(() => {
 }
 .detail-row dt {
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   margin-bottom: 0.2rem;
 }
 .detail-row dd {
   margin: 0;
   font-size: 0.8125rem;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   word-break: break-word;
 }
 .asset-usable-summary {
@@ -790,14 +792,14 @@ onMounted(() => {
   gap: 0.75rem;
   margin-bottom: 1rem;
   border-radius: 0.875rem;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
   padding: 0.75rem 0.9rem;
 }
 .asset-usable-label {
   display: block;
   margin-bottom: 0.18rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -807,32 +809,32 @@ onMounted(() => {
   font-weight: 900;
 }
 .asset-usable-summary.detail-state-pill--ready {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  color: #15803d;
+  border-color: rgb(var(--yb-success-border));
+  background: rgb(var(--yb-success-ui-soft));
+  color: rgb(var(--yb-success-strong));
 }
 .asset-usable-summary.detail-state-pill--pending {
-  border-color: #fde68a;
-  background: #fffbeb;
-  color: #b45309;
+  border-color: rgb(var(--yb-warning-border-soft));
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-warning-text));
 }
 .asset-usable-summary.detail-state-pill--rejected {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
 }
 .asset-usable-summary.detail-state-pill--history,
 .asset-usable-summary.detail-state-pill--cleaned,
 .asset-usable-summary.detail-state-pill--neutral {
-  border-color: #e2e8f0;
-  background: #f8fafc;
-  color: #64748b;
+  border-color: rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-muted-strong));
 }
 .asset-editable-label {
   flex: 0 0 auto;
   border-radius: 999px;
-  background: #0f766e;
-  color: #ffffff;
+  background: rgb(var(--yb-teal));
+  color: rgb(var(--yb-surface));
   padding: 0.24rem 0.62rem;
   font-size: 0.72rem;
   font-weight: 900;
@@ -843,39 +845,39 @@ onMounted(() => {
   max-width: 100%;
   border-radius: 9999px;
   padding: 0.18rem 0.56rem;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #64748b;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-muted-strong));
   font-size: 0.75rem;
   font-weight: 800;
   line-height: 1.15;
 }
 .detail-state-pill--ready {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  color: #15803d;
+  border-color: rgb(var(--yb-success-border));
+  background: rgb(var(--yb-success-ui-soft));
+  color: rgb(var(--yb-success-strong));
 }
 .detail-state-pill--pending {
-  border-color: #fde68a;
-  background: #fffbeb;
-  color: #b45309;
+  border-color: rgb(var(--yb-warning-border-soft));
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-warning-text));
 }
 .detail-state-pill--rejected {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
 }
 .detail-state-pill--history,
 .detail-state-pill--cleaned,
 .detail-state-pill--neutral {
-  border-color: #e2e8f0;
-  background: #f8fafc;
-  color: #64748b;
+  border-color: rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-muted-strong));
 }
 .versions-section {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid rgb(var(--yb-border-slate));
 }
 .content-head {
   display: flex;
@@ -888,11 +890,11 @@ onMounted(() => {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 700;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .section-meta {
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .version-list {
   display: grid;
@@ -900,10 +902,10 @@ onMounted(() => {
   gap: 0.75rem;
 }
 .version-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.875rem;
   padding: 0.875rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .version-top {
   display: flex;
@@ -915,12 +917,12 @@ onMounted(() => {
 .version-title {
   font-size: 0.8125rem;
   font-weight: 700;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .version-pill {
   border-radius: 9999px;
-  background: #e0e7ff;
-  color: #4338ca;
+  background: rgb(var(--yb-indigo-soft));
+  color: rgb(var(--yb-indigo-text));
   padding: 0.15rem 0.55rem;
   font-size: 0.6875rem;
   font-weight: 600;
@@ -928,38 +930,38 @@ onMounted(() => {
 
 /* Phase 6: light admin asset detail skin. Style-only. */
 .asset-detail-view {
-  background: transparent !important;
-  color: #111827;
+  background: transparent;
+  color: rgb(var(--yb-text));
 }
 
 .detail-card,
 .version-card,
 .preview-media-shell {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #111827 !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .page-title,
 .section-title,
 .version-title,
 .detail-row dd {
-  color: #111827 !important;
+  color: rgb(var(--yb-text));
 }
 
 .page-subtitle,
 .section-meta,
 .detail-row dt,
 .state-text {
-  color: #6b7280 !important;
+  color: rgb(var(--yb-text-muted));
 }
 
 .version-pill {
-  background: #eff6ff !important;
-  border: 1px solid #bfdbfe !important;
-  color: #1d4ed8 !important;
+  background: rgb(var(--yb-brand-soft));
+  border: 1px solid rgb(var(--yb-brand-border));
+  color: rgb(var(--yb-brand-strong));
 }
 </style>

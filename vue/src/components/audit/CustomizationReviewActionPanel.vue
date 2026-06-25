@@ -226,15 +226,15 @@ async function onFormSubmit(payload: CustomizationReviewPayload) {
   margin: 0 0 0.25rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #4f46e5;
+  color: rgb(var(--yb-indigo-action));
 }
 .hint {
   margin: 0;
   padding: 0.35rem 0.5rem;
   font-size: 0.75rem;
-  color: #1e40af;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  color: rgb(var(--yb-brand-deep));
+  background: rgb(var(--yb-brand-soft));
+  border: 1px solid rgb(var(--yb-brand-border));
   border-radius: 6px;
   line-height: 1.45;
 }
@@ -242,30 +242,30 @@ async function onFormSubmit(payload: CustomizationReviewPayload) {
   margin: 0;
   padding: 0.35rem 0.5rem;
   font-size: 0.75rem;
-  color: #92400e;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  color: rgb(var(--yb-warning-dark));
+  background: rgb(var(--yb-warning-soft));
+  border: 1px solid rgb(var(--yb-warning-border-soft));
   border-radius: 6px;
   line-height: 1.45;
 }
 .rule-hint {
   margin: 0;
   font-size: 0.6875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   line-height: 1.45;
 }
 .error-inline {
   margin: 0;
   padding: 0.35rem 0.5rem;
   font-size: 0.75rem;
-  color: #b91c1c;
-  background: #fef2f2;
+  color: rgb(var(--yb-danger-text));
+  background: rgb(var(--yb-danger-soft));
   border-radius: 6px;
 }
 .disabled-reason {
   margin: 0;
   font-size: 0.6875rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 .action-buttons {
   display: flex;

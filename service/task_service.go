@@ -2727,6 +2727,8 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 				"sku_item_id":                 item.ID,
 				"sequence_no":                 item.SequenceNo,
 				"sku_code":                    item.SKUCode,
+				"task_product_name_snapshot":  task.ProductNameSnapshot,
+				"product_name_snapshot":       item.ProductNameSnapshot,
 				"previous_product_name":       previousProductName,
 				"product_name":                item.ProductNameSnapshot,
 				"previous_product_i_id":       previousProductIID,

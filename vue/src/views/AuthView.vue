@@ -1,28 +1,27 @@
 <template>
-  <div class="flex flex-col min-h-screen w-full bg-surface overflow-auto font-body">
+  <div class="auth-page flex flex-col min-h-screen w-full bg-surface overflow-auto font-body">
     <!-- 背景水印：极浅色全局底纹 -->
     <div
       class="fixed inset-0 pointer-events-none select-none overflow-hidden flex items-center justify-center"
       aria-hidden="true"
     >
-      <span class="font-black text-[20rem] text-slate-200/30 leading-none">YONGBO</span>
+      <span class="auth-watermark font-black text-[20rem] text-[rgb(var(--yb-text-faint)/0.3)] leading-none">YONGBO</span>
     </div>
 
     <div class="relative z-10 flex w-full flex-1 flex-col items-center justify-center px-4 py-8">
       <!-- 居中卡片 -->
       <div
-        class="relative z-10 my-8 rounded-[2rem] p-6 sm:p-12"
-        style="width: min(100%, 480px); max-width: min(480px, calc(100vw - 4rem)); background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08);"
+        class="auth-card relative z-10 my-8 rounded-[2rem] p-6 sm:p-12"
       >
       <!-- 顶部 Header -->
       <div class="text-center mb-10">
-        <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-stone-200/80 mb-4">
-          <span class="material-symbols-outlined text-stone-600 text-2xl">architecture</span>
+        <div class="auth-logo inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[rgb(var(--yb-brand-soft))] mb-4">
+          <span class="material-symbols-outlined text-[rgb(var(--yb-brand))] text-2xl">architecture</span>
         </div>
-        <h1 class="text-2xl font-headline font-extrabold text-slate-900 mb-2 text-center whitespace-nowrap">
+        <h1 class="auth-title text-2xl font-headline font-extrabold text-[rgb(var(--yb-text))] mb-2 text-center whitespace-nowrap">
           永箔运营管理系统
         </h1>
-        <p class="text-xs text-slate-400 tracking-widest uppercase text-center whitespace-nowrap">
+        <p class="auth-subtitle text-xs text-[rgb(var(--yb-text-faint))] tracking-widest uppercase text-center whitespace-nowrap">
           请使用账号密码登录或注册新账号
         </p>
       </div>
@@ -30,20 +29,20 @@
       <!-- 错误提示 -->
       <div
         v-if="errorMessage"
-        class="mb-6 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 break-words leading-relaxed"
+        class="auth-error mb-6 p-3 bg-[rgb(var(--yb-danger-soft))] border border-[rgb(var(--yb-danger-border))] rounded-xl text-sm text-[rgb(var(--yb-danger))] break-words leading-relaxed"
       >
         {{ errorMessage }}
       </div>
 
       <!-- Switcher：w-full 胶囊 h-12，选中项白色浮起 -->
       <div class="mb-8">
-        <div class="bg-slate-100 rounded-full p-1 flex h-12 w-full">
+        <div class="auth-switch bg-[rgb(var(--yb-surface-muted))] rounded-full p-1 flex h-12 w-full">
           <button
             type="button"
             class="flex-1 h-full text-sm font-medium rounded-full transition-all duration-200 whitespace-nowrap"
             :class="activeTab === 'login'
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'bg-transparent text-slate-500 hover:text-slate-700'
+              ? 'is-active'
+              : ''
             "
             @click="activeTab = 'login'"
           >
@@ -53,8 +52,8 @@
             type="button"
             class="flex-1 h-full text-sm font-medium rounded-full transition-all duration-200 whitespace-nowrap"
             :class="activeTab === 'register'
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'bg-transparent text-slate-500 hover:text-slate-700'
+              ? 'is-active'
+              : ''
             "
             @click="activeTab = 'register'"
           >
@@ -66,26 +65,26 @@
       <!-- 登录表单 -->
       <form v-if="activeTab === 'login'" class="space-y-6" @submit.prevent="handleLogin">
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
           <input
             v-model="loginForm.username"
             type="text"
             placeholder="请输入用户名"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
           <input
             v-model="loginForm.password"
             type="password"
             placeholder="请输入密码"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <button
           type="submit"
-          class="w-full h-12 bg-slate-900 text-white text-sm font-medium rounded-xl transition-all hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+          class="auth-submit w-full h-12 bg-[rgb(var(--yb-brand))] text-[rgb(var(--yb-text-inverse))] text-sm font-medium rounded-xl transition-all hover:bg-[rgb(var(--yb-brand-strong))] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           :disabled="isLoading"
         >
           {{ isLoading ? '登录中...' : '登录' }}
@@ -95,66 +94,66 @@
       <!-- 注册表单 -->
       <form v-else class="space-y-6" @submit.prevent="handleRegister">
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
           <input
             v-model="registerForm.username"
             type="text"
             placeholder="请输入用户名"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
           <input
             v-model="registerForm.password"
             type="password"
             placeholder="请输入密码"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
-          <p class="mt-1 text-xs text-slate-500">至少 8 位，需包含字母和数字</p>
+          <p class="auth-help mt-1 text-xs text-[rgb(var(--yb-text-muted))]">至少 8 位，需包含字母和数字</p>
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">确认密码</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">确认密码</label>
           <input
             v-model="registerForm.confirmPassword"
             type="password"
             placeholder="请再次输入密码"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
-          <p class="mt-1 text-xs text-slate-500">需与上方密码保持一致</p>
+          <p class="auth-help mt-1 text-xs text-[rgb(var(--yb-text-muted))]">需与上方密码保持一致</p>
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">姓名</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">姓名</label>
           <input
             v-model="registerForm.displayName"
             type="text"
             placeholder="请输入真实姓名"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">手机号</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">手机号</label>
           <input
             v-model="registerForm.mobile"
             type="tel"
             placeholder="请输入手机号"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">邮箱（可选）</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">邮箱（可选）</label>
           <input
             v-model="registerForm.email"
             type="email"
             placeholder="请输入邮箱地址"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">部门</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">部门</label>
           <select
             v-model="registerForm.department"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 appearance-none cursor-pointer whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] appearance-none cursor-pointer whitespace-nowrap"
             @change="onDepartmentChange"
           >
             <option value="">请选择部门</option>
@@ -164,11 +163,11 @@
           </select>
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">组</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">组</label>
           <select
             v-model="registerForm.team"
             :disabled="!availableTeams.length"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           >
             <option value="">{{ availableTeams.length ? '请选择组' : '请先选择部门' }}</option>
             <option v-for="team in availableTeams" :key="team" :value="team">
@@ -177,17 +176,17 @@
           </select>
         </div>
         <div>
-          <label class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block whitespace-nowrap">管理员密钥（可选）</label>
+          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">管理员密钥（可选）</label>
           <input
             v-model="registerForm.adminKey"
             type="password"
             placeholder="仅部门管理员注册时填写"
-            class="auth-input w-full h-14 px-4 bg-slate-50 border-none rounded-xl text-base text-slate-900 placeholder:text-slate-400 whitespace-nowrap"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <button
           type="submit"
-          class="w-full h-12 bg-slate-900 text-white text-sm font-medium rounded-xl transition-all hover:bg-slate-800 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+          class="auth-submit w-full h-12 bg-[rgb(var(--yb-brand))] text-[rgb(var(--yb-text-inverse))] text-sm font-medium rounded-xl transition-all hover:bg-[rgb(var(--yb-brand-strong))] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           :disabled="isLoading"
         >
           {{ isLoading ? '注册中...' : '注册' }}
@@ -196,12 +195,12 @@
     </div>
     </div>
 
-    <footer class="app-footer app-footer--icp relative z-10 shrink-0 py-4 text-center text-xs text-slate-400">
+    <footer class="auth-footer app-footer app-footer--icp relative z-10 shrink-0 py-4 text-center text-xs text-[rgb(var(--yb-text-faint))]">
       <a
         href="https://beian.miit.gov.cn/"
         target="_blank"
         rel="noopener noreferrer"
-        class="text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+        class="text-[rgb(var(--yb-text-faint))] underline-offset-2 hover:text-[rgb(var(--yb-text-secondary))] hover:underline"
       >
         苏ICP备2026007026号-1
       </a>
@@ -383,120 +382,118 @@ async function handleRegister() {
 </script>
 
 <style scoped>
-/* 输入框 focus：背景微变 + 轻微阴影 */
-.auth-input {
-  outline: none;
-  transition: background-color 0.2s, box-shadow 0.2s;
-}
-.auth-input:focus {
-  background-color: rgb(241 245 249); /* slate-100，略深于默认 slate-50 */
-  box-shadow: 0 0 0 2px rgb(15 23 42 / 0.06), 0 1px 2px 0 rgb(0 0 0 / 0.05);
+.auth-page {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--yb-bg-page)) 0%,
+    rgb(var(--yb-surface-muted)) 48%,
+    rgb(var(--yb-brand-wash)) 100%
+  );
+  color: rgb(var(--yb-text));
 }
 
-/* 隐藏 select 默认箭头，使用自定义样式 */
-select.auth-input {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
-  background-position: right 1rem center;
+.auth-watermark {
+  color: rgb(var(--yb-text-faint) / 0.25);
+}
+
+.auth-card {
+  width: min(100%, 480px);
+  max-width: min(480px, calc(100vw - 4rem));
+  border: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 10px 40px rgb(var(--yb-shadow) / 0.08);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.auth-logo {
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand));
+  box-shadow: none;
+}
+
+.auth-title {
+  color: rgb(var(--yb-text));
+}
+
+.auth-subtitle,
+.auth-help,
+.auth-page label,
+.auth-footer,
+.auth-footer a {
+  color: rgb(var(--yb-text-muted));
+}
+
+.auth-error {
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
+}
+
+.auth-switch {
+  border: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
+}
+
+.auth-switch button {
+  color: rgb(var(--yb-text-muted));
+}
+
+.auth-switch button.is-active {
+  background: rgb(var(--yb-brand));
+  color: rgb(var(--yb-text-inverse));
+  box-shadow: none;
+}
+
+:global(#app .auth-input) {
+  border: 1px solid rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  outline: none;
+  transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+:global(#app .auth-input::placeholder) {
+  color: rgb(var(--yb-text-faint));
+}
+
+:global(#app .auth-input:focus) {
+  border-color: rgb(var(--yb-brand));
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
+}
+
+:global(#app select.auth-input) {
+  background-color: rgb(var(--yb-surface));
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgb(var(--yb-text-muted)) 50%),
+    linear-gradient(135deg, rgb(var(--yb-text-muted)) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 12px) 50%;
   background-repeat: no-repeat;
-  background-size: 1.25rem;
+  background-size:
+    6px 6px,
+    6px 6px;
   padding-right: 2.5rem;
 }
 
-/* 隐藏滚动条但保持可滚动 */
+.auth-submit {
+  background: rgb(var(--yb-brand));
+  color: rgb(var(--yb-text-inverse));
+  box-shadow: none;
+}
+
+.auth-submit:hover:not(:disabled) {
+  background: rgb(var(--yb-brand-strong));
+}
+
+.auth-footer a:hover {
+  color: rgb(var(--yb-text));
+}
+
 ::-webkit-scrollbar {
   width: 0;
   height: 0;
-}
-
-/* Phase 6: light auth page — white card, blue primary. Style-only. */
-.flex.flex-col.min-h-screen {
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 48%, #eef2ff 100%) !important;
-  color: #111827;
-}
-
-.fixed span {
-  color: rgba(148, 163, 184, 0.25) !important;
-}
-
-.relative.z-10.my-8 {
-  border: 1px solid #e5e7eb !important;
-  background: #ffffff !important;
-  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-.inline-flex.items-center.justify-center.w-12 {
-  background: #eff6ff !important;
-  color: #2563eb !important;
-  box-shadow: none;
-}
-
-h1 {
-  color: #111827 !important;
-}
-
-p,
-label {
-  color: #6b7280 !important;
-}
-
-.mb-6.p-3 {
-  border-color: #fecaca !important;
-  background: #fef2f2 !important;
-  color: #b91c1c !important;
-}
-
-.mb-8 > div {
-  border: 1px solid #e5e7eb;
-  background: #f9fafb !important;
-}
-
-.mb-8 button {
-  color: #6b7280 !important;
-}
-
-.mb-8 button.bg-white {
-  background: #2563eb !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-
-.auth-input {
-  border: 1px solid #d1d5db !important;
-  background: #ffffff !important;
-  color: #111827 !important;
-}
-
-.auth-input::placeholder {
-  color: #9ca3af !important;
-}
-
-.auth-input:focus {
-  background: #ffffff !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
-}
-
-select.auth-input {
-  background-color: #ffffff !important;
-  background-image: linear-gradient(45deg, transparent 50%, #6b7280 50%),
-    linear-gradient(135deg, #6b7280 50%, transparent 50%) !important;
-  background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50% !important;
-  background-size: 6px 6px, 6px 6px !important;
-}
-
-form > button[type='submit'] {
-  background: #2563eb !important;
-  color: #fff !important;
-  box-shadow: none;
-}
-
-.app-footer,
-.app-footer a {
-  color: #6b7280 !important;
-}
-
-.app-footer a:hover {
-  color: #111827 !important;
 }
 </style>

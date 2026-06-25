@@ -4,34 +4,36 @@
     <transition name="fade-scale">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-[3000] flex items-center justify-center bg-stone-900/40 p-3 sm:p-4"
+        class="fixed inset-0 z-[7100] flex items-center justify-center bg-[rgb(var(--yb-shadow)_/_0.18)] p-3 sm:p-4"
         role="dialog"
         aria-modal="true"
       >
         <div
+          ref="panelRef"
+          tabindex="-1"
           :class="[
-            'w-full max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-2rem)] max-h-[88dvh] rounded-2xl border border-stone-200/80 bg-white shadow-float overflow-hidden flex flex-col',
+            'w-full max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-2rem)] max-h-[88dvh] rounded-2xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] text-[rgb(var(--yb-text-body))] shadow-float overflow-hidden flex flex-col focus:outline-none',
             panelClass,
           ]"
         >
           <header class="flex-shrink-0 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 flex items-center justify-between gap-3">
-            <h2 class="min-w-0 text-base font-headline font-bold text-slate-900">
+            <h2 class="min-w-0 text-base font-headline font-bold text-[rgb(var(--yb-text))]">
               {{ title }}
             </h2>
             <button
               type="button"
-              class="modal-close-btn text-slate-400 hover:text-slate-600"
+              class="modal-close-btn text-[rgb(var(--yb-text-faint))] hover:text-[rgb(var(--yb-text-muted-strong))]"
               aria-label="关闭"
               @click="close"
             >
               ×
             </button>
           </header>
-          <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 pb-1 text-sm text-slate-700">
+          <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 pb-1 text-sm text-[rgb(var(--yb-text-body))]">
             <slot />
           </div>
           <slot name="footer">
-            <footer class="flex-shrink-0 flex flex-wrap justify-end gap-2 px-4 sm:px-5 py-3 sm:py-4 border-t border-slate-100">
+            <footer class="flex-shrink-0 flex flex-wrap justify-end gap-2 px-4 sm:px-5 py-3 sm:py-4 border-t border-[rgb(var(--yb-border))]">
               <BaseButton variant="secondary" size="sm" @click="close">
                 {{ cancelText }}
               </BaseButton>
@@ -52,8 +54,9 @@
 </template>
 
 <script setup lang="ts">
-import { watch, onUnmounted } from 'vue'
+import { ref, toRef } from 'vue'
 import BaseButton from './BaseButton.vue'
+import { useModalA11y } from '../../composables/useModalA11y'
 
 const props = withDefaults(
   defineProps<{
@@ -83,24 +86,15 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-watch(
-  () => props.modelValue,
-  (open) => {
-    if (typeof document === 'undefined') return
-    document.body.style.overflow = open ? 'hidden' : ''
-  },
-  { immediate: true },
-)
-
-onUnmounted(() => {
-  if (typeof document === 'undefined') return
-  document.body.style.overflow = ''
-})
+const panelRef = ref<HTMLElement | null>(null)
 
 function close() {
   emit('update:modelValue', false)
   emit('cancel')
 }
+
+// Focus trap + Esc + initial/returned focus + stacked scroll-lock counter.
+useModalA11y(toRef(props, 'modelValue'), panelRef, { onEsc: close })
 
 function confirm() {
   emit('confirm')
@@ -117,31 +111,6 @@ function confirm() {
 .fade-scale-leave-to {
   opacity: 0;
   transform: scale(0.95);
-}
-
-/* Light admin modal skin. Style-only. */
-.fixed.inset-0 {
-  z-index: 7100 !important;
-  background: rgba(15, 23, 42, 0.18) !important;
-}
-
-.fixed.inset-0 > div {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
-  box-shadow: 0 20px 40px -12px rgba(15, 23, 42, 0.18) !important;
-}
-
-h2 {
-  color: #111827 !important;
-}
-
-.flex-1 {
-  color: #374151 !important;
-}
-
-footer {
-  border-color: #e5e7eb !important;
 }
 
 button {
@@ -163,8 +132,8 @@ button {
 }
 
 .modal-close-btn:hover {
-  border-color: #e5e7eb;
-  background: #f9fafb;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
 }
 
 @media (max-width: 640px) {
@@ -173,8 +142,8 @@ button {
   }
 
   .fixed.inset-0 > div {
-    max-height: calc(100dvh - 1rem) !important;
-    border-radius: 1rem 1rem 0.75rem 0.75rem !important;
+    max-height: calc(100dvh - 1rem);
+    border-radius: 1rem 1rem 0.75rem 0.75rem;
   }
 
   footer :deep(button) {
@@ -182,35 +151,4 @@ button {
   }
 }
 
-/* Teleport 到 body 后在 #app 外，需局部复用 main.css 蓝色主按钮皮肤 */
-footer :deep(button.bg-stone-600) {
-  background: #2563eb !important;
-  border-color: #2563eb !important;
-  color: #ffffff !important;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
-}
-
-footer :deep(button.bg-stone-600:not(:disabled):hover) {
-  background: #1d4ed8 !important;
-  border-color: #1d4ed8 !important;
-  color: #ffffff !important;
-}
-
-footer :deep(button.bg-stone-600:not(:disabled):active) {
-  background: #1e40af !important;
-  border-color: #1e40af !important;
-  color: #ffffff !important;
-}
-
-footer :deep(button.bg-stone-600:focus-visible) {
-  outline: none;
-  box-shadow:
-    0 1px 2px rgba(37, 99, 235, 0.2),
-    0 0 0 3px rgba(37, 99, 235, 0.15) !important;
-}
-
-footer :deep(button.bg-stone-600:disabled) {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
 </style>

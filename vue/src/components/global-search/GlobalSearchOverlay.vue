@@ -1,7 +1,10 @@
 <template>
-  <div v-if="open" class="fixed inset-0 z-50 bg-slate-900/40 p-6" @click.self="close">
+  <div v-if="open" class="global-search-overlay fixed inset-0 z-50 bg-[rgb(var(--yb-shadow)/0.4)] p-6" @click.self="close">
     <div
-      class="mx-auto max-w-4xl rounded-xl border border-[var(--v1-border)] bg-white p-4 shadow-2xl"
+      class="global-search-panel mx-auto max-w-4xl rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4 shadow-2xl"
+      role="dialog"
+      aria-modal="true"
+      aria-label="全局搜索"
     >
       <input
         ref="inputRef"
@@ -17,7 +20,7 @@
           class="rounded-full px-2.5 py-1"
           :class="
             scope === item
-              ? 'bg-[var(--v1-bg-primary)] text-white'
+              ? 'bg-[var(--v1-bg-primary)] text-[rgb(var(--yb-text-inverse))]'
               : 'bg-[var(--v1-bg-surface-soft)] text-[var(--v1-text-secondary)]'
           "
           @click="scope = item"
@@ -27,11 +30,11 @@
       </div>
       <section
         v-if="predictionSuggestions.length"
-        class="global-prediction-section mt-4 rounded-lg border border-sky-100 bg-sky-50/70 p-3"
+        class="global-prediction-section mt-4 rounded-lg border border-[rgb(var(--yb-brand-border))] bg-[rgb(var(--yb-brand-soft)/0.7)] p-3"
       >
         <div class="mb-2 flex items-center justify-between gap-2">
-          <p class="text-xs font-semibold text-slate-700">预测提示</p>
-          <span class="text-[10px] text-slate-500">不消耗 AI 调用</span>
+          <p class="text-xs font-semibold text-[rgb(var(--yb-text-body))]">预测提示</p>
+          <span class="text-[10px] text-[rgb(var(--yb-text-muted))]">不消耗 AI 调用</span>
         </div>
         <div class="grid gap-2 sm:grid-cols-2">
           <button
@@ -75,7 +78,7 @@
               type="button"
               class="flex w-full items-start gap-2 rounded px-2 py-2 text-left transition-colors"
               :class="[
-                isActiveResult(group, rIdx) ? 'bg-white shadow-sm' : 'hover:bg-white/70',
+                isActiveResult(group, rIdx) ? 'bg-[rgb(var(--yb-surface))] shadow-sm' : 'hover:bg-[rgb(var(--yb-surface))]/70',
                 isNavigable(group.key) ? '' : 'cursor-default',
               ]"
               @mouseenter="setActive(group, rIdx)"
@@ -95,7 +98,7 @@
               <div class="flex shrink-0 flex-col items-end gap-1">
                 <span
                   v-if="result.badgeLabel || result.statusLabel"
-                  class="max-w-[5.5rem] truncate rounded bg-white px-1.5 py-0.5 text-[10px] text-[var(--v1-text-secondary)] ring-1 ring-[var(--v1-border)]"
+                  class="max-w-[5.5rem] truncate rounded bg-[rgb(var(--yb-surface))] px-1.5 py-0.5 text-[10px] text-[var(--v1-text-secondary)] ring-1 ring-[var(--v1-border)]"
                 >
                   {{ result.badgeLabel || result.statusLabel }}
                 </span>
@@ -344,7 +347,7 @@ function highlight(text: string): string {
   for (const match of text.matchAll(re)) {
     const idx = match.index ?? 0
     out += escapeHtml(text.slice(last, idx))
-    out += `<mark class="bg-amber-100">${escapeHtml(match[0])}</mark>`
+    out += `<mark class="bg-[rgb(var(--yb-warning-highlight))]">${escapeHtml(match[0])}</mark>`
     last = idx + match[0].length
   }
   out += escapeHtml(text.slice(last))
@@ -436,37 +439,53 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.fixed.inset-0 {
-  z-index: 7000 !important;
-  background: rgba(15, 23, 42, 0.16) !important;
+.global-search-overlay.fixed.inset-0 {
+  z-index: 7000;
+  background: rgb(var(--yb-shadow) / 0.16);
 }
 
-.mx-auto.max-w-4xl {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  box-shadow: 0 24px 48px -18px rgba(15, 23, 42, 0.18) !important;
+.global-search-panel.mx-auto.max-w-4xl {
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 24px 48px -18px rgb(var(--yb-shadow) / 0.18);
 }
 
-input {
-  border-color: #e5e7eb !important;
-  background: #f9fafb !important;
-  color: #111827 !important;
+.global-search-panel input {
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
 }
 
-input::placeholder {
-  color: #9ca3af !important;
+.global-search-panel input:focus,
+.global-search-panel input:focus-visible {
+  border-color: rgb(var(--yb-border));
+  box-shadow: none;
 }
 
-button {
-  border: 1px solid #e5e7eb;
-  color: #374151 !important;
+:global(#app .global-search-panel input:focus),
+:global(#app .global-search-panel input:focus-visible) {
+  border-color: rgb(var(--yb-border));
+}
+
+.global-search-panel input::placeholder {
+  color: rgb(var(--yb-text-faint));
+}
+
+.global-search-panel button {
+  border: 1px solid rgb(var(--yb-border));
+  color: rgb(var(--yb-text-body));
 }
 
 .global-prediction-section {
   background:
-    linear-gradient(120deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.08), rgba(37, 99, 235, 0.08)),
-    #f0f9ff !important;
-  background-size: 220% 100% !important;
+    linear-gradient(
+      120deg,
+      rgb(var(--yb-brand) / 0.08),
+      rgb(var(--yb-info-accent) / 0.08),
+      rgb(var(--yb-brand) / 0.08)
+    ),
+    rgb(var(--yb-info-wash));
+  background-size: 220% 100%;
   animation: global-stream-panel 8s linear infinite;
 }
 
@@ -477,9 +496,9 @@ button {
   min-height: 5.25rem;
   padding: 0.625rem 0.75rem;
   overflow: hidden;
-  border: 1px solid #bae6fd;
+  border: 1px solid rgb(var(--yb-info-cyan-border));
   border-radius: 0.5rem;
-  background: #ffffff;
+  background: rgb(var(--yb-surface));
   text-align: left;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
   animation: global-card-enter 420ms ease both;
@@ -487,8 +506,8 @@ button {
 
 .prediction-card:hover {
   transform: translateY(-2px);
-  border-color: #7dd3fc;
-  box-shadow: 0 14px 28px -22px rgba(2, 132, 199, 0.8);
+  border-color: rgb(var(--yb-info-cyan-border-strong));
+  box-shadow: 0 14px 28px -22px rgb(var(--yb-info-cyan-shadow) / 0.8);
 }
 
 .prediction-card::after {
@@ -496,7 +515,7 @@ button {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(110deg, transparent 0%, rgba(14, 165, 233, 0.14) 42%, transparent 72%);
+  background: linear-gradient(110deg, transparent 0%, rgb(var(--yb-info-accent) / 0.14) 42%, transparent 72%);
   transform: translateX(-120%);
   transition: transform 650ms ease;
 }
@@ -506,13 +525,13 @@ button {
 }
 
 .prediction-card strong {
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   font-size: 0.8125rem;
   line-height: 1.3;
 }
 
 .prediction-card small {
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
   font-size: 0.75rem;
   line-height: 1.35;
 }
@@ -528,14 +547,14 @@ button {
 }
 
 .prediction-source {
-  color: #0369a1;
+  color: rgb(var(--yb-info-text));
 }
 
 .prediction-card em {
   margin-top: 0.125rem;
   padding: 0.125rem 0.45rem;
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 
 @keyframes global-stream-panel {
@@ -554,49 +573,36 @@ button {
   }
 }
 
-section {
-  border-color: #e5e7eb !important;
-  background: #f9fafb !important;
+.global-search-panel section {
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
 }
 
-p,
-div,
-span {
-  color: #374151;
+.global-search-panel p,
+.global-search-panel div,
+.global-search-panel span {
+  color: rgb(var(--yb-text-body));
 }
 
-.bg-white,
-.hover\:bg-white\/70:hover {
-  background: #ffffff !important;
+.global-search-panel .shadow-sm {
+  box-shadow: 0 0 0 1px rgb(var(--yb-brand) / 0.12);
 }
 
-.shadow-sm {
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12) !important;
-}
-
-.bg-\[var\(--v1-bg-primary\)\] {
-  border-color: #2563eb !important;
-}
-
-.bg-\[var\(--v1-bg-surface-soft\)\] {
-  border-color: #e5e7eb !important;
-}
-
-:deep(mark) {
+.global-search-panel :deep(mark) {
   border-radius: 0.25rem;
-  background: #dbeafe !important;
-  color: #1e3a8a !important;
+  background: rgb(var(--yb-brand-subtle));
+  color: rgb(var(--yb-brand-context-strong));
 }
 
 @media (prefers-reduced-motion: reduce) {
   .global-prediction-section,
   .prediction-card {
-    animation: none !important;
+    animation: none;
   }
 
   .prediction-card,
   .prediction-card::after {
-    transition: none !important;
+    transition: none;
   }
 }
 </style>

@@ -55,6 +55,8 @@ describe('P0 mock family routing', () => {
     expect(inferMockFamily('/v1/me/notifications')).toBe('notifications')
     expect(inferMockFamily('/v1/tasks/123/asset-center/upload-sessions')).toBe('task-assets')
     expect(inferMockFamily('/v1/tasks/batch-create/parse-excel')).toBe('batch')
+    expect(inferMockFamily('/v1/product-management/combo-tree')).toBe('product-management')
+    expect(inferMockFamily('/v1/tasks/123/product-management')).toBe('product-management')
     expect(inferMockFamily('/v1/reports/l1/cards')).toBe('reports')
     expect(inferMockFamily('/v1/search')).toBeUndefined()
   })

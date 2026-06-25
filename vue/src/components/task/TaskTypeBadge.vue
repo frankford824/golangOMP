@@ -35,19 +35,19 @@ const badgeClass = computed(() => {
   white-space: nowrap;
 }
 .badge-original {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 .badge-new {
-  background: #f0fdf4;
-  color: #15803d;
+  background: rgb(var(--yb-success-ui-soft));
+  color: rgb(var(--yb-success-strong));
 }
 .badge-purchase {
-  background: #fefce8;
-  color: #a16207;
+  background: rgb(var(--yb-warning-highlight));
+  color: rgb(var(--yb-warning-badge-text));
 }
 .badge-retouch {
-  background: #f5f3ff;
-  color: #6d28d9;
+  background: rgb(var(--yb-purple-soft));
+  color: rgb(var(--yb-purple-text));
 }
 </style>

@@ -11,6 +11,11 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "a11y:audit": "node scripts/accessibility-audit.mjs",
+    "design:audit": "node scripts/design-system-audit.mjs",
+    "load:audit": "node scripts/large-surface-audit.mjs",
+    "visual:baseline": "node scripts/visual-baseline.mjs baseline",
+    "visual:compare": "node scripts/visual-baseline.mjs compare",
     "gen:api-types": "tsx scripts/gen_api_types.ts",
     "lint:object-key": "npx tsx scripts/check_object_key_usage.ts"
   },

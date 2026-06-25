@@ -230,9 +230,9 @@ function onThumbClick(item: AssetThumbItem) {
 .thumb-btn {
   padding: 0;
   flex: 0 0 auto;
-  border: 1px solid #dbe3ee;
+  border: 1px solid rgb(var(--yb-border-muted-blue));
   border-radius: 0.375rem;
-  background: #ffffff;
+  background: rgb(var(--yb-surface));
   overflow: hidden;
   display: inline-flex;
   align-items: center;
@@ -248,10 +248,10 @@ function onThumbClick(item: AssetThumbItem) {
   height: 4rem;
 }
 .thumb-btn:hover {
-  border-color: #98a2b3;
+  border-color: rgb(var(--yb-text-disabled-strong));
 }
 .thumb-btn--placeholder {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .thumb-img {
   width: 100%;
@@ -292,11 +292,11 @@ function onThumbClick(item: AssetThumbItem) {
   text-align: center;
   font-size: 0.625rem;
   line-height: 1.2;
-  color: #667085;
-  background: #f8fafc;
+  color: rgb(var(--yb-text-label));
+  background: rgb(var(--yb-surface-subtle));
 }
 .thumb-empty {
   font-size: 0.75rem;
-  color: #98a2b3;
+  color: rgb(var(--yb-text-disabled-strong));
 }
 </style>

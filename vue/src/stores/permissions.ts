@@ -52,13 +52,13 @@ function normalizeUniqueKeys(keys: unknown): string[] {
  *
  * 仅用于后端「命名空间」与前端 PermissionEnum 不对齐的真实漂移点。
  * 一般的 `.` ↔ `:` 分隔符差异由下方通用规则处理，这里只列需要跨命名空间
- * 的映射（例如后端放在 `task.*` 下，前端历史上归在 `design:*` 下）。
+ * 的映射（例如后端放在 `task.*` 下，前端历史上归在 `design.*` 下）。
  *
  * 新增后端 action 时若前端 `can(...)` 仍沿用旧命名，向本表追加一行即可。
  */
 const ACTION_SEMANTIC_ALIAS: Record<string, string[]> = {
-  'task.asset_upload': ['design:upload'],
-  'task.design_submit': ['design:submit'],
+  'task.asset_upload': ['design.upload'],
+  'task.design_submit': ['design.submit'],
 }
 
 /**
@@ -101,7 +101,7 @@ export function normalizeActionKey(raw: unknown): string {
  * 1) 后端原始 key（点号 / 冒号 / 下划线形式按后端实际下发）；
  * 2) 其 `.` ↔ `:` 变体，用于历史 `task:create` / 新 `task.create` 两种 `can()` 调用；
  * 3) `ACTION_SEMANTIC_ALIAS` 里声明的跨命名空间等价 key（例如
- *    `task.asset_upload` → `design:upload`），别名自己同样参与双向展开，
+ *    `task.asset_upload` → `design.upload`），别名自己同样参与双向展开，
  *    以避免 `can('design.upload')`（点号）仅因别名只给了冒号形式而丢失命中。
  */
 function mergeBackendActionAliases(keys: string[]): string[] {

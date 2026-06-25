@@ -1,5 +1,5 @@
 <template>
-  <section class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
+  <section class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
     <h1 class="text-base font-semibold text-[var(--v1-text-primary)]">组织总览</h1>
     <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
       <article class="rounded-lg border border-[var(--v1-border)] bg-[var(--v1-bg-surface-soft)] p-3">

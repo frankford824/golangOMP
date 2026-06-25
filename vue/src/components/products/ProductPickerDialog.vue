@@ -1,12 +1,12 @@
 /**
  * 组件职责：产品选择弹窗，用于原有产品绑定 ERP 已有 SKU
- * 
+ *
  * 核心业务规则（来自 Prompt.md）：
  *   - 原有产品必须选择 ERP 已有产品并绑定 SKU（不可手填）
- * 
+ *
  * 主要 Store：useTaskStore 或 useProductsStore
  * 预留接口：GET /api/products/search (mock)
- * 
+ *
  * 当前状态：已迁移 Base 组件，搜索/选择交互完整
  * 维护注意 / 风险点：
  *   - 绑定后 SKU 不可修改
@@ -206,24 +206,24 @@ function goNextPage() {
 .search-error {
   margin: 0;
   font-size: 0.875rem;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 .loading-hint {
   font-size: 0.875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .table-scroll {
   max-height: 360px;
   overflow: auto;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 0.75rem;
 }
 .thumb {
   width: 56px;
   height: 56px;
   border-radius: 6px;
-  border: 1px solid #e5e7eb;
-  background: #f1f5f9;
+  border: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-slate));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -236,7 +236,7 @@ function goNextPage() {
 }
 .thumb-placeholder {
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 .data-table {
   width: 100%;
@@ -247,25 +247,25 @@ function goNextPage() {
 .data-table td {
   padding: 0.5rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid rgb(var(--yb-border-slate));
 }
 .data-table td {
-  color: #374151;
+  color: rgb(var(--yb-text-body));
 }
 .data-table th {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   font-weight: 600;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .row-click {
   cursor: pointer;
 }
 .row-click:hover,
 .row-click.selected {
-  background: #f0fdf4;
+  background: rgb(var(--yb-success-ui-soft));
 }
 .row-click.selected {
-  box-shadow: inset 3px 0 0 #10b981;
+  box-shadow: inset 3px 0 0 rgb(var(--yb-success-emerald-bright));
 }
 .ellipsis {
   max-width: 140px;
@@ -279,7 +279,7 @@ function goNextPage() {
   justify-content: space-between;
   align-items: center;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .pagination-buttons {
   display: flex;
@@ -292,6 +292,6 @@ function goNextPage() {
 .empty-text {
   margin: 0;
   font-size: 0.875rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 </style>

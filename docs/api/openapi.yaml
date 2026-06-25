@@ -4040,6 +4040,11 @@ components:
         batch_mode:
           type: string
           enum: [single, multi_sku]
+        sku_items:
+          type: array
+          description: Present for batch task list rows so cards can render per-SKU summaries without an immediate detail fetch.
+          items:
+            $ref: '#/components/schemas/TaskSKUItem'
         warehouse_status:
           type: string
           nullable: true

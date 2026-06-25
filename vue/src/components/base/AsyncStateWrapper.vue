@@ -1,6 +1,6 @@
 <template>
   <template v-if="loading">
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <div class="bg-[rgb(var(--yb-surface))] rounded-2xl border border-[rgb(var(--yb-border))] shadow-sm p-6">
       <slot name="skeleton">
         <div class="space-y-2">
           <BaseSkeleton
@@ -14,12 +14,12 @@
     </div>
   </template>
   <template v-else-if="error">
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <div class="bg-[rgb(var(--yb-surface))] rounded-2xl border border-[rgb(var(--yb-border))] shadow-sm p-6">
       <BaseErrorState :title="errorTitle ?? '加载失败'" :description="error" @retry="$emit('retry')" />
     </div>
   </template>
   <template v-else-if="empty">
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <div class="bg-[rgb(var(--yb-surface))] rounded-2xl border border-[rgb(var(--yb-border))] shadow-sm p-6">
       <BaseEmptyState :title="emptyTitle ?? '暂无数据'" :description="emptyDescription">
         <slot name="empty-action" />
       </BaseEmptyState>

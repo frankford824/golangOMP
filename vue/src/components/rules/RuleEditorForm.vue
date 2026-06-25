@@ -34,21 +34,21 @@
         type="number"
         class="w-24"
       />
-      <span class="text-xs text-slate-400">1–6 位</span>
+      <span class="text-xs text-[rgb(var(--yb-text-faint))]">1–6 位</span>
     </div>
-    <label class="flex items-center gap-2 text-xs text-slate-700">
+    <label class="flex items-center gap-2 text-xs text-[rgb(var(--yb-text-body))]">
       <input
         v-model="form.dailyReset"
         type="checkbox"
-        class="h-3 w-3 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+        class="h-3 w-3 rounded border-[rgb(var(--yb-border-strong))] text-[rgb(var(--yb-success))] focus:ring-[rgb(var(--yb-success))]"
       />
       按日重置
     </label>
-    <label class="flex items-center gap-2 text-xs text-slate-700">
+    <label class="flex items-center gap-2 text-xs text-[rgb(var(--yb-text-body))]">
       <input
         v-model="form.enabled"
         type="checkbox"
-        class="h-3 w-3 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+        class="h-3 w-3 rounded border-[rgb(var(--yb-border-strong))] text-[rgb(var(--yb-success))] focus:ring-[rgb(var(--yb-success))]"
       />
       启用
     </label>

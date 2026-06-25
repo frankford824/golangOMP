@@ -144,8 +144,8 @@ onMounted(loadMyOrg)
 .org-card,
 .org-panel {
   border: 1px solid var(--v1-border);
-  background: #fff;
-  box-shadow: 0 16px 36px -28px rgba(15, 23, 42, 0.28);
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 16px 36px -28px rgb(var(--yb-shadow) / 0.28);
 }
 
 .org-hero {
@@ -155,8 +155,8 @@ onMounted(loadMyOrg)
   border-radius: 18px;
   padding: 22px;
   background:
-    linear-gradient(135deg, rgba(240, 253, 250, 0.95), rgba(255, 255, 255, 0.94) 54%),
-    #fff;
+    linear-gradient(135deg, rgb(var(--yb-teal-soft) / 0.95), rgb(var(--yb-surface) / 0.94) 54%),
+    rgb(var(--yb-surface));
 }
 
 .org-hero__icon,
@@ -170,13 +170,13 @@ onMounted(loadMyOrg)
   width: 50px;
   height: 50px;
   border-radius: 14px;
-  background: #ccfbf1;
-  color: #0f766e;
+  background: rgb(var(--yb-teal-mint));
+  color: rgb(var(--yb-teal));
 }
 
 .org-hero p {
   margin: 0;
-  color: #0f766e;
+  color: rgb(var(--yb-teal));
   font-size: 12px;
   font-weight: 800;
 }
@@ -216,18 +216,18 @@ onMounted(loadMyOrg)
 }
 
 .org-card__icon--blue {
-  background: #eff6ff;
-  color: #2563eb;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand));
 }
 
 .org-card__icon--green {
-  background: #ecfdf5;
-  color: #059669;
+  background: rgb(var(--yb-success-soft));
+  color: rgb(var(--yb-success-emerald));
 }
 
 .org-card__icon--amber {
-  background: #fffbeb;
-  color: #d97706;
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-warning));
 }
 
 .org-card span {
@@ -258,7 +258,7 @@ onMounted(loadMyOrg)
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .section-heading h2 {
@@ -285,26 +285,26 @@ onMounted(loadMyOrg)
   display: inline-flex;
   max-width: 100%;
   align-items: center;
-  border: 1px solid #bfdbfe;
+  border: 1px solid rgb(var(--yb-brand-border));
   border-radius: 999px;
-  background: #eff6ff;
+  background: rgb(var(--yb-brand-soft));
   padding: 6px 10px;
-  color: #1d4ed8;
+  color: rgb(var(--yb-brand-strong));
   font-size: 12px;
   font-weight: 800;
 }
 
 .chip-list--team span {
-  border-color: #a7f3d0;
-  background: #ecfdf5;
-  color: #047857;
+  border-color: rgb(var(--yb-success-border-soft));
+  background: rgb(var(--yb-success-soft));
+  color: rgb(var(--yb-success-teal));
 }
 
 .org-empty {
   margin: 16px 0 0;
-  border: 1px dashed #cbd5e1;
+  border: 1px dashed rgb(var(--yb-text-disabled));
   border-radius: 12px;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   padding: 18px;
   color: var(--v1-text-secondary);
   font-size: 13px;

@@ -1,15 +1,15 @@
 /**
  * 页面职责：规则及模板配置页
  * v0.6 对齐：FRONTEND_ALIGNMENT_v0.5(1).md G 节、I 节
- * 
+ *
  * 核心业务规则（来自 Prompt.md）：
  *   - 编号规则用于新品开发生成 SKU、定制单号等
  *   - 支持预览功能，实时生成示例 SKU 用于任务创建
  *   - 规则字段：名称、前缀、日期格式、地点编码、业务类型、自增位、dailyReset、enabled
- * 
+ *
  * 主要 Store：useRulesStore
  * 预留接口：GET /api/rules、POST /api/rules、GET /api/rules/preview (mock)
- * 
+ *
  * 当前状态：已迁移 Base 组件，列表与编辑弹窗响应式完整
  * 维护注意 / 风险点：
  *   - 预览逻辑依赖实时计算，规则变更需同步测试预览结果
@@ -168,7 +168,7 @@ function ruleTypeLabel(row: CodeRule) {
   margin: 0;
   font-size: 1.125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .content-grid {
   display: grid;
@@ -177,8 +177,8 @@ function ruleTypeLabel(row: CodeRule) {
 }
 .list-section,
 .edit-section {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 8px;
   padding: 1rem;
 }
@@ -187,7 +187,7 @@ function ruleTypeLabel(row: CodeRule) {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .table-wrap {
   overflow-x: auto;
@@ -202,22 +202,22 @@ function ruleTypeLabel(row: CodeRule) {
 .data-table td {
   padding: 0.5rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid rgb(var(--yb-border-slate));
 }
 .data-table th {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   font-weight: 600;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .data-table tbody tr:nth-child(even) {
-  background: #fafafa;
+  background: rgb(var(--yb-surface-row-even));
 }
 .row-click {
   cursor: pointer;
 }
 .row-click:hover,
 .row-click.selected {
-  background: #f0fdf4 !important;
+  background: rgb(var(--yb-success-ui-soft));
 }
 .edit-actions {
   margin: 0.75rem 0;
@@ -225,7 +225,7 @@ function ruleTypeLabel(row: CodeRule) {
 .save-error {
   margin: 0 0 0.5rem;
   font-size: 0.8125rem;
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
 }
 .edit-section .preview-panel {
   margin-bottom: 1rem;

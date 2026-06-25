@@ -25,7 +25,7 @@ withDefaults(
 }
 .skeleton-line {
   height: 1rem;
-  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background: linear-gradient(90deg, rgb(var(--yb-surface-slate)) 25%, rgb(var(--yb-border-slate)) 50%, rgb(var(--yb-surface-slate)) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.2s ease-in-out infinite;
   border-radius: 4px;

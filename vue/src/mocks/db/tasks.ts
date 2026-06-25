@@ -16,6 +16,10 @@ export interface MockTask {
   priority: 'normal' | 'critical' | 'low' | 'high'
   status: MockTaskStatus
   created_by: string
+  designer_id?: string | number | null
+  designer_name?: string | null
+  assignee_id?: string | number | null
+  assignee_name?: string | null
   created_at: string
   updated_at: string
 }

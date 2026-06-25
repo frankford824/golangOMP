@@ -4,11 +4,47 @@ import { mockTasks, upsertTask, type MockTask, type MockTaskStatus } from '../db
 import { listTaskModules, mockTaskModules, type MockModuleState } from '../db/taskModules'
 import { removeTaskDraft } from '../db/taskDrafts'
 import type { MockHandler, MockHttpResponse } from './types'
-import { getBeijingDateCompactString, nowISO } from '@/utils/date'
+import { addMillisecondsToNowISO, getBeijingDateCompactString, nowISO } from '@/utils/date'
 
 const MOCK_ACTOR = 'ops_demo'
 const MOCK_ACTOR_ID = 1
 const MOCK_ACTOR_TEAM = 'ungrouped'
+const LARGE_SURFACE_AUDIT_TOTAL = Number(import.meta.env.VITE_LARGE_SURFACE_TOTAL ?? 5000)
+const LARGE_SURFACE_AUDIT_PAGE_SIZE = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
+
+function isLargeSurfaceAuditEnabled(): boolean {
+  return import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true'
+}
+
+function largeSurfacePageSize(raw: unknown): number {
+  const fallback = Number.isFinite(LARGE_SURFACE_AUDIT_PAGE_SIZE) ? LARGE_SURFACE_AUDIT_PAGE_SIZE : 100
+  const candidate = Math.max(fallback, Number(raw ?? fallback))
+  return Math.min(150, Math.max(80, Math.floor(candidate)))
+}
+
+function largeSurfaceTasks(q: Record<string, unknown>): { items: MockTask[]; total: number; page: number; page_size: number } {
+  const page = Math.max(1, Number(q.page ?? 1))
+  const pageSize = largeSurfacePageSize(q.page_size)
+  const total = Number.isFinite(LARGE_SURFACE_AUDIT_TOTAL) ? LARGE_SURFACE_AUDIT_TOTAL : 5000
+  const statuses: MockTaskStatus[] = ['pending_claim', 'in_progress', 'submitted', 'approved', 'completed']
+  const priorities: MockTask['priority'][] = ['normal', 'high', 'low', 'critical']
+  const start = (page - 1) * pageSize
+  const items = Array.from({ length: pageSize }, (_, index) => {
+    const seq = start + index + 1
+    return {
+      id: String(900000 + seq),
+      task_no: `LT-${String(seq).padStart(5, '0')}`,
+      task_type: seq % 6 === 0 ? 'customer_customization' : 'original_product_development',
+      title: `长列表承载审计任务 ${String(seq).padStart(5, '0')}`,
+      priority: priorities[seq % priorities.length],
+      status: statuses[seq % statuses.length],
+      created_by: seq % 3 === 0 ? 'design_ops' : MOCK_ACTOR,
+      created_at: addMillisecondsToNowISO(-seq * 60_000),
+      updated_at: addMillisecondsToNowISO(-seq * 30_000),
+    }
+  })
+  return { items, total, page, page_size: pageSize }
+}
 
 function withMockEventPayload(payload: unknown): Record<string, unknown> {
   const base =
@@ -238,6 +274,14 @@ function getTaskOr404(taskId: string): MockTask | null {
 
 export const tasksHandler: MockHandler = (request) => {
   if (request.method === 'GET' && request.path === '/v1/tasks') {
+    if (isLargeSurfaceAuditEnabled()) {
+      return {
+        status: 200,
+        data: {
+          ...largeSurfaceTasks(request.query as Record<string, unknown>),
+        },
+      }
+    }
     return {
       status: 200,
       data: {

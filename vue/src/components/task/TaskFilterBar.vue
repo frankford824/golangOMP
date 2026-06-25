@@ -270,12 +270,12 @@ function reset() {
 .field-label {
   font-size: 0.75rem;
   font-weight: 500;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 .field-hint-error {
   margin: 0;
   font-size: 0.6875rem;
-  color: rgb(220 38 38);
+  color: rgb(var(--yb-danger));
 }
 /* 与筛选项底缘对齐的尾区：复选+文案与按钮同一水平中线对齐 */
 .filter-bar-trailing {
@@ -293,7 +293,7 @@ function reset() {
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.25;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
   cursor: pointer;
   user-select: none;
 }
@@ -303,8 +303,8 @@ function reset() {
   margin: 0;
   flex-shrink: 0;
   border-radius: 0.2rem;
-  border: 1px solid rgb(203 213 225);
-  accent-color: rgb(15 23 42);
+  border: 1px solid rgb(var(--yb-text-disabled));
+  accent-color: rgb(var(--yb-text-navy));
   cursor: pointer;
   vertical-align: middle;
 }

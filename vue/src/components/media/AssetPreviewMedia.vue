@@ -370,9 +370,9 @@ function onOpenFull() {
   width: 100%;
   min-height: 2.5rem;
   border-radius: 0.5rem;
-  border: 1px dashed #cbd5e1;
-  background: #f8fafc;
-  color: #475569;
+  border: 1px dashed rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-soft));
   font-size: 0.75rem;
   line-height: 1.35;
   display: flex;
@@ -384,37 +384,37 @@ function onOpenFull() {
   padding: 0.5rem;
 }
 .apm-loading {
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .apm-muted {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .apm-bad {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
 }
 .apm-warn {
-  border-color: #fde68a;
-  background: #fffbeb;
-  color: #92400e;
+  border-color: rgb(var(--yb-warning-border-soft));
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-warning-dark));
 }
 .apm-subhint {
   font-size: 0.6875rem;
-  color: #a16207;
+  color: rgb(var(--yb-warning-badge-text));
 }
 .apm-retry {
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgb(var(--yb-text-disabled));
   border-radius: 999px;
-  background: #fff;
-  color: #0f172a;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-navy));
   font-size: 0.6875rem;
   line-height: 1;
   padding: 0.25rem 0.5rem;
   cursor: pointer;
 }
 .apm-retry:hover {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .apm-retry--below {
   flex-shrink: 0;
@@ -448,7 +448,7 @@ function onOpenFull() {
 }
 .apm-empty-caption {
   font-size: 0.6875rem;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
   text-align: center;
   line-height: 1.35;
   max-width: 100%;

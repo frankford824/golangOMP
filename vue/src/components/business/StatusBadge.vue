@@ -48,19 +48,19 @@ const badgeClass = computed(() => {
   border-radius: 4px;
 }
 .variant-default {
-  background: #f1f5f9;
-  color: #475569;
+  background: rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-soft));
 }
 .variant-success {
-  background: rgb(16 185 129 / 0.15);
-  color: #059669;
+  background: rgb(var(--yb-success-emerald) / 0.15);
+  color: rgb(var(--yb-success-emerald));
 }
 .variant-warning {
-  background: rgb(245 158 11 / 0.15);
-  color: #d97706;
+  background: rgb(var(--yb-warning-accent) / 0.15);
+  color: rgb(var(--yb-warning));
 }
 .variant-danger {
-  background: rgb(220 38 38 / 0.1);
-  color: #dc2626;
+  background: rgb(var(--yb-danger) / 0.1);
+  color: rgb(var(--yb-danger));
 }
 </style>

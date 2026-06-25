@@ -3,22 +3,29 @@
     <!-- 顶栏 + 搜索/过滤：统一卡片容器 -->
     <div class="header-card">
       <div class="page-header">
-        <h2 class="page-title">任务中心</h2>
+        <h2 class="page-title task-list-page-title">任务中心</h2>
         <div class="page-header-actions">
           <BaseButton
             size="sm"
             variant="secondary"
+            class="task-list-action-button"
             :loading="refreshingList"
             @click="refreshList(true)"
           >
             {{ refreshingList ? '刷新中...' : '刷新列表' }}
           </BaseButton>
-          <BaseButton v-if="can('task.create')" variant="primary" @click="goCreate">
+          <BaseButton
+            v-if="can('task.create')"
+            variant="primary"
+            class="task-list-action-button task-list-action-button--primary"
+            @click="goCreate"
+          >
             创建任务
           </BaseButton>
           <BaseButton
             v-if="can('task.create')"
             variant="secondary"
+            class="task-list-action-button"
             @click="goExcelAssistCreate"
           >
             Excel 辅助创建
@@ -144,173 +151,53 @@
 
       <!-- 统一卡片视图 -->
       <div class="task-cards">
-        <div
+        <TaskCard
           v-for="task in pagedList"
           :key="task.id"
-          class="task-card"
-          :class="{
-            'task-card--selected': selectedIds.has(task.id),
-            'task-card--overdue': isOverdue(task),
-            'task-card--claimable': canClaimTask(task),
-            'task-card--customization': isCustomizationTask(task),
-          }"
+          :task="task"
+          :selected="selectedIds.has(task.id)"
+          :overdue="isOverdue(task)"
+          :claimable="canClaimTask(task)"
+          :customization="isCustomizationTask(task)"
+          :title="taskCardTitle(task)"
+          :sku="displaySku(task)"
+          :ownership="ownershipPrimary(task)"
+          :creator="taskCreatorDisplayName(task)"
+          :designer="taskDesignerDisplayName(task)"
+          :show-designer="shouldShowDesignerMetaOnTaskCenterCard(task)"
+          :category-label="taskCategoryLabel(task)"
+          :category-kind="isCustomizationTask(task) ? 'custom' : 'normal'"
+          :show-lane-tag="shouldShowWorkflowLaneTagOnCard(task)"
+          :status-label-override="getTaskCenterCardStatusLabel(task) ?? undefined"
+          :is-retouch="isRetouchTask(task)"
+          :is-batch="isBatchCard(task)"
+          :batch-count="batchItemCount(task)"
+          :batch-preview="taskCardBatchPreview(task)"
+          :has-more-batch="batchItemCount(task) > 2"
+          :claiming="claimingTaskId === task.id"
+          :claim-disabled="Boolean(claimingTaskId)"
+          :claim-label="taskCenterClaimButtonLabel(task, claimingTaskId === task.id)"
+          :can-copy-no="canCopyTaskField(task.taskNo)"
+          :can-copy-title="canCopyTaskField(taskCardTitle(task))"
+          :can-copy-sku="canCopyTaskField(displaySku(task))"
+          :updated-text="formatDate(task.updatedAt)"
+          :due-text="task.dueAt ? formatDate(task.dueAt) : '-'"
           @pointerdown="onTaskCardPointerDown"
           @pointermove="onTaskCardPointerMove"
           @click="onTaskCardClick($event, task)"
-        >
-          <div class="card-row card-row-top">
-            <label class="card-check" @click.stop>
-              <input
-                type="checkbox"
-                class="checkbox"
-                :checked="selectedIds.has(task.id)"
-                @change="toggleSelect(task.id)"
-              />
-            </label>
-            <div class="card-tags">
-              <span class="task-category-pill" :class="taskCategoryClass(task)">
-                {{ taskCategoryLabel(task) }}
-              </span>
-              <WorkflowLaneTag
-                v-if="shouldShowWorkflowLaneTagOnCard(task)"
-                :lane="task.workflowLane"
-              />
-              <TaskTypeBadge :type="task.businessType ?? task.taskType" />
-            </div>
-          </div>
-          <div class="card-copy-toolbar" data-card-no-nav="true" @click.stop>
-            <button
-              v-if="canCopyTaskField(task.taskNo)"
-              type="button"
-              :aria-label="`复制任务号 ${task.taskNo}`"
-              title="复制任务号"
-              @click="copyTaskCardText(task.taskNo, '任务号')"
-            >
-              单号
-            </button>
-            <button
-              v-if="canCopyTaskField(taskCardTitle(task))"
-              type="button"
-              :aria-label="`复制任务名称 ${taskCardTitle(task)}`"
-              title="复制任务名称"
-              @click="copyTaskCardText(taskCardTitle(task), '任务名称')"
-            >
-              名称
-            </button>
-            <button
-              v-if="canCopyTaskField(displaySku(task))"
-              type="button"
-              :aria-label="`复制 SKU ${displaySku(task)}`"
-              title="复制 SKU"
-              @click="copyTaskCardText(displaySku(task), 'SKU')"
-            >
-              SKU
-            </button>
-          </div>
-          <div class="card-no-row task-copy-zone" data-card-copy-zone>
-            <span class="card-no">{{ task.taskNo }}</span>
-          </div>
-          <div class="card-product-wrap">
-            <div
-              class="card-product task-copy-zone"
-              :title="taskCardTitle(task)"
-              data-card-copy-zone
-            >
-              {{ taskCardTitle(task) }}
-            </div>
-            <span v-if="isBatchCard(task)" class="batch-count-pill">共 {{ batchItemCount(task) }} 项</span>
-          </div>
-          <div
-            v-if="isBatchCard(task)"
-            class="batch-preview"
-            data-card-no-nav="true"
-            @click.stop
-          >
-            <div
-              v-for="(item, index) in batchPreviewItems(task)"
-              :key="batchItemKey(item, index)"
-              class="batch-preview-item"
-              :title="batchItemSummary(item)"
-            >
-              <span class="batch-preview-index">{{ item.sequenceNo ?? index + 1 }}</span>
-              <span class="batch-preview-text">{{ batchItemSummary(item) }}</span>
-            </div>
-            <button
-              v-if="batchItemCount(task) > batchPreviewLimit"
-              type="button"
-              class="batch-preview-more"
-              @click="openBatchItemsModal(task)"
-            >
-              查看全部 {{ batchItemCount(task) }} 项
-            </button>
-          </div>
-          <div class="card-status-row flex flex-wrap items-center gap-1 mt-1">
-            <TaskMainStatusBadge
-              v-if="task.mainStatus"
-              :status="task.mainStatus"
-              :label-override="getTaskCenterCardStatusLabel(task) ?? undefined"
-            />
-            <TaskStatusTag v-else :status="task.status" />
-            <FilingStatusBadge
-              v-if="task.filing_status || isRetouchTask(task)"
-              :status="task.filing_status"
-              :task-type="task.businessType ?? task.taskType"
-              :missing-fields-summary="task.missing_fields_summary_cn"
-              :error-message="task.filing_error_message"
-            />
-          </div>
-          <div class="card-meta-block">
-            <div class="card-meta-line card-meta-line--ownership">
-              <span class="card-meta-key">归属</span>
-              <span class="card-meta-value" :title="ownershipPrimary(task)">{{ ownershipPrimary(task) }}</span>
-            </div>
-            <div class="card-meta-line card-meta-line--sku">
-              <span class="card-meta-key">SKU</span>
-              <span class="card-meta-value task-copy-zone" :title="displaySku(task)" data-card-copy-zone>
-                {{ displaySku(task) }}
-              </span>
-            </div>
-            <div class="card-meta-line card-meta-line--creator">
-              <span class="card-meta-key">创建</span>
-              <span class="card-meta-value" :title="taskCreatorDisplayName(task)">{{
-                taskCreatorDisplayName(task)
-              }}</span>
-            </div>
-            <div
-              v-if="shouldShowDesignerMetaOnTaskCenterCard(task)"
-              class="card-meta-line card-meta-line--design"
-            >
-              <span class="card-meta-key">设计</span>
-              <span class="card-meta-value" :title="taskDesignerDisplayName(task)">{{
-                taskDesignerDisplayName(task)
-              }}</span>
-            </div>
-          </div>
-          <div class="card-row card-row-bottom">
-            <span class="card-updated">更新于 {{ formatDate(task.updatedAt) }}</span>
-            <span :class="isOverdue(task) ? 'card-due card-due-overdue' : 'card-due'">
-              截止 {{ task.dueAt ? formatDate(task.dueAt) : '-' }}
-            </span>
-            <BaseButton
-              v-if="canClaimTask(task)"
-              size="sm"
-              variant="secondary"
-              :loading="claimingTaskId === task.id"
-              :disabled="Boolean(claimingTaskId)"
-              @click.stop="claimTask(task)"
-            >
-              {{ taskCenterClaimButtonLabel(task, claimingTaskId === task.id) }}
-            </BaseButton>
-          </div>
-        </div>
+          @toggle-select="toggleSelect(task.id)"
+          @copy="copyTaskCardText"
+          @claim="claimTask(task)"
+          @open-batch="openBatchItemsModal(task)"
+        />
       </div>
     </AsyncStateWrapper>
 
     <!-- 分页页脚：翻页按钮，每页固定展示，不追加 -->
     <div v-if="filteredList.length > 0" class="footer-card">
-      <span class="text-xs text-slate-500">共 {{ tasksStore.listTotal }} 条</span>
+      <span class="text-xs text-[rgb(var(--yb-text-muted))]">共 {{ tasksStore.listTotal }} 条</span>
       <div class="flex items-center gap-3">
-        <label class="flex items-center gap-1 text-xs text-slate-500">
+        <label class="flex items-center gap-1 text-xs text-[rgb(var(--yb-text-muted))]">
           每页
           <BaseSelect
             v-model="pageSize"
@@ -330,10 +217,10 @@
           >
             上一页
           </BaseButton>
-          <span class="pager-info text-xs text-slate-500">
+          <span class="pager-info text-xs text-[rgb(var(--yb-text-muted))]">
             第 {{ page }} / {{ totalPages }} 页，已显示 {{ visibleCount }} / {{ tasksStore.listTotal }}
           </span>
-          <label class="page-jump text-xs text-slate-500">
+          <label class="page-jump text-xs text-[rgb(var(--yb-text-muted))]">
             跳至
             <BaseInput
               v-model="jumpPage"
@@ -424,11 +311,7 @@ import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/t
 import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterBar.vue'
 import TaskFilterBar from '@/components/task/TaskFilterBar.vue'
-import TaskStatusTag from '@/components/task/TaskStatusTag.vue'
-import TaskTypeBadge from '@/components/task/TaskTypeBadge.vue'
-import WorkflowLaneTag from '@/components/task/WorkflowLaneTag.vue'
-import TaskMainStatusBadge from '@/components/business/TaskMainStatusBadge.vue'
-import FilingStatusBadge from '@/components/business/FilingStatusBadge.vue'
+import TaskCard from '@/components/task/TaskCard.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
@@ -557,7 +440,6 @@ const batchReceiving = ref(false)
 const refreshingList = ref(false)
 const advancedFilterOpen = ref(false)
 const claimingTaskId = ref<string | null>(null)
-const batchPreviewLimit = 3
 const batchItemsModalTask = ref<Task | null>(null)
 const batchItemsModalOpen = computed({
   get: () => batchItemsModalTask.value != null,
@@ -991,12 +873,6 @@ function shouldShowWorkflowLaneTagOnCard(task: Task): boolean {
   return true
 }
 
-function taskCategoryClass(task: Task): string {
-  return isCustomizationTask(task)
-    ? 'task-category-pill-custom'
-    : 'task-category-pill-normal'
-}
-
 function isRetouchTask(task: Task): boolean {
   const type = task.businessType ?? task.taskType
   return type === 'RETOUCH_TASK'
@@ -1052,8 +928,15 @@ function batchItemKey(item: TaskSkuItem, index: number): string {
   return `${item.id ?? item.skuCode ?? item.sequenceNo ?? index}-${index}`
 }
 
-function batchPreviewItems(task: Task): TaskSkuItem[] {
-  return batchSkuItems(task).slice(0, batchPreviewLimit)
+/** 卡片批量预览:固定展示前 2 项(其余进「查看全部」弹窗),预映射成展示结构 */
+function taskCardBatchPreview(task: Task) {
+  return batchSkuItems(task)
+    .slice(0, 2)
+    .map((item, index) => ({
+      key: batchItemKey(item, index),
+      seq: item.sequenceNo ?? index + 1,
+      summary: batchItemSummary(item),
+    }))
 }
 
 function taskCardTitle(task: Task): string {
@@ -1170,7 +1053,7 @@ function onTaskCardClick(event: MouseEvent, task: Task) {
   goDetail(task)
 }
 
-/** 池中「接单」仅面向设计侧；单靠 design:work 会漏掉只下发 task.asset_upload / task.design_submit 的普通设计师 */
+/** 池中「接单」仅面向设计侧；单靠 design.work 会漏掉只下发 task.asset_upload / task.design_submit 的普通设计师 */
 function userCanClaimFromDesignerPool(): boolean {
   if (can(PermissionEnum.DESIGN_WORK)) return true
   if (can(PermissionEnum.DESIGN_UPLOAD)) return true
@@ -1501,17 +1384,17 @@ watch(totalPages, (value) => {
   padding-bottom: 2rem;
 }
 .header-card {
-  background: rgba(255, 255, 255, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgb(var(--yb-surface) / 0.98);
+  border: 1px solid rgb(var(--yb-surface) / 0.6);
   border-radius: 1rem;
-  box-shadow: 0 4px 24px -4px rgba(28, 25, 23, 0.06);
+  box-shadow: 0 4px 24px -4px rgb(var(--yb-shadow-stone) / 0.06);
   padding: 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 .filter-bar-wrap {
-  border-top: 1px solid rgb(231 229 228);
+  border-top: 1px solid rgb(var(--yb-legacy-border));
   padding-top: 0.5rem;
   margin-top: 0.25rem;
 }
@@ -1519,7 +1402,7 @@ watch(totalPages, (value) => {
   margin: 0;
   font-size: 0.6875rem;
   line-height: 1.4;
-  color: rgb(100 116 139);
+  color: var(--tc-muted);
 }
 .task-tabs,
 .task-category-switch {
@@ -1529,7 +1412,7 @@ watch(totalPages, (value) => {
   flex-wrap: wrap;
 }
 .task-category-switch {
-  border-top: 1px solid rgb(231 229 228);
+  border-top: 1px solid rgb(var(--yb-legacy-border));
   padding-top: 0.75rem;
 }
 .task-tab-active,
@@ -1551,7 +1434,7 @@ watch(totalPages, (value) => {
   font-size: 1.5rem;
   font-weight: 800;
   font-family: var(--yb-font-display);
-  color: rgb(28 25 23);
+  color: rgb(var(--yb-legacy-text));
 }
 .toolbar {
   display: flex;
@@ -1567,33 +1450,33 @@ watch(totalPages, (value) => {
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
-  background: rgba(255, 255, 255, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgb(var(--yb-surface) / 0.98);
+  border: 1px solid rgb(var(--yb-surface) / 0.6);
   border-radius: 1rem;
   font-size: 0.8125rem;
-  box-shadow: 0 4px 24px -4px rgba(28, 25, 23, 0.06);
+  box-shadow: 0 4px 24px -4px rgb(var(--yb-shadow-stone) / 0.06);
 }
 .batch-count {
   font-weight: 500;
-  color: rgb(51 65 85);
+  color: var(--tc-slate);
   flex: 1;
 }
 .list-action-error {
   margin: 0;
   padding: 0.625rem 0.875rem;
   border-radius: 0.75rem;
-  background: rgb(254 242 242);
-  border: 1px solid rgb(254 202 202);
-  color: rgb(185 28 28);
+  background: var(--tc-red-soft);
+  border: 1px solid var(--tc-red-border);
+  color: var(--tc-red);
   font-size: 0.8125rem;
 }
 .list-action-success {
   margin: 0;
   padding: 0.625rem 0.875rem;
   border-radius: 0.75rem;
-  border: 1px solid rgb(187 247 208);
-  background: rgb(240 253 244);
-  color: rgb(22 101 52);
+  border: 1px solid var(--tc-green-border);
+  background: var(--tc-green-ui-soft);
+  color: var(--tc-green-deep);
   font-size: 0.8125rem;
   font-weight: 700;
 }
@@ -1607,14 +1490,6 @@ watch(totalPages, (value) => {
   transform: translateY(-4px);
 }
 
-.checkbox {
-  width: 0.875rem;
-  height: 0.875rem;
-  border-radius: 0.25rem;
-  cursor: pointer;
-  accent-color: rgb(15 23 42);
-}
-
 /* 统一卡片视图：列宽约 300px 起，大屏约 320px，同屏约 4～5 列、卡片更宽便于阅读 */
 .task-cards {
   display: grid;
@@ -1626,162 +1501,16 @@ watch(totalPages, (value) => {
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   }
 }
-.task-card {
-  padding: 0.875rem;
-  background: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 0.875rem;
-  box-shadow: 0 4px 24px -4px rgba(28, 25, 23, 0.06);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.task-card:hover {
-  background: rgba(255, 255, 255, 0.88);
-  border-color: rgba(255, 255, 255, 0.8);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 48px -12px rgba(28, 25, 23, 0.08);
-}
-.card-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-}
-.card-row-top {
-  align-items: center;
-  flex-wrap: nowrap;
-  margin-bottom: 0.35rem;
-}
-.card-tags {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.25rem;
-}
-.card-row-bottom {
-  margin-top: 0.5rem;
-  margin-bottom: 0;
-  justify-content: flex-start;
-  flex-wrap: wrap;
-}
-.card-check {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  padding-top: 0.05rem;
-}
-.card-no-row {
-  margin-bottom: 0.4rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid rgb(241 245 249);
-}
-.card-no {
-  display: block;
-  font-weight: 600;
-  font-size: 0.75rem;
-  color: rgb(51 65 85);
-  font-family: var(--yb-font-data);
-  letter-spacing: 0.01em;
-}
-.card-product {
-  min-width: 0;
-  font-size: 0.875rem;
-  color: rgb(15 23 42);
-  font-weight: 500;
-  line-height: 1.35;
-  /* 固定两行高度；超出两行省略，悬停 title 见全文 */
-  min-height: calc(1.35em * 2);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-.card-meta-block {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  margin-top: 0.5rem;
-}
-.card-meta-line {
-  display: grid;
-  grid-template-columns: 2.25rem minmax(0, 1fr);
-  column-gap: 0.5rem;
-  align-items: baseline;
-  font-size: 0.75rem;
-  line-height: 1.4;
-}
-.card-meta-key {
-  text-align: right;
-  flex-shrink: 0;
-  font-weight: 600;
-}
-/* 仅字色区分字段，无底色；标签略饱和、正文统一为 slate 保证可读 */
-.card-meta-line--ownership .card-meta-key {
-  color: rgb(67 56 202);
-}
-.card-meta-line--sku .card-meta-key {
-  color: rgb(180 83 9);
-}
-.card-meta-line--creator .card-meta-key {
-  color: rgb(4 120 87);
-}
-.card-meta-line--design .card-meta-key {
-  color: rgb(91 33 182);
-}
-.card-meta-value {
-  min-width: 0;
-  color: rgb(71 85 105);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.card-updated {
-  font-size: 0.6875rem;
-  color: rgb(148 163 184);
-}
-.card-due {
-  font-size: 0.6875rem;
-  color: rgb(100 116 139);
-}
-.card-due-overdue {
-  color: rgb(220 38 38);
-  font-weight: 600;
-}
-.task-category-pill {
-  border-radius: 9999px;
-  padding: 0.1rem 0.4rem;
-  font-size: 0.625rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.task-category-pill-normal {
-  color: rgb(30 64 175);
-  background: rgb(239 246 255);
-  border: 1px solid rgb(191 219 254);
-}
-.task-category-pill-custom {
-  color: rgb(109 40 217);
-  background: rgb(245 243 255);
-  border: 1px solid rgb(221 214 254);
-}
-
 /* 分页 */
 .footer-card {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0.5rem 1rem;
-  background: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: var(--tc-panel);
+  border: 1px solid rgb(var(--yb-surface) / 0.6);
   border-radius: 1rem;
-  box-shadow: 0 4px 24px -4px rgba(28, 25, 23, 0.06);
+  box-shadow: 0 4px 24px -4px rgb(var(--yb-shadow-stone) / 0.06);
 }
 .pagination {
   display: flex;
@@ -1796,9 +1525,9 @@ watch(totalPages, (value) => {
   padding: 0.25rem 0.75rem;
   font-size: 0.75rem;
   border-radius: 9999px;
-  border: 1px solid rgb(226 232 240);
-  background: white;
-  color: rgb(51 65 85);
+  border: 1px solid var(--tc-border-slate);
+  background: var(--tc-panel);
+  color: var(--tc-slate);
   cursor: pointer;
 }
 .pager-btn:disabled {
@@ -1807,7 +1536,7 @@ watch(totalPages, (value) => {
 }
 .pager-info {
   font-size: 0.75rem;
-  color: rgb(100 116 139);
+  color: var(--tc-muted);
 }
 .task-page-size-select {
   min-width: 4.75rem;
@@ -1823,18 +1552,17 @@ watch(totalPages, (value) => {
 
 /* Light admin task list skin. Style-only. */
 .task-list-view {
-  color: #374151;
+  color: rgb(var(--yb-text-body));
   background: transparent;
 }
 
 .header-card,
 .batch-action-bar,
-.task-card,
 .footer-card {
-  border: 1px solid #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+  border: 1px solid var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
+  box-shadow: 0 1px 3px rgb(var(--yb-shadow) / 0.06);
 }
 
 .header-card {
@@ -1848,15 +1576,14 @@ watch(totalPages, (value) => {
 
 .page-title {
   position: relative;
-  color: #111827 !important;
+  color: var(--tc-text);
   font-size: clamp(1.8rem, 2.6vw, 3rem);
   font-weight: 900;
 }
 
 .filter-bar-wrap,
-.task-category-switch,
-.card-no-row {
-  border-color: #e5e7eb !important;
+.task-category-switch {
+  border-color: var(--tc-border);
 }
 
 .task-tabs,
@@ -1869,84 +1596,82 @@ watch(totalPages, (value) => {
 
 .task-tab-active,
 .task-category-active {
-  background: #2563eb !important;
-  border-color: #2563eb !important;
-  color: #ffffff !important;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+  background: var(--tc-panel);
+  border-color: var(--tc-border);
+  color: var(--tc-body);
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 
-.task-card {
-  overflow: hidden;
-}
-
-.task-card:hover {
-  border-color: #d1d5db !important;
-  background: #ffffff !important;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
-}
-
-.card-no,
-.card-product,
-.batch-count {
-  color: #111827 !important;
-}
-
-.card-meta-value,
-.card-updated,
-.card-due,
 .pager-info,
 .footer-card,
 .page-jump {
-  color: #6b7280 !important;
-}
-
-.card-meta-key {
-  color: #6b7280 !important;
-}
-
-.task-category-pill-normal,
-.task-category-pill-custom {
-  background: #f3f4f6 !important;
-  border-color: #e5e7eb !important;
-  color: #374151 !important;
-}
-
-.checkbox {
-  accent-color: #2563eb;
+  color: var(--tc-muted);
 }
 
 .list-action-error {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
+  background: var(--tc-red-soft);
+  border-color: var(--tc-red-border);
+  color: var(--tc-red);
 }
 
 /* Task center tokens: light admin system. */
 .task-list-view {
-  --tc-page: #f5f6f8;
-  --tc-panel: #ffffff;
-  --tc-panel-strong: #ffffff;
-  --tc-card: #ffffff;
-  --tc-card-soft: #f9fafb;
-  --tc-border: #e5e7eb;
-  --tc-border-strong: #d1d5db;
-  --tc-text: #111827;
-  --tc-muted: #6b7280;
-  --tc-faint: #9ca3af;
-  --tc-cyan: #2563eb;
-  --tc-blue: #2563eb;
-  --tc-green: #15803d;
-  --tc-amber: #b45309;
-  --tc-pink: #db2777;
-  background: #f5f6f8;
+  --tc-page: rgb(var(--yb-bg-page));
+  --tc-panel: rgb(var(--yb-surface));
+  --tc-panel-strong: rgb(var(--yb-surface));
+  --tc-panel-subtle: rgb(var(--yb-surface-subtle));
+  --tc-panel-muted: rgb(var(--yb-surface-muted));
+  --tc-card: rgb(var(--yb-surface));
+  --tc-card-soft: rgb(var(--yb-surface-soft));
+  --tc-border: rgb(var(--yb-border));
+  --tc-border-strong: rgb(var(--yb-border-strong));
+  --tc-border-subtle: rgb(var(--yb-border-subtle));
+  --tc-border-slate: rgb(var(--yb-border-slate));
+  --tc-text: rgb(var(--yb-text));
+  --tc-text-deep: rgb(var(--yb-text-deep));
+  --tc-body: rgb(var(--yb-text-body));
+  --tc-slate: rgb(var(--yb-text-slate));
+  --tc-muted: rgb(var(--yb-text-muted));
+  --tc-soft: rgb(var(--yb-text-soft));
+  --tc-faint: rgb(var(--yb-text-faint));
+  --tc-disabled: rgb(var(--yb-text-disabled));
+  --tc-blue: rgb(var(--yb-brand));
+  --tc-blue-strong: rgb(var(--yb-brand-strong));
+  --tc-blue-subtle: rgb(var(--yb-brand-subtle));
+  --tc-blue-soft: rgb(var(--yb-brand-soft));
+  --tc-blue-wash: rgb(var(--yb-brand-wash));
+  --tc-blue-border: rgb(var(--yb-brand-border));
+  --tc-blue-border-strong: rgb(var(--yb-brand-border-strong));
+  --tc-green: rgb(var(--yb-success-strong));
+  --tc-green-deep: rgb(var(--yb-success-deep));
+  --tc-teal: rgb(var(--yb-success-teal));
+  --tc-green-ui-soft: rgb(var(--yb-success-ui-soft));
+  --tc-green-soft: rgb(var(--yb-success-soft));
+  --tc-green-border: rgb(var(--yb-success-border));
+  --tc-amber: rgb(var(--yb-warning-text));
+  --tc-amber-accent: rgb(var(--yb-warning-accent));
+  --tc-amber-soft: rgb(var(--yb-warning-soft));
+  --tc-amber-border: rgb(var(--yb-warning-border));
+  --tc-amber-border-soft: rgb(var(--yb-warning-border-soft));
+  --tc-red: rgb(var(--yb-danger-text));
+  --tc-red-soft: rgb(var(--yb-danger-soft));
+  --tc-red-border: rgb(var(--yb-danger-border));
+  --tc-pink: rgb(var(--yb-magenta));
+  --tc-purple: rgb(var(--yb-purple-text));
+  --tc-purple-soft: rgb(var(--yb-purple-soft));
+  --tc-purple-border: rgb(var(--yb-purple-border));
+  --tc-indigo: rgb(var(--yb-indigo-text));
+  --tc-indigo-strong: rgb(var(--yb-indigo-strong));
+  --tc-indigo-soft: rgb(var(--yb-indigo-soft));
+  background: var(--tc-page);
 }
 
 .header-card,
 .batch-action-bar,
 .footer-card {
-  border-color: var(--tc-border) !important;
-  background: #ffffff !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  box-shadow: 0 1px 3px rgb(var(--yb-shadow) / 0.06);
 }
 
 .header-card {
@@ -1964,7 +1689,7 @@ watch(totalPages, (value) => {
 }
 
 .search-input {
-  width: min(32rem, 100%) !important;
+  width: min(32rem, 100%);
 }
 
 .task-category-switch,
@@ -1977,22 +1702,22 @@ watch(totalPages, (value) => {
 .toolbar :deep(button),
 .batch-action-bar :deep(button),
 .footer-card :deep(button) {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
 }
 
 .task-tab-active,
 .task-category-active {
-  background: #2563eb !important;
-  border-color: #2563eb !important;
-  color: #ffffff !important;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
+  background: var(--tc-panel);
+  border-color: var(--tc-border);
+  color: var(--tc-body);
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 
 .filter-bar-wrap {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
 }
 
 .filter-bar-wrap :deep(.filter-bar) {
@@ -2000,7 +1725,7 @@ watch(totalPages, (value) => {
 }
 
 .filter-bar-wrap :deep(.field-label) {
-  color: var(--tc-muted) !important;
+  color: var(--tc-muted);
   font-weight: 750;
 }
 
@@ -2013,182 +1738,6 @@ watch(totalPages, (value) => {
   .task-cards {
     grid-template-columns: repeat(auto-fill, minmax(390px, 1fr));
   }
-}
-
-.task-card {
-  position: relative;
-  display: flex;
-  min-height: 16.2rem;
-  flex-direction: column;
-  gap: 0.48rem;
-  overflow: hidden;
-  border-color: var(--tc-border) !important;
-  border-radius: 0.95rem;
-  padding: 0.95rem;
-  background: #ffffff !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
-}
-
-.task-card::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: #2563eb;
-  opacity: 1;
-}
-
-.task-card:hover {
-  border-color: #d1d5db !important;
-  background: #ffffff !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
-}
-
-.task-card--selected {
-  border-color: #93c5fd !important;
-  background: #eff6ff !important;
-  box-shadow: 0 0 0 1px #bfdbfe, 0 4px 12px rgba(37, 99, 235, 0.12) !important;
-}
-
-.task-card--selected::before {
-  width: 4px;
-  background: #2563eb;
-  opacity: 1;
-}
-
-.task-card--overdue {
-  border-color: #fcd34d !important;
-}
-
-.task-card--overdue::before {
-  background: #f59e0b;
-  opacity: 1;
-}
-
-.card-row-top {
-  position: relative;
-  z-index: 1;
-  min-height: 1.7rem;
-  margin-bottom: 0.2rem;
-}
-
-.card-check {
-  border-radius: 0.42rem;
-}
-
-.checkbox {
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 0.28rem;
-  accent-color: var(--tc-cyan);
-}
-
-.card-tags {
-  gap: 0.35rem;
-}
-
-.card-tags :deep(*) {
-  max-width: 100%;
-}
-
-.task-category-pill,
-.card-tags :deep(.task-type-badge),
-.card-tags :deep(.workflow-lane-tag) {
-  border: 1px solid #e5e7eb !important;
-  background: #f3f4f6 !important;
-  color: #374151 !important;
-  font-weight: 850 !important;
-}
-
-.task-category-pill-normal {
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
-}
-
-.task-category-pill-custom {
-  background: #fffbeb !important;
-  color: #b45309 !important;
-}
-
-.card-no-row {
-  position: relative;
-  z-index: 1;
-  margin-bottom: 0.2rem;
-  border-color: rgba(210, 229, 255, 0.13) !important;
-}
-
-.card-no {
-  color: #6b7280 !important;
-  font-family: var(--yb-font-data);
-  font-size: 0.78rem;
-  font-weight: 850;
-  letter-spacing: 0;
-}
-
-.card-product {
-  position: relative;
-  z-index: 1;
-  min-height: calc(1.38em * 2);
-  color: #111827 !important;
-  font-size: 0.96rem;
-  font-weight: 850;
-  line-height: 1.38;
-}
-
-.card-meta-block {
-  position: relative;
-  z-index: 1;
-  margin-top: 0.2rem;
-  gap: 0.25rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.75rem;
-  padding: 0.55rem 0.62rem;
-  background: #f9fafb;
-}
-
-.card-meta-line {
-  grid-template-columns: 2.6rem minmax(0, 1fr);
-  column-gap: 0.55rem;
-  font-size: 0.77rem;
-}
-
-.card-meta-key {
-  color: #6b7280 !important;
-  font-weight: 850;
-}
-
-.card-meta-value {
-  color: #374151 !important;
-  font-weight: 650;
-}
-
-.card-row-bottom {
-  position: relative;
-  z-index: 1;
-  margin-top: auto;
-  gap: 0.55rem 0.75rem;
-  border-top: 1px solid rgba(210, 229, 255, 0.1);
-  padding-top: 0.55rem;
-}
-
-.card-updated,
-.card-due {
-  color: var(--tc-muted) !important;
-  font-size: 0.72rem;
-  font-weight: 650;
-}
-
-.card-due-overdue {
-  color: #b45309 !important;
-  font-weight: 850;
-}
-
-.card-row-bottom :deep(button) {
-  min-height: 1.9rem;
-  border-color: #bfdbfe !important;
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
 }
 
 .footer-card {
@@ -2208,7 +1757,7 @@ watch(totalPages, (value) => {
   }
 
   .search-input {
-    width: 100% !important;
+    width: 100%;
   }
 }
 
@@ -2219,9 +1768,9 @@ watch(totalPages, (value) => {
 }
 
 .header-card {
-  gap: 0.82rem !important;
-  border-radius: 1rem !important;
-  padding: 1rem !important;
+  gap: 0.82rem;
+  border-radius: 1rem;
+  padding: 1rem;
 }
 
 .header-card::before {
@@ -2230,13 +1779,13 @@ watch(totalPages, (value) => {
 
 .page-header {
   min-height: 3.1rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--tc-border);
   padding-bottom: 0.7rem;
 }
 
 .page-title {
-  font-size: clamp(1.75rem, 1.8vw, 2.25rem) !important;
-  line-height: 1.04 !important;
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem);
+  line-height: 1.04;
 }
 
 .page-header-actions :deep(button) {
@@ -2244,11 +1793,11 @@ watch(totalPages, (value) => {
 }
 
 .task-category-switch {
-  padding-top: 0.55rem !important;
+  padding-top: 0.55rem;
 }
 
 .task-tabs {
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--tc-border);
   padding-bottom: 0.55rem;
 }
 
@@ -2264,12 +1813,12 @@ watch(totalPages, (value) => {
 }
 
 .search-input {
-  width: min(27rem, 100%) !important;
+  width: min(27rem, 100%);
 }
 
 .filter-bar-wrap {
-  margin-top: 0 !important;
-  padding-top: 0.75rem !important;
+  margin-top: 0;
+  padding-top: 0.75rem;
 }
 
 .filter-bar-wrap :deep(.filter-bar) {
@@ -2296,81 +1845,26 @@ watch(totalPages, (value) => {
 }
 
 .task-cards {
-  grid-template-columns: minmax(0, 1fr) !important;
-  gap: 1rem !important;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
 }
 
 @media (min-width: 900px) {
   .task-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 1280px) {
   .task-cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 1680px) {
   .task-cards {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-}
-
-.task-card {
-  min-height: 14.8rem;
-  gap: 0.52rem;
-  border-radius: 1rem;
-  padding: 1rem;
-  background: #ffffff !important;
-}
-
-.task-card--claimable:not(.task-card--overdue)::before {
-  background: #2563eb;
-}
-
-.card-row-top {
-  min-height: 1.55rem;
-  margin-bottom: 0.05rem;
-}
-
-.card-no-row {
-  margin-bottom: 0.12rem;
-  padding-bottom: 0.5rem;
-}
-
-.card-no {
-  font-size: 0.76rem;
-  color: #6b7280 !important;
-}
-
-.card-product {
-  min-height: calc(1.42em * 2);
-  font-size: 1rem;
-  line-height: 1.42;
-}
-
-.card-meta-block {
-  margin-top: 0.12rem;
-  border-color: #e5e7eb;
-  padding: 0.58rem 0.66rem;
-  background: #f9fafb;
-}
-
-.card-meta-line {
-  grid-template-columns: 2.45rem minmax(0, 1fr);
-  font-size: 0.78rem;
-}
-
-.card-row-bottom {
-  min-height: 2rem;
-  padding-top: 0.58rem;
-}
-
-.card-row-bottom :deep(button) {
-  min-height: 1.85rem;
-  padding-inline: 0.72rem;
 }
 
 /* Task center defect pass: badges, filters, card scale, and icon/button language. */
@@ -2382,21 +1876,21 @@ watch(totalPages, (value) => {
 
 .advanced-filter-toggle {
   min-width: 6.25rem;
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
 }
 
 .advanced-filter-toggle--active {
-  border-color: #bfdbfe !important;
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
+  border-color: var(--tc-blue-border);
+  background: var(--tc-blue-soft);
+  color: var(--tc-blue-strong);
 }
 
 .filter-bar-wrap {
-  border-top: 1px solid #e5e7eb !important;
-  padding-top: 0.72rem !important;
-  background: #ffffff !important;
+  border-top: 1px solid var(--tc-border);
+  padding-top: 0.72rem;
+  background: var(--tc-panel);
 }
 
 .filter-bar-wrap :deep(.filter-bar) {
@@ -2410,191 +1904,33 @@ watch(totalPages, (value) => {
 }
 
 .filter-bar-wrap :deep(.filter-overdue) {
-  color: #cbd5e1;
+  color: var(--tc-disabled);
 }
 
 .filter-bar-wrap :deep(.filter-overdue-input) {
-  accent-color: var(--tc-cyan);
+  accent-color: var(--tc-blue);
 }
 
 .task-cards {
-  gap: 0.78rem !important;
-}
-
-.task-card {
-  min-height: 12.9rem;
-  gap: 0.4rem;
-  border-color: #e5e7eb !important;
-  border-radius: 0.86rem;
-  padding: 0.82rem;
-  background: #ffffff !important;
-}
-
-.task-card:hover {
-  border-color: #d1d5db !important;
-}
-
-.task-card--selected {
-  border-color: #93c5fd !important;
-  background: #eff6ff !important;
-}
-
-.card-tags {
-  align-items: center;
-  gap: 0.28rem;
-}
-
-.task-category-pill,
-.card-tags :deep(.task-type-badge),
-.card-tags :deep(.lane-tag) {
-  display: inline-flex !important;
-  height: 1.25rem;
-  align-items: center;
-  border: 1px solid #e5e7eb !important;
-  border-radius: 999px;
-  padding: 0 0.45rem !important;
-  background: #f3f4f6 !important;
-  color: #374151 !important;
-  font-size: 0.66rem !important;
-  font-weight: 750 !important;
-  line-height: 1 !important;
-}
-
-.task-category-pill-normal,
-.task-category-pill-custom,
-.card-tags :deep(.badge-new),
-.card-tags :deep(.badge-original),
-.card-tags :deep(.badge-purchase),
-.card-tags :deep(.badge-retouch),
-.card-tags :deep(.is-normal),
-.card-tags :deep(.is-customization) {
-  background: #f3f4f6 !important;
-  color: #374151 !important;
-}
-
-.card-tags :deep(.badge-new) {
-  border-color: #bbf7d0 !important;
-  background: #f0fdf4 !important;
-  color: #15803d !important;
-}
-
-.task-category-pill-custom,
-.card-tags :deep(.is-customization) {
-  border-color: #fcd34d !important;
-  background: #fffbeb !important;
-  color: #92400e !important;
-}
-
-.card-status-row {
-  gap: 0.32rem !important;
-  margin-top: 0 !important;
-}
-
-.card-status-row :deep(.inline-flex),
-.card-status-row :deep(.filing-status-badge) {
-  min-height: 1.28rem;
-  border-color: #e5e7eb !important;
-  border-radius: 999px;
-  padding: 0.1rem 0.48rem !important;
-  background: #f3f4f6 !important;
-  color: #374151 !important;
-  font-size: 0.68rem !important;
-  font-weight: 780 !important;
-  line-height: 1 !important;
-}
-
-.card-status-row :deep(.bg-emerald-100),
-.card-status-row :deep(.text-emerald-800),
-.card-status-row :deep(.border-emerald-200) {
-  border-color: #bbf7d0 !important;
-  background: #ecfdf5 !important;
-  color: #15803d !important;
-}
-
-.card-status-row :deep(.bg-blue-100),
-.card-status-row :deep(.text-blue-800),
-.card-status-row :deep(.border-blue-200) {
-  border-color: #bfdbfe !important;
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
-}
-
-.card-status-row :deep(.bg-amber-100),
-.card-status-row :deep(.text-amber-800),
-.card-status-row :deep(.border-amber-200) {
-  border-color: #fde68a !important;
-  background: #fffbeb !important;
-  color: #b45309 !important;
-}
-
-.card-status-row :deep(.bg-red-100),
-.card-status-row :deep(.text-red-800),
-.card-status-row :deep(.border-red-200) {
-  border-color: #fecaca !important;
-  background: #fef2f2 !important;
-  color: #b91c1c !important;
-}
-
-.card-no-row {
-  padding-bottom: 0.4rem;
-}
-
-.card-no {
-  font-size: 0.72rem;
-}
-
-.card-product {
-  min-height: calc(1.36em * 2);
-  font-size: 0.93rem;
-  line-height: 1.36;
-}
-
-.card-meta-block {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.28rem 0.58rem;
-  border-color: #e5e7eb;
-  border-radius: 0.66rem;
-  padding: 0.48rem 0.56rem;
-  background: #f9fafb;
-}
-
-.card-meta-line {
-  min-width: 0;
-  grid-template-columns: 2.15rem minmax(0, 1fr);
-  column-gap: 0.38rem;
-  font-size: 0.7rem;
-}
-
-.card-row-bottom {
-  min-height: 1.55rem;
-  gap: 0.35rem 0.55rem;
-  padding-top: 0.42rem;
-}
-
-.card-updated,
-.card-due {
-  font-size: 0.68rem;
+  gap: 0.78rem;
 }
 
 .page-header-actions :deep(button),
 .toolbar :deep(button),
-.card-row-bottom :deep(button),
 .footer-card :deep(button) {
-  border-radius: 0.62rem !important;
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
-  box-shadow: none !important;
+  border-radius: 0.62rem;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
+  box-shadow: none;
 }
 
 .page-header-actions :deep(button:hover),
 .toolbar :deep(button:hover),
-.card-row-bottom :deep(button:hover),
 .footer-card :deep(button:hover) {
-  border-color: #d1d5db !important;
-  background: #f3f4f6 !important;
-  color: #111827 !important;
+  border-color: var(--tc-border-strong);
+  background: var(--tc-panel-muted);
+  color: var(--tc-text);
 }
 
 .page-header-actions :deep(button svg),
@@ -2602,36 +1938,18 @@ watch(totalPages, (value) => {
 .footer-card :deep(button svg) {
   width: 1rem;
   height: 1rem;
-  color: #6b7280;
+  color: var(--tc-muted);
   stroke-width: 2;
 }
 
 /* Narrow viewport repair: prevent the left rail from eating content. */
 .task-list-view,
-.header-card,
-.task-card,
-.card-product,
-.card-no-row,
-.card-meta-block,
-.card-row-bottom {
+.header-card {
   min-width: 0;
 }
 
 .task-list-view {
   overflow-x: hidden;
-}
-
-.card-no,
-.card-meta-value {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-product {
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 @media (max-width: 720px) {
@@ -2641,8 +1959,8 @@ watch(totalPages, (value) => {
   }
 
   .header-card {
-    border-radius: 0.82rem !important;
-    padding: 0.72rem !important;
+    border-radius: 0.82rem;
+    padding: 0.72rem;
   }
 
   .page-header {
@@ -2651,7 +1969,7 @@ watch(totalPages, (value) => {
   }
 
   .page-title {
-    font-size: clamp(1.75rem, 10vw, 2.35rem) !important;
+    font-size: clamp(1.75rem, 10vw, 2.35rem);
   }
 
   .page-header-actions {
@@ -2678,7 +1996,7 @@ watch(totalPages, (value) => {
   }
 
   .search-input {
-    width: 100% !important;
+    width: 100%;
     flex: 1 1 100%;
   }
 
@@ -2687,119 +2005,73 @@ watch(totalPages, (value) => {
   }
 
   .task-cards {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  .task-card {
-    min-height: auto;
-    padding: 0.72rem;
-  }
-
-  .card-row-top {
-    align-items: flex-start;
-    gap: 0.45rem;
-  }
-
-  .card-tags {
-    min-width: 0;
-    flex: 1;
-    flex-wrap: wrap;
-  }
-
-  .card-product {
-    display: -webkit-box;
-    min-height: auto;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  .card-meta-block {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .card-meta-line {
-    grid-template-columns: 2.25rem minmax(0, 1fr);
-  }
-
-  .card-row-bottom {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
   }
 }
 
 /* Edge and radius repair: keep a consistent gutter so rounded glass corners render cleanly. */
 .task-list-view {
-  padding-inline: clamp(0.45rem, 0.7vw, 0.75rem) !important;
+  padding-inline: clamp(0.45rem, 0.7vw, 0.75rem);
 }
 
 .header-card,
-.task-card,
 .batch-action-bar,
 .footer-card {
   isolation: isolate;
-  background-clip: padding-box !important;
+  background-clip: padding-box;
   contain: paint;
   transform: translateZ(0);
 }
 
-.header-card::before,
-.task-card::before {
+.header-card::before {
   border-radius: inherit;
 }
 
 @media (max-width: 720px) {
   .task-list-view {
-    padding-inline: 0.35rem !important;
+    padding-inline: 0.35rem;
   }
 }
 
 /* Final task-center layout stabilization under the persistent sidebar. */
 .task-list-view {
-  padding-inline: 0 !important;
+  padding-inline: 0;
 }
 
 .task-cards {
-  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
 
 @media (min-width: 900px) {
   .task-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 1280px) {
   .task-cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 1680px) {
   .task-cards {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 2200px) {
   .task-cards {
-    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
 .header-card,
-.task-card,
 .batch-action-bar,
 .footer-card {
   overflow: hidden;
   clip-path: inset(0 round 1rem);
-}
-
-.task-card {
-  clip-path: inset(0 round 0.86rem);
-  align-self: start;
 }
 
 .batch-action-bar,
@@ -2811,286 +2083,197 @@ watch(totalPages, (value) => {
 .header-card,
 .batch-action-bar,
 .footer-card {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
 }
 
 .header-card::before {
-  display: none !important;
-}
-
-.task-card {
-  background: #ffffff !important;
-}
-
-.task-card:hover {
-  background: #ffffff !important;
+  display: none;
 }
 
 /* Phase 2: align task center with light shell — final overrides win over legacy dark patches. */
 .task-list-view {
-  margin: 0 !important;
+  margin: 0;
   min-height: auto;
-  padding: 0 !important;
-  background: transparent !important;
+  padding: 0;
+  background: transparent;
 }
 
 .header-card,
 .batch-action-bar,
-.footer-card,
-.task-card {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+.footer-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .header-card::before {
-  display: none !important;
+  display: none;
 }
 
 .page-header {
-  border-bottom-color: #e5e7eb !important;
+  border-bottom-color: var(--tc-border);
 }
 
 .filter-bar-wrap {
-  background: #ffffff !important;
+  background: var(--tc-panel);
 }
 
 .advanced-filter-toggle {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
 }
 
 .advanced-filter-toggle--active {
-  border-color: #bfdbfe !important;
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
-}
-
-.task-card,
-.task-card:hover,
-.task-card--selected {
-  background: #ffffff !important;
-}
-
-.task-card--customization {
-  border-color: #fde68a !important;
-  background:
-    linear-gradient(135deg, rgba(255, 251, 235, 0.96) 0%, rgba(255, 255, 255, 0.98) 58%, #ffffff 100%) !important;
-}
-
-.task-card--customization::before {
-  background: #d97706;
-  opacity: 1;
-}
-
-.task-card--customization:hover {
-  border-color: #fcd34d !important;
-  background:
-    linear-gradient(135deg, rgba(255, 251, 235, 0.98) 0%, rgba(255, 255, 255, 0.99) 58%, #ffffff 100%) !important;
-}
-
-.task-card--customization.task-card--selected {
-  border-color: #93c5fd !important;
-  background:
-    linear-gradient(135deg, rgba(255, 251, 235, 0.95) 0%, rgba(239, 246, 255, 0.96) 64%, #ffffff 100%) !important;
-}
-
-.task-card--customization.task-card--selected::before,
-.task-card--customization.task-card--claimable:not(.task-card--overdue)::before {
-  background: #d97706;
-}
-
-.task-card--customization.task-card--overdue {
-  border-color: #f59e0b !important;
-}
-
-.task-card--customization.task-card--overdue::before {
-  background: #f59e0b;
-}
-
-.card-no {
-  color: #6b7280 !important;
-}
-
-.card-product {
-  color: #111827 !important;
-}
-
-.card-meta-block {
-  background: #f9fafb !important;
-  border-color: #e5e7eb !important;
-}
-
-.card-status-row :deep(.inline-flex),
-.card-status-row :deep(.filing-status-badge),
-.card-status-row :deep(.bg-emerald-100),
-.card-status-row :deep(.bg-blue-100),
-.card-status-row :deep(.bg-amber-100),
-.card-status-row :deep(.bg-red-100) {
-  border-color: #e5e7eb !important;
-  background: #f3f4f6 !important;
-  color: #374151 !important;
-}
-
-.card-status-row :deep(.text-emerald-800) {
-  color: #15803d !important;
-}
-
-.card-status-row :deep(.text-blue-800) {
-  color: #1d4ed8 !important;
-}
-
-.card-status-row :deep(.text-amber-800) {
-  color: #b45309 !important;
-}
-
-.card-status-row :deep(.text-red-800) {
-  color: #b91c1c !important;
+  border-color: var(--tc-blue-border);
+  background: var(--tc-blue-soft);
+  color: var(--tc-blue-strong);
 }
 
 .page-header-actions :deep(button),
 .toolbar :deep(button),
-.card-row-bottom :deep(button),
 .footer-card :deep(button) {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
-  box-shadow: none !important;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
+  box-shadow: none;
 }
 
 .page-header-actions :deep(button:hover),
 .toolbar :deep(button:hover),
-.card-row-bottom :deep(button:hover),
 .footer-card :deep(button:hover) {
-  border-color: #d1d5db !important;
-  background: #f3f4f6 !important;
-  color: #111827 !important;
+  border-color: var(--tc-border-strong);
+  background: var(--tc-panel-muted);
+  color: var(--tc-text);
 }
 
 .page-header-actions :deep(button svg),
 .toolbar :deep(button svg),
 .footer-card :deep(button svg) {
-  color: #6b7280;
+  color: var(--tc-muted);
 }
 
 /* Task center filter tabs: explicit default / hover / active (beats generic :deep(button) resets). */
 .task-category-switch :deep(button:not(.task-category-active)),
 .task-tabs :deep(button:not(.task-tab-active)) {
-  border: 1px solid #dbe3ef !important;
-  background: #ffffff !important;
-  color: #334155 !important;
-  font-weight: 500 !important;
-  box-shadow: none !important;
+  border: 1px solid var(--tc-border-subtle);
+  background: var(--tc-panel);
+  color: var(--tc-slate);
+  font-weight: 500;
+  box-shadow: none;
 }
 
 .task-category-switch :deep(button:not(.task-category-active):hover),
 .task-tabs :deep(button:not(.task-tab-active):hover) {
-  border-color: #93c5fd !important;
-  background: #f8fafc !important;
-  color: #1e293b !important;
-  box-shadow: none !important;
+  border-color: var(--tc-blue-border-strong);
+  background: var(--tc-panel-subtle);
+  color: var(--tc-text-deep);
+  box-shadow: none;
 }
 
 .task-category-switch :deep(button.task-category-active),
 .task-tabs :deep(button.task-tab-active) {
-  border: 1px solid #2563eb !important;
-  background: #2563eb !important;
-  color: #ffffff !important;
-  font-weight: 700 !important;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.16) !important;
+  border: 1px solid var(--tc-blue);
+  background: var(--tc-blue);
+  color: rgb(var(--yb-text-inverse));
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgb(var(--yb-brand) / 0.16);
 }
 
 .task-category-switch :deep(button.task-category-active:hover),
 .task-tabs :deep(button.task-tab-active:hover) {
-  border-color: #1d4ed8 !important;
-  background: #1d4ed8 !important;
-  color: #ffffff !important;
-  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.22) !important;
+  border-color: var(--tc-blue-strong);
+  background: var(--tc-blue-strong);
+  color: rgb(var(--yb-text-inverse));
+  box-shadow: 0 4px 12px rgb(var(--yb-brand-strong) / 0.22);
 }
 
-/* Copy-friendly task cards: text can be selected; copy controls appear only on hover/focus. */
-.task-card {
-  user-select: text;
+:global(#app .task-list-action-button),
+:global(#app .advanced-filter-toggle) {
+  border-radius: 0.62rem;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
 }
 
-.task-card :deep(button),
-.task-card .card-check,
-.task-card .card-tags {
-  user-select: none;
+:global(#app .task-list-action-button--primary) {
+  box-shadow: 0 1px 2px rgb(var(--yb-brand) / 0.2);
 }
 
-.task-copy-zone {
-  position: relative;
-  min-width: 0;
-  cursor: text;
-  user-select: text;
+:global(#app .advanced-filter-toggle) {
+  box-shadow: none;
 }
 
-.card-meta-value.task-copy-zone {
-  display: block;
+:global(#app .task-list-action-button:hover),
+:global(#app .advanced-filter-toggle:hover) {
+  border-color: var(--tc-border-strong);
+  background: var(--tc-panel-muted);
+  color: var(--tc-text);
 }
 
-.card-copy-toolbar {
-  position: absolute;
-  top: 2.55rem;
-  right: 0.75rem;
-  z-index: 8;
-  display: inline-flex;
-  gap: 0.2rem;
-  align-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  border-radius: 999px;
-  padding: 0.16rem;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-0.25rem);
-  transition:
-    opacity 0.14s ease,
-    transform 0.14s ease,
-    border-color 0.14s ease,
-    background 0.14s ease;
+:global(#app .advanced-filter-toggle.advanced-filter-toggle--active) {
+  border-color: var(--tc-blue-border);
+  background: var(--tc-blue-soft);
+  color: var(--tc-blue-strong);
 }
 
-.task-card:hover .card-copy-toolbar,
-.task-card:focus-within .card-copy-toolbar {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
+:global(#app .task-category-switch button:not(.task-category-active)),
+:global(#app .task-tabs button:not(.task-tab-active)) {
+  border: 1px solid var(--tc-border-subtle);
+  background: var(--tc-panel);
+  color: var(--tc-slate);
+  font-weight: 500;
+  box-shadow: none;
 }
 
-.card-copy-toolbar button {
-  min-height: 1.45rem;
-  border: 0;
-  border-radius: 999px;
-  padding: 0.14rem 0.46rem;
-  background: transparent;
-  color: #475569;
-  cursor: pointer;
-  font-size: 0.68rem;
-  font-weight: 850;
-  line-height: 1;
+:global(#app .task-category-switch button:not(.task-category-active):hover),
+:global(#app .task-tabs button:not(.task-tab-active):hover) {
+  border-color: var(--tc-blue-border-strong);
+  background: var(--tc-panel-subtle);
+  color: var(--tc-text-deep);
+  box-shadow: none;
 }
 
-.card-copy-toolbar button:hover,
-.card-copy-toolbar button:focus-visible {
-  background: #dbeafe;
-  color: #1d4ed8;
-  outline: none;
+:global(#app .task-list-page-title) {
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem);
+  line-height: 1.04;
 }
 
-.card-product-wrap {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  gap: 0.45rem;
+:global(#app .task-category-active),
+:global(#app .task-tab-active) {
+  border: 1px solid var(--tc-blue);
+  background: var(--tc-blue);
+  color: rgb(var(--yb-text-inverse));
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgb(var(--yb-brand) / 0.16);
 }
 
-.card-product-wrap .card-product {
-  flex: 1 1 auto;
-  min-height: calc(1.36em * 2);
+:global(#app .task-category-active:hover),
+:global(#app .task-tab-active:hover) {
+  border-color: var(--tc-blue-strong);
+  background: var(--tc-blue-strong);
+  color: rgb(var(--yb-text-inverse));
+  box-shadow: 0 4px 12px rgb(var(--yb-brand-strong) / 0.22);
+}
+
+:global(#app .pager-btn) {
+  border-radius: 0.62rem;
+  border-color: var(--tc-border);
+  background: var(--tc-panel);
+  color: var(--tc-body);
+  box-shadow: none;
+}
+
+:global(#app .pager-btn:hover) {
+  border-color: var(--tc-border-strong);
+  background: var(--tc-panel-muted);
+  color: var(--tc-text);
+}
+
+@media (max-width: 720px) {
+  :global(#app .task-list-page-title) {
+    font-size: clamp(1.75rem, 10vw, 2.35rem);
+  }
 }
 
 .batch-count-pill {
@@ -3098,81 +2281,27 @@ watch(totalPages, (value) => {
   flex: 0 0 auto;
   align-items: center;
   min-height: 1.25rem;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--tc-blue-border);
   border-radius: 999px;
   padding: 0.12rem 0.45rem;
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--tc-blue-soft);
+  color: var(--tc-blue-strong);
   font-size: 0.68rem;
   font-weight: 800;
   line-height: 1;
   white-space: nowrap;
 }
 
-.batch-preview {
-  display: grid;
-  gap: 0.22rem;
-  margin-top: 0.45rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.66rem;
-  padding: 0.42rem 0.5rem;
-  background: #f8fafc;
-}
-
-.batch-preview-item {
-  display: grid;
-  grid-template-columns: 1.35rem minmax(0, 1fr);
-  align-items: center;
-  gap: 0.32rem;
-  min-width: 0;
-  color: #475569;
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-
-.batch-preview-index,
 .batch-modal-index {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: #e0e7ff;
-  color: #3730a3;
+  background: var(--tc-indigo-soft);
+  color: var(--tc-indigo-strong);
   font-family: var(--yb-font-data);
   font-size: 0.65rem;
   font-weight: 800;
-}
-
-.batch-preview-index {
-  width: 1.18rem;
-  height: 1.18rem;
-}
-
-.batch-preview-text {
-  min-width: 0;
-  overflow: hidden;
-  color: #475569;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.batch-preview-more {
-  justify-self: start;
-  border: 0;
-  border-radius: 999px;
-  padding: 0.12rem 0.1rem;
-  background: transparent;
-  color: #2563eb;
-  cursor: pointer;
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
-.batch-preview-more:hover,
-.batch-preview-more:focus-visible {
-  color: #1d4ed8;
-  text-decoration: underline;
-  outline: none;
 }
 
 .batch-items-modal {
@@ -3186,14 +2315,14 @@ watch(totalPages, (value) => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--tc-border);
   padding-bottom: 0.75rem;
 }
 
 .batch-items-modal-title {
   min-width: 0;
   margin: 0;
-  color: #111827;
+  color: var(--tc-text);
   font-size: 0.95rem;
   font-weight: 800;
   line-height: 1.45;
@@ -3210,10 +2339,10 @@ watch(totalPages, (value) => {
   grid-template-columns: 1.8rem minmax(0, 1fr) minmax(5rem, auto);
   align-items: center;
   gap: 0.65rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--tc-border);
   border-radius: 0.7rem;
   padding: 0.62rem 0.7rem;
-  background: #ffffff;
+  background: var(--tc-panel);
 }
 
 .batch-modal-index {
@@ -3235,14 +2364,14 @@ watch(totalPages, (value) => {
 }
 
 .batch-modal-name {
-  color: #111827;
+  color: var(--tc-text);
   font-size: 0.82rem;
   font-weight: 800;
 }
 
 .batch-modal-sub {
   margin-top: 0.15rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-secondary));
   font-size: 0.72rem;
 }
 
@@ -3251,7 +2380,7 @@ watch(totalPages, (value) => {
   min-width: 0;
   max-width: 10rem;
   overflow: hidden;
-  color: #475569;
+  color: var(--tc-soft);
   font-family: var(--yb-font-data);
   font-size: 0.72rem;
   font-weight: 700;
@@ -3260,16 +2389,6 @@ watch(totalPages, (value) => {
 }
 
 @media (max-width: 720px) {
-  .card-copy-toolbar {
-    top: 2.35rem;
-    right: 0.55rem;
-  }
-
-  .card-product-wrap {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
   .batch-items-modal-header {
     display: grid;
   }

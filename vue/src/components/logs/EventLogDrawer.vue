@@ -1,13 +1,13 @@
 /**
  * 组件职责：事件日志抽屉，展示任务/审核/定制事件时间轴记录
- * 
+ *
  * 核心业务规则（来自 Prompt.md）：
  *   - 事件按 sequence 保序
  *   - gap 时触发 sync_status 校准
- * 
+ *
  * 主要 Store：useSyncStore、useTaskStore
  * 预留接口：GET /api/events (mock)
- * 
+ *
  * 当前状态：已接入 SequenceGapBanner
  * 维护注意 / 风险点：
  *   - 日志需支持失序自愈
@@ -163,7 +163,7 @@ function handleClose() {
 .drawer-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.18);
+  background: rgb(var(--yb-shadow) / 0.18);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -171,10 +171,10 @@ function handleClose() {
   position: relative;
   width: min(26rem, calc(100vw - 1rem));
   max-width: calc(100vw - 1rem);
-  border-left: 1px solid #e5e7eb;
-  background: #ffffff;
-  box-shadow: -20px 0 40px -12px rgba(15, 23, 42, 0.12);
-  color: #374151;
+  border-left: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  box-shadow: -20px 0 40px -12px rgb(var(--yb-shadow) / 0.12);
+  color: rgb(var(--yb-text-body));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -184,41 +184,41 @@ function handleClose() {
   align-items: center;
   justify-content: space-between;
   padding: 1rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid rgb(var(--yb-border));
   flex-shrink: 0;
 }
 .drawer-title {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 .drawer-close {
   padding: 0.25rem 0.5rem;
   font-size: 1.25rem;
   line-height: 1;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
   background: transparent;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 0.5rem;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .drawer-close:hover {
-  color: #374151;
-  border-color: #9ca3af;
-  background: #f3f4f6;
+  color: rgb(var(--yb-text-body));
+  border-color: rgb(var(--yb-text-faint));
+  background: rgb(var(--yb-surface-muted));
 }
 .drawer-loading,
 .drawer-empty,
 .drawer-error {
   padding: 1rem;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 .drawer-error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: rgb(var(--yb-danger-text));
+  background: rgb(var(--yb-danger-soft));
 }
 .event-list {
   list-style: none;
@@ -228,12 +228,12 @@ function handleClose() {
 }
 .event-item {
   padding: 0.5rem 0;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid rgb(var(--yb-surface-muted));
   font-size: 0.8125rem;
 }
 .event-time {
   display: block;
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
   margin-bottom: 0.25rem;
 }
 .event-item-main {
@@ -244,16 +244,16 @@ function handleClose() {
 .event-type {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 .event-summary {
   margin: 0;
   line-height: 1.45;
-  color: #374151;
+  color: rgb(var(--yb-text-body));
   font-size: 0.8125rem;
 }
 .event-text {
-  color: #374151;
+  color: rgb(var(--yb-text-body));
 }
 .event-replacement-grid {
   margin: 0.4rem 0 0;
@@ -263,15 +263,15 @@ function handleClose() {
 }
 .event-replacement-grid dt {
   font-size: 0.6875rem;
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 .event-replacement-grid dd {
   margin: 0;
   font-size: 0.75rem;
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 .trace-link {
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
   text-decoration: none;
 }
 .trace-link:hover {

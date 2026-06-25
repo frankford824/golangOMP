@@ -7,13 +7,13 @@
   >
     <template #default>
       <div class="space-y-3">
-        <p class="text-sm text-slate-600">
+        <p class="text-sm text-[rgb(var(--yb-text-secondary))]">
           {{ description }}
         </p>
-        <div v-if="loading" class="designer-loading text-sm text-slate-500 py-4">
+        <div v-if="loading" class="designer-loading text-sm text-[rgb(var(--yb-text-muted))] py-4">
           {{ loadingLabel }}
         </div>
-        <div v-else-if="!designers.length" class="designer-empty text-sm text-slate-500 py-4">
+        <div v-else-if="!designers.length" class="designer-empty text-sm text-[rgb(var(--yb-text-muted))] py-4">
           {{ emptyHint }}
         </div>
         <div v-else class="designer-list">
@@ -37,7 +37,7 @@
       </div>
     </template>
     <template #footer>
-      <footer class="flex-shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
+      <footer class="flex-shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-[rgb(var(--yb-border-quiet))]">
         <BaseButton size="sm" variant="secondary" @click="$emit('update:modelValue', false)">
           取消
         </BaseButton>
@@ -130,20 +130,20 @@ function onConfirm() {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
-  border: 1px solid #e5e7eb;
-  background-color: #ffffff;
+  border: 1px solid rgb(var(--yb-border));
+  background-color: rgb(var(--yb-surface));
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .designer-item:hover {
-  background-color: #f9fafb;
-  border-color: #d1d5db;
+  background-color: rgb(var(--yb-surface-soft));
+  border-color: rgb(var(--yb-border-strong));
 }
 
 .designer-item:has(.designer-radio:checked) {
-  border-color: #2563eb;
-  background-color: #eff6ff;
+  border-color: rgb(var(--yb-brand));
+  background-color: rgb(var(--yb-brand-soft));
 }
 
 .designer-item:has(.designer-radio:disabled) {
@@ -153,27 +153,27 @@ function onConfirm() {
 
 .designer-radio {
   margin: 0;
-  accent-color: #2563eb;
+  accent-color: rgb(var(--yb-brand));
 }
 
 .designer-name {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 
 .designer-role {
   margin-left: auto;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .designer-item:has(.designer-radio:checked) .designer-name {
-  color: #1d4ed8;
+  color: rgb(var(--yb-brand-strong));
 }
 
 .designer-item:has(.designer-radio:checked) .designer-role {
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
 }
 </style>
 

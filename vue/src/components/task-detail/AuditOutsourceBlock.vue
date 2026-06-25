@@ -1,5 +1,5 @@
 <template>
-  <section v-if="!isPurchase" class="detail-block h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6">
+  <section v-if="!isPurchase" class="detail-block h-full flex flex-col rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] shadow-sm p-6">
     <div class="audit-head">
       <div class="audit-title-line">
         <span class="block-icon">A</span>
@@ -637,16 +637,16 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
   margin: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
-  color: #166534;
-  background: #f0fdf4;
+  color: rgb(var(--yb-success-deep));
+  background: rgb(var(--yb-success-ui-soft));
   border-radius: 6px;
 }
 .block-error {
   margin: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
-  color: #b91c1c;
-  background: #fef2f2;
+  color: rgb(var(--yb-danger-text));
+  background: rgb(var(--yb-danger-soft));
   border-radius: 6px;
 }
 .audit-head {
@@ -679,24 +679,24 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 0.375rem;
-  background: rgb(248 250 252);
-  color: rgb(148 163 184);
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-placeholder));
   font-size: 0.75rem;
   flex-shrink: 0;
 }
-.block-title { font-size: 0.875rem; font-weight: 600; color: rgb(30 41 59); margin: 0; }
-.status-inline { display: flex; align-items: center; gap: 0.375rem; font-size: 0.75rem; color: rgb(107 114 128); }
+.block-title { font-size: 0.875rem; font-weight: 600; color: rgb(var(--yb-text-deep)); margin: 0; }
+.status-inline { display: flex; align-items: center; gap: 0.375rem; font-size: 0.75rem; color: rgb(var(--yb-text-muted)); }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.dot-green { color: rgb(5 150 105); }
-.dot-blue { color: rgb(37 99 235); }
-.dot-red { color: rgb(220 38 38); }
-.dot-grey { color: rgb(156 163 175); }
+.dot-green { color: rgb(var(--yb-success-emerald)); }
+.dot-blue { color: rgb(var(--yb-brand)); }
+.dot-red { color: rgb(var(--yb-danger)); }
+.dot-grey { color: rgb(var(--yb-text-faint)); }
 .outsource-flag {
   display: inline-block;
   padding: 0.125rem 0.5rem;
-  background: rgb(241 245 249);
-  border: 1px solid rgb(226 232 240);
-  color: rgb(51 65 85);
+  background: rgb(var(--yb-surface-slate));
+  border: 1px solid rgb(var(--yb-border-slate));
+  color: rgb(var(--yb-text-slate));
   border-radius: 9999px;
   font-size: 0.6875rem;
   margin-bottom: 0.25rem;
@@ -711,29 +711,29 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
   align-items: center;
   gap: 0.35rem;
   padding: 0.125rem 0.5rem;
-  background: rgb(238 242 255);
-  border: 1px solid rgb(199 210 254);
-  color: rgb(67 56 202);
+  background: rgb(var(--yb-indigo-surface));
+  border: 1px solid rgb(var(--yb-border-indigo));
+  color: rgb(var(--yb-indigo-text));
   border-radius: 9999px;
   font-size: 0.6875rem;
   margin-bottom: 0.25rem;
 }
 .flag-meta {
-  color: rgb(99 102 241);
+  color: rgb(var(--yb-indigo-accent));
 }
 .customization-review-card {
   margin-top: 0.25rem;
   padding: 0.875rem;
-  border: 1px solid rgb(224 231 255);
+  border: 1px solid rgb(var(--yb-indigo-soft));
   border-radius: 0.75rem;
-  background: rgb(248 250 252);
+  background: rgb(var(--yb-surface-subtle));
 }
 .customization-job-card {
   margin-top: 0.25rem;
   padding: 0.875rem;
-  border: 1px solid rgb(226 232 240);
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.75rem;
-  background: rgb(255 255 255);
+  background: rgb(var(--yb-surface));
 }
 .customization-job-head {
   display: flex;
@@ -746,12 +746,12 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
-  color: rgb(30 41 59);
+  color: rgb(var(--yb-text-deep));
 }
 .customization-job-hint {
   margin: 0.25rem 0 0;
   font-size: 0.75rem;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 .customization-job-error {
   margin-bottom: 0.75rem;
@@ -773,12 +773,12 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
-  color: rgb(30 41 59);
+  color: rgb(var(--yb-text-deep));
 }
 .customization-review-hint {
   margin: 0.25rem 0 0;
   font-size: 0.75rem;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 .customization-review-grid {
   display: grid;
@@ -799,34 +799,34 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
 .pricing-sect {
   padding: 0.55rem 0.65rem;
   border-radius: 0.6rem;
-  border: 1px solid rgb(226 232 240);
-  background: rgb(248 250 252);
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
 }
 .pricing-sect--exec {
-  background: rgb(245 243 255);
-  border-color: rgb(221 214 254);
+  background: rgb(var(--yb-purple-soft));
+  border-color: rgb(var(--yb-purple-border));
 }
 .pricing-sect-title {
   margin: 0 0 0.2rem;
   font-size: 0.78rem;
   font-weight: 700;
-  color: rgb(15 23 42);
+  color: rgb(var(--yb-text-navy));
 }
 .pricing-sect-note {
   margin: 0 0 0.45rem;
   font-size: 0.68rem;
   line-height: 1.45;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 .info-pair dt {
   margin: 0 0 0.125rem;
   font-size: 0.75rem;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 .info-pair dd {
   margin: 0;
   font-size: 0.8125rem;
-  color: rgb(15 23 42);
+  color: rgb(var(--yb-text-navy));
 }
 .mono {
   font-family: var(--yb-font-data);
@@ -842,42 +842,42 @@ async function submitCustomizationReview(payload: CustomizationReviewPayload) {
   border: 1px solid transparent;
 }
 .job-status-default {
-  background: rgb(226 232 240);
-  color: rgb(51 65 85);
+  background: rgb(var(--yb-border-slate));
+  color: rgb(var(--yb-text-slate));
 }
 .job-status-warning {
-  background: rgb(254 243 199);
-  color: rgb(146 64 14);
+  background: rgb(var(--yb-warning-badge-soft));
+  color: rgb(var(--yb-warning-dark));
 }
 .job-status-danger {
-  background: rgb(254 226 226);
-  color: rgb(185 28 28);
+  background: rgb(var(--yb-danger-soft-hover));
+  color: rgb(var(--yb-danger-text));
 }
 .job-status-success {
-  background: rgb(220 252 231);
-  color: rgb(22 101 52);
+  background: rgb(var(--yb-success-soft));
+  color: rgb(var(--yb-success-deep));
 }
-.reject-box { background: rgb(254 242 242); border: 1px solid rgb(254 202 202); border-radius: 0.5rem; padding: 0.625rem 0.75rem; }
+.reject-box { background: rgb(var(--yb-danger-soft)); border: 1px solid rgb(var(--yb-danger-border)); border-radius: 0.5rem; padding: 0.625rem 0.75rem; }
 .field-label {
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
   display: block;
   margin-bottom: 0.375rem;
 }
-.required { color: rgb(220 38 38); }
+.required { color: rgb(var(--yb-danger)); }
 .reason-textarea {
   width: 100%;
   padding: 0.5rem 0.625rem;
-  border: 1px solid rgb(226 232 240);
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.5rem;
   font-size: 0.8125rem;
   resize: vertical;
   box-sizing: border-box;
   outline: none;
 }
-.reason-textarea:focus { border-color: rgb(148 163 184); }
+.reason-textarea:focus { border-color: rgb(var(--yb-text-placeholder)); }
 .reject-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; justify-content: flex-end; }
 </style>

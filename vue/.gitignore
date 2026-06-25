@@ -1,5 +1,6 @@
 node_modules
 dist
+dist-test
 .env
 .env.local
 .env.*.local
@@ -7,3 +8,6 @@ dist
 .DS_Store
 coverage
 *.local
+tests/visual/current/
+tests/a11y/latest.json
+tests/load/latest.json

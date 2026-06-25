@@ -130,21 +130,21 @@ const DraggableList = {
   align-items: start;
 }
 .selector-panel {
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 6px;
   overflow: hidden;
-  background: #fff;
+  background: rgb(var(--yb-surface));
 }
 .panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0.375rem 0.625rem;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface-subtle));
+  border-bottom: 1px solid rgb(var(--yb-border-slate));
 }
-.panel-title { font-size: 0.75rem; font-weight: 600; color: #374151; }
-.panel-action { font-size: 0.6875rem; color: #1890ff; background: none; border: none; cursor: pointer; }
+.panel-title { font-size: 0.75rem; font-weight: 600; color: rgb(var(--yb-text-body)); }
+.panel-action { font-size: 0.6875rem; color: rgb(var(--yb-brand-ant)); background: none; border: none; cursor: pointer; }
 .field-list, :deep(.selected-list) {
   padding: 0.375rem;
   display: flex;
@@ -159,19 +159,19 @@ const DraggableList = {
   justify-content: space-between;
   align-items: center;
   padding: 0.25rem 0.5rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 4px;
-  background: #f9fafb;
+  background: rgb(var(--yb-surface-soft));
   font-size: 0.75rem;
-  color: #374151;
+  color: rgb(var(--yb-text-body));
   cursor: pointer;
   transition: border-color 0.15s;
   text-align: left;
   width: 100%;
 }
-.field-chip:hover { border-color: #1890ff; color: #1d4ed8; }
-.chip-add { font-size: 0.875rem; color: #9ca3af; }
-.empty-fields { font-size: 0.75rem; color: #9ca3af; padding: 0.5rem; text-align: center; }
+.field-chip:hover { border-color: rgb(var(--yb-brand-ant)); color: rgb(var(--yb-brand-strong)); }
+.chip-add { font-size: 0.875rem; color: rgb(var(--yb-text-faint)); }
+.empty-fields { font-size: 0.75rem; color: rgb(var(--yb-text-faint)); padding: 0.5rem; text-align: center; }
 .selector-arrows {
   display: flex;
   flex-direction: column;
@@ -183,10 +183,10 @@ const DraggableList = {
 .arrow-btn {
   width: 2rem;
   height: 2rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 4px;
-  background: #fff;
-  color: #374151;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-body));
   cursor: pointer;
   font-size: 0.875rem;
   display: flex;
@@ -194,19 +194,19 @@ const DraggableList = {
   justify-content: center;
   transition: border-color 0.15s;
 }
-.arrow-btn:hover { border-color: #1890ff; color: #1d4ed8; }
+.arrow-btn:hover { border-color: rgb(var(--yb-brand-ant)); color: rgb(var(--yb-brand-strong)); }
 :deep(.selected-item) {
   display: flex;
   align-items: center;
   gap: 0.375rem;
   padding: 0.25rem 0.375rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 4px;
-  background: #f0fdf4;
+  background: rgb(var(--yb-success-ui-soft));
   font-size: 0.75rem;
 }
-:deep(.drag-handle) { color: #9ca3af; cursor: grab; font-size: 0.625rem; }
-:deep(.selected-label) { flex: 1; color: #374151; }
+:deep(.drag-handle) { color: rgb(var(--yb-text-faint)); cursor: grab; font-size: 0.625rem; }
+:deep(.selected-label) { flex: 1; color: rgb(var(--yb-text-body)); }
 :deep(.item-actions) { display: flex; gap: 0.125rem; }
 :deep(.order-btn) {
   width: 1.25rem;
@@ -215,7 +215,7 @@ const DraggableList = {
   background: none;
   cursor: pointer;
   font-size: 0.6875rem;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
   padding: 0;
 }
 :deep(.order-btn:disabled) { opacity: 0.3; cursor: not-allowed; }
@@ -226,25 +226,25 @@ const DraggableList = {
   background: none;
   cursor: pointer;
   font-size: 0.875rem;
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
   padding: 0;
 }
 
 /* Apple Music / iOS liquid glass export field selector skin. Style-only. */
 .selector-panel {
   border-radius: 0.85rem;
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(14, 15, 22, 0.78);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-color: rgb(var(--yb-surface) / 0.16);
+  background: rgb(var(--yb-overlay-panel) / 0.78);
+  box-shadow: inset 0 1px 0 rgb(var(--yb-surface) / 0.08);
 }
 
 .panel-header {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.075);
+  border-color: rgb(var(--yb-surface) / 0.12);
+  background: rgb(var(--yb-surface) / 0.075);
 }
 
 .panel-title {
-  color: rgba(220, 230, 255, 0.78);
+  color: rgb(var(--yb-chart-tooltip-text) / 0.78);
 }
 
 .panel-action {
@@ -254,21 +254,21 @@ const DraggableList = {
 
 .field-list,
 :deep(.selected-list) {
-  scrollbar-color: rgba(220, 230, 255, 0.36) transparent;
+  scrollbar-color: rgb(var(--yb-chart-tooltip-text) / 0.36) transparent;
 }
 
 .field-chip,
 :deep(.selected-item) {
   border-radius: 0.65rem;
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.065);
+  border-color: rgb(var(--yb-surface) / 0.12);
+  background: rgb(var(--yb-surface) / 0.065);
   color: var(--yb-music-text-2);
 }
 
 .field-chip:hover {
-  border-color: rgba(100, 210, 255, 0.36);
-  background: rgba(100, 210, 255, 0.12);
-  color: #fff;
+  border-color: rgb(var(--yb-workflow-glow) / 0.36);
+  background: rgb(var(--yb-workflow-glow) / 0.12);
+  color: rgb(var(--yb-surface));
 }
 
 .chip-add,
@@ -283,19 +283,19 @@ const DraggableList = {
 
 .arrow-btn {
   border-radius: 0.65rem;
-  border-color: rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
+  border-color: rgb(var(--yb-surface) / 0.14);
+  background: rgb(var(--yb-surface) / 0.08);
   color: var(--yb-music-text-2);
 }
 
 .arrow-btn:hover {
-  border-color: rgba(100, 210, 255, 0.36);
-  background: rgba(100, 210, 255, 0.12);
-  color: #fff;
+  border-color: rgb(var(--yb-workflow-glow) / 0.36);
+  background: rgb(var(--yb-workflow-glow) / 0.12);
+  color: rgb(var(--yb-surface));
 }
 
 :deep(.remove-btn) {
-  color: #ff9b95;
+  color: rgb(var(--yb-danger-salmon));
 }
 
 @media (max-width: 700px) {

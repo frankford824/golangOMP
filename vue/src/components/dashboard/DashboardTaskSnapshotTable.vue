@@ -78,9 +78,9 @@ const rows = computed(() => {
   align-items: center;
   column-gap: 0.5rem;
   padding: 0.75rem;
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
   font-weight: 600;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .task-table__row {
   display: grid;
@@ -89,14 +89,14 @@ const rows = computed(() => {
   padding: 0.5rem 0.75rem;
   min-height: 2.5rem;
   align-items: center;
-  border-top: 1px solid #f1f5f9;
-  color: #0f172a;
+  border-top: 1px solid rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-navy));
 }
 .task-table__row--alt {
-  background: #fbfbfd;
+  background: rgb(var(--yb-surface-zinc-tint));
 }
 .task-table__row:not(.task-table__row--alt) {
-  background: #ffffff;
+  background: rgb(var(--yb-surface));
 }
 .col-task {
   min-width: 0;
@@ -105,34 +105,34 @@ const rows = computed(() => {
   white-space: nowrap;
 }
 .col-owner {
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .col-due {
   font-variant-numeric: tabular-nums;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .task-table__status--info {
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
   font-weight: 500;
 }
 .task-table__status--warning {
-  color: #d97706;
+  color: rgb(var(--yb-warning));
   font-weight: 500;
 }
 .task-table__status--success {
-  color: #059669;
+  color: rgb(var(--yb-success-emerald));
   font-weight: 500;
 }
 .task-table__status--neutral {
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .task-table__empty {
   padding: 1.5rem 0.75rem;
   text-align: center;
-  color: #94a3b8;
-  background: #fafbfc;
+  color: rgb(var(--yb-text-placeholder));
+  background: rgb(var(--yb-surface-canvas));
 }
 </style>

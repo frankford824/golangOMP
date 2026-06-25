@@ -987,8 +987,8 @@ onMounted(() => {
 }
 
 .excel-assist-card {
-  background: var(--color-surface, #fff);
-  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-surface, rgb(var(--yb-surface)));
+  border: 1px solid var(--color-border, rgb(var(--yb-border)));
   border-radius: 12px;
   padding: 1.25rem 1.5rem 1.5rem;
 }
@@ -1009,7 +1009,7 @@ onMounted(() => {
 
 .page-subtitle {
   margin: 0.35rem 0 0;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary, rgb(var(--yb-text-muted)));
   font-size: 0.875rem;
   line-height: 1.5;
 }
@@ -1026,20 +1026,20 @@ onMounted(() => {
 }
 
 .flow-tab {
-  border: 1px solid var(--color-border, #d1d5db);
+  border: 1px solid var(--color-border, rgb(var(--yb-border-strong)));
   border-radius: 8px;
   padding: 0.4rem 0.85rem;
-  background: var(--color-surface, #fff);
-  color: var(--color-text-secondary, #6b7280);
+  background: var(--color-surface, rgb(var(--yb-surface)));
+  color: var(--color-text-secondary, rgb(var(--yb-text-muted)));
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
 }
 
 .flow-tab.active {
-  border-color: var(--color-primary, #2563eb);
-  background: color-mix(in srgb, var(--color-primary, #2563eb) 8%, white);
-  color: var(--color-primary, #2563eb);
+  border-color: var(--color-primary, rgb(var(--yb-brand)));
+  background: color-mix(in srgb, var(--color-primary, rgb(var(--yb-brand))) 8%, white);
+  color: var(--color-primary, rgb(var(--yb-brand)));
   font-weight: 600;
 }
 
@@ -1047,10 +1047,10 @@ onMounted(() => {
   display: inline-block;
   margin: 0 0 1.25rem;
   padding: 0.35rem 0.75rem;
-  border: 1px solid var(--color-primary, #2563eb);
+  border: 1px solid var(--color-primary, rgb(var(--yb-brand)));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--color-primary, #2563eb) 8%, white);
-  color: var(--color-primary, #2563eb);
+  background: color-mix(in srgb, var(--color-primary, rgb(var(--yb-brand))) 8%, white);
+  color: var(--color-primary, rgb(var(--yb-brand)));
   font-size: 0.875rem;
   font-weight: 600;
 }
@@ -1091,12 +1091,12 @@ onMounted(() => {
 
 .preview-meta {
   font-size: 0.8rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary, rgb(var(--yb-text-muted)));
 }
 
 .preview-table-wrap {
   overflow: auto;
-  border: 1px solid var(--color-border, #e5e7eb);
+  border: 1px solid var(--color-border, rgb(var(--yb-border)));
   border-radius: 8px;
 }
 
@@ -1109,19 +1109,19 @@ onMounted(() => {
 .preview-table th,
 .preview-table td {
   padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid var(--color-border, #f3f4f6);
+  border-bottom: 1px solid var(--color-border, rgb(var(--yb-surface-muted)));
   text-align: left;
   vertical-align: top;
 }
 
 .preview-table th {
-  background: var(--color-surface-muted, #f9fafb);
+  background: var(--color-surface-muted, rgb(var(--yb-surface-soft)));
   font-weight: 600;
   white-space: nowrap;
 }
 
 .preview-table tr.has-error {
-  background: color-mix(in srgb, #ef4444 6%, white);
+  background: color-mix(in srgb, rgb(var(--yb-red)) 6%, white);
 }
 
 .cell-ellipsis {
@@ -1136,7 +1136,7 @@ onMounted(() => {
   gap: 0.5rem;
   margin: 0;
   padding: 0.75rem;
-  border: 1px solid var(--color-border, #e5e7eb);
+  border: 1px solid var(--color-border, rgb(var(--yb-border)));
   border-radius: 8px;
 }
 
@@ -1149,7 +1149,7 @@ onMounted(() => {
 
 .draft-row dt {
   margin: 0;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary, rgb(var(--yb-text-muted)));
   font-weight: 500;
 }
 
@@ -1162,7 +1162,7 @@ onMounted(() => {
   margin: 0.5rem 0 0;
   padding-left: 1.1rem;
   font-size: 0.8125rem;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 
 .ref-thumbs {
@@ -1196,12 +1196,12 @@ onMounted(() => {
   height: 56px;
   object-fit: cover;
   border-radius: 4px;
-  border: 1px solid var(--color-border, #e5e7eb);
+  border: 1px solid var(--color-border, rgb(var(--yb-border)));
 }
 
 .ref-thumb-file {
   font-size: 0.7rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary, rgb(var(--yb-text-muted)));
 }
 
 .ref-thumb-actions {
@@ -1212,10 +1212,10 @@ onMounted(() => {
 
 .ref-action,
 .ref-upload-btn {
-  border: 1px solid var(--color-border, #d1d5db);
+  border: 1px solid var(--color-border, rgb(var(--yb-border-strong)));
   border-radius: 4px;
-  background: var(--color-surface, #fff);
-  color: var(--color-text-secondary, #4b5563);
+  background: var(--color-surface, rgb(var(--yb-surface)));
+  color: var(--color-text-secondary, rgb(var(--yb-text-secondary)));
   font-size: 0.68rem;
   line-height: 1.2;
   padding: 0.16rem 0.3rem;
@@ -1229,19 +1229,19 @@ onMounted(() => {
 }
 
 .ref-action-danger {
-  color: #b91c1c;
-  border-color: #fecaca;
+  color: rgb(var(--yb-danger-text));
+  border-color: rgb(var(--yb-danger-border));
 }
 
 .ref-upload-btn {
   align-self: flex-start;
-  color: var(--color-primary, #2563eb);
-  border-color: color-mix(in srgb, var(--color-primary, #2563eb) 35%, #d1d5db);
+  color: var(--color-primary, rgb(var(--yb-brand)));
+  border-color: color-mix(in srgb, var(--color-primary, rgb(var(--yb-brand))) 35%, rgb(var(--yb-border-strong)));
 }
 
 .empty-ref-text {
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary, rgb(var(--yb-text-muted)));
 }
 
 .batch-ref-status,
@@ -1251,11 +1251,11 @@ onMounted(() => {
 }
 
 .batch-ref-status {
-  color: #047857;
+  color: rgb(var(--yb-success-teal));
 }
 
 .batch-ref-error {
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 
 .err-tag {
@@ -1263,14 +1263,14 @@ onMounted(() => {
   margin: 0 0.25rem 0.25rem 0;
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
-  background: #fee2e2;
-  color: #b91c1c;
+  background: rgb(var(--yb-danger-soft-hover));
+  color: rgb(var(--yb-danger-text));
   font-size: 0.7rem;
 }
 
 .meta-card,
 .submit-card {
-  border: 1px solid var(--color-border, #e5e7eb);
+  border: 1px solid var(--color-border, rgb(var(--yb-border)));
   border-radius: 8px;
   padding: 1rem;
 }
@@ -1291,7 +1291,7 @@ onMounted(() => {
 }
 
 .required {
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
 }
 
 .due-at-row {
@@ -1302,7 +1302,7 @@ onMounted(() => {
 .native-input {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--color-border, #d1d5db);
+  border: 1px solid var(--color-border, rgb(var(--yb-border-strong)));
   border-radius: 6px;
   padding: 0.4rem 0.55rem;
   font-size: 0.875rem;
@@ -1323,15 +1323,15 @@ onMounted(() => {
   margin: 0 0 0.5rem;
   padding: 0.5rem 0.65rem;
   border-radius: 6px;
-  background: #fef2f2;
-  color: #b91c1c;
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
   font-size: 0.8125rem;
 }
 
 .submit-hint {
   margin: 0 0 0.75rem;
   font-size: 0.8125rem;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary, rgb(var(--yb-text-muted)));
 }
 
 .submit-btn {

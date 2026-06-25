@@ -1,7 +1,7 @@
 <template>
   <button
     :type="type"
-    class="inline-flex items-center justify-center rounded-xl text-sm font-medium font-headline transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+    class="inline-flex items-center justify-center rounded-xl text-sm font-medium font-headline transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--yb-brand-accent)_/_0.45)] focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-[rgb(var(--yb-border))] disabled:bg-[rgb(var(--yb-surface-muted))] disabled:text-[rgb(var(--yb-text-faint))] disabled:shadow-none disabled:hover:border-[rgb(var(--yb-border))] disabled:hover:bg-[rgb(var(--yb-surface-muted))] disabled:hover:text-[rgb(var(--yb-text-faint))]"
     :class="buttonClass"
     :disabled="disabled || loading"
     @click="onClick"
@@ -42,15 +42,15 @@ const emit = defineEmits<{
 }>()
 
 const basePrimary =
-  'border border-stone-600 bg-stone-600 text-stone-50 hover:bg-stone-500 hover:border-stone-500'
+  'border border-[rgb(var(--yb-brand))] bg-[rgb(var(--yb-brand))] text-[rgb(var(--yb-text-inverse))] hover:border-[rgb(var(--yb-brand-strong))] hover:bg-[rgb(var(--yb-brand-strong))]'
 const baseSecondary =
-  'border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100 hover:border-stone-300'
+  'border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] text-[rgb(var(--yb-text))] hover:border-[rgb(var(--yb-brand-border))] hover:bg-[rgb(var(--yb-brand-soft))] hover:text-[rgb(var(--yb-brand-strong))]'
 const baseGhost =
-  'border border-transparent bg-transparent text-stone-600 hover:bg-stone-50 hover:border-transparent'
+  'border border-transparent bg-transparent text-[rgb(var(--yb-text-muted-strong))] hover:border-transparent hover:bg-[rgb(var(--yb-brand-soft))] hover:text-[rgb(var(--yb-brand))]'
 const baseDanger =
-  'border border-red-600 bg-red-600 text-white hover:bg-red-700 hover:border-red-700'
+  'border border-[rgb(var(--yb-danger))] bg-[rgb(var(--yb-danger))] text-[rgb(var(--yb-text-inverse))] hover:border-[rgb(var(--yb-danger-text))] hover:bg-[rgb(var(--yb-danger-text))]'
 const baseOutsource =
-  'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+  'border border-[rgb(var(--yb-warning-border-soft))] bg-[rgb(var(--yb-warning-soft))] text-[rgb(var(--yb-warning-text))] hover:bg-[rgb(var(--yb-warning-badge-soft))]'
 
 const sizeSm = 'h-8 px-3 text-xs'
 const sizeMd = 'h-10 px-3.5 text-sm'

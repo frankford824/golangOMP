@@ -1,28 +1,33 @@
 <template>
   <div class="flex flex-col gap-1">
-    <label v-if="label" class="text-sm font-medium text-slate-600">
+    <label v-if="label" :for="inputId" class="text-sm font-medium text-[rgb(var(--yb-text-muted-strong))]">
       {{ label }}
     </label>
     <input
+      :id="inputId"
       :type="type"
       :value="modelValue"
       :placeholder="placeholder"
       :disabled="disabled"
       :maxlength="maxlength"
-      class="w-full h-11 rounded-xl border border-stone-200 bg-stone-50/80 px-3 text-sm text-stone-800 placeholder:text-stone-400 outline-none transition focus:border-stone-400 focus:ring-1 focus:ring-stone-300 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
+      :aria-invalid="error ? 'true' : undefined"
+      :aria-describedby="describedBy"
+      class="w-full h-11 rounded-xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft)_/_0.8)] px-3 text-sm text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-placeholder))] outline-none transition focus:border-[rgb(var(--yb-brand-border-strong))] focus:ring-1 focus:ring-[rgb(var(--yb-brand-accent)_/_0.35)] disabled:cursor-not-allowed disabled:bg-[rgb(var(--yb-surface-muted))] disabled:text-[rgb(var(--yb-text-faint))]"
       @input="onInput"
     />
-    <p v-if="hint" class="text-xs text-slate-400">
+    <p v-if="hint" :id="hintId" class="text-xs text-[rgb(var(--yb-text-faint))]">
       {{ hint }}
     </p>
-    <p v-if="error" class="text-xs text-red-600">
+    <p v-if="error" :id="errorId" class="text-xs text-[rgb(var(--yb-danger))]">
       {{ error }}
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
-withDefaults(
+import { computed, useId } from 'vue'
+
+const props = withDefaults(
   defineProps<{
     modelValue?: string | number
     label?: string
@@ -43,6 +48,17 @@ withDefaults(
 const emit = defineEmits<{
   'update:modelValue': [string | number]
 }>()
+
+const uid = useId()
+const inputId = `${uid}-input`
+const hintId = `${uid}-hint`
+const errorId = `${uid}-error`
+const describedBy = computed(() => {
+  const ids: string[] = []
+  if (props.error) ids.push(errorId)
+  if (props.hint) ids.push(hintId)
+  return ids.length ? ids.join(' ') : undefined
+})
 
 function onInput(e: Event) {
   const target = e.target as HTMLInputElement

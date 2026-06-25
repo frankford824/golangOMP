@@ -1,5 +1,5 @@
 <template>
-  <div class="forbidden-page min-h-[100dvh] flex items-center justify-center bg-slate-50">
+  <div class="forbidden-page min-h-[100dvh] flex items-center justify-center bg-[rgb(var(--yb-surface-soft))]">
     <div class="forbidden-card">
       <div class="icon-wrap">
         <div class="icon-circle">
@@ -44,9 +44,9 @@ function goLogin() {
 <style scoped>
 .forbidden-card {
   padding: 2rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   border-radius: 0.75rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   text-align: center;
   max-width: 360px;
 }
@@ -54,12 +54,12 @@ function goLogin() {
   margin: 0 0 0.75rem;
   font-size: 1.25rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .desc {
   margin: 0;
   font-size: 0.875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .icon-wrap {
@@ -73,8 +73,8 @@ function goLogin() {
   width: 56px;
   height: 56px;
   border-radius: 9999px;
-  border: 2px solid #f97373;
-  background: #fef2f2;
+  border: 2px solid rgb(var(--yb-danger-coral));
+  background: rgb(var(--yb-danger-soft));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,7 +84,7 @@ function goLogin() {
   position: absolute;
   width: 32px;
   height: 2px;
-  background-color: #ef4444;
+  background-color: rgb(var(--yb-red));
   transform: rotate(-45deg);
 }
 </style>

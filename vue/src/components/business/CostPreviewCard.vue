@@ -1,11 +1,11 @@
 <template>
   <section class="info-block">
-    <h4 class="text-sm font-semibold text-slate-900">成本预估（Mock）</h4>
+    <h4 class="text-sm font-semibold text-[rgb(var(--yb-text))]">成本预估（Mock）</h4>
 
     <template v-if="canEdit">
       <div class="mt-2 grid grid-cols-2 gap-3">
         <div>
-          <label class="block text-[11px] text-slate-500 mb-1">长度（cm）</label>
+          <label class="block text-[11px] text-[rgb(var(--yb-text-muted))] mb-1">长度（cm）</label>
           <BaseInput
             v-model="lengthInput"
             type="number"
@@ -15,7 +15,7 @@
           />
         </div>
         <div>
-          <label class="block text-[11px] text-slate-500 mb-1">宽度（cm）</label>
+          <label class="block text-[11px] text-[rgb(var(--yb-text-muted))] mb-1">宽度（cm）</label>
           <BaseInput
             v-model="widthInput"
             type="number"
@@ -28,14 +28,14 @@
 
       <div class="mt-3 grid grid-cols-2 gap-3 items-end">
         <div>
-          <p class="text-[11px] text-slate-500">面积（㎡）</p>
-          <p class="mt-1 text-sm font-medium text-slate-900">
+          <p class="text-[11px] text-[rgb(var(--yb-text-muted))]">面积（㎡）</p>
+          <p class="mt-1 text-sm font-medium text-[rgb(var(--yb-text))]">
             {{ area.toFixed(2) }}
           </p>
         </div>
         <div>
-          <p class="text-[11px] text-slate-500">单价（元/㎡，写死）</p>
-          <p class="mt-1 text-sm font-medium text-slate-900">
+          <p class="text-[11px] text-[rgb(var(--yb-text-muted))]">单价（元/㎡，写死）</p>
+          <p class="mt-1 text-sm font-medium text-[rgb(var(--yb-text))]">
             {{ unitPrice.toFixed(3) }}
           </p>
         </div>
@@ -43,13 +43,13 @@
 
       <div class="mt-3 grid grid-cols-2 gap-3 items-end">
         <div>
-          <p class="text-[11px] text-slate-500">预估成本（自动）</p>
-          <p class="mt-1 text-sm font-medium text-slate-900">
+          <p class="text-[11px] text-[rgb(var(--yb-text-muted))]">预估成本（自动）</p>
+          <p class="mt-1 text-sm font-medium text-[rgb(var(--yb-text))]">
             {{ autoAmount.toFixed(3) }}
           </p>
         </div>
         <div>
-          <label class="block text-[11px] text-slate-500 mb-1">手工覆盖金额（元，可选）</label>
+          <label class="block text-[11px] text-[rgb(var(--yb-text-muted))] mb-1">手工覆盖金额（元，可选）</label>
           <BaseInput
             v-model="manualInput"
             type="number"
@@ -62,28 +62,28 @@
 
       <div class="mt-3 flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <span class="text-[11px] text-slate-500">成本来源</span>
+          <span class="text-[11px] text-[rgb(var(--yb-text-muted))]">成本来源</span>
           <BaseTag v-if="isManual" variant="warning">手工</BaseTag>
           <BaseTag v-else variant="success">自动</BaseTag>
         </div>
         <div class="text-right">
-          <p class="text-[11px] text-slate-500">最终成本（元）</p>
-          <p class="mt-1 text-sm font-semibold text-emerald-700">
+          <p class="text-[11px] text-[rgb(var(--yb-text-muted))]">最终成本（元）</p>
+          <p class="mt-1 text-sm font-semibold text-[rgb(var(--yb-success-strong))]">
             {{ finalAmount.toFixed(3) }}
           </p>
         </div>
       </div>
 
-      <p class="mt-2 text-[11px] text-slate-400">
+      <p class="mt-2 text-[11px] text-[rgb(var(--yb-text-faint))]">
         当前为预估金额，仅供参考。
       </p>
     </template>
     <div v-else class="mt-2">
-      <p class="text-[11px] text-slate-500">最终成本（元）</p>
-      <p class="mt-1 text-sm font-semibold text-slate-700">
+      <p class="text-[11px] text-[rgb(var(--yb-text-muted))]">最终成本（元）</p>
+      <p class="mt-1 text-sm font-semibold text-[rgb(var(--yb-text-body))]">
         {{ finalAmount.toFixed(3) }}
       </p>
-      <p class="mt-2 text-[11px] text-slate-400">无编辑权限，仅可查看。</p>
+      <p class="mt-2 text-[11px] text-[rgb(var(--yb-text-faint))]">无编辑权限，仅可查看。</p>
     </div>
   </section>
 </template>
@@ -131,6 +131,9 @@ const finalAmount = computed(() => (isManual.value ? manualAmount.value : autoAm
 
 <style scoped>
 .info-block {
-  @apply p-4 bg-white border border-slate-200 rounded-lg;
+  padding: 1rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-surface));
 }
 </style>

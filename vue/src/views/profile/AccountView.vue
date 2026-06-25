@@ -322,8 +322,8 @@ function logout(): void {
 .profile-panel,
 .profile-shortcuts {
   border: 1px solid var(--v1-border);
-  background: #fff;
-  box-shadow: 0 16px 36px -28px rgba(15, 23, 42, 0.28);
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 16px 36px -28px rgb(var(--yb-shadow) / 0.28);
 }
 
 .profile-hero {
@@ -335,8 +335,8 @@ function logout(): void {
   padding: 22px;
   border-radius: 18px;
   background:
-    linear-gradient(135deg, rgba(239, 246, 255, 0.92), rgba(255, 255, 255, 0.96) 48%),
-    #fff;
+    linear-gradient(135deg, rgb(var(--yb-brand-soft) / 0.92), rgb(var(--yb-surface) / 0.96) 48%),
+    rgb(var(--yb-surface));
 }
 
 .profile-hero__avatar,
@@ -345,8 +345,8 @@ function logout(): void {
   place-items: center;
   overflow: hidden;
   border-radius: 50%;
-  background: linear-gradient(135deg, #2563eb, #14b8a6);
-  color: #fff;
+  background: linear-gradient(135deg, rgb(var(--yb-brand)), rgb(var(--yb-teal-accent)));
+  color: rgb(var(--yb-surface));
   font-weight: 800;
 }
 
@@ -371,7 +371,7 @@ function logout(): void {
   margin: 0;
   font-size: 12px;
   font-weight: 700;
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
 }
 
 .profile-hero h1 {
@@ -407,16 +407,16 @@ function logout(): void {
 
 .profile-logout {
   height: 34px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
+  border: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
   padding: 0 12px;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 
 .profile-logout:hover,
 .profile-logout:focus-visible {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+  border-color: rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-subtle));
   outline: none;
 }
 
@@ -436,7 +436,7 @@ function logout(): void {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .section-heading h2 {
@@ -485,26 +485,26 @@ function logout(): void {
 }
 
 .profile-button--primary {
-  background: #2563eb;
-  color: #fff;
+  background: rgb(var(--yb-brand));
+  color: rgb(var(--yb-surface));
 }
 
 .profile-button--primary:hover:not(:disabled),
 .profile-button--primary:focus-visible:not(:disabled) {
-  background: #1d4ed8;
+  background: rgb(var(--yb-brand-strong));
   outline: none;
 }
 
 .profile-button--ghost {
-  border-color: #e2e8f0;
-  background: #fff;
-  color: #475569;
+  border-color: rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-soft));
 }
 
 .profile-button--ghost:hover:not(:disabled),
 .profile-button--ghost:focus-visible:not(:disabled) {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+  border-color: rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-subtle));
   outline: none;
 }
 
@@ -518,7 +518,7 @@ function logout(): void {
 .readonly-item {
   min-width: 0;
   border-radius: 10px;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   padding: 12px;
 }
 
@@ -561,23 +561,23 @@ function logout(): void {
 .profile-field span {
   font-size: 12px;
   font-weight: 700;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 
 .profile-field input {
   height: 40px;
   width: 100%;
-  border: 1px solid #dbe3ef;
+  border: 1px solid rgb(var(--yb-border-subtle));
   border-radius: 8px;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   padding: 0 12px;
   color: var(--v1-text-primary);
   font-size: 14px;
 }
 
 .profile-field input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
   outline: none;
 }
 
@@ -596,7 +596,7 @@ function logout(): void {
 }
 
 .profile-feedback--success {
-  color: #047857;
+  color: rgb(var(--yb-success-teal));
 }
 
 .profile-feedback--error {
@@ -622,8 +622,8 @@ function logout(): void {
 .profile-shortcuts a:hover,
 .profile-shortcuts a:focus-visible,
 .profile-shortcuts a.router-link-active {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
   outline: none;
 }
 

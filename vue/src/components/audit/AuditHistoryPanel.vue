@@ -31,19 +31,19 @@ function formatDate(iso: string) {
 <style scoped>
 .audit-history-panel {
   padding: 1rem;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 8px;
 }
 .block-title {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .empty {
   font-size: 0.875rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 .record-list {
   list-style: none;
@@ -52,7 +52,7 @@ function formatDate(iso: string) {
 }
 .record-item {
   padding: 0.5rem 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid rgb(var(--yb-surface-slate));
   font-size: 0.8125rem;
 }
 .record-item:last-child {
@@ -60,14 +60,14 @@ function formatDate(iso: string) {
 }
 .record-action {
   font-weight: 500;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   margin-right: 0.5rem;
 }
 .record-meta {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .record-comment {
   margin: 0.25rem 0 0;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 </style>

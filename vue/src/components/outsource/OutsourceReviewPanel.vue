@@ -1,13 +1,13 @@
 /**
  * 组件职责：定制回传审核面板，查看回传资产 + 执行复核通过/打回
- * 
+ *
  * 核心业务规则（来自 Prompt.md）：
  *   - 定制回传后由审核员B/复核员复核
  *   - 通过后进入仓库接收
- * 
+ *
  * 主要 Store：useOutsourceStore
  * 当前主链：外包创建由 POST /v1/tasks/{id}/outsource 触发，回传审核跟随任务审核链路
- * 
+ *
  * 当前状态：已迁移 Base 组件，面板交互完整
  * 维护注意 / 风险点：
  *   - 回传资产版本需对比 hash
@@ -57,15 +57,15 @@ function submit() {
 <style scoped>
 .review-panel {
   padding: 1rem;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 8px;
 }
 .review-panel h4 {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .form-fields {
   display: flex;
@@ -75,7 +75,7 @@ function submit() {
 .label {
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .radio-group {
   display: flex;

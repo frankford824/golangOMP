@@ -1,7 +1,7 @@
 <template>
-  <div ref="rootEl" class="supplement rounded-md border border-slate-200 bg-slate-50/80 p-3">
-    <h5 class="mb-2 text-xs font-semibold text-slate-800">补全仓库准入信息</h5>
-    <p class="mb-3 text-xs text-slate-600 leading-relaxed">
+  <div ref="rootEl" class="supplement rounded-md border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft))] p-3">
+    <h5 class="mb-2 text-xs font-semibold text-[rgb(var(--yb-text-body-strong))]">补全仓库准入信息</h5>
+    <p class="mb-3 text-xs text-[rgb(var(--yb-text-secondary))] leading-relaxed">
       补全产品分类、成本单价与采购单价等仓库准入信息，保存后任务数据会自动刷新。
     </p>
     <div class="grid gap-2 sm:grid-cols-2">
@@ -42,10 +42,10 @@
       />
     </div>
     <BaseTextarea v-model="specText" class="mt-2" label="规格说明" :rows="3" placeholder="规格、尺寸、工艺等" />
-    <p class="mt-2 text-xs leading-relaxed text-slate-600">
+    <p class="mt-2 text-xs leading-relaxed text-[rgb(var(--yb-text-secondary))]">
       成本单价保存后将作为人工维护成本，并请求同步 ERP；后续仍可再次修改。
     </p>
-    <p v-if="saveError" class="mt-2 text-xs text-red-600">{{ saveError }}</p>
+    <p v-if="saveError" class="mt-2 text-xs text-[rgb(var(--yb-danger))]">{{ saveError }}</p>
     <div class="mt-3 flex flex-wrap gap-2">
       <BaseButton size="sm" variant="primary" :loading="saving" :disabled="saving" @click="save">
         保存并刷新任务

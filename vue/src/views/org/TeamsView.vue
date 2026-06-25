@@ -1,5 +1,5 @@
 <template>
-  <section class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
+  <section class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
     <h1 class="text-base font-semibold text-[var(--v1-text-primary)]">团队管理</h1>
     <ul class="mt-3 space-y-2">
       <li

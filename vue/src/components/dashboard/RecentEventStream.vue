@@ -80,8 +80,8 @@ function onSelect(ev: RecentEvent) {
 
 <style scoped>
 .event-stream {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 8px;
   padding: 1rem;
 }
@@ -89,14 +89,14 @@ function onSelect(ev: RecentEvent) {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .stream-loading,
 .stream-error,
 .stream-empty {
   padding: 0.5rem 0;
   font-size: 0.875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .stream-list {
   list-style: none;
@@ -108,7 +108,7 @@ function onSelect(ev: RecentEvent) {
   align-items: center;
   gap: 1rem;
   padding: 0.625rem 0.25rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid rgb(var(--yb-surface-slate));
   font-size: 0.8125rem;
   transition: background-color 0.15s;
   border-radius: 0.375rem;
@@ -120,34 +120,34 @@ function onSelect(ev: RecentEvent) {
   border-bottom: none;
 }
 .stream-item.navigable:hover {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .event-time {
   flex: 0 0 8rem;
   white-space: nowrap;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   font-variant-numeric: tabular-nums;
 }
 .event-title {
   flex: 0 0 6.25rem;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .event-ref {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   font-family: var(--yb-font-data);
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
 }
 .event-ref--link {
-  color: rgb(16 185 129);
+  color: rgb(var(--yb-success-emerald-bright));
 }
 .event-actor {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -166,11 +166,11 @@ function onSelect(ev: RecentEvent) {
   gap: 0.75rem;
   padding: 0.5rem 0.125rem;
   font-size: 0.8125rem;
-  border-color: #e2e8f0;
+  border-color: rgb(var(--yb-border-slate));
 }
 .event-time--short {
   flex: 0 0 2.5rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   font-size: 0.75rem;
 }
 .event-line {
@@ -178,7 +178,7 @@ function onSelect(ev: RecentEvent) {
   flex-wrap: wrap;
   gap: 0.25rem 0.5rem;
   min-width: 0;
-  color: #1e293b;
+  color: rgb(var(--yb-text-deep));
   line-height: 1.45;
 }
 .stream-list--dashboard .event-title {
@@ -189,7 +189,7 @@ function onSelect(ev: RecentEvent) {
   font-size: 0.75rem;
 }
 .stream-list--dashboard .event-actor {
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
   font-size: 0.75rem;
 }
 

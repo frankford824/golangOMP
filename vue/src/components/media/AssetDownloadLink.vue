@@ -53,7 +53,7 @@ async function onClick(ev: MouseEvent) {
 <style scoped>
 .asset-dl-link {
   font-size: 0.75rem;
-  color: rgb(37 99 235);
+  color: rgb(var(--yb-brand));
   cursor: pointer;
   text-decoration: underline;
 }
@@ -64,21 +64,21 @@ async function onClick(ev: MouseEvent) {
   padding: 0.45rem 0.9rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #fff;
+  color: rgb(var(--yb-surface));
   text-decoration: none;
-  background: rgb(37 99 235);
-  border: 1px solid rgb(29 78 216);
+  background: rgb(var(--yb-brand));
+  border: 1px solid rgb(var(--yb-brand-strong));
   border-radius: 0.5rem;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.08);
   transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .asset-dl-link--button:hover {
-  background: rgb(29 78 216);
-  border-color: rgb(30 64 175);
-  box-shadow: 0 2px 6px rgb(37 99 235 / 0.25);
+  background: rgb(var(--yb-brand-strong));
+  border-color: rgb(var(--yb-brand-deep));
+  box-shadow: 0 2px 6px rgb(var(--yb-brand) / 0.25);
 }
 .asset-dl-link--button:focus-visible {
-  outline: 2px solid rgb(147 197 253);
+  outline: 2px solid rgb(var(--yb-brand-border-strong));
   outline-offset: 2px;
 }
 .asset-dl-icon {

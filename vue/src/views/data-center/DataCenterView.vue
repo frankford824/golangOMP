@@ -167,7 +167,7 @@ watch(
   flex-direction: column;
   gap: 0.75rem;
   padding-bottom: 1.5rem;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   font-family: var(--yb-font-text);
   letter-spacing: 0;
 }
@@ -194,14 +194,14 @@ watch(
   font-size: 1rem;
   font-weight: 750;
   line-height: 1.3;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   letter-spacing: 0;
 }
 .page-subtitle {
   margin: 0.2rem 0 0;
   font-size: 0.75rem;
   line-height: 1.4;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   letter-spacing: 0;
 }
 .module-tabs {
@@ -218,12 +218,12 @@ watch(
   flex: 1 1 11rem;
   flex-direction: column;
   justify-content: center;
-  border: 1px solid #d7e0ea;
+  border: 1px solid rgb(var(--yb-border-blue));
   border-radius: 0.5rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   padding: 0.55rem 0.7rem;
   text-align: left;
-  color: #1e293b;
+  color: rgb(var(--yb-text-deep));
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease,
@@ -244,14 +244,14 @@ watch(
   white-space: nowrap;
   font-size: 0.6875rem;
   line-height: 1.25;
-  color: #718096;
+  color: rgb(var(--yb-text-blue-gray));
   letter-spacing: 0;
 }
 .module-tab.active {
-  border-color: #2563eb;
-  background: #f3f8ff;
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.16);
-  color: #1d4ed8;
+  border-color: rgb(var(--yb-brand));
+  background: rgb(var(--yb-surface-blue-soft));
+  box-shadow: inset 0 0 0 1px rgb(var(--yb-brand) / 0.16);
+  color: rgb(var(--yb-brand-strong));
 }
 .module-body {
   min-width: 0;

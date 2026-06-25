@@ -1,16 +1,16 @@
 <template>
-  <div class="app-shell bg-[#f5f6f8] font-body text-gray-900 flex overflow-hidden h-[100dvh]">
+  <div class="app-shell font-body flex overflow-hidden h-[100dvh]">
     <!-- Light Slim Sidebar -->
     <aside
-      class="sidebar hidden md:flex flex-col h-full w-20 bg-white border-r border-gray-200 transition-all duration-300 overflow-hidden group hover:w-64"
+      class="sidebar hidden md:flex flex-col h-full w-20 bg-[rgb(var(--yb-surface))] border-r border-[rgb(var(--yb-border))] transition-all duration-300 overflow-hidden group hover:w-64"
       @transitionend="onSidebarTransitionEnd"
     >
       <div class="flex items-center gap-3 px-6 h-16 mb-4">
-        <div class="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center flex-shrink-0">
-          <span class="material-symbols-outlined text-blue-600 text-lg">architecture</span>
+        <div class="w-8 h-8 rounded-lg bg-[rgb(var(--yb-brand-soft))] border border-[rgb(var(--yb-brand-border))] flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-[rgb(var(--yb-brand))] text-lg">architecture</span>
         </div>
         <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">
-          <h2 class="font-headline font-extrabold text-gray-900 text-sm tracking-tight">永箔运营</h2>
+          <h2 class="font-headline font-extrabold text-[rgb(var(--yb-text))] text-sm tracking-tight">永箔运营</h2>
         </div>
       </div>
       <nav class="flex-1 px-4 space-y-4 overflow-y-auto custom-scrollbar">
@@ -22,7 +22,7 @@
             :to="resolveMenuTo(menu)"
             :active-class="menu.exact ? '' : 'active'"
             :exact-active-class="menu.exact ? 'active' : ''"
-            class="nav-item flex items-center gap-4 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 sidebar-item-hover transition-all"
+            class="nav-item flex items-center gap-4 p-2 rounded-xl text-[rgb(var(--yb-text-muted))] hover:text-[rgb(var(--yb-text))] hover:bg-[rgb(var(--yb-surface-muted))] sidebar-item-hover transition-all"
           >
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
@@ -38,7 +38,7 @@
             :key="menu.key"
             :to="menu.to"
             active-class="active"
-            class="nav-item flex items-center gap-4 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 sidebar-item-hover transition-all"
+            class="nav-item flex items-center gap-4 p-2 rounded-xl text-[rgb(var(--yb-text-muted))] hover:text-[rgb(var(--yb-text))] hover:bg-[rgb(var(--yb-surface-muted))] sidebar-item-hover transition-all"
           >
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
@@ -53,7 +53,7 @@
             :key="menu.key"
             :to="menu.to"
             active-class="active"
-            class="nav-item flex items-center gap-4 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-100 sidebar-item-hover transition-all"
+            class="nav-item flex items-center gap-4 p-2 rounded-xl text-[rgb(var(--yb-text-muted))] hover:text-[rgb(var(--yb-text))] hover:bg-[rgb(var(--yb-surface-muted))] sidebar-item-hover transition-all"
           >
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
@@ -68,7 +68,7 @@
 
     <main class="app-main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
       <!-- TopNavBar: Light solid bar -->
-      <header class="flex justify-between items-center px-8 py-4 bg-white border-b border-gray-200 z-10">
+      <header class="flex justify-between items-center px-8 py-4 bg-[rgb(var(--yb-surface))] border-b border-[rgb(var(--yb-border))] z-10">
         <div class="flex min-w-0 items-center gap-3 md:gap-12">
           <button
             type="button"
@@ -78,16 +78,16 @@
           >
             <span class="material-symbols-outlined">menu</span>
           </button>
-          <span class="min-w-0 truncate text-lg font-headline font-extrabold tracking-tighter text-gray-900 uppercase">永箔运营管理系统</span>
+          <span class="min-w-0 truncate text-lg font-headline font-extrabold tracking-tighter text-[rgb(var(--yb-text))] uppercase">永箔运营管理系统</span>
         </div>
         <div class="flex min-w-0 items-center gap-3 sm:gap-6">
           <div class="relative hidden sm:block">
-            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 !text-lg pointer-events-none">search</span>
+            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--yb-text-faint))] text-lg pointer-events-none">search</span>
             <input
               type="text"
               readonly
               placeholder="Ctrl+K 搜索任务、SKU、产品"
-              class="bg-gray-50 border border-gray-200 rounded-full pl-10 pr-4 py-1.5 text-xs w-64 text-gray-900 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-gray-400"
+              class="bg-[rgb(var(--yb-surface-soft))] border border-[rgb(var(--yb-border))] rounded-full pl-10 pr-4 py-1.5 text-xs w-64 text-[rgb(var(--yb-text))] focus:ring-1 focus:ring-[rgb(var(--yb-brand))] focus:border-[rgb(var(--yb-brand))] transition-all placeholder:text-[rgb(var(--yb-text-faint))]"
               @focus="openSearch"
               @click="openSearch"
             />
@@ -399,15 +399,22 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 
 <style scoped>
 .nav-section-label {
-  @apply px-4 pt-3 pb-1 text-[10px] font-headline font-bold uppercase tracking-[0.2em] text-stone-500;
+  @apply px-4 pt-3 pb-1 text-[10px] font-headline font-bold uppercase tracking-[0.2em];
+  color: rgb(var(--yb-text-muted));
 }
 
 .nav-item.active {
-  @apply bg-blue-50 text-blue-700 border border-blue-100;
+  @apply border;
+  border-color: rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 
 .nav-badge-p2 {
-  @apply inline-flex items-center ml-1 px-1.5 text-[10px] font-semibold rounded-full border border-gray-200 bg-gray-100 text-gray-600;
+  @apply inline-flex items-center ml-1 px-1.5 text-[10px] font-semibold rounded-full border;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-secondary));
 }
 
 .sidebar-item-hover:hover .material-symbols-outlined {
@@ -416,19 +423,25 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .role-tag {
-  @apply inline-flex items-center rounded-full border border-stone-200 bg-stone-50 px-2.5 py-0.5 text-xs font-medium text-stone-600;
+  @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-brand));
 }
 
 .user-trigger {
-  @apply flex items-center gap-2 cursor-pointer text-sm text-stone-900 px-2 py-1 rounded-lg border border-transparent bg-transparent transition-colors;
+  @apply flex items-center gap-2 cursor-pointer text-sm px-2 py-1 rounded-lg border border-transparent bg-transparent transition-colors;
+  color: rgb(var(--yb-text));
 }
 
 .user-trigger:hover {
-  @apply bg-stone-50 border-stone-200;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
 }
 
 .switcher-caret {
-  @apply text-stone-400 transition-transform inline-block;
+  @apply transition-transform inline-block;
+  color: rgb(var(--yb-text-faint));
 }
 
 .switcher-caret.open {
@@ -436,23 +449,25 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .role-dropdown {
-  @apply absolute right-0 top-[calc(100%+6px)] min-w-[180px] rounded-2xl border border-gray-200 bg-white shadow-md z-50 py-1.5;
+  @apply absolute right-0 top-[calc(100%+6px)] min-w-[180px] rounded-2xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] shadow-md z-50 py-1.5;
 }
 
 .dropdown-item {
-  @apply flex items-center justify-between w-full px-3 py-1.5 text-xs text-stone-600 bg-transparent border-none text-left cursor-pointer gap-2;
+  @apply flex items-center justify-between w-full px-3 py-1.5 text-xs text-[rgb(var(--yb-brand))] bg-transparent border-none text-left cursor-pointer gap-2;
 }
 
 .dropdown-item:hover {
-  @apply bg-stone-50 text-stone-900;
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
 }
 
 .logout-item {
-  @apply text-red-600;
+  @apply text-[rgb(var(--yb-danger))];
 }
 
 .logout-item:hover {
-  @apply bg-red-50 text-red-700;
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
 }
 
 /* 铺满滚动区宽度（不再居中 max-width）；保留少量边距避免贴边 */
@@ -464,22 +479,22 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 .app-shell {
   --sidebar-rail: 4.25rem;
   --sidebar-drawer: 16rem;
-  background: #f5f6f8 !important;
-  color: #111827;
+  background: rgb(var(--yb-bg-page));
+  color: rgb(var(--yb-text));
 }
 
 .sidebar {
   position: relative;
   z-index: 40;
-  width: var(--sidebar-rail) !important;
-  flex: 0 0 var(--sidebar-rail) !important;
+  width: var(--sidebar-rail);
+  flex: 0 0 var(--sidebar-rail);
   margin: 0.5rem 0 0.5rem 0.5rem;
-  height: calc(100% - 1rem) !important;
-  overflow: hidden !important;
-  border: 0 !important;
+  height: calc(100% - 1rem);
+  overflow: hidden;
+  border: 0;
   border-radius: 0.95rem;
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   background-clip: padding-box;
@@ -491,8 +506,8 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .sidebar:hover {
-  width: var(--sidebar-drawer) !important;
-  flex-basis: var(--sidebar-drawer) !important;
+  width: var(--sidebar-drawer);
+  flex-basis: var(--sidebar-drawer);
 }
 
 .app-main {
@@ -506,9 +521,9 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   width: 100%;
   pointer-events: none;
   border-radius: inherit;
-  border: 1px solid #e5e7eb;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  border: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 1px 3px rgb(var(--yb-shadow) / 0.06);
   background-clip: padding-box;
   z-index: 0;
 }
@@ -522,10 +537,10 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   z-index: 1;
   width: calc(var(--sidebar-rail) - 0.8rem);
   margin: 0.35rem 0.4rem 0.65rem;
-  height: 3rem !important;
-  padding-inline: 0.45rem !important;
+  height: 3rem;
+  padding-inline: 0.45rem;
   border-radius: 0.85rem;
-  background: transparent !important;
+  background: transparent;
   transition: width 0.24s ease;
 }
 
@@ -539,87 +554,87 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   width: 100%;
   box-sizing: border-box;
   overflow-x: hidden;
-  padding-inline: 0.75rem !important;
+  padding-inline: 0.75rem;
   transition:
     width 0.24s ease,
     padding-inline 0.24s ease;
 }
 
 .sidebar:hover > nav {
-  padding-inline: 1rem !important;
+  padding-inline: 1rem;
 }
 
 .sidebar > div:first-child > div:first-child {
-  width: 2rem !important;
-  height: 2rem !important;
-  border-radius: 0.75rem !important;
-  background: #eff6ff !important;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-brand-soft));
   box-shadow: none;
 }
 
 .sidebar h2 {
-  color: #111827 !important;
-  font-size: 0.82rem !important;
-  font-weight: 750 !important;
+  color: rgb(var(--yb-text));
+  font-size: 0.82rem;
+  font-weight: 750;
 }
 
 .sidebar .opacity-0 {
-  opacity: 0 !important;
+  opacity: 0;
 }
 
 .sidebar:hover .opacity-0 {
-  opacity: 1 !important;
+  opacity: 1;
 }
 
 .sidebar :deep(.material-symbols-outlined) {
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .nav-section-label {
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 
 .nav-item {
-  color: #6b7280 !important;
+  color: rgb(var(--yb-text-muted));
   overflow: hidden;
-  border-radius: 0.85rem !important;
+  border-radius: 0.85rem;
   background-clip: padding-box;
   border: 1px solid transparent;
 }
 
 .nav-item:hover {
-  background: #f3f4f6 !important;
-  color: #111827 !important;
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text));
 }
 
 .nav-item.active {
-  border: 1px solid #bfdbfe !important;
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
+  border: 1px solid rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
   text-shadow: none;
   box-shadow: none;
 }
 
 .nav-item.active :deep(.material-symbols-outlined) {
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
 }
 
 .nav-badge-p2 {
-  border-color: #e5e7eb;
-  background: #f3f4f6;
-  color: #6b7280;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-muted));
 }
 
 main > header {
   position: relative;
-  z-index: 120 !important;
+  z-index: 120;
   margin: 0.75rem 0.75rem 0;
   min-height: 3.85rem;
-  padding-block: 0.65rem !important;
-  border: 1px solid #e5e7eb !important;
+  padding-block: 0.65rem;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 1rem;
-  background: #ffffff !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 1px 3px rgb(var(--yb-shadow) / 0.06);
   overflow: visible;
   background-clip: padding-box;
   clip-path: none;
@@ -627,30 +642,30 @@ main > header {
 }
 
 main > header span {
-  color: #111827 !important;
+  color: rgb(var(--yb-text));
 }
 
 main > header > div:first-child > span {
-  color: #111827 !important;
-  font-size: 1rem !important;
-  font-weight: 800 !important;
-  letter-spacing: 0 !important;
-  text-shadow: none !important;
+  color: rgb(var(--yb-text));
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-shadow: none;
 }
 
 main > header input {
-  background: #f9fafb !important;
-  border-color: #e5e7eb !important;
-  color: #111827 !important;
+  background: rgb(var(--yb-surface-soft));
+  border-color: rgb(var(--yb-border));
+  color: rgb(var(--yb-text));
 }
 
 main > header input::placeholder {
-  color: #9ca3af !important;
+  color: rgb(var(--yb-text-faint));
 }
 
 .content {
   padding: 0.75rem;
-  background: #f5f6f8;
+  background: rgb(var(--yb-bg-page));
   max-width: 100%;
   overflow-x: hidden;
 }
@@ -663,17 +678,17 @@ main > header input::placeholder {
   width: 2.35rem;
   height: 2.35rem;
   flex: 0 0 auto;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 0.75rem;
-  background: #ffffff;
-  color: #374151;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-body));
 }
 
 .mobile-menu-button:hover,
 .mobile-close-button:hover {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border-color: rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 
 .mobile-sidebar-backdrop {
@@ -681,7 +696,7 @@ main > header input::placeholder {
   inset: 0;
   z-index: 7500;
   display: flex;
-  background: rgba(15, 23, 42, 0.2);
+  background: rgb(var(--yb-shadow) / 0.2);
   padding: 0.75rem;
 }
 
@@ -691,10 +706,10 @@ main > header input::placeholder {
   max-width: 100%;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 1rem;
-  background: #ffffff;
-  box-shadow: 0 24px 48px -28px rgba(15, 23, 42, 0.55);
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 24px 48px -28px rgb(var(--yb-shadow) / 0.55);
 }
 
 .mobile-sidebar-header {
@@ -702,7 +717,7 @@ main > header input::placeholder {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid rgb(var(--yb-border));
   padding: 0.85rem;
 }
 
@@ -711,7 +726,7 @@ main > header input::placeholder {
   min-width: 0;
   align-items: center;
   gap: 0.55rem;
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 
 .mobile-brand .material-symbols-outlined {
@@ -721,14 +736,14 @@ main > header input::placeholder {
   align-items: center;
   justify-content: center;
   border-radius: 0.75rem;
-  background: #eff6ff;
-  color: #2563eb !important;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand));
 }
 
 .mobile-brand strong {
   min-width: 0;
   overflow: hidden;
-  color: #111827;
+  color: rgb(var(--yb-text));
   font-size: 0.95rem;
   font-weight: 800;
   text-overflow: ellipsis;
@@ -745,7 +760,7 @@ main > header input::placeholder {
 
 .mobile-nav-section-label {
   padding: 0.7rem 0.35rem 0.2rem;
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
   font-size: 0.68rem;
   font-weight: 800;
 }
@@ -759,23 +774,23 @@ main > header input::placeholder {
   border: 1px solid transparent;
   border-radius: 0.8rem;
   padding: 0.55rem 0.65rem;
-  color: #4b5563;
+  color: rgb(var(--yb-text-secondary));
 }
 
 .mobile-nav-item:hover {
-  background: #f3f4f6;
-  color: #111827;
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text));
   text-decoration: none;
 }
 
 .mobile-nav-item.active {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border-color: rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 
 .mobile-nav-item .material-symbols-outlined {
-  color: currentColor !important;
+  color: currentColor;
 }
 
 .mobile-nav-item span:nth-child(2) {
@@ -789,8 +804,8 @@ main > header input::placeholder {
 
 .mobile-nav-badge {
   border-radius: 999px;
-  background: #f3f4f6;
-  color: #6b7280;
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-muted));
   padding: 0.05rem 0.45rem;
   font-size: 0.68rem;
   font-weight: 800;
@@ -829,12 +844,12 @@ main > header input::placeholder {
   main > header {
     margin: 0.5rem 0.5rem 0;
     min-height: 3.25rem;
-    padding: 0.5rem 0.65rem !important;
+    padding: 0.5rem 0.65rem;
     border-radius: 0.85rem;
   }
 
   main > header > div:first-child > span {
-    font-size: 0.92rem !important;
+    font-size: 0.92rem;
   }
 
   .content {

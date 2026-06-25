@@ -1,6 +1,6 @@
 <template>
-  <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40">
-    <div class="w-full max-w-md rounded-xl border border-[var(--v1-border)] bg-white p-4">
+  <div class="fixed inset-0 z-40 flex items-center justify-center bg-[rgb(var(--yb-shadow)/0.4)]">
+    <div class="w-full max-w-md rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
       <h3 class="text-sm font-semibold text-[var(--v1-text-primary)]">终止任务</h3>
       <textarea
         v-model="reason"
@@ -28,14 +28,14 @@
         <button
           v-if="showDirectForce || suggestForceClose"
           type="button"
-          class="rounded-md border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700"
+          class="rounded-md border border-[rgb(var(--yb-danger-border))] bg-[rgb(var(--yb-danger-soft))] px-3 py-1 text-xs text-[rgb(var(--yb-danger-text))]"
           @click="$emit('force', reason)"
         >
           强制终止
         </button>
         <button
           type="button"
-          class="rounded-md bg-amber-500 px-3 py-1 text-xs text-white"
+          class="rounded-md bg-[rgb(var(--yb-warning))] px-3 py-1 text-xs text-[rgb(var(--yb-text-inverse))]"
           :disabled="Boolean(suggestForceClose)"
           @click="$emit('submit', reason)"
         >

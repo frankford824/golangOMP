@@ -10,8 +10,8 @@
     <div class="placeholder-card">
       <div class="placeholder-icon" aria-hidden="true">
         <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-          <path d="M8 36V28M16 36V20M24 36V24M32 36V16M40 36V12" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
-          <path d="M8 28l8-8 8 4 8-8 8-4" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 36V28M16 36V20M24 36V24M32 36V16M40 36V12" stroke="rgb(var(--yb-text-placeholder))" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M8 28l8-8 8 4 8-8 8-4" stroke="rgb(var(--yb-text-placeholder))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
       <h3 class="placeholder-title">设计师 KPI 报表（开发中）</h3>
@@ -55,7 +55,7 @@
   margin: 0;
   font-size: 1.125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 
 .page-badge {
@@ -64,10 +64,10 @@
   padding: 0.125rem 0.625rem;
   font-size: 0.6875rem;
   font-weight: 600;
-  background: #f1f5f9;
-  color: #64748b;
+  background: rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-muted-strong));
   border-radius: 999px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
 }
 
 .placeholder-card {
@@ -76,8 +76,8 @@
   align-items: center;
   gap: 1rem;
   padding: 3rem 2rem;
-  background: #fff;
-  border: 1px dashed #cbd5e1;
+  background: rgb(var(--yb-surface));
+  border: 1px dashed rgb(var(--yb-text-disabled));
   border-radius: 12px;
   text-align: center;
   width: 100%;
@@ -85,20 +85,20 @@
 }
 
 .placeholder-icon {
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 
 .placeholder-title {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 
 .placeholder-desc {
   margin: 0;
   font-size: 0.875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .feature-list {
@@ -113,8 +113,8 @@
   padding: 0.375rem 0;
   padding-left: 1.25rem;
   font-size: 0.875rem;
-  color: #475569;
-  border-bottom: 1px solid #f1f5f9;
+  color: rgb(var(--yb-text-soft));
+  border-bottom: 1px solid rgb(var(--yb-surface-slate));
   position: relative;
 }
 
@@ -126,7 +126,7 @@
   transform: translateY(-50%);
   width: 0.375rem;
   height: 0.375rem;
-  background: #94a3b8;
+  background: rgb(var(--yb-text-placeholder));
   border-radius: 50%;
 }
 
@@ -139,8 +139,8 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface-subtle));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 6px;
   font-size: 0.75rem;
   width: 100%;
@@ -148,13 +148,13 @@
 
 .api-note-label {
   font-weight: 600;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   white-space: nowrap;
 }
 
 .api-note-code {
   font-family: var(--yb-font-data);
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   word-break: break-all;
 }
 </style>

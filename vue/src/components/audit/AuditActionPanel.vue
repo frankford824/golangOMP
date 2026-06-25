@@ -1,13 +1,13 @@
 /**
  * 组件职责：审核动作面板，提供通过/打回/意见填写 + 交班/转派按钮
- * 
+ *
  * 核心业务规则（来自 Prompt.md）：
  *   - 审核支持交班/转派/接手
  *   - 危险动作需填写 reason + 二次确认
- * 
+ *
  * 主要 Store：useAuditStore
  * 预留接口：POST /api/audits (mock)
- * 
+ *
  * 当前状态：已迁移 Base 组件，按钮交互完整
  * 维护注意 / 风险点：
  *   - reason 必填 + 二次确认逻辑必须保留
@@ -161,7 +161,7 @@ defineExpose({ form })
 .audit-rule-hint {
   margin: 0 0 0.5rem;
   font-size: 0.6875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   line-height: 1.45;
 }
 .decision-mode {
@@ -172,7 +172,7 @@ defineExpose({ form })
   margin-bottom: 0.35rem;
   font-size: 0.6875rem;
   font-weight: 600;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .decision-seg {
   display: grid;
@@ -182,48 +182,48 @@ defineExpose({ form })
 .decision-seg-btn {
   height: 1.9rem;
   border-radius: 999px;
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
+  border: 1px solid rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-subtle));
   font-size: 0.6875rem;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .decision-seg-btn-reject {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fff1f2;
+  color: rgb(var(--yb-danger-text));
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-danger-wash));
 }
 .decision-seg-btn-pass {
-  color: #047857;
-  border-color: #a7f3d0;
-  background: #ecfdf5;
+  color: rgb(var(--yb-success-teal));
+  border-color: rgb(var(--yb-success-border-soft));
+  background: rgb(var(--yb-success-soft));
 }
 .decision-seg-btn-active.decision-seg-btn-reject {
-  background: #fee2e2;
-  border-color: #f87171;
+  background: rgb(var(--yb-danger-soft-hover));
+  border-color: rgb(var(--yb-danger-soft-red));
 }
 .decision-seg-btn-active.decision-seg-btn-pass {
-  background: #d1fae5;
-  border-color: #34d399;
+  background: rgb(var(--yb-surface-success-strong));
+  border-color: rgb(var(--yb-success-emerald-light));
 }
 .audit-context-hint {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   line-height: 1.45;
 }
 .audit-action-panel {
   padding: 0.75rem;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface-subtle));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 10px;
 }
 .audit-action-panel h4 {
   margin: 0 0 0.5rem;
   font-size: 0.8125rem;
   font-weight: 700;
-  color: #1e1b4b;
+  color: rgb(var(--yb-indigo-night));
 }
 .form-fields {
   display: flex;
@@ -231,8 +231,8 @@ defineExpose({ form })
   gap: 0.5rem;
 }
 .field-block {
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface));
   border-radius: 0.625rem;
   padding: 0.45rem 0.5rem;
 }
@@ -240,15 +240,15 @@ defineExpose({ form })
   display: flex;
   align-items: center;
   font-size: 0.875rem;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
   cursor: pointer;
 }
 .pass-state-hint {
   margin: 0;
   font-size: 0.6875rem;
-  color: #166534;
-  background: #f0fdf4;
-  border: 1px solid #86efac;
+  color: rgb(var(--yb-success-deep));
+  background: rgb(var(--yb-success-ui-soft));
+  border: 1px solid rgb(var(--yb-success-border-bright));
   border-radius: 6px;
   padding: 0.4rem 0.5rem;
   line-height: 1.4;
@@ -256,7 +256,7 @@ defineExpose({ form })
 .disabled-reason {
   margin: 0.55rem 0 0;
   font-size: 0.75rem;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 .action-buttons {
   display: flex;

@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col gap-1">
-    <label v-if="label" class="text-sm font-medium text-slate-600">
+    <label v-if="label" :id="labelId" class="text-sm font-medium text-[rgb(var(--yb-text-muted-strong))]">
       {{ label }}
     </label>
 
@@ -8,23 +8,30 @@
       <!-- 外层容器参与定位宽度；避免 button 嵌套 -->
       <div
         ref="triggerEl"
-        class="flex h-11 w-full items-center gap-1 rounded-xl border border-stone-200 bg-stone-50/80 px-2 text-sm text-stone-800 transition focus-within:border-stone-400 focus-within:ring-1 focus-within:ring-stone-300 hover:bg-stone-50"
-        :class="{ 'cursor-not-allowed bg-stone-100 text-stone-500': disabled }"
+        class="flex h-11 w-full items-center gap-1 rounded-xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft)_/_0.8)] px-2 text-sm text-[rgb(var(--yb-text))] transition focus-within:border-[rgb(var(--yb-brand-border-strong))] focus-within:ring-1 focus-within:ring-[rgb(var(--yb-brand-accent)_/_0.35)] hover:bg-[rgb(var(--yb-surface))]"
+        :class="{ 'cursor-not-allowed bg-[rgb(var(--yb-surface-muted))] text-[rgb(var(--yb-text-faint))]': disabled }"
       >
         <button
           type="button"
-          class="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-stone-500"
+          class="base-select-trigger-button flex min-w-0 flex-1 items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-[rgb(var(--yb-text-faint))]"
+          :class="{ 'base-select-trigger-button-open': open }"
           :disabled="disabled"
+          aria-haspopup="listbox"
+          :aria-expanded="open"
+          :aria-labelledby="triggerLabelledBy"
+          :aria-invalid="error ? 'true' : undefined"
+          :aria-describedby="describedBy"
           @click="toggleOpen"
         >
           <span
+            :id="valueId"
             class="min-w-0 flex-1 truncate"
-            :class="{ 'text-slate-500': !selectedLabel && placeholder }"
+            :class="{ 'text-[rgb(var(--yb-text-placeholder))]': !selectedLabel && placeholder }"
           >
             {{ selectedLabel || placeholder || '请选择' }}
           </span>
           <span
-            class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-slate-400 transition-transform duration-150"
+            class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-[rgb(var(--yb-text-faint))] transition-transform duration-150"
             :class="{ 'rotate-180': open }"
           >
             ▾
@@ -33,7 +40,7 @@
         <button
           v-if="showClear"
           type="button"
-          class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition hover:bg-stone-200/80 hover:text-stone-600"
+          class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--yb-text-faint))] transition hover:bg-[rgb(var(--yb-surface-muted))] hover:text-[rgb(var(--yb-text-muted-strong))]"
           aria-label="清除选择"
           @click.stop="clearSelection"
         >
@@ -47,19 +54,21 @@
         <div
           v-if="open"
           ref="panelEl"
-          class="fixed overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-md"
+          class="base-select-panel fixed overflow-hidden rounded-2xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] text-[rgb(var(--yb-text-body))] shadow-md"
           :class="filterable ? 'flex max-h-72 flex-col' : 'py-1'"
           :style="panelStyle"
+          role="listbox"
+          aria-label="选择选项"
         >
           <template v-if="filterable">
-            <div class="shrink-0 border-b border-stone-200 px-2 py-1.5">
+            <div class="shrink-0 border-b border-[rgb(var(--yb-border))] px-2 py-1.5">
               <input
                 ref="filterInputRef"
                 v-model="filterQuery"
                 type="search"
                 autocomplete="off"
                 :placeholder="filterPlaceholder"
-                class="w-full rounded-lg border border-stone-200 bg-stone-50/80 px-2 py-1.5 text-sm text-stone-800 outline-none placeholder:text-stone-400 focus:border-stone-400 focus:ring-1 focus:ring-stone-300"
+                class="w-full rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft)_/_0.8)] px-2 py-1.5 text-sm text-[rgb(var(--yb-text))] outline-none placeholder:text-[rgb(var(--yb-text-placeholder))] focus:border-[rgb(var(--yb-brand-border-strong))] focus:ring-1 focus:ring-[rgb(var(--yb-brand-accent)_/_0.35)]"
                 @click.stop
                 @keydown.stop.escape="close"
               />
@@ -69,10 +78,10 @@
                 v-for="opt in displayedOptions"
                 :key="String(opt.value)"
                 type="button"
-                class="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-stone-700 transition-colors"
+                class="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-[rgb(var(--yb-text-body))] transition-colors"
                 :class="{
-                  'bg-stone-100 text-stone-900 font-medium': isSelected(opt.value),
-                  'hover:bg-stone-50': !isSelected(opt.value),
+                  'bg-[rgb(var(--yb-brand-soft))] text-[rgb(var(--yb-brand-strong))] font-medium': isSelected(opt.value),
+                  'hover:bg-[rgb(var(--yb-surface-muted))]': !isSelected(opt.value),
                 }"
                 @click="selectOption(opt.value)"
               >
@@ -82,13 +91,13 @@
               </button>
               <p
                 v-if="!displayedOptions.length"
-                class="px-3 py-2 text-center text-xs text-slate-500"
+                class="px-3 py-2 text-center text-xs text-[rgb(var(--yb-text-muted))]"
               >
                 无匹配结果
               </p>
               <p
                 v-else-if="hiddenOptionCount > 0"
-                class="px-3 py-2 text-center text-xs text-slate-500"
+                class="px-3 py-2 text-center text-xs text-[rgb(var(--yb-text-muted))]"
               >
                 还有 {{ hiddenOptionCount }} 项，请输入关键字缩小范围
               </p>
@@ -100,10 +109,10 @@
                 v-for="opt in options"
                 :key="String(opt.value)"
                 type="button"
-                class="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-stone-700 transition-colors"
+                class="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-[rgb(var(--yb-text-body))] transition-colors"
                 :class="{
-                  'bg-stone-100 text-stone-900 font-medium': isSelected(opt.value),
-                  'hover:bg-stone-50': !isSelected(opt.value),
+                  'bg-[rgb(var(--yb-brand-soft))] text-[rgb(var(--yb-brand-strong))] font-medium': isSelected(opt.value),
+                  'hover:bg-[rgb(var(--yb-surface-muted))]': !isSelected(opt.value),
                 }"
                 @click="selectOption(opt.value)"
               >
@@ -117,17 +126,17 @@
       </transition>
     </Teleport>
 
-    <p v-if="hint" class="text-xs text-slate-400">
+    <p v-if="hint" :id="hintId" class="text-xs text-[rgb(var(--yb-text-faint))]">
       {{ hint }}
     </p>
-    <p v-if="error" class="text-xs text-red-600">
+    <p v-if="error" :id="errorId" class="text-xs text-[rgb(var(--yb-danger))]">
       {{ error }}
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 
 export interface BaseSelectOption {
   value: string | number
@@ -168,6 +177,21 @@ const emit = defineEmits<{
   'update:modelValue': [string | number]
   'filter-change': [string]
 }>()
+
+const uid = useId()
+const labelId = `${uid}-label`
+const valueId = `${uid}-value`
+const hintId = `${uid}-hint`
+const errorId = `${uid}-error`
+const triggerLabelledBy = computed(() =>
+  props.label ? `${labelId} ${valueId}` : valueId,
+)
+const describedBy = computed(() => {
+  const ids: string[] = []
+  if (props.error) ids.push(errorId)
+  if (props.hint) ids.push(hintId)
+  return ids.length ? ids.join(' ') : undefined
+})
 
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
@@ -327,44 +351,44 @@ watch(filterQuery, () => {
 
 <style scoped>
 /* Light admin select dropdown skin. Style-only. */
-.fixed {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #374151 !important;
-  box-shadow: 0 10px 24px -8px rgba(15, 23, 42, 0.12) !important;
+.base-select-panel.fixed {
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-body));
+  box-shadow: 0 10px 24px -8px rgb(var(--yb-shadow) / 0.12);
 }
 
-.fixed :deep(input) {
-  border-color: #e5e7eb !important;
-  background: #f9fafb !important;
-  color: #111827 !important;
+.base-select-panel :deep(input) {
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
 }
 
-.fixed :deep(input::placeholder) {
-  color: #9ca3af !important;
+.base-select-panel :deep(input::placeholder) {
+  color: rgb(var(--yb-text-faint));
 }
 
-.fixed button {
-  color: #374151 !important;
+.base-select-panel button {
+  color: rgb(var(--yb-text-body));
 }
 
-.fixed button:hover,
-.fixed .bg-stone-100 {
-  background: #f3f4f6 !important;
-  color: #111827 !important;
+.base-select-panel button:hover {
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text));
 }
 
-.fixed .bg-stone-100 {
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
+.base-select-panel .border-b {
+  border-color: rgb(var(--yb-border));
 }
 
-.fixed .border-b {
-  border-color: #e5e7eb !important;
+.base-select-trigger-button:hover,
+.base-select-trigger-button-open {
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text));
 }
 
-.cursor-not-allowed {
-  opacity: 1 !important;
+.relative .cursor-not-allowed {
+  opacity: 1;
 }
 </style>
 

@@ -3,22 +3,22 @@
     <!-- 选文件后：本地假进度（非真实上传） -->
     <div
       v-if="pickAnimating"
-      class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-opacity duration-200"
+      class="rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] p-4 shadow-sm transition-opacity duration-200"
     >
       <div class="flex min-w-0 flex-col gap-1">
-        <p class="min-w-0 text-sm font-medium text-slate-800" :title="pickFileTitle">
+        <p class="min-w-0 text-sm font-medium text-[rgb(var(--yb-text-body-strong))]" :title="pickFileTitle">
           <span class="truncate">{{ pickFileName }}</span>
-          <span class="whitespace-nowrap text-slate-500"> · {{ pickFileSizeLabel }}</span>
+          <span class="whitespace-nowrap text-[rgb(var(--yb-text-muted))]"> · {{ pickFileSizeLabel }}</span>
         </p>
-        <p class="text-xs text-slate-600">{{ DESIGN_UPLOAD_COPY.pickProcessing }}</p>
+        <p class="text-xs text-[rgb(var(--yb-text-secondary))]">{{ DESIGN_UPLOAD_COPY.pickProcessing }}</p>
       </div>
       <div class="mt-3">
-        <div class="mb-1 flex items-center justify-between text-xs text-slate-600">
+        <div class="mb-1 flex items-center justify-between text-xs text-[rgb(var(--yb-text-secondary))]">
           <span class="tabular-nums">{{ pickPercentRounded }}%</span>
         </div>
-        <div class="h-2 w-full origin-left overflow-hidden rounded-full bg-slate-200">
+        <div class="h-2 w-full origin-left overflow-hidden rounded-full bg-[rgb(var(--yb-border-slate))]">
           <div
-            class="h-full w-full origin-left rounded-full bg-blue-600 transition-transform duration-150 ease-out"
+            class="h-full w-full origin-left rounded-full bg-[rgb(var(--yb-brand))] transition-transform duration-150 ease-out"
             :style="{ transform: `scaleX(${pickScale})` }"
           />
         </div>
@@ -28,16 +28,16 @@
     <!-- 提交审核：真实上传进度 + 成功 / 失败（与 design.store 会话同步） -->
     <div
       v-if="deliverySession"
-      class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-opacity duration-200"
+      class="rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] p-4 shadow-sm transition-opacity duration-200"
     >
       <div class="flex min-w-0 flex-col gap-1">
-        <p class="min-w-0 text-sm font-medium text-slate-800" :title="sessionFileTitle">
+        <p class="min-w-0 text-sm font-medium text-[rgb(var(--yb-text-body-strong))]" :title="sessionFileTitle">
           <span class="truncate">{{ deliverySession.fileName }}</span>
-          <span class="whitespace-nowrap text-slate-500">
+          <span class="whitespace-nowrap text-[rgb(var(--yb-text-muted))]">
             · {{ formatFileSizeBytes(deliverySession.fileSizeBytes) }}
           </span>
         </p>
-        <p v-if="deliverySession.phase === 'uploading'" class="text-xs text-slate-600">
+        <p v-if="deliverySession.phase === 'uploading'" class="text-xs text-[rgb(var(--yb-text-secondary))]">
           {{ DESIGN_UPLOAD_COPY.uploadingToServer }}
           <template v-if="deliverySession.multipartLabel">
             · {{ deliverySession.multipartLabel }}
@@ -49,12 +49,12 @@
         v-if="deliverySession.phase === 'uploading' || deliverySession.phase === 'success'"
         class="mt-3"
       >
-        <div class="mb-1 flex items-center justify-between text-xs text-slate-600">
+        <div class="mb-1 flex items-center justify-between text-xs text-[rgb(var(--yb-text-secondary))]">
           <span class="tabular-nums">{{ serverPercentRounded }}%</span>
         </div>
-        <div class="h-2 w-full origin-left overflow-hidden rounded-full bg-slate-200">
+        <div class="h-2 w-full origin-left overflow-hidden rounded-full bg-[rgb(var(--yb-border-slate))]">
           <div
-            class="h-full w-full origin-left rounded-full bg-blue-600 transition-transform duration-150 ease-out"
+            class="h-full w-full origin-left rounded-full bg-[rgb(var(--yb-brand))] transition-transform duration-150 ease-out"
             :style="{ transform: `scaleX(${serverProgressScale})` }"
           />
         </div>
@@ -62,9 +62,9 @@
 
       <div
         v-if="deliverySession.phase === 'success'"
-        class="mt-3 flex items-center gap-2 text-sm font-medium text-emerald-700 transition-opacity duration-200"
+        class="mt-3 flex items-center gap-2 text-sm font-medium text-[rgb(var(--yb-success-strong))] transition-opacity duration-200"
       >
-        <CheckCircle2 class="h-5 w-5 shrink-0 text-emerald-600" aria-hidden="true" />
+        <CheckCircle2 class="h-5 w-5 shrink-0 text-[rgb(var(--yb-success))]" aria-hidden="true" />
         <span>{{ DESIGN_UPLOAD_COPY.uploadComplete }}</span>
       </div>
 
@@ -72,7 +72,7 @@
         v-if="deliverySession.phase === 'error'"
         class="mt-3 space-y-3 transition-opacity duration-200"
       >
-        <div class="flex items-start gap-2 text-sm text-red-600">
+        <div class="flex items-start gap-2 text-sm text-[rgb(var(--yb-danger))]">
           <XCircle class="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{{ deliverySession.errorMessage }}</span>
         </div>
@@ -161,6 +161,7 @@
               class="sr-only"
               :accept="accept"
               multiple
+              :aria-label="uploadButtonLabel"
               :disabled="blockInteraction"
               @change="handleFileChange"
             />
@@ -181,15 +182,16 @@
         @paste="handlePaste"
         @click="!blockInteraction && openEmptyPicker()"
       >
-        <input
-          ref="emptyInputRef"
-          type="file"
-          class="sr-only"
-          :accept="accept"
-          multiple
-          :disabled="blockInteraction"
-          @change="handleFileChange"
-        />
+          <input
+            ref="emptyInputRef"
+            type="file"
+            class="sr-only"
+            :accept="accept"
+            multiple
+            :aria-label="uploadButtonLabel"
+            :disabled="blockInteraction"
+            @change="handleFileChange"
+          />
         <span class="upload-icon-text">+</span>
         <span class="upload-hint">{{ uploadButtonLabel }}</span>
         <span v-if="readingLocal" class="upload-uploading">{{ DESIGN_UPLOAD_COPY.reading }}</span>
@@ -205,19 +207,19 @@
       >
         {{ props.submitButtonLabel || DESIGN_UPLOAD_COPY.submitAudit }}
       </BaseButton>
-      <span v-if="totalStagedFileCount === 0" class="submit-hint text-sm text-slate-400">
+      <span v-if="totalStagedFileCount === 0" class="submit-hint text-sm text-[rgb(var(--yb-text-faint))]">
         {{ DESIGN_UPLOAD_COPY.submitHintNeedFiles }}
       </span>
       <span
         v-else-if="designStore.isSubmitting"
-        class="submit-hint text-sm text-slate-400"
+        class="submit-hint text-sm text-[rgb(var(--yb-text-faint))]"
       >
         {{ DESIGN_UPLOAD_COPY.submitHintUploading }}
       </span>
-      <span v-else-if="submitError && !deliverySession" class="submit-hint text-sm text-red-600">
+      <span v-else-if="submitError && !deliverySession" class="submit-hint text-sm text-[rgb(var(--yb-danger))]">
         {{ submitError }}
       </span>
-      <span v-else class="submit-hint text-sm text-slate-400">
+      <span v-else class="submit-hint text-sm text-[rgb(var(--yb-text-faint))]">
         {{ submitHintIdle }}
       </span>
     </div>
@@ -677,24 +679,24 @@ defineExpose({
   margin: 0 0 0.375rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: rgb(51 65 85);
+  color: rgb(var(--yb-text-slate));
 }
 .upload-size-limit-hint {
   margin: 0 0 0.375rem;
   font-size: 0.75rem;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 .upload-pick-error {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
-  color: rgb(220 38 38);
+  color: rgb(var(--yb-danger));
 }
 .staging-area {
   margin-top: 0.25rem;
-  border: 1.5px dashed rgb(147 197 253);
+  border: 1.5px dashed rgb(var(--yb-brand-border-strong));
   border-radius: 6px;
   padding: 0.625rem;
-  background: rgb(240 247 255);
+  background: rgb(var(--yb-surface-blue-tint));
 }
 .staging-header {
   display: flex;
@@ -705,18 +707,18 @@ defineExpose({
 .staging-label {
   font-size: 0.6875rem;
   font-weight: 600;
-  color: rgb(29 78 216);
+  color: rgb(var(--yb-brand-strong));
 }
 .staging-clear {
   font-size: 0.6875rem;
-  color: rgb(148 163 184);
+  color: rgb(var(--yb-text-placeholder));
   background: none;
   border: none;
   cursor: pointer;
   padding: 0;
 }
 .staging-clear:hover:not(:disabled) {
-  color: rgb(220 38 38);
+  color: rgb(var(--yb-danger));
 }
 .staging-clear:disabled {
   opacity: 0.45;
@@ -744,15 +746,15 @@ defineExpose({
   height: 100%;
   object-fit: cover;
   border-radius: 4px;
-  border: 1px solid rgb(191 219 254);
+  border: 1px solid rgb(var(--yb-brand-border));
   display: block;
 }
 .staging-file-card {
   width: 100%;
   height: 100%;
   border-radius: 4px;
-  border: 1px solid rgb(191 219 254);
-  background: #fff;
+  border: 1px solid rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-surface));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -764,12 +766,12 @@ defineExpose({
 .staging-file-ext {
   font-size: 0.625rem;
   font-weight: 700;
-  color: rgb(29 78 216);
+  color: rgb(var(--yb-brand-strong));
 }
 .staging-file-name {
   font-size: 0.5rem;
   line-height: 1.1;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -778,7 +780,7 @@ defineExpose({
 .staging-file-size {
   font-size: 0.5rem;
   line-height: 1.1;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
   font-variant-numeric: tabular-nums;
 }
 .staging-remove {
@@ -788,8 +790,8 @@ defineExpose({
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
+  background: rgb(var(--yb-black) / 0.5);
+  color: rgb(var(--yb-surface));
   border: none;
   font-size: 0.5rem;
   cursor: pointer;
@@ -799,7 +801,7 @@ defineExpose({
   padding: 0;
 }
 .staging-remove:hover:not(:disabled) {
-  background: rgb(220 38 38);
+  background: rgb(var(--yb-danger));
 }
 .staging-remove:disabled {
   opacity: 0.4;
@@ -809,30 +811,30 @@ defineExpose({
   position: relative;
   width: 56px;
   height: 56px;
-  border: 1.5px dashed rgb(147 197 253);
+  border: 1.5px dashed rgb(var(--yb-brand-border-strong));
   border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   transition: border-color 0.15s;
 }
 .staging-add:hover {
-  border-color: rgb(24 144 255);
+  border-color: rgb(var(--yb-brand-ant));
 }
 .staging-add-icon {
   font-size: 1.25rem;
-  color: rgb(147 197 253);
+  color: rgb(var(--yb-brand-border-strong));
   line-height: 1;
   pointer-events: none;
 }
 .upload-area {
   min-height: 2.125rem;
-  border: 1px solid #e4e7ec;
+  border: 1px solid rgb(var(--yb-border-control));
   border-radius: var(--dv-r-control, 0.625rem);
-  background: #f2f4f7;
-  color: #344054;
+  background: rgb(var(--yb-surface-control));
+  color: rgb(var(--yb-text-body-strong));
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.45rem 0.8rem;
@@ -846,7 +848,7 @@ defineExpose({
   text-align: left;
 }
 .upload-area:hover {
-  background: #e9edf3;
+  background: rgb(var(--yb-surface-hover));
 }
 .upload-icon-text {
   font-size: 0.875rem;
@@ -860,16 +862,16 @@ defineExpose({
 }
 .upload-uploading {
   font-size: 0.75rem;
-  color: #1d4ed8;
+  color: rgb(var(--yb-brand-strong));
 }
 .submit-row {
   padding-top: 0.5rem;
-  border-top: 1px solid rgb(241 245 249);
+  border-top: 1px solid rgb(var(--yb-surface-slate));
 }
 .batch-submit-summary {
   margin: 0 0 0.375rem;
   font-size: 0.75rem;
   line-height: 1.35;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
 }
 </style>

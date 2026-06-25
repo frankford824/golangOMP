@@ -5,7 +5,7 @@
       <span v-if="task.warehouseSubStatus" class="status-badge" :class="statusBadgeClass">
         {{ getWarehouseSubStatusLabel(task.warehouseSubStatus) }}
       </span>
-      <span v-else class="text-slate-400 text-sm">-</span>
+      <span v-else class="text-[rgb(var(--yb-text-faint))] text-sm">-</span>
     </div>
 
     <!-- 操作按钮 -->
@@ -107,13 +107,13 @@ function openReturnDialog() {
 <style scoped>
 .warehouse-status-block { padding: 0.5rem 0; }
 .status-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.625rem; }
-.status-label { font-size: 0.75rem; color: #64748b; }
+.status-label { font-size: 0.75rem; color: rgb(var(--yb-text-muted-strong)); }
 .status-badge { font-size: 0.75rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 4px; }
-.badge-success { background: rgb(16 185 129 / 0.15); color: #059669; }
-.badge-warning { background: rgb(245 158 11 / 0.15); color: #d97706; }
-.badge-danger { background: rgb(220 38 38 / 0.1); color: #dc2626; }
-.badge-default { background: #f1f5f9; color: #475569; }
+.badge-success { background: rgb(var(--yb-success-emerald) / 0.15); color: rgb(var(--yb-success-emerald)); }
+.badge-warning { background: rgb(var(--yb-warning-accent) / 0.15); color: rgb(var(--yb-warning)); }
+.badge-danger { background: rgb(var(--yb-danger) / 0.1); color: rgb(var(--yb-danger)); }
+.badge-default { background: rgb(var(--yb-surface-slate)); color: rgb(var(--yb-text-soft)); }
 .action-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
-.action-hint { margin: 0 0 0.5rem; font-size: 0.75rem; color: #94a3b8; }
-.action-error { color: #b91c1c; }
+.action-hint { margin: 0 0 0.5rem; font-size: 0.75rem; color: rgb(var(--yb-text-placeholder)); }
+.action-error { color: rgb(var(--yb-danger-text)); }
 </style>

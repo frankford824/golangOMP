@@ -56,8 +56,8 @@
           </label>
         </div>
 
-        <p v-if="errorMessage" class="text-red-600">{{ errorMessage }}</p>
-        <p v-else-if="successMessage" class="text-emerald-600">{{ successMessage }}</p>
+        <p v-if="errorMessage" class="text-[rgb(var(--yb-danger))]">{{ errorMessage }}</p>
+        <p v-else-if="successMessage" class="text-[rgb(var(--yb-success))]">{{ successMessage }}</p>
 
         <div class="flex items-center justify-end gap-2">
           <button
@@ -70,7 +70,7 @@
           </button>
           <button
             type="button"
-            class="rounded-md bg-[var(--v1-text-primary)] px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded-md bg-[var(--v1-text-primary)] px-3 py-1.5 text-sm text-[rgb(var(--yb-text-inverse))] disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="readonly || saving || isCompleted"
             @click="completeProcurement"
           >
@@ -209,7 +209,7 @@ async function completeProcurement() {
   border: 1px solid var(--v1-border);
   border-radius: 0.5rem;
   padding: 0.5rem 0.625rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   color: var(--v1-text-primary);
 }
 </style>

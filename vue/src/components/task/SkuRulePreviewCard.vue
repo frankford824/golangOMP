@@ -76,15 +76,15 @@ function generate() {
 <style scoped>
 .sku-preview-card {
   padding: 1rem;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface-subtle));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 8px;
 }
 .card-title {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .rule-select {
   margin-bottom: 0.75rem;
@@ -96,19 +96,19 @@ function generate() {
   font-size: 0.875rem;
 }
 .preview-result .label {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .preview-result .value {
   font-weight: 600;
-  color: #059669;
+  color: rgb(var(--yb-success-emerald));
   margin-left: 0.25rem;
 }
 .hint {
   margin: 0;
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 .hint.danger {
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
 }
 </style>

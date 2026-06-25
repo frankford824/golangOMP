@@ -1,6 +1,6 @@
 <template>
   <section
-    class="detail-block h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6"
+    class="detail-block h-full flex flex-col rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] shadow-sm p-6"
     :class="{ 'basic-info--compact': compactFields }"
   >
     <div class="block-header">
@@ -67,9 +67,9 @@
       </div>
       <div class="info-row">
         <dt>截止时间</dt>
-        <dd :class="task.dueAt && isOverdue ? 'text-red-600 font-medium' : ''">
+        <dd :class="task.dueAt && isOverdue ? 'text-[rgb(var(--yb-danger))] font-medium' : ''">
           {{ task.dueAt ? formatDate(task.dueAt) : '无截止时间' }}
-          <span v-if="isOverdue" class="text-xs text-red-500 ml-1">已逾期</span>
+          <span v-if="isOverdue" class="text-xs text-[rgb(var(--yb-danger))] ml-1">已逾期</span>
         </dd>
       </div>
       <div v-if="task.isBatchTask !== undefined" class="info-row">
@@ -189,9 +189,9 @@ const priorityLabel = computed(() => {
 
 const priorityClass = computed(() => {
   const priority = String(task.value.priority ?? '')
-  if (priority === 'high' || priority === 'critical' || priority === 'urgent') return 'text-red-600 font-medium'
-  if (priority === 'medium' || priority === 'normal') return 'text-amber-600'
-  return 'text-slate-500'
+  if (priority === 'high' || priority === 'critical' || priority === 'urgent') return 'text-[rgb(var(--yb-danger))] font-medium'
+  if (priority === 'medium' || priority === 'normal') return 'text-[rgb(var(--yb-warning-text))]'
+  return 'text-[rgb(var(--yb-text-muted))]'
 })
 
 const isOverdue = computed(() => checkOverdue(task.value.dueAt, isDoneStatus(task.value)))
@@ -224,12 +224,12 @@ function formatDate(iso: string): string {
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 0.375rem;
-  background: rgb(248 250 252);
-  color: rgb(148 163 184);
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-placeholder));
   font-size: 0.75rem;
   flex-shrink: 0;
 }
-.block-title { font-size: 0.875rem; font-weight: 600; color: rgb(30 41 59); margin: 0; }
+.block-title { font-size: 0.875rem; font-weight: 600; color: rgb(var(--yb-text-deep)); margin: 0; }
 .info-grid {
   display: flex;
   flex-direction: column;
@@ -249,13 +249,13 @@ dt,
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgb(75 85 99);
+  color: rgb(var(--yb-text-secondary));
   margin: 0;
   text-align: left;
 }
 dd {
   font-size: 0.875rem;
-  color: rgb(17 24 39);
+  color: rgb(var(--yb-text));
   margin: 0;
   min-width: 0;
   text-align: right;
@@ -263,8 +263,8 @@ dd {
 }
 .ownership-block {
   padding: 0.5rem 0;
-  border-top: 1px solid rgb(241 245 249);
-  border-bottom: 1px solid rgb(241 245 249);
+  border-top: 1px solid rgb(var(--yb-surface-slate));
+  border-bottom: 1px solid rgb(var(--yb-surface-slate));
 }
 .ownership-block-title {
   margin: 0 0 0.375rem;
@@ -272,15 +272,15 @@ dd {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
 }
 .ownership-inner { margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.legacy-row dt { color: rgb(148 163 184); }
-.legacy-value { color: rgb(100 116 139); font-size: 0.8125rem; }
+.legacy-row dt { color: rgb(var(--yb-text-placeholder)); }
+.legacy-value { color: rgb(var(--yb-text-muted-strong)); font-size: 0.8125rem; }
 .ownership-note {
   margin: 0.375rem 0 0;
   font-size: 0.6875rem;
-  color: rgb(148 163 184);
+  color: rgb(var(--yb-text-placeholder));
   line-height: 1.4;
 }
 .basic-info--compact .info-row {

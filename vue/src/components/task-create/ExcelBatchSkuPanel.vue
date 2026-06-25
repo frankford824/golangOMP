@@ -335,9 +335,9 @@ function reset(): void {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgb(var(--yb-border-context));
   border-radius: 0.875rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   padding: 0.75rem;
   font-size: 0.75rem;
 }
@@ -349,23 +349,23 @@ function reset(): void {
 }
 .excel-eyebrow {
   margin: 0 0 0.1rem;
-  color: #8a94a3;
+  color: rgb(var(--yb-text-form-muted-alt));
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.04em;
 }
 .excel-title {
   margin: 0;
-  color: #171c22;
+  color: rgb(var(--yb-text-context-strong));
   font-size: 0.9rem;
   font-weight: 800;
 }
 .excel-status {
   flex: none;
   border-radius: 999px;
-  background: #f4f5f7;
+  background: rgb(var(--yb-surface-ui));
   padding: 0.18rem 0.55rem;
-  color: #5b6573;
+  color: rgb(var(--yb-text-context-muted));
   font-size: 0.68rem;
   font-weight: 700;
 }
@@ -383,18 +383,18 @@ function reset(): void {
   align-items: center;
   gap: 0.28rem;
   border-radius: 999px;
-  background: #f4f5f7;
+  background: rgb(var(--yb-surface-ui));
   padding: 0.25rem 0.35rem;
-  color: #8a94a3;
+  color: rgb(var(--yb-text-form-muted-alt));
 }
 .excel-step.is-active {
-  background: #22272e;
-  color: #fff;
-  box-shadow: 0 4px 10px rgba(34, 39, 46, 0.16);
+  background: rgb(var(--yb-text-charcoal));
+  color: rgb(var(--yb-surface));
+  box-shadow: 0 4px 10px rgb(var(--yb-text-charcoal) / 0.16);
 }
 .excel-step.is-done {
-  background: #edf5ff;
-  color: #2f80ed;
+  background: rgb(var(--yb-surface-blue));
+  color: rgb(var(--yb-brand-legacy-blue));
 }
 .step-index {
   display: inline-flex;
@@ -404,7 +404,7 @@ function reset(): void {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgb(var(--yb-surface) / 0.9);
   color: inherit;
   font-size: 0.6rem;
   font-weight: 800;
@@ -422,8 +422,8 @@ function reset(): void {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.45rem;
   border-radius: 0.75rem;
-  border: 1px solid #e6eaf0;
-  background: #f7f8fa;
+  border: 1px solid rgb(var(--yb-border-context));
+  background: rgb(var(--yb-surface-form-muted));
   padding: 0.55rem;
   outline: none;
   transition:
@@ -432,8 +432,8 @@ function reset(): void {
 }
 .excel-actions-card:focus-within,
 .excel-actions-card:hover {
-  border-color: #60a5fa;
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.12);
+  border-color: rgb(var(--yb-brand-accent));
+  box-shadow: 0 0 0 2px rgb(var(--yb-brand-accent) / 0.12);
 }
 .hh-btn {
   display: inline-flex;
@@ -456,38 +456,38 @@ function reset(): void {
   opacity: 0.52;
 }
 .hh-btn-primary {
-  background: #22272e;
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(34, 39, 46, 0.18);
+  background: rgb(var(--yb-text-charcoal));
+  color: rgb(var(--yb-surface));
+  box-shadow: 0 4px 12px rgb(var(--yb-text-charcoal) / 0.18);
 }
 .hh-btn-primary:not(:disabled):hover {
-  background: #171c22;
+  background: rgb(var(--yb-text-context-strong));
 }
 .hh-btn-file,
 .hh-btn-secondary,
 .hh-btn-ghost {
-  border-color: #e1e6ee;
-  background: #fff;
-  color: #22272e;
+  border-color: rgb(var(--yb-border-blue-quiet));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-charcoal));
 }
 .hh-btn-file:not(:disabled):hover,
 .hh-btn-secondary:not(:disabled):hover,
 .hh-btn-ghost:not(:disabled):hover {
-  border-color: #cbd5e1;
-  background: #f4f5f7;
+  border-color: rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-ui));
 }
 .hh-btn-ghost {
   grid-column: 1 / -1;
-  color: #5b6573;
+  color: rgb(var(--yb-text-context-muted));
 }
 .excel-meta {
   display: flex;
   flex-direction: column;
   gap: 0.22rem;
   border-radius: 0.7rem;
-  background: #fafbfc;
+  background: rgb(var(--yb-surface-canvas));
   padding: 0.5rem 0.6rem;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 .file-line,
 .template-line,
@@ -498,7 +498,7 @@ function reset(): void {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  color: #22272e;
+  color: rgb(var(--yb-text-charcoal));
   font-weight: 700;
   word-break: break-all;
 }
@@ -507,12 +507,12 @@ function reset(): void {
   height: 0.42rem;
   flex: none;
   border-radius: 999px;
-  background: #cbd5e1;
+  background: rgb(var(--yb-text-disabled));
 }
 .preview-card {
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgb(var(--yb-border-context));
   border-radius: 0.75rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   padding: 0.6rem;
 }
 .preview-header {
@@ -526,11 +526,11 @@ function reset(): void {
   margin: 0;
 }
 .preview-header p {
-  color: #171c22;
+  color: rgb(var(--yb-text-context-strong));
   font-weight: 800;
 }
 .preview-header span {
-  color: #8a94a3;
+  color: rgb(var(--yb-text-form-muted-alt));
 }
 .preview-table {
   width: 100%;
@@ -538,22 +538,22 @@ function reset(): void {
   font-size: 0.68rem;
 }
 .preview-table th {
-  background: #f4f5f7;
-  color: #5b6573;
+  background: rgb(var(--yb-surface-ui));
+  color: rgb(var(--yb-text-context-muted));
   font-weight: 800;
 }
 .preview-table th,
 .preview-table td {
   padding: 0.28rem 0.35rem;
   text-align: left;
-  border-top: 1px solid #eef1f5;
+  border-top: 1px solid rgb(var(--yb-surface-form-hover));
 }
 .preview-table-wrap {
   overflow-x: auto;
 }
 .preview-table tr.has-error {
-  background: #fff1f2;
-  color: #b91c1c;
+  background: rgb(var(--yb-danger-wash));
+  color: rgb(var(--yb-danger-text));
 }
 .cell-ellipsis {
   max-width: 8rem;
@@ -576,7 +576,7 @@ function reset(): void {
   height: 1.75rem;
   object-fit: cover;
   border-radius: 0.25rem;
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgb(var(--yb-border-context));
 }
 .ref-thumb-file {
   max-width: 4rem;
@@ -584,8 +584,8 @@ function reset(): void {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.6rem;
-  color: #5b6573;
-  background: #f4f5f7;
+  color: rgb(var(--yb-text-context-muted));
+  background: rgb(var(--yb-surface-ui));
   border-radius: 0.25rem;
   padding: 0.1rem 0.25rem;
 }
@@ -595,7 +595,7 @@ function reset(): void {
 }
 .excel-error {
   margin: 0;
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
   font-size: 0.72rem;
 }
 .sr-only {
@@ -612,10 +612,10 @@ function reset(): void {
 
 /* Phase 4: light admin Excel batch panel skin. Style-only. */
 .excel-panel {
-  border-color: #e5e7eb;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 
 .excel-eyebrow,
@@ -623,13 +623,13 @@ function reset(): void {
 .preview-header span,
 .rule-line,
 .template-line {
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .excel-title,
 .preview-header p,
 .file-line {
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 
 .excel-status,
@@ -637,91 +637,91 @@ function reset(): void {
 .excel-actions-card,
 .excel-meta,
 .preview-card {
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
+  border: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
 }
 
 .excel-step.is-active {
-  border-color: #93c5fd;
-  background: #eff6ff;
-  color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  border-color: rgb(var(--yb-brand-border-strong));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.1);
 }
 
 .excel-step.is-done {
-  border-color: #86efac;
-  background: #f0fdf4;
-  color: #15803d;
+  border-color: rgb(var(--yb-success-border-bright));
+  background: rgb(var(--yb-success-ui-soft));
+  color: rgb(var(--yb-success-strong));
 }
 
 .step-index {
-  background: #e5e7eb;
-  color: #374151;
+  background: rgb(var(--yb-border));
+  color: rgb(var(--yb-text-body));
 }
 
 .hh-btn-primary {
-  border-color: #2563eb;
-  background: #2563eb;
-  color: #fff;
+  border-color: rgb(var(--yb-brand));
+  background: rgb(var(--yb-brand));
+  color: rgb(var(--yb-surface));
   box-shadow: none;
 }
 
 .hh-btn-primary:not(:disabled):hover {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+  background: rgb(var(--yb-brand-strong));
+  border-color: rgb(var(--yb-brand-strong));
 }
 
 .hh-btn-file,
 .hh-btn-secondary,
 .hh-btn-ghost {
-  border-color: #d1d5db;
-  background: #ffffff;
-  color: #374151;
+  border-color: rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-body));
 }
 
 .hh-btn-file:not(:disabled):hover,
 .hh-btn-secondary:not(:disabled):hover,
 .hh-btn-ghost:not(:disabled):hover {
-  border-color: #93c5fd;
-  background: #f9fafb;
-  color: #111827;
+  border-color: rgb(var(--yb-brand-border-strong));
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
 }
 
 .file-dot {
-  background: #2563eb;
+  background: rgb(var(--yb-brand));
   box-shadow: none;
 }
 
 .preview-table th {
-  background: #f3f4f6;
-  color: #374151;
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-body));
 }
 
 .preview-table td {
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 
 .preview-table th,
 .preview-table td {
-  border-top-color: #e5e7eb;
+  border-top-color: rgb(var(--yb-border));
 }
 
 .preview-table tr.has-error {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
 }
 
 .ref-thumb-img {
-  border-color: #e5e7eb;
-  background: #ffffff;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
 }
 
 .ref-thumb-file {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 
 .excel-error {
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 </style>

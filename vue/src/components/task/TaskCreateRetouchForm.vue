@@ -401,15 +401,15 @@ function prettyFileSize(size: number): string {
 .form-notice {
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid #dbeafe;
-  background: #f0f7ff;
+  border: 1px solid rgb(var(--yb-brand-subtle));
+  background: rgb(var(--yb-surface-blue-tint));
 }
 
 .form-notice-title {
   margin: 0 0 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #1e40af;
+  color: rgb(var(--yb-brand-deep));
 }
 
 .form-notice-list {
@@ -417,7 +417,7 @@ function prettyFileSize(size: number): string {
   padding-left: 1.1rem;
   font-size: 12px;
   line-height: 1.55;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 
 .form-notice-list li + li {
@@ -438,7 +438,7 @@ function prettyFileSize(size: number): string {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 4px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid rgb(var(--yb-border-slate));
 }
 
 .requirements-header-text {
@@ -449,14 +449,14 @@ function prettyFileSize(size: number): string {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 
 .requirements-subtitle {
   margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.4;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .add-req-btn,
@@ -464,9 +464,9 @@ function prettyFileSize(size: number): string {
 .req-pick-btn,
 .pending-remove-btn {
   flex-shrink: 0;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #0f172a;
+  border: 1px solid rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-navy));
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
@@ -483,17 +483,17 @@ function prettyFileSize(size: number): string {
 .add-req-btn:hover,
 .req-pick-btn:hover,
 .remove-req-btn:hover {
-  border-color: #94a3b8;
-  background: #f8fafc;
+  border-color: rgb(var(--yb-text-placeholder));
+  background: rgb(var(--yb-surface-subtle));
 }
 
 .requirement-card {
   width: 100%;
   min-width: 0;
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgb(var(--yb-text-disabled));
   border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.04);
   overflow: hidden;
 }
 
@@ -503,26 +503,26 @@ function prettyFileSize(size: number): string {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 14px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface-subtle));
+  border-bottom: 1px solid rgb(var(--yb-border-slate));
 }
 
 .requirement-index {
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 
 .remove-req-btn {
   padding: 4px 10px;
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fff;
+  color: rgb(var(--yb-danger-text));
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-surface));
 }
 
 .remove-req-btn:hover {
-  background: #fef2f2;
-  border-color: #fca5a5;
+  background: rgb(var(--yb-danger-soft));
+  border-color: rgb(var(--yb-danger-border-hover));
 }
 
 .requirement-card-body {
@@ -541,15 +541,15 @@ function prettyFileSize(size: number): string {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-right: 1px solid #e2e8f0;
-  background: #fcfdff;
+  border-right: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-near-white));
 }
 
 .requirement-col--files {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: #fafbfc;
+  background: rgb(var(--yb-surface-canvas));
 }
 
 .requirement-desc-input :deep(textarea) {
@@ -560,7 +560,7 @@ function prettyFileSize(size: number): string {
   margin: 0;
   font-size: 11px;
   line-height: 1.45;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .req-upload-panel {
@@ -568,9 +568,9 @@ function prettyFileSize(size: number): string {
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 8px;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   outline: none;
   transition:
     border-color 0.15s ease,
@@ -580,9 +580,9 @@ function prettyFileSize(size: number): string {
 
 .req-upload-panel-active,
 .req-upload-panel:focus-within {
-  border-color: #60a5fa;
-  background: #f8fbff;
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.14);
+  border-color: rgb(var(--yb-brand-accent));
+  background: rgb(var(--yb-surface-brand-panel));
+  box-shadow: 0 0 0 2px rgb(var(--yb-brand-accent) / 0.14);
 }
 
 .req-upload-toolbar {
@@ -602,15 +602,15 @@ function prettyFileSize(size: number): string {
 .req-upload-label {
   font-size: 12px;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 
 .req-upload-optional {
   font-size: 11px;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   padding: 1px 6px;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
 }
 
 .req-pick-btn {
@@ -622,20 +622,20 @@ function prettyFileSize(size: number): string {
   margin: 0;
   font-size: 11px;
   line-height: 1.45;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 
 .req-upload-empty {
   margin: 0;
   font-size: 11px;
   line-height: 1.4;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 
 .pick-error {
   margin: 0;
   font-size: 12px;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 
 .hidden-input {
@@ -660,7 +660,7 @@ function prettyFileSize(size: number): string {
   font-size: 11px;
   padding: 4px 6px;
   border-radius: 4px;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 
 .pending-file-name {
@@ -672,7 +672,7 @@ function prettyFileSize(size: number): string {
 }
 
 .pending-file-meta {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   flex-shrink: 0;
 }
 
@@ -688,7 +688,7 @@ function prettyFileSize(size: number): string {
 
   .requirement-col--main {
     border-right: none;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid rgb(var(--yb-border-slate));
   }
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <section v-if="visible" class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
+  <section v-if="visible" class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
     <div class="flex items-start justify-between gap-3">
       <div>
         <p class="text-xs text-[var(--v1-text-secondary)]">{{ eyebrow }}</p>

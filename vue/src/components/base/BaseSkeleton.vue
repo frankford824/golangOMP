@@ -32,7 +32,7 @@ withDefaults(
   position: relative;
   overflow: hidden;
   flex: 0 0 auto;
-  background: #eef2f7;
+  background: rgb(var(--yb-border-quiet));
 }
 
 .base-skeleton--block {
@@ -51,7 +51,7 @@ withDefaults(
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.72) 46%,
+    rgb(var(--yb-surface) / 0.72) 46%,
     transparent 100%
   );
   animation: base-skeleton-shimmer 1.4s ease-in-out infinite;

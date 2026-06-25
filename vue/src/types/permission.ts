@@ -44,9 +44,9 @@ export const PermissionEnum = {
   TASK_CLOSE: 'task:close',
   TASK_FORCE_CLOSE: 'task:force_close',
   // 设计
-  DESIGN_WORK: 'design:work',
-  DESIGN_UPLOAD: 'design:upload',
-  DESIGN_SUBMIT: 'design:submit',
+  DESIGN_WORK: 'design.work',
+  DESIGN_UPLOAD: 'design.upload',
+  DESIGN_SUBMIT: 'design.submit',
   // 定制 / 仓库
   OUTSOURCE_VIEW: 'outsource:view',
   WAREHOUSE_VIEW: 'warehouse:view',

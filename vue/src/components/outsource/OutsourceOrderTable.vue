@@ -85,25 +85,25 @@ function formatDate(iso: string) {
 .data-table td {
   padding: 0.45rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid rgb(var(--yb-border-slate));
   line-height: 1.4;
 }
 .data-table th {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .data-table tbody tr:nth-child(even) {
-  background: #fafafa;
+  background: rgb(var(--yb-surface-row-even));
 }
 .row-click {
   cursor: pointer;
 }
-.row-click:hover {
-  background: #f1f5f9 !important;
+.data-table tbody tr.row-click:hover {
+  background: rgb(var(--yb-surface-slate));
 }
 .cell-product {
   max-width: 280px;
@@ -116,6 +116,6 @@ function formatDate(iso: string) {
   white-space: nowrap;
   font-family: var(--yb-font-data);
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 </style>

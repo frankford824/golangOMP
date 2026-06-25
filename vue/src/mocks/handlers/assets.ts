@@ -2,6 +2,125 @@ import { mockAssets } from '../db/assets'
 import type { MockHandler } from './types'
 import { addMillisecondsToNowISO, nowISO } from '@/utils/date'
 
+type MockAssetRecord = (typeof mockAssets)[number]
+
+const LARGE_SURFACE_AUDIT_TOTAL = Number(import.meta.env.VITE_LARGE_SURFACE_TOTAL ?? 5000)
+const LARGE_SURFACE_AUDIT_PAGE_SIZE = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
+
+function isLargeSurfaceAuditEnabled(): boolean {
+  return import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true'
+}
+
+function largeSurfaceSize(raw: unknown): number {
+  const fallback = Number.isFinite(LARGE_SURFACE_AUDIT_PAGE_SIZE) ? LARGE_SURFACE_AUDIT_PAGE_SIZE : 100
+  const candidate = Math.max(fallback, Number(raw ?? fallback))
+  return Math.min(150, Math.max(80, Math.floor(candidate)))
+}
+
+function largeSurfaceAssets(q: Record<string, unknown>) {
+  const page = Math.max(1, Number(q.page ?? 1))
+  const size = largeSurfaceSize(q.size)
+  const total = Number.isFinite(LARGE_SURFACE_AUDIT_TOTAL) ? LARGE_SURFACE_AUDIT_TOTAL : 5000
+  const start = (page - 1) * size
+  const roles: Array<'source' | 'delivery' | 'reference'> = ['delivery', 'source', 'reference']
+  const data = Array.from({ length: size }, (_, index) => {
+    const seq = start + index + 1
+    const role = roles[seq % roles.length]
+    return {
+      id: `asset_load_${seq}`,
+      asset_id: 700000 + seq,
+      asset_version_id: 800000 + seq,
+      task_id: String(900000 + seq),
+      task_no: `LT-${String(seq).padStart(5, '0')}`,
+      sku_code: `SKU-LOAD-${String(seq).padStart(5, '0')}`,
+      product_name: `长列表承载审计素材 ${seq}`,
+      title: `长列表承载审计素材 ${String(seq).padStart(5, '0')}`,
+      file_name: `load-audit-${String(seq).padStart(5, '0')}.png`,
+      filename: `load-audit-${String(seq).padStart(5, '0')}.png`,
+      file_role: role,
+      asset_kind: role,
+      resource_source: 'internal',
+      source: 'asset_center',
+      usable_state: seq % 7 === 0 ? 'archived' : 'usable',
+      mime_type: 'image/png',
+      file_size: 204800 + seq,
+      created_at: addMillisecondsToNowISO(-seq * 60_000),
+      preview_url: '',
+      download_url: '',
+      versions: [],
+    }
+  })
+  return { data, total, page, size }
+}
+
+function buildMockAssetDetail(asset: MockAssetRecord) {
+  const baseFileName = asset.file_name || `${asset.id}.png`
+  return {
+    ...asset,
+    asset_kind: asset.file_role,
+    asset_type: asset.file_role,
+    upload_status: 'uploaded',
+    download_mode: 'direct',
+    preview_available: true,
+    source_type: 'system',
+    source_label: '系统资产',
+    resource_id: asset.id,
+    task_no: asset.task_id === 'task_1002' ? 'T-20260423-1002' : asset.task_id,
+    sku_code: 'SKU-MOCK-1002',
+    primary_sku_code: 'SKU-MOCK-1002',
+    scope_sku_code: 'SKU-MOCK-1002',
+    product_name: '常规定制补图素材',
+    workflow_lane: 'normal',
+    source_department: '设计部',
+    task_creator_name: 'ops_demo',
+    created_by_name: 'designer_demo',
+    mime_type: 'image/png',
+    current_asset_id: asset.id,
+    usable_state: 'usable',
+    usable_label: '当前有效',
+    last_access_at: addMillisecondsToNowISO(-5 * 60_000),
+    versions: [
+      {
+        id: `${asset.id}_v2`,
+        version: 2,
+        file_role: asset.file_role,
+        file_name: baseFileName,
+        mime_type: 'image/png',
+        download_mode: 'direct',
+        preview_available: true,
+        usable_state: 'usable',
+        usable_label: '当前有效',
+        created_at: asset.created_at,
+        created_by: { user_id: 'u_2', username: 'designer_demo', name: '设计演示' },
+      },
+      {
+        id: `${asset.id}_v1`,
+        version: 1,
+        file_role: asset.file_role,
+        file_name: baseFileName.replace(/(\.[^.]+)?$/, '-history$1'),
+        mime_type: 'image/png',
+        download_mode: 'direct',
+        preview_available: true,
+        usable_state: 'superseded',
+        usable_label: '历史版本',
+        created_at: addMillisecondsToNowISO(-35 * 60_000),
+        created_by: { user_id: 'u_1', username: 'ops_demo', name: '运营演示' },
+      },
+    ],
+  }
+}
+
+function buildMockAssetAccessMeta(asset: MockAssetRecord) {
+  return {
+    download_url: `/mock-assets/${asset.id}.png`,
+    file_name: asset.file_name,
+    filename: asset.file_name,
+    mime_type: 'image/png',
+    download_mode: 'direct',
+    preview_available: true,
+  }
+}
+
 export const assetsHandler: MockHandler = (request) => {
   if (request.method === 'POST' && request.path === '/v1/tasks/reference-upload') {
     const assetId = `asset_ref_${Date.now()}`
@@ -23,10 +142,14 @@ export const assetsHandler: MockHandler = (request) => {
   }
 
   if (request.method === 'GET' && request.path === '/v1/assets') {
-    return { status: 200, data: { items: mockAssets, total: mockAssets.length } }
+    const items = mockAssets.map(buildMockAssetDetail)
+    return { status: 200, data: { items, total: items.length } }
   }
 
   if (request.method === 'GET' && request.path === '/v1/assets/search') {
+    if (isLargeSurfaceAuditEnabled()) {
+      return { status: 200, data: largeSurfaceAssets(request.query as Record<string, unknown>) }
+    }
     const keyword = String(request.query.keyword ?? '').trim()
     const pageRaw = Number(request.query.page ?? 1)
     const sizeRaw = Number(request.query.size ?? 20)
@@ -36,8 +159,29 @@ export const assetsHandler: MockHandler = (request) => {
       !keyword || `${asset.id} ${asset.task_id} ${asset.file_name}`.toLowerCase().includes(keyword.toLowerCase()),
     )
     const start = (page - 1) * size
-    const data = matched.slice(start, start + size)
+    const data = matched.slice(start, start + size).map(buildMockAssetDetail)
     return { status: 200, data: { data, total: matched.length, page, size } }
+  }
+
+  const assetPreviewMatch = request.path.match(/^\/v1\/assets\/([^/]+)\/preview$/)
+  if (request.method === 'GET' && assetPreviewMatch) {
+    const asset = mockAssets.find((item) => item.id === assetPreviewMatch[1])
+    if (!asset) return { status: 404, data: { message: 'asset not found' } }
+    return { status: 200, data: { data: buildMockAssetAccessMeta(asset) } }
+  }
+
+  const assetDownloadMatch = request.path.match(/^\/v1\/assets\/([^/]+)\/download$/)
+  if (request.method === 'GET' && assetDownloadMatch) {
+    const asset = mockAssets.find((item) => item.id === assetDownloadMatch[1])
+    if (!asset) return { status: 404, data: { message: 'asset not found' } }
+    return { status: 200, data: { data: buildMockAssetAccessMeta(asset) } }
+  }
+
+  const assetDetailMatch = request.path.match(/^\/v1\/assets\/([^/]+)$/)
+  if (request.method === 'GET' && assetDetailMatch) {
+    const asset = mockAssets.find((item) => item.id === assetDetailMatch[1])
+    if (!asset) return { status: 404, data: { message: 'asset not found' } }
+    return { status: 200, data: { data: buildMockAssetDetail(asset) } }
   }
 
   if (request.method === 'POST' && request.path === '/v1/assets/upload-sessions') {
@@ -108,7 +252,9 @@ export const assetsHandler: MockHandler = (request) => {
 
   if (request.method === 'GET' && request.path.match(/^\/v1\/tasks\/[^/]+\/asset-center\/assets$/)) {
     const taskId = request.path.split('/')[3] ?? ''
-    const items = mockAssets.filter((asset) => String(asset.task_id ?? '') === taskId)
+    const items = mockAssets
+      .filter((asset) => String(asset.task_id ?? '') === taskId)
+      .map(buildMockAssetDetail)
     return { status: 200, data: { items, total: items.length } }
   }
 

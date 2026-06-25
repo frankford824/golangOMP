@@ -51,7 +51,7 @@ export interface FrontendAccess {
   /** 是否部门管理员 */
   is_department_admin: boolean
   /**
-   * 可选：小组长（设计组长调度等）。未返回时前端无法区分组长与普通成员，仅靠 `design:work` 不够。
+   * 可选：小组长（设计组长调度等）。未返回时前端无法区分组长与普通成员，仅靠 `design.work` 不够。
    */
   is_group_leader?: boolean
 }

@@ -32,7 +32,7 @@
           />
         </div>
 
-        <p class="hint-text text-xs text-slate-500 mb-3">
+        <p class="hint-text text-xs text-[rgb(var(--yb-text-muted))] mb-3">
           导出使用<strong>任务中心</strong>当前 Tab、关键词与高级筛选条件。筛选结果共
           <strong>{{ tasksStore.listTotal }}</strong> 条，当前页已加载
           <strong>{{ currentPageTasks.length }}</strong> 条。
@@ -40,7 +40,7 @@
         <p
           v-if="exportFeedback"
           class="text-xs mb-2"
-          :class="exportFeedbackIsError ? 'text-red-600' : 'text-emerald-700'"
+          :class="exportFeedbackIsError ? 'text-[rgb(var(--yb-danger))]' : 'text-[rgb(var(--yb-success-strong))]'"
         >
           {{ exportFeedback }}
         </p>
@@ -69,7 +69,7 @@
           >
             导出全部筛选结果
           </BaseButton>
-          <p class="hint-text text-xs text-slate-500">
+          <p class="hint-text text-xs text-[rgb(var(--yb-text-muted))]">
             当前页 {{ currentPageTasks.length }} 条；全部筛选结果最多同步导出
             {{ TASK_EXPORT_MAX_TOTAL }} 条。
           </p>
@@ -82,7 +82,7 @@
           <BaseEmptyState title="暂无仓库记录" description="当前无涉及仓库接收的任务记录。" />
         </div>
         <template v-else>
-          <p class="text-xs text-slate-500 mb-2">共 {{ filteredWarehouseTasks.length }} 条仓库相关任务。</p>
+          <p class="text-xs text-[rgb(var(--yb-text-muted))] mb-2">共 {{ filteredWarehouseTasks.length }} 条仓库相关任务。</p>
           <div class="mt-2 flex items-center gap-3">
             <BaseButton
               size="sm"
@@ -103,7 +103,7 @@
           <BaseEmptyState title="暂无定制记录" description="当前无定制相关审计记录，或仅占位展示。" />
         </div>
         <template v-else>
-          <p class="text-xs text-slate-500 mb-2">共 {{ outsourceRecords.length }} 条定制相关记录。</p>
+          <p class="text-xs text-[rgb(var(--yb-text-muted))] mb-2">共 {{ outsourceRecords.length }} 条定制相关记录。</p>
           <div class="mt-2 flex items-center gap-3">
             <BaseButton
               size="sm"
@@ -497,12 +497,12 @@ onMounted(() => {
 .field-selector-wrap {
   margin-bottom: 1rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid rgb(var(--yb-border-slate));
 }
 .fs-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   margin-bottom: 0.5rem;
 }
 .page-header {
@@ -515,7 +515,7 @@ onMounted(() => {
   margin: 0;
   font-size: 1.125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .tabs {
   display: flex;
@@ -525,7 +525,7 @@ onMounted(() => {
   gap: 0.25rem;
   padding: 0.125rem;
   border-radius: 9999px;
-  background: #e2e8f0;
+  background: rgb(var(--yb-border-slate));
 }
 .tab-btn {
   flex: 0 0 auto;
@@ -534,24 +534,24 @@ onMounted(() => {
   border-radius: 9999px;
   border: none;
   background: transparent;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .tab-btn.active {
-  background: #2563eb;
-  color: #ffffff;
+  background: rgb(var(--yb-brand));
+  color: rgb(var(--yb-surface));
 }
 .content-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 0.75rem;
   padding: 1rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 .section-title {
   margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .filters {
   display: grid;
@@ -588,18 +588,18 @@ onMounted(() => {
   }
 }
 .simple-table th {
-  background: #f3f4f6;
-  color: #374151;
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-body));
   font-weight: 600;
 }
 .simple-table th,
 .simple-table td {
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   padding: 0.25rem 0.5rem;
   text-align: left;
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 .simple-table tbody tr:hover td {
-  background: #f9fafb;
+  background: rgb(var(--yb-surface-soft));
 }
 </style>

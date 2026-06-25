@@ -53,20 +53,20 @@ function versionTypeLabel(type?: string): string {
 .evidence-content p {
   margin: 0.5rem 0;
   font-size: 0.875rem;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .evidence-content .label {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   margin-right: 0.35rem;
 }
 .evidence-content code {
   font-size: 0.8125rem;
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
   padding: 0.15rem 0.35rem;
   border-radius: 4px;
 }
 .evidence-empty {
   font-size: 0.875rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 </style>

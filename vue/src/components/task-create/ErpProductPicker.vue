@@ -7,7 +7,7 @@
     />
     <button
       type="button"
-      class="rounded bg-[var(--v1-bg-primary)] px-2 py-1 text-xs text-white"
+      class="rounded bg-[var(--v1-bg-primary)] px-2 py-1 text-xs text-[rgb(var(--yb-text-inverse))]"
       @click="handleSearch"
     >
       查询

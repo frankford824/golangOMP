@@ -1,0 +1,414 @@
+{
+  "mode": "baseline",
+  "baseUrl": "http://127.0.0.1:4174",
+  "fixedNow": "2026-06-24T04:00:00.000Z",
+  "viewport": {
+    "name": "desktop",
+    "width": 1440,
+    "height": 900
+  },
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 1024,
+      "height": 768
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "generatedAt": "2026-06-25T09:16:37.008Z",
+  "screenshots": [
+    {
+      "id": "desktop:dashboard",
+      "name": "dashboard",
+      "viewport": "desktop",
+      "path": "/",
+      "file": "dashboard.png",
+      "sha256": "b1dad92d5ea85762a9dbe276d126840257d05b05f9d5adb83e7d067cd502da38"
+    },
+    {
+      "id": "desktop:avatar-dropdown-open",
+      "name": "avatar-dropdown-open",
+      "viewport": "desktop",
+      "path": "/",
+      "file": "avatar-dropdown-open.png",
+      "sha256": "f10de6975e1aec56eece0794e07e0db227d881dd3c69f398198e52050e8166c7"
+    },
+    {
+      "id": "desktop:global-search-overlay",
+      "name": "global-search-overlay",
+      "viewport": "desktop",
+      "path": "/",
+      "file": "global-search-overlay.png",
+      "sha256": "9d2b72ce66261893d16ff70daad7527dcf8811a893234a74bd86f133f78be8bc"
+    },
+    {
+      "id": "desktop:task-list",
+      "name": "task-list",
+      "viewport": "desktop",
+      "path": "/tasks",
+      "file": "task-list.png",
+      "sha256": "cf45ec7c71130d3185aed79406a07fa4c3f9e0200c23db55f618ecb99a2b767d"
+    },
+    {
+      "id": "desktop:task-create-modal",
+      "name": "task-create-modal",
+      "viewport": "desktop",
+      "path": "/tasks/create",
+      "file": "task-create-modal.png",
+      "sha256": "a53226c78bbf0286266e02b8a85e5bfd6007ebd54b5f845dae46c860f41aa623"
+    },
+    {
+      "id": "desktop:base-select-open",
+      "name": "base-select-open",
+      "viewport": "desktop",
+      "path": "/tasks/create",
+      "file": "base-select-open.png",
+      "sha256": "544b1cbbf9f3d449f0051828079759ec37452920190c9cd902027b5405e05bc0"
+    },
+    {
+      "id": "desktop:close-draft-confirm-modal",
+      "name": "close-draft-confirm-modal",
+      "viewport": "desktop",
+      "path": "/tasks/create",
+      "file": "close-draft-confirm-modal.png",
+      "sha256": "610af4e47198ab31c1980cb1686453cdd49f8b7c616e54cb21c15b6f4c9cf2e0"
+    },
+    {
+      "id": "desktop:task-detail",
+      "name": "task-detail",
+      "viewport": "desktop",
+      "path": "/tasks/task_1002",
+      "file": "task-detail.png",
+      "sha256": "091b0de7766f612ec6d52bfb0ed64050eeb70a186025d881a3609822257dc222"
+    },
+    {
+      "id": "desktop:task-assets",
+      "name": "task-assets",
+      "viewport": "desktop",
+      "path": "/tasks/task_1002/assets?asset_id=asset_1001",
+      "file": "task-assets.png",
+      "sha256": "ed83eb5b10f6517d9a5dc66ddfb0a6726bb27919bfc578b62e840ce641b2f7a2"
+    },
+    {
+      "id": "desktop:asset-detail",
+      "name": "asset-detail",
+      "viewport": "desktop",
+      "path": "/asset-center/asset_1001?task_id=task_1002",
+      "file": "asset-detail.png",
+      "sha256": "5be8ce8d36ecfe65f5ad6f7b5c388081046c778c11ee72ddda8bb3f562137926"
+    },
+    {
+      "id": "desktop:task-info-edit-modal",
+      "name": "task-info-edit-modal",
+      "viewport": "desktop",
+      "path": "/tasks/task_1002",
+      "file": "task-info-edit-modal.png",
+      "sha256": "dd9426c1e345a66f3c32723c5b4709b8f1b5ad7d265f83d7b62a4b72f8f8bb56"
+    },
+    {
+      "id": "desktop:reassign-designer-dialog",
+      "name": "reassign-designer-dialog",
+      "viewport": "desktop",
+      "path": "/tasks/task_1002",
+      "file": "reassign-designer-dialog.png",
+      "sha256": "41e6b346ed88d170759e8a18d41a244e3100be0a72a8627f6ff848ff1bcf538f"
+    },
+    {
+      "id": "desktop:assets-index",
+      "name": "assets-index",
+      "viewport": "desktop",
+      "path": "/asset-center",
+      "file": "assets-index.png",
+      "sha256": "c41df7e3cfab4d88796493646249d7a624fc712a6c139b2241ee9b2771bbb2fa"
+    },
+    {
+      "id": "desktop:product-management",
+      "name": "product-management",
+      "viewport": "desktop",
+      "path": "/products",
+      "file": "product-management.png",
+      "sha256": "6a019a45ce2b22adca1f84c2098f62e463acafe90c212c09bc52a1a40b80f79d"
+    },
+    {
+      "id": "desktop:user-management-role-modal",
+      "name": "user-management-role-modal",
+      "viewport": "desktop",
+      "path": "/users",
+      "file": "user-management-role-modal.png",
+      "sha256": "4082cbe6209ab98e64f7e59d955234a08efff26f6da8a53c6d73a13b1f6e61f4"
+    },
+    {
+      "id": "desktop:product-management-cost-tooltip",
+      "name": "product-management-cost-tooltip",
+      "viewport": "desktop",
+      "path": "/products",
+      "file": "product-management-cost-tooltip.png",
+      "sha256": "193be99ddcc164ec11c552c43edcb5bd76da18e2b6663a18ec0dd87af188684e"
+    },
+    {
+      "id": "tablet:dashboard",
+      "name": "dashboard",
+      "viewport": "tablet",
+      "path": "/",
+      "file": "tablet-dashboard.png",
+      "sha256": "631f081077788527b0ea181c267c429c8a4adace26618e4309ce1ef657f6ce32"
+    },
+    {
+      "id": "tablet:avatar-dropdown-open",
+      "name": "avatar-dropdown-open",
+      "viewport": "tablet",
+      "path": "/",
+      "file": "tablet-avatar-dropdown-open.png",
+      "sha256": "96b17555f8cf83984721d1d3b4b4a16513e3c582fc15c8dceaff09a6a5360fa6"
+    },
+    {
+      "id": "tablet:global-search-overlay",
+      "name": "global-search-overlay",
+      "viewport": "tablet",
+      "path": "/",
+      "file": "tablet-global-search-overlay.png",
+      "sha256": "4e943b06602c7640decff47d9808c25f003422380b342d4f9add8944d8f8209b"
+    },
+    {
+      "id": "tablet:task-list",
+      "name": "task-list",
+      "viewport": "tablet",
+      "path": "/tasks",
+      "file": "tablet-task-list.png",
+      "sha256": "00bc8cf246419d0790e71465df7bf520acc5cdb1bc53b730b88850a19bf06169"
+    },
+    {
+      "id": "tablet:task-create-modal",
+      "name": "task-create-modal",
+      "viewport": "tablet",
+      "path": "/tasks/create",
+      "file": "tablet-task-create-modal.png",
+      "sha256": "ef6cf3d90fb922a8d906c95546f317935cbc644196e367c7e70092bfb6e28c4b"
+    },
+    {
+      "id": "tablet:base-select-open",
+      "name": "base-select-open",
+      "viewport": "tablet",
+      "path": "/tasks/create",
+      "file": "tablet-base-select-open.png",
+      "sha256": "b561433700f7b489aa82979ecefefbbab7aa52fdae48c39a016e8d6b1e4527d5"
+    },
+    {
+      "id": "tablet:close-draft-confirm-modal",
+      "name": "close-draft-confirm-modal",
+      "viewport": "tablet",
+      "path": "/tasks/create",
+      "file": "tablet-close-draft-confirm-modal.png",
+      "sha256": "b21cc9b9ed61a3e324f1137167517c95133b3dbf594ab7270330ef86015ea79f"
+    },
+    {
+      "id": "tablet:task-detail",
+      "name": "task-detail",
+      "viewport": "tablet",
+      "path": "/tasks/task_1002",
+      "file": "tablet-task-detail.png",
+      "sha256": "68011bbb381c28586e4bc98ea9b1142a06351e835ec821680053dcfc672971a4"
+    },
+    {
+      "id": "tablet:task-assets",
+      "name": "task-assets",
+      "viewport": "tablet",
+      "path": "/tasks/task_1002/assets?asset_id=asset_1001",
+      "file": "tablet-task-assets.png",
+      "sha256": "063e59c8577ec172c6b621d52a546bbbf272004c10c58c11fc063721a9153022"
+    },
+    {
+      "id": "tablet:asset-detail",
+      "name": "asset-detail",
+      "viewport": "tablet",
+      "path": "/asset-center/asset_1001?task_id=task_1002",
+      "file": "tablet-asset-detail.png",
+      "sha256": "3a9fbf56e6deb1cd81e66f52d697c17d115c5ed3890fdb5f3ec99edf88f477c6"
+    },
+    {
+      "id": "tablet:task-info-edit-modal",
+      "name": "task-info-edit-modal",
+      "viewport": "tablet",
+      "path": "/tasks/task_1002",
+      "file": "tablet-task-info-edit-modal.png",
+      "sha256": "86a18e313ecb6da39b482ff888d9e907be35e641a48dd4a1afe03368588d1b43"
+    },
+    {
+      "id": "tablet:reassign-designer-dialog",
+      "name": "reassign-designer-dialog",
+      "viewport": "tablet",
+      "path": "/tasks/task_1002",
+      "file": "tablet-reassign-designer-dialog.png",
+      "sha256": "6a7ebc7640b6280b71eef643dc203a98d3bab11e8a75aa95a9ace1abc6b04f71"
+    },
+    {
+      "id": "tablet:assets-index",
+      "name": "assets-index",
+      "viewport": "tablet",
+      "path": "/asset-center",
+      "file": "tablet-assets-index.png",
+      "sha256": "af0cb6fd24b0b077c191cf3e8f8a1b0dc65caaf3f9784c8bb5a176b533046d9f"
+    },
+    {
+      "id": "tablet:product-management",
+      "name": "product-management",
+      "viewport": "tablet",
+      "path": "/products",
+      "file": "tablet-product-management.png",
+      "sha256": "053777dbf793234f9028847fe4915ee2be6525f46ce304f5c07c916f497165f8"
+    },
+    {
+      "id": "tablet:user-management-role-modal",
+      "name": "user-management-role-modal",
+      "viewport": "tablet",
+      "path": "/users",
+      "file": "tablet-user-management-role-modal.png",
+      "sha256": "90d50b574358bae4f5ea6f712ef854479d0e8e4cb7f37e5e79785cea0c82a3d8"
+    },
+    {
+      "id": "tablet:product-management-cost-tooltip",
+      "name": "product-management-cost-tooltip",
+      "viewport": "tablet",
+      "path": "/products",
+      "file": "tablet-product-management-cost-tooltip.png",
+      "sha256": "156b3f33cac76136347214adfa2450bb9bcc9049f33f2ea68f992001a5f87eb2"
+    },
+    {
+      "id": "mobile:dashboard",
+      "name": "dashboard",
+      "viewport": "mobile",
+      "path": "/",
+      "file": "mobile-dashboard.png",
+      "sha256": "53b5c2d4374d7354cf100762ef02196f599bbaa8bd2aa25885bd99ef3b4e26a7"
+    },
+    {
+      "id": "mobile:avatar-dropdown-open",
+      "name": "avatar-dropdown-open",
+      "viewport": "mobile",
+      "path": "/",
+      "file": "mobile-avatar-dropdown-open.png",
+      "sha256": "e28913e768aaf4acee58ce1e78b7da6fa9563054276e8c5eeecb7b5b7de6d913"
+    },
+    {
+      "id": "mobile:global-search-overlay",
+      "name": "global-search-overlay",
+      "viewport": "mobile",
+      "path": "/",
+      "file": "mobile-global-search-overlay.png",
+      "sha256": "27bb6b1b2b78e15fd6d0c691d676af684a1bce38e27d6e826cd46edf2ad56956"
+    },
+    {
+      "id": "mobile:task-list",
+      "name": "task-list",
+      "viewport": "mobile",
+      "path": "/tasks",
+      "file": "mobile-task-list.png",
+      "sha256": "0a2edb7643fa7251cd4b8de798ee8f8e50776c735c4d6c7c1de521354a88b6df"
+    },
+    {
+      "id": "mobile:task-create-modal",
+      "name": "task-create-modal",
+      "viewport": "mobile",
+      "path": "/tasks/create",
+      "file": "mobile-task-create-modal.png",
+      "sha256": "253ae2e53b12745bb5258ddef143c4798ae644c654e2064bc101d53b685c3c63"
+    },
+    {
+      "id": "mobile:base-select-open",
+      "name": "base-select-open",
+      "viewport": "mobile",
+      "path": "/tasks/create",
+      "file": "mobile-base-select-open.png",
+      "sha256": "8dd60a3be22d3bd757af0bdd8cbb4a62ac8476f0bbe60fb881bc287c46e66812"
+    },
+    {
+      "id": "mobile:close-draft-confirm-modal",
+      "name": "close-draft-confirm-modal",
+      "viewport": "mobile",
+      "path": "/tasks/create",
+      "file": "mobile-close-draft-confirm-modal.png",
+      "sha256": "b2a08ec05045371cf62d49a5bae4c38a4ce4e20472a3e8abd7048e21cf5c2d4a"
+    },
+    {
+      "id": "mobile:task-detail",
+      "name": "task-detail",
+      "viewport": "mobile",
+      "path": "/tasks/task_1002",
+      "file": "mobile-task-detail.png",
+      "sha256": "e6fed8abda3aa8b6a925204a822760763f4729e220c024e8066a8a7aafe7b76a"
+    },
+    {
+      "id": "mobile:task-assets",
+      "name": "task-assets",
+      "viewport": "mobile",
+      "path": "/tasks/task_1002/assets?asset_id=asset_1001",
+      "file": "mobile-task-assets.png",
+      "sha256": "800d0a99251858d34b4f9ec64d6aac6057742364e562f7cf8885547a7fbc0844"
+    },
+    {
+      "id": "mobile:asset-detail",
+      "name": "asset-detail",
+      "viewport": "mobile",
+      "path": "/asset-center/asset_1001?task_id=task_1002",
+      "file": "mobile-asset-detail.png",
+      "sha256": "7658e5ed1ae0307f7ca2ac6b64186b14c7af1aa5c004ed6cf12c1b294b763c01"
+    },
+    {
+      "id": "mobile:task-info-edit-modal",
+      "name": "task-info-edit-modal",
+      "viewport": "mobile",
+      "path": "/tasks/task_1002",
+      "file": "mobile-task-info-edit-modal.png",
+      "sha256": "a3bcb14642b338f41137f8232cf3d0cf51b104de8d711fe4680c4ba503e57e90"
+    },
+    {
+      "id": "mobile:reassign-designer-dialog",
+      "name": "reassign-designer-dialog",
+      "viewport": "mobile",
+      "path": "/tasks/task_1002",
+      "file": "mobile-reassign-designer-dialog.png",
+      "sha256": "e6f85e1448dbb66be109015d1d40d25bbae41dd2f5a793baaba3e72f6ca5b306"
+    },
+    {
+      "id": "mobile:assets-index",
+      "name": "assets-index",
+      "viewport": "mobile",
+      "path": "/asset-center",
+      "file": "mobile-assets-index.png",
+      "sha256": "2ba2dce4c140fe363e78f4c77ddfddf1de92c5230a089ede4760130df4ee55d1"
+    },
+    {
+      "id": "mobile:product-management",
+      "name": "product-management",
+      "viewport": "mobile",
+      "path": "/products",
+      "file": "mobile-product-management.png",
+      "sha256": "426fc3f148fd1920684bef5c8b46371df69293b1650e6464abc1dd323fdfe79a"
+    },
+    {
+      "id": "mobile:user-management-role-modal",
+      "name": "user-management-role-modal",
+      "viewport": "mobile",
+      "path": "/users",
+      "file": "mobile-user-management-role-modal.png",
+      "sha256": "0fed6e6744a565000c814b81bd70345a680c1320f6161d04bf8d5fdde7776905"
+    },
+    {
+      "id": "mobile:product-management-cost-tooltip",
+      "name": "product-management-cost-tooltip",
+      "viewport": "mobile",
+      "path": "/products",
+      "file": "mobile-product-management-cost-tooltip.png",
+      "sha256": "0c4dcf3487082cdaf748738c3c5dc0f7b0d16b3ae710d7204c901b56193121e6"
+    }
+  ]
+}

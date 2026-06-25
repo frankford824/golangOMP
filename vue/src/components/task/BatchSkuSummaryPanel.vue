@@ -141,7 +141,7 @@ function onClear() {
 
 <style scoped>
 .summary-panel {
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgb(var(--yb-text-disabled));
   border-radius: 8px;
   padding: 0.75rem;
   display: flex;
@@ -157,33 +157,33 @@ function onClear() {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .summary-empty {
   margin: 0;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .stat-list {
   margin: 0;
   padding-left: 1.1rem;
   font-size: 0.8125rem;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
   line-height: 1.6;
 }
 .ref-hint {
   margin: 0;
   font-size: 0.75rem;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .preview-block {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid rgb(var(--yb-border-slate));
   padding-top: 0.5rem;
 }
 .preview-label {
   margin: 0 0 0.35rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .preview-list {
   margin: 0;
@@ -201,11 +201,11 @@ function onClear() {
   align-items: center;
 }
 .preview-no {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .preview-sku {
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -214,16 +214,16 @@ function onClear() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .preview-status {
   text-align: right;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .rest-hint {
   margin: 0.35rem 0 0;
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .summary-actions {
   display: flex;
@@ -231,8 +231,8 @@ function onClear() {
   gap: 0.5rem;
 }
 .danger-weak {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fff;
+  color: rgb(var(--yb-danger-text));
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-surface));
 }
 </style>

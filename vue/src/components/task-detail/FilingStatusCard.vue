@@ -1,5 +1,5 @@
 <template>
-  <div class="detail-card h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6">
+  <div class="detail-card h-full flex flex-col rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] shadow-sm p-6">
     <div class="sidebar-header">ERP 建档状态</div>
     <template v-if="hasFilingInfo">
       <div class="filing-status-row">
@@ -13,11 +13,11 @@
       </div>
       <div v-if="props.task?.missing_fields_summary_cn" class="filing-detail-row">
         <span class="filing-label">缺失字段</span>
-        <span class="filing-value text-amber-700">{{ props.task.missing_fields_summary_cn }}</span>
+        <span class="filing-value text-[rgb(var(--yb-warning-text))]">{{ props.task.missing_fields_summary_cn }}</span>
       </div>
       <div v-if="businessErrorMessage" class="filing-detail-row">
         <span class="filing-label">失败原因</span>
-        <span class="filing-value text-red-700">{{ businessErrorMessage }}</span>
+        <span class="filing-value text-[rgb(var(--yb-danger-text))]">{{ businessErrorMessage }}</span>
       </div>
       <div v-if="props.task?.last_filed_at" class="filing-detail-row">
         <span class="filing-label">最近同步时间</span>
@@ -43,7 +43,7 @@
         </BaseButton>
       </div>
     </template>
-    <p v-else class="filing-empty text-slate-500 text-sm">暂无建档状态信息</p>
+    <p v-else class="filing-empty text-[rgb(var(--yb-text-muted))] text-sm">暂无建档状态信息</p>
   </div>
 </template>
 
@@ -108,17 +108,17 @@ async function onRetry() {
 .filing-label {
   font-size: 0.6875rem;
   font-weight: 500;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 .filing-value {
   font-size: 0.8125rem;
-  color: rgb(51 65 85);
+  color: rgb(var(--yb-text-slate));
 }
 .filing-empty {
   margin: 0;
 }
 .filing-retry-row {
   padding-top: 0.5rem;
-  border-top: 1px solid rgb(241 245 249);
+  border-top: 1px solid rgb(var(--yb-surface-slate));
 }
 </style>

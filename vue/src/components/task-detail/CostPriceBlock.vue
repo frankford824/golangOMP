@@ -2,7 +2,7 @@
   <!-- 仅新品开发 / 采购任务展示成本区：与创建 3-in-1 收集项一致；原品创建未收集成本字段故不展示 -->
   <section
     v-if="isNewProduct || isPurchase"
-    class="detail-block h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6"
+    class="detail-block h-full flex flex-col rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] shadow-sm p-6"
     :class="{ 'cost-block--tiles': variant === 'tiles' }"
   >
     <div class="block-header">
@@ -178,7 +178,7 @@ function formatMoneyShort(n: number | undefined | null): string {
 .cost-title-suffix {
   font-size: 0.6875rem;
   font-weight: 500;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
   margin: 0;
 }
 .block-icon {
@@ -188,15 +188,15 @@ function formatMoneyShort(n: number | undefined | null): string {
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 0.375rem;
-  background: rgb(248 250 252);
-  color: rgb(148 163 184);
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-placeholder));
   font-size: 0.75rem;
   flex-shrink: 0;
 }
 .block-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: rgb(30 41 59);
+  color: rgb(var(--yb-text-deep));
   margin: 0;
 }
 .info-grid {
@@ -213,11 +213,11 @@ dt {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 dd {
   font-size: 0.875rem;
-  color: rgb(15 23 42);
+  color: rgb(var(--yb-text-navy));
   margin: 0;
 }
 
@@ -228,11 +228,11 @@ dd {
   margin-bottom: 0.5rem;
 }
 .cost-block--tiles .block-icon {
-  background: rgb(241 245 249);
-  color: rgb(100 116 139);
+  background: rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-muted-strong));
 }
 .cost-block--tiles .block-title {
-  color: rgb(15 23 42);
+  color: rgb(var(--yb-text-navy));
   font-size: 0.8125rem;
 }
 .cost-tiles-row {
@@ -252,8 +252,8 @@ dd {
   max-width: 6.75rem;
   padding: 0.4rem 0.45rem;
   border-radius: 0.5rem;
-  background: rgb(248 250 252);
-  border: 1px solid rgb(226 232 240);
+  background: rgb(var(--yb-surface-subtle));
+  border: 1px solid rgb(var(--yb-border-slate));
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
@@ -263,18 +263,18 @@ dd {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
 }
 .cost-tile-value {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: rgb(15 23 42);
+  color: rgb(var(--yb-text-navy));
   font-variant-numeric: tabular-nums;
 }
 .cost-tile-warning {
   font-size: 0.625rem;
   font-weight: 700;
-  color: rgb(251 146 60);
+  color: rgb(var(--yb-warning-orange-bright));
   line-height: 1.2;
 }
 </style>

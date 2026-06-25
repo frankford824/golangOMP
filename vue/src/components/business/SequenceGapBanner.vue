@@ -32,12 +32,12 @@ async function onRecalibrate() {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  background: #fef3c7;
-  border: 1px solid #f59e0b;
+  background: rgb(var(--yb-warning-badge-soft));
+  border: 1px solid rgb(var(--yb-warning-accent));
   border-radius: 8px;
   margin-bottom: 1rem;
   font-size: 0.875rem;
-  color: #92400e;
+  color: rgb(var(--yb-warning-dark));
 }
 .banner-text {
   flex: 1;

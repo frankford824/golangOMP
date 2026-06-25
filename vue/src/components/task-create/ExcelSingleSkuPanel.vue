@@ -275,9 +275,9 @@ function reset(): void {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgb(var(--yb-border-context));
   border-radius: 0.875rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   padding: 0.75rem;
   font-size: 0.75rem;
 }
@@ -289,23 +289,23 @@ function reset(): void {
 }
 .excel-eyebrow {
   margin: 0 0 0.1rem;
-  color: #8a94a3;
+  color: rgb(var(--yb-text-form-muted-alt));
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.04em;
 }
 .excel-title {
   margin: 0;
-  color: #171c22;
+  color: rgb(var(--yb-text-context-strong));
   font-size: 0.9rem;
   font-weight: 800;
 }
 .excel-status {
   flex: none;
   border-radius: 999px;
-  background: #f4f5f7;
+  background: rgb(var(--yb-surface-ui));
   padding: 0.18rem 0.55rem;
-  color: #5b6573;
+  color: rgb(var(--yb-text-context-muted));
   font-size: 0.68rem;
   font-weight: 700;
 }
@@ -324,14 +324,14 @@ function reset(): void {
   gap: 0.3rem;
   border-radius: 0.5rem;
   padding: 0.25rem 0.35rem;
-  color: #8a94a3;
+  color: rgb(var(--yb-text-form-muted-alt));
 }
 .excel-step.is-active {
-  background: #eef4ff;
-  color: #2563eb;
+  background: rgb(var(--yb-surface-blue-light));
+  color: rgb(var(--yb-brand));
 }
 .excel-step.is-done {
-  color: #3d7a57;
+  color: rgb(var(--yb-success-muted-text));
 }
 .step-index {
   display: inline-flex;
@@ -341,13 +341,13 @@ function reset(): void {
   justify-content: center;
   border-radius: 999px;
   background: currentColor;
-  color: #fff;
+  color: rgb(var(--yb-surface));
   font-size: 0.62rem;
   font-weight: 700;
 }
 .excel-step.is-active .step-index,
 .excel-step.is-done .step-index {
-  background: #2563eb;
+  background: rgb(var(--yb-brand));
 }
 .excel-actions-card {
   display: flex;
@@ -361,8 +361,8 @@ function reset(): void {
 }
 .excel-actions-card:focus-within,
 .excel-actions-card:hover {
-  background: #f8fbff;
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.12);
+  background: rgb(var(--yb-surface-brand-panel));
+  box-shadow: 0 0 0 2px rgb(var(--yb-brand-accent) / 0.12);
 }
 .hh-btn {
   border-radius: 0.5rem;
@@ -373,21 +373,21 @@ function reset(): void {
   border: 1px solid transparent;
 }
 .hh-btn-primary {
-  background: #2563eb;
-  color: #fff;
+  background: rgb(var(--yb-brand));
+  color: rgb(var(--yb-surface));
 }
 .hh-btn-secondary {
-  background: #f4f5f7;
-  color: #171c22;
-  border-color: #e6eaf0;
+  background: rgb(var(--yb-surface-ui));
+  color: rgb(var(--yb-text-context-strong));
+  border-color: rgb(var(--yb-border-context));
 }
 .hh-btn-file {
-  background: #fff;
-  border-color: #d5dbe3;
+  background: rgb(var(--yb-surface));
+  border-color: rgb(var(--yb-border-form-hover));
 }
 .hh-btn-ghost {
   background: transparent;
-  color: #5b6573;
+  color: rgb(var(--yb-text-context-muted));
 }
 .hh-btn:disabled {
   opacity: 0.5;
@@ -404,7 +404,7 @@ function reset(): void {
   border: 0;
 }
 .excel-meta {
-  color: #5b6573;
+  color: rgb(var(--yb-text-context-muted));
   line-height: 1.45;
 }
 .file-line {
@@ -417,7 +417,7 @@ function reset(): void {
   width: 0.35rem;
   height: 0.35rem;
   border-radius: 999px;
-  background: #94a3b8;
+  background: rgb(var(--yb-text-placeholder));
 }
 .template-line,
 .rule-line {
@@ -425,6 +425,6 @@ function reset(): void {
 }
 .excel-error {
   margin: 0;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 </style>

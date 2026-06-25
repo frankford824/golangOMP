@@ -114,38 +114,38 @@ const costPriceModeOptions = [
   display: contents;
 }
 .form-card {
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgb(var(--yb-border-context));
   border-radius: 0.875rem;
   padding: 0.75rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   min-height: 5.25rem;
 }
 .field-label {
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .required {
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
 }
 .optional-text {
   margin-left: 0.25rem;
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 .form-hint {
   margin: 0.25rem 0 0;
   font-size: 0.8125rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .form-hint.danger {
-  color: #dc2626;
+  color: rgb(var(--yb-danger));
 }
 .card-hint {
-  border: 1px solid #e6eaf0;
+  border: 1px solid rgb(var(--yb-border-context));
   border-radius: 0.875rem;
   padding: 0.75rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .form-card :deep(.flex.flex-col.gap-1) {
   gap: 0.4rem;
@@ -154,11 +154,11 @@ const costPriceModeOptions = [
 .form-card :deep(.relative > div) {
   height: 2.75rem;
   border-radius: 0.75rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .form-card :deep(textarea) {
   border-radius: 0.75rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   box-shadow: none;
   resize: vertical;
 }
@@ -166,43 +166,43 @@ const costPriceModeOptions = [
 /* Phase 6: light embedded form skin (parent modal already light). Style-only. */
 .form-card,
 .card-hint {
-  border-color: #e5e7eb;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 
 .field-label {
-  color: #374151;
+  color: rgb(var(--yb-text-body));
 }
 
 .form-hint,
 .optional-text {
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .form-hint.danger,
 .required {
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 
 .form-card :deep(input),
 .form-card :deep(.relative > div),
 .form-card :deep(textarea) {
-  border-color: #d1d5db;
-  background: #ffffff;
-  color: #111827;
+  border-color: rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
 }
 
 .form-card :deep(input::placeholder),
 .form-card :deep(textarea::placeholder) {
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 
 .form-card :deep(input:focus),
 .form-card :deep(textarea:focus) {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
 }
 @media (max-width: 760px) {
   .type-section {

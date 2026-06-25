@@ -6,15 +6,15 @@
 -->
 
 <template>
-  <div class="flex h-screen w-full items-center justify-center bg-slate-50">
+  <div class="flex h-screen w-full items-center justify-center bg-[rgb(var(--yb-surface-soft))]">
     <div class="text-center">
-      <h1 class="text-lg font-medium text-slate-900 mb-2">页面已迁移</h1>
-      <p class="text-sm text-slate-500 mb-4">
+      <h1 class="text-lg font-medium text-[rgb(var(--yb-text))] mb-2">页面已迁移</h1>
+      <p class="text-sm text-[rgb(var(--yb-text-muted))] mb-4">
         登录功能已整合至新的 AuthView.vue
       </p>
       <router-link
         to="/login"
-        class="inline-block px-4 py-2 bg-slate-900 text-white text-sm rounded-lg"
+        class="inline-block px-4 py-2 bg-[rgb(var(--yb-surface-neutral-inverse-deep))] text-[rgb(var(--yb-text-inverse))] text-sm rounded-lg"
       >
         前往登录页
       </router-link>

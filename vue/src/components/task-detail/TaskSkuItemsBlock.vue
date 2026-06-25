@@ -3,7 +3,7 @@
 -->
 <template>
   <section
-    class="detail-block h-full flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm p-6"
+    class="detail-block h-full flex flex-col rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] shadow-sm p-6"
   >
     <div class="block-header">
       <div class="flex items-center gap-2">
@@ -305,23 +305,23 @@ watch(
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 0.375rem;
-  background: rgb(248 250 252);
-  color: rgb(148 163 184);
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-placeholder));
   font-size: 0.75rem;
   flex-shrink: 0;
 }
 .block-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: rgb(30 41 59);
+  color: rgb(var(--yb-text-deep));
   margin: 0;
 }
 .current-panel {
   margin-top: 0.75rem;
   padding: 0.875rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.625rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .current-panel-header {
   display: flex;
@@ -339,12 +339,12 @@ watch(
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .current-subtitle {
   margin: 0.25rem 0 0;
   font-size: 0.875rem;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   font-weight: 700;
   word-break: break-word;
 }
@@ -356,9 +356,9 @@ watch(
 .status-pill {
   padding: 0.125rem 0.45rem;
   border-radius: 999px;
-  border: 1px solid #cbd5e1;
-  background: #f1f5f9;
-  color: #475569;
+  border: 1px solid rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-soft));
   font-size: 0.6875rem;
   font-weight: 600;
   white-space: nowrap;
@@ -376,22 +376,22 @@ watch(
   gap: 0.25rem;
   padding: 0.25rem 0.55rem;
   border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
   font-size: 0.75rem;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
   cursor: pointer;
   white-space: nowrap;
   font-weight: 500;
 }
 .item-tab-active {
-  border-color: #93c5fd;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border-color: rgb(var(--yb-brand-border-strong));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 .core-info {
-  background: #fff;
-  border: 1px solid #e6edf5;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-blue-faint));
   border-radius: 0.5rem;
   padding: 0.625rem 0.7rem;
   display: flex;
@@ -406,12 +406,12 @@ watch(
 .core-label {
   min-width: 4.4rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   font-weight: 600;
 }
 .core-value {
   font-size: 0.8125rem;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .core-mono {
   font-family: var(--yb-font-data);
@@ -431,34 +431,34 @@ watch(
 .attr-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   flex-shrink: 0;
 }
 .attr-value {
   font-size: 0.8125rem;
-  color: #1e293b;
+  color: rgb(var(--yb-text-deep));
   min-width: 0;
   word-break: break-word;
 }
 .pill-default {
-  border-color: #cbd5e1;
-  background: #f1f5f9;
-  color: #475569;
+  border-color: rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-soft));
 }
 .pill-info {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border-color: rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
 }
 .pill-warning {
-  border-color: #fde68a;
-  background: #fffbeb;
-  color: #b45309;
+  border-color: rgb(var(--yb-warning-border-soft));
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-warning-text));
 }
 .pill-success {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  color: #15803d;
+  border-color: rgb(var(--yb-success-border));
+  background: rgb(var(--yb-success-ui-soft));
+  color: rgb(var(--yb-success-strong));
 }
 .current-nav {
   display: flex;
@@ -469,16 +469,16 @@ watch(
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
   border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
+  color: rgb(var(--yb-text-soft));
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .nav-btn:hover:not(:disabled) {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  background: rgb(var(--yb-brand-soft));
+  border-color: rgb(var(--yb-brand-border));
+  color: rgb(var(--yb-brand-strong));
 }
 .nav-btn:disabled {
   opacity: 0.5;
@@ -486,24 +486,24 @@ watch(
 }
 .nav-indicator {
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   min-width: 2.6rem;
   text-align: center;
 }
 .requirement-brief {
   margin-top: 0.625rem;
   padding-top: 0.5rem;
-  border-top: 1px dashed #dbe2ea;
+  border-top: 1px dashed rgb(var(--yb-border-blue-muted));
 }
 .requirement-label {
   font-size: 0.6875rem;
   font-weight: 600;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .requirement-text {
   margin: 0.25rem 0 0;
   font-size: 0.75rem;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -518,13 +518,13 @@ watch(
 .sub-ref-section {
   margin-top: 0.625rem;
   padding-top: 0.5rem;
-  border-top: 1px dashed #dbe2ea;
+  border-top: 1px dashed rgb(var(--yb-border-blue-muted));
 }
 .sub-ref-label {
   display: block;
   font-size: 0.6875rem;
   font-weight: 600;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 0.375rem;
@@ -551,8 +551,8 @@ watch(
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface));
   display: block;
 }
 .sub-ref-thumb-btn :deep(.apm-placeholder),
@@ -565,6 +565,6 @@ watch(
 .sub-ref-empty {
   margin: 0;
   font-size: 0.8125rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 </style>

@@ -131,8 +131,8 @@ const conditions = computed((): Condition[] => {
 
 <style scoped>
 .close-condition-panel {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface-subtle));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 6px;
   padding: 0.75rem;
 }
@@ -151,12 +151,12 @@ const conditions = computed((): Condition[] => {
 .panel-title {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #374151;
+  color: rgb(var(--yb-text-body));
 }
 .panel-sub {
   font-size: 0.625rem;
   font-weight: 500;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .close-status-badge {
   font-size: 0.6875rem;
@@ -164,14 +164,14 @@ const conditions = computed((): Condition[] => {
   padding: 0.15rem 0.5rem;
   border-radius: 9999px;
 }
-.badge-ready { background: rgb(16 185 129 / 0.15); color: #059669; }
-.badge-not-ready { background: #fef2f2; color: #dc2626; }
-.badge-terminal { background: rgb(226 232 240 / 0.9); color: #475569; }
+.badge-ready { background: rgb(var(--yb-success-emerald) / 0.15); color: rgb(var(--yb-success-emerald)); }
+.badge-not-ready { background: rgb(var(--yb-danger-soft)); color: rgb(var(--yb-danger)); }
+.badge-terminal { background: rgb(var(--yb-border-slate) / 0.9); color: rgb(var(--yb-text-soft)); }
 .terminal-copy {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;
   line-height: 1.45;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .condition-list {
   list-style: none;
@@ -189,9 +189,9 @@ const conditions = computed((): Condition[] => {
   line-height: 1.4;
 }
 .condition-icon { font-size: 0.6875rem; width: 0.875rem; flex-shrink: 0; }
-.condition-label { color: #374151; }
-.passed .condition-icon { color: #059669; }
-.failed .condition-icon { color: #dc2626; }
-.failed .condition-label { color: #b91c1c; }
-.condition-hint { color: #9ca3af; font-size: 0.6875rem; }
+.condition-label { color: rgb(var(--yb-text-body)); }
+.passed .condition-icon { color: rgb(var(--yb-success-emerald)); }
+.failed .condition-icon { color: rgb(var(--yb-danger)); }
+.failed .condition-label { color: rgb(var(--yb-danger-text)); }
+.condition-hint { color: rgb(var(--yb-text-faint)); font-size: 0.6875rem; }
 </style>

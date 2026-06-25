@@ -561,7 +561,7 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 .block-batch-error {
   margin: 0;
   font-size: 12px;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 
 .block-kicker {
@@ -570,21 +570,21 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, rgb(var(--yb-text-muted-strong)));
 }
 
 .block-summary {
   margin: 0;
   font-size: 12px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, rgb(var(--yb-text-muted-strong)));
 }
 
 .requirement-card {
   padding: 14px 16px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-left: 3px solid #3b82f6;
+  border: 1px solid var(--border-color, rgb(var(--yb-border-slate)));
+  border-left: 3px solid rgb(var(--yb-brand-bright));
   border-radius: 10px;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 
 .requirement-card-head {
@@ -608,16 +608,16 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   padding: 2px 8px;
   font-size: 11px;
   font-weight: 500;
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
   background: transparent;
-  border: 1px solid #bfdbfe;
+  border: 1px solid rgb(var(--yb-brand-border));
   border-radius: 6px;
   cursor: pointer;
 }
 
 .batch-link-btn:hover:not(:disabled) {
-  background: #eff6ff;
-  border-color: #93c5fd;
+  background: rgb(var(--yb-brand-soft));
+  border-color: rgb(var(--yb-brand-border-strong));
 }
 
 .batch-link-btn:disabled {
@@ -628,19 +628,19 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 .requirement-no {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-primary, rgb(var(--yb-text-navy)));
 }
 
 .requirement-counts {
   font-size: 12px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, rgb(var(--yb-text-muted-strong)));
 }
 
 .requirement-desc {
   margin: 0;
   font-size: 14px;
   line-height: 1.6;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-primary, rgb(var(--yb-text-navy)));
   white-space: pre-wrap;
 }
 
@@ -659,12 +659,12 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 
 .requirement-meta dt {
   margin: 0;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, rgb(var(--yb-text-muted-strong)));
 }
 
 .requirement-meta dd {
   margin: 0;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-primary, rgb(var(--yb-text-navy)));
 }
 
 .requirement-assets {
@@ -673,7 +673,7 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   flex-direction: column;
   gap: 16px;
   padding-top: 12px;
-  border-top: 1px dashed var(--border-color, #e2e8f0);
+  border-top: 1px dashed var(--border-color, rgb(var(--yb-border-slate)));
 }
 
 .asset-section {
@@ -694,13 +694,13 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-primary, rgb(var(--yb-text-navy)));
 }
 
 .asset-empty {
   margin: 0;
   font-size: 12px;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--text-secondary, rgb(var(--yb-text-placeholder)));
 }
 
 .reference-grid {
@@ -714,9 +714,9 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  border: 1px solid var(--border-color, #dbe3ef);
+  border: 1px solid var(--border-color, rgb(var(--yb-border-subtle)));
   border-radius: 8px;
-  background: #fff;
+  background: rgb(var(--yb-surface));
 }
 
 .reference-thumb-btn {
@@ -725,7 +725,7 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   border-radius: 6px;
   overflow: hidden;
   cursor: pointer;
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
   aspect-ratio: 1;
 }
 
@@ -757,7 +757,7 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 .reference-file-name {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-primary, rgb(var(--yb-text-navy)));
   word-break: break-all;
   line-height: 1.35;
   display: -webkit-box;
@@ -768,7 +768,7 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 
 .reference-file-sub {
   font-size: 11px;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, rgb(var(--yb-text-muted-strong)));
 }
 
 .source-file-list {
@@ -785,9 +785,9 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   align-items: flex-start;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border-color, #dbe3ef);
+  border: 1px solid var(--border-color, rgb(var(--yb-border-subtle)));
   border-radius: 8px;
-  background: #fff;
+  background: rgb(var(--yb-surface));
 }
 
 .source-file-thumb {
@@ -796,8 +796,8 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   height: 72px;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid var(--border-color, #dbe3ef);
-  background: #f8fafc;
+  border: 1px solid var(--border-color, rgb(var(--yb-border-subtle)));
+  background: rgb(var(--yb-surface-subtle));
 }
 
 .source-thumb-media,
@@ -829,12 +829,12 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 
 .source-file-name {
   font-weight: 500;
-  color: var(--text-primary, #0f172a);
+  color: var(--text-primary, rgb(var(--yb-text-navy)));
   word-break: break-all;
 }
 
 .source-file-sub {
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, rgb(var(--yb-text-muted-strong)));
 }
 
 .asset-download-btn {
@@ -842,15 +842,15 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   padding: 4px 12px;
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
-  background: #2563eb;
+  color: rgb(var(--yb-surface));
+  background: rgb(var(--yb-brand));
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 
 .asset-download-btn:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: rgb(var(--yb-brand-strong));
 }
 
 .asset-download-btn:disabled {
@@ -861,6 +861,6 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 .requirement-download-error {
   margin: 10px 0 0;
   font-size: 12px;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 </style>

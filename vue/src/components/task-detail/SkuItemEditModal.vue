@@ -341,22 +341,22 @@ async function submit() {
   margin: 0 0 0.35rem;
   font-size: 0.75rem;
   font-weight: 700;
-  color: #475467;
+  color: rgb(var(--yb-text-neutral));
 }
 
 .sku-edit-refs {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
-  border: 1px solid #eaecf0;
+  border: 1px solid rgb(var(--yb-border-muted));
   border-radius: 0.75rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   padding: 0.75rem;
 }
 
 .sku-edit-ref-hint {
   margin: 0;
-  color: #047857;
+  color: rgb(var(--yb-success-teal));
   font-size: 0.75rem;
 }
 
@@ -364,9 +364,9 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  border: 1px solid #eaecf0;
+  border: 1px solid rgb(var(--yb-border-muted));
   border-radius: 0.75rem;
-  background: #f9fafb;
+  background: rgb(var(--yb-surface-soft));
   padding: 0.75rem;
 }
 
@@ -378,7 +378,7 @@ async function submit() {
 }
 
 .sku-edit-cost-current {
-  color: #344054;
+  color: rgb(var(--yb-text-body-strong));
   font-size: 0.75rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -390,16 +390,16 @@ async function submit() {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8125rem;
-  color: #475467;
+  color: rgb(var(--yb-text-neutral));
 }
 
 .sku-edit-error {
   margin: 0;
   padding: 0.5rem 0.6rem;
-  border: 1px solid #fecaca;
+  border: 1px solid rgb(var(--yb-danger-border));
   border-radius: 0.5rem;
-  background: #fef2f2;
-  color: #b91c1c;
+  background: rgb(var(--yb-danger-soft));
+  color: rgb(var(--yb-danger-text));
   font-size: 0.8125rem;
 }
 

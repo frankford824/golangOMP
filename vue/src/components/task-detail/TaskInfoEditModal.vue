@@ -4,7 +4,7 @@
     :title="isBatchTask ? '编辑母任务信息' : '编辑任务信息'"
     :show-confirm="false"
     cancel-text="关闭"
-    panel-class="max-w-[min(1060px,96vw)] !max-h-[94vh] task-info-edit-modal-panel"
+    panel-class="max-w-[min(1060px,96vw)] task-info-edit-modal-panel"
     @update:model-value="onClose"
   >
     <div v-if="loadError" class="edit-error-banner">
@@ -89,7 +89,7 @@
           <div>
             <label class="field-label">截止时间</label>
             <div class="due-at-input-row">
-              <input v-model="form.due_at" type="date" class="native-input" />
+              <input v-model="form.due_at" type="date" class="native-input" aria-label="任务截止日期" />
               <select v-model="form.due_at_hour" class="native-input due-hour-select">
                 <option v-for="opt in dueHourOptions" :key="opt.value" :value="opt.value">
                   {{ opt.label }}
@@ -169,7 +169,7 @@
           <BaseTextarea v-model="form.purchase_remark" class="sm:col-span-2" label="采购备注" :rows="2" />
           <div>
             <label class="field-label">预计到货日</label>
-            <input v-model="form.expected_delivery_date" type="date" class="native-input" />
+            <input v-model="form.expected_delivery_date" type="date" class="native-input" aria-label="预计到货日" />
           </div>
         </div>
       </section>
@@ -694,12 +694,12 @@ watch(
 }
 
 .form-card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgb(var(--yb-border));
   border-radius: 0.875rem;
-  background: #ffffff;
+  background: rgb(var(--yb-surface));
   padding: 0.875rem 1rem;
-  color: #111827;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  color: rgb(var(--yb-text));
+  box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
 }
 
 .section-eyebrow {
@@ -708,13 +708,13 @@ watch(
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .section-hint {
   margin: 0.35rem 0 0.65rem;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
   line-height: 1.45;
 }
 
@@ -740,7 +740,7 @@ watch(
   margin-bottom: 0.35rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #374151;
+  color: rgb(var(--yb-text-body));
   letter-spacing: 0.01em;
 }
 
@@ -750,17 +750,17 @@ watch(
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8125rem;
-  color: #374151;
+  color: rgb(var(--yb-text-body));
   line-height: 1.4;
 }
 
 .native-input {
   width: 100%;
   min-height: 2.75rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid rgb(var(--yb-border-strong));
   border-radius: 0.75rem;
-  background: #ffffff;
-  color: #111827;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
   font-size: 0.875rem;
   padding: 0.45rem 0.65rem;
   outline: none;
@@ -771,25 +771,25 @@ watch(
 }
 
 .native-input::placeholder {
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 
 .native-input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
 }
 
 .native-input:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-  background: #f9fafb;
+  background: rgb(var(--yb-surface-soft));
 }
 
 select.native-input {
   cursor: pointer;
   appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, #6b7280 50%),
-    linear-gradient(135deg, #6b7280 50%, transparent 50%);
+  background-image: linear-gradient(45deg, transparent 50%, rgb(var(--yb-text-muted)) 50%),
+    linear-gradient(135deg, rgb(var(--yb-text-muted)) 50%, transparent 50%);
   background-position:
     calc(100% - 1.1rem) calc(50% + 0.12rem),
     calc(100% - 0.75rem) calc(50% + 0.12rem);
@@ -822,18 +822,18 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
   flex-shrink: 0;
   margin: 0;
   border-radius: 0.25rem;
-  accent-color: #2563eb;
+  accent-color: rgb(var(--yb-brand));
   cursor: pointer;
 }
 
 .edit-error-banner {
   margin-bottom: 0.65rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid #fecaca;
+  border: 1px solid rgb(var(--yb-danger-border));
   border-radius: 0.5rem;
-  background: #fef2f2;
+  background: rgb(var(--yb-danger-soft));
   font-size: 0.875rem;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
   line-height: 1.45;
 }
 
@@ -841,7 +841,7 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
   padding: 2rem 0;
   text-align: center;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .edit-modal-footer {
@@ -851,14 +851,13 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
   gap: 0.5rem;
   width: 100%;
   padding: 1rem 1.25rem;
-  border-top: 1px solid #e5e7eb;
-  background: #f9fafb;
+  border-top: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
 }
 
 /* BaseInput / BaseTextarea / IIdSelector（BaseSelect）局部浅色覆写 */
-.edit-workspace :deep(label.text-sm.font-medium.text-slate-600),
 .edit-workspace :deep(label.field-label) {
-  color: #374151 !important;
+  color: rgb(var(--yb-text-body));
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -869,92 +868,85 @@ input.native-input[type='date']::-webkit-calendar-picker-indicator {
 
 .form-card :deep(input),
 .form-card :deep(textarea) {
-  border-color: #d1d5db !important;
-  background: #ffffff !important;
-  color: #111827 !important;
-  box-shadow: none !important;
+  border-color: rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  box-shadow: none;
 }
 
 .form-card :deep(input) {
   min-height: 2.75rem;
-  border-radius: 0.75rem !important;
+  border-radius: 0.75rem;
 }
 
 .form-card :deep(textarea) {
-  border-radius: 0.75rem !important;
+  border-radius: 0.75rem;
   resize: vertical;
 }
 
 .form-card :deep(input::placeholder),
 .form-card :deep(textarea::placeholder) {
-  color: #9ca3af !important;
+  color: rgb(var(--yb-text-faint));
 }
 
 .form-card :deep(input:focus),
 .form-card :deep(textarea:focus) {
-  border-color: #2563eb !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+  border-color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
 }
 
 .form-card :deep(input:disabled),
 .form-card :deep(textarea:disabled) {
   cursor: not-allowed;
   opacity: 0.55;
-  background: #f9fafb !important;
+  background: rgb(var(--yb-surface-soft));
 }
 
 .form-card :deep(.relative > div) {
   min-height: 2.75rem;
-  border-color: #d1d5db !important;
-  border-radius: 0.75rem !important;
-  background: #ffffff !important;
-  color: #111827 !important;
-  box-shadow: none !important;
+  border-color: rgb(var(--yb-border-strong));
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  box-shadow: none;
 }
 
 .form-card :deep(.relative > div:focus-within) {
-  border-color: #2563eb !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+  border-color: rgb(var(--yb-brand));
+  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
 }
 
 .form-card :deep(.relative button) {
-  color: #111827 !important;
-}
-
-.form-card :deep(.relative .text-slate-500) {
-  color: #6b7280 !important;
-}
-
-.form-card :deep(.text-xs.text-slate-400) {
-  color: #6b7280 !important;
+  color: rgb(var(--yb-text));
 }
 
 /* 浅色弹窗外壳（对齐 BaseModal / 阶段一全局壳） */
 :global(.task-info-edit-modal-panel) {
-  border-color: #e5e7eb !important;
-  background: #ffffff !important;
-  color: #111827 !important;
-  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12) !important;
+  max-height: 94vh;
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
+  box-shadow: 0 10px 40px rgb(var(--yb-shadow) / 0.12);
 }
 
 :global(.task-info-edit-modal-panel > header) {
-  border-bottom: 1px solid #e5e7eb;
-  background: #ffffff;
+  border-bottom: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
 }
 
 :global(.task-info-edit-modal-panel > header h2) {
-  color: #111827 !important;
+  color: rgb(var(--yb-text));
 }
 
 :global(.task-info-edit-modal-panel > header button) {
-  color: #6b7280 !important;
+  color: rgb(var(--yb-text-muted));
 }
 
 :global(.task-info-edit-modal-panel > header button:hover) {
-  color: #111827 !important;
+  color: rgb(var(--yb-text));
 }
 
 :global(.task-info-edit-modal-panel > div.flex-1) {
-  color: #111827 !important;
+  color: rgb(var(--yb-text));
 }
 </style>

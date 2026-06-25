@@ -19,8 +19,8 @@ export function usePermission() {
   /**
    * 能力判断：v1.8 起调用方统一使用点号（`task.create`、`role.assign` 等）。
    *
-   * - `PermissionEnum` 值仍是历史冒号形式，走 `hasPermission`（其 `actions` 别名
-   *   层已同时塞入点号与冒号两种 key，命中结果一致）；
+   * - `PermissionEnum` 里仍有历史冒号形式，走 `hasPermission`（其 `actions` 别名
+   *   层已同时塞入点号与冒号两种 key，命中结果一致）；已迁移的点号枚举也同路处理；
    * - 其它字符串走 `hasAction`（包含 v1.8 新增的细粒度 action）；
    * - 冒号形式调用会被规范化为点号并在 DEV 态 `console.warn`，便于清理残留。
    */

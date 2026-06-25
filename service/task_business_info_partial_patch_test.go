@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -449,11 +450,12 @@ func TestUpdateSKUItemInfoProductNameUpdatesShortNameAndQueuesProductManagementS
 		},
 	}
 	productManagement := &productManagementQueueStub{}
+	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
 		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
+		eventRepo,
 		nil,
 		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
@@ -481,6 +483,19 @@ func TestUpdateSKUItemInfoProductNameUpdatesShortNameAndQueuesProductManagementS
 	}
 	if got := productManagement.queuedTasks; len(got) != 1 || got[0] != taskID {
 		t.Fatalf("queued product management tasks = %+v, want [%d]", got, taskID)
+	}
+	if len(eventRepo.events) == 0 {
+		t.Fatal("expected sku item update event")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(eventRepo.events[len(eventRepo.events)-1].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal sku item update payload: %v", err)
+	}
+	if got := payload["product_name_snapshot"]; got != "新子项名称" {
+		t.Fatalf("event product_name_snapshot = %v, want 新子项名称", got)
+	}
+	if got := payload["task_product_name_snapshot"]; got != "批量母任务" {
+		t.Fatalf("event task_product_name_snapshot = %v, want 批量母任务", got)
 	}
 }
 

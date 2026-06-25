@@ -13,11 +13,11 @@
         </p>
         <div
           v-if="hasDesignOutputHint"
-          class="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 space-y-1.5"
+          class="reassign-risk-hint"
         >
-          <p class="font-semibold m-0">风险提示</p>
-          <p class="m-0">当前任务可能已存在设计稿/版本记录，请先与原设计师沟通确认后再重新指派。</p>
-          <p class="m-0">重新指派后，新设计师将在现有任务基础上继续处理。</p>
+          <p class="reassign-risk-title">风险提示</p>
+          <p>当前任务可能已存在设计稿/版本记录，请先与原设计师沟通确认后再重新指派。</p>
+          <p>重新指派后，新设计师将在现有任务基础上继续处理。</p>
         </div>
 
         <div class="field-block">
@@ -36,8 +36,9 @@
         </div>
 
         <div class="field-block">
-          <label class="field-label-text">原因说明</label>
+          <label class="field-label-text" :for="reasonNoteId">原因说明</label>
           <textarea
+            :id="reasonNoteId"
             v-model="reasonNote"
             class="reason-textarea"
             rows="3"
@@ -72,7 +73,7 @@
           确认将该任务从 <strong>{{ currentAssigneeName || '当前负责人' }}</strong> 重新指派给
           <strong>{{ pendingConfirm?.assigneeName }}</strong> 吗？
         </p>
-        <p v-if="hasDesignOutputHint" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        <p v-if="hasDesignOutputHint" class="reassign-confirm-risk">
           当前任务可能已有设计产出，请确认已与原设计师沟通后再继续。重新指派后，新设计师将继续在现有任务基础上处理。
         </p>
         <p v-else-if="pendingConfirm?.mode === 'clear'" class="confirm-copy-secondary text-sm">
@@ -88,7 +89,7 @@
       </div>
     </template>
     <template #footer>
-      <footer class="flex-shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
+      <footer class="reassign-footer">
         <template v-if="step === 'form'">
           <BaseButton size="sm" variant="secondary" @click="close">取消</BaseButton>
           <BaseButton
@@ -115,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
@@ -166,6 +167,7 @@ const reasonCode = ref<string>('')
 const reasonNote = ref('')
 const selectedId = ref<string | number>('')
 const formError = ref('')
+const reasonNoteId = useId()
 
 const selectableDesigners = computed(() => {
   const cur = props.currentAssigneeId != null ? String(props.currentAssigneeId) : ''
@@ -288,18 +290,18 @@ function submitConfirm() {
 .field-label-text {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .field-readonly {
   margin: 0;
   font-size: 0.875rem;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   padding: 0.5rem 0.75rem;
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   border-radius: 0.375rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
 }
 .reason-textarea {
   width: 100%;
@@ -307,61 +309,99 @@ function submitConfirm() {
   font-size: 0.875rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #111827;
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
   resize: vertical;
   font-family: inherit;
 }
 
 .reason-textarea::placeholder {
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 
 .reason-textarea:disabled {
-  border-color: #d1d5db;
-  background: #f3f4f6;
-  color: #6b7280;
+  border-color: rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-muted));
 }
 .reason-textarea:focus {
   outline: none;
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 1px #bfdbfe;
+  border-color: rgb(var(--yb-brand-border-strong));
+  box-shadow: 0 0 0 1px rgb(var(--yb-brand-border));
 }
 .form-error {
   margin: 0;
   font-size: 0.8125rem;
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 
 .intro-copy {
-  color: #374151;
+  color: rgb(var(--yb-text-body));
 }
 
 .intro-copy-strong {
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 
 .confirm-copy-primary {
-  color: #111827;
+  color: rgb(var(--yb-text));
 }
 
 .confirm-copy-secondary {
-  color: #4b5563;
+  color: rgb(var(--yb-text-secondary));
 }
 
 .confirm-reason-label {
-  color: #111827;
+  color: rgb(var(--yb-text));
+}
+
+.reassign-risk-hint,
+.reassign-confirm-risk {
+  border: 1px solid rgb(var(--yb-warning-border-soft));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-warning-strong));
+  font-size: 0.875rem;
+}
+
+.reassign-risk-hint {
+  padding: 0.625rem 0.75rem;
+}
+
+.reassign-risk-hint p {
+  margin: 0;
+}
+
+.reassign-risk-hint p + p {
+  margin-top: 0.375rem;
+}
+
+.reassign-risk-title {
+  font-weight: 600;
+}
+
+.reassign-confirm-risk {
+  padding: 0.5rem 0.75rem;
+}
+
+.reassign-footer {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  border-top: 1px solid rgb(var(--yb-border-quiet));
+  padding: 1rem 1.25rem;
 }
 
 .reassign-select :deep(label) {
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
 }
 
 .reassign-select :deep(.h-11) {
-  border-color: #d1d5db;
-  background: #ffffff;
-  color: #111827;
+  border-color: rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text));
 }
 
 .reassign-select :deep(.h-11 > button) {
@@ -369,20 +409,12 @@ function submitConfirm() {
 }
 
 .reassign-select :deep(.h-11 > button:disabled) {
-  color: #6b7280 !important;
-}
-
-.reassign-select :deep(.h-11 .text-slate-500) {
-  color: #6b7280 !important;
-}
-
-.reassign-select :deep(.h-11 .text-slate-400) {
-  color: #9ca3af !important;
+  color: rgb(var(--yb-text-muted));
 }
 
 .reassign-select :deep(.cursor-not-allowed) {
-  background: #f3f4f6 !important;
-  color: #6b7280 !important;
-  opacity: 1 !important;
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-muted));
+  opacity: 1;
 }
 </style>

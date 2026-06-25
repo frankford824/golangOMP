@@ -113,22 +113,22 @@ function joinedText(u: OrgUser) {
   margin: 0 0 0.125rem;
   font-size: 0.9375rem;
   font-weight: 700;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .path-line {
   margin: 0;
   font-size: 0.8125rem;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
   font-weight: 500;
 }
 .path-line.muted {
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
   font-weight: 400;
 }
 .count-line {
   margin: 0.25rem 0 0;
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .head-actions {
   display: flex;
@@ -139,7 +139,7 @@ function joinedText(u: OrgUser) {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.5rem;
 }
 .data-table {
@@ -149,21 +149,21 @@ function joinedText(u: OrgUser) {
 }
 .data-table th,
 .data-table td {
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid rgb(var(--yb-surface-slate));
   padding: 0.5rem 0.65rem;
   text-align: left;
 }
 .data-table th {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
   font-weight: 600;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
 }
 .mono {
   font-family: var(--yb-font-data);
   font-size: 0.6875rem;
 }
 .roles {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   max-width: 12rem;
 }
 .col-actions {
@@ -173,7 +173,7 @@ function joinedText(u: OrgUser) {
 .link {
   background: none;
   border: none;
-  color: #2563eb;
+  color: rgb(var(--yb-brand));
   cursor: pointer;
   font-size: 0.75rem;
   margin-right: 0.5rem;
@@ -181,6 +181,6 @@ function joinedText(u: OrgUser) {
   text-decoration: underline;
 }
 .link.danger {
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 </style>

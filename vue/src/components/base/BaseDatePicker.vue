@@ -1,28 +1,32 @@
 <template>
   <div class="flex flex-col gap-1">
-    <label v-if="label" class="text-sm font-medium text-slate-600">
+    <label v-if="label" :for="dateId" class="text-sm font-medium text-[rgb(var(--yb-text-muted-strong))]">
       {{ label }}
     </label>
     <input
+      :id="dateId"
       type="date"
       :value="displayValue"
       :disabled="disabled"
       :min="min"
       :max="max"
-      class="w-full h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+      :aria-label="label ? undefined : '日期选择'"
+      :aria-invalid="error ? 'true' : undefined"
+      :aria-describedby="describedBy"
+      class="w-full h-11 rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft)_/_0.8)] px-3 text-sm text-[rgb(var(--yb-text))] shadow-sm outline-none transition focus:border-[rgb(var(--yb-brand-border-strong))] focus:ring-2 focus:ring-[rgb(var(--yb-brand-accent)_/_0.24)] disabled:cursor-not-allowed disabled:bg-[rgb(var(--yb-surface-muted))] disabled:text-[rgb(var(--yb-text-faint))]"
       @input="onInput"
     />
-    <p v-if="hint" class="text-xs text-slate-400">
+    <p v-if="hint" :id="hintId" class="text-xs text-[rgb(var(--yb-text-faint))]">
       {{ hint }}
     </p>
-    <p v-if="error" class="text-xs text-red-600">
+    <p v-if="error" :id="errorId" class="text-xs text-[rgb(var(--yb-danger))]">
       {{ error }}
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { toBeijingDateInputValue } from '@/utils/date'
 
 const props = withDefaults(
@@ -45,6 +49,16 @@ const emit = defineEmits<{
   'update:modelValue': [string]
 }>()
 
+const uid = useId()
+const dateId = `${uid}-date`
+const hintId = `${uid}-hint`
+const errorId = `${uid}-error`
+const describedBy = computed(() => {
+  const ids: string[] = []
+  if (props.error) ids.push(errorId)
+  if (props.hint) ids.push(hintId)
+  return ids.length ? ids.join(' ') : undefined
+})
 
 const displayValue = computed(() => {
   const v = props.modelValue

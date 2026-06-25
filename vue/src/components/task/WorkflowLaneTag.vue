@@ -75,14 +75,14 @@ const sizeClass = computed(() => (props.size === 'md' ? 'size-md' : 'size-sm'))
 }
 
 .lane-tag.is-customization {
-  background: #7c3aed;
-  color: #fff;
-  border: 1px solid #7c3aed;
+  background: rgb(var(--yb-purple));
+  color: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-purple));
 }
 
 .lane-tag.is-normal {
   background: transparent;
-  color: #475569;
-  border: 1px solid #cbd5e1;
+  color: rgb(var(--yb-text-soft));
+  border: 1px solid rgb(var(--yb-text-disabled));
 }
 </style>

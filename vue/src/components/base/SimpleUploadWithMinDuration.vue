@@ -10,8 +10,8 @@
     <!-- 选择区：点击或拖拽（等价于 el-upload drag） -->
     <div
       v-if="!file"
-      class="upload-dropzone flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-stone-300 bg-stone-50/80 px-6 py-10 text-center transition-colors hover:border-stone-400 hover:bg-stone-50"
-      :class="{ 'border-stone-500 bg-stone-100': dragOver }"
+      class="upload-dropzone flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[rgb(var(--yb-border-strong))] bg-[rgb(var(--yb-surface-soft)_/_0.8)] px-6 py-10 text-center transition-colors hover:border-[rgb(var(--yb-brand-border-strong))] hover:bg-[rgb(var(--yb-brand-soft))]"
+      :class="{ 'border-[rgb(var(--yb-brand))] bg-[rgb(var(--yb-brand-soft))]': dragOver }"
       role="button"
       tabindex="0"
       @click="openPicker"
@@ -29,26 +29,26 @@
         :accept="accept"
         @change="onInputChange"
       />
-      <span class="text-sm font-medium text-stone-700">点击或拖拽文件到此处</span>
-      <span class="mt-1 text-xs text-stone-500">单文件上传</span>
+      <span class="text-sm font-medium text-[rgb(var(--yb-text-body))]">点击或拖拽文件到此处</span>
+      <span class="mt-1 text-xs text-[rgb(var(--yb-text-muted))]">单文件上传</span>
     </div>
 
     <!-- 已选文件：文件名（截断 + title tooltip）+ 大小 -->
-    <div v-else class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+    <div v-else class="rounded-xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] p-4 shadow-sm">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <p
-            class="truncate text-sm font-medium text-stone-800"
+            class="truncate text-sm font-medium text-[rgb(var(--yb-text))]"
             :title="file.name"
           >
             {{ file.name }}
           </p>
-          <p class="mt-0.5 text-xs text-stone-500">{{ formattedSize }}</p>
+          <p class="mt-0.5 text-xs text-[rgb(var(--yb-text-muted))]">{{ formattedSize }}</p>
         </div>
         <button
           v-if="phase === 'idle' || phase === 'error'"
           type="button"
-          class="shrink-0 text-xs text-stone-500 underline decoration-stone-300 hover:text-stone-800"
+          class="shrink-0 text-xs text-[rgb(var(--yb-text-muted))] underline decoration-[rgb(var(--yb-border-strong))] hover:text-[rgb(var(--yb-text))]"
           @click="clearFile"
         >
           移除
@@ -57,14 +57,14 @@
 
       <!-- 上传中 / 成功后最小停留：进度条（等价于 el-progress line） -->
       <div v-if="phase === 'uploading' || phase === 'holding'" class="mt-4">
-        <div class="mb-1 flex items-center justify-between text-xs text-stone-600">
+        <div class="mb-1 flex items-center justify-between text-xs text-[rgb(var(--yb-text-muted-strong))]">
           <span>{{ holdLabel }}</span>
           <span class="tabular-nums">{{ displayPercent }}%</span>
         </div>
-        <div class="h-2 w-full overflow-hidden rounded-full bg-stone-200">
+        <div class="h-2 w-full overflow-hidden rounded-full bg-[rgb(var(--yb-surface-muted))]">
           <div
-            class="h-full rounded-full bg-stone-600 transition-[width] duration-150 ease-out"
-            :class="phase === 'holding' ? 'bg-stone-500' : 'bg-stone-600'"
+            class="h-full rounded-full bg-[rgb(var(--yb-brand))] transition-[width] duration-150 ease-out"
+            :class="phase === 'holding' ? 'bg-[rgb(var(--yb-brand-accent))]' : 'bg-[rgb(var(--yb-brand))]'"
             :style="{ width: `${displayPercent}%` }"
           />
         </div>
@@ -73,15 +73,15 @@
       <!-- 成功 -->
       <div
         v-if="phase === 'success'"
-        class="mt-4 flex items-center gap-2 text-sm font-medium text-emerald-700"
+        class="mt-4 flex items-center gap-2 text-sm font-medium text-[rgb(var(--yb-success-text))]"
       >
-        <CheckCircle2 class="h-5 w-5 shrink-0 text-emerald-600" aria-hidden="true" />
+        <CheckCircle2 class="h-5 w-5 shrink-0 text-[rgb(var(--yb-success))]" aria-hidden="true" />
         <span>上传成功</span>
       </div>
 
       <!-- 失败 -->
       <div v-if="phase === 'error'" class="mt-4 space-y-3">
-        <p class="text-sm text-red-600">{{ errorMessage }}</p>
+        <p class="text-sm text-[rgb(var(--yb-danger))]">{{ errorMessage }}</p>
         <div class="flex flex-wrap gap-2">
           <BaseButton size="sm" variant="secondary" @click="retry">重试</BaseButton>
           <BaseButton size="sm" variant="ghost" @click="clearFile">重新选择</BaseButton>

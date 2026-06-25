@@ -2,7 +2,7 @@
   <div ref="rootEl" class="relative w-full">
     <div
       ref="triggerEl"
-      class="flex h-11 w-full items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 text-sm text-slate-700 shadow-sm transition focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-900/5 hover:border-slate-300 hover:bg-slate-100"
+      class="flex h-11 w-full items-center gap-1 rounded-lg border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft))] px-2 text-sm text-[rgb(var(--yb-text-body))] shadow-sm transition focus-within:border-[rgb(var(--yb-brand-border-strong))] focus-within:ring-2 focus-within:ring-[rgb(var(--yb-brand)/0.12)] hover:border-[rgb(var(--yb-border-strong))] hover:bg-[rgb(var(--yb-surface-muted))]"
     >
       <button
         type="button"
@@ -11,12 +11,12 @@
       >
         <span
           class="min-w-0 flex-1 truncate"
-          :class="{ 'text-slate-500': !internalValue.length }"
+          :class="{ 'text-[rgb(var(--yb-text-muted))]': !internalValue.length }"
         >
           {{ displayLabel }}
         </span>
         <span
-          class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-slate-400 transition-transform duration-150"
+          class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-[rgb(var(--yb-text-faint))] transition-transform duration-150"
           :class="{ 'rotate-180': open }"
         >
           ▾
@@ -25,7 +25,7 @@
       <button
         v-if="internalValue.length"
         type="button"
-        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-200/80 hover:text-slate-600"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--yb-text-faint))] transition hover:bg-[rgb(var(--yb-border-slate)/0.8)] hover:text-[rgb(var(--yb-text-secondary))]"
         aria-label="清除状态筛选"
         @click.stop="clearAll"
       >
@@ -38,29 +38,29 @@
     <div
       v-if="open"
       ref="panelEl"
-      class="fixed rounded-2xl border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-100/60 overflow-hidden"
+      class="fixed rounded-2xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] py-1 shadow-lg ring-1 ring-[rgb(var(--yb-border-quiet)/0.6)] overflow-hidden"
       :style="panelStyle"
     >
       <div class="mb-1 flex items-center justify-between px-3">
-        <span class="text-[11px] font-medium text-slate-500">任务状态</span>
+        <span class="text-[11px] font-medium text-[rgb(var(--yb-text-muted))]">任务状态</span>
         <button
           type="button"
-          class="text-[11px] text-slate-400 hover:text-slate-600"
+          class="text-[11px] text-[rgb(var(--yb-text-faint))] hover:text-[rgb(var(--yb-text-secondary))]"
           @click="clearAll"
         >
           清空
         </button>
       </div>
-      <div class="max-h-56 space-y-1 overflow-auto py-1 pr-1 text-[11px] text-slate-700">
+      <div class="max-h-56 space-y-1 overflow-auto py-1 pr-1 text-[11px] text-[rgb(var(--yb-text-body))]">
         <label
           v-for="opt in options"
           :key="opt.value"
-          class="flex cursor-pointer items-center gap-1 px-3 py-1.5 rounded-md transition-colors hover:bg-slate-100"
+          class="flex cursor-pointer items-center gap-1 px-3 py-1.5 rounded-md transition-colors hover:bg-[rgb(var(--yb-surface-muted))]"
         >
           <input
             type="checkbox"
             :value="opt.value"
-            class="h-3 w-3 rounded border-slate-300 text-slate-900 focus:ring-slate-900/20"
+            class="h-3 w-3 rounded border-[rgb(var(--yb-border-strong))] text-[rgb(var(--yb-text))] focus:ring-[rgb(var(--yb-brand)/0.2)]"
             :checked="internalValue.includes(opt.value)"
             @change="onToggle(opt.value)"
           />

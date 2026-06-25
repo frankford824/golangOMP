@@ -147,21 +147,21 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   margin: 0 0 0.25rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .panel-hint {
   margin: 0 0 0.5rem;
   font-size: 0.6875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   line-height: 1.35;
 }
 .tree-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.5rem;
-  background: #fafafa;
+  background: rgb(var(--yb-surface-row-even));
   padding: 0.375rem;
 }
 .dept-block + .dept-block {
@@ -178,18 +178,18 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   user-select: none;
 }
 .dept-row:hover {
-  background: #f1f5f9;
+  background: rgb(var(--yb-surface-slate));
 }
 .chevron {
   font-size: 0.65rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
   width: 0.75rem;
 }
 .dept-name {
   flex: 1;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
   text-align: left;
 }
 .group-list {
@@ -204,24 +204,24 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   margin-bottom: 2px;
   border: 1px solid transparent;
   border-radius: 0.375rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   cursor: pointer;
   font: inherit;
   text-align: left;
   position: relative;
 }
 .group-row:hover {
-  border-color: #e2e8f0;
+  border-color: rgb(var(--yb-border-slate));
 }
 .group-row.active {
-  border-color: #22c55e;
-  background: #f0fdf4;
+  border-color: rgb(var(--yb-success-bright));
+  background: rgb(var(--yb-success-ui-soft));
 }
 .group-name {
   flex: 1;
   min-width: 0;
   font-size: 0.75rem;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -229,8 +229,8 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 .count-badge {
   font-size: 0.625rem;
   font-weight: 600;
-  color: #475569;
-  background: #e2e8f0;
+  color: rgb(var(--yb-text-soft));
+  background: rgb(var(--yb-border-slate));
   border-radius: 9999px;
   padding: 0.05rem 0.35rem;
   flex-shrink: 0;
@@ -244,15 +244,15 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   justify-content: center;
   border: none;
   background: transparent;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
   border-radius: 0.25rem;
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
 }
 .more-btn:hover {
-  background: #f1f5f9;
-  color: #475569;
+  background: rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-soft));
 }
 .menu {
   position: absolute;
@@ -261,10 +261,10 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   margin-top: 2px;
   z-index: 20;
   min-width: 9rem;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.5rem;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 8px 24px rgb(var(--yb-shadow) / 0.08);
   padding: 0.25rem;
 }
 .menu-right {
@@ -281,17 +281,17 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   background: none;
   border-radius: 0.25rem;
   cursor: pointer;
-  color: #334155;
+  color: rgb(var(--yb-text-slate));
 }
 .menu-item:hover {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .menu-item.danger {
-  color: #b91c1c;
+  color: rgb(var(--yb-danger-text));
 }
 .empty-groups {
   font-size: 0.6875rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
   padding: 0.25rem 0.5rem;
   margin: 0;
 }

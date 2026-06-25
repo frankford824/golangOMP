@@ -1,5 +1,5 @@
 <template>
-  <section class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
+  <section class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
     <h1 class="text-base font-semibold text-[var(--v1-text-primary)]">报表中心（L1）</h1>
     <div v-if="loadError" class="mt-3 text-xs text-[var(--v1-danger)]">{{ loadError }}</div>
     <div v-else class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-5">

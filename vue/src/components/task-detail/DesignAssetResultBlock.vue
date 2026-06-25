@@ -398,7 +398,7 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 .timeline-empty {
   margin: 0.25rem 0 0;
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 
 .manuscript-head {
@@ -416,19 +416,19 @@ function onSharedVersionClick(version: TaskAssetVersion) {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
 }
 
 .manuscript-meta {
   margin: 0;
   font-size: 0.6875rem;
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
 }
 
 .design-asset-result-manuscript {
   border-radius: 0.625rem;
-  border: 1px solid rgb(226 232 240);
-  background: rgb(248 250 252);
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
   padding: 0.75rem;
   min-width: 0;
 }
@@ -445,8 +445,8 @@ function onSharedVersionClick(version: TaskAssetVersion) {
   gap: 0.35rem;
   min-width: 0;
   border-radius: 0.5rem;
-  border: 1px solid rgb(226 232 240);
-  background: rgb(255 255 255);
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface));
   padding: 0.45rem;
 }
 
@@ -457,7 +457,7 @@ function onSharedVersionClick(version: TaskAssetVersion) {
   overflow: hidden;
   border: none;
   padding: 0;
-  background: rgb(241 245 249);
+  background: rgb(var(--yb-surface-slate));
 }
 
 .manuscript-card-visual--image {
@@ -470,7 +470,7 @@ function onSharedVersionClick(version: TaskAssetVersion) {
   height: 100%;
   object-fit: contain;
   display: block;
-  background: #fff;
+  background: rgb(var(--yb-surface));
 }
 
 .manuscript-card-visual--image :deep(.manuscript-preview-media) {
@@ -511,13 +511,13 @@ function onSharedVersionClick(version: TaskAssetVersion) {
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .manuscript-card-label {
   margin: 0;
   font-size: 0.6875rem;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
   line-height: 1.3;
   word-break: break-all;
 }
@@ -529,14 +529,14 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 .manuscript-empty {
   margin: 0;
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: rgb(var(--yb-text-faint));
 }
 
 .design-asset-pane--refs,
 .design-asset-pane--timeline {
   border-radius: 0.625rem;
-  border: 1px solid rgb(226 232 240);
-  background: rgb(248 250 252);
+  border: 1px solid rgb(var(--yb-border-slate));
+  background: rgb(var(--yb-surface-subtle));
   padding: 0.75rem;
   min-width: 0;
 }
@@ -553,7 +553,7 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 .section-label {
   font-size: 0.6875rem;
   font-weight: 600;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
   text-transform: uppercase;
   display: block;
   margin-bottom: 0.375rem;
@@ -562,13 +562,13 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 .ref-pane-hint {
   font-size: 0.6875rem;
   font-weight: 500;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .shared-asset-note {
   margin: 0 0 0.375rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 
 .shared-asset-strip {
@@ -579,9 +579,9 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 }
 
 .shared-asset-chip {
-  border: 1px solid #dbeafe;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border: 1px solid rgb(var(--yb-brand-subtle));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
   border-radius: 999px;
   font-size: 0.6875rem;
   padding: 0.18rem 0.5rem;
@@ -619,19 +619,19 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 }
 
 .version-group-kind.kind-delivery {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-color: #bfdbfe;
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
+  border-color: rgb(var(--yb-brand-border));
 }
 
 .version-group-kind.kind-source {
-  background: #fef3c7;
-  color: #a16207;
-  border-color: #fde68a;
+  background: rgb(var(--yb-warning-badge-soft));
+  color: rgb(var(--yb-warning-badge-text));
+  border-color: rgb(var(--yb-warning-border-soft));
 }
 
 .version-group-no {
-  color: #94a3b8;
+  color: rgb(var(--yb-text-placeholder));
   font-weight: 500;
 }
 
@@ -653,20 +653,20 @@ function onSharedVersionClick(version: TaskAssetVersion) {
   align-items: center;
   gap: 0.25rem;
   padding: 0.35rem 0.6rem;
-  border: 1px solid rgb(226 232 240);
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.5rem;
-  background: rgb(248 250 252);
+  background: rgb(var(--yb-surface-subtle));
   font-size: 0.6875rem;
   font-weight: 600;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .version-btn.version-active {
-  border-color: rgb(30 41 59);
-  color: rgb(15 23 42);
-  background: rgb(241 245 249);
+  border-color: rgb(var(--yb-text-deep));
+  color: rgb(var(--yb-text-navy));
+  background: rgb(var(--yb-surface-slate));
 }
 
 .version-btn:disabled {
@@ -686,8 +686,8 @@ function onSharedVersionClick(version: TaskAssetVersion) {
   width: 100%;
   min-height: 80px;
   border-radius: 4px;
-  border: 1px dashed rgb(203 213 225);
-  background: rgb(248 250 252);
+  border: 1px dashed rgb(var(--yb-text-disabled));
+  background: rgb(var(--yb-surface-subtle));
   padding: 1rem;
   text-align: center;
 }
@@ -695,13 +695,13 @@ function onSharedVersionClick(version: TaskAssetVersion) {
 .nonpreview-name {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: rgb(51 65 85);
+  color: rgb(var(--yb-text-slate));
   margin: 0 0 0.25rem;
 }
 
 .nonpreview-hint {
   font-size: 0.75rem;
-  color: rgb(148 163 184);
+  color: rgb(var(--yb-text-placeholder));
   margin: 0;
 }
 

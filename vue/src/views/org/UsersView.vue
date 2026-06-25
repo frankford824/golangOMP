@@ -1,5 +1,5 @@
 <template>
-  <section class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
+  <section class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
     <h1 class="text-base font-semibold text-[var(--v1-text-primary)]">用户管理</h1>
     <div class="mt-3 overflow-x-auto">
       <table class="w-full min-w-[40rem] border-collapse text-sm">

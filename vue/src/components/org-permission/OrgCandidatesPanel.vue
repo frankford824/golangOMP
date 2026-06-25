@@ -188,7 +188,7 @@ function hasLocation(u: OrgUser) {
   margin: 0 0 0.5rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .tabs {
   display: flex;
@@ -199,26 +199,26 @@ function hasLocation(u: OrgUser) {
   flex: 1;
   padding: 0.35rem 0.25rem;
   font-size: 0.6875rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.375rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   cursor: pointer;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .tab.active {
-  border-color: #22c55e;
-  background: #f0fdf4;
-  color: #166534;
+  border-color: rgb(var(--yb-success-bright));
+  background: rgb(var(--yb-success-ui-soft));
+  color: rgb(var(--yb-success-deep));
   font-weight: 600;
 }
 .list-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgb(var(--yb-border-slate));
   border-radius: 0.5rem;
   padding: 0.35rem;
-  background: #fafafa;
+  background: rgb(var(--yb-surface-row-even));
 }
 .user-row {
   display: flex;
@@ -226,8 +226,8 @@ function hasLocation(u: OrgUser) {
   gap: 0.35rem;
   padding: 0.45rem;
   margin-bottom: 0.35rem;
-  background: #fff;
-  border: 1px solid #f1f5f9;
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-surface-slate));
   border-radius: 0.375rem;
 }
 .user-meta {
@@ -238,12 +238,12 @@ function hasLocation(u: OrgUser) {
 }
 .u-name {
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .u-sub,
 .u-loc,
 .u-roles {
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .row-actions {
   display: flex;

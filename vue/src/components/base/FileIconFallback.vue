@@ -45,8 +45,8 @@ const extLabel = computed(() => {
   width: 100%;
   height: 100%;
   border-radius: 4px;
-  border: 1px solid rgb(191 219 254);
-  background: #fff;
+  border: 1px solid rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-surface));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -60,7 +60,7 @@ const extLabel = computed(() => {
 .file-ext {
   font-size: 0.625rem;
   font-weight: 700;
-  color: rgb(29 78 216);
+  color: rgb(var(--yb-brand-strong));
 }
 
 .file-name {
@@ -70,13 +70,13 @@ const extLabel = computed(() => {
   white-space: nowrap;
   font-size: 0.5rem;
   line-height: 1.1;
-  color: rgb(71 85 105);
+  color: rgb(var(--yb-text-soft));
 }
 
 .file-size {
   font-size: 0.5rem;
   line-height: 1.1;
-  color: rgb(100 116 139);
+  color: rgb(var(--yb-text-muted-strong));
   font-variant-numeric: tabular-nums;
 }
 </style>

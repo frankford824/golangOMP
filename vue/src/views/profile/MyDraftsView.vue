@@ -1,6 +1,6 @@
 <template>
   <section class="space-y-4">
-    <div class="rounded-xl border border-[var(--v1-border)] bg-white p-4">
+    <div class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
       <div class="flex items-center justify-between gap-2">
         <div>
           <h1 class="text-base font-semibold text-[var(--v1-text-primary)]">任务草稿</h1>
@@ -11,14 +11,14 @@
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="rounded border border-[var(--v1-border)] bg-white px-3 py-1 text-xs text-[var(--v1-text-secondary)]"
+            class="rounded border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] px-3 py-1 text-xs text-[var(--v1-text-secondary)]"
             :disabled="loading"
             @click="loadDrafts"
           >
             {{ loading ? '刷新中...' : '刷新' }}
           </button>
           <router-link
-            class="rounded bg-[var(--v1-bg-primary)] px-3 py-1 text-xs text-white"
+            class="rounded bg-[var(--v1-bg-primary)] px-3 py-1 text-xs text-[rgb(var(--yb-text-inverse))]"
             to="/tasks/create?create=1"
           >
             创建任务
@@ -40,7 +40,7 @@
         <article
           v-for="draft in drafts"
           :key="draft.id"
-          class="rounded-xl border border-[var(--v1-border)] bg-white p-4"
+          class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4"
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -65,7 +65,7 @@
               </router-link>
               <button
                 type="button"
-                class="rounded border border-red-200 px-2 py-1 text-xs text-red-600"
+                class="rounded border border-[rgb(var(--yb-danger-border))] px-2 py-1 text-xs text-[rgb(var(--yb-danger))]"
                 :disabled="deletingId === draft.id"
                 @click="removeDraft(draft.id)"
               >

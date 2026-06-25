@@ -306,9 +306,9 @@ function onCancel() {
   margin: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
-  color: #1e40af;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  color: rgb(var(--yb-brand-deep));
+  background: rgb(var(--yb-brand-soft));
+  border: 1px solid rgb(var(--yb-brand-border));
   border-radius: 6px;
   line-height: 1.45;
 }
@@ -330,7 +330,7 @@ function onCancel() {
 }
 .field-label {
   font-size: 0.75rem;
-  color: #475569;
+  color: rgb(var(--yb-text-soft));
   font-weight: 500;
 }
 .reason-textarea {
@@ -338,22 +338,22 @@ function onCancel() {
   min-height: 2.25rem;
   padding: 0.35rem 0.5rem;
   font-size: 0.875rem;
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgb(var(--yb-text-disabled));
   border-radius: 6px;
   background: white;
   box-sizing: border-box;
 }
 .reason-textarea:focus {
   outline: none;
-  border-color: #60a5fa;
-  box-shadow: 0 0 0 2px rgb(96 165 250 / 0.25);
+  border-color: rgb(var(--yb-brand-accent));
+  box-shadow: 0 0 0 2px rgb(var(--yb-brand-accent) / 0.25);
 }
 .modal-error {
   margin: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.8125rem;
-  color: #b91c1c;
-  background: #fef2f2;
+  color: rgb(var(--yb-danger-text));
+  background: rgb(var(--yb-danger-soft));
   border-radius: 6px;
 }
 .modal-footer {

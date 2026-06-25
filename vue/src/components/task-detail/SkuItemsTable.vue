@@ -280,10 +280,10 @@ function formatFiledAt(value: string): string {
 
 <style scoped>
 .sku-section {
-  border: 1px solid var(--dv-border-soft, #e8ecf4);
+  border: 1px solid var(--dv-border-soft, rgb(var(--yb-border-ui-soft)));
   border-radius: var(--dv-r-outer, 1.25rem);
-  background: #fff;
-  box-shadow: var(--dv-surface-elev, 0 1px 3px rgba(15, 23, 42, 0.07));
+  background: rgb(var(--yb-surface));
+  box-shadow: var(--dv-surface-elev, 0 1px 3px rgb(var(--yb-shadow) / 0.07));
   padding: 1.15rem 1.2rem 1.2rem;
 }
 
@@ -299,7 +299,7 @@ function formatFiledAt(value: string): string {
   margin: 0;
   font-size: 1rem;
   font-weight: 800;
-  color: #151a21;
+  color: rgb(var(--yb-text-ink));
   letter-spacing: -0.01em;
   line-height: 1.3;
 }
@@ -310,8 +310,8 @@ function formatFiledAt(value: string): string {
   margin-left: 0.4rem;
   padding: 0.1rem 0.45rem;
   border-radius: 9999px;
-  background: #f1f5f9;
-  color: #64748b;
+  background: rgb(var(--yb-surface-slate));
+  color: rgb(var(--yb-text-muted-strong));
   font-size: 0.6875rem;
   font-weight: 700;
   vertical-align: middle;
@@ -331,33 +331,33 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-filing-badge--done {
-  color: #067647;
-  background: #ecfdf3;
-  border: 1px solid #a7f3d0;
+  color: rgb(var(--yb-success-text));
+  background: rgb(var(--yb-success-mint));
+  border: 1px solid rgb(var(--yb-success-border-soft));
 }
 
 .sku-filing-badge--progress {
-  color: #175cd3;
-  background: #eff8ff;
-  border: 1px solid #bfdbfe;
+  color: rgb(var(--yb-brand-link));
+  background: rgb(var(--yb-info-panel));
+  border: 1px solid rgb(var(--yb-brand-border));
 }
 
 .sku-filing-badge--error {
-  color: #b42318;
-  background: #fef3f2;
-  border: 1px solid #fecdc8;
+  color: rgb(var(--yb-danger-action));
+  background: rgb(var(--yb-surface-danger-ui));
+  border: 1px solid rgb(var(--yb-border-danger-ui));
 }
 
 .sku-filing-badge--default {
-  color: #667085;
-  background: #f9fafb;
-  border: 1px solid #e4e7ec;
+  color: rgb(var(--yb-text-label));
+  background: rgb(var(--yb-surface-soft));
+  border: 1px solid rgb(var(--yb-border-control));
 }
 
 .sku-table-wrap {
   overflow-x: auto;
   border-radius: 0.75rem;
-  border: 1px solid #eaecf0;
+  border: 1px solid rgb(var(--yb-border-muted));
 }
 
 .sku-table {
@@ -372,9 +372,9 @@ function formatFiledAt(value: string): string {
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #667085;
-  background: #f9fafb;
-  border-bottom: 1px solid #eaecf0;
+  color: rgb(var(--yb-text-label));
+  background: rgb(var(--yb-surface-soft));
+  border-bottom: 1px solid rgb(var(--yb-border-muted));
   white-space: nowrap;
 }
 
@@ -386,13 +386,13 @@ function formatFiledAt(value: string): string {
   padding: 0.6rem 0.65rem;
   text-align: left;
   font-size: 0.8125rem;
-  color: #344054;
+  color: rgb(var(--yb-text-body-strong));
   vertical-align: middle;
   line-height: 1.45;
 }
 
 .sku-td--seq {
-  color: #98a2b3;
+  color: rgb(var(--yb-text-disabled-strong));
   font-variant-numeric: tabular-nums;
   width: 2.5rem;
 }
@@ -406,7 +406,7 @@ function formatFiledAt(value: string): string {
 .sku-td--req {
   min-width: 140px;
   max-width: 220px;
-  color: #475467;
+  color: rgb(var(--yb-text-neutral));
 }
 
 .sku-td--spec {
@@ -422,13 +422,13 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-spec-main {
-  color: #344054;
+  color: rgb(var(--yb-text-body-strong));
   font-weight: 700;
   line-height: 1.25;
 }
 
 .sku-spec-meta {
-  color: #667085;
+  color: rgb(var(--yb-text-label));
   font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1.15;
@@ -448,24 +448,24 @@ function formatFiledAt(value: string): string {
 
 .sku-cost-value {
   font-weight: 800;
-  color: #111827;
+  color: rgb(var(--yb-text));
   font-variant-numeric: tabular-nums;
 }
 
 .sku-cost-value--empty {
-  color: #98a2b3;
+  color: rgb(var(--yb-text-disabled-strong));
   font-weight: 700;
 }
 
 .sku-cost-meta {
-  color: #667085;
+  color: rgb(var(--yb-text-label));
   font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1;
 }
 
 .sku-row {
-  border-bottom: 1px solid #f2f4f7;
+  border-bottom: 1px solid rgb(var(--yb-surface-control));
   transition: background 0.12s ease;
 }
 
@@ -474,22 +474,22 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-row:hover {
-  background: #f9fafb;
+  background: rgb(var(--yb-surface-soft));
 }
 
 .sku-empty-ref {
-  color: #d0d5dd;
+  color: rgb(var(--yb-border-neutral));
   font-size: 0.75rem;
 }
 
 .sku-status-pill {
   display: inline-flex;
   align-items: center;
-  border: 1px solid #e4e7ec;
+  border: 1px solid rgb(var(--yb-border-control));
   border-radius: 9999px;
   padding: 0.12rem 0.5rem;
-  color: #344054;
-  background: #f9fafb;
+  color: rgb(var(--yb-text-body-strong));
+  background: rgb(var(--yb-surface-soft));
   font-size: 0.6875rem;
   font-weight: 600;
 }
@@ -501,7 +501,7 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-sync-meta {
-  color: #98a2b3;
+  color: rgb(var(--yb-text-disabled-strong));
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
 }
@@ -510,9 +510,9 @@ function formatFiledAt(value: string): string {
   display: inline-flex;
   align-items: center;
   border-radius: 9999px;
-  border: 1px solid #e4e7ec;
-  background: #f9fafb;
-  color: #667085;
+  border: 1px solid rgb(var(--yb-border-control));
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text-label));
   padding: 0.1rem 0.45rem;
   font-size: 0.6875rem;
   font-weight: 600;
@@ -524,20 +524,20 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-action-btn {
-  border: 1px solid #d0d5dd;
+  border: 1px solid rgb(var(--yb-border-neutral));
   border-radius: 0.5rem;
-  background: #fff;
+  background: rgb(var(--yb-surface));
   padding: 0.3rem 0.6rem;
   font-size: 0.6875rem;
   font-weight: 700;
-  color: #344054;
+  color: rgb(var(--yb-text-body-strong));
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 .sku-action-btn:hover {
-  background: #f9fafb;
-  border-color: #98a2b3;
+  background: rgb(var(--yb-surface-soft));
+  border-color: rgb(var(--yb-text-disabled-strong));
 }
 
 .sku-action-btn:disabled {
@@ -546,12 +546,12 @@ function formatFiledAt(value: string): string {
 }
 
 .sku-action-btn--primary {
-  background: #151a21;
-  color: #fff;
-  border-color: #151a21;
+  background: rgb(var(--yb-text-ink));
+  color: rgb(var(--yb-surface));
+  border-color: rgb(var(--yb-text-ink));
 }
 
 .sku-action-btn--primary:hover {
-  background: #0f1218;
+  background: rgb(var(--yb-text-night));
 }
 </style>

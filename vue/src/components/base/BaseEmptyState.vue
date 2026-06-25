@@ -1,12 +1,12 @@
 <template>
   <div
-    class="flex flex-col items-center justify-center gap-2 py-8 text-center text-sm text-slate-500"
+    class="flex flex-col items-center justify-center gap-2 py-8 text-center text-sm text-[rgb(var(--yb-text-muted))]"
   >
-    <div class="mb-1 h-8 w-8 rounded-full border border-dashed border-slate-200" />
-    <p class="text-sm font-medium text-slate-600">
+    <div class="mb-1 h-8 w-8 rounded-full border border-dashed border-[rgb(var(--yb-border))]" />
+    <p class="text-sm font-medium text-[rgb(var(--yb-text-muted-strong))]">
       {{ title }}
     </p>
-    <p v-if="description" class="text-xs text-slate-400">
+    <p v-if="description" class="text-xs text-[rgb(var(--yb-text-faint))]">
       {{ description }}
     </p>
     <slot />
@@ -25,4 +25,3 @@ withDefaults(
   },
 )
 </script>
-

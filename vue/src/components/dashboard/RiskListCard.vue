@@ -104,26 +104,26 @@ function onSelect(item: RiskItem) {
 .risk-card {
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border: 1px solid rgb(226 232 240 / 0.95);
+  background: rgb(var(--yb-surface));
+  border: 1px solid rgb(var(--yb-border-slate) / 0.95);
   border-radius: 0.75rem;
   padding: 1.25rem;
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.05),
-    0 0 0 1px rgba(15, 23, 42, 0.04);
+    0 1px 2px rgb(var(--yb-shadow) / 0.05),
+    0 0 0 1px rgb(var(--yb-shadow) / 0.04);
 }
 .risk-title {
   margin: 0 0 0.75rem;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .risk-loading,
 .risk-error,
 .risk-empty {
   padding: 0.5rem 0;
   font-size: 0.875rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .risk-list {
   list-style: none;
@@ -143,7 +143,7 @@ function onSelect(item: RiskItem) {
   cursor: pointer;
 }
 .risk-item.navigable:hover {
-  background: #f8fafc;
+  background: rgb(var(--yb-surface-subtle));
 }
 .risk-dot {
   width: 6px;
@@ -152,24 +152,24 @@ function onSelect(item: RiskItem) {
   flex-shrink: 0;
 }
 .risk-item.high .risk-dot {
-  background: #dc2626;
+  background: rgb(var(--yb-danger));
 }
 .risk-item.medium .risk-dot {
-  background: #f59e0b;
+  background: rgb(var(--yb-warning-accent));
 }
 .risk-item.low .risk-dot {
-  background: #10b981;
+  background: rgb(var(--yb-success-emerald-bright));
 }
 .risk-message {
   flex: 1;
-  color: #0f172a;
+  color: rgb(var(--yb-text-navy));
 }
 .risk-ref {
   font-size: 0.75rem;
-  color: #64748b;
+  color: rgb(var(--yb-text-muted-strong));
 }
 .risk-ref--link {
-  color: rgb(16 185 129);
+  color: rgb(var(--yb-success-emerald-bright));
 }
 .risk-footer {
   display: flex;

@@ -3,7 +3,7 @@
     <transition name="loading-fade">
       <div v-if="active" :class="overlayClass" role="status" aria-live="polite">
         <div class="loading-panel">
-          <BaseSpinner :size="spinnerSize" color="#2563eb" />
+          <BaseSpinner :size="spinnerSize" color="rgb(var(--yb-brand))" />
           <div v-if="label || description" class="loading-copy">
             <strong v-if="label">{{ label }}</strong>
             <span v-if="description">{{ description }}</span>
@@ -15,7 +15,7 @@
   <transition v-else name="loading-fade">
     <div v-if="active" :class="overlayClass" role="status" aria-live="polite">
       <div class="loading-panel">
-        <BaseSpinner :size="spinnerSize" color="#2563eb" />
+        <BaseSpinner :size="spinnerSize" color="rgb(var(--yb-brand))" />
         <div v-if="label || description" class="loading-copy">
           <strong v-if="label">{{ label }}</strong>
           <span v-if="description">{{ description }}</span>
@@ -80,7 +80,7 @@ const overlayClass = computed(() => [
 }
 
 .loading-overlay--dim {
-  background: rgba(248, 250, 252, 0.78);
+  background: rgb(var(--yb-surface-subtle) / 0.78);
   backdrop-filter: blur(2px);
 }
 
@@ -93,12 +93,12 @@ const overlayClass = computed(() => [
   max-width: min(24rem, calc(100vw - 2rem));
   align-items: center;
   gap: 0.75rem;
-  border: 1px solid #dbeafe;
+  border: 1px solid rgb(var(--yb-brand-subtle));
   border-radius: 0.75rem;
-  background: #ffffff;
+  background: rgb(var(--yb-surface));
   padding: 0.75rem 0.9rem;
-  color: #111827;
-  box-shadow: 0 18px 36px -24px rgba(15, 23, 42, 0.42);
+  color: rgb(var(--yb-text));
+  box-shadow: 0 18px 36px -24px rgb(var(--yb-shadow) / 0.42);
 }
 
 .loading-copy {
@@ -108,14 +108,14 @@ const overlayClass = computed(() => [
 }
 
 .loading-copy strong {
-  color: #111827;
+  color: rgb(var(--yb-text));
   font-size: 0.85rem;
   font-weight: 800;
   line-height: 1.25;
 }
 
 .loading-copy span {
-  color: #6b7280;
+  color: rgb(var(--yb-text-muted));
   font-size: 0.75rem;
   line-height: 1.35;
 }
