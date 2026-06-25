@@ -38,7 +38,7 @@ const productManagementCostTraceJoin = `
 	  ON cost_snapshot.id = (
 	    SELECT s.id
 	      FROM omp_sku_cost_snapshots s
-	     WHERE CONVERT(s.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci = CONVERT(pm.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci
+	     WHERE s.sku_code = pm.sku_code
 	       AND (
 	         (pm.task_sku_item_id IS NOT NULL AND s.task_sku_item_id = pm.task_sku_item_id)
 	         OR (pm.task_sku_item_id IS NULL AND s.task_id = pm.task_id AND s.task_sku_item_id IS NULL)
@@ -767,7 +767,7 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 			  SELECT 1
 			    FROM omp_sku_combo_relations rel
 				    LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
-				   WHERE CONVERT(rel.child_sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci = CONVERT(pm.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci
+				   WHERE rel.child_sku_code = pm.sku_code
 			     AND (
 			       rel.combo_sku_code = ?
 			       OR COALESCE(rec.erp_i_id, '') = ?

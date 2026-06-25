@@ -144,8 +144,6 @@ func (s *productManagementService) listComboTreeByComboGroups(ctx context.Contex
 	if appErr != nil {
 		return nil, appErr
 	}
-	actor, _ := domain.RequestActorFromContext(ctx)
-	s.decorateRecords(ctx, actor, items)
 	groups := s.productManagementComboGroups(ctx, items)
 	comboGroups := make([]domain.ProductManagementComboGroup, 0, len(groups))
 	for _, group := range groups {
@@ -156,6 +154,8 @@ func (s *productManagementService) listComboTreeByComboGroups(ctx context.Contex
 	page, pageSize := normalizeProductManagementPage(filter.Page, filter.PageSize)
 	pagedGroups := paginateProductManagementComboGroups(comboGroups, page, pageSize)
 	data := productManagementRecordsFromComboGroups(pagedGroups)
+	actor, _ := domain.RequestActorFromContext(ctx)
+	s.decorateRecords(ctx, actor, data)
 	summary, appErr := s.productManagementComboSyncSummary(ctx)
 	if appErr != nil {
 		return nil, appErr

@@ -271,7 +271,7 @@ func TestProductManagementWhereSearchesComboRelations(t *testing.T) {
 	for _, fragment := range []string{
 		"FROM omp_sku_combo_relations rel",
 		"LEFT JOIN omp_sku_combo_records rec",
-		"CONVERT(rel.child_sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci = CONVERT(pm.sku_code USING utf8mb4) COLLATE utf8mb4_0900_ai_ci",
+		"rel.child_sku_code = pm.sku_code",
 		"rel.combo_sku_code = ?",
 		"COALESCE(rec.erp_i_id, '') = ?",
 		"rel.combo_sku_code LIKE ?",
