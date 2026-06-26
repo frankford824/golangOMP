@@ -1,0 +1,48 @@
+html,
+body,
+#asset-workbench-app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+.aw-root {
+  min-height: 100vh;
+  color: var(--aw-ink);
+  background: var(--aw-paper);
+  font-family: var(--aw-font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+.aw-root *,
+.aw-root *::before,
+.aw-root *::after {
+  box-sizing: border-box;
+}
+
+.aw-root button,
+.aw-root input {
+  font: inherit;
+}
+
+.aw-root button {
+  cursor: pointer;
+}
+
+.aw-root :focus-visible {
+  outline: 2px solid var(--aw-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-root *,
+  .aw-root *::before,
+  .aw-root *::after {
+    scroll-behavior: auto;
+    transition-duration: 1ms;
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+  }
+}

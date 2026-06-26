@@ -88,6 +88,45 @@ func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testin
 	}
 }
 
+func TestIdentityServiceRegisterAssetWorkbenchUserOnlyGrantsSubmitter(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	sessionRepo := &identitySessionRepoStub{}
+	logRepo := &identityPermissionLogRepoStub{}
+	svc := NewIdentityService(userRepo, sessionRepo, logRepo, identityTxRunner{})
+
+	result, appErr := svc.RegisterAssetWorkbenchUser(context.Background(), RegisterAssetWorkbenchUserParams{
+		Username:    "piece_worker",
+		DisplayName: "计件人员",
+		Mobile:      "13800000991",
+		Email:       "piece-worker@example.com",
+		Password:    "Pass1234",
+	})
+	if appErr != nil {
+		t.Fatalf("RegisterAssetWorkbenchUser() error = %+v", appErr)
+	}
+	if result == nil || result.User == nil || result.Session == nil || result.Session.Token == "" {
+		t.Fatalf("RegisterAssetWorkbenchUser() result = %+v", result)
+	}
+	if result.User.Department != domain.DepartmentUnassigned {
+		t.Fatalf("department = %q, want unassigned", result.User.Department)
+	}
+	if result.User.Team != "未分配池" {
+		t.Fatalf("team = %q, want 未分配池", result.User.Team)
+	}
+	if result.User.EmploymentType != domain.EmploymentTypePartTime {
+		t.Fatalf("employment_type = %q, want part_time", result.User.EmploymentType)
+	}
+	if !reflect.DeepEqual(result.User.Roles, []domain.Role{domain.RoleAssetSubmitter}) {
+		t.Fatalf("roles = %+v, want only AssetSubmitter", result.User.Roles)
+	}
+	if containsRoleValue(result.User.Roles, domain.RoleMember) || containsRoleValue(result.User.Roles, domain.RoleDesigner) {
+		t.Fatalf("workbench self-registration leaked main-site roles: %+v", result.User.Roles)
+	}
+	if len(logRepo.logs) != 1 || logRepo.logs[0].RoutePath != "/v1/asset-workbench/register" {
+		t.Fatalf("permission logs = %+v", logRepo.logs)
+	}
+}
+
 func TestIdentityServiceGetCurrentUserAllowsNonManagementSessionUser(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	sessionRepo := &identitySessionRepoStub{}

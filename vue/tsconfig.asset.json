@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"],
+      "@aw/*": ["src/asset-workbench/*"]
+    }
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/asset-workbench/**/*.ts",
+    "src/asset-workbench/**/*.vue"
+  ]
+}

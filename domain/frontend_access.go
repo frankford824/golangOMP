@@ -319,6 +319,14 @@ func frontendRoleName(role Role) string {
 		return "audit_b"
 	case RoleWarehouse:
 		return "warehouse"
+	case RoleAssetSubmitter:
+		return "asset_submitter"
+	case RoleAssetManager:
+		return "asset_manager"
+	case RoleAssetTemplateAdmin:
+		return "asset_template_admin"
+	case RoleAssetSettlement:
+		return "asset_settlement"
 	case RoleOutsource:
 		return "outsource"
 	case RoleCustomizationReviewer:
@@ -493,6 +501,38 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Menus:   []string{"warehouse_receive", "warehouse_processing", "resource_management", "product_management", "export_center"},
 			Pages:   []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"},
 			Actions: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"},
+		}
+	case RoleAssetSubmitter:
+		return FrontendAccessSpec{
+			Roles:   []string{"asset_submitter"},
+			Scopes:  []string{"asset_workbench"},
+			Menus:   []string{"asset_workbench"},
+			Pages:   []string{"asset_workbench_upload", "asset_workbench_submissions", "asset_workbench_profile"},
+			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.submit", "asset.workbench.profile"},
+		}
+	case RoleAssetManager:
+		return FrontendAccessSpec{
+			Roles:   []string{"asset_manager"},
+			Scopes:  []string{"asset_workbench", "asset_workbench.manage"},
+			Menus:   []string{"asset_workbench"},
+			Pages:   []string{"asset_workbench_materials", "asset_workbench_submissions", "asset_workbench_qc", "asset_workbench_logs"},
+			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.manage", "asset.workbench.system_search", "asset.workbench.download"},
+		}
+	case RoleAssetTemplateAdmin:
+		return FrontendAccessSpec{
+			Roles:   []string{"asset_template_admin"},
+			Scopes:  []string{"asset_workbench", "asset_workbench.cost_center"},
+			Menus:   []string{"asset_workbench"},
+			Pages:   []string{"asset_workbench_cost_center", "asset_workbench_templates"},
+			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.cost_center.manage", "asset.workbench.template.manage"},
+		}
+	case RoleAssetSettlement:
+		return FrontendAccessSpec{
+			Roles:   []string{"asset_settlement"},
+			Scopes:  []string{"asset_workbench", "asset_workbench.settlement"},
+			Menus:   []string{"asset_workbench"},
+			Pages:   []string{"asset_workbench_settlement", "asset_workbench_reports", "asset_workbench_supplements"},
+			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.settlement", "asset.workbench.export"},
 		}
 	case RoleOutsource:
 		return FrontendAccessSpec{

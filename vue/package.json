@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:asset": "vite --config vite.asset.config.ts",
     "build": "vue-tsc -b && vite build",
+    "build:asset": "vue-tsc -p tsconfig.asset.json && vite build --config vite.asset.config.ts",
     "build:prod": "vue-tsc -b && vite build --mode production",
     "build:test": "vue-tsc -b && vite build --mode test",
     "preview": "vite preview",
@@ -14,6 +16,7 @@
     "a11y:audit": "node scripts/accessibility-audit.mjs",
     "design:audit": "node scripts/design-system-audit.mjs",
     "load:audit": "node scripts/large-surface-audit.mjs",
+    "asset:audit": "node scripts/asset-workbench-architecture-audit.mjs",
     "visual:baseline": "node scripts/visual-baseline.mjs baseline",
     "visual:compare": "node scripts/visual-baseline.mjs compare",
     "gen:api-types": "tsx scripts/gen_api_types.ts",

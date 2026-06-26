@@ -50,6 +50,7 @@ func NewRouter(
 	taskBatchExcelH *handler.TaskBatchExcelHandler,
 	taskSingleExcelH *handler.TaskSingleExcelHandler,
 	workbenchH *handler.WorkbenchHandler,
+	assetWorkbenchH *handler.AssetWorkbenchHandler,
 	exportCenterH *handler.ExportCenterHandler,
 	integrationCenterH *handler.IntegrationCenterHandler,
 	codeRuleH *handler.CodeRuleHandler,
@@ -113,6 +114,7 @@ func NewRouter(
 	}
 
 	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH, notificationH)
+	registerAssetWorkbenchRoutes(v1, access, assetWorkbenchH)
 
 	v1.POST("/trace-events", access(v1, http.MethodPost, "/trace-events", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), userAdminH.RecordWorkflowTraceEvent)
 	v1.GET("/trace-events", access(v1, http.MethodGet, "/trace-events", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin), userAdminH.ListWorkflowTraceEvents)

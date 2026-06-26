@@ -257,6 +257,10 @@ func IsKnownRole(role Role) bool {
 		RoleAdmin,
 		RoleDeptAdmin,
 		RoleWarehouse,
+		RoleAssetSubmitter,
+		RoleAssetManager,
+		RoleAssetTemplateAdmin,
+		RoleAssetSettlement,
 		RoleOutsource,
 		RoleCustomizationReviewer,
 		RoleERP:

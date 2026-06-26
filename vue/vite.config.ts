@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
+  const rootDir = path.dirname(fileURLToPath(import.meta.url))
   const devProxyTarget = env.VITE_DEV_API_PROXY_TARGET?.trim()
   const proxy = devProxyTarget
     ? {
@@ -22,7 +23,8 @@ export default defineConfig(({ mode }) => {
     plugins: [vue()],
     resolve: {
       alias: {
-        '@': path.join(path.dirname(fileURLToPath(import.meta.url)), 'src'),
+        '@': path.join(rootDir, 'src'),
+        '@aw': path.join(rootDir, 'src/asset-workbench'),
       },
     },
     server: {

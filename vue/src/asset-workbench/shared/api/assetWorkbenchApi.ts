@@ -1,0 +1,820 @@
+import http from '@/services/http'
+import type { BackendUser } from '@/services/apiTypes'
+
+interface ApiEnvelope<T> {
+  data?: T
+  pagination?: {
+    total?: number
+    page?: number
+    page_size?: number
+  }
+}
+
+export interface AssetWorkbenchProfile {
+  id: number
+  user_id: number
+  worker_type: string
+  job_grade: string
+  real_name: string
+  phone?: string
+  province?: string
+  city?: string
+  id_card?: string
+  alipay_account?: string
+  status: string
+  pii_completed: boolean
+}
+
+export interface AssetWorkbenchRegisterPayload {
+  account: string
+  name: string
+  phone: string
+  email?: string
+  password: string
+  worker_type?: string
+  province?: string
+  city?: string
+  id_card?: string
+  gender?: string
+  alipay_account?: string
+}
+
+export interface AssetWorkbenchRegisterResult {
+  auth?: {
+    user?: BackendUser
+    session?: {
+      session_id?: string
+      token?: string
+      token_type?: string
+      expires_at?: string
+    }
+  }
+  profile?: AssetWorkbenchProfile
+}
+
+export interface UpsertProfilePayload {
+  worker_type?: string
+  job_grade?: string
+  real_name?: string
+  phone?: string
+  province?: string
+  city?: string
+  id_card?: string
+  alipay_account?: string
+  status?: string
+  reason?: string
+}
+
+export interface AssetWorkbenchBootstrap {
+  app: string
+  version: string
+  timezone: string
+  oss_prefix: string
+  upload_session_ttl_seconds: number
+  profile?: AssetWorkbenchProfile
+  capabilities: string[]
+  settlement_item_types: string[]
+  deferred_business_items: Array<{ key: string; status: string; note: string }>
+  architecture_guardrails: string[]
+}
+
+export interface PriceMatrixRow {
+  id: number
+  worker_type: string
+  job_grade: string
+  difficulty_class: string
+  unit_price: number
+  effective_from: string
+  effective_to?: string
+  enabled: boolean
+}
+
+export interface DeductionRuleRow {
+  id: number
+  worker_type: string
+  job_grade: string
+  difficulty_class: string
+  deduction_amount: number
+  effective_from: string
+  effective_to?: string
+  enabled: boolean
+}
+
+export interface WelfareRuleRow {
+  id: number
+  rule_name: string
+  worker_type: string
+  job_grade: string
+  rule_type: string
+  amount: number
+  effective_from: string
+  effective_to?: string
+  enabled: boolean
+}
+
+export interface PromoCouponRow {
+  id: number
+  coupon_code: string
+  coupon_name: string
+  mode: string
+  amount?: number
+  percent?: number
+  priority: number
+  worker_type: string
+  job_grade: string
+  difficulty_class: string
+  effective_from: string
+  effective_to?: string
+  enabled: boolean
+}
+
+export interface SubmissionRow {
+  id: number
+  submission_no: string
+  submitter_user_id: number
+  business_month: string
+  submitted_at: string
+  status: string
+  item_count: number
+  file_count: number
+  page_count: number
+  gross_total: number
+}
+
+export interface SubmissionItemRow {
+  id: number
+  submission_id: number
+  payee_user_id: number
+  order_no: string
+  difficulty_class: string
+  finalized: boolean
+  page_count: number
+  item_count: number
+  business_month: string
+  gross_amount: number
+  pricing_status: string
+  qc_status: string
+  settlement_status: string
+}
+
+export interface SubmissionFileRow {
+  id: number
+  submission_id: number
+  submission_item_id: number
+  original_filename: string
+  file_type: string
+  mime_type: string
+  file_size: number
+  file_hash?: string
+  preview_status: string
+  preview_key?: string
+  preview_error?: string
+}
+
+export interface SubmissionDetail {
+  submission: SubmissionRow
+  items: Array<{
+    item: SubmissionItemRow
+    files: SubmissionFileRow[]
+  }>
+}
+
+export interface SettlementPreviewRow {
+  payee_user_id: number
+  item_count: number
+  page_count: number
+  gross_amount: number
+  error_count: number
+  deduction_amount: number
+  welfare_amount: number
+  supplement_amount: number
+  net_amount: number
+}
+
+export interface SettlementPayrollRow {
+  payee_user_id: number
+  business_month: string
+  row_type: 'normal_piecework' | 'supplement_piecework'
+  item_count: number
+  page_count: number
+  gross_amount: number
+  error_count: number
+  deduction_amount: number
+  welfare_amount: number
+  supplement_amount: number
+  adjustment_amount: number
+  net_amount: number
+}
+
+export interface SettlementPreview {
+  business_month: string
+  rows: SettlementPreviewRow[]
+  totals: SettlementPreviewRow
+  payroll_rows: SettlementPayrollRow[]
+}
+
+export interface SettlementBatchRow {
+  id: number
+  batch_no: string
+  business_month: string
+  status: string
+  item_count: number
+  gross_amount: number
+  deduction_amount: number
+  welfare_amount: number
+  supplement_amount: number
+  adjustment_amount: number
+  net_amount: number
+}
+
+export interface SettlementItemRow {
+  id: number
+  batch_id: number
+  item_type: string
+  submission_item_id?: number
+  payee_user_id: number
+  business_month: string
+  amount: number
+  quantity: number
+  unit_price?: number
+  direction: string
+  source_ref_type: string
+  source_ref_id?: number
+}
+
+export interface SettlementBatchDetail {
+  batch: SettlementBatchRow
+  items: SettlementItemRow[]
+  payroll_rows: SettlementPayrollRow[]
+}
+
+export interface SettlementAdjustmentRow {
+  id: number
+  batch_id?: number
+  payee_user_id: number
+  business_month: string
+  adjustment_type: string
+  amount: number
+  reason: string
+  status: string
+  payload_json?: Record<string, unknown>
+  created_by: number
+}
+
+export interface SettlementSupplementRow {
+  id: number
+  payee_user_id: number
+  business_month: string
+  linked_batch_id?: number
+  status: string
+  order_no: string
+  difficulty_class: string
+  finalized: boolean
+  page_count: number
+  gross_amount: number
+  duplicate_hint_json?: {
+    has_duplicates?: boolean
+    submission_item_ids?: number[]
+    supplement_ids?: number[]
+  }
+}
+
+export interface SupplementPermissionRow {
+  id: number
+  payee_user_id: number
+  business_month: string
+  enabled: boolean
+  reason: string
+  granted_by: number
+  revoked_by?: number
+  granted_at: string
+  revoked_at?: string
+}
+
+export interface ErrorImportBatchRow {
+  id: number
+  import_no: string
+  business_month: string
+  uploaded_by: number
+  original_filename: string
+  status: string
+  total_rows: number
+  matched_rows: number
+  unmatched_rows: number
+  ambiguous_rows: number
+  error_message?: string
+}
+
+export interface AssetWorkbenchEventRow {
+  id: number
+  actor_user_id?: number
+  event_type: string
+  entity_type: string
+  entity_id?: number
+  reason: string
+  created_at: string
+}
+
+export interface AssetWorkbenchSavedView {
+  id: number
+  user_id: number
+  view_type: string
+  view_name: string
+  config_json: Record<string, unknown>
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface FilePreviewMeta {
+  file_id: number
+  status: string
+  preparing: boolean
+  preview_url?: string
+  expires_at?: string
+  error?: string
+}
+
+export interface FileDownloadMeta {
+  file_id: number
+  filename: string
+  mime_type: string
+  file_size: number
+  download_url: string
+  expires_at: string
+}
+
+export interface FileBatchDownloadManifest {
+  items: FileDownloadMeta[]
+  failures?: Array<{
+    file_id: number
+    reason: string
+  }>
+}
+
+export interface SystemAssetDownloadInfo {
+  download_mode: string
+  download_url?: string
+  access_hint?: string
+  preview_available?: boolean
+  filename: string
+  file_size: number
+  mime_type?: string
+  expires_at?: string
+}
+
+export interface SystemAssetRow {
+  id: number
+  resource_id?: string
+  source_type?: string
+  asset_no?: string
+  file_name?: string
+  original_filename?: string
+  mime_type?: string
+  product_name?: string
+  task_no?: string
+  preview_available?: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SystemSearchResult {
+  items: SystemAssetRow[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface SystemAssetBatchDownloadManifest {
+  items: Array<{
+    asset_id: number
+    task_id: number
+    filename: string
+    file_size: number
+    mime_type?: string
+    download_url: string
+    expires_at?: string
+  }>
+  failures?: Array<{
+    asset_id: number
+    task_id?: number
+    filename?: string
+    reason: string
+  }>
+  success_count: number
+  failure_count: number
+  total_size: number
+  expires_at?: string
+}
+
+export interface PaginatedResult<T> {
+  items: T[]
+  total: number
+}
+
+export interface CreateUploadSessionPayload {
+  original_filename: string
+  file_size: number
+  mime_type: string
+  file_hash?: string
+}
+
+export interface UploadSessionRow {
+  id: number
+  session_id: string
+  status: string
+  object_key: string
+  original_filename: string
+  file_size: number
+  mime_type: string
+  file_hash?: string
+  upload_id?: string
+}
+
+export interface UploadPlanPart {
+  part_number: number
+  upload_url: string
+}
+
+export interface UploadPlan {
+  mode?: string
+  object_key?: string
+  upload_id?: string
+  parts?: UploadPlanPart[]
+  part_size?: number
+  method?: string
+  required_upload_content_type?: string
+}
+
+export interface CreateUploadSessionResult {
+  session: UploadSessionRow
+  plan?: UploadPlan
+}
+
+export interface CompleteUploadSessionPayload {
+  parts: Array<{
+    part_number: number
+    etag: string
+  }>
+}
+
+export interface CreateSubmissionPayload {
+  notes?: string
+  items: Array<{
+    order_no: string
+    difficulty_class: string
+    finalized: boolean
+    page_count: number
+    item_count?: number
+    upload_session_ids: string[]
+  }>
+}
+
+export interface CreateSettlementSupplementPayload {
+  payee_user_id: number
+  business_month: string
+  order_no: string
+  difficulty_class: string
+  finalized: boolean
+  page_count: number
+  gross_amount: number
+  status?: string
+}
+
+export interface UpsertSupplementPermissionPayload {
+  payee_user_id: number
+  business_month: string
+  enabled: boolean
+  reason?: string
+}
+
+export interface CreateSettlementAdjustmentPayload {
+  payee_user_id: number
+  adjustment_type?: string
+  direction?: string
+  amount: number
+  reason: string
+  payload_json?: Record<string, unknown>
+}
+
+export interface UpsertSavedViewPayload {
+  view_type: string
+  view_name: string
+  config_json: Record<string, unknown>
+  is_default?: boolean
+}
+
+export interface CreatePriceMatrixPayload {
+  worker_type: string
+  job_grade: string
+  difficulty_class: string
+  unit_price: number
+  effective_from: string
+  effective_to?: string
+  remark?: string
+}
+
+export interface CreateDeductionRulePayload {
+  worker_type: string
+  job_grade: string
+  difficulty_class: string
+  deduction_amount: number
+  effective_from: string
+  effective_to?: string
+  remark?: string
+}
+
+export interface CreateWelfareRulePayload {
+  rule_name: string
+  worker_type: string
+  job_grade: string
+  rule_type: string
+  amount: number
+  config_json?: Record<string, unknown>
+  effective_from: string
+  effective_to?: string
+  remark?: string
+}
+
+export interface CreatePromoCouponPayload {
+  coupon_code: string
+  coupon_name: string
+  mode: string
+  amount?: number
+  percent?: number
+  priority: number
+  worker_type: string
+  job_grade: string
+  difficulty_class: string
+  eligible_user_ids_json?: number[]
+  eligible_codes_json?: string[]
+  effective_from: string
+  effective_to?: string
+  remark?: string
+}
+
+function unwrap<T>(payload: ApiEnvelope<T> | T): T {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    const wrapped = payload as ApiEnvelope<T>
+    if (wrapped.data !== undefined) return wrapped.data
+  }
+  return payload as T
+}
+
+function unwrapPaginated<T>(payload: ApiEnvelope<T[]> | T[]): PaginatedResult<T> {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    const wrapped = payload as ApiEnvelope<T[]>
+    return {
+      items: wrapped.data ?? [],
+      total: wrapped.pagination?.total ?? wrapped.data?.length ?? 0,
+    }
+  }
+  const items = Array.isArray(payload) ? payload : []
+  return { items, total: items.length }
+}
+
+export const assetWorkbenchApi = {
+  async register(payload: AssetWorkbenchRegisterPayload, signal?: AbortSignal): Promise<AssetWorkbenchRegisterResult> {
+    const res = await http.post<ApiEnvelope<AssetWorkbenchRegisterResult>>('/v1/asset-workbench/register', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async bootstrap(signal?: AbortSignal): Promise<AssetWorkbenchBootstrap> {
+    const res = await http.get<ApiEnvelope<AssetWorkbenchBootstrap>>('/v1/asset-workbench/bootstrap', { signal })
+    return unwrap(res.data)
+  },
+
+  async listPriceMatrix(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<PriceMatrixRow>> {
+    const res = await http.get<ApiEnvelope<PriceMatrixRow[]>>('/v1/asset-workbench/price-matrix', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async createPriceMatrix(payload: CreatePriceMatrixPayload, signal?: AbortSignal): Promise<PriceMatrixRow> {
+    const res = await http.post<ApiEnvelope<PriceMatrixRow>>('/v1/asset-workbench/price-matrix', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async upsertMyProfile(payload: UpsertProfilePayload, signal?: AbortSignal): Promise<AssetWorkbenchProfile> {
+    const res = await http.patch<ApiEnvelope<AssetWorkbenchProfile>>('/v1/asset-workbench/profile', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async listProfiles(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<AssetWorkbenchProfile>> {
+    const res = await http.get<ApiEnvelope<AssetWorkbenchProfile[]>>('/v1/asset-workbench/profiles', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async upsertProfile(userId: number, payload: UpsertProfilePayload, signal?: AbortSignal): Promise<AssetWorkbenchProfile> {
+    const res = await http.patch<ApiEnvelope<AssetWorkbenchProfile>>(`/v1/asset-workbench/profiles/${userId}`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async listDeductionRules(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<DeductionRuleRow>> {
+    const res = await http.get<ApiEnvelope<DeductionRuleRow[]>>('/v1/asset-workbench/deduction-rules', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async createDeductionRule(payload: CreateDeductionRulePayload, signal?: AbortSignal): Promise<DeductionRuleRow> {
+    const res = await http.post<ApiEnvelope<DeductionRuleRow>>('/v1/asset-workbench/deduction-rules', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async listWelfareRules(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WelfareRuleRow>> {
+    const res = await http.get<ApiEnvelope<WelfareRuleRow[]>>('/v1/asset-workbench/welfare-rules', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async createWelfareRule(payload: CreateWelfareRulePayload, signal?: AbortSignal): Promise<WelfareRuleRow> {
+    const res = await http.post<ApiEnvelope<WelfareRuleRow>>('/v1/asset-workbench/welfare-rules', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async listPromoCoupons(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<PromoCouponRow>> {
+    const res = await http.get<ApiEnvelope<PromoCouponRow[]>>('/v1/asset-workbench/promo-coupons', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async createPromoCoupon(payload: CreatePromoCouponPayload, signal?: AbortSignal): Promise<PromoCouponRow> {
+    const res = await http.post<ApiEnvelope<PromoCouponRow>>('/v1/asset-workbench/promo-coupons', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async listSubmissions(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<SubmissionRow>> {
+    const res = await http.get<ApiEnvelope<SubmissionRow[]>>('/v1/asset-workbench/submissions', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async getSubmissionDetail(submissionId: number, signal?: AbortSignal): Promise<SubmissionDetail> {
+    const res = await http.get<ApiEnvelope<SubmissionDetail>>(`/v1/asset-workbench/submissions/${submissionId}`, { signal })
+    return unwrap(res.data)
+  },
+
+  async previewSettlement(businessMonth: string, signal?: AbortSignal): Promise<SettlementPreview> {
+    const res = await http.get<ApiEnvelope<SettlementPreview>>('/v1/asset-workbench/settlement/preview', {
+      params: { business_month: businessMonth },
+      signal,
+    })
+    return unwrap(res.data)
+  },
+
+  async listSettlementBatches(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<SettlementBatchRow>> {
+    const res = await http.get<ApiEnvelope<SettlementBatchRow[]>>('/v1/asset-workbench/settlement/batches', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async getSettlementBatchDetail(batchId: number, signal?: AbortSignal): Promise<SettlementBatchDetail> {
+    const res = await http.get<ApiEnvelope<SettlementBatchDetail>>(`/v1/asset-workbench/settlement/batches/${batchId}`, { signal })
+    return unwrap(res.data)
+  },
+
+  async listSettlementSupplements(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<SettlementSupplementRow>> {
+    const res = await http.get<ApiEnvelope<SettlementSupplementRow[]>>('/v1/asset-workbench/settlement/supplements', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async listSupplementPermissions(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<SupplementPermissionRow>> {
+    const res = await http.get<ApiEnvelope<SupplementPermissionRow[]>>('/v1/asset-workbench/settlement/supplement-permissions', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async listSupplementEligibleMonths(payeeUserId: number, signal?: AbortSignal): Promise<string[]> {
+    const res = await http.get<ApiEnvelope<{ months: string[] }>>('/v1/asset-workbench/settlement/supplement-eligible-months', {
+      params: { payee_user_id: payeeUserId },
+      signal,
+    })
+    return unwrap(res.data).months ?? []
+  },
+
+  async upsertSupplementPermission(payload: UpsertSupplementPermissionPayload, signal?: AbortSignal): Promise<SupplementPermissionRow> {
+    const res = await http.put<ApiEnvelope<SupplementPermissionRow>>('/v1/asset-workbench/settlement/supplement-permissions', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async generateSettlementBatch(businessMonth: string, signal?: AbortSignal): Promise<SettlementBatchRow> {
+    const res = await http.post<ApiEnvelope<SettlementBatchRow>>(
+      '/v1/asset-workbench/settlement/batches',
+      { business_month: businessMonth },
+      { signal },
+    )
+    return unwrap(res.data)
+  },
+
+  async confirmSettlementBatch(batchId: number, signal?: AbortSignal): Promise<unknown> {
+    const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/settlement/batches/${batchId}/confirm`, undefined, { signal })
+    return unwrap(res.data)
+  },
+
+  async cancelSettlementBatch(batchId: number, reason: string, signal?: AbortSignal): Promise<unknown> {
+    const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/settlement/batches/${batchId}/cancel`, { reason }, { signal })
+    return unwrap(res.data)
+  },
+
+  async createSettlementAdjustment(batchId: number, payload: CreateSettlementAdjustmentPayload, signal?: AbortSignal): Promise<SettlementAdjustmentRow> {
+    const res = await http.post<ApiEnvelope<SettlementAdjustmentRow>>(`/v1/asset-workbench/settlement/batches/${batchId}/adjustments`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async createSettlementSupplement(payload: CreateSettlementSupplementPayload, signal?: AbortSignal): Promise<SettlementSupplementRow> {
+    const res = await http.post<ApiEnvelope<SettlementSupplementRow>>('/v1/asset-workbench/settlement/supplements', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async importErrorExcel(businessMonth: string, file: File, signal?: AbortSignal): Promise<ErrorImportBatchRow> {
+    const form = new FormData()
+    form.set('business_month', businessMonth)
+    form.set('file', file)
+    const res = await http.post<ApiEnvelope<ErrorImportBatchRow>>('/v1/asset-workbench/error-imports/excel', form, { signal })
+    return unwrap(res.data)
+  },
+
+  async createUploadSession(payload: CreateUploadSessionPayload, signal?: AbortSignal): Promise<CreateUploadSessionResult> {
+    const res = await http.post<ApiEnvelope<CreateUploadSessionResult>>('/v1/asset-workbench/upload-sessions', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async completeUploadSession(sessionId: string, payload: CompleteUploadSessionPayload, signal?: AbortSignal): Promise<unknown> {
+    const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/upload-sessions/${encodeURIComponent(sessionId)}/complete`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async cancelUploadSession(sessionId: string, signal?: AbortSignal): Promise<unknown> {
+    const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/upload-sessions/${encodeURIComponent(sessionId)}/cancel`, undefined, { signal })
+    return unwrap(res.data)
+  },
+
+  async createSubmission(payload: CreateSubmissionPayload, signal?: AbortSignal): Promise<SubmissionDetail> {
+    const res = await http.post<ApiEnvelope<SubmissionDetail>>('/v1/asset-workbench/submissions', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async getFilePreview(fileId: number, signal?: AbortSignal): Promise<FilePreviewMeta> {
+    const res = await http.get<ApiEnvelope<FilePreviewMeta>>(`/v1/asset-workbench/files/${fileId}/preview`, { signal })
+    return unwrap(res.data)
+  },
+
+  async getFileDownload(fileId: number, signal?: AbortSignal): Promise<FileDownloadMeta> {
+    const res = await http.get<ApiEnvelope<FileDownloadMeta>>(`/v1/asset-workbench/files/${fileId}/download`, { signal })
+    return unwrap(res.data)
+  },
+
+  async batchDownloadFiles(fileIds: number[], signal?: AbortSignal): Promise<FileBatchDownloadManifest> {
+    const res = await http.post<ApiEnvelope<FileBatchDownloadManifest>>('/v1/asset-workbench/files/batch-download', { file_ids: fileIds }, { signal })
+    return unwrap(res.data)
+  },
+
+  async updateSubmissionItemQC(itemId: number, payload: { qc_status: string; reason?: string }, signal?: AbortSignal): Promise<SubmissionItemRow> {
+    const res = await http.patch<ApiEnvelope<SubmissionItemRow>>(`/v1/asset-workbench/items/${itemId}/qc`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async voidSubmissionItem(itemId: number, reason: string, signal?: AbortSignal): Promise<SubmissionItemRow> {
+    const res = await http.post<ApiEnvelope<SubmissionItemRow>>(`/v1/asset-workbench/items/${itemId}/void`, { reason }, { signal })
+    return unwrap(res.data)
+  },
+
+  async repriceSubmissionItem(itemId: number, reason = '', signal?: AbortSignal): Promise<SubmissionItemRow> {
+    const res = await http.post<ApiEnvelope<SubmissionItemRow>>(`/v1/asset-workbench/items/${itemId}/reprice`, { reason }, { signal })
+    return unwrap(res.data)
+  },
+
+  async systemSearch(params: { q?: string; limit?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
+    const res = await http.get<ApiEnvelope<SystemSearchResult>>('/v1/asset-workbench/system-search', { params, signal })
+    return unwrap(res.data)
+  },
+
+  async downloadSystemAsset(assetId: number, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
+    const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/asset-workbench/system-assets/${assetId}/download`, { signal })
+    return unwrap(res.data)
+  },
+
+  async batchDownloadSystemAssets(assetIds: number[], namingMode = 'business', signal?: AbortSignal): Promise<SystemAssetBatchDownloadManifest> {
+    const res = await http.post<ApiEnvelope<SystemAssetBatchDownloadManifest>>('/v1/asset-workbench/system-assets/batch-download', {
+      asset_ids: assetIds,
+      naming_mode: namingMode,
+    }, { signal })
+    return unwrap(res.data)
+  },
+
+  async listEvents(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<AssetWorkbenchEventRow>> {
+    const res = await http.get<ApiEnvelope<AssetWorkbenchEventRow[]>>('/v1/asset-workbench/events', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async listSavedViews(viewType: string, signal?: AbortSignal): Promise<AssetWorkbenchSavedView[]> {
+    const res = await http.get<ApiEnvelope<AssetWorkbenchSavedView[]>>('/v1/asset-workbench/saved-views', {
+      params: { view_type: viewType },
+      signal,
+    })
+    return unwrap(res.data)
+  },
+
+  async upsertSavedView(payload: UpsertSavedViewPayload, signal?: AbortSignal): Promise<AssetWorkbenchSavedView> {
+    const res = await http.put<ApiEnvelope<AssetWorkbenchSavedView>>('/v1/asset-workbench/saved-views', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async deleteSavedView(viewId: number, signal?: AbortSignal): Promise<unknown> {
+    const res = await http.delete<ApiEnvelope<unknown>>(`/v1/asset-workbench/saved-views/${viewId}`, { signal })
+    return unwrap(res.data)
+  },
+}

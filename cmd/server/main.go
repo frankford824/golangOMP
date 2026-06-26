@@ -26,6 +26,7 @@ import (
 	assetcenter "workflow/service/asset_center"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	"workflow/service/asset_lifecycle/scheduler"
+	assetworkbench "workflow/service/asset_workbench"
 	"workflow/service/blueprint"
 	designsourcesvc "workflow/service/design_source"
 	erpproductsvc "workflow/service/erp_product"
@@ -155,6 +156,7 @@ func main() {
 	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
 	businessTrendRepo := mysqlrepo.NewBusinessTrendRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
+	assetWorkbenchRepo := mysqlrepo.NewAssetWorkbenchRepo(mdb)
 
 	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
 	auditSvc := service.NewAuditService(auditRepo, skuRepo, assetVersionRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
@@ -462,13 +464,26 @@ func main() {
 		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
 		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
 	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
+	assetWorkbenchSvc := assetworkbench.NewService(assetworkbench.Config{
+		Timezone:                 cfg.AssetWorkbench.Timezone,
+		OSSPrefix:                cfg.AssetWorkbench.OSSPrefix,
+		UploadSessionTTL:         cfg.AssetWorkbench.UploadSessionTTL,
+		PreviewWorkerLeaseTTL:    cfg.AssetWorkbench.PreviewWorkerLeaseTTL,
+		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
+	},
+		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
+		assetworkbench.WithIdentityRegistrar(identitySvc),
+		assetworkbench.WithOSSDirect(ossDirectSvc),
+		assetworkbench.WithPreviewRenderer(service.NewExternalAssetPreviewRenderer()),
+		assetworkbench.WithSystemAssetSearcher(globalAssetCenterSvc),
+	)
 
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
 	agentH := handler.NewAgentHandler(agentSvc)
 	incidentH := handler.NewIncidentHandler(incidentSvc)
 	policyH := handler.NewPolicyHandler(policySvc)
-	authH := handler.NewAuthHandler(identitySvc)
+	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()
 	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc, workflowTraceEventSvc)
 
@@ -507,6 +522,7 @@ func main() {
 	taskBatchExcelH := handler.NewTaskBatchExcelHandler(taskBatchTemplateSvc, taskBatchParseSvc)
 	taskSingleExcelH := handler.NewTaskSingleExcelHandler(taskSingleTemplateSvc, taskSingleParseSvc)
 	workbenchH := handler.NewWorkbenchHandler(workbenchSvc)
+	assetWorkbenchH := handler.NewAssetWorkbenchHandler(assetWorkbenchSvc, cfg.AssetWorkbench.CookieDomain)
 	exportCenterH := handler.NewExportCenterHandler(exportCenterSvc)
 	integrationCenterH := handler.NewIntegrationCenterHandler(integrationCenterSvc)
 	codeRuleH := handler.NewCodeRuleHandler(codeRuleSvc)
@@ -531,12 +547,29 @@ func main() {
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
-	workers.NewGroup(db, rdb, logger, erpSyncSvc, productManagementSvc, skuComboSyncSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	workers.NewGroup(workers.GroupDeps{
+		DB:                            db,
+		Redis:                         rdb,
+		Logger:                        logger,
+		ERPSync:                       erpSyncSvc,
+		ProductManagement:             productManagementSvc,
+		SKUComboSync:                  skuComboSyncSvc,
+		AssetWorkbenchPreview:         assetWorkbenchSvc,
+		AssetWorkbenchMaintenance:     assetWorkbenchSvc,
+		ERPEnabled:                    cfg.ERP.Enabled,
+		ERPInterval:                   cfg.ERP.Interval,
+		AssetWorkbenchPreviewEnabled:  cfg.AssetWorkbench.PreviewWorkerEnabled,
+		AssetWorkbenchPreviewInterval: cfg.AssetWorkbench.PreviewWorkerInterval,
+		AssetWorkbenchPreviewLimit:    cfg.AssetWorkbench.PreviewWorkerLimit,
+		AssetWorkbenchExpiryEnabled:   cfg.AssetWorkbench.UploadExpiryWorkerEnabled,
+		AssetWorkbenchExpiryInterval:  cfg.AssetWorkbench.UploadExpiryWorkerInterval,
+		AssetWorkbenchExpiryLimit:     cfg.AssetWorkbench.UploadExpiryWorkerLimit,
+	}).Start(workerCtx)
 	if wecomSender.Start(workerCtx) {
 		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
 	}

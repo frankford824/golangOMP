@@ -125,6 +125,10 @@ const (
 	RoleAuditB                Role = "Audit_B"
 	RoleCustomizationReviewer Role = "CustomizationReviewer"
 	RoleWarehouse             Role = "Warehouse"
+	RoleAssetSubmitter        Role = "AssetSubmitter"
+	RoleAssetManager          Role = "AssetManager"
+	RoleAssetTemplateAdmin    Role = "AssetTemplateAdmin"
+	RoleAssetSettlement       Role = "AssetSettlement"
 )
 
 // --- Compatibility-only roles: do NOT use in new logic ---

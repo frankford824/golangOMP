@@ -24,7 +24,7 @@
             v-model="filters.keyword"
             type="search"
             class="ac-search-input"
-            placeholder="搜索系统资产、外部资源、任务 ID、SKU…"
+            placeholder="搜索系统资产、任务 ID、SKU…"
             autocomplete="off"
             enterkeyhint="search"
           />
@@ -840,7 +840,6 @@ const bulkSearchFilters = reactive({
 const assetSourceOptions: BaseSelectOption[] = [
   { value: 'all', label: '全部资源' },
   { value: 'system', label: '系统资源' },
-  { value: 'external', label: '外部资源' },
 ]
 
 const assetUsableStateOptions: BaseSelectOption[] = [
@@ -891,6 +890,10 @@ const bulkSearchFormatFilterLabel = computed(() =>
 
 const bulkSearchAssetKindFilterLabel = computed(() =>
   bulkSearchAssetKindOptions.find((item) => item.value === bulkSearchFilters.assetKind)?.label ?? '全部类型',
+)
+
+const effectiveAssetSearchSource = computed<AssetResourceSource>(() =>
+  filters.resourceSource === 'all' || filters.resourceSource === 'external' ? 'system' : filters.resourceSource,
 )
 
 const requestedTaskId = computed(() => {
@@ -960,7 +963,7 @@ const listTotalPages = computed(() =>
 )
 
 const pagedAssets = computed(() => {
-  return assets.value
+  return assets.value.filter((asset) => !isExternalAsset(asset))
 })
 
 watch(listTotalPages, (tp) => {
@@ -2202,7 +2205,7 @@ async function reload() {
     const res = await assetsApi.searchAssets(
       {
         keyword: effectiveSearchKeyword.value || undefined,
-        source: filters.resourceSource,
+        source: effectiveAssetSearchSource.value,
         usable_state: filters.usableState === 'all' ? undefined : filters.usableState,
         format_category: filters.formatCategory === 'all' ? undefined : filters.formatCategory,
         created_from: dateFilterToRFC3339(filters.createdFrom, 'start'),
@@ -2214,7 +2217,7 @@ async function reload() {
     )
     if (abortController.signal.aborted || requestSeq !== reloadRequestSeq) return
     const body = res.data
-    const backendItems = Array.isArray(body?.data) ? body.data : []
+    const backendItems = (Array.isArray(body?.data) ? body.data : []).filter((item) => !isExternalAsset(item))
     const backendTotal = Number(body?.total)
     const backendPage = Number(body?.page)
     const backendSize = Number(body?.size)
@@ -2301,7 +2304,7 @@ onMounted(() => {
     filters.keyword = requestedTaskId.value
   }
   const requestedSource = typeof route.query.source === 'string' ? route.query.source.trim() : ''
-  if (requestedSource === 'system' || requestedSource === 'external' || requestedSource === 'all') {
+  if (requestedSource === 'system' || requestedSource === 'all') {
     filters.resourceSource = requestedSource
   }
   const requestedUsableState = typeof route.query.usable_state === 'string' ? route.query.usable_state.trim() : ''

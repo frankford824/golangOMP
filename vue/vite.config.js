@@ -6,6 +6,7 @@ export default defineConfig(function (_a) {
     var _b;
     var mode = _a.mode;
     var env = loadEnv(mode, process.cwd(), 'VITE_');
+    var rootDir = path.dirname(fileURLToPath(import.meta.url));
     var devProxyTarget = (_b = env.VITE_DEV_API_PROXY_TARGET) === null || _b === void 0 ? void 0 : _b.trim();
     var proxy = devProxyTarget
         ? {
@@ -22,7 +23,8 @@ export default defineConfig(function (_a) {
         plugins: [vue()],
         resolve: {
             alias: {
-                '@': path.join(path.dirname(fileURLToPath(import.meta.url)), 'src'),
+                '@': path.join(rootDir, 'src'),
+                '@aw': path.join(rootDir, 'src/asset-workbench'),
             },
         },
         server: {
