@@ -96,6 +96,9 @@ type CreateTaskParams struct {
 	TopLevelPurchaseSKU string
 	SyncERPOnCreate     bool
 	SyncERPOnCreateSet  bool
+	ClientCreateID      string
+	CreatePayloadHash   string
+	CreateRequestJSON   string
 
 	// retouch_task structured requirement lines (Phase 1A text only).
 	RetouchRequirements []domain.CreateRetouchRequirementItem
@@ -338,6 +341,7 @@ type taskService struct {
 	assetStorageRefRepo          repo.AssetStorageRefRepo
 	referenceFileRefFlatRepo     repo.ReferenceFileRefFlatRepo
 	retouchRequirementRepo       repo.TaskRetouchRequirementRepo
+	taskCreateRequestRepo        repo.TaskCreateRequestRepo
 	taskReferenceAssetFormalizer TaskReferenceAssetFormalizer
 	productCodeSeqRepo           repo.ProductCodeSequenceRepo
 	erpBridgeSvc                 ERPBridgeService
@@ -351,6 +355,7 @@ type taskService struct {
 	blueprintRuleEngine          *blueprint.RuleEngine
 	productManagementCloseSyncer ProductManagementCloseSyncer
 	notifications                taskNotificationService
+	createFilingAsync            bool
 }
 
 type customizationPricingUserReader interface {
@@ -408,6 +413,18 @@ func WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo repo.ReferenceFil
 func WithTaskRetouchRequirementRepo(retouchRequirementRepo repo.TaskRetouchRequirementRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.retouchRequirementRepo = retouchRequirementRepo
+	}
+}
+
+func WithTaskCreateRequestRepo(taskCreateRequestRepo repo.TaskCreateRequestRepo) TaskServiceOption {
+	return func(s *taskService) {
+		s.taskCreateRequestRepo = taskCreateRequestRepo
+	}
+}
+
+func WithTaskCreateFilingAsync() TaskServiceOption {
+	return func(s *taskService) {
+		s.createFilingAsync = true
 	}
 }
 
@@ -596,8 +613,14 @@ func (s *taskService) taskActionAuthorizer() *taskActionAuthorizer {
 	return newTaskActionAuthorizer(s.dataScopeResolver, s.scopeUserRepo)
 }
 
-func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (*domain.Task, *domain.AppError) {
+func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (created *domain.Task, appErr *domain.AppError) {
 	p = normalizeCreateTaskRequest(p)
+	var reservation taskCreateIdempotencyReservation
+	defer func() {
+		if appErr != nil {
+			s.markTaskCreateIdempotencyFailed(reservation, p.CreatorID, appErr.Message)
+		}
+	}()
 	if p.RequesterID == nil {
 		requesterID := p.CreatorID
 		p.RequesterID = &requesterID
@@ -615,6 +638,13 @@ func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (*domain.T
 	}
 	if p.ReferenceImagesProvided || len(p.ReferenceImages) > 0 {
 		return nil, rejectReferenceImagesOnTaskCreate()
+	}
+	if replayTask, reserved, reserveErr := s.reserveTaskCreateIdempotency(ctx, &p); reserveErr != nil {
+		return nil, reserveErr
+	} else if replayTask != nil {
+		return replayTask, nil
+	} else {
+		reservation = reserved
 	}
 
 	if isMultipleBatchTaskRequest(p) {
@@ -985,13 +1015,18 @@ func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, 
 	}
 	s.formalizeTaskCreateReferenceAssetsBestEffort(ctx, p, newID)
 	if shouldTriggerFilingAfterTaskCreate(p) {
-		s.triggerFilingBestEffort(ctx, TriggerTaskFilingParams{
+		filingParams := TriggerTaskFilingParams{
 			TaskID:     newID,
 			OperatorID: p.CreatorID,
 			Remark:     p.Remark,
 			Source:     TaskFilingTriggerSourceCreate,
 			Force:      p.SyncERPOnCreate,
-		}, "task_create_auto_policy")
+		}
+		if s.createFilingAsync {
+			s.triggerFilingBestEffortAsync(filingParams, "task_create_auto_policy")
+		} else {
+			s.triggerFilingBestEffort(ctx, filingParams, "task_create_auto_policy")
+		}
 	}
 	return created, nil
 }

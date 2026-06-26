@@ -4378,6 +4378,10 @@ components:
       description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, and `retouch_task`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
       required: [task_type, owner_team]
       properties:
+        client_create_id:
+          type: string
+          maxLength: 128
+          description: Client-generated task-create idempotency key. Reusing the same key with the same payload returns the existing created task instead of allocating a new task number or SKU range.
         task_type:
           type: string
           enum: [original_product_development, new_product_development, purchase_task, retouch_task]
@@ -4517,7 +4521,7 @@ components:
           type: string
         sync_erp_on_create:
           type: boolean
-          description: When true, backend triggers the ERP product upsert immediately after task creation using the minimal create-time payload (`product_name`, generated/provided sku, and `i_id`). Later edits can enrich ERP data.
+          description: When true, backend schedules the ERP product upsert immediately after task creation using the minimal create-time payload (`product_name`, generated/provided sku, and `i_id`). The create response is not blocked by ERP Bridge/OpenWeb latency; later edits can enrich ERP data.
         purchase_sku:
           type: string
         product_channel:
@@ -5478,6 +5482,182 @@ components:
             $ref: '#/components/schemas/ProductSearchResult'
         pagination:
           $ref: '#/components/schemas/PaginationMeta'
+    ProductManagementSyncStatus:
+      type: string
+      enum: [pending_sync, queued, syncing, synced, failed, cooling_down, waiting_image]
+    ProductManagementImageSource:
+      type: string
+      enum: [manual, erp_product_image, delivery, derived_preview, task_reference, auto_on_close, missing]
+    ProductManagementCostTrace:
+      type: object
+      properties:
+        rule_name: { type: string }
+        rule_source: { type: string }
+        matched_rule_version:
+          type: integer
+          nullable: true
+        prefill_source: { type: string }
+        requires_manual_review: { type: boolean }
+        manual_cost_override: { type: boolean }
+        manual_cost_override_reason: { type: string }
+        input_snapshot:
+          type: object
+          additionalProperties: true
+        calculation_snapshot:
+          type: object
+          additionalProperties: true
+        snapshot_at:
+          type: string
+          format: date-time
+          nullable: true
+    ProductManagementAreaTrace:
+      type: object
+      description: Product-center display trace for the area used by cost assessment. It is derived server-side from SKU item structured specs, task specs, or the existing cost dimension parser.
+      properties:
+        width_m:
+          type: number
+          format: double
+          nullable: true
+        height_m:
+          type: number
+          format: double
+          nullable: true
+        quantity:
+          type: number
+          format: double
+          nullable: true
+        area_m2:
+          type: number
+          format: double
+          nullable: true
+        formula: { type: string }
+        source:
+          type: string
+          enum: [sku_item_variant, task_detail, text_extractor, missing]
+        source_label: { type: string }
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        warning: { type: string }
+    ProductManagementRecord:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        record_key: { type: string }
+        task_id: { type: integer, format: int64 }
+        task_sku_item_id:
+          type: integer
+          format: int64
+          nullable: true
+        task_no: { type: string }
+        task_type: { type: string }
+        source_mode: { type: string }
+        sku_code: { type: string }
+        product_i_id: { type: string }
+        erp_i_id: { type: string }
+        category_name: { type: string }
+        product_family: { type: string }
+        product_name: { type: string }
+        cost_price:
+          type: number
+          format: double
+          nullable: true
+        cost_trace:
+          allOf: [{ $ref: '#/components/schemas/ProductManagementCostTrace' }]
+          nullable: true
+        spec_text: { type: string }
+        size_text: { type: string }
+        area_trace:
+          allOf: [{ $ref: '#/components/schemas/ProductManagementAreaTrace' }]
+          nullable: true
+        creator_id: { type: integer, format: int64 }
+        creator_name: { type: string }
+        task_created_at: { type: string, format: date-time }
+        image_source:
+          $ref: '#/components/schemas/ProductManagementImageSource'
+        image_source_label: { type: string }
+        image_selection_mode:
+          type: string
+          enum: [auto, manual]
+        image_asset_id:
+          type: integer
+          format: int64
+          nullable: true
+        image_asset_version_id:
+          type: integer
+          format: int64
+          nullable: true
+        image_preview_url: { type: string }
+        image_filename: { type: string }
+        image_mime_type: { type: string }
+        image_missing_reason: { type: string }
+        image_sync_source:
+          $ref: '#/components/schemas/ProductManagementImageSource'
+        erp_sync_status:
+          $ref: '#/components/schemas/ProductManagementSyncStatus'
+        base_sync_status:
+          $ref: '#/components/schemas/ProductManagementSyncStatus'
+        image_sync_status:
+          $ref: '#/components/schemas/ProductManagementSyncStatus'
+        last_erp_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_erp_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_base_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_image_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+        sync_cooldown_until:
+          type: string
+          format: date-time
+          nullable: true
+        last_sync_error: { type: string }
+        base_sync_error: { type: string }
+        image_sync_error: { type: string }
+        image_required: { type: boolean }
+        can_maintain_image: { type: boolean }
+        can_cross_task_select: { type: boolean }
+        can_sync_erp: { type: boolean }
+        can_force_override: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProductManagementListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductManagementRecord'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+    ProductManagementComboTreeResponse:
+      type: object
+      properties:
+        groups:
+          type: array
+          description: Combo or single-SKU groups. Each group embeds its current product-management child records; use `/v1/product-management` for the authoritative child record field contract.
+          items:
+            type: object
+            additionalProperties: true
+        data:
+          type: array
+          description: Flattened current-page product-management records, using the same record shape as `/v1/product-management`.
+          items:
+            type: object
+            additionalProperties: true
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+        combo_sync_summary:
+          type: object
+          additionalProperties: true
     ERPSyncRun:
       type: object
       properties:
@@ -8948,6 +9128,154 @@ paths:
                 type: object
                 properties:
                   deleted: { type: integer }
+  /v1/product-management:
+    get:
+      summary: List product management records
+      description: |
+        Product-center read model for SKU-to-ERP maintenance. The record includes base data sync state,
+        ERP image sync state, cost trace, and the server-derived area trace used by cost assessment.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: keyword
+          schema: { type: string }
+        - in: query
+          name: display_scope
+          schema:
+            type: string
+            enum: [combo, single, all]
+        - in: query
+          name: image_source
+          schema:
+            $ref: '#/components/schemas/ProductManagementImageSource'
+        - in: query
+          name: sync_status
+          schema:
+            $ref: '#/components/schemas/ProductManagementSyncStatus'
+        - in: query
+          name: base_sync_status
+          schema:
+            $ref: '#/components/schemas/ProductManagementSyncStatus'
+        - in: query
+          name: image_sync_status
+          schema:
+            $ref: '#/components/schemas/ProductManagementSyncStatus'
+        - in: query
+          name: cost_status
+          schema:
+            type: string
+            enum: [missing, ready]
+        - in: query
+          name: issue_scope
+          schema:
+            type: string
+            enum: [attention, all]
+        - in: query
+          name: creator_id
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Product management records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductManagementListResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-management/combo-tree:
+    get:
+      summary: List product management records grouped by ERP combo SKU
+      description: |
+        Product-center combo hierarchy. This endpoint does not call the ERP OpenWeb API directly; it reads local
+        combo-cache tables and embeds the same product management record contract as `/v1/product-management`.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: keyword
+          schema: { type: string }
+        - in: query
+          name: display_scope
+          schema:
+            type: string
+            enum: [combo, single, all]
+        - in: query
+          name: image_source
+          schema:
+            $ref: '#/components/schemas/ProductManagementImageSource'
+        - in: query
+          name: sync_status
+          schema:
+            $ref: '#/components/schemas/ProductManagementSyncStatus'
+        - in: query
+          name: base_sync_status
+          schema:
+            $ref: '#/components/schemas/ProductManagementSyncStatus'
+        - in: query
+          name: image_sync_status
+          schema:
+            $ref: '#/components/schemas/ProductManagementSyncStatus'
+        - in: query
+          name: cost_status
+          schema:
+            type: string
+            enum: [missing, ready]
+        - in: query
+          name: issue_scope
+          schema:
+            type: string
+            enum: [attention, all]
+        - in: query
+          name: creator_id
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Product management combo tree
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductManagementComboTreeResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/erp/products:
     get:
       summary: Search ERP Bridge products
@@ -10364,6 +10692,14 @@ paths:
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
         required_roles: [Ops]
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+          description: Optional create-task idempotency key. Equivalent to request body `client_create_id`.
       requestBody:
         required: true
         content:

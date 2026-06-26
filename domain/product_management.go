@@ -49,6 +49,18 @@ type ProductManagementCostTrace struct {
 	SnapshotAt               *time.Time      `json:"snapshot_at,omitempty"`
 }
 
+type ProductManagementAreaTrace struct {
+	WidthM      *float64 `json:"width_m,omitempty"`
+	HeightM     *float64 `json:"height_m,omitempty"`
+	Quantity    *float64 `json:"quantity,omitempty"`
+	AreaM2      *float64 `json:"area_m2,omitempty"`
+	Formula     string   `json:"formula,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	SourceLabel string   `json:"source_label,omitempty"`
+	Confidence  string   `json:"confidence,omitempty"`
+	Warning     string   `json:"warning,omitempty"`
+}
+
 type ProductManagementRecord struct {
 	ID                  int64                               `json:"id"`
 	RecordKey           string                              `json:"record_key"`
@@ -65,6 +77,9 @@ type ProductManagementRecord struct {
 	ProductName         string                              `json:"product_name"`
 	CostPrice           *float64                            `json:"cost_price,omitempty"`
 	CostTrace           *ProductManagementCostTrace         `json:"cost_trace,omitempty"`
+	SpecText            string                              `json:"spec_text,omitempty"`
+	SizeText            string                              `json:"size_text,omitempty"`
+	AreaTrace           *ProductManagementAreaTrace         `json:"area_trace,omitempty"`
 	CreatorID           int64                               `json:"creator_id"`
 	CreatorName         string                              `json:"creator_name"`
 	TaskCreatedAt       time.Time                           `json:"task_created_at"`
@@ -96,6 +111,15 @@ type ProductManagementRecord struct {
 	CanForceOverride    bool                                `json:"can_force_override"`
 	CreatedAt           time.Time                           `json:"created_at"`
 	UpdatedAt           time.Time                           `json:"updated_at"`
+
+	DimensionVariantJSON  json.RawMessage `json:"-"`
+	DimensionTaskSpecText string          `json:"-"`
+	DimensionTaskSizeText string          `json:"-"`
+	DimensionTaskWidthM   *float64        `json:"-"`
+	DimensionTaskHeightM  *float64        `json:"-"`
+	DimensionTaskAreaM2   *float64        `json:"-"`
+	DimensionSKUQuantity  *float64        `json:"-"`
+	DimensionTaskQuantity *float64        `json:"-"`
 }
 
 type ProductManagementImageCandidate struct {

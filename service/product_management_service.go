@@ -1105,6 +1105,7 @@ func (s *productManagementService) decorateRecords(ctx context.Context, actor do
 		record.CanCrossTaskSelect = isProductManagementAdmin(actor)
 		record.CanForceOverride = isProductManagementAdmin(actor)
 		record.CanSyncERP = canSyncProductManagementERP(actor, record)
+		decorateProductManagementArea(record)
 		if record.ImageAssetID != nil {
 			record.ImagePreviewURL = fmt.Sprintf("/v1/assets/%d/preview", *record.ImageAssetID)
 		}
@@ -1135,6 +1136,140 @@ func (s *productManagementService) decorateRecords(ctx context.Context, actor do
 			record.ImagePreviewURL = ""
 		}
 	}
+}
+
+func decorateProductManagementArea(record *domain.ProductManagementRecord) {
+	if record == nil {
+		return
+	}
+	variant := taskSKUItemVariantObject(record.DimensionVariantJSON)
+	variantSpec := productManagementVariantStringFromObject(variant, "spec_text")
+	variantSize := productManagementVariantStringFromObject(variant, "size_text")
+	record.SpecText = firstNonEmptyString(record.SpecText, variantSpec, record.DimensionTaskSpecText)
+	record.SizeText = firstNonEmptyString(record.SizeText, variantSize, record.DimensionTaskSizeText)
+
+	width := cloneFloat64Ptr(variantFloatFromObject(variant, "width", "width_m"))
+	height := cloneFloat64Ptr(variantFloatFromObject(variant, "height", "height_m"))
+	area := cloneFloat64Ptr(variantFloatFromObject(variant, "area", "area_m2"))
+	quantity := cloneFloat64Ptr(variantFloatFromObject(variant, "quantity", "qty"))
+	source := ""
+	sourceLabel := ""
+	confidence := ""
+	if variantSpec != "" || variantSize != "" || width != nil || height != nil || area != nil || quantity != nil {
+		source = "sku_item_variant"
+		sourceLabel = "SKU 子项规格"
+		confidence = "high"
+	}
+
+	if width == nil {
+		width = cloneFloat64Ptr(record.DimensionTaskWidthM)
+	}
+	if height == nil {
+		height = cloneFloat64Ptr(record.DimensionTaskHeightM)
+	}
+	if area == nil {
+		area = cloneFloat64Ptr(record.DimensionTaskAreaM2)
+	}
+	if quantity == nil {
+		quantity = cloneFloat64Ptr(record.DimensionSKUQuantity)
+	}
+	if quantity == nil {
+		quantity = cloneFloat64Ptr(record.DimensionTaskQuantity)
+	}
+	if source == "" && (record.DimensionTaskSpecText != "" || record.DimensionTaskSizeText != "" || width != nil || height != nil || area != nil || quantity != nil) {
+		source = "task_detail"
+		sourceLabel = "任务规格"
+		confidence = "high"
+	}
+
+	if area == nil && width != nil && height != nil {
+		qty := productManagementAreaQuantityOrDefault(quantity)
+		computedArea := *width * *height * qty
+		area = &computedArea
+	}
+	if area == nil {
+		text := strings.Join(uniqueNonEmptyStrings(
+			record.SizeText,
+			record.SpecText,
+			record.ProductName,
+			record.ProductFamily,
+			record.CategoryName,
+		), " ")
+		extracted := extractCostDimensionsFromText(text)
+		if width == nil {
+			width = cloneFloat64Ptr(extracted.WidthM)
+		}
+		if height == nil {
+			height = cloneFloat64Ptr(extracted.HeightM)
+		}
+		if area == nil {
+			area = cloneFloat64Ptr(extracted.AreaM2)
+		}
+		if area != nil && source == "" {
+			source = "text_extractor"
+			sourceLabel = "规格文本解析"
+			if record.SizeText != "" || record.SpecText != "" {
+				confidence = "medium"
+			} else {
+				confidence = "low"
+			}
+		}
+	}
+
+	trace := &domain.ProductManagementAreaTrace{
+		WidthM:      cloneFloat64Ptr(width),
+		HeightM:     cloneFloat64Ptr(height),
+		Quantity:    cloneFloat64Ptr(quantity),
+		AreaM2:      cloneFloat64Ptr(area),
+		Source:      source,
+		SourceLabel: sourceLabel,
+		Confidence:  confidence,
+	}
+	if trace.AreaM2 != nil {
+		trace.Formula = productManagementAreaFormula(trace.WidthM, trace.HeightM, trace.Quantity, trace.AreaM2)
+	} else {
+		trace.Warning = "缺少可识别尺寸，成本面积待人工核对。"
+		if trace.Source == "" {
+			trace.Source = "missing"
+			trace.SourceLabel = "未识别到尺寸"
+			trace.Confidence = "low"
+		}
+	}
+	record.AreaTrace = trace
+}
+
+func productManagementVariantStringFromObject(obj map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := obj[key]; ok {
+			if text, ok := value.(string); ok {
+				if trimmed := strings.TrimSpace(text); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func productManagementAreaQuantityOrDefault(quantity *float64) float64 {
+	if quantity != nil && *quantity > 0 {
+		return *quantity
+	}
+	return 1
+}
+
+func productManagementAreaFormula(width, height, quantity, area *float64) string {
+	if area == nil {
+		return ""
+	}
+	if width != nil && height != nil {
+		qty := productManagementAreaQuantityOrDefault(quantity)
+		if quantity != nil && qty > 1 {
+			return fmt.Sprintf("面积 = 宽 %.4g m × 高 %.4g m × 数量 %.4g = %.4g ㎡", *width, *height, qty, *area)
+		}
+		return fmt.Sprintf("面积 = 宽 %.4g m × 高 %.4g m = %.4g ㎡", *width, *height, *area)
+	}
+	return fmt.Sprintf("面积 = %.4g ㎡", *area)
 }
 
 func (s *productManagementService) productManagementComboGroups(ctx context.Context, records []*domain.ProductManagementRecord) []domain.ProductManagementComboGroup {

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +111,66 @@ func TestProductManagementComboScopePaginatesComboGroups(t *testing.T) {
 	}
 	if len(result.Data) != 2 {
 		t.Fatalf("page data count = %d, want combo child count 2", len(result.Data))
+	}
+}
+
+func TestProductManagementAreaTraceUsesSKUItemVariant(t *testing.T) {
+	record := productManagementTestRecord(11, "CGK000011", time.Now())
+	record.DimensionVariantJSON = json.RawMessage(`{"spec_text":"单个 160*125cm","size_text":"160*125cm","width":1.6,"height":1.25,"quantity":3}`)
+
+	decorateProductManagementArea(record)
+
+	if record.SpecText != "单个 160*125cm" || record.SizeText != "160*125cm" {
+		t.Fatalf("spec/size = %q/%q, want variant spec and size", record.SpecText, record.SizeText)
+	}
+	if record.AreaTrace == nil || record.AreaTrace.AreaM2 == nil {
+		t.Fatal("area trace was not generated")
+	}
+	if math.Abs(*record.AreaTrace.AreaM2-6) > 0.000001 {
+		t.Fatalf("area = %.6f, want 6", *record.AreaTrace.AreaM2)
+	}
+	if record.AreaTrace.Source != "sku_item_variant" {
+		t.Fatalf("source = %q, want sku_item_variant", record.AreaTrace.Source)
+	}
+	if !strings.Contains(record.AreaTrace.Formula, "数量") {
+		t.Fatalf("formula = %q, want quantity formula", record.AreaTrace.Formula)
+	}
+}
+
+func TestProductManagementAreaTraceExtractsFromProductText(t *testing.T) {
+	record := productManagementTestRecord(12, "CGK000012", time.Now())
+	record.ProductName = "常规kt板/毕业手举牌/160*125cm"
+
+	decorateProductManagementArea(record)
+
+	if record.AreaTrace == nil || record.AreaTrace.AreaM2 == nil {
+		t.Fatal("area trace was not generated")
+	}
+	if math.Abs(*record.AreaTrace.AreaM2-2) > 0.000001 {
+		t.Fatalf("area = %.6f, want 2", *record.AreaTrace.AreaM2)
+	}
+	if record.AreaTrace.Source != "text_extractor" {
+		t.Fatalf("source = %q, want text_extractor", record.AreaTrace.Source)
+	}
+	if record.AreaTrace.Confidence != "low" {
+		t.Fatalf("confidence = %q, want low for product-name extraction", record.AreaTrace.Confidence)
+	}
+}
+
+func TestProductManagementAreaTraceMarksMissingDimensions(t *testing.T) {
+	record := productManagementTestRecord(13, "CGK000013", time.Now())
+	record.ProductName = "常规kt板/无尺寸任务"
+
+	decorateProductManagementArea(record)
+
+	if record.AreaTrace == nil {
+		t.Fatal("area trace was not generated")
+	}
+	if record.AreaTrace.AreaM2 != nil {
+		t.Fatalf("area = %.6f, want nil", *record.AreaTrace.AreaM2)
+	}
+	if record.AreaTrace.Source != "missing" || record.AreaTrace.Warning == "" {
+		t.Fatalf("trace = %+v, want missing warning", record.AreaTrace)
 	}
 }
 

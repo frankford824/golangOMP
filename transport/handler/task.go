@@ -94,6 +94,7 @@ type createTaskReq struct {
 	BaseSalePrice     *float64 `json:"base_sale_price"`
 	ReferenceLink     string   `json:"reference_link"`
 	SyncERPOnCreate   *bool    `json:"sync_erp_on_create"`
+	ClientCreateID    string   `json:"client_create_id"`
 
 	// Purchase task fields
 	PurchaseSKU    string `json:"purchase_sku"`
@@ -828,6 +829,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 
 	referenceImages := req.ReferenceImages
 	referenceFileRefs := req.ReferenceFileRefs
+	clientCreateID := firstNonEmptyTrimmed(req.ClientCreateID, c.GetHeader("Idempotency-Key"), c.GetHeader("X-Idempotency-Key"))
 
 	demandText := req.DemandText
 	if demandText == "" && req.ChangeRequest != "" {
@@ -887,6 +889,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		TopLevelPurchaseSKU: req.PurchaseSKU,
 		SyncERPOnCreate:     req.SyncERPOnCreate != nil && *req.SyncERPOnCreate,
 		SyncERPOnCreateSet:  req.SyncERPOnCreate != nil,
+		ClientCreateID:      clientCreateID,
 	}
 	if len(req.RetouchRequirements) > 0 {
 		params.RetouchRequirements = make([]domain.CreateRetouchRequirementItem, 0, len(req.RetouchRequirements))

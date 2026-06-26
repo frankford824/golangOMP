@@ -225,8 +225,11 @@ export const tasksApi = {
    * POST /v1/tasks
    * 权限：运营、管理员
    */
-  create: (payload: Record<string, unknown>, signal?: AbortSignal) =>
-    http.post('/v1/tasks', payload, { signal }),
+  create: (payload: Record<string, unknown>, signal?: AbortSignal, idempotencyKey?: string) =>
+    http.post('/v1/tasks', payload, {
+      signal,
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+    }),
 
   /**
    * 可选预展示：根据当前表单信息，向后端请求一组“将要使用”的 SKU 码。
@@ -640,8 +643,8 @@ export async function fetchTaskById(id: string) {
 }
 
 /** @deprecated 请使用 tasksApi.create */
-export async function createTask(payload: Record<string, unknown>) {
-  const res = await tasksApi.create(payload)
+export async function createTask(payload: Record<string, unknown>, idempotencyKey?: string) {
+  const res = await tasksApi.create(payload, undefined, idempotencyKey)
   return res.data
 }
 

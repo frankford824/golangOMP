@@ -233,6 +233,14 @@ func (s *taskService) triggerFilingBestEffort(ctx context.Context, p TriggerTask
 	}
 }
 
+func (s *taskService) triggerFilingBestEffortAsync(p TriggerTaskFilingParams, reason string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		s.triggerFilingBestEffort(ctx, p, reason)
+	}()
+}
+
 func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, operatorID int64, remark, source string, force bool, targetSKUItemIDs []int64) ([]taskFilingPayload, []string, string, *domain.AppError) {
 	if isBatchNewProductTask(task) {
 		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, task.ID)

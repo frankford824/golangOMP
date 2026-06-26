@@ -1,10 +1,10 @@
-# V1 API 速查表(229 path · 一行一条)
+# V1 API 速查表(231 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 229 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 231 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -48,6 +48,8 @@
 | POST | `/v1/org-move-requests/{id}/approve` | Approve an org move request | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org-move-requests/{id}/reject` | Reject an org move request | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | GET, POST | `/v1/trace-events` | List business trace events；Record frontend business trace event | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/product-management` | List product management records | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/product-management/combo-tree` | List product management records grouped by ERP combo SKU | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/tasks` | List tasks；Create task | GET:已登录 / 主流程读全量可见; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/filter-options` | Get task center filter options | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

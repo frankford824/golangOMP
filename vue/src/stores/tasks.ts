@@ -1938,11 +1938,15 @@ export const useTasksStore = defineStore('tasks', () => {
     return payload
   }
 
-  async function addTask(task: Partial<Task>, _action_id?: string): Promise<Task> {
+  async function addTask(task: Partial<Task>, actionId?: string): Promise<Task> {
     const rawPayload = buildCreatePayload(task)
     // Defense in depth: 在进入网络层前再按后端字段白名单过滤一次，
     // 避免任何回归 UI 把 forbidden 字段送入 POST /v1/tasks。
     const payload = sanitizeCreateTaskPayload(rawPayload, String(rawPayload.task_type ?? ''))
+    const clientCreateId = typeof actionId === 'string' ? actionId.trim() : ''
+    if (clientCreateId) {
+      payload.client_create_id = clientCreateId
+    }
     if (import.meta.env.DEV) {
       const stripped = Object.keys(rawPayload).filter((k) => !(k in payload))
       if (stripped.length > 0) {
@@ -1968,7 +1972,7 @@ export const useTasksStore = defineStore('tasks', () => {
         customization_source_type: payload.customization_source_type,
       })
     }
-    const res = await tasksApi.create(payload)
+	const res = await tasksApi.create(payload, undefined, clientCreateId || undefined)
     const raw = res?.data?.data ?? res?.data ?? res
     const created = enrichTaskDomainFields(normalizeBackendTask(raw as Record<string, unknown>))
     items.value.push(created)

@@ -31,6 +31,18 @@ export interface ProductManagementCostTrace {
   snapshot_at?: string
 }
 
+export interface ProductManagementAreaTrace {
+  width_m?: number
+  height_m?: number
+  quantity?: number
+  area_m2?: number
+  formula?: string
+  source?: string
+  source_label?: string
+  confidence?: string
+  warning?: string
+}
+
 export interface ProductManagementRecord {
   id: number
   record_key: string
@@ -47,6 +59,9 @@ export interface ProductManagementRecord {
   product_name: string
   cost_price?: number | null
   cost_trace?: ProductManagementCostTrace | null
+  spec_text?: string
+  size_text?: string
+  area_trace?: ProductManagementAreaTrace | null
   creator_id: number
   creator_name: string
   task_created_at: string

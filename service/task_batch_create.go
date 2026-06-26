@@ -470,6 +470,11 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 				return err
 			}
 		}
+		if s.taskCreateRequestRepo != nil && strings.TrimSpace(p.ClientCreateID) != "" && strings.TrimSpace(p.CreatePayloadHash) != "" {
+			if err := s.taskCreateRequestRepo.MarkSucceeded(ctx, tx, p.CreatorID, p.ClientCreateID, p.CreatePayloadHash, newID); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if txErr != nil {

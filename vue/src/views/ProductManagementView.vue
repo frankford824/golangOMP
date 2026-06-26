@@ -50,7 +50,7 @@
         </select>
       </label>
       <label class="pm-field">
-        <span>成本</span>
+        <span>规格 / 面积 / 成本</span>
         <select v-model="filters.cost_status" @change="applyFilters">
           <option value="">全部</option>
           <option value="missing">缺成本</option>
@@ -180,13 +180,28 @@
               </button>
             </div>
 
-            <div class="pm-cost-cell" :class="{ 'is-missing': !hasCost(child.record) }">
-              <span class="pm-cost-value">{{ formatCost(child.record.cost_price) }}</span>
-              <span class="pm-cost-help" tabindex="0" :aria-label="costTraceAria(child.record)">
-                i
-                <span class="pm-cost-popover" role="tooltip">
-                  <strong>成本计算过程</strong>
-                  <span v-for="line in costTraceLines(child.record)" :key="line">{{ line }}</span>
+            <div class="pm-cost-cell" :class="{ 'is-missing': !hasCost(child.record), 'has-area-warning': hasAreaWarning(child.record) }">
+              <span v-if="specSummary(child.record)" class="pm-spec-chip" :title="specSummary(child.record)">
+                {{ specSummary(child.record) }}
+              </span>
+              <span class="pm-area-row">
+                <span class="pm-area-value">{{ areaTraceSummary(child.record) }}</span>
+                <span class="pm-area-help" tabindex="0" :aria-label="areaTraceAria(child.record)">
+                  ㎡
+                  <span class="pm-cost-popover pm-area-popover" role="tooltip">
+                    <strong>面积识别过程</strong>
+                    <span v-for="line in areaTraceLines(child.record)" :key="line">{{ line }}</span>
+                  </span>
+                </span>
+              </span>
+              <span class="pm-cost-row">
+                <span class="pm-cost-value">{{ formatCost(child.record.cost_price) }}</span>
+                <span class="pm-cost-help" tabindex="0" :aria-label="costTraceAria(child.record)">
+                  i
+                  <span class="pm-cost-popover" role="tooltip">
+                    <strong>成本计算过程</strong>
+                    <span v-for="line in costTraceLines(child.record)" :key="line">{{ line }}</span>
+                  </span>
                 </span>
               </span>
             </div>
@@ -714,6 +729,93 @@ function replaceRecord(next: ProductManagementRecord): void {
 
 function hasCost(record: ProductManagementRecord): boolean {
   return typeof record.cost_price === 'number' && record.cost_price > 0
+}
+
+function specSummary(record: ProductManagementRecord): string {
+  return firstTraceString(record.size_text, record.spec_text)
+}
+
+function hasAreaWarning(record: ProductManagementRecord): boolean {
+  return Boolean(record.area_trace?.warning)
+}
+
+function areaTraceAria(record: ProductManagementRecord): string {
+  const sku = record.sku_code || '当前 SKU'
+  return `查看 ${sku} 的面积识别过程`
+}
+
+function areaTraceSummary(record: ProductManagementRecord): string {
+  const area = record.area_trace?.area_m2
+  if (typeof area === 'number' && Number.isFinite(area) && area > 0) {
+    return `${formatTraceNumber(area)} ㎡`
+  }
+  return '面积待核对'
+}
+
+function areaTraceLines(record: ProductManagementRecord): string[] {
+  const trace = record.area_trace
+  if (!trace) {
+    return ['暂无面积识别信息。', '请检查任务规格尺寸或在任务详情中补充结构化尺寸。']
+  }
+  const lines: string[] = []
+  const spec = specSummary(record)
+  if (spec) {
+    lines.push(`规格：${spec}`)
+  }
+  const dimensionParts = [
+    typeof trace.width_m === 'number' ? `宽 ${formatTraceNumber(trace.width_m)}m` : '',
+    typeof trace.height_m === 'number' ? `高 ${formatTraceNumber(trace.height_m)}m` : '',
+    typeof trace.quantity === 'number' ? `数量 ${formatTraceNumber(trace.quantity)}` : '',
+  ].filter(Boolean)
+  if (dimensionParts.length > 0) {
+    lines.push(`尺寸：${dimensionParts.join('，')}`)
+  }
+  if (trace.formula) {
+    lines.push(`公式：${trace.formula}`)
+  } else if (typeof trace.area_m2 === 'number') {
+    lines.push(`面积：${formatTraceNumber(trace.area_m2)}㎡`)
+  }
+  if (trace.source_label || trace.source) {
+    lines.push(`来源：${trace.source_label || areaTraceSourceLabel(trace.source)}`)
+  }
+  if (trace.confidence) {
+    lines.push(`可信度：${areaTraceConfidenceLabel(trace.confidence)}`)
+  }
+  if (trace.warning) {
+    lines.push(`提示：${trace.warning}`)
+  }
+  if (lines.length === 0) {
+    lines.push('暂无可展示的面积识别明细。')
+  }
+  return lines
+}
+
+function areaTraceSourceLabel(source?: string): string {
+  switch (source) {
+    case 'sku_item_variant':
+      return 'SKU 子项规格'
+    case 'task_detail':
+      return '任务规格'
+    case 'text_extractor':
+      return '规格文本解析'
+    case 'missing':
+      return '未识别到尺寸'
+    default:
+      return source || '未知来源'
+  }
+}
+
+function areaTraceConfidenceLabel(confidence: string): string {
+  switch (confidence) {
+    case 'high':
+      return '高'
+    case 'medium':
+      return '中'
+    case 'low':
+      return '低'
+    default:
+      return confidence
+  }
 }
 
 function costTraceAria(record: ProductManagementRecord): string {
@@ -1629,13 +1731,49 @@ function errorMessage(err: unknown): string {
 
 .pm-cost-cell {
   position: relative;
+  display: grid;
+  width: min(16rem, 100%);
+  max-width: 100%;
+  gap: 0.35rem;
+  color: rgb(var(--yb-success-teal));
+  font-weight: 900;
+}
+
+.pm-spec-chip {
+  display: inline-flex;
+  max-width: 100%;
+  width: max-content;
+  align-items: center;
+  overflow: hidden;
+  padding: 0.24rem 0.55rem;
+  border: 1px solid rgba(var(--yb-brand-cyan-comma), 0.24);
+  border-radius: 999px;
+  color: rgb(var(--yb-brand-cyan));
+  background: rgba(var(--yb-brand-cyan-comma), 0.08);
+  font-family: var(--yb-font-text);
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-area-row,
+.pm-cost-row {
+  position: relative;
   display: inline-flex;
   width: max-content;
   max-width: 100%;
   align-items: center;
-  gap: 0.45rem;
-  color: rgb(var(--yb-success-teal));
+  gap: 0.42rem;
+}
+
+.pm-area-value {
+  color: rgb(var(--yb-brand-subtle));
+  font-size: 0.88rem;
   font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .pm-cost-value {
@@ -1644,7 +1782,8 @@ function errorMessage(err: unknown): string {
   white-space: nowrap;
 }
 
-.pm-cost-help {
+.pm-cost-help,
+.pm-area-help {
   position: relative;
   display: inline-flex;
   width: 1.35rem;
@@ -1663,8 +1802,17 @@ function errorMessage(err: unknown): string {
   outline: none;
 }
 
+.pm-area-help {
+  border-color: rgba(var(--yb-brand-cyan-comma), 0.26);
+  color: rgb(var(--yb-brand-cyan));
+  background: rgba(var(--yb-brand-cyan-comma), 0.08);
+  box-shadow: 0 7px 18px rgba(var(--yb-brand-cyan-comma), 0.1);
+}
+
 .pm-cost-help:hover,
-.pm-cost-help:focus-visible {
+.pm-cost-help:focus-visible,
+.pm-area-help:hover,
+.pm-area-help:focus-visible {
   border-color: rgb(var(--yb-success-emerald-light));
   color: rgb(var(--yb-success-text-dark));
   background: rgb(var(--yb-surface-success-strong));
@@ -1709,7 +1857,10 @@ function errorMessage(err: unknown): string {
 
 .pm-cost-help:hover .pm-cost-popover,
 .pm-cost-help:focus-visible .pm-cost-popover,
-.pm-cost-help:focus-within .pm-cost-popover {
+.pm-cost-help:focus-within .pm-cost-popover,
+.pm-area-help:hover .pm-cost-popover,
+.pm-area-help:focus-visible .pm-cost-popover,
+.pm-area-help:focus-within .pm-cost-popover {
   opacity: 1;
   transform: translateY(-50%) translateX(0) scale(1);
 }
@@ -1723,6 +1874,16 @@ function errorMessage(err: unknown): string {
   color: rgb(var(--yb-danger-text));
   background: rgb(var(--yb-danger-wash));
   box-shadow: 0 7px 18px rgba(var(--yb-danger-comma), 0.12);
+}
+
+.pm-cost-cell.has-area-warning .pm-area-value {
+  color: rgb(var(--yb-warning));
+}
+
+.pm-cost-cell.has-area-warning .pm-area-help {
+  border-color: rgb(var(--yb-warning-border));
+  color: rgb(var(--yb-warning));
+  background: rgb(var(--yb-warning-wash));
 }
 
 .pm-link {

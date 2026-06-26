@@ -411,6 +411,7 @@ import {
   toBeijingHourISO,
 } from '@/utils/date'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
+import { generateActionId } from '@/utils/uuid'
 import {
   REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
   REFERENCE_UPLOAD_MAX_FILE_SIZE_MB,
@@ -467,6 +468,7 @@ const note = ref('')
 const priority = ref('normal')
 const submitError = ref('')
 const submitting = ref(false)
+const actionId = ref(generateActionId())
 
 const priorityOptions = [
   { value: 'low', label: '低' },
@@ -643,9 +645,11 @@ function resetAllExcelState() {
   resetPurchaseExcelState()
   resetOriginalExcelState()
   submitError.value = ''
+  actionId.value = generateActionId()
 }
 
 function onBatchExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchViolation[] }) {
+  actionId.value = generateActionId()
   previewRows.value = payload.preview
   violations.value = payload.violations
   syncBatchItemsFromPreview()
@@ -657,12 +661,14 @@ function onBatchExcelParsed(payload: { preview: BatchPreviewRow[]; violations: B
 function onBatchExcelReset() {
   resetBatchExcelState()
   submitError.value = ''
+  actionId.value = generateActionId()
 }
 
 function onSingleExcelParsed(payload: {
   draft: SingleTaskExcelDraft
   violations: ExcelAssistViolation[]
 }) {
+  actionId.value = generateActionId()
   singleDraft.value = payload.draft
   singleViolations.value = payload.violations
   submitError.value = ''
@@ -671,12 +677,14 @@ function onSingleExcelParsed(payload: {
 function onSingleExcelReset() {
   resetSingleExcelState()
   submitError.value = ''
+  actionId.value = generateActionId()
 }
 
 function onPurchaseExcelParsed(payload: {
   draft: SingleTaskExcelDraft
   violations: ExcelAssistViolation[]
 }) {
+  actionId.value = generateActionId()
   purchaseDraft.value = payload.draft
   purchaseViolations.value = payload.violations
   submitError.value = ''
@@ -685,12 +693,14 @@ function onPurchaseExcelParsed(payload: {
 function onPurchaseExcelReset() {
   resetPurchaseExcelState()
   submitError.value = ''
+  actionId.value = generateActionId()
 }
 
 function onOriginalExcelParsed(payload: {
   draft: SingleTaskExcelDraft
   violations: ExcelAssistViolation[]
 }) {
+  actionId.value = generateActionId()
   originalDraft.value = payload.draft
   originalViolations.value = payload.violations
   submitError.value = ''
@@ -699,6 +709,7 @@ function onOriginalExcelParsed(payload: {
 function onOriginalExcelReset() {
   resetOriginalExcelState()
   submitError.value = ''
+  actionId.value = generateActionId()
 }
 
 function previewRowErrors(row: number): BatchViolation[] {
@@ -961,7 +972,7 @@ async function submit() {
   }
 
   try {
-    const created = await tasksStore.addTask(payload as unknown as Partial<Task>)
+    const created = await tasksStore.addTask(payload as unknown as Partial<Task>, actionId.value)
     await tasksStore.loadTaskById(created.id)
     void router.push({ path: `/tasks/${created.id}` })
   } catch (err) {

@@ -398,7 +398,11 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 			pr.OnlyInCode, pr.OnlyInOpenAPI = DiffFields(pr.CodeFields, pr.OpenAPIFields)
 			pr.Verdict = decideVerdict(pr.CodeFields, pr.OpenAPIFields, pr.OnlyInCode, pr.OnlyInOpenAPI)
 			if isDrift(pr.Verdict) {
-				report.Summary.Drift++
+				if _, ok := knownGapReasons[knownGapKey(method, route.Path)]; ok {
+					recordKnownGap(&report, &pr, method, route.Path, displayHandler(route), pr.Verdict, "")
+				} else {
+					report.Summary.Drift++
+				}
 			} else {
 				report.Summary.Clean++
 			}

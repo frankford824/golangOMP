@@ -108,6 +108,7 @@ func main() {
 	costRuleRepo := mysqlrepo.NewCostRuleRepo(mdb)
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
+	taskCreateRequestRepo := mysqlrepo.NewTaskCreateRequestRepo(mdb)
 	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
 	skuComboRepo := mysqlrepo.NewSKUComboRepo(mdb)
 	procurementRepo := mysqlrepo.NewProcurementRepo(mdb)
@@ -337,6 +338,8 @@ func main() {
 		service.WithTaskReferenceFileRefsOSSDirectService(ossDirectSvc),
 		service.WithTaskDesignAssetReadModel(designAssetRepo),
 		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
+		service.WithTaskCreateRequestRepo(taskCreateRequestRepo),
+		service.WithTaskCreateFilingAsync(),
 		service.WithTaskCustomizationJobRepo(customizationJobRepo),
 		service.WithTaskCustomizationPricingRuleRepo(customizationPricingRuleRepo),
 		service.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),

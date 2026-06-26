@@ -31,7 +31,9 @@ const productManagementSelectCols = `
 	cost_snapshot.cost_rule_name, cost_snapshot.cost_rule_source, cost_snapshot.matched_rule_version,
 	cost_snapshot.prefill_source, cost_snapshot.requires_manual_review, cost_snapshot.manual_cost_override,
 	cost_snapshot.manual_cost_override_reason, cost_snapshot.input_snapshot_json,
-	cost_snapshot.calculation_snapshot_json, cost_snapshot.created_at`
+	cost_snapshot.calculation_snapshot_json, cost_snapshot.created_at,
+	pm_tsi.variant_json, pm_tsi.quantity,
+	pm_td.spec_text, pm_td.size_text, pm_td.width, pm_td.height, pm_td.area, pm_td.quantity`
 
 const productManagementCostTraceJoin = `
 	LEFT JOIN omp_sku_cost_snapshots cost_snapshot
@@ -56,6 +58,10 @@ const productManagementCostTraceJoin = `
 	       s.id DESC
 	     LIMIT 1
 	  )`
+
+const productManagementDimensionJoin = `
+	LEFT JOIN task_details pm_td ON pm_td.task_id = pm.task_id
+	LEFT JOIN task_sku_items pm_tsi ON pm.task_sku_item_id IS NOT NULL AND pm_tsi.id = pm.task_sku_item_id`
 
 func (r *productManagementRepo) RefreshReadModel(ctx context.Context) error {
 	if err := r.refreshMainTaskRecords(ctx); err != nil {
@@ -335,7 +341,7 @@ func (r *productManagementRepo) List(ctx context.Context, filter repo.ProductMan
 		return nil, 0, fmt.Errorf("count product management records: %w", err)
 	}
 	args = append(args, (filter.Page-1)*filter.PageSize, filter.PageSize)
-	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` `+where+`
+	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` `+where+`
 		ORDER BY pm.updated_at DESC, pm.task_created_at DESC, pm.id DESC
 		LIMIT ?, ?`, args...)
 	if err != nil {
@@ -346,12 +352,12 @@ func (r *productManagementRepo) List(ctx context.Context, filter repo.ProductMan
 }
 
 func (r *productManagementRepo) GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error) {
-	row := r.db.db.QueryRowContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` WHERE pm.id = ?`, id)
+	row := r.db.db.QueryRowContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.id = ?`, id)
 	return scanProductManagementRecord(row)
 }
 
 func (r *productManagementRepo) GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, error) {
-	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` WHERE pm.task_id = ? ORDER BY pm.task_sku_item_id IS NULL DESC, pm.id ASC`, taskID)
+	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.task_id = ? ORDER BY pm.task_sku_item_id IS NULL DESC, pm.id ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list product management records by task: %w", err)
 	}
@@ -416,7 +422,7 @@ func (r *productManagementRepo) ClaimQueuedSyncRecords(ctx context.Context, limi
 	); err != nil {
 		return nil, fmt.Errorf("claim product management sync records: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+` WHERE pm.sync_claim_token = ? ORDER BY pm.last_erp_checked_at, pm.id`, claimToken)
+	rows, err := tx.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.sync_claim_token = ? ORDER BY pm.last_erp_checked_at, pm.id`, claimToken)
 	if err != nil {
 		return nil, fmt.Errorf("list claimed product management sync records: %w", err)
 	}
@@ -865,9 +871,12 @@ func scanProductManagementRecordScanner(scanner productManagementScanner) (*doma
 	var taskSKUItemID, imageAssetID, imageAssetVersionID sql.NullInt64
 	var costMatchedRuleVersion, costRequiresManualReview, costManualOverride sql.NullInt64
 	var costPrice sql.NullFloat64
+	var dimensionSKUQuantity, dimensionTaskQuantity sql.NullInt64
+	var dimensionTaskWidth, dimensionTaskHeight, dimensionTaskArea sql.NullFloat64
 	var lastERPCheckedAt, lastERPSyncedAt, lastBaseSyncedAt, lastImageSyncedAt, syncCooldownUntil sql.NullTime
 	var costRuleName, costRuleSource, costPrefillSource, costManualOverrideReason sql.NullString
 	var costInputSnapshot, costCalculationSnapshot sql.NullString
+	var dimensionVariantJSON, dimensionTaskSpecText, dimensionTaskSizeText sql.NullString
 	var costSnapshotAt sql.NullTime
 	if err := scanner.Scan(
 		&item.ID,
@@ -919,6 +928,14 @@ func scanProductManagementRecordScanner(scanner productManagementScanner) (*doma
 		&costInputSnapshot,
 		&costCalculationSnapshot,
 		&costSnapshotAt,
+		&dimensionVariantJSON,
+		&dimensionSKUQuantity,
+		&dimensionTaskSpecText,
+		&dimensionTaskSizeText,
+		&dimensionTaskWidth,
+		&dimensionTaskHeight,
+		&dimensionTaskArea,
+		&dimensionTaskQuantity,
 	); err != nil {
 		return nil, fmt.Errorf("scan product management record: %w", err)
 	}
@@ -943,6 +960,14 @@ func scanProductManagementRecordScanner(scanner productManagementScanner) (*doma
 		costCalculationSnapshot,
 		costSnapshotAt,
 	)
+	item.DimensionVariantJSON = productManagementRawJSON(dimensionVariantJSON)
+	item.DimensionTaskSpecText = strings.TrimSpace(dimensionTaskSpecText.String)
+	item.DimensionTaskSizeText = strings.TrimSpace(dimensionTaskSizeText.String)
+	item.DimensionTaskWidthM = fromNullFloat64(dimensionTaskWidth)
+	item.DimensionTaskHeightM = fromNullFloat64(dimensionTaskHeight)
+	item.DimensionTaskAreaM2 = fromNullFloat64(dimensionTaskArea)
+	item.DimensionSKUQuantity = productManagementFloatFromNullInt64(dimensionSKUQuantity)
+	item.DimensionTaskQuantity = productManagementFloatFromNullInt64(dimensionTaskQuantity)
 	if strings.TrimSpace(item.ERPIID) == "" {
 		item.ERPIID = strings.TrimSpace(item.ProductIID)
 	}
@@ -992,4 +1017,12 @@ func productManagementRawJSON(value sql.NullString) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(raw)
+}
+
+func productManagementFloatFromNullInt64(value sql.NullInt64) *float64 {
+	if !value.Valid || value.Int64 <= 0 {
+		return nil
+	}
+	converted := float64(value.Int64)
+	return &converted
 }

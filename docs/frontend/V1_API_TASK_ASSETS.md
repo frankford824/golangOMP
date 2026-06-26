@@ -301,7 +301,9 @@ curl -X POST https://api.example.com/v1/task-create/asset-center/upload-sessions
 ### 请求体 schema
 参数:
 
-无 path/query/header 参数。
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `Idempotency-Key` | header | string | 否 | Optional create-task idempotency key. Equivalent to request body `client_create_id`. |
 
 Content-Type: `multipart/form-data`
 

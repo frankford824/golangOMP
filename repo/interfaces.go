@@ -294,6 +294,13 @@ type TaskRepo interface {
 	UpdateCustomizationState(ctx context.Context, tx Tx, id int64, lastOperatorID *int64, rejectReason, rejectCategory string) error
 }
 
+type TaskCreateRequestRepo interface {
+	Reserve(ctx context.Context, actorID int64, clientCreateID, payloadHash, requestPayloadJSON string, expiresAt time.Time) (*domain.TaskCreateRequest, string, error)
+	FindRecentActiveByActorPayloadHash(ctx context.Context, actorID int64, payloadHash string, since time.Time) (*domain.TaskCreateRequest, error)
+	MarkSucceeded(ctx context.Context, tx Tx, actorID int64, clientCreateID, payloadHash string, taskID int64) error
+	MarkFailed(ctx context.Context, actorID int64, clientCreateID, payloadHash, errorMessage string) error
+}
+
 // CodeRuleRepo handles code_rules and code_rule_sequences tables (V7 §5).
 type CodeRuleRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.CodeRule, error)
