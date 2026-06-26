@@ -574,6 +574,429 @@ func (r *assetWorkbenchRepo) ListActivePromoCoupons(ctx context.Context, workerT
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) ListGroups(ctx context.Context, filter repo.AssetWorkbenchGroupFilter) ([]*domain.AssetWorkbenchGroup, int64, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if v := strings.TrimSpace(filter.Keyword); v != "" {
+		like := "%" + v + "%"
+		where = append(where, "(name LIKE ? OR description LIKE ?)")
+		args = append(args, like, like)
+	}
+	if filter.Enabled != nil {
+		where = append(where, "enabled = ?")
+		args = append(args, *filter.Enabled)
+	}
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_groups WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench groups: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchGroupSelect()+` WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY enabled DESC, updated_at DESC, id DESC
+		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list asset workbench groups: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchGroup{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchGroup(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) CreateGroup(ctx context.Context, tx repo.Tx, group *domain.AssetWorkbenchGroup) (*domain.AssetWorkbenchGroup, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_groups (name, description, enabled, created_by)
+		VALUES (?, ?, ?, ?)`,
+		group.Name, group.Description, group.Enabled, group.CreatedBy,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench group: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench group last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchGroupSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchGroup(row)
+}
+
+func (r *assetWorkbenchRepo) UpdateGroup(ctx context.Context, tx repo.Tx, group *domain.AssetWorkbenchGroup) (*domain.AssetWorkbenchGroup, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_groups
+		SET name = ?, description = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		group.Name, group.Description, group.Enabled, group.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench group: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench group rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchGroupSelect()+` WHERE id = ?`, group.ID)
+	return scanAssetWorkbenchGroup(row)
+}
+
+func (r *assetWorkbenchRepo) SetGroupEnabled(ctx context.Context, tx repo.Tx, groupID int64, enabled bool) (*domain.AssetWorkbenchGroup, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_groups
+		SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		enabled, groupID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("set asset workbench group enabled: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench group enabled rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchGroupSelect()+` WHERE id = ?`, groupID)
+	return scanAssetWorkbenchGroup(row)
+}
+
+func (r *assetWorkbenchRepo) AddGroupMembers(ctx context.Context, tx repo.Tx, groupID int64, userIDs []int64) error {
+	for _, userID := range userIDs {
+		if userID <= 0 {
+			continue
+		}
+		if _, err := Unwrap(tx).ExecContext(ctx, `
+			INSERT IGNORE INTO asset_workbench_group_members (group_id, user_id)
+			VALUES (?, ?)`, groupID, userID); err != nil {
+			return fmt.Errorf("insert asset workbench group member: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *assetWorkbenchRepo) RemoveGroupMembers(ctx context.Context, tx repo.Tx, groupID int64, userIDs []int64) error {
+	if groupID <= 0 || len(userIDs) == 0 {
+		return nil
+	}
+	placeholders := make([]string, 0, len(userIDs))
+	args := []interface{}{groupID}
+	for _, userID := range userIDs {
+		if userID <= 0 {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, userID)
+	}
+	if len(placeholders) == 0 {
+		return nil
+	}
+	_, err := Unwrap(tx).ExecContext(ctx, `
+		DELETE FROM asset_workbench_group_members
+		WHERE group_id = ? AND user_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("delete asset workbench group members: %w", err)
+	}
+	return nil
+}
+
+func (r *assetWorkbenchRepo) ListGroupMembers(ctx context.Context, groupID int64) ([]*domain.AssetWorkbenchGroupMember, error) {
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchGroupMemberSelect()+` WHERE group_id = ? ORDER BY user_id ASC`, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench group members: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchGroupMember{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchGroupMember(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) ListTemplates(ctx context.Context, filter repo.AssetWorkbenchTemplateFilter) ([]*domain.AssetWorkbenchTemplate, int64, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if v := strings.TrimSpace(filter.Keyword); v != "" {
+		like := "%" + v + "%"
+		where = append(where, "(name LIKE ? OR category LIKE ? OR difficulty_class LIKE ?)")
+		args = append(args, like, like, like)
+	}
+	if v := strings.TrimSpace(filter.Category); v != "" {
+		where = append(where, "category = ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(filter.DifficultyClass); v != "" {
+		where = append(where, "difficulty_class = ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(filter.WorkerType); v != "" {
+		where = append(where, "worker_type = ?")
+		args = append(args, v)
+	}
+	if filter.Enabled != nil {
+		where = append(where, "enabled = ?")
+		args = append(args, *filter.Enabled)
+	}
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_templates WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench templates: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchTemplateSelect()+` WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY enabled DESC, sort_order ASC, id DESC
+		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list asset workbench templates: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchTemplate{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchTemplate(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) GetTemplate(ctx context.Context, templateID int64) (*domain.AssetWorkbenchTemplate, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchTemplateSelect()+` WHERE id = ?`, templateID)
+	return scanAssetWorkbenchTemplate(row)
+}
+
+func (r *assetWorkbenchRepo) CreateTemplate(ctx context.Context, tx repo.Tx, template *domain.AssetWorkbenchTemplate) (*domain.AssetWorkbenchTemplate, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_templates (
+			name, category, difficulty_class, worker_type, enabled, sort_order, created_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		template.Name,
+		template.Category,
+		template.DifficultyClass,
+		template.WorkerType,
+		template.Enabled,
+		template.SortOrder,
+		template.CreatedBy,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench template: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench template last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchTemplateSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchTemplate(row)
+}
+
+func (r *assetWorkbenchRepo) UpdateTemplate(ctx context.Context, tx repo.Tx, template *domain.AssetWorkbenchTemplate) (*domain.AssetWorkbenchTemplate, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_templates
+		SET name = ?, category = ?, difficulty_class = ?, worker_type = ?, enabled = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		template.Name,
+		template.Category,
+		template.DifficultyClass,
+		template.WorkerType,
+		template.Enabled,
+		template.SortOrder,
+		template.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench template: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench template rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchTemplateSelect()+` WHERE id = ?`, template.ID)
+	return scanAssetWorkbenchTemplate(row)
+}
+
+func (r *assetWorkbenchRepo) SetTemplateEnabled(ctx context.Context, tx repo.Tx, templateID int64, enabled bool) (*domain.AssetWorkbenchTemplate, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_templates
+		SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		enabled, templateID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("set asset workbench template enabled: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench template enabled rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchTemplateSelect()+` WHERE id = ?`, templateID)
+	return scanAssetWorkbenchTemplate(row)
+}
+
+func (r *assetWorkbenchRepo) ListTemplatesForUser(ctx context.Context, userID int64) ([]*domain.AssetWorkbenchTemplate, error) {
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchTemplateSelect()+`
+		WHERE enabled = 1
+		  AND id IN (
+		    SELECT template_id
+		    FROM asset_workbench_template_assignments
+		    WHERE enabled = 1
+		      AND (
+		        (target_type = ? AND target_id = ?)
+		        OR (
+		          target_type = ?
+		          AND target_id IN (SELECT group_id FROM asset_workbench_group_members WHERE user_id = ?)
+		        )
+		      )
+		  )
+		ORDER BY sort_order ASC, id ASC`,
+		domain.AssetWorkbenchAssignmentTargetUser,
+		userID,
+		domain.AssetWorkbenchAssignmentTargetGroup,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench templates for user: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchTemplate{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchTemplate(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) IsTemplateAssignedToUser(ctx context.Context, userID, templateID int64) (bool, error) {
+	var exists int
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM asset_workbench_template_assignments a
+		JOIN asset_workbench_templates t ON t.id = a.template_id AND t.enabled = 1
+		WHERE a.template_id = ?
+		  AND a.enabled = 1
+		  AND (
+		    (a.target_type = ? AND a.target_id = ?)
+		    OR (
+		      a.target_type = ?
+		      AND a.target_id IN (SELECT group_id FROM asset_workbench_group_members WHERE user_id = ?)
+		    )
+		  )
+		LIMIT 1`,
+		templateID,
+		domain.AssetWorkbenchAssignmentTargetUser,
+		userID,
+		domain.AssetWorkbenchAssignmentTargetGroup,
+		userID,
+	).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check asset workbench template assignment: %w", err)
+	}
+	return true, nil
+}
+
+func (r *assetWorkbenchRepo) ListTemplateAssignments(ctx context.Context, filter repo.AssetWorkbenchTemplateAssignmentFilter) ([]*domain.AssetWorkbenchTemplateAssignment, int64, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if filter.TemplateID != nil {
+		where = append(where, "template_id = ?")
+		args = append(args, *filter.TemplateID)
+	}
+	if v := strings.TrimSpace(filter.TargetType); v != "" {
+		where = append(where, "target_type = ?")
+		args = append(args, v)
+	}
+	if filter.TargetID != nil {
+		where = append(where, "target_id = ?")
+		args = append(args, *filter.TargetID)
+	}
+	if filter.Enabled != nil {
+		where = append(where, "enabled = ?")
+		args = append(args, *filter.Enabled)
+	}
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_template_assignments WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench template assignments: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchTemplateAssignmentSelect()+` WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY updated_at DESC, id DESC
+		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list asset workbench template assignments: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchTemplateAssignment{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchTemplateAssignment(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) CreateTemplateAssignment(ctx context.Context, tx repo.Tx, assignment *domain.AssetWorkbenchTemplateAssignment) (*domain.AssetWorkbenchTemplateAssignment, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_template_assignments (
+			template_id, target_type, target_id, enabled, assigned_by
+		) VALUES (?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), assigned_by = VALUES(assigned_by), updated_at = CURRENT_TIMESTAMP`,
+		assignment.TemplateID,
+		assignment.TargetType,
+		assignment.TargetID,
+		assignment.Enabled,
+		assignment.AssignedBy,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench template assignment: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench template assignment last insert id: %w", err)
+	}
+	if id == 0 {
+		row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchTemplateAssignmentSelect()+`
+			WHERE template_id = ? AND target_type = ? AND target_id = ?`,
+			assignment.TemplateID, assignment.TargetType, assignment.TargetID)
+		return scanAssetWorkbenchTemplateAssignment(row)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchTemplateAssignmentSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchTemplateAssignment(row)
+}
+
+func (r *assetWorkbenchRepo) SetTemplateAssignmentEnabled(ctx context.Context, tx repo.Tx, assignmentID int64, enabled bool) (*domain.AssetWorkbenchTemplateAssignment, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_template_assignments
+		SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		enabled, assignmentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("set asset workbench template assignment enabled: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench template assignment rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchTemplateAssignmentSelect()+` WHERE id = ?`, assignmentID)
+	return scanAssetWorkbenchTemplateAssignment(row)
+}
+
 func (r *assetWorkbenchRepo) CreateUploadSession(ctx context.Context, tx repo.Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_upload_sessions (
@@ -697,14 +1120,18 @@ func (r *assetWorkbenchRepo) GetSubmission(ctx context.Context, submissionID int
 func (r *assetWorkbenchRepo) CreateSubmissionItem(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_submission_items (
-			submission_id, payee_user_id, order_no, difficulty_class, finalized, page_count, item_count,
+			submission_id, payee_user_id, order_no, template_id, template_name_snapshot, category_snapshot,
+			difficulty_class, finalized, page_count, item_count,
 			business_month, submitted_at, worker_type_snapshot, job_grade_snapshot, base_price_rule_id,
 			base_unit_price, promo_coupon_id, promo_snapshot_json, pricing_snapshot_json, gross_amount,
 			pricing_status, qc_status, settlement_status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.SubmissionID,
 		item.PayeeUserID,
 		item.OrderNo,
+		toNullInt64(item.TemplateID),
+		item.TemplateNameSnapshot,
+		item.CategorySnapshot,
 		item.DifficultyClass,
 		item.Finalized,
 		item.PageCount,
@@ -1452,6 +1879,33 @@ func (r *assetWorkbenchRepo) ListSettlementItemsByBatch(ctx context.Context, bat
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) ListConfirmedSettlementItemsByPayee(ctx context.Context, payeeUserID int64) ([]*domain.AssetWorkbenchSettlementItem, error) {
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT si.id, si.batch_id, si.item_type, si.submission_item_id, si.payee_user_id, si.business_month,
+			si.amount, si.quantity, si.unit_price, si.direction, si.source_ref_type, si.source_ref_id, si.snapshot_json, si.created_at
+		FROM asset_workbench_settlement_items si
+		JOIN asset_workbench_settlement_batches sb ON sb.id = si.batch_id
+		WHERE si.payee_user_id = ?
+		  AND sb.status = ?
+		ORDER BY si.business_month DESC, si.id ASC`,
+		payeeUserID,
+		domain.AssetWorkbenchBatchStatusConfirmed,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list confirmed asset workbench settlement items by payee: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchSettlementItem{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchSettlementItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *assetWorkbenchRepo) HasConfirmedSettlementForPayeeMonth(ctx context.Context, payeeUserID int64, businessMonth string) (bool, error) {
 	var exists int
 	err := r.db.db.QueryRowContext(ctx, `
@@ -1868,9 +2322,10 @@ func assetWorkbenchSubmissionSelect() string {
 }
 
 func assetWorkbenchSubmissionItemSelect() string {
-	return `SELECT id, submission_id, payee_user_id, order_no, difficulty_class, finalized, page_count, item_count,
-		business_month, submitted_at, worker_type_snapshot, job_grade_snapshot, base_price_rule_id, base_unit_price,
-		promo_coupon_id, promo_snapshot_json, pricing_snapshot_json, gross_amount, pricing_status, qc_status,
+	return `SELECT id, submission_id, payee_user_id, order_no, template_id, template_name_snapshot, category_snapshot,
+		difficulty_class, finalized, page_count, item_count, business_month, submitted_at, worker_type_snapshot,
+		job_grade_snapshot, base_price_rule_id, base_unit_price, promo_coupon_id, promo_snapshot_json,
+		pricing_snapshot_json, gross_amount, pricing_status, qc_status,
 		settlement_status, current_settlement_batch_id, voided_at, voided_by, void_reason, created_at, updated_at
 		FROM asset_workbench_submission_items`
 }
@@ -1899,6 +2354,26 @@ func assetWorkbenchPromoCouponSelect() string {
 		difficulty_class, eligible_user_ids_json, eligible_codes_json, effective_from, effective_to,
 		enabled, stack_policy, created_by, remark, created_at, updated_at
 		FROM asset_workbench_promo_coupons`
+}
+
+func assetWorkbenchGroupSelect() string {
+	return `SELECT id, name, description, enabled, created_by, created_at, updated_at
+		FROM asset_workbench_groups`
+}
+
+func assetWorkbenchGroupMemberSelect() string {
+	return `SELECT group_id, user_id, created_at
+		FROM asset_workbench_group_members`
+}
+
+func assetWorkbenchTemplateSelect() string {
+	return `SELECT id, name, category, difficulty_class, worker_type, enabled, sort_order, created_by, created_at, updated_at
+		FROM asset_workbench_templates`
+}
+
+func assetWorkbenchTemplateAssignmentSelect() string {
+	return `SELECT id, template_id, target_type, target_id, enabled, assigned_by, created_at, updated_at
+		FROM asset_workbench_template_assignments`
 }
 
 func assetWorkbenchErrorImportBatchSelect() string {
@@ -2035,12 +2510,13 @@ func scanAssetWorkbenchSubmission(scanner interface{ Scan(...interface{}) error 
 
 func scanAssetWorkbenchSubmissionItem(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSubmissionItem, error) {
 	var item domain.AssetWorkbenchSubmissionItem
-	var basePriceRuleID, promoCouponID, currentBatchID, voidedBy sql.NullInt64
+	var templateID, basePriceRuleID, promoCouponID, currentBatchID, voidedBy sql.NullInt64
 	var baseUnitPrice sql.NullFloat64
 	var promoSnapshot, pricingSnapshot sql.NullString
 	var voidedAt sql.NullTime
 	if err := scanner.Scan(
-		&item.ID, &item.SubmissionID, &item.PayeeUserID, &item.OrderNo, &item.DifficultyClass,
+		&item.ID, &item.SubmissionID, &item.PayeeUserID, &item.OrderNo, &templateID,
+		&item.TemplateNameSnapshot, &item.CategorySnapshot, &item.DifficultyClass,
 		&item.Finalized, &item.PageCount, &item.ItemCount, &item.BusinessMonth, &item.SubmittedAt,
 		&item.WorkerTypeSnapshot, &item.JobGradeSnapshot, &basePriceRuleID, &baseUnitPrice,
 		&promoCouponID, &promoSnapshot, &pricingSnapshot, &item.GrossAmount, &item.PricingStatus,
@@ -2049,6 +2525,7 @@ func scanAssetWorkbenchSubmissionItem(scanner interface{ Scan(...interface{}) er
 	); err != nil {
 		return nil, err
 	}
+	item.TemplateID = fromNullInt64(templateID)
 	item.BasePriceRuleID = fromNullInt64(basePriceRuleID)
 	item.BaseUnitPrice = fromNullFloat64(baseUnitPrice)
 	item.PromoCouponID = fromNullInt64(promoCouponID)
@@ -2127,6 +2604,46 @@ func scanAssetWorkbenchPromoCoupon(scanner interface{ Scan(...interface{}) error
 	item.EligibleUserIDs = cloneValidJSON(usersJSON)
 	item.EligibleCodes = cloneValidJSON(codesJSON)
 	item.EffectiveTo = fromNullTime(effectiveTo)
+	return &item, nil
+}
+
+func scanAssetWorkbenchGroup(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchGroup, error) {
+	var item domain.AssetWorkbenchGroup
+	if err := scanner.Scan(
+		&item.ID, &item.Name, &item.Description, &item.Enabled, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func scanAssetWorkbenchGroupMember(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchGroupMember, error) {
+	var item domain.AssetWorkbenchGroupMember
+	if err := scanner.Scan(&item.GroupID, &item.UserID, &item.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func scanAssetWorkbenchTemplate(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchTemplate, error) {
+	var item domain.AssetWorkbenchTemplate
+	if err := scanner.Scan(
+		&item.ID, &item.Name, &item.Category, &item.DifficultyClass, &item.WorkerType,
+		&item.Enabled, &item.SortOrder, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func scanAssetWorkbenchTemplateAssignment(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchTemplateAssignment, error) {
+	var item domain.AssetWorkbenchTemplateAssignment
+	if err := scanner.Scan(
+		&item.ID, &item.TemplateID, &item.TargetType, &item.TargetID, &item.Enabled,
+		&item.AssignedBy, &item.CreatedAt, &item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
 	return &item, nil
 }
 

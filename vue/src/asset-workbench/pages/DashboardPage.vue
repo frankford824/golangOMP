@@ -3,6 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { assetWorkbenchApi, type SettlementPreview, type SubmissionRow } from '@aw/shared/api/assetWorkbenchApi'
+import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
+import { formatInt, formatMoney } from '@aw/shared/format/number'
+import { submissionStatusMeta } from '@aw/shared/format/status'
 
 const month = ref(new Date().toISOString().slice(0, 7))
 const submissions = ref<SubmissionRow[]>([])
@@ -15,16 +18,12 @@ const pendingSubmissionCount = computed(() => submissions.value.filter((item) =>
 const netAmount = computed(() => settlement.value?.totals.net_amount ?? 0)
 const pagesCount = computed(() => settlement.value?.totals.page_count ?? 0)
 const recentSubmissions = computed(() => submissions.value.slice(0, 8))
-
-function submissionStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    submitted: '待质检',
-    checked: '已通过',
-    needs_fix: '待修正',
-    voided: '已作废',
-  }
-  return labels[status] ?? status
-}
+const ledgerSegments = computed(() => [
+  { key: 'submitted', label: '成品单数', value: formatInt(submittedCount.value), hint: '本月已提交计件单' },
+  { key: 'pending', label: '待处理', value: formatInt(pendingSubmissionCount.value), hint: '待质检 / 待修正' },
+  { key: 'pages', label: '页数合计', value: formatInt(pagesCount.value), hint: '计价以页为单位' },
+  { key: 'net', label: '本月预估净额', value: formatMoney(netAmount.value), hint: '正常计件与补录分开结算', money: true },
+])
 
 async function loadDashboard() {
   loading.value = true
@@ -57,45 +56,28 @@ onMounted(() => {
 
 <template>
   <section class="aw-page-stack">
-    <div class="aw-page-heading">
-      <div>
-        <p class="aw-eyebrow">本月工作台</p>
-        <h2>今日先处理这些事</h2>
-      </div>
-      <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadDashboard">刷新</button>
-    </div>
-
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
 
-    <div class="aw-metric-grid">
-      <article class="aw-metric-card">
-        <span>本月成品单数</span>
-        <strong>{{ submittedCount }}</strong>
-        <small>{{ pagesCount }} 页，按提交完成时间归入 {{ month }}</small>
-      </article>
-      <article class="aw-metric-card">
-        <span>待质检/待修正</span>
-        <strong>{{ pendingSubmissionCount }}</strong>
-        <small>进入维护专区处理状态、预览和下载</small>
-      </article>
-      <article class="aw-metric-card">
-        <span>本月预估净额</span>
-        <strong class="aw-money">{{ netAmount.toFixed(2) }}</strong>
-        <small>正常计件工资与补录计件工资分开展示</small>
-      </article>
-    </div>
+    <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日先处理这些事" :segments="ledgerSegments">
+      <template #actions>
+        <button class="aw-console-button" type="button" :disabled="loading" @click="loadDashboard">刷新</button>
+      </template>
+    </LedgerReadout>
 
     <div class="aw-two-column">
       <section class="aw-panel">
-        <h3>常用入口</h3>
+        <div class="aw-panel__head"><h3>常用入口</h3></div>
         <div class="aw-inline-actions">
-          <RouterLink class="aw-secondary-button" to="/upload">上传成品</RouterLink>
+          <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
           <RouterLink class="aw-secondary-button" to="/submissions">查看维护区</RouterLink>
           <RouterLink class="aw-secondary-button" to="/settlement">生成结算预览</RouterLink>
         </div>
       </section>
-      <section class="aw-panel aw-panel--stage">
-        <h3>最近提交</h3>
+      <section class="aw-panel">
+        <div class="aw-panel__head">
+          <h3>最近提交</h3>
+          <RouterLink v-if="recentSubmissions.length" class="aw-link-button" to="/submissions">查看全部</RouterLink>
+        </div>
         <div v-if="recentSubmissions.length" class="aw-contact-sheet">
           <RouterLink
             v-for="submission in recentSubmissions"
@@ -104,10 +86,14 @@ onMounted(() => {
             to="/submissions"
           >
             <strong>{{ submission.submission_no }}</strong>
-            <small>{{ submissionStatusLabel(submission.status) }} · {{ submission.item_count }} 单</small>
+            <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
           </RouterLink>
         </div>
-        <p v-else class="aw-copy">有新提交后，这里会显示最近需要检查的批次。</p>
+        <div v-else class="aw-empty-state">
+          <h3>还没有提交</h3>
+          <p>上传第一批成品后，这里会按提交时间显示需要质检的批次。</p>
+          <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
+        </div>
       </section>
     </div>
   </section>

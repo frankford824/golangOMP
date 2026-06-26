@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
+import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { assetWorkbenchApi, type SubmissionFileRow } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type SubmissionFileRow, type WorkbenchTemplateRow } from '@aw/shared/api/assetWorkbenchApi'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
 
 type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
@@ -11,6 +12,7 @@ interface QueueItem {
   id: string
   file: File
   orderNo: string
+  templateId: number
   difficultyClass: string
   finalized: boolean
   pageCount: number
@@ -27,15 +29,25 @@ const submitting = ref(false)
 const error = ref('')
 const notice = ref('')
 const submittedFiles = ref<SubmissionFileRow[]>([])
+const templates = ref<WorkbenchTemplateRow[]>([])
+const selectedTemplateId = ref(0)
 const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
+const { bootstrap, refresh } = useAssetWorkbenchBootstrap()
 
 const uploadedItems = computed(() => queue.value.filter((item) => item.status === 'uploaded'))
-const canSubmit = computed(() => uploadedItems.value.length > 0 && !uploading.value && !submitting.value)
+const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
+const canSubmit = computed(() => {
+  if (uploadedItems.value.length === 0 || uploading.value || submitting.value) return false
+  if (!isSimpleUser.value) return true
+  return uploadedItems.value.every((item) => item.templateId > 0)
+})
 const totalPages = computed(() => queue.value.reduce((sum, item) => sum + item.pageCount, 0))
+const selectedTemplate = computed(() => templates.value.find((item) => item.id === selectedTemplateId.value))
 const submitButtonLabel = computed(() => {
-  if (submitting.value) return '正在创建提交'
+  if (submitting.value) return isSimpleUser.value ? '正在交作品' : '正在创建提交'
   if (uploadedItems.value.length === 0) return '先上传队列'
-  return `创建提交 ${uploadedItems.value.length} 单`
+  if (isSimpleUser.value && uploadedItems.value.some((item) => item.templateId <= 0)) return '先选择作品类型'
+  return isSimpleUser.value ? `交作品 ${uploadedItems.value.length} 个` : `创建提交 ${uploadedItems.value.length} 单`
 })
 
 function openFilePicker() {
@@ -61,7 +73,8 @@ function enqueueFiles(files: FileList | null | undefined) {
       id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
       file,
       orderNo: filenameWithoutExt(file.name),
-      difficultyClass: 'A',
+      templateId: selectedTemplateId.value,
+      difficultyClass: selectedTemplate.value?.difficulty_class ?? 'A',
       finalized: true,
       pageCount: 1,
       progress: 0,
@@ -106,6 +119,7 @@ async function createSubmission() {
       notes: '',
       items: uploadedItems.value.map((item) => ({
         order_no: item.orderNo,
+        template_id: item.templateId || undefined,
         difficulty_class: item.difficultyClass,
         finalized: item.finalized,
         page_count: item.pageCount,
@@ -114,13 +128,25 @@ async function createSubmission() {
       })),
     })
     submittedFiles.value = detail.items.flatMap((item) => item.files)
-    notice.value = '提交已创建'
+    notice.value = isSimpleUser.value ? '作品已交上去' : '提交已创建'
     queue.value = queue.value.filter((item) => item.status !== 'uploaded')
   } catch (err) {
     error.value = err instanceof Error ? err.message : '提交失败'
   } finally {
     submitting.value = false
   }
+}
+
+function selectTemplate(template: WorkbenchTemplateRow) {
+  selectedTemplateId.value = template.id
+  for (const item of queue.value) {
+    item.templateId = template.id
+    item.difficultyClass = template.difficulty_class
+  }
+}
+
+function templateName(templateId: number) {
+  return templates.value.find((item) => item.id === templateId)?.name ?? '未选择'
 }
 
 function removeItem(id: string) {
@@ -141,16 +167,29 @@ function filenameWithoutExt(filename: string) {
   const dot = filename.lastIndexOf('.')
   return dot > 0 ? filename.slice(0, dot) : filename
 }
+
+async function loadContext() {
+  await refresh()
+  templates.value = await assetWorkbenchApi.listMyTemplates()
+  if (!selectedTemplateId.value && templates.value[0]) {
+    selectedTemplateId.value = templates.value[0].id
+  }
+}
+
+onMounted(() => {
+  void loadContext()
+})
 </script>
 
 <template>
   <section class="aw-page-stack">
-    <div class="aw-page-heading">
-      <div>
-        <p class="aw-eyebrow">成品交付</p>
-        <h2>成品上传中心</h2>
+    <div class="aw-page-bar">
+      <div class="aw-page-bar__copy">
+        <p class="aw-eyebrow">{{ isSimpleUser ? '交作品' : '成品交付' }}</p>
+        <h2>{{ isSimpleUser ? '把做好的文件交上来' : '成品上传中心' }}</h2>
+        <p>{{ isSimpleUser ? '先选作品类型，再拖入文件。文件名会自动当作订单号。' : '批量拖拽文件，提交前校正订单号、难度、页数和定稿状态。' }}</p>
       </div>
-      <div class="aw-button-row">
+      <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
         <button class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0" @click="uploadAll">
           上传队列
@@ -160,9 +199,35 @@ function filenameWithoutExt(filename: string) {
 
     <input ref="inputRef" class="aw-visually-hidden" type="file" multiple @change="handleInput" />
 
+    <div v-if="isSimpleUser" class="aw-panel">
+      <div class="aw-panel__head">
+        <div>
+          <p class="aw-eyebrow">作品类型</p>
+          <h3>选择这次要交的类型</h3>
+        </div>
+      </div>
+      <div v-if="templates.length" class="aw-template-option-grid">
+        <button
+          v-for="template in templates"
+          :key="template.id"
+          class="aw-template-option"
+          :class="{ 'aw-template-option--active': selectedTemplateId === template.id }"
+          type="button"
+          @click="selectTemplate(template)"
+        >
+          <strong>{{ template.name }}</strong>
+          <span>{{ template.category || '常规作品' }}</span>
+        </button>
+      </div>
+      <div v-else class="aw-empty-state">
+        <h3>还没有可选类型</h3>
+        <p>管理员下发作品类型后，你就能在这里选择并上传。</p>
+      </div>
+    </div>
+
     <div class="aw-dropzone" tabindex="0" @dragover.prevent @drop.prevent="handleDrop">
       <strong>拖拽文件到这里</strong>
-      <span>系统会默认把文件名识别为订单号；提交前可以逐条修改难度、页数和定稿状态。</span>
+      <span>{{ isSimpleUser ? '文件名会自动当作订单号；选好类型后直接上传。' : '系统会默认把文件名识别为订单号；提交前可以逐条修改难度、页数和定稿状态。' }}</span>
     </div>
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
@@ -180,7 +245,8 @@ function filenameWithoutExt(filename: string) {
             <span>订单号</span>
             <input v-model="item.orderNo" aria-label="订单号" />
           </label>
-          <select v-model="item.difficultyClass" aria-label="难度类">
+          <span v-if="isSimpleUser" class="aw-chip aw-chip--info">{{ templateName(item.templateId) }}</span>
+          <select v-else v-model="item.difficultyClass" aria-label="难度类">
             <option v-for="option in difficultyOptions" :key="option" :value="option">{{ option }}</option>
           </select>
           <input v-model.number="item.pageCount" aria-label="页数" min="1" type="number" />
@@ -195,7 +261,7 @@ function filenameWithoutExt(filename: string) {
       </div>
       <div v-else class="aw-empty-state">
         <h3>等待文件</h3>
-        <p>支持批量拖拽上传。完成后进入维护专区，管理员可以质检、修正、下载和结算。</p>
+        <p>{{ isSimpleUser ? '支持批量拖拽上传。上传后可以在看收入里查看金额。' : '支持批量拖拽上传。完成后进入维护专区，管理员可以质检、修正、下载和结算。' }}</p>
       </div>
     </div>
 

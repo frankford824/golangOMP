@@ -71,6 +71,8 @@ export interface AssetWorkbenchBootstrap {
   timezone: string
   oss_prefix: string
   upload_session_ttl_seconds: number
+  is_admin: boolean
+  user?: BackendUser
   profile?: AssetWorkbenchProfile
   capabilities: string[]
   settlement_item_types: string[]
@@ -128,6 +130,34 @@ export interface PromoCouponRow {
   enabled: boolean
 }
 
+export interface WorkbenchGroupRow {
+  id: number
+  name: string
+  description: string
+  enabled: boolean
+  created_by: number
+}
+
+export interface WorkbenchTemplateRow {
+  id: number
+  name: string
+  category: string
+  difficulty_class: string
+  worker_type: string
+  enabled: boolean
+  sort_order: number
+  created_by: number
+}
+
+export interface WorkbenchTemplateAssignmentRow {
+  id: number
+  template_id: number
+  target_type: 'user' | 'group'
+  target_id: number
+  enabled: boolean
+  assigned_by: number
+}
+
 export interface SubmissionRow {
   id: number
   submission_no: string
@@ -146,6 +176,9 @@ export interface SubmissionItemRow {
   submission_id: number
   payee_user_id: number
   order_no: string
+  template_id?: number
+  template_name_snapshot?: string
+  category_snapshot?: string
   difficulty_class: string
   finalized: boolean
   page_count: number
@@ -246,6 +279,25 @@ export interface SettlementBatchDetail {
   batch: SettlementBatchRow
   items: SettlementItemRow[]
   payroll_rows: SettlementPayrollRow[]
+}
+
+export interface MySettlementMonthRow {
+  business_month: string
+  item_count: number
+  page_count: number
+  gross_amount: number
+  deduction_amount: number
+  welfare_amount: number
+  supplement_amount: number
+  adjustment_amount: number
+  net_amount: number
+  confirmed: boolean
+}
+
+export interface MySettlementResult {
+  current_month: string
+  estimated_net_amount: number
+  months: MySettlementMonthRow[]
 }
 
 export interface SettlementAdjustmentRow {
@@ -462,7 +514,8 @@ export interface CreateSubmissionPayload {
   notes?: string
   items: Array<{
     order_no: string
-    difficulty_class: string
+    template_id?: number
+    difficulty_class?: string
     finalized: boolean
     page_count: number
     item_count?: number
@@ -553,6 +606,27 @@ export interface CreatePromoCouponPayload {
   remark?: string
 }
 
+export interface UpsertGroupPayload {
+  name: string
+  description?: string
+  enabled?: boolean
+}
+
+export interface UpsertTemplatePayload {
+  name: string
+  category?: string
+  difficulty_class: string
+  worker_type?: string
+  enabled?: boolean
+  sort_order?: number
+}
+
+export interface AssignTemplatePayload {
+  template_id: number
+  user_ids?: number[]
+  group_ids?: number[]
+}
+
 function unwrap<T>(payload: ApiEnvelope<T> | T): T {
   if (payload && typeof payload === 'object' && 'data' in payload) {
     const wrapped = payload as ApiEnvelope<T>
@@ -581,6 +655,11 @@ export const assetWorkbenchApi = {
 
   async bootstrap(signal?: AbortSignal): Promise<AssetWorkbenchBootstrap> {
     const res = await http.get<ApiEnvelope<AssetWorkbenchBootstrap>>('/v1/asset-workbench/bootstrap', { signal })
+    return unwrap(res.data)
+  },
+
+  async listMyTemplates(signal?: AbortSignal): Promise<WorkbenchTemplateRow[]> {
+    const res = await http.get<ApiEnvelope<WorkbenchTemplateRow[]>>('/v1/asset-workbench/my-templates', { signal })
     return unwrap(res.data)
   },
 
@@ -639,6 +718,74 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async listGroups(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchGroupRow>> {
+    const res = await http.get<ApiEnvelope<WorkbenchGroupRow[]>>('/v1/asset-workbench/groups', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async createGroup(payload: UpsertGroupPayload, signal?: AbortSignal): Promise<WorkbenchGroupRow> {
+    const res = await http.post<ApiEnvelope<WorkbenchGroupRow>>('/v1/asset-workbench/groups', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async updateGroup(groupId: number, payload: UpsertGroupPayload, signal?: AbortSignal): Promise<WorkbenchGroupRow> {
+    const res = await http.patch<ApiEnvelope<WorkbenchGroupRow>>(`/v1/asset-workbench/groups/${groupId}`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async addGroupMembers(groupId: number, userIds: number[], signal?: AbortSignal): Promise<unknown> {
+    const res = await http.put<ApiEnvelope<unknown>>(`/v1/asset-workbench/groups/${groupId}/members`, { user_ids: userIds }, { signal })
+    return unwrap(res.data)
+  },
+
+  async removeGroupMembers(groupId: number, userIds: number[], signal?: AbortSignal): Promise<unknown> {
+    const res = await http.delete<ApiEnvelope<unknown>>(`/v1/asset-workbench/groups/${groupId}/members`, {
+      data: { user_ids: userIds },
+      signal,
+    })
+    return unwrap(res.data)
+  },
+
+  async deleteGroup(groupId: number, signal?: AbortSignal): Promise<WorkbenchGroupRow> {
+    const res = await http.delete<ApiEnvelope<WorkbenchGroupRow>>(`/v1/asset-workbench/groups/${groupId}`, { signal })
+    return unwrap(res.data)
+  },
+
+  async listTemplates(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchTemplateRow>> {
+    const res = await http.get<ApiEnvelope<WorkbenchTemplateRow[]>>('/v1/asset-workbench/templates', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async createTemplate(payload: UpsertTemplatePayload, signal?: AbortSignal): Promise<WorkbenchTemplateRow> {
+    const res = await http.post<ApiEnvelope<WorkbenchTemplateRow>>('/v1/asset-workbench/templates', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async updateTemplate(templateId: number, payload: UpsertTemplatePayload, signal?: AbortSignal): Promise<WorkbenchTemplateRow> {
+    const res = await http.patch<ApiEnvelope<WorkbenchTemplateRow>>(`/v1/asset-workbench/templates/${templateId}`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async deleteTemplate(templateId: number, signal?: AbortSignal): Promise<WorkbenchTemplateRow> {
+    const res = await http.delete<ApiEnvelope<WorkbenchTemplateRow>>(`/v1/asset-workbench/templates/${templateId}`, { signal })
+    return unwrap(res.data)
+  },
+
+  async listTemplateAssignments(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchTemplateAssignmentRow>> {
+    const res = await http.get<ApiEnvelope<WorkbenchTemplateAssignmentRow[]>>('/v1/asset-workbench/template-assignments', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async assignTemplate(payload: AssignTemplatePayload, signal?: AbortSignal): Promise<WorkbenchTemplateAssignmentRow[]> {
+    const res = await http.post<ApiEnvelope<WorkbenchTemplateAssignmentRow[]>>('/v1/asset-workbench/template-assignments', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async deleteTemplateAssignment(assignmentId: number, signal?: AbortSignal): Promise<WorkbenchTemplateAssignmentRow> {
+    const res = await http.delete<ApiEnvelope<WorkbenchTemplateAssignmentRow>>(`/v1/asset-workbench/template-assignments/${assignmentId}`, { signal })
+    return unwrap(res.data)
+  },
+
   async listSubmissions(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<SubmissionRow>> {
     const res = await http.get<ApiEnvelope<SubmissionRow[]>>('/v1/asset-workbench/submissions', { params, signal })
     return unwrapPaginated(res.data)
@@ -654,6 +801,11 @@ export const assetWorkbenchApi = {
       params: { business_month: businessMonth },
       signal,
     })
+    return unwrap(res.data)
+  },
+
+  async mySettlement(signal?: AbortSignal): Promise<MySettlementResult> {
+    const res = await http.get<ApiEnvelope<MySettlementResult>>('/v1/asset-workbench/settlement/my', { signal })
     return unwrap(res.data)
   },
 

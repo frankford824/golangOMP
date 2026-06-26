@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { NConfigProvider, NDialogProvider, NMessageProvider, type GlobalThemeOverrides } from 'naive-ui'
 
-import WorkbenchShell from './shell/WorkbenchShell.vue'
+import ShellGate from './shell/ShellGate.vue'
 
 const route = useRoute()
 const isPublicRoute = computed(() => route.meta.public === true)
@@ -42,7 +42,7 @@ const themeOverrides: GlobalThemeOverrides = {
         <div v-if="isPublicRoute" class="aw-root aw-root--auth">
           <RouterView />
         </div>
-        <WorkbenchShell v-else />
+        <ShellGate v-else />
       </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>

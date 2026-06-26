@@ -11,6 +11,17 @@ import {
   type SupplementPermissionRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { exportSettlementWorkbook } from '@aw/features/export/settlementExport'
+import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
+import { formatInt, formatMoney } from '@aw/shared/format/number'
+import {
+  batchStatusMeta,
+  chipClass,
+  directionMeta,
+  duplicateMeta,
+  enabledMeta,
+  itemTypeMeta,
+  supplementStatusMeta,
+} from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 
 interface GridColumn {
@@ -21,17 +32,19 @@ interface GridColumn {
 }
 
 type PayrollGridRow = SettlementPayrollRow & { grid_id: string; row_label: string }
-type MetricGridRow = { id: string; metric: string; scope: string; note: string; amount: number }
 type BatchGridRow = SettlementBatchRow & { status_label: string }
 type BatchItemGridRow = {
   id: number
+  item_type: string
   item_type_label: string
   payee_user_id: number
   quantity: number
+  direction: string
   direction_label: string
   amount: number
 }
 type PermissionGridRow = SupplementPermissionRow & { status_label: string; reason_label: string }
+type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string }
 
 const month = ref(new Date().toISOString().slice(0, 7))
 const preview = ref<SettlementPreview | null>(null)
@@ -68,59 +81,41 @@ const adjustmentForm = ref({
   amount: 0,
   reason: '',
 })
-const batchStatusLabels: Record<string, string> = {
-  generated: '待确认',
-  confirmed: '已确认',
-  cancelled: '已取消',
-  reversed: '已冲正',
-}
-const settlementItemTypeLabels: Record<string, string> = {
-  gross_piecework: '正常计件',
-  error_deduction: '出错扣减',
-  welfare: '福利补贴',
-  supplement: '补录计件',
-  adjustment: '补差',
-  reversal: '冲正',
-}
-const supplementStatusLabels: Record<string, string> = {
-  pending: '待审核',
-  approved: '已批准',
-  rejected: '已拒绝',
-  reversed: '已冲正',
-}
+const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'amount'])
+const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity'])
 
 const totals = computed(() => preview.value?.totals)
 const payrollRows = computed(() => preview.value?.payroll_rows ?? [])
-const totalMetricRows = computed(() => {
+const ledgerSegments = computed(() => {
   const value = totals.value
-  if (!value) return []
+  if (!value) {
+    return [
+      { key: 'gross', label: '正常计件', value: formatMoney(0), hint: '待生成预览' },
+      { key: 'deduction', label: '出错扣减', value: formatMoney(0), hint: '结算时读取出错表' },
+      { key: 'supplement', label: '补录计件', value: formatMoney(0), hint: '工资条第二行' },
+      { key: 'net', label: '应结净额', value: formatMoney(0), hint: '正常 + 补录 - 扣减', money: true },
+    ]
+  }
   return [
-    { id: 'gross', metric: '正常计件', scope: `${value.item_count} 单`, note: `${value.page_count} 页`, amount: value.gross_amount },
-    { id: 'deduction', metric: '出错扣减', scope: `${value.error_count} 个出错`, note: '按导入出错表计算', amount: value.deduction_amount },
-    { id: 'supplement', metric: '补录计件', scope: '漏传补录', note: '单独工资行', amount: value.supplement_amount },
-    { id: 'net', metric: '应结净额', scope: '本月合计', note: '正常工资行 + 补录工资行', amount: value.net_amount },
-  ] satisfies MetricGridRow[]
+    { key: 'gross', label: '正常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单 · ${formatInt(value.page_count)} 页` },
+    { key: 'deduction', label: '出错扣减', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错` },
+    { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行' },
+    { key: 'net', label: '应结净额', value: formatMoney(value.net_amount), hint: '正常工资行 + 补录工资行', money: true },
+  ]
 })
-const metricGridRows = computed(() => totalMetricRows.value as unknown as Record<string, unknown>[])
 const payrollGridRows = computed(() => payrollRows.value.map(toPayrollGridRow) as unknown as Record<string, unknown>[])
 const batchGridRows = computed(() => batches.value.map(toBatchGridRow) as unknown as Record<string, unknown>[])
 const batchItemGridRows = computed(() => (selectedBatch.value?.items ?? []).map(toBatchItemGridRow) as unknown as Record<string, unknown>[])
 const batchPayrollGridRows = computed(() => (selectedBatch.value?.payroll_rows ?? []).map(toPayrollGridRow) as unknown as Record<string, unknown>[])
 const permissionGridRows = computed(() => supplementPermissions.value.map(toPermissionGridRow) as unknown as Record<string, unknown>[])
-const supplementRowsWithLabels = computed(() =>
+const supplementRowsWithLabels = computed<SupplementGridRow[]>(() =>
   supplements.value.map((row) => ({
     ...row,
-    status_label: supplementStatusLabel(row.status),
-    duplicate_label: row.duplicate_hint_json?.has_duplicates ? '可能重复' : '无重复提示',
+    status_label: supplementStatusMeta(row.status).label,
+    duplicate_label: duplicateMeta(row.duplicate_hint_json?.has_duplicates).label,
   })),
 )
 const supplementGridRows = computed(() => supplementRowsWithLabels.value as unknown as Record<string, unknown>[])
-const metricGridColumns = computed<GridColumn[]>(() => [
-  { key: 'metric', label: '指标', width: 108 },
-  { key: 'scope', label: '范围', width: 132 },
-  { key: 'note', label: '说明', width: 160 },
-  { key: 'amount', label: '金额', width: 112, align: 'right' },
-])
 const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_user_id', label: '人员', width: 96 },
   { key: 'row_label', label: '工资条', width: 140 },
@@ -165,26 +160,6 @@ function payrollRowLabel(row: SettlementPayrollRow) {
   return row.row_type === 'supplement_piecework' ? '补录计件工资' : '正常计件工资'
 }
 
-function batchStatusLabel(status: string) {
-  return batchStatusLabels[status] ?? status
-}
-
-function settlementItemTypeLabel(type: string) {
-  return settlementItemTypeLabels[type] ?? type
-}
-
-function supplementStatusLabel(status: string) {
-  return supplementStatusLabels[status] ?? status
-}
-
-function directionLabel(direction: string) {
-  const labels: Record<string, string> = {
-    credit: '增加',
-    debit: '扣回',
-  }
-  return labels[direction] ?? direction
-}
-
 function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
   return {
     ...row,
@@ -196,17 +171,19 @@ function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
 function toBatchGridRow(row: SettlementBatchRow): BatchGridRow {
   return {
     ...row,
-    status_label: batchStatusLabel(row.status),
+    status_label: batchStatusMeta(row.status).label,
   }
 }
 
 function toBatchItemGridRow(row: SettlementBatchDetail['items'][number]): BatchItemGridRow {
   return {
     id: row.id,
-    item_type_label: settlementItemTypeLabel(row.item_type),
+    item_type: row.item_type,
+    item_type_label: itemTypeMeta(row.item_type).label,
     payee_user_id: row.payee_user_id,
     quantity: row.quantity,
-    direction_label: directionLabel(row.direction),
+    direction: row.direction,
+    direction_label: directionMeta(row.direction).label,
     amount: row.amount,
   }
 }
@@ -214,13 +191,35 @@ function toBatchItemGridRow(row: SettlementBatchDetail['items'][number]): BatchI
 function toPermissionGridRow(row: SupplementPermissionRow): PermissionGridRow {
   return {
     ...row,
-    status_label: row.enabled ? '已开放' : '已关闭',
+    status_label: enabledMeta(row.enabled).label,
     reason_label: row.reason || '无备注',
   }
 }
 
 function gridRowAsBatch(row: Record<string, unknown>): SettlementBatchRow {
   return row as unknown as SettlementBatchRow
+}
+
+function gridRowAsPermission(row: Record<string, unknown>): PermissionGridRow {
+  return row as unknown as PermissionGridRow
+}
+
+function gridRowAsSupplement(row: Record<string, unknown>): SupplementGridRow {
+  return row as unknown as SupplementGridRow
+}
+
+function gridRowAsBatchItem(row: Record<string, unknown>): BatchItemGridRow {
+  return row as unknown as BatchItemGridRow
+}
+
+function isMoneyColumn(key: string) {
+  return moneyColumns.has(key)
+}
+
+function gridValue(key: string, value: unknown) {
+  if (moneyColumns.has(key)) return formatMoney(value)
+  if (intColumns.has(key)) return formatInt(value)
+  return value || '—'
 }
 
 async function loadSettlement(options: { keepNotice?: boolean } = {}) {
@@ -397,7 +396,7 @@ async function createAdjustment() {
         batch_no: batch.batch_no,
       },
     })
-    notice.value = `已追加${created.adjustment_type === 'reversal' ? '冲正' : '补差'}：${created.amount}`
+    notice.value = `已追加${created.adjustment_type === 'reversal' ? '冲正' : '补差'}：${formatMoney(created.amount)}`
     adjustmentForm.value.amount = 0
     adjustmentForm.value.reason = ''
     await loadSettlement({ keepNotice: true })
@@ -433,14 +432,14 @@ onMounted(() => {
 
 <template>
   <section class="aw-page-stack">
-    <div class="aw-page-heading">
-      <div>
+    <div class="aw-page-bar">
+      <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">工资结算</p>
         <h2>结算统计</h2>
+        <p>先导入出错表，再生成预览。每个员工固定两条工资行：正常计件工资一条，补录计件工资一条。</p>
       </div>
-      <div class="aw-button-row">
+      <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="openErrorImport">导入出错</button>
-        <button class="aw-secondary-button" type="button" @click="() => loadSettlement()">生成预览</button>
         <button class="aw-secondary-button" type="button" :disabled="exporting || (!preview && !selectedBatch)" @click="exportSettlement">
           导出工资条
         </button>
@@ -449,27 +448,21 @@ onMounted(() => {
     </div>
     <input ref="errorInputRef" class="aw-visually-hidden" type="file" accept=".xlsx,.xls" @change="handleErrorImport" />
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
+
+    <LedgerReadout :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
+      <template #actions>
+        <input v-model="month" type="month" />
+        <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
+      </template>
+    </LedgerReadout>
+
     <div class="aw-panel">
-      <h3>本月工资预览</h3>
-      <p class="aw-copy">
-        先导入出错表，再生成预览。每个员工固定展示两条工资行：正常计件工资一条，补录计件工资一条；没有补录时补录金额为 0。
-      </p>
+      <div class="aw-panel__head">
+        <h3>工资条明细</h3>
+        <span class="aw-chip aw-chip--neutral">无补录时第二行显示 0</span>
+      </div>
       <p v-if="loading" class="aw-copy">正在加载 {{ month }} 结算预览</p>
       <p v-else-if="error" class="aw-copy">{{ error }}</p>
-      <WorkbenchDataGrid
-        v-else-if="totals"
-        :columns="metricGridColumns"
-        :rows="metricGridRows"
-        row-key="id"
-        storage-key="settlement-metrics"
-        :height="170"
-        :row-height="34"
-      >
-        <template #cell="{ column, value }">
-          <strong v-if="column.key === 'amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
-        </template>
-      </WorkbenchDataGrid>
       <WorkbenchDataGrid
         v-if="payrollRows.length"
         :columns="payrollGridColumns"
@@ -481,16 +474,17 @@ onMounted(() => {
         :row-height="34"
       >
         <template #cell="{ column, value }">
-          <strong v-if="column.key === 'net_amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+          <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+          <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
     </div>
 
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
-        <input v-model="month" type="month" />
-        <button type="button" @click="() => loadSettlement()">刷新</button>
+        <span>结算批次</span>
+        <span>{{ formatInt(batches.length) }} 个批次</span>
       </div>
       <WorkbenchDataGrid
         v-if="batches.length"
@@ -504,22 +498,33 @@ onMounted(() => {
       >
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'actions'" class="aw-inline-actions">
-          <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
-          <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="confirmBatch(gridRowAsBatch(row))">
-            确认
+            <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
+            <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="confirmBatch(gridRowAsBatch(row))">
+              确认
             </button>
             <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="startCancelBatch(gridRowAsBatch(row))">
               取消
             </button>
           </div>
-          <strong v-else-if="column.key === 'net_amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+          <span
+            v-else-if="column.key === 'status_label'"
+            :class="chipClass(batchStatusMeta(gridRowAsBatch(row).status).tone)"
+          >
+            {{ value }}
+          </span>
+          <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+          <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
       <div v-if="pendingCancelBatch" class="aw-panel">
-        <div class="aw-grid-toolbar">
-          <span>取消结算批次</span>
-          <span>{{ pendingCancelBatch.batch_no }}</span>
+        <div class="aw-panel__head">
+          <div>
+            <h3>取消结算批次</h3>
+            <p class="aw-copy">{{ pendingCancelBatch.batch_no }}</p>
+          </div>
+          <span :class="chipClass(batchStatusMeta(pendingCancelBatch.status).tone)">
+            {{ batchStatusMeta(pendingCancelBatch.status).label }}
+          </span>
         </div>
         <label class="aw-field">
           <span>取消原因</span>
@@ -542,7 +547,7 @@ onMounted(() => {
           <p class="aw-eyebrow">批次明细</p>
           <h3>{{ selectedBatch.batch.batch_no }}</h3>
         </div>
-        <strong class="aw-money">{{ selectedBatch.batch.net_amount }}</strong>
+        <strong class="aw-cell-money">{{ formatMoney(selectedBatch.batch.net_amount) }}</strong>
       </div>
       <WorkbenchDataGrid
         :columns="batchItemGridColumns"
@@ -553,9 +558,12 @@ onMounted(() => {
         :height="260"
         :row-height="34"
       >
-        <template #cell="{ column, value }">
-          <strong v-if="column.key === 'amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+        <template #cell="{ row, column, value }">
+          <span v-if="column.key === 'item_type_label'" :class="chipClass(itemTypeMeta(gridRowAsBatchItem(row).item_type).tone)">{{ value }}</span>
+          <span v-else-if="column.key === 'direction_label'" :class="chipClass(directionMeta(gridRowAsBatchItem(row).direction).tone)">{{ value }}</span>
+          <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+          <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
       <WorkbenchDataGrid
@@ -569,8 +577,9 @@ onMounted(() => {
         :row-height="34"
       >
         <template #cell="{ column, value }">
-          <strong v-if="column.key === 'net_amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+          <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+          <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
       <div v-if="selectedBatch.batch.status === 'confirmed'" class="aw-panel">
@@ -609,37 +618,95 @@ onMounted(() => {
       <p v-else class="aw-copy">批次确认后才能追加冲正或补差。</p>
     </div>
 
-    <div class="aw-panel">
-      <h3>月度补录</h3>
-      <p class="aw-copy">补录按人员 + 业务月手动开放。已批准补录会在工资条中单独形成补录计件工资行，没有补录也展示 0。</p>
-      <div class="aw-form-grid">
-        <label>
-          开放人员 ID
-          <input v-model.number="permissionForm.payee_user_id" type="number" min="1" />
-        </label>
-        <label>
-          可补录月份
-          <select v-model="month" :disabled="eligibleSupplementMonths.length === 0">
-            <option v-if="eligibleSupplementMonths.length === 0" :value="month">{{ month }}</option>
-            <option v-for="item in eligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
-          </select>
-        </label>
-        <label>
-          开关
-          <select v-model="permissionForm.enabled">
-            <option :value="true">开放</option>
-            <option :value="false">关闭</option>
-          </select>
-        </label>
-        <label>
-          原因
-          <input v-model="permissionForm.reason" />
-        </label>
+    <div class="aw-two-column">
+      <div class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>补录权限</h3>
+            <p class="aw-copy">补录按人员 + 业务月手动开放。</p>
+          </div>
+          <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
+        </div>
+        <div class="aw-form-grid">
+          <label>
+            开放人员 ID
+            <input v-model.number="permissionForm.payee_user_id" type="number" min="1" />
+          </label>
+          <label>
+            可补录月份
+            <select v-model="month" :disabled="eligibleSupplementMonths.length === 0">
+              <option v-if="eligibleSupplementMonths.length === 0" :value="month">{{ month }}</option>
+              <option v-for="item in eligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </label>
+          <label>
+            开关
+            <select v-model="permissionForm.enabled">
+              <option :value="true">开放</option>
+              <option :value="false">关闭</option>
+            </select>
+          </label>
+          <label>
+            原因
+            <input v-model="permissionForm.reason" />
+          </label>
+        </div>
+        <div class="aw-inline-actions">
+          <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
+            读取可补录月份
+          </button>
+          <button class="aw-primary-button" type="button" @click="upsertSupplementPermission">更新权限</button>
+        </div>
       </div>
-      <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
-        读取可补录月份
-      </button>
-      <button class="aw-secondary-button" type="button" @click="upsertSupplementPermission">更新补录权限</button>
+
+      <div class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>补录录入</h3>
+            <p class="aw-copy">已批准补录会在工资条中单独形成补录计件工资行。</p>
+          </div>
+          <span class="aw-chip aw-chip--info">无补录显示 0</span>
+        </div>
+        <div class="aw-form-grid">
+          <label>
+            人员 ID
+            <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
+          </label>
+          <label>
+            订单号
+            <input v-model="supplementForm.order_no" />
+          </label>
+          <label>
+            难度
+            <select v-model="supplementForm.difficulty_class">
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+              <option value="A+小夜灯">A+小夜灯</option>
+            </select>
+          </label>
+          <label>
+            页数
+            <input v-model.number="supplementForm.page_count" min="1" type="number" />
+          </label>
+          <label>
+            补录金额
+            <input v-model.number="supplementForm.gross_amount" min="0" type="number" />
+          </label>
+          <label class="aw-inline-check">
+            <input v-model="supplementForm.finalized" type="checkbox" />
+            定稿
+          </label>
+        </div>
+        <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
+      </div>
+    </div>
+
+    <div class="aw-data-surface">
+      <div class="aw-grid-toolbar">
+        <span>补录权限记录</span>
+        <span>{{ formatInt(supplementPermissions.length) }} 条</span>
+      </div>
       <WorkbenchDataGrid
         v-if="supplementPermissions.length"
         :columns="permissionGridColumns"
@@ -650,44 +717,25 @@ onMounted(() => {
         :height="220"
         :row-height="34"
       >
-        <template #cell="{ column, value }">
-          <strong v-if="column.key === 'reason_label'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+        <template #cell="{ row, column, value }">
+          <span
+            v-if="column.key === 'status_label'"
+            :class="chipClass(gridRowAsPermission(row).enabled ? 'success' : 'neutral')"
+          >
+            {{ value }}
+          </span>
+          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+          <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
       <p v-else class="aw-copy">当前月份还没有开放补录权限</p>
-      <div class="aw-form-grid">
-        <label>
-          人员 ID
-          <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
-        </label>
-        <label>
-          订单号
-          <input v-model="supplementForm.order_no" />
-        </label>
-        <label>
-          难度
-          <select v-model="supplementForm.difficulty_class">
-            <option value="A">A</option>
-            <option value="B">B</option>
-            <option value="C">C</option>
-            <option value="A+小夜灯">A+小夜灯</option>
-          </select>
-        </label>
-        <label>
-          页数
-          <input v-model.number="supplementForm.page_count" min="1" type="number" />
-        </label>
-        <label>
-          补录金额
-          <input v-model.number="supplementForm.gross_amount" min="0" type="number" />
-        </label>
-        <label class="aw-inline-check">
-          <input v-model="supplementForm.finalized" type="checkbox" />
-          定稿
-        </label>
+    </div>
+
+    <div class="aw-data-surface">
+      <div class="aw-grid-toolbar">
+        <span>补录明细</span>
+        <span>{{ formatInt(supplements.length) }} 条</span>
       </div>
-      <button class="aw-secondary-button" type="button" @click="createSupplement">创建补录</button>
       <WorkbenchDataGrid
         v-if="supplements.length"
         :columns="supplementGridColumns"
@@ -698,9 +746,21 @@ onMounted(() => {
         :height="220"
         :row-height="34"
       >
-        <template #cell="{ column, value }">
-          <strong v-if="column.key === 'gross_amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+        <template #cell="{ row, column, value }">
+          <span
+            v-if="column.key === 'status_label'"
+            :class="chipClass(supplementStatusMeta(gridRowAsSupplement(row).status).tone)"
+          >
+            {{ value }}
+          </span>
+          <span
+            v-else-if="column.key === 'duplicate_label'"
+            :class="chipClass(duplicateMeta(gridRowAsSupplement(row).duplicate_hint_json?.has_duplicates).tone)"
+          >
+            {{ value }}
+          </span>
+          <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+          <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
       <p v-else class="aw-copy">当前月份没有补录记录</p>

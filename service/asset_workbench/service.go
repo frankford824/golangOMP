@@ -138,6 +138,7 @@ type BootstrapResponse struct {
 	Timezone               string                        `json:"timezone"`
 	OSSPrefix              string                        `json:"oss_prefix"`
 	UploadSessionTTL       int64                         `json:"upload_session_ttl_seconds"`
+	IsAdmin                bool                          `json:"is_admin"`
 	Capabilities           []string                      `json:"capabilities"`
 	SettlementItemTypes    []string                      `json:"settlement_item_types"`
 	DeferredBusinessItems  []DeferredBusinessItem        `json:"deferred_business_items"`
@@ -237,6 +238,31 @@ type CreatePromoCouponParams struct {
 	Remark          string          `json:"remark"`
 }
 
+type UpsertGroupParams struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+}
+
+type GroupMembersParams struct {
+	UserIDs []int64 `json:"user_ids"`
+}
+
+type UpsertTemplateParams struct {
+	Name            string `json:"name"`
+	Category        string `json:"category"`
+	DifficultyClass string `json:"difficulty_class"`
+	WorkerType      string `json:"worker_type"`
+	Enabled         bool   `json:"enabled"`
+	SortOrder       int    `json:"sort_order"`
+}
+
+type AssignTemplateParams struct {
+	TemplateID int64   `json:"template_id"`
+	UserIDs    []int64 `json:"user_ids"`
+	GroupIDs   []int64 `json:"group_ids"`
+}
+
 type CreateUploadSessionParams struct {
 	OriginalFilename string `json:"original_filename"`
 	FileSize         int64  `json:"file_size"`
@@ -260,6 +286,7 @@ type CreateSubmissionParams struct {
 
 type CreateSubmissionItemParams struct {
 	OrderNo          string   `json:"order_no"`
+	TemplateID       int64    `json:"template_id"`
 	DifficultyClass  string   `json:"difficulty_class"`
 	Finalized        bool     `json:"finalized"`
 	PageCount        int      `json:"page_count"`
@@ -384,6 +411,25 @@ type SettlementPayrollRow struct {
 	SupplementAmount float64 `json:"supplement_amount"`
 	AdjustmentAmount float64 `json:"adjustment_amount"`
 	NetAmount        float64 `json:"net_amount"`
+}
+
+type MySettlementResponse struct {
+	CurrentMonth       string                 `json:"current_month"`
+	EstimatedNetAmount float64                `json:"estimated_net_amount"`
+	Months             []MySettlementMonthRow `json:"months"`
+}
+
+type MySettlementMonthRow struct {
+	BusinessMonth    string  `json:"business_month"`
+	ItemCount        int     `json:"item_count"`
+	PageCount        int     `json:"page_count"`
+	GrossAmount      float64 `json:"gross_amount"`
+	DeductionAmount  float64 `json:"deduction_amount"`
+	WelfareAmount    float64 `json:"welfare_amount"`
+	SupplementAmount float64 `json:"supplement_amount"`
+	AdjustmentAmount float64 `json:"adjustment_amount"`
+	NetAmount        float64 `json:"net_amount"`
+	Confirmed        bool    `json:"confirmed"`
 }
 
 type welfareSettlementLine struct {
@@ -517,6 +563,7 @@ func (s *Service) Bootstrap(ctx context.Context, actor domain.RequestActor) (*Bo
 		Timezone:            s.cfg.Timezone,
 		OSSPrefix:           s.cfg.OSSPrefix,
 		UploadSessionTTL:    int64(s.cfg.UploadSessionTTL.Seconds()),
+		IsAdmin:             isAssetWorkbenchAdmin(actor),
 		Capabilities:        assetWorkbenchCapabilities(actor),
 		SettlementItemTypes: domain.DefaultAssetWorkbenchSettlementItemTypes(),
 		DeferredBusinessItems: []DeferredBusinessItem{
@@ -826,6 +873,373 @@ func (s *Service) CreatePromoCoupon(ctx context.Context, actor domain.RequestAct
 	return created, nil
 }
 
+func (s *Service) ListGroups(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchGroupFilter) ([]*domain.AssetWorkbenchGroup, int64, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, 0, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list groups.", nil)
+	}
+	items, total, err := s.repo.ListGroups(ctx, filter)
+	if err != nil {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench groups.", err.Error())
+	}
+	return items, total, nil
+}
+
+func (s *Service) CreateGroup(ctx context.Context, actor domain.RequestActor, params UpsertGroupParams) (*domain.AssetWorkbenchGroup, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can create groups.", nil)
+	}
+	name := strings.TrimSpace(params.Name)
+	if name == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name is required.", nil)
+	}
+	item := &domain.AssetWorkbenchGroup{
+		Name:        name,
+		Description: strings.TrimSpace(params.Description),
+		Enabled:     true,
+		CreatedBy:   actor.ID,
+	}
+	var created *domain.AssetWorkbenchGroup
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		created, err = s.repo.CreateGroup(ctx, tx, item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventGroupUpserted, domain.AssetWorkbenchEntityGroup, &created.ID, nil, created, "create group")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench group.", err.Error())
+	}
+	return created, nil
+}
+
+func (s *Service) UpdateGroup(ctx context.Context, actor domain.RequestActor, groupID int64, params UpsertGroupParams) (*domain.AssetWorkbenchGroup, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can update groups.", nil)
+	}
+	name := strings.TrimSpace(params.Name)
+	if groupID <= 0 || name == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "group_id and name are required.", nil)
+	}
+	item := &domain.AssetWorkbenchGroup{
+		ID:          groupID,
+		Name:        name,
+		Description: strings.TrimSpace(params.Description),
+		Enabled:     params.Enabled,
+	}
+	var updated *domain.AssetWorkbenchGroup
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateGroup(ctx, tx, item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventGroupUpserted, domain.AssetWorkbenchEntityGroup, &updated.ID, nil, updated, "update group")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Group not found.", "Failed to update asset workbench group.")
+	}
+	return updated, nil
+}
+
+func (s *Service) DeleteGroup(ctx context.Context, actor domain.RequestActor, groupID int64) (*domain.AssetWorkbenchGroup, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can disable groups.", nil)
+	}
+	var updated *domain.AssetWorkbenchGroup
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.SetGroupEnabled(ctx, tx, groupID, false)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventGroupUpserted, domain.AssetWorkbenchEntityGroup, &updated.ID, nil, updated, "disable group")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Group not found.", "Failed to disable asset workbench group.")
+	}
+	return updated, nil
+}
+
+func (s *Service) AddGroupMembers(ctx context.Context, actor domain.RequestActor, groupID int64, params GroupMembersParams) *domain.AppError {
+	if err := s.requireRepo(); err != nil {
+		return err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can update group members.", nil)
+	}
+	userIDs := positiveUniqueInt64s(params.UserIDs)
+	if groupID <= 0 || len(userIDs) == 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "group_id and user_ids are required.", nil)
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.repo.AddGroupMembers(ctx, tx, groupID, userIDs); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventGroupUpserted, domain.AssetWorkbenchEntityGroup, &groupID, nil, map[string]interface{}{
+			"added_user_ids": userIDs,
+		}, "add group members")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return appErr
+		}
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to add asset workbench group members.", err.Error())
+	}
+	return nil
+}
+
+func (s *Service) RemoveGroupMembers(ctx context.Context, actor domain.RequestActor, groupID int64, params GroupMembersParams) *domain.AppError {
+	if err := s.requireRepo(); err != nil {
+		return err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can update group members.", nil)
+	}
+	userIDs := positiveUniqueInt64s(params.UserIDs)
+	if groupID <= 0 || len(userIDs) == 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "group_id and user_ids are required.", nil)
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.repo.RemoveGroupMembers(ctx, tx, groupID, userIDs); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventGroupUpserted, domain.AssetWorkbenchEntityGroup, &groupID, nil, map[string]interface{}{
+			"removed_user_ids": userIDs,
+		}, "remove group members")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return appErr
+		}
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to remove asset workbench group members.", err.Error())
+	}
+	return nil
+}
+
+func (s *Service) ListTemplates(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchTemplateFilter) ([]*domain.AssetWorkbenchTemplate, int64, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, 0, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can list templates.", nil)
+	}
+	items, total, err := s.repo.ListTemplates(ctx, filter)
+	if err != nil {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench templates.", err.Error())
+	}
+	return items, total, nil
+}
+
+func (s *Service) ListMyTemplates(ctx context.Context, actor domain.RequestActor) ([]*domain.AssetWorkbenchTemplate, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, assetWorkbenchRolesForService()...) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Authentication required.", nil)
+	}
+	if isAssetWorkbenchAdmin(actor) {
+		enabled := true
+		items, _, err := s.repo.ListTemplates(ctx, repo.AssetWorkbenchTemplateFilter{Enabled: &enabled, PageSize: 500})
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench templates.", err.Error())
+		}
+		return items, nil
+	}
+	items, err := s.repo.ListTemplatesForUser(ctx, actor.ID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list assigned asset workbench templates.", err.Error())
+	}
+	return items, nil
+}
+
+func (s *Service) CreateTemplate(ctx context.Context, actor domain.RequestActor, params UpsertTemplateParams) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can create templates.", nil)
+	}
+	item, appErr := normalizeWorkbenchTemplate(actor.ID, 0, params, true)
+	if appErr != nil {
+		return nil, appErr
+	}
+	var created *domain.AssetWorkbenchTemplate
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		created, err = s.repo.CreateTemplate(ctx, tx, item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateUpserted, domain.AssetWorkbenchEntityTemplate, &created.ID, nil, created, "create template")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench template.", err.Error())
+	}
+	return created, nil
+}
+
+func (s *Service) UpdateTemplate(ctx context.Context, actor domain.RequestActor, templateID int64, params UpsertTemplateParams) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update templates.", nil)
+	}
+	item, appErr := normalizeWorkbenchTemplate(actor.ID, templateID, params, params.Enabled)
+	if appErr != nil {
+		return nil, appErr
+	}
+	var updated *domain.AssetWorkbenchTemplate
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateTemplate(ctx, tx, item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateUpserted, domain.AssetWorkbenchEntityTemplate, &updated.ID, nil, updated, "update template")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Template not found.", "Failed to update asset workbench template.")
+	}
+	return updated, nil
+}
+
+func (s *Service) DeleteTemplate(ctx context.Context, actor domain.RequestActor, templateID int64) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can disable templates.", nil)
+	}
+	var updated *domain.AssetWorkbenchTemplate
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.SetTemplateEnabled(ctx, tx, templateID, false)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateUpserted, domain.AssetWorkbenchEntityTemplate, &updated.ID, nil, updated, "disable template")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Template not found.", "Failed to disable asset workbench template.")
+	}
+	return updated, nil
+}
+
+func (s *Service) ListTemplateAssignments(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchTemplateAssignmentFilter) ([]*domain.AssetWorkbenchTemplateAssignment, int64, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, 0, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list template assignments.", nil)
+	}
+	items, total, err := s.repo.ListTemplateAssignments(ctx, filter)
+	if err != nil {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench template assignments.", err.Error())
+	}
+	return items, total, nil
+}
+
+func (s *Service) AssignTemplate(ctx context.Context, actor domain.RequestActor, params AssignTemplateParams) ([]*domain.AssetWorkbenchTemplateAssignment, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can assign templates.", nil)
+	}
+	if params.TemplateID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "template_id is required.", nil)
+	}
+	userIDs := positiveUniqueInt64s(params.UserIDs)
+	groupIDs := positiveUniqueInt64s(params.GroupIDs)
+	if len(userIDs) == 0 && len(groupIDs) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_ids or group_ids are required.", nil)
+	}
+	assignments := []*domain.AssetWorkbenchTemplateAssignment{}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		for _, userID := range userIDs {
+			created, err := s.repo.CreateTemplateAssignment(ctx, tx, &domain.AssetWorkbenchTemplateAssignment{
+				TemplateID: params.TemplateID,
+				TargetType: domain.AssetWorkbenchAssignmentTargetUser,
+				TargetID:   userID,
+				Enabled:    true,
+				AssignedBy: actor.ID,
+			})
+			if err != nil {
+				return err
+			}
+			assignments = append(assignments, created)
+		}
+		for _, groupID := range groupIDs {
+			created, err := s.repo.CreateTemplateAssignment(ctx, tx, &domain.AssetWorkbenchTemplateAssignment{
+				TemplateID: params.TemplateID,
+				TargetType: domain.AssetWorkbenchAssignmentTargetGroup,
+				TargetID:   groupID,
+				Enabled:    true,
+				AssignedBy: actor.ID,
+			})
+			if err != nil {
+				return err
+			}
+			assignments = append(assignments, created)
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateAssigned, domain.AssetWorkbenchEntityTemplate, &params.TemplateID, nil, assignments, "assign template")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to assign asset workbench template.", err.Error())
+	}
+	return assignments, nil
+}
+
+func (s *Service) DeleteTemplateAssignment(ctx context.Context, actor domain.RequestActor, assignmentID int64) (*domain.AssetWorkbenchTemplateAssignment, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can remove template assignments.", nil)
+	}
+	var updated *domain.AssetWorkbenchTemplateAssignment
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.SetTemplateAssignmentEnabled(ctx, tx, assignmentID, false)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateAssignmentRemoved, domain.AssetWorkbenchEntityTemplateAssignment, &updated.ID, nil, updated, "remove assignment")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Template assignment not found.", "Failed to remove asset workbench template assignment.")
+	}
+	return updated, nil
+}
+
 func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestActor, params CreateUploadSessionParams) (*UploadSessionResponse, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
@@ -1038,7 +1452,11 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 		}
 		detail.Submission = createdSubmission
 		for _, reqItem := range params.Items {
-			item, appErr := s.buildSubmissionItem(ctx, actor.ID, createdSubmission.ID, now, businessMonth, profile, reqItem)
+			template, appErr := s.resolveSubmissionTemplate(ctx, actor, profile, reqItem)
+			if appErr != nil {
+				return appErr
+			}
+			item, appErr := s.buildSubmissionItem(ctx, actor.ID, createdSubmission.ID, now, businessMonth, profile, reqItem, template)
 			if appErr != nil {
 				return appErr
 			}
@@ -1243,7 +1661,7 @@ func (s *Service) RepriceSubmissionItem(ctx context.Context, actor domain.Reques
 		Finalized:       before.Finalized,
 		PageCount:       before.PageCount,
 		ItemCount:       before.ItemCount,
-	})
+	}, nil)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -1492,6 +1910,118 @@ func (s *Service) ImportErrorRecordsExcel(ctx context.Context, actor domain.Requ
 		OriginalFilename: originalFilename,
 		Records:          records,
 	})
+}
+
+func (s *Service) MySettlement(ctx context.Context, actor domain.RequestActor) (*MySettlementResponse, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, assetWorkbenchRolesForService()...) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Authentication required.", nil)
+	}
+	currentMonth := s.businessMonth(s.nowFn().UTC())
+	rowsByMonth := map[string]*MySettlementMonthRow{}
+	ensureRow := func(month string) *MySettlementMonthRow {
+		row := rowsByMonth[month]
+		if row == nil {
+			row = &MySettlementMonthRow{BusinessMonth: month}
+			rowsByMonth[month] = row
+		}
+		return row
+	}
+
+	confirmedItems, err := s.repo.ListConfirmedSettlementItemsByPayee(ctx, actor.ID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load confirmed settlement items.", err.Error())
+	}
+	for _, item := range confirmedItems {
+		if item == nil {
+			continue
+		}
+		row := ensureRow(item.BusinessMonth)
+		row.Confirmed = true
+		switch item.ItemType {
+		case domain.AssetWorkbenchItemTypeGrossPiecework:
+			row.ItemCount++
+			row.PageCount += int(item.Quantity)
+			row.GrossAmount += item.Amount
+		case domain.AssetWorkbenchItemTypeErrorDeduction:
+			row.DeductionAmount += item.Amount
+		case domain.AssetWorkbenchItemTypeWelfare:
+			row.WelfareAmount += item.Amount
+		case domain.AssetWorkbenchItemTypeSupplement:
+			row.SupplementAmount += item.Amount
+		case domain.AssetWorkbenchItemTypeAdjustment, domain.AssetWorkbenchItemTypeReversal:
+			if item.Direction == "debit" {
+				row.AdjustmentAmount -= item.Amount
+			} else {
+				row.AdjustmentAmount += item.Amount
+			}
+		}
+		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount + row.AdjustmentAmount
+	}
+
+	currentItems, err := s.repo.ListSubmissionItemsByMonth(ctx, currentMonth)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month submission items.", err.Error())
+	}
+	selfItems := make([]*domain.AssetWorkbenchSubmissionItem, 0, len(currentItems))
+	for _, item := range currentItems {
+		if item == nil || item.PayeeUserID != actor.ID {
+			continue
+		}
+		if item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
+			continue
+		}
+		selfItems = append(selfItems, item)
+	}
+	currentSupplements, _, err := s.repo.ListSettlementSupplements(ctx, repo.AssetWorkbenchSettlementSupplementFilter{
+		PayeeUserID:   &actor.ID,
+		BusinessMonth: currentMonth,
+		PageSize:      500,
+	})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month supplements.", err.Error())
+	}
+	errorRecords, err := s.repo.ListErrorRecordsByMonth(ctx, currentMonth)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month error records.", err.Error())
+	}
+	preview, appErr := s.buildSettlementPreview(ctx, currentMonth, selfItems, errorRecords, currentSupplements)
+	if appErr != nil {
+		return nil, appErr
+	}
+	for _, previewRow := range preview.Rows {
+		if previewRow.PayeeUserID != actor.ID {
+			continue
+		}
+		row := ensureRow(currentMonth)
+		row.ItemCount += previewRow.ItemCount
+		row.PageCount += previewRow.PageCount
+		row.GrossAmount += previewRow.GrossAmount
+		row.DeductionAmount += previewRow.DeductionAmount
+		row.WelfareAmount += previewRow.WelfareAmount
+		row.SupplementAmount += previewRow.SupplementAmount
+		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount + row.AdjustmentAmount
+	}
+
+	months := make([]MySettlementMonthRow, 0, len(rowsByMonth))
+	for _, row := range rowsByMonth {
+		months = append(months, *row)
+	}
+	sort.Slice(months, func(i, j int) bool {
+		return months[i].BusinessMonth > months[j].BusinessMonth
+	})
+	currentRow := rowsByMonth[currentMonth]
+	estimated := 0.0
+	if currentRow != nil {
+		estimated = currentRow.NetAmount
+	}
+	return &MySettlementResponse{
+		CurrentMonth:       currentMonth,
+		EstimatedNetAmount: estimated,
+		Months:             months,
+	}, nil
 }
 
 func (s *Service) PreviewSettlement(ctx context.Context, actor domain.RequestActor, businessMonth string) (*SettlementPreview, *domain.AppError) {
@@ -2237,9 +2767,46 @@ func (s *Service) processPreviewFile(ctx context.Context, file *domain.AssetWork
 	})
 }
 
-func (s *Service) buildSubmissionItem(ctx context.Context, payeeUserID, submissionID int64, submittedAt time.Time, businessMonth string, profile *domain.AssetWorkbenchProfile, req CreateSubmissionItemParams) (*domain.AssetWorkbenchSubmissionItem, *domain.AppError) {
+func (s *Service) resolveSubmissionTemplate(ctx context.Context, actor domain.RequestActor, profile *domain.AssetWorkbenchProfile, req CreateSubmissionItemParams) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
+	if req.TemplateID <= 0 {
+		return nil, nil
+	}
+	template, err := s.repo.GetTemplate(ctx, req.TemplateID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Template not found.", "Failed to load asset workbench template.")
+	}
+	if !template.Enabled {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Template is disabled.", map[string]interface{}{"template_id": req.TemplateID})
+	}
+	workerType := ""
+	if profile != nil {
+		workerType = strings.TrimSpace(profile.WorkerType)
+	}
+	if template.WorkerType != "" && template.WorkerType != domain.AssetWorkbenchWorkerTypeAll && workerType != "" && template.WorkerType != workerType {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Template is not available for current worker type.", map[string]interface{}{"template_id": req.TemplateID})
+	}
+	if !isAssetWorkbenchAdmin(actor) {
+		assigned, err := s.repo.IsTemplateAssignedToUser(ctx, actor.ID, req.TemplateID)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify template assignment.", err.Error())
+		}
+		if !assigned {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Template is not assigned to current user.", map[string]interface{}{"template_id": req.TemplateID})
+		}
+	}
+	return template, nil
+}
+
+func (s *Service) buildSubmissionItem(ctx context.Context, payeeUserID, submissionID int64, submittedAt time.Time, businessMonth string, profile *domain.AssetWorkbenchProfile, req CreateSubmissionItemParams, templates ...*domain.AssetWorkbenchTemplate) (*domain.AssetWorkbenchSubmissionItem, *domain.AppError) {
+	var template *domain.AssetWorkbenchTemplate
+	if len(templates) > 0 {
+		template = templates[0]
+	}
 	orderNo := strings.TrimSpace(req.OrderNo)
 	difficulty := strings.TrimSpace(req.DifficultyClass)
+	if template != nil {
+		difficulty = strings.TrimSpace(template.DifficultyClass)
+	}
 	if orderNo == "" || difficulty == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no and difficulty_class are required.", nil)
 	}
@@ -2264,11 +2831,19 @@ func (s *Service) buildSubmissionItem(ctx context.Context, payeeUserID, submissi
 		QCStatus:           domain.AssetWorkbenchSubmissionStatusSubmitted,
 		SettlementStatus:   domain.AssetWorkbenchSettlementStatusUnsettled,
 	}
+	if template != nil {
+		templateID := template.ID
+		item.TemplateID = &templateID
+		item.TemplateNameSnapshot = template.Name
+		item.CategorySnapshot = template.Category
+	}
 	if item.WorkerTypeSnapshot == "" || item.JobGradeSnapshot == "" {
 		item.PricingStatus = domain.AssetWorkbenchPricingStatusPendingGrade
 		item.PricingSnapshot = mustJSON(map[string]interface{}{
-			"status": "pending_grade",
-			"reason": "missing worker_type or job_grade",
+			"status":        "pending_grade",
+			"reason":        "missing worker_type or job_grade",
+			"template_id":   item.TemplateID,
+			"template_name": item.TemplateNameSnapshot,
 		})
 		return item, nil
 	}
@@ -2282,6 +2857,9 @@ func (s *Service) buildSubmissionItem(ctx context.Context, payeeUserID, submissi
 				"job_grade":        item.JobGradeSnapshot,
 				"difficulty_class": item.DifficultyClass,
 				"business_month":   businessMonth,
+				"template_id":      item.TemplateID,
+				"template_name":    item.TemplateNameSnapshot,
+				"category":         item.CategorySnapshot,
 			})
 			return item, nil
 		}
@@ -2312,6 +2890,9 @@ func (s *Service) buildSubmissionItem(ctx context.Context, payeeUserID, submissi
 		"effective_to":     formatOptionalDate(price.EffectiveTo),
 		"submitted_at":     submittedAt.Format(time.RFC3339),
 		"business_month":   businessMonth,
+		"template_id":      item.TemplateID,
+		"template_name":    item.TemplateNameSnapshot,
+		"category":         item.CategorySnapshot,
 		"final_unit_price": unitPrice,
 		"promo_applied":    promo != nil,
 		"gross_formula":    "final_unit_price * page_count",
@@ -3394,6 +3975,31 @@ func defaultAll(value string) string {
 	return value
 }
 
+func normalizeWorkbenchTemplate(actorID, templateID int64, params UpsertTemplateParams, enabled bool) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
+	name := strings.TrimSpace(params.Name)
+	difficulty := strings.TrimSpace(params.DifficultyClass)
+	if name == "" || difficulty == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name and difficulty_class are required.", nil)
+	}
+	workerType := normalizeWorkerType(params.WorkerType)
+	if workerType == domain.AssetWorkbenchWorkerTypeAll {
+		workerType = ""
+	}
+	if workerType != "" && workerType != domain.AssetWorkbenchWorkerTypeFulltime && workerType != domain.AssetWorkbenchWorkerTypeParttime {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type must be fulltime, parttime or empty.", nil)
+	}
+	return &domain.AssetWorkbenchTemplate{
+		ID:              templateID,
+		Name:            name,
+		Category:        strings.TrimSpace(params.Category),
+		DifficultyClass: difficulty,
+		WorkerType:      workerType,
+		Enabled:         enabled,
+		SortOrder:       params.SortOrder,
+		CreatedBy:       actorID,
+	}, nil
+}
+
 func normalizePromoMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "fixed", "fixed_price", "flat", "one_price", "一口价":
@@ -3704,6 +4310,27 @@ func actorHasAny(actor domain.RequestActor, roles ...domain.Role) bool {
 	return domain.ActorHasAnyRole(actor, roles)
 }
 
+func isAssetWorkbenchAdmin(actor domain.RequestActor) bool {
+	return actorHasAny(actor,
+		domain.RoleAssetManager,
+		domain.RoleAssetTemplateAdmin,
+		domain.RoleAssetSettlement,
+		domain.RoleHRAdmin,
+		domain.RoleSuperAdmin,
+	)
+}
+
+func assetWorkbenchRolesForService() []domain.Role {
+	return []domain.Role{
+		domain.RoleAssetSubmitter,
+		domain.RoleAssetManager,
+		domain.RoleAssetTemplateAdmin,
+		domain.RoleAssetSettlement,
+		domain.RoleHRAdmin,
+		domain.RoleSuperAdmin,
+	}
+}
+
 func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 	actions := append([]string{}, actor.FrontendAccess.Actions...)
 	if actorHasAny(actor, domain.RoleAssetSubmitter) {
@@ -3711,12 +4338,15 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.bootstrap",
 			"asset.workbench.submit",
 			"asset.workbench.profile",
+			"asset.workbench.settlement.self",
 		)
 	}
 	if actorHasAny(actor, domain.RoleAssetManager) {
 		actions = append(actions,
 			"asset.workbench.bootstrap",
 			"asset.workbench.manage",
+			"asset.workbench.group.manage",
+			"asset.workbench.template.assign",
 			"asset.workbench.system_search",
 			"asset.workbench.download",
 		)
@@ -3726,6 +4356,7 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.bootstrap",
 			"asset.workbench.cost_center.manage",
 			"asset.workbench.template.manage",
+			"asset.workbench.template.assign",
 		)
 	}
 	if actorHasAny(actor, domain.RoleAssetSettlement) {
@@ -3747,12 +4378,15 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.bootstrap",
 			"asset.workbench.submit",
 			"asset.workbench.profile",
+			"asset.workbench.settlement.self",
 			"asset.workbench.profile.manage",
 			"asset.workbench.manage",
+			"asset.workbench.group.manage",
 			"asset.workbench.system_search",
 			"asset.workbench.download",
 			"asset.workbench.cost_center.manage",
 			"asset.workbench.template.manage",
+			"asset.workbench.template.assign",
 			"asset.workbench.settlement",
 			"asset.workbench.export",
 		)
@@ -3766,6 +4400,22 @@ func dedupeStrings(values []string) []string {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func positiveUniqueInt64s(values []int64) []int64 {
+	seen := map[int64]struct{}{}
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
 			continue
 		}
 		if _, ok := seen[value]; ok {

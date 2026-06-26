@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { assetWorkbenchApi, type SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
+import { formatInt } from '@aw/shared/format/number'
+import { chipClass, systemPreviewMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 
 interface GridColumn {
@@ -35,7 +37,7 @@ const materialRowsWithLabels = computed<MaterialGridRow[]>(() =>
     display_no: row.asset_no || row.resource_id || row.id,
     display_name: row.product_name || row.task_no || row.file_name || '',
     display_type: row.mime_type || 'unknown',
-    preview_label: row.preview_available ? '可预览' : '只下载',
+    preview_label: systemPreviewMeta(row.preview_available).label,
   })),
 )
 const materialGridRows = computed(() => materialRowsWithLabels.value as unknown as Record<string, unknown>[])
@@ -43,8 +45,8 @@ const materialGridColumns = computed<GridColumn[]>(() => [
   { key: 'select', label: '选择', width: 84, align: 'center' },
   { key: 'display_no', label: '编码', width: 150 },
   { key: 'display_name', label: '名称', width: 220 },
-  { key: 'display_type', label: '类型', width: 120 },
-  { key: 'preview_label', label: '预览', width: 96 },
+  { key: 'display_type', label: '类型', width: 220 },
+  { key: 'preview_label', label: '预览', width: 120 },
   { key: 'actions', label: '动作', width: 96, align: 'center' },
 ])
 
@@ -129,21 +131,29 @@ async function downloadSelectedAssets() {
 onBeforeUnmount(() => {
   controller?.abort()
 })
+
+onMounted(() => {
+  void searchMaterials()
+})
 </script>
 
 <template>
   <section class="aw-page-stack">
-    <div class="aw-page-heading">
-      <div>
+    <div class="aw-page-bar">
+      <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">只读素材</p>
         <h2>模板素材库</h2>
+        <p>只读搜索系统素材，支持预览能力识别、单文件下载和批量打包下载。</p>
       </div>
-      <button class="aw-secondary-button" type="button" @click="downloadSelectedAssets">批量下载</button>
+      <div class="aw-page-bar__actions">
+        <button class="aw-primary-button" type="button" @click="downloadSelectedAssets">批量下载</button>
+      </div>
     </div>
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
         <input v-model="keyword" type="search" placeholder="搜索编码、款式编码、产品名或趋势" @keydown.enter="searchMaterials" />
         <button type="button" @click="searchMaterials">搜索</button>
+        <span>{{ formatInt(total) }} 条结果</span>
         <label class="aw-inline-check">
           <input
             type="checkbox"
@@ -176,8 +186,13 @@ onBeforeUnmount(() => {
             <span>{{ gridRowAsAsset(row).id }}</span>
           </label>
           <button v-else-if="column.key === 'actions'" type="button" @click="downloadAsset(gridRowAsAsset(row))">下载</button>
-          <strong v-else-if="column.key === 'preview_label'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+          <span
+            v-else-if="column.key === 'preview_label'"
+            :class="chipClass(systemPreviewMeta(gridRowAsAsset(row).preview_available).tone)"
+          >
+            {{ value }}
+          </span>
+          <span v-else class="aw-cell-text">{{ value }}</span>
         </template>
       </WorkbenchDataGrid>
       <div v-else class="aw-empty-state">

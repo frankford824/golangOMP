@@ -11,6 +11,7 @@ import {
   ReceiptText,
   ScrollText,
   Search,
+  Send,
   UsersRound,
 } from 'lucide-vue-next'
 
@@ -30,6 +31,7 @@ const navItems = [
   { to: '/submissions', label: '维护', icon: Boxes, requires: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'] },
   { to: '/materials', label: '素材', icon: Library, requires: ['asset.workbench.system_search'] },
   { to: '/cost-center', label: '成本', icon: Calculator, requires: ['asset.workbench.cost_center.manage'] },
+  { to: '/template-assignments', label: '下发', icon: Send, requires: ['asset.workbench.template.assign'] },
   { to: '/settlement', label: '结算', icon: ReceiptText, requires: ['asset.workbench.settlement'] },
   { to: '/people', label: '人员', icon: UsersRound, requires: ['asset.workbench.profile', 'asset.workbench.profile.manage'] },
   { to: '/events', label: '日志', icon: ScrollText, requires: ['asset.workbench.manage', 'asset.workbench.cost_center.manage', 'asset.workbench.settlement'] },
@@ -58,8 +60,17 @@ const profileStatusLabel = computed(() => {
 })
 const permissionSummary = computed(() => {
   const count = bootstrap.value?.capabilities.length ?? 0
-  return count > 0 ? '权限已加载' : '暂无可用权限'
+  return count > 0 ? `${count} 项权限已加载` : '暂无可用权限'
 })
+const profileState = computed(() => {
+  const status = bootstrap.value?.profile?.status
+  if (status === 'active') return 'active'
+  if (status === 'pending') return 'pending'
+  return 'idle'
+})
+const businessMonth = computed(() =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date()),
+)
 
 function hasAnyCapability(required: string[]) {
   const capabilities = new Set(bootstrap.value?.capabilities ?? [])
@@ -181,10 +192,13 @@ watch(commandQuery, () => {
       <main class="aw-shell__content">
         <div v-if="error" class="aw-inline-alert">{{ error }}</div>
         <div v-else-if="loading" class="aw-inline-alert">正在加载工作台信息</div>
-        <div v-else-if="bootstrap" class="aw-context-strip">
-          <span>业务月份按北京时间计算</span>
-          <span>{{ profileStatusLabel }}</span>
-          <span>{{ permissionSummary }}</span>
+        <div v-else-if="bootstrap" class="aw-statusline">
+          <span class="aw-statusline__dot" :data-state="profileState"></span>
+          <span class="aw-statusline__item">业务月 <b>{{ businessMonth }}</b>（北京时间）</span>
+          <span class="aw-statusline__sep">·</span>
+          <span class="aw-statusline__item">{{ profileStatusLabel }}</span>
+          <span class="aw-statusline__sep">·</span>
+          <span class="aw-statusline__item">{{ permissionSummary }}</span>
         </div>
         <RouterView />
       </main>

@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { assetWorkbenchApi, type AssetWorkbenchProfile } from '@aw/shared/api/assetWorkbenchApi'
+import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
+import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 
 const form = reactive({
@@ -35,36 +37,27 @@ const hrForm = reactive({
 const profileGridRows = computed(() =>
   profiles.value.map((profile) => ({
     ...profile,
-    worker_type_label: workerTypeLabel(profile.worker_type),
-    status_label: profileStatusLabel(profile.status),
+    worker_type_label: workerTypeMeta(profile.worker_type).label,
+    status_label: profileStatusMeta(profile.status).label,
+    phone_label: maskPhone(profile.phone),
+    id_card_label: maskIdCard(profile.id_card),
+    alipay_label: maskAlipay(profile.alipay_account),
   })) as unknown as Record<string, unknown>[],
 )
 const profileGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
   { key: 'real_name', label: '姓名', width: 128 },
   { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'job_grade', label: '岗级', width: 96 },
-  { key: 'phone', label: '手机', width: 132 },
+  { key: 'phone_label', label: '手机', width: 132 },
+  { key: 'id_card_label', label: '证件', width: 150 },
+  { key: 'alipay_label', label: '支付账号', width: 140 },
   { key: 'province', label: '省份', width: 96 },
   { key: 'city', label: '城市', width: 96 },
   { key: 'status_label', label: '状态', width: 100 },
 ])
 
-function workerTypeLabel(value: string) {
-  const labels: Record<string, string> = {
-    parttime: '兼职',
-    fulltime: '全职',
-    all: '全部',
-  }
-  return labels[value] ?? value
-}
-
-function profileStatusLabel(value: string) {
-  const labels: Record<string, string> = {
-    pending: '待审核',
-    active: '已生效',
-    disabled: '已停用',
-  }
-  return labels[value] ?? value
+function gridRowAsProfile(row: Record<string, unknown>) {
+  return row as unknown as AssetWorkbenchProfile
 }
 
 async function loadPeople() {
@@ -160,18 +153,27 @@ onMounted(() => {
 
 <template>
   <section class="aw-page-stack">
-    <div class="aw-page-heading">
-      <div>
+    <div class="aw-page-bar">
+      <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">人员档案</p>
         <h2>人员账户维护</h2>
+        <p>工作台档案只服务资产交付和计件结算。岗级变化只影响新的提交快照。</p>
       </div>
-      <button class="aw-secondary-button" type="button" @click="loadPeople">刷新</button>
+      <div class="aw-page-bar__actions">
+        <button class="aw-secondary-button" type="button" @click="loadPeople">刷新</button>
+        <button class="aw-primary-button" type="button" :disabled="saving" @click="saveProfile">保存档案</button>
+      </div>
     </div>
 
     <div class="aw-two-column">
       <div class="aw-panel">
-        <h3>我的档案</h3>
-        <p class="aw-copy">这里的信息会用于之后的上传计价。HR 调整岗级后，只影响新的提交记录。</p>
+        <div class="aw-panel__head">
+          <div>
+            <h3>我的档案</h3>
+            <p class="aw-copy">这里的信息会用于之后的上传计价。</p>
+          </div>
+          <span :class="chipClass(profileStatusMeta(form.status).tone)">{{ profileStatusMeta(form.status).label }}</span>
+        </div>
         <div class="aw-form-grid">
           <label>
             人员类型
@@ -205,13 +207,15 @@ onMounted(() => {
             <input v-model="form.alipay_account" />
           </label>
         </div>
-        <button class="aw-primary-button" type="button" :disabled="saving" @click="saveProfile">保存档案</button>
         <p v-if="notice" class="aw-copy">{{ notice }}</p>
         <p v-if="error" class="aw-copy">{{ error }}</p>
       </div>
 
       <div class="aw-panel">
-        <h3>档案边界</h3>
+        <div class="aw-panel__head">
+          <h3>档案边界</h3>
+          <span class="aw-chip aw-chip--neutral">PII 脱敏</span>
+        </div>
         <p class="aw-copy">
           工作台档案只服务资产交付和计件结算，不进入主站运营菜单。
         </p>
@@ -244,8 +248,19 @@ onMounted(() => {
           >
             {{ value || row.user_id }}
           </button>
+          <span
+            v-else-if="column.key === 'worker_type_label'"
+            :class="chipClass(workerTypeMeta(gridRowAsProfile(row).worker_type).tone)"
+          >
+            {{ value }}
+          </span>
           <span v-else-if="column.key === 'job_grade'">{{ value || '未定级' }}</span>
-          <span v-else-if="column.key === 'status_label'" class="aw-status-chip">{{ value }}</span>
+          <span
+            v-else-if="column.key === 'status_label'"
+            :class="chipClass(profileStatusMeta(gridRowAsProfile(row).status).tone)"
+          >
+            {{ value }}
+          </span>
           <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
@@ -256,9 +271,14 @@ onMounted(() => {
     </div>
 
     <div v-if="selectedProfile" class="aw-panel">
-      <div class="aw-grid-toolbar">
-        <span>HR 定级维护</span>
-        <span>用户 #{{ selectedProfile.user_id }}</span>
+      <div class="aw-panel__head">
+        <div>
+          <h3>HR 定级维护</h3>
+          <p class="aw-copy">用户 #{{ selectedProfile.user_id }} · {{ maskPhone(selectedProfile.phone) }}</p>
+        </div>
+        <span :class="chipClass(profileStatusMeta(selectedProfile.status).tone)">
+          {{ profileStatusMeta(selectedProfile.status).label }}
+        </span>
       </div>
       <div class="aw-form-grid">
         <label>

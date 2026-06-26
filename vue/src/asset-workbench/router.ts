@@ -18,14 +18,20 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'asset-dashboard',
-    component: () => import('./pages/DashboardPage.vue'),
-    meta: { label: '总览' },
+    component: () => import('./pages/HomePage.vue'),
+    meta: { label: '首页' },
   },
   {
     path: '/upload',
     name: 'asset-upload',
     component: () => import('./pages/UploadPage.vue'),
-    meta: { label: '上传提交' },
+    meta: { label: '交作品' },
+  },
+  {
+    path: '/my-settlement',
+    name: 'asset-my-settlement',
+    component: () => import('./pages/MySettlementPage.vue'),
+    meta: { label: '看收入' },
   },
   {
     path: '/submissions',
@@ -44,6 +50,12 @@ const routes: RouteRecordRaw[] = [
     name: 'asset-cost-center',
     component: () => import('./pages/CostCenterPage.vue'),
     meta: { label: '成本中心' },
+  },
+  {
+    path: '/template-assignments',
+    name: 'asset-template-assignments',
+    component: () => import('./pages/TemplateAssignPage.vue'),
+    meta: { label: '模板下发' },
   },
   {
     path: '/settlement',

@@ -15,6 +15,9 @@ const (
 
 	AssetWorkbenchPayrollRowTypeNormalPiecework     = "normal_piecework"
 	AssetWorkbenchPayrollRowTypeSupplementPiecework = "supplement_piecework"
+
+	AssetWorkbenchAssignmentTargetUser  = "user"
+	AssetWorkbenchAssignmentTargetGroup = "group"
 )
 
 func DefaultAssetWorkbenchSettlementItemTypes() []string {
@@ -110,6 +113,10 @@ const (
 	AssetWorkbenchEventItemQCUpdated               = "item.qc_updated"
 	AssetWorkbenchEventItemVoided                  = "item.voided"
 	AssetWorkbenchEventItemRepriced                = "item.repriced"
+	AssetWorkbenchEventGroupUpserted               = "group.upserted"
+	AssetWorkbenchEventTemplateUpserted            = "template.upserted"
+	AssetWorkbenchEventTemplateAssigned            = "template.assigned"
+	AssetWorkbenchEventTemplateAssignmentRemoved   = "template_assignment.removed"
 
 	AssetWorkbenchEntityProfile              = "profile"
 	AssetWorkbenchEntityPriceMatrix          = "price_matrix"
@@ -127,6 +134,9 @@ const (
 	AssetWorkbenchEntitySupplement           = "settlement_supplement"
 	AssetWorkbenchEntitySupplementPermission = "supplement_permission"
 	AssetWorkbenchEntitySavedView            = "saved_view"
+	AssetWorkbenchEntityGroup                = "group"
+	AssetWorkbenchEntityTemplate             = "template"
+	AssetWorkbenchEntityTemplateAssignment   = "template_assignment"
 )
 
 type AssetWorkbenchProfile struct {
@@ -236,6 +246,46 @@ type AssetWorkbenchPromoCoupon struct {
 	UpdatedAt       time.Time       `json:"updated_at" db:"updated_at"`
 }
 
+type AssetWorkbenchGroup struct {
+	ID          int64     `json:"id" db:"id"`
+	Name        string    `json:"name" db:"name"`
+	Description string    `json:"description" db:"description"`
+	Enabled     bool      `json:"enabled" db:"enabled"`
+	CreatedBy   int64     `json:"created_by" db:"created_by"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type AssetWorkbenchGroupMember struct {
+	GroupID   int64     `json:"group_id" db:"group_id"`
+	UserID    int64     `json:"user_id" db:"user_id"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
+type AssetWorkbenchTemplate struct {
+	ID              int64     `json:"id" db:"id"`
+	Name            string    `json:"name" db:"name"`
+	Category        string    `json:"category" db:"category"`
+	DifficultyClass string    `json:"difficulty_class" db:"difficulty_class"`
+	WorkerType      string    `json:"worker_type" db:"worker_type"`
+	Enabled         bool      `json:"enabled" db:"enabled"`
+	SortOrder       int       `json:"sort_order" db:"sort_order"`
+	CreatedBy       int64     `json:"created_by" db:"created_by"`
+	CreatedAt       time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type AssetWorkbenchTemplateAssignment struct {
+	ID         int64     `json:"id" db:"id"`
+	TemplateID int64     `json:"template_id" db:"template_id"`
+	TargetType string    `json:"target_type" db:"target_type"`
+	TargetID   int64     `json:"target_id" db:"target_id"`
+	Enabled    bool      `json:"enabled" db:"enabled"`
+	AssignedBy int64     `json:"assigned_by" db:"assigned_by"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
+}
+
 type AssetWorkbenchUploadSession struct {
 	ID               int64           `json:"id" db:"id"`
 	SessionID        string          `json:"session_id" db:"session_id"`
@@ -277,6 +327,9 @@ type AssetWorkbenchSubmissionItem struct {
 	SubmissionID             int64           `json:"submission_id" db:"submission_id"`
 	PayeeUserID              int64           `json:"payee_user_id" db:"payee_user_id"`
 	OrderNo                  string          `json:"order_no" db:"order_no"`
+	TemplateID               *int64          `json:"template_id,omitempty" db:"template_id"`
+	TemplateNameSnapshot     string          `json:"template_name_snapshot" db:"template_name_snapshot"`
+	CategorySnapshot         string          `json:"category_snapshot" db:"category_snapshot"`
 	DifficultyClass          string          `json:"difficulty_class" db:"difficulty_class"`
 	Finalized                bool            `json:"finalized" db:"finalized"`
 	PageCount                int             `json:"page_count" db:"page_count"`

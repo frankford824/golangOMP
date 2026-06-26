@@ -149,7 +149,10 @@ watch(
 </script>
 
 <template>
-  <div class="aw-data-grid" :style="{ '--aw-grid-columns': gridTemplateColumns }">
+  <div
+    class="aw-data-grid"
+    :style="{ '--aw-grid-columns': gridTemplateColumns, '--aw-grid-row-height': `${rowHeight}px` }"
+  >
     <div class="aw-data-grid__head">
       <div
         v-for="column in orderedColumns"

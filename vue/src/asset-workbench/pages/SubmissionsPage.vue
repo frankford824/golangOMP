@@ -9,7 +9,10 @@ import {
   type SubmissionItemRow,
   type SubmissionRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
+import { formatInt, formatMoney } from '@aw/shared/format/number'
+import { chipClass, previewStatusMeta, pricingStatusMeta, qcStatusMeta, submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 
 type ItemActionKind = 'needs_fix' | 'void' | 'reprice'
@@ -23,6 +26,7 @@ interface GridColumn {
 
 type DetailItemGridRow = SubmissionItemRow & { file_count: number; action: string }
 type DetailFileGridRow = SubmissionFileRow & { selected: boolean; action: string }
+type SubmissionGridRow = SubmissionRow & { status_label: string }
 
 interface PendingItemAction {
   kind: ItemActionKind
@@ -43,13 +47,21 @@ const notice = ref('')
 const viewName = ref('默认维护视图')
 const groupBy = ref('business_month')
 const density = ref('compact')
+const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
 
 const selectedFiles = computed(() => {
   const detail = selectedDetail.value
   if (!detail) return []
   return detail.items.flatMap((entry) => entry.files)
 })
-const submissionGridRows = computed(() => rows.value as unknown as Record<string, unknown>[])
+const gridRowHeight = computed(() => (density.value === 'compact' ? 34 : 44))
+const submissionRowsWithLabels = computed<SubmissionGridRow[]>(() =>
+  rows.value.map((row) => ({
+    ...row,
+    status_label: submissionStatusMeta(row.status).label,
+  })),
+)
+const submissionGridRows = computed(() => submissionRowsWithLabels.value as unknown as Record<string, unknown>[])
 const detailItemRows = computed<DetailItemGridRow[]>(() =>
   (selectedDetail.value?.items ?? []).map((entry) => ({
     ...entry.item,
@@ -69,10 +81,10 @@ const detailFileGridRows = computed(() => detailFileRows.value as unknown as Rec
 const submissionGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
   { key: 'submission_no', label: '提交批次', width: 180 },
   { key: 'business_month', label: '业务月', width: 108 },
-  { key: 'status', label: '状态', width: 96 },
+  { key: 'status_label', label: '状态', width: 96 },
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
   { key: 'page_count', label: '页数', width: 88, align: 'right' },
-  { key: 'gross_amount', label: '毛额', width: 108, align: 'right' },
+  { key: 'gross_total', label: '毛额', width: 108, align: 'right' },
   { key: 'action', label: '动作', width: 96, align: 'center' },
 ])
 const detailItemGridColumns = computed<GridColumn[]>(() => [
@@ -99,6 +111,7 @@ const pendingActionTitle = computed(() => {
   if (pendingAction.value.kind === 'void') return '作废明细'
   return '重新计价'
 })
+const canManageItems = computed(() => bootstrap.value?.capabilities.includes('asset.workbench.manage') === true)
 
 async function loadSubmissions() {
   loading.value = true
@@ -187,6 +200,10 @@ function toggleAllFiles(checked: boolean) {
 
 function gridRowAsItem(row: Record<string, unknown>): DetailItemGridRow {
   return row as unknown as DetailItemGridRow
+}
+
+function gridRowAsSubmission(row: Record<string, unknown>): SubmissionGridRow {
+  return row as unknown as SubmissionGridRow
 }
 
 function gridRowAsFile(row: Record<string, unknown>): DetailFileGridRow {
@@ -278,18 +295,22 @@ async function executePendingAction() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadSubmissions(), loadSavedViews()])
+  await Promise.all([refreshBootstrap(), loadSubmissions(), loadSavedViews()])
 })
 </script>
 
 <template>
   <section class="aw-page-stack">
-    <div class="aw-page-heading">
-      <div>
+    <div class="aw-page-bar">
+      <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">交付维护</p>
         <h2>资产维护专区</h2>
+        <p>批量检查提交、文件预览、质检状态和结算前重计价。视图会记住分组、密度和列设置。</p>
       </div>
-      <button class="aw-secondary-button" type="button" @click="saveView">保存视图</button>
+      <div class="aw-page-bar__actions">
+        <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">批量下载</button>
+        <button class="aw-primary-button" type="button" @click="saveView">保存视图</button>
+      </div>
     </div>
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
@@ -303,7 +324,7 @@ onMounted(async () => {
           <option value="compact">紧凑</option>
           <option value="comfortable">舒展</option>
         </select>
-        <button type="button" @click="downloadSelectedFiles">批量下载</button>
+        <span>{{ formatInt(total) }} 个批次</span>
       </div>
       <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
       <div v-if="savedViews.length" class="aw-button-row">
@@ -325,12 +346,19 @@ onMounted(async () => {
         storage-key="submissions"
         :group-by="groupBy"
         :height="420"
-        :row-height="36"
+        :row-height="gridRowHeight"
       >
         <template #cell="{ row, column, value }">
-          <button v-if="column.key === 'action'" type="button" @click="openSubmission(row as unknown as SubmissionRow)">文件</button>
-          <strong v-else-if="column.key === 'gross_amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+          <button v-if="column.key === 'action'" type="button" @click="openSubmission(gridRowAsSubmission(row))">文件</button>
+          <span
+            v-else-if="column.key === 'status_label'"
+            :class="chipClass(submissionStatusMeta(gridRowAsSubmission(row).status).tone)"
+          >
+            {{ value }}
+          </span>
+          <span v-else-if="column.key === 'gross_total'" class="aw-cell-money">{{ formatMoney(value) }}</span>
+          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ formatInt(value) }}</span>
+          <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
       <div v-else class="aw-empty-state">
@@ -342,19 +370,22 @@ onMounted(async () => {
     </div>
 
     <div v-if="selectedDetail || detailLoading" class="aw-data-surface">
-      <div class="aw-page-heading">
-        <div>
+      <div class="aw-page-bar">
+        <div class="aw-page-bar__copy">
           <p class="aw-eyebrow">提交文件</p>
           <h2>{{ selectedDetail?.submission.submission_no || '提交文件' }}</h2>
+          <p>按明细处理质检、重计价、作废和文件批量下载。</p>
         </div>
-        <label class="aw-inline-check">
-          <input
-            type="checkbox"
-            :checked="selectedFileIds.size > 0 && selectedFileIds.size === downloadableFileIDs.length"
-            @change="toggleAllFiles(($event.target as HTMLInputElement).checked)"
-          />
-          <span>全选</span>
-        </label>
+        <div class="aw-page-bar__actions">
+          <label class="aw-inline-check">
+            <input
+              type="checkbox"
+              :checked="selectedFileIds.size > 0 && selectedFileIds.size === downloadableFileIDs.length"
+              @change="toggleAllFiles(($event.target as HTMLInputElement).checked)"
+            />
+            <span>全选</span>
+          </label>
+        </div>
       </div>
       <p v-if="detailLoading" class="aw-copy">正在加载文件</p>
       <WorkbenchDataGrid
@@ -365,23 +396,44 @@ onMounted(async () => {
         storage-key="submission-detail-items"
         group-by="qc_status"
         :height="300"
-        :row-height="36"
+        :row-height="gridRowHeight"
       >
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'action'" class="aw-inline-actions">
-            <button type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
-            <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
-            <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
-            <button type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
+            <template v-if="canManageItems">
+              <button type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
+              <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
+              <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
+              <button type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
+            </template>
+            <span v-else class="aw-chip aw-chip--neutral">只读</span>
           </div>
-          <strong v-else-if="column.key === 'gross_amount'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+          <span
+            v-else-if="column.key === 'pricing_status'"
+            :class="chipClass(pricingStatusMeta(gridRowAsItem(row).pricing_status).tone)"
+          >
+            {{ pricingStatusMeta(gridRowAsItem(row).pricing_status).label }}
+          </span>
+          <span
+            v-else-if="column.key === 'qc_status'"
+            :class="chipClass(qcStatusMeta(gridRowAsItem(row).qc_status).tone)"
+          >
+            {{ qcStatusMeta(gridRowAsItem(row).qc_status).label }}
+          </span>
+          <span v-else-if="column.key === 'gross_amount'" class="aw-cell-money">{{ formatMoney(value) }}</span>
+          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ formatInt(value) }}</span>
+          <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
       <div v-if="pendingAction" class="aw-panel">
-        <div class="aw-grid-toolbar">
-          <span>{{ pendingActionTitle }}</span>
-          <span>{{ pendingAction.item.order_no }}</span>
+        <div class="aw-panel__head">
+          <div>
+            <h3>{{ pendingActionTitle }}</h3>
+            <p class="aw-copy">{{ pendingAction.item.order_no }}</p>
+          </div>
+          <span :class="chipClass(qcStatusMeta(pendingAction.item.qc_status).tone)">
+            {{ qcStatusMeta(pendingAction.item.qc_status).label }}
+          </span>
         </div>
         <label class="aw-field">
           <span>操作原因</span>
@@ -400,7 +452,7 @@ onMounted(async () => {
         storage-key="submission-detail-files"
         group-by="preview_status"
         :height="300"
-        :row-height="36"
+        :row-height="gridRowHeight"
       >
         <template #cell="{ row, column, value }">
           <label v-if="column.key === 'selected'" class="aw-inline-check">
@@ -413,7 +465,13 @@ onMounted(async () => {
           </label>
           <button v-else-if="column.key === 'action'" type="button" @click="downloadFile(gridRowAsFile(row))">下载</button>
           <span v-else-if="column.key === 'file_type'">{{ gridRowAsFile(row).file_type || gridRowAsFile(row).mime_type }}</span>
-          <span v-else>{{ value }}</span>
+          <span
+            v-else-if="column.key === 'preview_status'"
+            :class="chipClass(previewStatusMeta(gridRowAsFile(row).preview_status).tone)"
+          >
+            {{ previewStatusMeta(gridRowAsFile(row).preview_status).label }}
+          </span>
+          <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
       <div v-else class="aw-empty-state">

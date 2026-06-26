@@ -8,6 +8,8 @@ import {
   type PromoCouponRow,
   type WelfareRuleRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { formatMoney, formatPercent } from '@aw/shared/format/number'
+import { chipClass, enabledMeta, promoModeMeta, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 
 interface GridColumn {
@@ -17,7 +19,10 @@ interface GridColumn {
   align?: 'left' | 'right' | 'center'
 }
 
-type PromoGridRow = PromoCouponRow & { value_label: number | string }
+type PriceGridRow = PriceMatrixRow & { worker_type_label: string; unit_price_label: string; enabled_label: string }
+type DeductionGridRow = DeductionRuleRow & { worker_type_label: string; deduction_amount_label: string; enabled_label: string }
+type WelfareGridRow = WelfareRuleRow & { worker_type_label: string; amount_label: string; enabled_label: string }
+type PromoGridRow = PromoCouponRow & { worker_type_label: string; mode_label: string; value_label: string; enabled_label: string }
 
 const priceRows = ref<PriceMatrixRow[]>([])
 const deductionRows = ref<DeductionRuleRow[]>([])
@@ -71,41 +76,88 @@ const promoForm = ref({
   effective_from: today,
   effective_to: '',
 })
-const priceGridRows = computed(() => priceRows.value as unknown as Record<string, unknown>[])
-const deductionGridRows = computed(() => deductionRows.value as unknown as Record<string, unknown>[])
-const welfareGridRows = computed(() => welfareRows.value as unknown as Record<string, unknown>[])
+const priceRowsWithLabels = computed<PriceGridRow[]>(() =>
+  priceRows.value.map((row) => ({
+    ...row,
+    worker_type_label: workerTypeMeta(row.worker_type).label,
+    unit_price_label: formatMoney(row.unit_price),
+    enabled_label: enabledMeta(row.enabled).label,
+  })),
+)
+const deductionRowsWithLabels = computed<DeductionGridRow[]>(() =>
+  deductionRows.value.map((row) => ({
+    ...row,
+    worker_type_label: workerTypeMeta(row.worker_type).label,
+    deduction_amount_label: formatMoney(row.deduction_amount),
+    enabled_label: enabledMeta(row.enabled).label,
+  })),
+)
+const welfareRowsWithLabels = computed<WelfareGridRow[]>(() =>
+  welfareRows.value.map((row) => ({
+    ...row,
+    worker_type_label: workerTypeMeta(row.worker_type).label,
+    amount_label: formatMoney(row.amount),
+    enabled_label: enabledMeta(row.enabled).label,
+  })),
+)
+const priceGridRows = computed(() => priceRowsWithLabels.value as unknown as Record<string, unknown>[])
+const deductionGridRows = computed(() => deductionRowsWithLabels.value as unknown as Record<string, unknown>[])
+const welfareGridRows = computed(() => welfareRowsWithLabels.value as unknown as Record<string, unknown>[])
 const promoRowsWithLabels = computed<PromoGridRow[]>(() =>
   promoRows.value.map((row) => ({
     ...row,
-    value_label: row.amount ?? row.percent ?? '',
+    worker_type_label: workerTypeMeta(row.worker_type).label,
+    mode_label: promoModeMeta(row.mode).label,
+    value_label: row.mode === 'markup_rate' ? formatPercent(row.percent ?? 0) : formatMoney(row.amount ?? 0),
+    enabled_label: enabledMeta(row.enabled).label,
   })),
 )
 const promoGridRows = computed(() => promoRowsWithLabels.value as unknown as Record<string, unknown>[])
 const priceGridColumns = computed<GridColumn[]>(() => [
-  { key: 'worker_type', label: '类型', width: 96 },
+  { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'job_grade', label: '岗级', width: 96 },
   { key: 'difficulty_class', label: '难度', width: 132 },
-  { key: 'unit_price', label: '单价', width: 96, align: 'right' },
-  { key: 'enabled', label: '启用', width: 88 },
+  { key: 'unit_price_label', label: '单价', width: 104, align: 'right' },
+  { key: 'enabled_label', label: '启用', width: 88 },
 ])
 const deductionGridColumns = computed<GridColumn[]>(() => [
-  { key: 'worker_type', label: '类型', width: 96 },
+  { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'job_grade', label: '岗级', width: 96 },
   { key: 'difficulty_class', label: '难度', width: 120 },
-  { key: 'deduction_amount', label: '每错扣减', width: 112, align: 'right' },
+  { key: 'deduction_amount_label', label: '每错扣减', width: 112, align: 'right' },
+  { key: 'enabled_label', label: '启用', width: 88 },
 ])
 const welfareGridColumns = computed<GridColumn[]>(() => [
   { key: 'rule_name', label: '名称', width: 140 },
-  { key: 'worker_type', label: '类型', width: 96 },
+  { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'job_grade', label: '岗级', width: 96 },
-  { key: 'amount', label: '金额', width: 96, align: 'right' },
+  { key: 'amount_label', label: '金额', width: 104, align: 'right' },
+  { key: 'enabled_label', label: '启用', width: 88 },
 ])
 const promoGridColumns = computed<GridColumn[]>(() => [
   { key: 'coupon_code', label: '编码', width: 120 },
-  { key: 'mode', label: '模式', width: 120 },
+  { key: 'mode_label', label: '模式', width: 120 },
+  { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'priority', label: '优先级', width: 96, align: 'right' },
   { key: 'value_label', label: '值', width: 96, align: 'right' },
+  { key: 'enabled_label', label: '启用', width: 88 },
 ])
+
+function gridRowAsPrice(row: Record<string, unknown>): PriceGridRow {
+  return row as unknown as PriceGridRow
+}
+
+function gridRowAsDeduction(row: Record<string, unknown>): DeductionGridRow {
+  return row as unknown as DeductionGridRow
+}
+
+function gridRowAsWelfare(row: Record<string, unknown>): WelfareGridRow {
+  return row as unknown as WelfareGridRow
+}
+
+function gridRowAsPromo(row: Record<string, unknown>): PromoGridRow {
+  return row as unknown as PromoGridRow
+}
 
 async function loadCostCenter() {
   loading.value = true
@@ -216,16 +268,25 @@ onMounted(async () => {
 
 <template>
   <section class="aw-page-stack">
-    <div class="aw-page-heading">
-      <div>
+    <div class="aw-page-bar">
+      <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">计价规则</p>
         <h2>成本中心</h2>
+        <p>集中维护价目矩阵、出错扣减、福利补贴与大促价格卷。提交只冻结毛额，扣减和福利在结算时计算。</p>
       </div>
-      <button class="aw-primary-button" type="button" @click="createPriceRule">新增价目</button>
+      <div class="aw-page-bar__actions">
+        <button class="aw-primary-button" type="button" @click="createPriceRule">新增价目</button>
+      </div>
     </div>
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <div class="aw-panel">
-      <h3>价目矩阵时间带</h3>
+      <div class="aw-panel__head">
+        <div>
+          <h3>价目矩阵时间带</h3>
+          <p class="aw-copy">按人员类型、岗级和难度命中单价。</p>
+        </div>
+        <button class="aw-secondary-button" type="button" @click="createPriceRule">新增</button>
+      </div>
       <div class="aw-form-grid">
         <label>
           类型
@@ -274,17 +335,23 @@ onMounted(async () => {
         :height="260"
         :row-height="34"
       >
-        <template #cell="{ column, value }">
-          <strong v-if="column.key === 'unit_price'">{{ value }}</strong>
-          <span v-else>{{ value }}</span>
+        <template #cell="{ row, column, value }">
+          <span v-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPrice(row).worker_type).tone)">{{ value }}</span>
+          <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPrice(row).enabled).tone)">{{ value }}</span>
+          <span v-else-if="column.key === 'unit_price_label'" class="aw-cell-money">{{ value }}</span>
+          <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
     </div>
 
     <div class="aw-three-column">
       <div class="aw-panel">
-        <h3>出错扣减</h3>
-        <p class="aw-copy">结算时读取出错 Excel 与扣减规则，提交时不冻结扣减结果。</p>
+        <div class="aw-panel__head">
+          <div>
+            <h3>出错扣减</h3>
+            <p class="aw-copy">结算时读取出错 Excel 与扣减规则，提交时不冻结扣减结果。</p>
+          </div>
+        </div>
         <div class="aw-form-grid">
           <label>
             类型
@@ -307,7 +374,7 @@ onMounted(async () => {
             <input v-model.number="deductionForm.deduction_amount" min="0" type="number" />
           </label>
         </div>
-        <button class="aw-secondary-button" type="button" @click="createDeductionRule">新增扣减</button>
+        <button class="aw-secondary-button aw-form-action" type="button" @click="createDeductionRule">新增扣减</button>
         <WorkbenchDataGrid
           v-if="deductionRows.length"
           :columns="deductionGridColumns"
@@ -318,17 +385,23 @@ onMounted(async () => {
           :height="220"
           :row-height="34"
         >
-          <template #cell="{ column, value }">
-            <strong v-if="column.key === 'deduction_amount'">{{ value }}</strong>
-            <span v-else>{{ value }}</span>
+          <template #cell="{ row, column, value }">
+            <span v-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsDeduction(row).worker_type).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsDeduction(row).enabled).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'deduction_amount_label'" class="aw-cell-money">{{ value }}</span>
+            <span v-else>{{ value || '—' }}</span>
           </template>
         </WorkbenchDataGrid>
         <p v-else class="aw-copy">已配置 {{ totals.deduction }} 条扣减规则</p>
       </div>
 
       <div class="aw-panel">
-        <h3>福利补贴</h3>
-        <p class="aw-copy">福利按人员和月份发放，不归属到单个订单。</p>
+        <div class="aw-panel__head">
+          <div>
+            <h3>福利补贴</h3>
+            <p class="aw-copy">福利按人员和月份发放，不归属到单个订单。</p>
+          </div>
+        </div>
         <div class="aw-form-grid">
           <label>
             名称
@@ -351,7 +424,7 @@ onMounted(async () => {
             <input v-model.number="welfareForm.amount" min="0" type="number" />
           </label>
         </div>
-        <button class="aw-secondary-button" type="button" @click="createWelfareRule">新增福利</button>
+        <button class="aw-secondary-button aw-form-action" type="button" @click="createWelfareRule">新增福利</button>
         <WorkbenchDataGrid
           v-if="welfareRows.length"
           :columns="welfareGridColumns"
@@ -362,17 +435,23 @@ onMounted(async () => {
           :height="220"
           :row-height="34"
         >
-          <template #cell="{ column, value }">
-            <strong v-if="column.key === 'amount'">{{ value }}</strong>
-            <span v-else>{{ value }}</span>
+          <template #cell="{ row, column, value }">
+            <span v-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsWelfare(row).worker_type).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsWelfare(row).enabled).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'amount_label'" class="aw-cell-money">{{ value }}</span>
+            <span v-else>{{ value || '—' }}</span>
           </template>
         </WorkbenchDataGrid>
         <p v-else class="aw-copy">已配置 {{ totals.welfare }} 条福利规则</p>
       </div>
 
       <div class="aw-panel">
-        <h3>大促价格卷</h3>
-        <p class="aw-copy">同一订单只采用一条大促规则；一口价优先，其他按优先级选择。</p>
+        <div class="aw-panel__head">
+          <div>
+            <h3>大促价格卷</h3>
+            <p class="aw-copy">同一订单只采用一条大促规则；一口价优先，其他按优先级选择。</p>
+          </div>
+        </div>
         <div class="aw-form-grid">
           <label>
             编码
@@ -403,7 +482,7 @@ onMounted(async () => {
             <input v-model.number="promoForm.priority" min="1" type="number" />
           </label>
         </div>
-        <button class="aw-secondary-button" type="button" @click="createPromoCoupon">新增大促券</button>
+        <button class="aw-secondary-button aw-form-action" type="button" @click="createPromoCoupon">新增大促券</button>
         <WorkbenchDataGrid
           v-if="promoRows.length"
           :columns="promoGridColumns"
@@ -414,9 +493,12 @@ onMounted(async () => {
           :height="220"
           :row-height="34"
         >
-          <template #cell="{ column, value }">
-            <strong v-if="column.key === 'value_label'">{{ value }}</strong>
-            <span v-else>{{ value }}</span>
+          <template #cell="{ row, column, value }">
+            <span v-if="column.key === 'mode_label'" :class="chipClass(promoModeMeta(gridRowAsPromo(row).mode).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPromo(row).worker_type).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPromo(row).enabled).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'value_label'" class="aw-cell-money">{{ value }}</span>
+            <span v-else>{{ value || '—' }}</span>
           </template>
         </WorkbenchDataGrid>
         <p v-else class="aw-copy">已配置 {{ totals.promo }} 条大促规则</p>

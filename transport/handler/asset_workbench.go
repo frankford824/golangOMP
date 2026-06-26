@@ -126,6 +126,296 @@ func (h *AssetWorkbenchHandler) UpsertProfile(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) ListMyTemplates(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.ListMyTemplates(c.Request.Context(), actor)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) ListGroups(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	items, total, appErr := h.svc.ListGroups(c.Request.Context(), actor, repo.AssetWorkbenchGroupFilter{
+		Keyword:  c.Query("q"),
+		Enabled:  parseOptionalBool(c.Query("enabled")),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) CreateGroup(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.UpsertGroupParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.CreateGroup(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateGroup(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid group_id", nil))
+		return
+	}
+	var req assetworkbench.UpsertGroupParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateGroup(c.Request.Context(), actor, groupID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) DeleteGroup(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid group_id", nil))
+		return
+	}
+	result, appErr := h.svc.DeleteGroup(c.Request.Context(), actor, groupID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) AddGroupMembers(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid group_id", nil))
+		return
+	}
+	var req assetworkbench.GroupMembersParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	if appErr := h.svc.AddGroupMembers(c.Request.Context(), actor, groupID, req); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, gin.H{"status": "ok"})
+}
+
+func (h *AssetWorkbenchHandler) RemoveGroupMembers(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid group_id", nil))
+		return
+	}
+	var req assetworkbench.GroupMembersParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	if appErr := h.svc.RemoveGroupMembers(c.Request.Context(), actor, groupID, req); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, gin.H{"status": "ok"})
+}
+
+func (h *AssetWorkbenchHandler) ListTemplates(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	items, total, appErr := h.svc.ListTemplates(c.Request.Context(), actor, repo.AssetWorkbenchTemplateFilter{
+		Keyword:         c.Query("q"),
+		Category:        c.Query("category"),
+		DifficultyClass: c.Query("difficulty_class"),
+		WorkerType:      c.Query("worker_type"),
+		Enabled:         parseOptionalBool(c.Query("enabled")),
+		Page:            page,
+		PageSize:        pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) CreateTemplate(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.UpsertTemplateParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.CreateTemplate(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateTemplate(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	templateID, err := strconv.ParseInt(c.Param("template_id"), 10, 64)
+	if err != nil || templateID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid template_id", nil))
+		return
+	}
+	var req assetworkbench.UpsertTemplateParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateTemplate(c.Request.Context(), actor, templateID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) DeleteTemplate(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	templateID, err := strconv.ParseInt(c.Param("template_id"), 10, 64)
+	if err != nil || templateID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid template_id", nil))
+		return
+	}
+	result, appErr := h.svc.DeleteTemplate(c.Request.Context(), actor, templateID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) ListTemplateAssignments(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	var templateID *int64
+	if raw := strings.TrimSpace(c.Query("template_id")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil && parsed > 0 {
+			templateID = &parsed
+		}
+	}
+	var targetID *int64
+	if raw := strings.TrimSpace(c.Query("target_id")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil && parsed > 0 {
+			targetID = &parsed
+		}
+	}
+	items, total, appErr := h.svc.ListTemplateAssignments(c.Request.Context(), actor, repo.AssetWorkbenchTemplateAssignmentFilter{
+		TemplateID: templateID,
+		TargetType: c.Query("target_type"),
+		TargetID:   targetID,
+		Enabled:    parseOptionalBool(c.Query("enabled")),
+		Page:       page,
+		PageSize:   pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) AssignTemplate(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.AssignTemplateParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.AssignTemplate(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) DeleteTemplateAssignment(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	assignmentID, err := strconv.ParseInt(c.Param("assignment_id"), 10, 64)
+	if err != nil || assignmentID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid assignment_id", nil))
+		return
+	}
+	result, appErr := h.svc.DeleteTemplateAssignment(c.Request.Context(), actor, assignmentID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) ListPriceMatrix(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -612,6 +902,19 @@ func (h *AssetWorkbenchHandler) ImportErrorRecordsExcel(c *gin.Context) {
 		return
 	}
 	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) MySettlement(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.MySettlement(c.Request.Context(), actor)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *AssetWorkbenchHandler) PreviewSettlement(c *gin.Context) {

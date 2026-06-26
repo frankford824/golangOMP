@@ -311,6 +311,32 @@ type AssetWorkbenchPromoCouponFilter struct {
 	PageSize        int
 }
 
+type AssetWorkbenchGroupFilter struct {
+	Keyword  string
+	Enabled  *bool
+	Page     int
+	PageSize int
+}
+
+type AssetWorkbenchTemplateFilter struct {
+	Keyword         string
+	Category        string
+	DifficultyClass string
+	WorkerType      string
+	Enabled         *bool
+	Page            int
+	PageSize        int
+}
+
+type AssetWorkbenchTemplateAssignmentFilter struct {
+	TemplateID *int64
+	TargetType string
+	TargetID   *int64
+	Enabled    *bool
+	Page       int
+	PageSize   int
+}
+
 type AssetWorkbenchSubmissionFilter struct {
 	SubmitterUserID  *int64
 	PayeeUserID      *int64
@@ -389,6 +415,26 @@ type AssetWorkbenchRepo interface {
 	CreatePromoCoupon(ctx context.Context, tx Tx, item *domain.AssetWorkbenchPromoCoupon) (*domain.AssetWorkbenchPromoCoupon, error)
 	ListActivePromoCoupons(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) ([]*domain.AssetWorkbenchPromoCoupon, error)
 
+	ListGroups(ctx context.Context, filter AssetWorkbenchGroupFilter) ([]*domain.AssetWorkbenchGroup, int64, error)
+	CreateGroup(ctx context.Context, tx Tx, group *domain.AssetWorkbenchGroup) (*domain.AssetWorkbenchGroup, error)
+	UpdateGroup(ctx context.Context, tx Tx, group *domain.AssetWorkbenchGroup) (*domain.AssetWorkbenchGroup, error)
+	SetGroupEnabled(ctx context.Context, tx Tx, groupID int64, enabled bool) (*domain.AssetWorkbenchGroup, error)
+	AddGroupMembers(ctx context.Context, tx Tx, groupID int64, userIDs []int64) error
+	RemoveGroupMembers(ctx context.Context, tx Tx, groupID int64, userIDs []int64) error
+	ListGroupMembers(ctx context.Context, groupID int64) ([]*domain.AssetWorkbenchGroupMember, error)
+
+	ListTemplates(ctx context.Context, filter AssetWorkbenchTemplateFilter) ([]*domain.AssetWorkbenchTemplate, int64, error)
+	GetTemplate(ctx context.Context, templateID int64) (*domain.AssetWorkbenchTemplate, error)
+	CreateTemplate(ctx context.Context, tx Tx, template *domain.AssetWorkbenchTemplate) (*domain.AssetWorkbenchTemplate, error)
+	UpdateTemplate(ctx context.Context, tx Tx, template *domain.AssetWorkbenchTemplate) (*domain.AssetWorkbenchTemplate, error)
+	SetTemplateEnabled(ctx context.Context, tx Tx, templateID int64, enabled bool) (*domain.AssetWorkbenchTemplate, error)
+	ListTemplatesForUser(ctx context.Context, userID int64) ([]*domain.AssetWorkbenchTemplate, error)
+	IsTemplateAssignedToUser(ctx context.Context, userID, templateID int64) (bool, error)
+
+	ListTemplateAssignments(ctx context.Context, filter AssetWorkbenchTemplateAssignmentFilter) ([]*domain.AssetWorkbenchTemplateAssignment, int64, error)
+	CreateTemplateAssignment(ctx context.Context, tx Tx, assignment *domain.AssetWorkbenchTemplateAssignment) (*domain.AssetWorkbenchTemplateAssignment, error)
+	SetTemplateAssignmentEnabled(ctx context.Context, tx Tx, assignmentID int64, enabled bool) (*domain.AssetWorkbenchTemplateAssignment, error)
+
 	CreateUploadSession(ctx context.Context, tx Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error)
 	GetUploadSession(ctx context.Context, sessionID string) (*domain.AssetWorkbenchUploadSession, error)
 	UpdateUploadSessionStatus(ctx context.Context, tx Tx, sessionID, status string, uploadedAt *time.Time, cancelledAt *time.Time, submittedItemID *int64) error
@@ -430,6 +476,7 @@ type AssetWorkbenchRepo interface {
 	GetSettlementBatch(ctx context.Context, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error)
 	ListSettlementBatches(ctx context.Context, filter AssetWorkbenchSettlementBatchFilter) ([]*domain.AssetWorkbenchSettlementBatch, int64, error)
 	ListSettlementItemsByBatch(ctx context.Context, batchID int64) ([]*domain.AssetWorkbenchSettlementItem, error)
+	ListConfirmedSettlementItemsByPayee(ctx context.Context, payeeUserID int64) ([]*domain.AssetWorkbenchSettlementItem, error)
 	HasConfirmedSettlementForPayeeMonth(ctx context.Context, payeeUserID int64, businessMonth string) (bool, error)
 	ListConfirmedSettlementMonthsByPayee(ctx context.Context, payeeUserID int64) ([]string, error)
 	CreateSettlementAdjustment(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementAdjustment) (*domain.AssetWorkbenchSettlementAdjustment, error)
