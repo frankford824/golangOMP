@@ -146,6 +146,43 @@ func TestProductManagementBaseSyncSuccessMarksTaskProjection(t *testing.T) {
 	}
 }
 
+func TestProductManagementBaseSyncTreatsTimeoutAsSuccessWhenReadbackMatches(t *testing.T) {
+	previousSleeper := productManagementERPBaseReadbackSleep
+	productManagementERPBaseReadbackSleep = func(time.Duration) {}
+	defer func() { productManagementERPBaseReadbackSleep = previousSleeper }()
+
+	cost := 20.328
+	productName := "张三常规KT板/端午节/180*80cm"
+	bridge := &productManagementERPBridgeCapture{
+		upsertErr: domain.NewAppError(domain.ErrCodeInternalError, "erp bridge request timed out", nil),
+		readbackProduct: &domain.ERPProduct{
+			SKUCode:     "CGK000329",
+			IID:         "常规kt板",
+			ProductName: productName,
+			CostPrice:   &cost,
+		},
+	}
+	svc := &productManagementService{
+		erpBridge: bridge,
+		now:       time.Now,
+	}
+
+	appErr := svc.syncBaseRecordToERP(context.Background(), &domain.ProductManagementRecord{
+		ID:          6420,
+		TaskNo:      "RW-20260620-A-001600",
+		SKUCode:     "CGK000329",
+		ProductIID:  "常规kt板",
+		ProductName: productName,
+		CostPrice:   &cost,
+	})
+	if appErr != nil {
+		t.Fatalf("syncBaseRecordToERP() appErr = %+v, want nil after matching readback", appErr)
+	}
+	if bridge.upsertCalls != 1 {
+		t.Fatalf("UpsertProduct calls = %d, want 1", bridge.upsertCalls)
+	}
+}
+
 func productManagementTestRecord(id int64, sku string, now time.Time) *domain.ProductManagementRecord {
 	return &domain.ProductManagementRecord{
 		ID:                 id,
@@ -258,6 +295,7 @@ func (productManagementUnitTxRunner) RunInTx(ctx context.Context, fn func(tx rep
 
 type productManagementERPBridgeCapture struct {
 	payload          domain.ERPProductUpsertPayload
+	upsertErr        *domain.AppError
 	upsertCalls      int
 	itemStylePayload domain.ERPItemStyleUpdatePayload
 	itemStyleCalls   int
@@ -317,6 +355,9 @@ func (s *productManagementERPBridgeCapture) EnsureLocalProduct(context.Context, 
 func (s *productManagementERPBridgeCapture) UpsertProduct(_ context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError) {
 	s.payload = payload
 	s.upsertCalls++
+	if s.upsertErr != nil {
+		return nil, s.upsertErr
+	}
 	return &domain.ERPProductUpsertResult{Status: "accepted"}, nil
 }
 

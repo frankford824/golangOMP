@@ -311,7 +311,7 @@ func extractEmbeddedReferenceImages(f *excelize.File, dataSheet string) (map[int
 				})
 			}
 			extension := normalizePictureExtension(pic.Extension, pic.File)
-			row := visualPictureRow(f, dataSheet, anchorRow, pic)
+			row := resolvedPictureRow(f, dataSheet, cell, anchorRow, pic)
 			if row <= 1 {
 				continue
 			}
@@ -363,6 +363,30 @@ func visualPictureRow(f *excelize.File, sheet string, anchorRow int, pic exceliz
 		row++
 	}
 	return row
+}
+
+func resolvedPictureRow(f *excelize.File, sheet string, cell string, anchorRow int, pic excelize.Picture) int {
+	if pictureCellIsReferenceColumn(f, sheet, cell) {
+		return anchorRow
+	}
+	return visualPictureRow(f, sheet, anchorRow, pic)
+}
+
+func pictureCellIsReferenceColumn(f *excelize.File, sheet string, cell string) bool {
+	col, _, err := excelize.CellNameToCoordinates(cell)
+	if err != nil || col <= 0 {
+		return false
+	}
+	headerCell, err := excelize.CoordinatesToCellName(col, 1)
+	if err != nil {
+		return false
+	}
+	header, err := f.GetCellValue(sheet, headerCell)
+	if err != nil {
+		return false
+	}
+	normalized := strings.ReplaceAll(strings.TrimSpace(header), " ", "")
+	return normalized == "参考图" || strings.HasPrefix(normalized, "参考图")
 }
 
 func excelRowHeightPixels(f *excelize.File, sheet string, row int) float64 {

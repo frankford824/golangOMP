@@ -36,3 +36,24 @@ func TestJSTMapsToERPProductsReadsImageFields(t *testing.T) {
 		t.Fatalf("products[1] short names not mapped from short_name: %+v", products[1])
 	}
 }
+
+func TestJSTMapsToERPProductsReadsNumericPrices(t *testing.T) {
+	products := jstMapsToERPProducts([]map[string]interface{}{
+		{
+			"sku_id":     "CGK000298",
+			"i_id":       "KT板",
+			"name":       "ERP Product",
+			"sale_price": 17600,
+			"cost_price": 27.83,
+		},
+	}, "")
+	if len(products) != 1 {
+		t.Fatalf("len(products) = %d, want 1", len(products))
+	}
+	if products[0].SPrice == nil || *products[0].SPrice != 17600 {
+		t.Fatalf("SPrice = %+v, want 17600", products[0].SPrice)
+	}
+	if products[0].CostPrice == nil || *products[0].CostPrice != 27.83 {
+		t.Fatalf("CostPrice = %+v, want 27.83", products[0].CostPrice)
+	}
+}

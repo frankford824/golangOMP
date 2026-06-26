@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -565,6 +566,12 @@ func (s *productManagementService) syncBaseRecordToERP(ctx context.Context, reco
 		payload.CostPrice = &cost
 	}
 	_, appErr := s.erpBridge.UpsertProduct(ctx, payload)
+	if appErr == nil {
+		return nil
+	}
+	if readbackErr := s.verifyERPBaseReadback(ctx, record, payload); readbackErr == nil {
+		return nil
+	}
 	return appErr
 }
 
@@ -638,6 +645,85 @@ var productManagementERPImageReadbackRetryDelays = []time.Duration{
 }
 
 var productManagementERPImageReadbackSleep = time.Sleep
+
+var productManagementERPBaseReadbackRetryDelays = []time.Duration{
+	300 * time.Millisecond,
+	800 * time.Millisecond,
+	1500 * time.Millisecond,
+}
+
+var productManagementERPBaseReadbackSleep = time.Sleep
+
+const productManagementERPBaseCostTolerance = 0.0005
+
+func (s *productManagementService) verifyERPBaseReadback(ctx context.Context, record *domain.ProductManagementRecord, payload domain.ERPProductUpsertPayload) *domain.AppError {
+	if s == nil || s.erpBridge == nil || record == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 基础资料回读校验失败：同步服务未配置", nil)
+	}
+	sku := strings.TrimSpace(firstNonEmptyString(payload.SKUCode, payload.SKUID, record.SKUCode))
+	if sku == "" {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "SKU is required for ERP base readback", nil)
+	}
+	maxAttempts := 1 + len(productManagementERPBaseReadbackRetryDelays)
+	var lastMessage string
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		product, appErr := s.erpBridge.GetProductByID(ctx, sku)
+		if appErr != nil {
+			lastMessage = strings.TrimSpace(appErr.Message)
+		} else if product == nil {
+			lastMessage = "ERP 未返回该 SKU 商品资料"
+		} else if mismatches := productManagementERPBaseReadbackMismatches(product, payload); len(mismatches) > 0 {
+			lastMessage = strings.Join(mismatches, "；")
+		} else {
+			return nil
+		}
+		if attempt < maxAttempts {
+			productManagementERPBaseReadbackSleep(productManagementERPBaseReadbackRetryDelays[attempt-1])
+		}
+	}
+	if lastMessage == "" {
+		lastMessage = "ERP 基础资料状态未知"
+	}
+	return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 基础资料回读校验未通过："+lastMessage, nil)
+}
+
+func productManagementERPBaseReadbackMismatches(product *domain.ERPProduct, payload domain.ERPProductUpsertPayload) []string {
+	if product == nil {
+		return []string{"ERP 未返回该 SKU 商品资料"}
+	}
+	var mismatches []string
+	expectedSKU := strings.TrimSpace(firstNonEmptyString(payload.SKUCode, payload.SKUID, payload.ProductID))
+	actualSKU := strings.TrimSpace(firstNonEmptyString(product.SKUCode, product.SKUID, product.ProductID))
+	if expectedSKU != "" && actualSKU != "" && actualSKU != expectedSKU {
+		mismatches = append(mismatches, fmt.Sprintf("ERP 返回 SKU %s，与系统 SKU %s 不一致", actualSKU, expectedSKU))
+	}
+	expectedIID := strings.TrimSpace(payload.IID)
+	actualIID := strings.TrimSpace(product.IID)
+	if expectedIID != "" {
+		if actualIID == "" {
+			mismatches = append(mismatches, "ERP 未返回款式编码")
+		} else if actualIID != expectedIID {
+			mismatches = append(mismatches, fmt.Sprintf("ERP 款式编码 %s，与系统款式编码 %s 不一致", actualIID, expectedIID))
+		}
+	}
+	expectedName := strings.TrimSpace(firstNonEmptyString(payload.ProductName, payload.Name))
+	actualName := strings.TrimSpace(firstNonEmptyString(product.ProductName, product.Name))
+	if expectedName != "" {
+		if actualName == "" {
+			mismatches = append(mismatches, "ERP 未返回商品名称")
+		} else if actualName != expectedName {
+			mismatches = append(mismatches, "ERP 商品名称与系统商品名称不一致")
+		}
+	}
+	if payload.CostPrice != nil {
+		if product.CostPrice == nil {
+			mismatches = append(mismatches, "ERP 未返回成本价")
+		} else if math.Abs(*product.CostPrice-*payload.CostPrice) > productManagementERPBaseCostTolerance {
+			mismatches = append(mismatches, fmt.Sprintf("ERP 成本 %.4f，与系统成本 %.4f 不一致", *product.CostPrice, *payload.CostPrice))
+		}
+	}
+	return mismatches
+}
 
 func (s *productManagementService) verifyERPImageReadback(ctx context.Context, record *domain.ProductManagementRecord) *domain.AppError {
 	if s == nil || s.erpBridge == nil || record == nil {

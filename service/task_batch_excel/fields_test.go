@@ -172,8 +172,32 @@ func TestParseExcelUploadsEmbeddedReferenceImagesAndValidatesIID(t *testing.T) {
 	}
 }
 
-func TestParseExcelAssignsReferenceImageByVisualCenterRow(t *testing.T) {
-	content := testWorkbookWithImageCenteredInNextRow(t)
+func TestParseExcelAssignsTemplateReferenceImageByAnchorRow(t *testing.T) {
+	content := testWorkbookWithImageCenteredInNextRow(t, "D2")
+	uploader := &parseReferenceUploaderStub{}
+	result, appErr := NewParseServiceWithDependencies(uploader, nil).Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content), WithActorID(42))
+	if appErr != nil {
+		t.Fatalf("Parse appErr = %v", appErr)
+	}
+	if len(result.Violations) != 0 {
+		t.Fatalf("violations = %+v, want none", result.Violations)
+	}
+	if len(result.Preview) != 2 {
+		t.Fatalf("preview len = %d, want 2", len(result.Preview))
+	}
+	if len(result.Preview[0].ReferenceFileRefs) != 1 {
+		t.Fatalf("row 2 reference_file_refs = %+v, want 1", result.Preview[0].ReferenceFileRefs)
+	}
+	if len(result.Preview[1].ReferenceFileRefs) != 0 {
+		t.Fatalf("row 3 reference_file_refs = %+v, want none", result.Preview[1].ReferenceFileRefs)
+	}
+	if len(uploader.filenames) != 1 || uploader.filenames[0] != "batch-row-2-reference-1.png" {
+		t.Fatalf("uploaded filenames = %+v, want batch-row-2-reference-1.png", uploader.filenames)
+	}
+}
+
+func TestParseExcelAssignsNonReferenceImageByVisualCenterRow(t *testing.T) {
+	content := testWorkbookWithImageCenteredInNextRow(t, "C2")
 	uploader := &parseReferenceUploaderStub{}
 	result, appErr := NewParseServiceWithDependencies(uploader, nil).Parse(t.Context(), domain.TaskTypeNewProductDevelopment, bytes.NewReader(content), WithActorID(42))
 	if appErr != nil {
@@ -481,7 +505,7 @@ func testWorkbookWithImage(t *testing.T, iid string) []byte {
 	return buf.Bytes()
 }
 
-func testWorkbookWithImageCenteredInNextRow(t *testing.T) []byte {
+func testWorkbookWithImageCenteredInNextRow(t *testing.T, cell string) []byte {
 	t.Helper()
 	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
 	f := excelize.NewFile()
@@ -500,7 +524,7 @@ func testWorkbookWithImageCenteredInNextRow(t *testing.T) []byte {
 			_ = f.SetCellValue(itemsSheet, cell, values[field.Key])
 		}
 	}
-	if err := f.AddPictureFromBytes(itemsSheet, "D2", &excelize.Picture{
+	if err := f.AddPictureFromBytes(itemsSheet, cell, &excelize.Picture{
 		Extension: ".png",
 		File:      solidPNG(20, 20),
 		Format: &excelize.GraphicOptions{
