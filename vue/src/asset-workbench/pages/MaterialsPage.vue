@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
   <section class="aw-page-stack">
     <div class="aw-page-heading">
       <div>
-        <p class="aw-eyebrow">System source</p>
+        <p class="aw-eyebrow">只读素材</p>
         <h2>模板素材库</h2>
       </div>
       <button class="aw-secondary-button" type="button" @click="downloadSelectedAssets">批量下载</button>
@@ -181,8 +181,8 @@ onBeforeUnmount(() => {
         </template>
       </WorkbenchDataGrid>
       <div v-else class="aw-empty-state">
-        <h3>系统资产只读源</h3>
-        <p>后端固定走 /v1/asset-workbench/system-search，仅 AssetManager/SuperAdmin 可用。当前结果 {{ total }} 条。</p>
+        <h3>还没有搜索结果</h3>
+        <p>输入编码、产品名、款式或关键词后搜索。只有有素材库权限的账号可以查看和下载。</p>
       </div>
     </div>
   </section>

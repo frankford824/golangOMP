@@ -218,7 +218,7 @@ onMounted(async () => {
   <section class="aw-page-stack">
     <div class="aw-page-heading">
       <div>
-        <p class="aw-eyebrow">Price matrix</p>
+        <p class="aw-eyebrow">计价规则</p>
         <h2>成本中心</h2>
       </div>
       <button class="aw-primary-button" type="button" @click="createPriceRule">新增价目</button>
@@ -258,7 +258,7 @@ onMounted(async () => {
       </div>
       <p class="aw-copy" v-if="loading">正在加载价目矩阵</p>
       <p class="aw-copy" v-else-if="error">{{ error }}</p>
-      <p class="aw-copy" v-else>当前返回 {{ totals.price }} 条价目规则</p>
+      <p class="aw-copy" v-else>已配置 {{ totals.price }} 条价目规则</p>
       <div class="aw-timeline-band">
         <span class="aw-timeline-band__past">过期</span>
         <span class="aw-timeline-band__active">生效中</span>
@@ -323,12 +323,12 @@ onMounted(async () => {
             <span v-else>{{ value }}</span>
           </template>
         </WorkbenchDataGrid>
-        <p v-else class="aw-copy">当前返回 {{ totals.deduction }} 条扣减规则</p>
+        <p v-else class="aw-copy">已配置 {{ totals.deduction }} 条扣减规则</p>
       </div>
 
       <div class="aw-panel">
         <h3>福利补贴</h3>
-        <p class="aw-copy">福利按人月生成 settlement item，不挂在单条提交 item 上。</p>
+        <p class="aw-copy">福利按人员和月份发放，不归属到单个订单。</p>
         <div class="aw-form-grid">
           <label>
             名称
@@ -367,12 +367,12 @@ onMounted(async () => {
             <span v-else>{{ value }}</span>
           </template>
         </WorkbenchDataGrid>
-        <p v-else class="aw-copy">当前返回 {{ totals.welfare }} 条福利规则</p>
+        <p v-else class="aw-copy">已配置 {{ totals.welfare }} 条福利规则</p>
       </div>
 
       <div class="aw-panel">
         <h3>大促价格卷</h3>
-        <p class="aw-copy">v1 单券命中：一口价优先，其余按最高优先级选择，不叠加。</p>
+        <p class="aw-copy">同一订单只采用一条大促规则；一口价优先，其他按优先级选择。</p>
         <div class="aw-form-grid">
           <label>
             编码
@@ -419,7 +419,7 @@ onMounted(async () => {
             <span v-else>{{ value }}</span>
           </template>
         </WorkbenchDataGrid>
-        <p v-else class="aw-copy">当前返回 {{ totals.promo }} 条大促券</p>
+        <p v-else class="aw-copy">已配置 {{ totals.promo }} 条大促规则</p>
       </div>
     </div>
   </section>

@@ -32,16 +32,40 @@ const hrForm = reactive({
   status: 'pending',
   reason: '',
 })
-const profileGridRows = computed(() => profiles.value as unknown as Record<string, unknown>[])
+const profileGridRows = computed(() =>
+  profiles.value.map((profile) => ({
+    ...profile,
+    worker_type_label: workerTypeLabel(profile.worker_type),
+    status_label: profileStatusLabel(profile.status),
+  })) as unknown as Record<string, unknown>[],
+)
 const profileGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
   { key: 'real_name', label: '姓名', width: 128 },
-  { key: 'worker_type', label: '类型', width: 96 },
+  { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'job_grade', label: '岗级', width: 96 },
   { key: 'phone', label: '手机', width: 132 },
   { key: 'province', label: '省份', width: 96 },
   { key: 'city', label: '城市', width: 96 },
-  { key: 'status', label: '状态', width: 100 },
+  { key: 'status_label', label: '状态', width: 100 },
 ])
+
+function workerTypeLabel(value: string) {
+  const labels: Record<string, string> = {
+    parttime: '兼职',
+    fulltime: '全职',
+    all: '全部',
+  }
+  return labels[value] ?? value
+}
+
+function profileStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    pending: '待审核',
+    active: '已生效',
+    disabled: '已停用',
+  }
+  return labels[value] ?? value
+}
 
 async function loadPeople() {
   loading.value = true
@@ -116,7 +140,7 @@ async function saveHRProfile() {
       city: hrForm.city,
       alipay_account: hrForm.alipay_account || undefined,
       status: hrForm.status,
-      reason: hrForm.reason || 'HR profile maintenance',
+      reason: hrForm.reason || 'HR 维护工作台档案',
     })
     notice.value = `已更新 ${hrForm.real_name || profile.user_id} 的工作台档案`
     await loadPeople()
@@ -138,7 +162,7 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-heading">
       <div>
-        <p class="aw-eyebrow">Profile and grade periods</p>
+        <p class="aw-eyebrow">人员档案</p>
         <h2>人员账户维护</h2>
       </div>
       <button class="aw-secondary-button" type="button" @click="loadPeople">刷新</button>
@@ -147,7 +171,7 @@ onMounted(() => {
     <div class="aw-two-column">
       <div class="aw-panel">
         <h3>我的档案</h3>
-        <p class="aw-copy">提交时会冻结 worker type 和岗级；HR 后续改级不影响历史提交。</p>
+        <p class="aw-copy">这里的信息会用于之后的上传计价。HR 调整岗级后，只影响新的提交记录。</p>
         <div class="aw-form-grid">
           <label>
             人员类型
@@ -189,10 +213,10 @@ onMounted(() => {
       <div class="aw-panel">
         <h3>档案边界</h3>
         <p class="aw-copy">
-          工作台私有字段写入 asset_workbench_profiles，岗级历史写入 profile_grade_periods，不污染主站 users。
+          工作台档案只服务资产交付和计件结算，不进入主站运营菜单。
         </p>
         <p class="aw-copy">
-          HR 列表默认脱敏，手机号和支付账号只有在明确输入新值时才会更新，避免把掩码写回数据库。
+          身份证、手机号、支付账号默认脱敏展示；查看和导出完整信息会留下操作记录。
         </p>
       </div>
     </div>
@@ -209,7 +233,7 @@ onMounted(() => {
         :rows="profileGridRows"
         row-key="id"
         storage-key="people-profiles"
-        group-by="worker_type"
+        group-by="worker_type_label"
       >
         <template #cell="{ row, column, value }">
           <button
@@ -221,7 +245,7 @@ onMounted(() => {
             {{ value || row.user_id }}
           </button>
           <span v-else-if="column.key === 'job_grade'">{{ value || '未定级' }}</span>
-          <span v-else-if="column.key === 'status'" class="aw-status-chip">{{ value }}</span>
+          <span v-else-if="column.key === 'status_label'" class="aw-status-chip">{{ value }}</span>
           <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>

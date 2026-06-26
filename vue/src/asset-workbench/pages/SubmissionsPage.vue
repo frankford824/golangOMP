@@ -286,7 +286,7 @@ onMounted(async () => {
   <section class="aw-page-stack">
     <div class="aw-page-heading">
       <div>
-        <p class="aw-eyebrow">Workbench assets</p>
+        <p class="aw-eyebrow">交付维护</p>
         <h2>资产维护专区</h2>
       </div>
       <button class="aw-secondary-button" type="button" @click="saveView">保存视图</button>
@@ -337,14 +337,14 @@ onMounted(async () => {
         <h3>还没有提交明细</h3>
         <p v-if="loading">正在加载提交列表</p>
         <p v-else-if="error">{{ error }}</p>
-        <p v-else>当前返回 {{ total }} 条提交。这里承载列宽/列序记忆、保存视图、行内编辑、分组和虚拟滚动。</p>
+        <p v-else>当前没有可维护的提交。上传成品后，可以在这里质检、修正、下载和保存常用视图。</p>
       </div>
     </div>
 
     <div v-if="selectedDetail || detailLoading" class="aw-data-surface">
       <div class="aw-page-heading">
         <div>
-          <p class="aw-eyebrow">Submission files</p>
+          <p class="aw-eyebrow">提交文件</p>
           <h2>{{ selectedDetail?.submission.submission_no || '提交文件' }}</h2>
         </div>
         <label class="aw-inline-check">

@@ -24,11 +24,13 @@ const props = withDefaults(
     rowKey: string
     storageKey: string
     groupBy?: string
+    groupLabels?: Record<string, string>
     height?: number
     rowHeight?: number
   }>(),
   {
     groupBy: '',
+    groupLabels: () => ({}),
     height: 420,
     rowHeight: 36,
   },
@@ -64,7 +66,8 @@ const flatItems = computed<FlatItem[]>(() => {
   }
   const items: FlatItem[] = []
   for (const [group, rows] of groups) {
-    items.push({ type: 'group', key: `group:${group}`, label: `${group} · ${rows.length}` })
+    const label = props.groupLabels[group] ?? group
+    items.push({ type: 'group', key: `group:${group}`, label: `${label} · ${rows.length}` })
     for (const row of rows) {
       items.push({ type: 'row', key: String(row[props.rowKey]), row })
     }

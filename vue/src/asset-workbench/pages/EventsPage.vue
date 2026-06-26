@@ -50,7 +50,7 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-heading">
       <div>
-        <p class="aw-eyebrow">Audit trail</p>
+        <p class="aw-eyebrow">操作留痕</p>
         <h2>操作日志</h2>
       </div>
       <button class="aw-secondary-button" type="button" @click="loadEvents">刷新</button>
@@ -81,7 +81,7 @@ onMounted(() => {
       </WorkbenchDataGrid>
       <div v-else class="aw-empty-state">
         <h3>暂无操作日志</h3>
-        <p>当前筛选返回 {{ total }} 条。工作台写操作会进入 asset_workbench_events。</p>
+        <p>上传、质检、结算、档案维护等关键操作会在这里留下记录。当前筛选返回 {{ total }} 条。</p>
       </div>
     </div>
   </section>

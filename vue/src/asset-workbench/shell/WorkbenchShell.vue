@@ -46,6 +46,20 @@ const filteredCommandItems = computed(() => {
     return haystack.includes(query)
   })
 })
+const profileStatusLabel = computed(() => {
+  const status = bootstrap.value?.profile?.status
+  if (!status) return '档案待完善'
+  const labels: Record<string, string> = {
+    pending: '档案待审核',
+    active: '档案已生效',
+    disabled: '档案已停用',
+  }
+  return labels[status] ?? status
+})
+const permissionSummary = computed(() => {
+  const count = bootstrap.value?.capabilities.length ?? 0
+  return count > 0 ? '权限已加载' : '暂无可用权限'
+})
 
 function hasAnyCapability(required: string[]) {
   const capabilities = new Set(bootstrap.value?.capabilities ?? [])
@@ -154,7 +168,7 @@ watch(commandQuery, () => {
     <section class="aw-shell__workspace">
       <header class="aw-topbar">
         <div>
-          <p class="aw-eyebrow">The Grading Desk</p>
+          <p class="aw-eyebrow">资产交付与计件结算</p>
           <h1>{{ activeLabel }}</h1>
         </div>
         <button class="aw-command-button" type="button" @click="toggleCommand">
@@ -168,9 +182,9 @@ watch(commandQuery, () => {
         <div v-if="error" class="aw-inline-alert">{{ error }}</div>
         <div v-else-if="loading" class="aw-inline-alert">正在加载工作台信息</div>
         <div v-else-if="bootstrap" class="aw-context-strip">
-          <span>{{ bootstrap.timezone }}</span>
-          <span>{{ bootstrap.profile?.status || '未建档' }}</span>
-          <span>{{ bootstrap.capabilities.length }} 项能力</span>
+          <span>业务月份按北京时间计算</span>
+          <span>{{ profileStatusLabel }}</span>
+          <span>{{ permissionSummary }}</span>
         </div>
         <RouterView />
       </main>

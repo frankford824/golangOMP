@@ -22,6 +22,15 @@ interface GridColumn {
 
 type PayrollGridRow = SettlementPayrollRow & { grid_id: string; row_label: string }
 type MetricGridRow = { id: string; metric: string; scope: string; note: string; amount: number }
+type BatchGridRow = SettlementBatchRow & { status_label: string }
+type BatchItemGridRow = {
+  id: number
+  item_type_label: string
+  payee_user_id: number
+  quantity: number
+  direction_label: string
+  amount: number
+}
 type PermissionGridRow = SupplementPermissionRow & { status_label: string; reason_label: string }
 
 const month = ref(new Date().toISOString().slice(0, 7))
@@ -59,6 +68,26 @@ const adjustmentForm = ref({
   amount: 0,
   reason: '',
 })
+const batchStatusLabels: Record<string, string> = {
+  generated: '待确认',
+  confirmed: '已确认',
+  cancelled: '已取消',
+  reversed: '已冲正',
+}
+const settlementItemTypeLabels: Record<string, string> = {
+  gross_piecework: '正常计件',
+  error_deduction: '出错扣减',
+  welfare: '福利补贴',
+  supplement: '补录计件',
+  adjustment: '补差',
+  reversal: '冲正',
+}
+const supplementStatusLabels: Record<string, string> = {
+  pending: '待审核',
+  approved: '已批准',
+  rejected: '已拒绝',
+  reversed: '已冲正',
+}
 
 const totals = computed(() => preview.value?.totals)
 const payrollRows = computed(() => preview.value?.payroll_rows ?? [])
@@ -66,21 +95,22 @@ const totalMetricRows = computed(() => {
   const value = totals.value
   if (!value) return []
   return [
-    { id: 'gross', metric: '毛额', scope: `${value.item_count} 单`, note: `${value.error_count} 个出错`, amount: value.gross_amount },
-    { id: 'deduction', metric: '扣减', scope: '结算时计算', note: '不冻结在提交', amount: value.deduction_amount },
-    { id: 'net', metric: '净额', scope: '人月聚合', note: '每人固定两条工资行', amount: value.net_amount },
-    { id: 'supplement', metric: '补录', scope: '人月正向行', note: '不挂 item', amount: value.supplement_amount },
+    { id: 'gross', metric: '正常计件', scope: `${value.item_count} 单`, note: `${value.page_count} 页`, amount: value.gross_amount },
+    { id: 'deduction', metric: '出错扣减', scope: `${value.error_count} 个出错`, note: '按导入出错表计算', amount: value.deduction_amount },
+    { id: 'supplement', metric: '补录计件', scope: '漏传补录', note: '单独工资行', amount: value.supplement_amount },
+    { id: 'net', metric: '应结净额', scope: '本月合计', note: '正常工资行 + 补录工资行', amount: value.net_amount },
   ] satisfies MetricGridRow[]
 })
 const metricGridRows = computed(() => totalMetricRows.value as unknown as Record<string, unknown>[])
 const payrollGridRows = computed(() => payrollRows.value.map(toPayrollGridRow) as unknown as Record<string, unknown>[])
-const batchGridRows = computed(() => batches.value as unknown as Record<string, unknown>[])
-const batchItemGridRows = computed(() => (selectedBatch.value?.items ?? []) as unknown as Record<string, unknown>[])
+const batchGridRows = computed(() => batches.value.map(toBatchGridRow) as unknown as Record<string, unknown>[])
+const batchItemGridRows = computed(() => (selectedBatch.value?.items ?? []).map(toBatchItemGridRow) as unknown as Record<string, unknown>[])
 const batchPayrollGridRows = computed(() => (selectedBatch.value?.payroll_rows ?? []).map(toPayrollGridRow) as unknown as Record<string, unknown>[])
 const permissionGridRows = computed(() => supplementPermissions.value.map(toPermissionGridRow) as unknown as Record<string, unknown>[])
 const supplementRowsWithLabels = computed(() =>
   supplements.value.map((row) => ({
     ...row,
+    status_label: supplementStatusLabel(row.status),
     duplicate_label: row.duplicate_hint_json?.has_duplicates ? '可能重复' : '无重复提示',
   })),
 )
@@ -88,7 +118,7 @@ const supplementGridRows = computed(() => supplementRowsWithLabels.value as unkn
 const metricGridColumns = computed<GridColumn[]>(() => [
   { key: 'metric', label: '指标', width: 108 },
   { key: 'scope', label: '范围', width: 132 },
-  { key: 'note', label: '口径', width: 160 },
+  { key: 'note', label: '说明', width: 160 },
   { key: 'amount', label: '金额', width: 112, align: 'right' },
 ])
 const payrollGridColumns = computed<GridColumn[]>(() => [
@@ -106,15 +136,15 @@ const payrollGridColumns = computed<GridColumn[]>(() => [
 const batchGridColumns = computed<GridColumn[]>(() => [
   { key: 'batch_no', label: '批次号', width: 190 },
   { key: 'business_month', label: '业务月', width: 108 },
-  { key: 'status', label: '状态', width: 96 },
+  { key: 'status_label', label: '状态', width: 96 },
   { key: 'net_amount', label: '净额', width: 112, align: 'right' },
   { key: 'actions', label: '动作', width: 180, align: 'center' },
 ])
 const batchItemGridColumns = computed<GridColumn[]>(() => [
-  { key: 'item_type', label: '类型', width: 150 },
+  { key: 'item_type_label', label: '结算项目', width: 150 },
   { key: 'payee_user_id', label: '人员', width: 96 },
   { key: 'quantity', label: '数量', width: 88, align: 'right' },
-  { key: 'direction', label: '方向', width: 88 },
+  { key: 'direction_label', label: '方向', width: 88 },
   { key: 'amount', label: '金额', width: 112, align: 'right' },
 ])
 const permissionGridColumns = computed<GridColumn[]>(() => [
@@ -126,7 +156,7 @@ const permissionGridColumns = computed<GridColumn[]>(() => [
 const supplementGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_user_id', label: '人员', width: 96 },
   { key: 'order_no', label: '订单号', width: 150 },
-  { key: 'status', label: '状态', width: 96 },
+  { key: 'status_label', label: '状态', width: 96 },
   { key: 'duplicate_label', label: '查重', width: 108 },
   { key: 'gross_amount', label: '补录金额', width: 112, align: 'right' },
 ])
@@ -135,11 +165,49 @@ function payrollRowLabel(row: SettlementPayrollRow) {
   return row.row_type === 'supplement_piecework' ? '补录计件工资' : '正常计件工资'
 }
 
+function batchStatusLabel(status: string) {
+  return batchStatusLabels[status] ?? status
+}
+
+function settlementItemTypeLabel(type: string) {
+  return settlementItemTypeLabels[type] ?? type
+}
+
+function supplementStatusLabel(status: string) {
+  return supplementStatusLabels[status] ?? status
+}
+
+function directionLabel(direction: string) {
+  const labels: Record<string, string> = {
+    credit: '增加',
+    debit: '扣回',
+  }
+  return labels[direction] ?? direction
+}
+
 function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
   return {
     ...row,
     grid_id: `${row.payee_user_id}-${row.row_type}`,
     row_label: payrollRowLabel(row),
+  }
+}
+
+function toBatchGridRow(row: SettlementBatchRow): BatchGridRow {
+  return {
+    ...row,
+    status_label: batchStatusLabel(row.status),
+  }
+}
+
+function toBatchItemGridRow(row: SettlementBatchDetail['items'][number]): BatchItemGridRow {
+  return {
+    id: row.id,
+    item_type_label: settlementItemTypeLabel(row.item_type),
+    payee_user_id: row.payee_user_id,
+    quantity: row.quantity,
+    direction_label: directionLabel(row.direction),
+    amount: row.amount,
   }
 }
 
@@ -367,7 +435,7 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-heading">
       <div>
-        <p class="aw-eyebrow">Settlement batch</p>
+        <p class="aw-eyebrow">工资结算</p>
         <h2>结算统计</h2>
       </div>
       <div class="aw-button-row">
@@ -382,9 +450,9 @@ onMounted(() => {
     <input ref="errorInputRef" class="aw-visually-hidden" type="file" accept=".xlsx,.xls" @change="handleErrorImport" />
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <div class="aw-panel">
-      <h3>结算净额口径</h3>
+      <h3>本月工资预览</h3>
       <p class="aw-copy">
-        submission item 只提供计件毛额。结算批次生成 gross_piecework、error_deduction、welfare、supplement、adjustment 和 reversal 行后汇总净额。
+        先导入出错表，再生成预览。每个员工固定展示两条工资行：正常计件工资一条，补录计件工资一条；没有补录时补录金额为 0。
       </p>
       <p v-if="loading" class="aw-copy">正在加载 {{ month }} 结算预览</p>
       <p v-else-if="error" class="aw-copy">{{ error }}</p>
@@ -430,15 +498,15 @@ onMounted(() => {
         :rows="batchGridRows"
         row-key="id"
         storage-key="settlement-batches"
-        group-by="status"
+        group-by="status_label"
         :height="260"
         :row-height="36"
       >
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'actions'" class="aw-inline-actions">
-            <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
-            <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="confirmBatch(gridRowAsBatch(row))">
-              确认
+          <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
+          <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="confirmBatch(gridRowAsBatch(row))">
+            确认
             </button>
             <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="startCancelBatch(gridRowAsBatch(row))">
               取消
@@ -464,14 +532,14 @@ onMounted(() => {
       </div>
       <div v-if="!batches.length" class="aw-empty-state">
         <h3>还没有结算批次</h3>
-        <p>生成批次后，item 会进入 in_batch；确认后才转 settled。</p>
+        <p>生成批次会锁定本月可结算明细；未确认前可以取消后重新生成，确认后只能做冲正或补差。</p>
       </div>
     </div>
 
     <div v-if="selectedBatch" class="aw-detail-panel">
       <div class="aw-detail-panel__head">
         <div>
-          <p class="aw-eyebrow">Batch detail</p>
+          <p class="aw-eyebrow">批次明细</p>
           <h3>{{ selectedBatch.batch.batch_no }}</h3>
         </div>
         <strong class="aw-money">{{ selectedBatch.batch.net_amount }}</strong>
@@ -481,7 +549,7 @@ onMounted(() => {
         :rows="batchItemGridRows"
         row-key="id"
         storage-key="settlement-batch-items"
-        group-by="item_type"
+        group-by="item_type_label"
         :height="260"
         :row-height="34"
       >
@@ -507,7 +575,7 @@ onMounted(() => {
       </WorkbenchDataGrid>
       <div v-if="selectedBatch.batch.status === 'confirmed'" class="aw-panel">
         <h3>冲正 / 补差</h3>
-        <p class="aw-copy">只允许已确认批次追加 adjustment 或 reversal 行；原始结算明细不改写。</p>
+        <p class="aw-copy">已确认批次不直接改原始明细。需要补发或扣回时，在这里追加调整记录并保留原因。</p>
         <div class="aw-form-grid">
           <label>
             人员 ID
@@ -626,7 +694,7 @@ onMounted(() => {
         :rows="supplementGridRows"
         row-key="id"
         storage-key="settlement-supplements"
-        group-by="status"
+        group-by="status_label"
         :height="220"
         :row-height="34"
       >

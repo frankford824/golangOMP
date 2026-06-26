@@ -1,6 +1,6 @@
 .aw-root {
   display: grid;
-  grid-template-columns: 228px minmax(0, 1fr);
+  grid-template-columns: var(--aw-rail-width) minmax(0, 1fr);
 }
 
 .aw-root--auth {
@@ -19,6 +19,7 @@
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-panel);
   padding: var(--aw-space-6);
 }
 
@@ -73,16 +74,6 @@
   font-weight: 600;
 }
 
-.aw-field input {
-  width: 100%;
-  min-height: var(--aw-row-md);
-  border: 1px solid var(--aw-hairline);
-  border-radius: var(--aw-radius-sm);
-  background: var(--aw-surface);
-  color: var(--aw-ink);
-  padding: 0 var(--aw-space-3);
-}
-
 .aw-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -108,8 +99,8 @@
   top: 0;
   height: 100vh;
   border-right: 1px solid var(--aw-hairline);
-  background: var(--aw-surface);
-  padding: var(--aw-space-5) var(--aw-space-4);
+  background: var(--aw-surface-raised);
+  padding: var(--aw-space-5) var(--aw-space-3);
 }
 
 .aw-shell__brand {
@@ -125,7 +116,7 @@
   place-items: center;
   width: 34px;
   height: 34px;
-  border: 1px solid var(--aw-hairline);
+  border: 1px solid var(--aw-stage-line);
   border-radius: var(--aw-radius-sm);
   color: var(--aw-surface);
   background: var(--aw-stage);
@@ -154,6 +145,10 @@
   transition: background var(--aw-motion-fast) var(--aw-ease-standard), color var(--aw-motion-fast) var(--aw-ease-standard);
 }
 
+.aw-nav-item svg {
+  flex: 0 0 auto;
+}
+
 .aw-nav-item:hover,
 .aw-nav-item--active {
   color: var(--aw-ink);
@@ -171,7 +166,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 76px;
+  min-height: 76px;
   border-bottom: 1px solid var(--aw-hairline);
   background: color-mix(in srgb, var(--aw-paper) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -213,6 +208,20 @@
   padding: 0 var(--aw-space-3);
   background: var(--aw-surface);
   color: var(--aw-ink);
+  text-decoration: none;
+  transition:
+    border-color var(--aw-motion-fast) var(--aw-ease-standard),
+    background var(--aw-motion-fast) var(--aw-ease-standard),
+    color var(--aw-motion-fast) var(--aw-ease-standard),
+    transform var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-command-button:hover,
+.aw-secondary-button:hover,
+.aw-grid-toolbar button:hover,
+.aw-command__list button:hover {
+  border-color: var(--aw-hairline-strong);
+  background: var(--aw-surface-muted);
 }
 
 .aw-command-button kbd {
@@ -226,6 +235,11 @@
   color: var(--aw-surface);
   background: var(--aw-accent);
   font-weight: 700;
+}
+
+.aw-primary-button:hover {
+  border-color: var(--aw-accent-hover);
+  background: var(--aw-accent-hover);
 }
 
 .aw-secondary-button {
@@ -259,6 +273,8 @@
 
 .aw-shell__content {
   padding: var(--aw-space-8);
+  width: min(100%, var(--aw-content-max));
+  margin-inline: auto;
 }
 
 .aw-context-strip,
@@ -271,7 +287,7 @@
   align-items: center;
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-sm);
-  background: var(--aw-surface);
+  background: var(--aw-surface-raised);
   padding: 0 var(--aw-space-3);
   color: var(--aw-ink-2);
   font-size: 13px;
@@ -325,6 +341,7 @@
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-soft);
 }
 
 .aw-metric-card {
@@ -360,6 +377,12 @@
   color: var(--aw-surface);
   border-color: var(--aw-stage-surface);
   background: var(--aw-stage);
+  box-shadow: none;
+}
+
+.aw-panel--stage .aw-copy,
+.aw-panel--stage h3 {
+  color: var(--aw-surface);
 }
 
 .aw-ordered-list {
@@ -370,15 +393,35 @@
 
 .aw-contact-sheet {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: var(--aw-space-2);
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--aw-space-3);
   margin-top: var(--aw-space-4);
 }
 
-.aw-contact-sheet span {
+.aw-contact-sheet span,
+.aw-contact-tile {
+  display: grid;
+  align-content: space-between;
+  gap: var(--aw-space-2);
   aspect-ratio: 4 / 3;
   border-radius: var(--aw-radius-xs);
   background: var(--aw-stage-surface);
+  color: var(--aw-surface);
+  padding: var(--aw-space-3);
+  text-decoration: none;
+}
+
+.aw-contact-tile strong,
+.aw-contact-tile small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-contact-tile small {
+  color: color-mix(in srgb, var(--aw-surface) 66%, transparent);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-xs);
 }
 
 .aw-status-pill {
@@ -408,16 +451,21 @@
 
 .aw-grid-toolbar {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: var(--aw-space-2);
   margin-bottom: var(--aw-space-4);
 }
 
-.aw-grid-toolbar input {
+.aw-root .aw-grid-toolbar input {
+  flex: 0 1 520px;
   width: min(520px, 100%);
-  min-height: 36px;
-  border: 1px solid var(--aw-hairline);
-  border-radius: var(--aw-radius-sm);
-  padding: 0 var(--aw-space-3);
+  min-height: var(--aw-row-sm);
+}
+
+.aw-root .aw-grid-toolbar input[type='month'] {
+  flex-basis: 180px;
+  width: 180px;
 }
 
 .aw-empty-state {
@@ -579,6 +627,7 @@
 
 .aw-data-grid__body {
   overflow: auto;
+  max-width: 100%;
 }
 
 .aw-data-grid__row {
@@ -611,13 +660,30 @@
 
 .aw-upload-list > div {
   display: grid;
-  grid-template-columns: minmax(160px, 1.4fr) minmax(88px, 0.7fr) minmax(72px, 0.5fr) minmax(88px, 0.5fr) minmax(96px, 0.6fr) minmax(72px, 0.4fr);
+  grid-template-columns:
+    minmax(180px, 1.5fr)
+    minmax(96px, 0.55fr)
+    minmax(80px, 0.45fr)
+    minmax(86px, 0.45fr)
+    minmax(104px, 0.55fr)
+    minmax(72px, auto);
   gap: var(--aw-space-2);
   align-items: center;
   min-height: var(--aw-row-md);
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-sm);
   padding: var(--aw-space-2) var(--aw-space-3);
+  background: var(--aw-surface-raised);
+}
+
+.aw-upload-row__order {
+  min-width: 0;
+}
+
+.aw-upload-row__error {
+  grid-column: 1 / -1;
+  color: var(--aw-danger);
+  font-size: var(--aw-font-size-sm);
 }
 
 .aw-form-grid {
@@ -670,7 +736,7 @@
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface);
-  box-shadow: 0 18px 60px color-mix(in srgb, var(--aw-stage) 18%, transparent);
+  box-shadow: var(--aw-shadow-popover);
 }
 
 .aw-command__input {
