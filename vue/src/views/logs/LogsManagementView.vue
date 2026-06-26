@@ -260,111 +260,53 @@
           />
           <BaseButton variant="primary" size="sm" @click="applyOperationFilters">查询</BaseButton>
         </div>
-        <div v-if="opLoading" class="space-y-2">
-          <BaseSkeleton width="100%" height="2rem" />
-          <BaseSkeleton width="100%" height="2rem" />
-        </div>
-        <BaseErrorState v-else-if="opError" :title="opError" @retry="loadOperationLogs" />
-        <BaseEmptyState
-          v-else-if="!operationItems.length"
-          title="暂无操作记录"
-          description="根据当前条件未找到记录。"
-        />
+        <BaseErrorState v-if="opError" :title="opError" @retry="loadOperationLogs" />
         <template v-else>
-          <div class="table-scroll">
-            <table class="simple-table">
-              <thead>
-                <tr>
-                  <th>时间</th>
-                  <th>来源</th>
-                  <th>摘要</th>
-                  <th>业务类型</th>
-                  <th>操作者</th>
-                  <th>关联对象</th>
-                  <th>状态</th>
-                  <th>原始信息</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="r in operationItems" :key="r.log_id">
-                  <td>{{ formatAt(r.created_at) }}</td>
-                  <td>{{ opSourceLabel(r.source) }}</td>
-                  <td class="summary-cell">{{ r.summary || '—' }}</td>
-                  <td class="text-xs text-[rgb(var(--yb-text-body-strong))]" :title="r.event_type || undefined">
-                    {{ getOperationEventTypeLabel(r.event_type) }}
-                  </td>
-                  <td>{{ formatOperationActor(r) }}</td>
-                  <td class="ref-cell">
-                    <span class="text-[rgb(var(--yb-text-secondary))]" :title="r.reference_type || undefined">{{ referenceTypeLabel(r.reference_type) }}</span>
-                    <span class="font-mono text-xs block">{{ r.reference_id }}</span>
-                  </td>
-                  <td :title="r.status || undefined">{{ statusLabel(r.status) }}</td>
-                  <td class="json-cell-wrap">
-                    <template v-if="hasPayload(r)">
-                      <div class="json-cell-row">
-                        <pre class="json-cell-preview">{{ jsonPreviewLine(r.payload) }}</pre>
-                        <BaseButton
-                          variant="secondary"
-                          size="sm"
-                          class="shrink-0"
-                          @click="openJsonModal('载荷', r.payload)"
-                        >
-                          完整
-                        </BaseButton>
-                      </div>
-                    </template>
-                    <span v-else class="text-[rgb(var(--yb-text-faint))]">—</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="pager">
-            <button type="button" class="pager-btn" :disabled="opPage <= 1" @click="opPage--">上一页</button>
-            <span class="pager-info text-xs text-[rgb(var(--yb-text-muted))]">第 {{ opPage }} 页</span>
-            <button type="button" class="pager-btn" :disabled="opPage >= opTotalPages" @click="opPage++">下一页</button>
-          </div>
+          <BaseDataTable
+            aria-label="操作明细"
+            :columns="operationTableColumns"
+            :data="operationItems"
+            :loading="opLoading"
+            :row-key="operationRowKey"
+            :scroll-x="1180"
+            density="compact"
+            empty-title="暂无操作记录"
+            empty-description="根据当前条件未找到记录。"
+          />
+          <BaseTablePager
+            class="mt-3"
+            :page="opPage"
+            :page-size="opPageSize"
+            :total="opData.total"
+            :loading="opLoading"
+            @update:page="opPage = $event"
+          />
         </template>
       </section>
 
       <section v-show="activeTab === 'permission'" class="content-card">
         <h3 class="section-title">权限明细</h3>
-        <div v-if="permLoading" class="space-y-2">
-          <BaseSkeleton width="100%" height="2rem" />
-          <BaseSkeleton width="100%" height="2rem" />
-        </div>
-        <BaseErrorState v-else-if="permError" :title="permError" @retry="loadPermissionLogs" />
-        <BaseEmptyState
-          v-else-if="!permissionItems.length"
-          title="暂无权限变更"
-          description="根据当前条件未找到记录。"
-        />
+        <BaseErrorState v-if="permError" :title="permError" @retry="loadPermissionLogs" />
         <template v-else>
-          <div class="table-scroll">
-            <table class="simple-table">
-              <thead>
-                <tr>
-                  <th>时间</th>
-                  <th>操作人</th>
-                  <th>目标用户</th>
-                  <th>动作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="r in permissionItems" :key="String(r.id)">
-                  <td>{{ formatAt(r.created_at) }}</td>
-                  <td>{{ formatPermActor(r) }}</td>
-                  <td>{{ formatPermTarget(r) }}</td>
-                  <td>{{ formatPermAction(r) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="pager">
-            <button type="button" class="pager-btn" :disabled="permPage <= 1" @click="permPage--">上一页</button>
-            <span class="pager-info text-xs text-[rgb(var(--yb-text-muted))]">第 {{ permPage }} 页</span>
-            <button type="button" class="pager-btn" :disabled="permPage >= permTotalPages" @click="permPage++">下一页</button>
-          </div>
+          <BaseDataTable
+            aria-label="权限明细"
+            :columns="permissionTableColumns"
+            :data="permissionItems"
+            :loading="permLoading"
+            :row-key="permissionRowKey"
+            :scroll-x="760"
+            density="compact"
+            empty-title="暂无权限变更"
+            empty-description="根据当前条件未找到记录。"
+          />
+          <BaseTablePager
+            class="mt-3"
+            :page="permPage"
+            :page-size="permPageSize"
+            :total="permData.total"
+            :loading="permLoading"
+            @update:page="permPage = $event"
+          />
         </template>
       </section>
 
@@ -400,57 +342,27 @@
           />
           <BaseButton variant="primary" size="sm" @click="applyServerFilters">查询</BaseButton>
         </div>
-        <div v-if="serverLoading" class="space-y-2">
-          <BaseSkeleton width="100%" height="2rem" />
-          <BaseSkeleton width="100%" height="2rem" />
-        </div>
-        <BaseErrorState v-else-if="serverError" :title="serverError" @retry="loadServerLogs" />
-        <BaseEmptyState
-          v-else-if="!serverItems.length"
-          title="暂无服务器日志"
-          description="根据当前条件未找到记录。"
-        />
+        <BaseErrorState v-if="serverError" :title="serverError" @retry="loadServerLogs" />
         <template v-else>
-          <div class="table-scroll">
-            <table class="simple-table">
-              <thead>
-                <tr>
-                  <th>时间</th>
-                  <th>级别</th>
-                  <th>消息</th>
-                  <th>详情</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="r in serverItems" :key="r.id">
-                  <td>{{ formatAt(r.created_at) }}</td>
-                  <td><span class="level-badge" :class="'level-' + r.level" :title="r.level || undefined">{{ levelLabel(r.level) }}</span></td>
-                  <td class="msg-cell">{{ r.msg }}</td>
-                  <td class="json-cell-wrap">
-                    <template v-if="hasServerDetails(r)">
-                      <div class="json-cell-row">
-                        <pre class="json-cell-preview">{{ jsonPreviewLine(normalizeServerDetails(r.details)) }}</pre>
-                        <BaseButton
-                          variant="secondary"
-                          size="sm"
-                          class="shrink-0"
-                          @click="openJsonModal('详情', normalizeServerDetails(r.details))"
-                        >
-                          完整
-                        </BaseButton>
-                      </div>
-                    </template>
-                    <span v-else class="text-[rgb(var(--yb-text-faint))]">—</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="pager">
-            <button type="button" class="pager-btn" :disabled="serverPage <= 1" @click="serverPage--">上一页</button>
-            <span class="pager-info text-xs text-[rgb(var(--yb-text-muted))]">第 {{ serverPage }} 页</span>
-            <button type="button" class="pager-btn" :disabled="serverPage >= serverTotalPages" @click="serverPage++">下一页</button>
-          </div>
+          <BaseDataTable
+            aria-label="服务器日志"
+            :columns="serverTableColumns"
+            :data="serverItems"
+            :loading="serverLoading"
+            :row-key="serverRowKey"
+            :scroll-x="920"
+            density="compact"
+            empty-title="暂无服务器日志"
+            empty-description="根据当前条件未找到记录。"
+          />
+          <BaseTablePager
+            class="mt-3"
+            :page="serverPage"
+            :page-size="serverPageSize"
+            :total="serverData.total"
+            :loading="serverLoading"
+            @update:page="serverPage = $event"
+          />
         </template>
       </section>
 
@@ -590,6 +502,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, onMounted, defineComponent, h, type PropType } from 'vue'
+import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { logsApi } from '@/services/api/logsApi'
 import type {
   OperationLogEntry,
@@ -602,6 +515,8 @@ import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
+import BaseDataTable from '@/components/base/BaseDataTable.vue'
+import BaseTablePager from '@/components/base/BaseTablePager.vue'
 import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
 import { beijingDateTimeLocalToISO, formatDateTimeBeijing } from '@/utils/date'
@@ -776,9 +691,11 @@ const businessInsightLines = computed(() => {
   return lines
 })
 
+const auditPageSize = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
+const defaultDenseTablePageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? auditPageSize : 20
 const opPage = ref(1)
 const skipNextOpPageWatch = ref(false)
-const opPageSize = 20
+const opPageSize = defaultDenseTablePageSize
 const opLoading = ref(false)
 const opError = ref('')
 const opData = ref<{ items: OperationLogEntry[]; total: number }>({ items: [], total: 0 })
@@ -786,19 +703,17 @@ const opSource = ref<'' | OperationLogEntry['source']>('')
 const opEventType = ref('')
 
 const permPage = ref(1)
-const permPageSize = 20
+const permPageSize = defaultDenseTablePageSize
 const permLoading = ref(false)
 const permError = ref('')
 const permData = ref<{ items: PermissionLog[]; total: number }>({ items: [], total: 0 })
 
 const operationItems = computed(() => opData.value.items)
-const opTotalPages = computed(() => Math.max(1, Math.ceil(opData.value.total / opPageSize)))
 
 const permissionItems = computed(() => permData.value.items)
-const permTotalPages = computed(() => Math.max(1, Math.ceil(permData.value.total / permPageSize)))
 
 const serverPage = ref(1)
-const serverPageSize = 20
+const serverPageSize = defaultDenseTablePageSize
 const serverLoading = ref(false)
 const serverError = ref('')
 const serverData = ref<{ items: ServerLog[]; total: number }>({ items: [], total: 0 })
@@ -816,7 +731,138 @@ const jsonModalTitle = ref('')
 const jsonModalBody = ref('')
 
 const serverItems = computed(() => serverData.value.items)
-const serverTotalPages = computed(() => Math.max(1, Math.ceil(serverData.value.total / serverPageSize)))
+
+const operationTableColumns = computed<DataTableColumns<OperationLogEntry>>(() => [
+  {
+    title: '时间',
+    key: 'created_at',
+    width: 150,
+    render: (row) => formatAt(row.created_at),
+  },
+  {
+    title: '来源',
+    key: 'source',
+    width: 90,
+    render: (row) => opSourceLabel(row.source),
+  },
+  {
+    title: '摘要',
+    key: 'summary',
+    minWidth: 190,
+    render: (row) => h('span', { class: 'summary-cell' }, row.summary || '—'),
+  },
+  {
+    title: '业务类型',
+    key: 'event_type',
+    minWidth: 150,
+    render: (row) =>
+      h(
+        'span',
+        {
+          class: 'text-xs text-[rgb(var(--yb-text-body-strong))]',
+          title: row.event_type || undefined,
+        },
+        getOperationEventTypeLabel(row.event_type),
+      ),
+  },
+  {
+    title: '操作者',
+    key: 'actor',
+    minWidth: 130,
+    render: (row) => formatOperationActor(row),
+  },
+  {
+    title: '关联对象',
+    key: 'reference',
+    minWidth: 140,
+    render: (row) =>
+      h('div', { class: 'ref-cell' }, [
+        h(
+          'span',
+          {
+            class: 'text-[rgb(var(--yb-text-secondary))]',
+            title: row.reference_type || undefined,
+          },
+          referenceTypeLabel(row.reference_type),
+        ),
+        h('span', { class: 'font-mono text-xs block' }, row.reference_id ?? '—'),
+      ]),
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 90,
+    render: (row) => h('span', { title: row.status || undefined }, statusLabel(row.status)),
+  },
+  {
+    title: '原始信息',
+    key: 'payload',
+    minWidth: 260,
+    render: (row) => renderPayloadCell('载荷', row.payload, hasPayload(row)),
+  },
+])
+
+const permissionTableColumns = computed<DataTableColumns<PermissionLog>>(() => [
+  {
+    title: '时间',
+    key: 'created_at',
+    width: 170,
+    render: (row) => formatAt(row.created_at),
+  },
+  {
+    title: '操作人',
+    key: 'actor',
+    minWidth: 170,
+    render: (row) => formatPermActor(row),
+  },
+  {
+    title: '目标用户',
+    key: 'target',
+    minWidth: 170,
+    render: (row) => formatPermTarget(row),
+  },
+  {
+    title: '动作',
+    key: 'action',
+    minWidth: 220,
+    render: (row) => formatPermAction(row),
+  },
+])
+
+const serverTableColumns = computed<DataTableColumns<ServerLog>>(() => [
+  {
+    title: '时间',
+    key: 'created_at',
+    width: 170,
+    render: (row) => formatAt(row.created_at),
+  },
+  {
+    title: '级别',
+    key: 'level',
+    width: 96,
+    render: (row) =>
+      h(
+        'span',
+        {
+          class: ['level-badge', `level-${row.level}`],
+          title: row.level || undefined,
+        },
+        levelLabel(row.level),
+      ),
+  },
+  {
+    title: '消息',
+    key: 'msg',
+    minWidth: 260,
+    render: (row) => h('span', { class: 'msg-cell' }, row.msg || '—'),
+  },
+  {
+    title: '详情',
+    key: 'details',
+    minWidth: 300,
+    render: (row) => renderPayloadCell('详情', normalizeServerDetails(row.details), hasServerDetails(row)),
+  },
+])
 
 let traceAbort: AbortController | null = null
 let traceSeq = 0
@@ -858,6 +904,37 @@ const LOG_LEVEL_LABEL: Record<string, string> = {
   warning: '警告',
   error: '错误',
   fatal: '致命',
+}
+
+function operationRowKey(row: OperationLogEntry): DataTableRowKey {
+  return row.log_id
+}
+
+function permissionRowKey(row: PermissionLog): DataTableRowKey {
+  return String(row.id)
+}
+
+function serverRowKey(row: ServerLog): DataTableRowKey {
+  return row.id
+}
+
+function renderPayloadCell(title: string, payload: unknown, visible: boolean) {
+  if (!visible) {
+    return h('span', { class: 'text-[rgb(var(--yb-text-faint))]' }, '—')
+  }
+  return h('div', { class: 'json-cell-row' }, [
+    h('pre', { class: 'json-cell-preview' }, jsonPreviewLine(payload)),
+    h(
+      BaseButton,
+      {
+        variant: 'secondary',
+        size: 'sm',
+        class: 'shrink-0',
+        onClick: () => openJsonModal(title, payload),
+      },
+      { default: () => '完整' },
+    ),
+  ])
 }
 
 const LOG_STATUS_LABEL: Record<string, string> = {
@@ -2073,39 +2150,6 @@ onMounted(() => {
 .exception-time { color: rgb(var(--yb-text-muted)); }
 .exception-main { color: rgb(var(--yb-text)); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .exception-object { color: rgb(var(--yb-text-secondary)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.table-scroll {
-  width: 100%;
-  max-width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.simple-table { width: 100%; min-width: 780px; border-collapse: collapse; font-size: 0.75rem; }
-.business-table { min-width: 960px; }
-.simple-table th,
-.simple-table td { border: 1px solid rgb(var(--yb-border-slate)); padding: 0.45rem 0.55rem; text-align: left; vertical-align: top; }
-.simple-table th { background: rgb(var(--yb-surface-muted)); color: rgb(var(--yb-text-body)); font-weight: 700; }
-.simple-table td { background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); }
-.simple-table tbody tr:hover td { background: rgb(var(--yb-surface-soft)); }
-.time-cell { width: 9.5rem; white-space: nowrap; }
-.strong { color: rgb(var(--yb-text)); font-weight: 700; }
-.muted { margin-top: 0.18rem; color: rgb(var(--yb-text-muted)); font-size: 0.7rem; line-height: 1.35; }
-.mono { font-family: var(--yb-font-data); }
-.object-chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; max-width: 18rem; }
-.object-chip {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  border-radius: 999px;
-  border: 1px solid rgb(var(--yb-brand-subtle));
-  background: rgb(var(--yb-brand-soft));
-  color: rgb(var(--yb-brand-strong));
-  padding: 0.13rem 0.45rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .status-badge,
 .level-badge {
   display: inline-flex;
@@ -2121,7 +2165,6 @@ onMounted(() => {
 .level-info { background: rgb(var(--yb-brand-soft)); color: rgb(var(--yb-brand-strong)); }
 .level-warn { background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
 .level-error { background: rgb(var(--yb-danger-soft)); color: rgb(var(--yb-danger-text)); }
-.location-cell,
 .msg-cell,
 .summary-cell {
   max-width: 300px;
@@ -2131,7 +2174,6 @@ onMounted(() => {
 }
 .summary-cell { max-width: 220px; }
 .ref-cell { max-width: 140px; }
-.json-cell-wrap { vertical-align: top; min-width: 12rem; max-width: 22rem; }
 .json-cell-row { display: flex; align-items: flex-start; gap: 0.5rem; }
 .json-cell-preview,
 .json-body {

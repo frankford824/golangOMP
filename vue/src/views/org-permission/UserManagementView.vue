@@ -69,66 +69,31 @@
           />
           <BaseButton type="button" variant="primary" class="toolbar-query" @click="onSearch">查询</BaseButton>
         </div>
-        <div v-if="listLoading" class="space-y-2">
-          <BaseSkeleton width="100%" height="2rem" />
-        </div>
-        <BaseErrorState v-else-if="listError" :title="listError" @retry="loadUsers" />
-        <BaseEmptyState v-else-if="!users.length" title="暂无用户" description="未获取到用户列表。" />
-        <div v-else class="table-wrap">
-          <table class="simple-table">
-            <thead>
-              <tr>
-                <th>用户名</th>
-                <th>姓名</th>
-                <th>部门</th>
-                <th>组</th>
-                <th>角色</th>
-                <th>状态</th>
-                <th class="th-action">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="u in users" :key="u.id">
-                <td class="td-mono">{{ u.username }}</td>
-                <td>{{ u.display_name || '-' }}</td>
-                <td>{{ u.department ?? '-' }}</td>
-                <td>{{ u.team ?? '-' }}</td>
-                <td>{{ formatWorkflowRolesForDisplay(u.roles) }}</td>
-                <td>
-                  <span
-                    class="status-pill"
-                    :class="u.status === 'active' ? 'status-pill--on' : 'status-pill--off'"
-                  >
-                    {{ formatUserStatusForDisplay(u.status) }}
-                  </span>
-                </td>
-                <td>
-                  <button type="button" class="link-btn" @click="openDetail(u)">角色管理</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="pager-row">
-          <span class="pager-total">共 {{ pagination.total }} 条</span>
-          <div class="pager-right">
-            <label class="pager-label">
-              每页
-              <BaseSelect
-                v-model="pageSize"
-                class="pager-page-size"
-                :options="pageSizeOptions"
-              />
-            </label>
-            <BaseButton variant="ghost" size="sm" :disabled="page <= 1" @click="goPage(page - 1)">
-              上一页
-            </BaseButton>
-            <span class="pager-meta">第 {{ page }} / {{ totalPages }} 页</span>
-            <BaseButton variant="ghost" size="sm" :disabled="page >= totalPages" @click="goPage(page + 1)">
-              下一页
-            </BaseButton>
-          </div>
-        </div>
+        <BaseErrorState v-if="listError" :title="listError" @retry="loadUsers" />
+        <template v-else>
+          <BaseDataTable
+            aria-label="用户列表"
+            :columns="userTableColumns"
+            :data="users"
+            :loading="listLoading"
+            :row-key="userRowKey"
+            :scroll-x="980"
+            density="compact"
+            empty-title="暂无用户"
+            empty-description="未获取到用户列表。"
+          />
+          <BaseTablePager
+            class="mt-4"
+            :page="page"
+            :page-size="pageSize"
+            :total="pagination.total"
+            :loading="listLoading"
+            show-page-size
+            :page-size-options="[20, 50, 100]"
+            @update:page="goPage"
+            @update:page-size="pageSize = $event"
+          />
+        </template>
       </section>
 
       <!-- 用户详情 / 角色管理 弹层 -->
@@ -268,7 +233,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, computed, h, onBeforeUnmount, onMounted, watch } from 'vue'
+import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { usersApi } from '@/services/api/usersApi'
 import {
@@ -288,6 +254,8 @@ import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
+import BaseDataTable from '@/components/base/BaseDataTable.vue'
+import BaseTablePager from '@/components/base/BaseTablePager.vue'
 
 const router = useRouter()
 const permissionsStore = usePermissionsStore()
@@ -361,9 +329,11 @@ const roleOptions = ref<RoleOption[]>([])
 let listAbort: AbortController | null = null
 let listSeq = 0
 
+const auditPageSize = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
+const defaultPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? auditPageSize : 20
 const page = ref(1)
-const pageSize = ref(20)
-const pagination = ref({ total: 0, page: 1, page_size: 20 })
+const pageSize = ref(defaultPageSize)
+const pagination = ref({ total: 0, page: 1, page_size: defaultPageSize })
 const keyword = ref('')
 const statusFilter = ref('')
 const roleFilter = ref('')
@@ -406,10 +376,66 @@ const teamOptionsFiltered = computed(() =>
     : teamOptions.value,
 )
 const teamFilterOptions = computed<BaseSelectOption[]>(() => teamOptionsFiltered.value)
-const pageSizeOptions = computed<BaseSelectOption[]>(() => [
-  { value: 20, label: '20' },
-  { value: 50, label: '50' },
-  { value: 100, label: '100' },
+const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
+  {
+    title: '用户名',
+    key: 'username',
+    width: 150,
+    render: (row) => h('span', { class: 'td-mono' }, row.username || '-'),
+  },
+  {
+    title: '姓名',
+    key: 'display_name',
+    width: 150,
+    render: (row) => row.display_name || '-',
+  },
+  {
+    title: '部门',
+    key: 'department',
+    minWidth: 140,
+    render: (row) => row.department ?? '-',
+  },
+  {
+    title: '组',
+    key: 'team',
+    minWidth: 140,
+    render: (row) => row.team ?? '-',
+  },
+  {
+    title: '角色',
+    key: 'roles',
+    minWidth: 220,
+    render: (row) => formatWorkflowRolesForDisplay(row.roles),
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 110,
+    render: (row) =>
+      h(
+        'span',
+        {
+          class: ['status-pill', row.status === 'active' ? 'status-pill--on' : 'status-pill--off'],
+        },
+        formatUserStatusForDisplay(row.status),
+      ),
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 112,
+    fixed: 'right',
+    render: (row) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'link-btn',
+          onClick: () => openDetail(row),
+        },
+        '角色管理',
+      ),
+  },
 ])
 const createTeamOptions = computed(() =>
   createForm.value.department
@@ -451,6 +477,10 @@ function mapRawUser(raw: Record<string, unknown>): UserRow {
     status: typeof raw.status === 'string' ? raw.status : undefined,
     frontend_access: raw.frontend_access,
   }
+}
+
+function userRowKey(row: UserRow): DataTableRowKey {
+  return row.id
 }
 
 async function loadOrgOptions() {
@@ -943,62 +973,6 @@ onBeforeUnmount(() => {
   font-size: 0.75rem;
 }
 
-/* 表格外壳：去格子线，顶栏暗色条（小黑盒常用手法） */
-.table-wrap {
-  overflow-x: auto;
-  border-radius: 0.5rem;
-  border: 1px solid rgb(var(--yb-border-zinc));
-  background: rgb(var(--yb-surface));
-}
-
-.simple-table {
-  width: 100%;
-  min-width: 56rem;
-  border-collapse: collapse;
-  font-size: 0.8125rem;
-}
-
-.simple-table thead {
-  background: rgb(var(--yb-text-zinc-deep));
-  color: rgb(var(--yb-border-zinc));
-}
-
-.simple-table th {
-  padding: 0.65rem 0.9rem;
-  text-align: left;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-}
-
-.simple-table th.th-action {
-  text-align: right;
-  width: 6.25rem;
-  min-width: 6.25rem;
-}
-
-.simple-table tbody tr {
-  border-top: 1px solid rgb(var(--yb-surface-neutral-muted));
-  transition: background-color 0.12s ease;
-}
-
-.simple-table tbody tr:hover {
-  background: rgb(var(--yb-surface-row-even));
-}
-
-.simple-table td {
-  padding: 0.65rem 0.9rem;
-  vertical-align: middle;
-  color: rgb(var(--yb-text-zinc));
-}
-
-.simple-table td:last-child {
-  text-align: right;
-  white-space: nowrap;
-}
-
 .td-mono {
   font-variant-numeric: tabular-nums;
   font-family: var(--yb-font-data);
@@ -1042,44 +1016,6 @@ onBeforeUnmount(() => {
 .link-btn:hover {
   color: rgb(var(--yb-success-teal));
   background: rgb(var(--yb-success-soft));
-}
-
-.pager-row {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
-  border-top: 1px solid rgb(var(--yb-surface-neutral-muted));
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.pager-total,
-.pager-meta {
-  font-size: 0.75rem;
-  color: rgb(var(--yb-text-zinc-soft));
-  font-weight: 500;
-}
-
-.pager-right {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.pager-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  color: rgb(var(--yb-text-zinc-soft));
-  font-weight: 500;
-}
-
-.pager-page-size {
-  min-width: 4.75rem;
 }
 
 /* —— 弹窗可读性层：浅色后台风格，仅作用于新增用户 / 角色管理 —— */
@@ -1394,12 +1330,6 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .toolbar {
     grid-template-columns: 1fr;
-  }
-
-  .simple-table th,
-  .simple-table td {
-    padding-left: 0.6rem;
-    padding-right: 0.6rem;
   }
 }
 
