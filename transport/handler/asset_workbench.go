@@ -1022,6 +1022,24 @@ func (h *AssetWorkbenchHandler) DownloadSystemAsset(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) PreviewSystemAsset(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	assetID, err := strconv.ParseInt(strings.TrimSpace(c.Param("asset_id")), 10, 64)
+	if err != nil || assetID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset_id", nil))
+		return
+	}
+	result, appErr := h.svc.SystemAssetPreview(c.Request.Context(), actor, assetID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) BatchDownloadSystemAssets(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

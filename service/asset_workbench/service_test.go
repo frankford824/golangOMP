@@ -526,10 +526,15 @@ type systemAssetDownloaderStub struct {
 	downloadCalls int
 	batchCalls    int
 	batchAssetIDs []int64
+	info          *domain.AssetDownloadInfo
 }
 
 func (s *systemAssetDownloaderStub) DownloadLatest(_ context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	s.downloadCalls++
+	if s.info != nil {
+		copyInfo := *s.info
+		return &copyInfo, nil
+	}
 	url := "https://assets.example.com/system/" + strconv.FormatInt(assetID, 10)
 	return &domain.AssetDownloadInfo{
 		DownloadMode: domain.AssetDownloadModeDirect,
@@ -1280,6 +1285,41 @@ func TestSystemAssetDownloadRequiresManagerRole(t *testing.T) {
 	_, appErr := svc.SystemAssetDownload(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, 1001)
 	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("SystemAssetDownload(submitter) appErr = %+v", appErr)
+	}
+	if downloader.downloadCalls != 0 {
+		t.Fatalf("downloadCalls = %d, want 0", downloader.downloadCalls)
+	}
+}
+
+func TestSystemAssetPreviewUsesPreviewableDownloadURL(t *testing.T) {
+	url := "https://assets.example.com/system/1001.png"
+	downloader := &systemAssetDownloaderStub{
+		info: &domain.AssetDownloadInfo{
+			DownloadMode: domain.AssetDownloadModeDirect,
+			DownloadURL:  &url,
+			Filename:     "system-asset.png",
+			FileSize:     2048,
+			MimeType:     "image/png",
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetDownloader(downloader))
+
+	meta, appErr := svc.SystemAssetPreview(context.Background(), domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}}, 1001)
+	if appErr != nil {
+		t.Fatalf("SystemAssetPreview() error = %+v", appErr)
+	}
+	if meta.Status != domain.AssetWorkbenchPreviewStatusReady || !meta.PreviewAvailable || meta.PreviewURL != url || meta.DownloadURL != url {
+		t.Fatalf("preview meta = %+v, want ready direct preview", meta)
+	}
+}
+
+func TestSystemAssetPreviewRequiresManagerRole(t *testing.T) {
+	downloader := &systemAssetDownloaderStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetDownloader(downloader))
+
+	_, appErr := svc.SystemAssetPreview(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, 1001)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("SystemAssetPreview(submitter) appErr = %+v", appErr)
 	}
 	if downloader.downloadCalls != 0 {
 		t.Fatalf("downloadCalls = %d, want 0", downloader.downloadCalls)

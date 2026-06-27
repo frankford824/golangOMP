@@ -21,8 +21,7 @@ body {
   font-family: var(--aw-font-sans);
   font-size: var(--aw-font-size-md);
   line-height: 1.55;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+  text-rendering: auto;
 }
 
 .aw-root h1,

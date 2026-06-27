@@ -94,6 +94,7 @@ func registerAssetWorkbenchRoutes(
 		group.PUT("/saved-views", access(group, http.MethodPut, "/saved-views", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.UpsertSavedView)
 		group.DELETE("/saved-views/:view_id", access(group, http.MethodDelete, "/saved-views/:view_id", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DeleteSavedView)
 		group.GET("/system-assets/:asset_id/download", access(group, http.MethodGet, "/system-assets/:asset_id/download", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.DownloadSystemAsset)
+		group.GET("/system-assets/:asset_id/preview", access(group, http.MethodGet, "/system-assets/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.PreviewSystemAsset)
 		group.POST("/system-assets/batch-download", access(group, http.MethodPost, "/system-assets/batch-download", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BatchDownloadSystemAssets)
 		group.GET("/system-search", access(group, http.MethodGet, "/system-search", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.SystemSearch)
 	}

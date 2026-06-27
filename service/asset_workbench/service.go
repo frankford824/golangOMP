@@ -417,6 +417,18 @@ type FilePreviewMeta struct {
 	Error      string     `json:"error,omitempty"`
 }
 
+type SystemAssetPreviewMeta struct {
+	AssetID          int64      `json:"asset_id"`
+	Status           string     `json:"status"`
+	Preparing        bool       `json:"preparing"`
+	PreviewURL       string     `json:"preview_url,omitempty"`
+	DownloadURL      string     `json:"download_url,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	MimeType         string     `json:"mime_type,omitempty"`
+	Filename         string     `json:"filename,omitempty"`
+	PreviewAvailable bool       `json:"preview_available"`
+}
+
 type FileDownloadMeta struct {
 	FileID      int64     `json:"file_id"`
 	Filename    string    `json:"filename"`
@@ -3428,6 +3440,42 @@ func (s *Service) SystemAssetDownload(ctx context.Context, actor domain.RequestA
 	return info, nil
 }
 
+func (s *Service) SystemAssetPreview(ctx context.Context, actor domain.RequestActor, assetID int64) (*SystemAssetPreviewMeta, *domain.AppError) {
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can preview system assets from workbench.", nil)
+	}
+	if assetID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
+	}
+	if s.systemDownloads == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
+	}
+	info, appErr := s.systemDownloads.DownloadLatest(ctx, assetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if info == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset preview info is empty.", nil)
+	}
+	meta := &SystemAssetPreviewMeta{
+		AssetID:          assetID,
+		Status:           domain.AssetWorkbenchPreviewStatusNotApplicable,
+		Filename:         info.Filename,
+		MimeType:         strings.TrimSpace(info.MimeType),
+		ExpiresAt:        info.ExpiresAt,
+		PreviewAvailable: false,
+	}
+	if info.DownloadURL != nil {
+		meta.DownloadURL = strings.TrimSpace(*info.DownloadURL)
+	}
+	if meta.DownloadURL != "" && (info.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(meta.MimeType, info.Filename)) {
+		meta.Status = domain.AssetWorkbenchPreviewStatusReady
+		meta.PreviewURL = meta.DownloadURL
+		meta.PreviewAvailable = true
+	}
+	return meta, nil
+}
+
 func (s *Service) SystemAssetBatchDownloadManifest(ctx context.Context, actor domain.RequestActor, params SystemAssetBatchDownloadParams) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can batch download system assets from workbench.", nil)
@@ -4726,6 +4774,22 @@ func inferFileType(filename, mimeType string) string {
 			return ext
 		}
 		return "file"
+	}
+}
+
+func isWorkbenchSystemAssetDirectPreviewable(mimeType string, filename string) bool {
+	mime := strings.ToLower(strings.TrimSpace(mimeType))
+	if strings.HasPrefix(mime, "image/") {
+		return !strings.Contains(mime, "photoshop") && !strings.Contains(mime, "vnd.adobe")
+	}
+	if mime == "application/pdf" {
+		return true
+	}
+	switch strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".") {
+	case "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "pdf":
+		return true
+	default:
+		return false
 	}
 }
 

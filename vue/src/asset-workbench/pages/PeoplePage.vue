@@ -238,6 +238,9 @@ onMounted(() => {
         row-key="id"
         storage-key="people-profiles"
         group-by="worker_type_label"
+        row-clickable
+        :selected-row-key="selectedProfile?.id"
+        @row-click="selectProfile"
       >
         <template #cell="{ row, column, value }">
           <button

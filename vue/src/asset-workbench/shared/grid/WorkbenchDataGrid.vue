@@ -27,14 +27,22 @@ const props = withDefaults(
     groupLabels?: Record<string, string>
     height?: number
     rowHeight?: number
+    rowClickable?: boolean
+    selectedRowKey?: string | number | null
   }>(),
   {
     groupBy: '',
     groupLabels: () => ({}),
     height: 420,
     rowHeight: 36,
+    rowClickable: false,
+    selectedRowKey: null,
   },
 )
+
+const emit = defineEmits<{
+  rowClick: [row: GridRow]
+}>()
 
 const scrollTop = ref(0)
 const columnState = ref<GridColumnState>({ order: [], widths: {} })
@@ -137,6 +145,15 @@ function cellValue(row: GridRow, column: WorkbenchDataGridColumn) {
   return row[column.key]
 }
 
+function isSelectedRow(row: GridRow) {
+  return props.selectedRowKey != null && String(row[props.rowKey]) === String(props.selectedRowKey)
+}
+
+function activateRow(row: GridRow) {
+  if (!props.rowClickable) return
+  emit('rowClick', row)
+}
+
 onMounted(loadColumnState)
 
 watch(
@@ -183,7 +200,18 @@ watch(
         <div v-if="item.type === 'group'" class="aw-data-grid__group">
           {{ item.label }}
         </div>
-        <div v-else class="aw-data-grid__row">
+        <div
+          v-else
+          class="aw-data-grid__row"
+          :class="{
+            'aw-data-grid__row--clickable': rowClickable,
+            'aw-data-grid__row--selected': isSelectedRow(item.row),
+          }"
+          :tabindex="rowClickable ? 0 : undefined"
+          @click="activateRow(item.row)"
+          @keydown.enter.prevent="activateRow(item.row)"
+          @keydown.space.prevent="activateRow(item.row)"
+        >
           <div
             v-for="column in orderedColumns"
             :key="column.key"

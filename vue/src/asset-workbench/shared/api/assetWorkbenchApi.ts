@@ -421,6 +421,8 @@ export interface ErrorImportBatchRow {
 export interface AssetWorkbenchEventRow {
   id: number
   actor_user_id?: number
+  actor_display_name?: string
+  actor_username?: string
   event_type: string
   entity_type: string
   entity_id?: number
@@ -474,6 +476,18 @@ export interface SystemAssetDownloadInfo {
   file_size: number
   mime_type?: string
   expires_at?: string
+}
+
+export interface SystemAssetPreviewMeta {
+  asset_id: number
+  status: string
+  preparing: boolean
+  preview_url?: string
+  download_url?: string
+  expires_at?: string
+  mime_type?: string
+  filename?: string
+  preview_available: boolean
 }
 
 export interface SystemAssetRow {
@@ -1055,6 +1069,11 @@ export const assetWorkbenchApi = {
 
   async downloadSystemAsset(assetId: number, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
     const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/asset-workbench/system-assets/${assetId}/download`, { signal })
+    return unwrap(res.data)
+  },
+
+  async previewSystemAsset(assetId: number, signal?: AbortSignal): Promise<SystemAssetPreviewMeta> {
+    const res = await http.get<ApiEnvelope<SystemAssetPreviewMeta>>(`/v1/asset-workbench/system-assets/${assetId}/preview`, { signal })
     return unwrap(res.data)
   },
 

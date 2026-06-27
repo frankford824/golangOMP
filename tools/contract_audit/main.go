@@ -135,6 +135,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/asset-workbench/submissions"):                               "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/submissions/:submission_id"):                "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/system-assets/:asset_id/download"):          "asset-workbench-mounted-route-contract-pending",
+	knownGapKey("GET", "/v1/asset-workbench/system-assets/:asset_id/preview"):           "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/system-search"):                             "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/template-assignments"):                      "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/templates"):                                 "asset-workbench-mounted-route-contract-pending",

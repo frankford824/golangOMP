@@ -30,21 +30,28 @@ const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
 const { logout } = useWorkbenchSession()
 
 const navItems = [
-  { to: '/', label: '总览', icon: LayoutDashboard, requires: ['asset.workbench.bootstrap'] },
-  { to: '/upload', label: '上传', icon: FileUp, requires: ['asset.workbench.submit'] },
-  { to: '/submissions', label: '维护', icon: Boxes, requires: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'] },
-  { to: '/materials', label: '素材', icon: Library, requires: ['asset.workbench.system_search'] },
-  { to: '/cost-center', label: '成本', icon: Calculator, requires: ['asset.workbench.cost_center.manage'] },
-  { to: '/template-assignments', label: '下发', icon: Send, requires: ['asset.workbench.template.assign'] },
-  { to: '/settlement', label: '结算', icon: ReceiptText, requires: ['asset.workbench.settlement'] },
-  { to: '/people', label: '人员', icon: UsersRound, requires: ['asset.workbench.profile', 'asset.workbench.profile.manage'] },
-  { to: '/members', label: '权限', icon: UserRound, requires: ['asset.workbench.member.identity'] },
-  { to: '/events', label: '日志', icon: ScrollText, requires: ['asset.workbench.manage', 'asset.workbench.cost_center.manage', 'asset.workbench.settlement'] },
-  { to: '/account', label: '账号', icon: UserRound, requires: ['asset.workbench.bootstrap'] },
+  { group: '工作台', to: '/', label: '总览', icon: LayoutDashboard, requires: ['asset.workbench.bootstrap'] },
+  { group: '工作台', to: '/upload', label: '交作品', icon: FileUp, requires: ['asset.workbench.submit'] },
+  { group: '工作台', to: '/submissions', label: '维护区', icon: Boxes, requires: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'] },
+  { group: '工作台', to: '/materials', label: '素材库', icon: Library, requires: ['asset.workbench.system_search'] },
+  { group: '管理', to: '/template-assignments', label: '作品下发', icon: Send, requires: ['asset.workbench.template.assign'] },
+  { group: '管理', to: '/cost-center', label: '成本中心', icon: Calculator, requires: ['asset.workbench.cost_center.manage'] },
+  { group: '管理', to: '/settlement', label: '结算工资', icon: ReceiptText, requires: ['asset.workbench.settlement'] },
+  { group: '管理', to: '/people', label: '人员档案', icon: UsersRound, requires: ['asset.workbench.profile', 'asset.workbench.profile.manage'] },
+  { group: '管理', to: '/members', label: '成员权限', icon: UserRound, requires: ['asset.workbench.member.identity'] },
+  { group: '管理', to: '/events', label: '操作日志', icon: ScrollText, requires: ['asset.workbench.manage', 'asset.workbench.cost_center.manage', 'asset.workbench.settlement'] },
 ]
 
 const activeLabel = computed(() => String(route.meta.label || '资产工作台'))
 const visibleNavItems = computed(() => navItems.filter((item) => hasAnyCapability(item.requires)))
+const visibleNavGroups = computed(() => {
+  const groups: Array<{ label: string; items: typeof navItems }> = []
+  for (const label of ['工作台', '管理']) {
+    const items = visibleNavItems.value.filter((item) => item.group === label)
+    if (items.length) groups.push({ label, items })
+  }
+  return groups
+})
 const filteredCommandItems = computed(() => {
   const query = commandQuery.value.trim().toLowerCase()
   const source = visibleNavItems.value
@@ -170,16 +177,19 @@ watch(commandQuery, () => {
       </div>
 
       <nav class="aw-shell__nav">
-        <RouterLink
-          v-for="item in visibleNavItems"
-          :key="item.to"
-          :to="item.to"
-          class="aw-nav-item"
-          active-class="aw-nav-item--active"
-        >
-          <component :is="item.icon" :size="18" stroke-width="2" aria-hidden="true" />
-          <span>{{ item.label }}</span>
-        </RouterLink>
+        <section v-for="group in visibleNavGroups" :key="group.label" class="aw-nav-group">
+          <p>{{ group.label }}</p>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.to"
+            :to="item.to"
+            class="aw-nav-item"
+            active-class="aw-nav-item--active"
+          >
+            <component :is="item.icon" :size="18" stroke-width="2" aria-hidden="true" />
+            <span>{{ item.label }}</span>
+          </RouterLink>
+        </section>
       </nav>
     </aside>
 
