@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:asset": "vite --config vite.asset.config.ts",
     "build": "vue-tsc -b && vite build",
+    "build:asset": "vue-tsc -p tsconfig.asset.json && vite build --config vite.asset.config.ts",
     "build:prod": "vue-tsc -b && vite build --mode production",
     "build:test": "vue-tsc -b && vite build --mode test",
     "preview": "vite preview",
@@ -14,6 +16,7 @@
     "a11y:audit": "node scripts/accessibility-audit.mjs",
     "design:audit": "node scripts/design-system-audit.mjs",
     "load:audit": "node scripts/large-surface-audit.mjs",
+    "asset:audit": "node scripts/asset-workbench-architecture-audit.mjs",
     "visual:baseline": "node scripts/visual-baseline.mjs baseline",
     "visual:compare": "node scripts/visual-baseline.mjs compare",
     "gen:api-types": "tsx scripts/gen_api_types.ts",
@@ -21,13 +24,17 @@
   },
   "dependencies": {
     "@fontpkg/source-han-sans-cn-vf": "^2.5.2",
+    "@fontsource/geist-mono": "^5.2.8",
+    "@fontsource/geist-sans": "^5.2.5",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/material-symbols-outlined": "^5.2.45",
-    "axios": "^1.13.6",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "axios": "^1.18.1",
     "echarts": "^5.6.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "lucide-vue-next": "^0.577.0",
+    "misans": "^4.1.0",
     "naive-ui": "^2.44.1",
     "pinia": "^2.1.0",
     "vue": "^3.4.0",
@@ -43,10 +50,18 @@
     "playwright": "^1.61.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.4",
     "typescript": "~5.9.3",
-    "vite": "^8.0.12",
+    "vite": "^8.1.0",
     "vitest": "^4.1.4",
     "vue-tsc": "^2.0.0"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1",
+    "form-data": "^4.0.6",
+    "js-yaml": "^4.2.0",
+    "tmp": "^0.2.7",
+    "undici": "^7.28.0",
+    "uuid": "^11.1.1"
   }
 }

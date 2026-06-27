@@ -28,6 +28,7 @@ type Config struct {
 	UploadService  UploadServiceConfig
 	OSSDirect      OSSDirectConfig
 	ExternalAssets ExternalAssetsConfig
+	AssetWorkbench AssetWorkbenchConfig
 	AssetCleanup   AssetCleanupConfig
 	AI             AIConfig
 	BusinessTrend  BusinessTrendConfig
@@ -104,6 +105,22 @@ type ExternalAssetsConfig struct {
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	LocalPathMappings   string
+}
+
+type AssetWorkbenchConfig struct {
+	CookieDomain                string
+	Timezone                    string
+	OSSPrefix                   string
+	UploadSessionTTL            time.Duration
+	PreviewWorkerEnabled        bool
+	PreviewWorkerInterval       time.Duration
+	PreviewWorkerLimit          int
+	PreviewWorkerLeaseTTL       time.Duration
+	PreviewWorkerMaxAttempts    int
+	PreviewWorkerRetryBaseDelay time.Duration
+	UploadExpiryWorkerEnabled   bool
+	UploadExpiryWorkerInterval  time.Duration
+	UploadExpiryWorkerLimit     int
 }
 
 type ServerConfig struct {
@@ -309,6 +326,21 @@ func Load() (*Config, error) {
 			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
 			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
 			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),
+		},
+		AssetWorkbench: AssetWorkbenchConfig{
+			CookieDomain:                getEnv("ASSET_COOKIE_DOMAIN", ""),
+			Timezone:                    getEnv("ASSET_WORKBENCH_TIMEZONE", "Asia/Shanghai"),
+			OSSPrefix:                   getEnv("ASSET_WORKBENCH_OSS_PREFIX", "asset-workbench"),
+			UploadSessionTTL:            mustParseDuration(getEnv("ASSET_WORKBENCH_UPLOAD_SESSION_TTL", "24h")),
+			PreviewWorkerEnabled:        mustParseBool(getEnv("ASSET_WORKBENCH_PREVIEW_WORKER_ENABLED", "false")),
+			PreviewWorkerInterval:       mustParseDuration(getEnv("ASSET_WORKBENCH_PREVIEW_WORKER_INTERVAL", "15s")),
+			PreviewWorkerLimit:          mustParseInt(getEnv("ASSET_WORKBENCH_PREVIEW_WORKER_LIMIT", "8")),
+			PreviewWorkerLeaseTTL:       mustParseDuration(getEnv("ASSET_WORKBENCH_PREVIEW_WORKER_LEASE_TTL", "5m")),
+			PreviewWorkerMaxAttempts:    mustParseInt(getEnv("ASSET_WORKBENCH_PREVIEW_WORKER_MAX_ATTEMPTS", "5")),
+			PreviewWorkerRetryBaseDelay: mustParseDuration(getEnv("ASSET_WORKBENCH_PREVIEW_WORKER_RETRY_BASE_DELAY", "30s")),
+			UploadExpiryWorkerEnabled:   mustParseBool(getEnv("ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_ENABLED", "true")),
+			UploadExpiryWorkerInterval:  mustParseDuration(getEnv("ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_INTERVAL", "10m")),
+			UploadExpiryWorkerLimit:     mustParseInt(getEnv("ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_LIMIT", "100")),
 		},
 		AssetCleanup: AssetCleanupConfig{
 			Enabled: mustParseBool(getEnv("ASSET_CLEANUP_ENABLED", "false")),

@@ -9,6 +9,7 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 	baseservice "workflow/service"
+	externalassets "workflow/service/external_assets"
 )
 
 func TestDownloadAutoCleanedReturnsGone(t *testing.T) {
@@ -97,6 +98,18 @@ func TestDownloadLatestFallsBackToSKUAndFileNameWhenOriginalMissing(t *testing.T
 	}
 	if got := info.Filename; got != "NSKT000277-source.psd" {
 		t.Fatalf("Filename = %q, want SKU-prefixed fallback", got)
+	}
+}
+
+func TestExternalDownloadAndPreviewDisabledReturnNotFound(t *testing.T) {
+	svc := NewService(&fakeSearchRepo{}, nil, nil)
+	svc.SetExternalAssetService(externalassets.NewService(nil, externalassets.Config{Enabled: false}, nil))
+
+	if info, appErr := svc.DownloadExternal(context.Background(), 42); info != nil || appErr == nil || appErr.Code != domain.ErrCodeNotFound {
+		t.Fatalf("DownloadExternal info=%#v error=%#v, want not found", info, appErr)
+	}
+	if info, appErr := svc.PreviewExternal(context.Background(), 42); info != nil || appErr == nil || appErr.Code != domain.ErrCodeNotFound {
+		t.Fatalf("PreviewExternal info=%#v error=%#v, want not found", info, appErr)
 	}
 }
 

@@ -21,7 +21,7 @@ const (
 	wsTokenCookiePath         = "/ws"
 )
 
-func setAssetFilesTokenCookie(c *gin.Context, result *domain.AuthResult) {
+func setAssetFilesTokenCookie(c *gin.Context, result *domain.AuthResult, cookieDomain string) {
 	if result == nil || result.Session == nil || strings.TrimSpace(result.Session.Token) == "" {
 		return
 	}
@@ -31,26 +31,26 @@ func setAssetFilesTokenCookie(c *gin.Context, result *domain.AuthResult) {
 	}
 	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(AssetFilesTokenCookie, result.Session.Token, maxAge, assetFilesTokenCookiePath, "", secure, true)
-	c.SetCookie(WSTokenCookie, result.Session.Token, maxAge, wsTokenCookiePath, "", secure, true)
+	c.SetCookie(AssetFilesTokenCookie, result.Session.Token, maxAge, assetFilesTokenCookiePath, cookieDomain, secure, true)
+	c.SetCookie(WSTokenCookie, result.Session.Token, maxAge, wsTokenCookiePath, cookieDomain, secure, true)
 }
 
-func setAssetFilesRawTokenCookie(c *gin.Context, token string, maxAge int) {
+func setAssetFilesRawTokenCookie(c *gin.Context, token string, maxAge int, cookieDomain string) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return
 	}
 	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(AssetFilesTokenCookie, token, maxAge, assetFilesTokenCookiePath, "", secure, true)
-	c.SetCookie(WSTokenCookie, token, maxAge, wsTokenCookiePath, "", secure, true)
+	c.SetCookie(AssetFilesTokenCookie, token, maxAge, assetFilesTokenCookiePath, cookieDomain, secure, true)
+	c.SetCookie(WSTokenCookie, token, maxAge, wsTokenCookiePath, cookieDomain, secure, true)
 }
 
-func clearAssetFilesTokenCookie(c *gin.Context) {
+func clearAssetFilesTokenCookie(c *gin.Context, cookieDomain string) {
 	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(AssetFilesTokenCookie, "", -1, assetFilesTokenCookiePath, "", secure, true)
-	c.SetCookie(WSTokenCookie, "", -1, wsTokenCookiePath, "", secure, true)
+	c.SetCookie(AssetFilesTokenCookie, "", -1, assetFilesTokenCookiePath, cookieDomain, secure, true)
+	c.SetCookie(WSTokenCookie, "", -1, wsTokenCookiePath, cookieDomain, secure, true)
 }
 
 func bearerTokenFromHeader(header string) string {
@@ -66,11 +66,16 @@ func bearerTokenFromHeader(header string) string {
 }
 
 type AuthHandler struct {
-	svc service.IdentityService
+	svc               service.IdentityService
+	assetCookieDomain string
 }
 
-func NewAuthHandler(svc service.IdentityService) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc service.IdentityService, assetCookieDomains ...string) *AuthHandler {
+	assetCookieDomain := ""
+	if len(assetCookieDomains) > 0 {
+		assetCookieDomain = strings.TrimSpace(assetCookieDomains[0])
+	}
+	return &AuthHandler{svc: svc, assetCookieDomain: assetCookieDomain}
 }
 
 type registerReq struct {
@@ -124,7 +129,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
-	setAssetFilesTokenCookie(c, result)
+	setAssetFilesTokenCookie(c, result, h.assetCookieDomain)
 	respondCreated(c, result)
 }
 
@@ -151,7 +156,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
-	setAssetFilesTokenCookie(c, result)
+	setAssetFilesTokenCookie(c, result, h.assetCookieDomain)
 	respondOK(c, result)
 }
 
@@ -168,12 +173,12 @@ func (h *AuthHandler) RefreshAssetCookie(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil))
 		return
 	}
-	setAssetFilesRawTokenCookie(c, token, 0)
+	setAssetFilesRawTokenCookie(c, token, 0, h.assetCookieDomain)
 	respondOK(c, gin.H{"status": "ok"})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	clearAssetFilesTokenCookie(c)
+	clearAssetFilesTokenCookie(c, h.assetCookieDomain)
 	respondOK(c, gin.H{"status": "ok"})
 }
 

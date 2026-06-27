@@ -1,0 +1,1745 @@
+package assetworkbench
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/xuri/excelize/v2"
+
+	"workflow/domain"
+	"workflow/repo"
+	baseservice "workflow/service"
+	assetcenter "workflow/service/asset_center"
+)
+
+func testWorkbenchOSSDirect() *baseservice.OSSDirectService {
+	return baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        "https://oss-cn-hangzhou.aliyuncs.com",
+		PublicEndpoint:  "https://assets.example.com",
+		Bucket:          "workflow-assets",
+		AccessKeyID:     "test-id",
+		AccessKeySecret: "test-secret",
+		PresignExpiry:   15 * time.Minute,
+	})
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+type priceOnlyRepo struct {
+	repo.AssetWorkbenchRepo
+	price   *domain.AssetWorkbenchPriceMatrix
+	coupons []*domain.AssetWorkbenchPromoCoupon
+}
+
+func (r *priceOnlyRepo) FindActivePrice(context.Context, string, string, string, time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
+	return r.price, nil
+}
+
+func (r *priceOnlyRepo) ListActivePromoCoupons(context.Context, string, string, string, time.Time) ([]*domain.AssetWorkbenchPromoCoupon, error) {
+	return r.coupons, nil
+}
+
+type deductionOnlyRepo struct {
+	repo.AssetWorkbenchRepo
+	rule         *domain.AssetWorkbenchDeductionRule
+	welfareRules []*domain.AssetWorkbenchWelfareRule
+}
+
+func (r *deductionOnlyRepo) FindActiveDeductionRule(context.Context, string, string, string, time.Time) (*domain.AssetWorkbenchDeductionRule, error) {
+	return r.rule, nil
+}
+
+func (r *deductionOnlyRepo) FindActiveWelfareRules(context.Context, string, string, time.Time) ([]*domain.AssetWorkbenchWelfareRule, error) {
+	return r.welfareRules, nil
+}
+
+type errorImportRepo struct {
+	repo.AssetWorkbenchRepo
+	items   []*domain.AssetWorkbenchSubmissionItem
+	batch   *domain.AssetWorkbenchErrorImportBatch
+	records []*domain.AssetWorkbenchErrorRecord
+	events  []*domain.AssetWorkbenchEvent
+}
+
+func (r *errorImportRepo) ListSubmissionItemsByMonth(context.Context, string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
+	return r.items, nil
+}
+
+func (r *errorImportRepo) CreateErrorImportBatch(_ context.Context, _ repo.Tx, batch *domain.AssetWorkbenchErrorImportBatch) (*domain.AssetWorkbenchErrorImportBatch, error) {
+	copyBatch := *batch
+	copyBatch.ID = 9001
+	r.batch = &copyBatch
+	return &copyBatch, nil
+}
+
+func (r *errorImportRepo) CreateErrorRecord(_ context.Context, _ repo.Tx, record *domain.AssetWorkbenchErrorRecord) (*domain.AssetWorkbenchErrorRecord, error) {
+	copyRecord := *record
+	copyRecord.ID = int64(len(r.records) + 1)
+	r.records = append(r.records, &copyRecord)
+	return &copyRecord, nil
+}
+
+func (r *errorImportRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type supplementRepo struct {
+	repo.AssetWorkbenchRepo
+	items           []*domain.AssetWorkbenchSubmissionItem
+	supplements     []*domain.AssetWorkbenchSettlementSupplement
+	permissions     []*domain.AssetWorkbenchSupplementPermission
+	confirmedMonths map[int64][]string
+	created         *domain.AssetWorkbenchSettlementSupplement
+	events          []*domain.AssetWorkbenchEvent
+}
+
+func (r *supplementRepo) ListSubmissionItemsByMonth(context.Context, string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
+	return r.items, nil
+}
+
+func (r *supplementRepo) ListSettlementSupplements(_ context.Context, filter repo.AssetWorkbenchSettlementSupplementFilter) ([]*domain.AssetWorkbenchSettlementSupplement, int64, error) {
+	items := make([]*domain.AssetWorkbenchSettlementSupplement, 0, len(r.supplements))
+	for _, item := range r.supplements {
+		if item == nil {
+			continue
+		}
+		if filter.PayeeUserID != nil && item.PayeeUserID != *filter.PayeeUserID {
+			continue
+		}
+		if filter.BusinessMonth != "" && item.BusinessMonth != filter.BusinessMonth {
+			continue
+		}
+		if filter.OrderNo != "" && item.OrderNo != filter.OrderNo {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (r *supplementRepo) CreateSettlementSupplement(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSettlementSupplement) (*domain.AssetWorkbenchSettlementSupplement, error) {
+	copyItem := *item
+	copyItem.ID = 7001
+	r.created = &copyItem
+	return &copyItem, nil
+}
+
+func (r *supplementRepo) GetSupplementPermission(_ context.Context, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error) {
+	for _, item := range r.permissions {
+		if item != nil && item.PayeeUserID == payeeUserID && item.BusinessMonth == businessMonth {
+			return item, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *supplementRepo) ListSupplementPermissions(_ context.Context, filter repo.AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, error) {
+	items := make([]*domain.AssetWorkbenchSupplementPermission, 0, len(r.permissions))
+	for _, item := range r.permissions {
+		if item == nil {
+			continue
+		}
+		if filter.PayeeUserID != nil && item.PayeeUserID != *filter.PayeeUserID {
+			continue
+		}
+		if filter.BusinessMonth != "" && item.BusinessMonth != filter.BusinessMonth {
+			continue
+		}
+		if filter.Enabled != nil && item.Enabled != *filter.Enabled {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (r *supplementRepo) UpsertSupplementPermission(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSupplementPermission) (*domain.AssetWorkbenchSupplementPermission, error) {
+	copyItem := *item
+	if copyItem.ID == 0 {
+		copyItem.ID = int64(len(r.permissions) + 1)
+	}
+	for i, existing := range r.permissions {
+		if existing != nil && existing.PayeeUserID == item.PayeeUserID && existing.BusinessMonth == item.BusinessMonth {
+			r.permissions[i] = &copyItem
+			return &copyItem, nil
+		}
+	}
+	r.permissions = append(r.permissions, &copyItem)
+	return &copyItem, nil
+}
+
+func (r *supplementRepo) HasConfirmedSettlementForPayeeMonth(_ context.Context, payeeUserID int64, businessMonth string) (bool, error) {
+	for _, month := range r.confirmedMonths[payeeUserID] {
+		if month == businessMonth {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *supplementRepo) ListConfirmedSettlementMonthsByPayee(_ context.Context, payeeUserID int64) ([]string, error) {
+	return append([]string(nil), r.confirmedMonths[payeeUserID]...), nil
+}
+
+func (r *supplementRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type adjustmentRepo struct {
+	repo.AssetWorkbenchRepo
+	batch          *domain.AssetWorkbenchSettlementBatch
+	adjustment     *domain.AssetWorkbenchSettlementAdjustment
+	settlementItem *domain.AssetWorkbenchSettlementItem
+	appliedAmount  float64
+	events         []*domain.AssetWorkbenchEvent
+}
+
+func (r *adjustmentRepo) LockSettlementBatch(_ context.Context, _ repo.Tx, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error) {
+	if r.batch == nil || r.batch.ID != batchID {
+		return nil, sql.ErrNoRows
+	}
+	copyBatch := *r.batch
+	return &copyBatch, nil
+}
+
+func (r *adjustmentRepo) CreateSettlementAdjustment(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSettlementAdjustment) (*domain.AssetWorkbenchSettlementAdjustment, error) {
+	copyItem := *item
+	copyItem.ID = 8001
+	r.adjustment = &copyItem
+	return &copyItem, nil
+}
+
+func (r *adjustmentRepo) CreateSettlementItem(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSettlementItem) (*domain.AssetWorkbenchSettlementItem, error) {
+	copyItem := *item
+	copyItem.ID = 8101
+	r.settlementItem = &copyItem
+	return &copyItem, nil
+}
+
+func (r *adjustmentRepo) ApplySettlementBatchAdjustment(_ context.Context, _ repo.Tx, _ int64, signedAmount float64) error {
+	r.appliedAmount += signedAmount
+	if r.batch != nil {
+		r.batch.AdjustmentAmount += signedAmount
+		r.batch.NetAmount += signedAmount
+	}
+	return nil
+}
+
+func (r *adjustmentRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type settlementBatchRepo struct {
+	repo.AssetWorkbenchRepo
+	items                 []*domain.AssetWorkbenchSubmissionItem
+	supplements           []*domain.AssetWorkbenchSettlementSupplement
+	createdBatch          *domain.AssetWorkbenchSettlementBatch
+	settlementItems       []*domain.AssetWorkbenchSettlementItem
+	attachedItemIDs       []int64
+	attachedSupplementIDs []int64
+	cancelledBatchID      int64
+	cancelReason          string
+	confirmedBatchID      int64
+	events                []*domain.AssetWorkbenchEvent
+}
+
+func (r *settlementBatchRepo) ListErrorRecordsByMonth(context.Context, string) ([]*domain.AssetWorkbenchErrorRecord, error) {
+	return nil, nil
+}
+
+func (r *settlementBatchRepo) LockSettleableItems(context.Context, repo.Tx, string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
+	return r.items, nil
+}
+
+func (r *settlementBatchRepo) LockSettleableSupplements(context.Context, repo.Tx, string) ([]*domain.AssetWorkbenchSettlementSupplement, error) {
+	return r.supplements, nil
+}
+
+func (r *settlementBatchRepo) FindActiveWelfareRules(context.Context, string, string, time.Time) ([]*domain.AssetWorkbenchWelfareRule, error) {
+	return nil, nil
+}
+
+func (r *settlementBatchRepo) CreateSettlementBatch(_ context.Context, _ repo.Tx, batch *domain.AssetWorkbenchSettlementBatch) (*domain.AssetWorkbenchSettlementBatch, error) {
+	copyBatch := *batch
+	copyBatch.ID = 8801
+	r.createdBatch = &copyBatch
+	return &copyBatch, nil
+}
+
+func (r *settlementBatchRepo) CreateSettlementItem(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSettlementItem) (*domain.AssetWorkbenchSettlementItem, error) {
+	copyItem := *item
+	copyItem.ID = int64(len(r.settlementItems) + 1)
+	r.settlementItems = append(r.settlementItems, &copyItem)
+	return &copyItem, nil
+}
+
+func (r *settlementBatchRepo) AttachItemsToSettlementBatch(_ context.Context, _ repo.Tx, batchID int64, itemIDs []int64) error {
+	r.attachedItemIDs = append([]int64(nil), itemIDs...)
+	return nil
+}
+
+func (r *settlementBatchRepo) AttachSupplementsToSettlementBatch(_ context.Context, _ repo.Tx, batchID int64, supplementIDs []int64) error {
+	r.attachedSupplementIDs = append([]int64(nil), supplementIDs...)
+	return nil
+}
+
+func (r *settlementBatchRepo) ConfirmSettlementBatch(_ context.Context, _ repo.Tx, batchID int64, _ int64, _ time.Time) error {
+	r.confirmedBatchID = batchID
+	return nil
+}
+
+func (r *settlementBatchRepo) CancelGeneratedSettlementBatch(_ context.Context, _ repo.Tx, batchID int64, _ int64, reason string, _ time.Time) error {
+	r.cancelledBatchID = batchID
+	r.cancelReason = reason
+	return nil
+}
+
+func (r *settlementBatchRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type registerIdentityStub struct {
+	params baseserviceRegisterParams
+}
+
+type baseserviceRegisterParams struct {
+	username    string
+	displayName string
+	mobile      string
+}
+
+func (s *registerIdentityStub) RegisterAssetWorkbenchUser(_ context.Context, p baseservice.RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError) {
+	s.params = baseserviceRegisterParams{username: p.Username, displayName: p.DisplayName, mobile: p.Mobile}
+	return &domain.AuthResult{
+		User: &domain.User{
+			ID:          77,
+			Username:    p.Username,
+			DisplayName: p.DisplayName,
+			Roles:       []domain.Role{domain.RoleAssetSubmitter},
+		},
+		Session: &domain.AuthSession{Token: "token-77"},
+	}, nil
+}
+
+type registerProfileRepo struct {
+	repo.AssetWorkbenchRepo
+	profile      *domain.AssetWorkbenchProfile
+	gradePeriods []*domain.AssetWorkbenchGradePeriod
+	events       []*domain.AssetWorkbenchEvent
+}
+
+func (r *registerProfileRepo) UpsertProfile(_ context.Context, _ repo.Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error) {
+	copyProfile := *profile
+	copyProfile.ID = 100
+	r.profile = &copyProfile
+	return &copyProfile, nil
+}
+
+func (r *registerProfileRepo) AppendGradePeriod(_ context.Context, _ repo.Tx, period *domain.AssetWorkbenchGradePeriod) (*domain.AssetWorkbenchGradePeriod, error) {
+	copyPeriod := *period
+	copyPeriod.ID = int64(len(r.gradePeriods) + 1)
+	r.gradePeriods = append(r.gradePeriods, &copyPeriod)
+	return &copyPeriod, nil
+}
+
+func (r *registerProfileRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type profileListRepo struct {
+	repo.AssetWorkbenchRepo
+	items        []*domain.AssetWorkbenchProfile
+	saved        *domain.AssetWorkbenchProfile
+	gradePeriods []*domain.AssetWorkbenchGradePeriod
+	events       []*domain.AssetWorkbenchEvent
+}
+
+func (r *profileListRepo) ListProfiles(context.Context, repo.AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error) {
+	return r.items, int64(len(r.items)), nil
+}
+
+func (r *profileListRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
+	for _, item := range r.items {
+		if item != nil && item.UserID == userID {
+			copyItem := *item
+			return &copyItem, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *profileListRepo) UpsertProfile(_ context.Context, _ repo.Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error) {
+	copyProfile := *profile
+	if copyProfile.ID == 0 {
+		copyProfile.ID = 100
+	}
+	r.saved = &copyProfile
+	return &copyProfile, nil
+}
+
+func (r *profileListRepo) AppendGradePeriod(_ context.Context, _ repo.Tx, period *domain.AssetWorkbenchGradePeriod) (*domain.AssetWorkbenchGradePeriod, error) {
+	copyPeriod := *period
+	copyPeriod.ID = int64(len(r.gradePeriods) + 1)
+	r.gradePeriods = append(r.gradePeriods, &copyPeriod)
+	return &copyPeriod, nil
+}
+
+func (r *profileListRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type assetWorkbenchTestTx struct{}
+
+func (assetWorkbenchTestTx) IsTx() {}
+
+type assetWorkbenchTestTxRunner struct{}
+
+func (assetWorkbenchTestTxRunner) RunInTx(ctx context.Context, fn func(tx repo.Tx) error) error {
+	return fn(assetWorkbenchTestTx{})
+}
+
+type downloadFileRepo struct {
+	repo.AssetWorkbenchRepo
+	files  map[int64]*domain.AssetWorkbenchSubmissionFile
+	events []*domain.AssetWorkbenchEvent
+}
+
+func (r *downloadFileRepo) GetSubmissionFile(_ context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error) {
+	file := r.files[fileID]
+	if file == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyFile := *file
+	return &copyFile, nil
+}
+
+func (r *downloadFileRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type systemAssetDownloaderStub struct {
+	downloadCalls int
+	batchCalls    int
+	batchAssetIDs []int64
+}
+
+func (s *systemAssetDownloaderStub) DownloadLatest(_ context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.downloadCalls++
+	url := "https://assets.example.com/system/" + strconv.FormatInt(assetID, 10)
+	return &domain.AssetDownloadInfo{
+		DownloadMode: domain.AssetDownloadModeDirect,
+		DownloadURL:  &url,
+		Filename:     "system-asset.psd",
+		FileSize:     2048,
+		MimeType:     "image/vnd.adobe.photoshop",
+	}, nil
+}
+
+func (s *systemAssetDownloaderStub) BuildBatchDownloadManifest(_ context.Context, assetIDs []int64, _ ...assetcenter.BatchDownloadOption) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
+	s.batchCalls++
+	s.batchAssetIDs = append([]int64(nil), assetIDs...)
+	items := make([]assetcenter.BatchDownloadItem, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		items = append(items, assetcenter.BatchDownloadItem{
+			AssetID:     assetID,
+			TaskID:      assetID + 100,
+			Filename:    "system-asset-" + strconv.FormatInt(assetID, 10) + ".psd",
+			FileSize:    2048,
+			DownloadURL: "https://assets.example.com/system/" + strconv.FormatInt(assetID, 10),
+		})
+	}
+	return &assetcenter.BatchDownloadManifest{
+		Items:        items,
+		SuccessCount: len(items),
+		TotalSize:    int64(len(items)) * 2048,
+	}, nil
+}
+
+type itemActionRepo struct {
+	repo.AssetWorkbenchRepo
+	items        map[int64]*domain.AssetWorkbenchSubmissionItem
+	price        *domain.AssetWorkbenchPriceMatrix
+	events       []*domain.AssetWorkbenchEvent
+	refreshCalls int
+}
+
+func (r *itemActionRepo) GetSubmissionItem(_ context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error) {
+	item := r.items[itemID]
+	if item == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyItem := *item
+	return &copyItem, nil
+}
+
+func (r *itemActionRepo) UpdateSubmissionItemQCStatus(_ context.Context, _ repo.Tx, itemID int64, qcStatus string) (*domain.AssetWorkbenchSubmissionItem, error) {
+	item := r.items[itemID]
+	if item == nil {
+		return nil, sql.ErrNoRows
+	}
+	if item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.CurrentSettlementBatchID != nil || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "not mutable", nil)
+	}
+	item.QCStatus = qcStatus
+	copyItem := *item
+	return &copyItem, nil
+}
+
+func (r *itemActionRepo) VoidSubmissionItem(_ context.Context, _ repo.Tx, itemID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmissionItem, error) {
+	item := r.items[itemID]
+	if item == nil {
+		return nil, sql.ErrNoRows
+	}
+	if item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.CurrentSettlementBatchID != nil || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "not mutable", nil)
+	}
+	item.QCStatus = domain.AssetWorkbenchSubmissionStatusVoided
+	item.VoidedAt = &at
+	item.VoidedBy = &actorID
+	item.VoidReason = reason
+	copyItem := *item
+	return &copyItem, nil
+}
+
+func (r *itemActionRepo) UpdateSubmissionItemPricing(_ context.Context, _ repo.Tx, next *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
+	item := r.items[next.ID]
+	if item == nil {
+		return nil, sql.ErrNoRows
+	}
+	if item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.CurrentSettlementBatchID != nil || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "not mutable", nil)
+	}
+	item.BasePriceRuleID = next.BasePriceRuleID
+	item.BaseUnitPrice = next.BaseUnitPrice
+	item.PromoCouponID = next.PromoCouponID
+	item.PromoSnapshot = next.PromoSnapshot
+	item.PricingSnapshot = next.PricingSnapshot
+	item.GrossAmount = next.GrossAmount
+	item.PricingStatus = next.PricingStatus
+	copyItem := *item
+	return &copyItem, nil
+}
+
+func (r *itemActionRepo) RefreshSubmissionTotals(_ context.Context, _ repo.Tx, _ int64) error {
+	r.refreshCalls++
+	return nil
+}
+
+func (r *itemActionRepo) FindActivePrice(context.Context, string, string, string, time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
+	if r.price == nil {
+		return nil, sql.ErrNoRows
+	}
+	return r.price, nil
+}
+
+func (r *itemActionRepo) ListActivePromoCoupons(context.Context, string, string, string, time.Time) ([]*domain.AssetWorkbenchPromoCoupon, error) {
+	return nil, nil
+}
+
+func (r *itemActionRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+func TestRegisterCreatesPendingProfileFromSelfRegistration(t *testing.T) {
+	identity := &registerIdentityStub{}
+	workbenchRepo := &registerProfileRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithIdentityRegistrar(identity),
+	)
+
+	result, appErr := svc.Register(context.Background(), RegisterParams{
+		Account:       "piece_worker",
+		Name:          "计件人员",
+		Phone:         "13800000991",
+		Password:      "Pass1234",
+		Province:      "浙江",
+		City:          "杭州",
+		IDCard:        "330100199001010000",
+		AlipayAccount: "piece-worker@example.com",
+	})
+	if appErr != nil {
+		t.Fatalf("Register() error = %+v", appErr)
+	}
+	if result == nil || result.Auth == nil || result.Auth.Session == nil || result.Auth.Session.Token != "token-77" {
+		t.Fatalf("Register() result = %+v", result)
+	}
+	if identity.params.username != "piece_worker" || identity.params.displayName != "计件人员" || identity.params.mobile != "13800000991" {
+		t.Fatalf("identity params = %+v", identity.params)
+	}
+	if workbenchRepo.profile == nil {
+		t.Fatal("profile was not saved")
+	}
+	if workbenchRepo.profile.UserID != 77 || workbenchRepo.profile.Status != domain.AssetWorkbenchProfileStatusPending {
+		t.Fatalf("profile = %+v", workbenchRepo.profile)
+	}
+	if workbenchRepo.profile.WorkerType != domain.AssetWorkbenchWorkerTypeParttime || workbenchRepo.profile.JobGrade != "" {
+		t.Fatalf("profile worker snapshot = %+v", workbenchRepo.profile)
+	}
+	if !workbenchRepo.profile.PIICompleted {
+		t.Fatalf("profile should be marked PII completed when name, phone and id card are provided: %+v", workbenchRepo.profile)
+	}
+	if len(workbenchRepo.gradePeriods) != 1 || workbenchRepo.gradePeriods[0].WorkerType != domain.AssetWorkbenchWorkerTypeParttime {
+		t.Fatalf("grade periods = %+v", workbenchRepo.gradePeriods)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventProfileUpserted {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestListProfilesMasksPIIForListResponses(t *testing.T) {
+	phone := "13800000991"
+	idCard := "330100199001010000"
+	workbenchRepo := &profileListRepo{items: []*domain.AssetWorkbenchProfile{
+		{
+			ID:            10,
+			UserID:        77,
+			WorkerType:    domain.AssetWorkbenchWorkerTypeParttime,
+			JobGrade:      "J1",
+			RealName:      "计件人员",
+			Phone:         &phone,
+			IDCard:        &idCard,
+			AlipayAccount: "piece-worker@example.com",
+			Status:        domain.AssetWorkbenchProfileStatusActive,
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	items, total, appErr := svc.ListProfiles(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleHRAdmin},
+	}, repo.AssetWorkbenchProfileFilter{Page: 1, PageSize: 20})
+	if appErr != nil {
+		t.Fatalf("ListProfiles() error = %+v", appErr)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("ListProfiles() total=%d items=%d", total, len(items))
+	}
+	if items[0].Phone == nil || *items[0].Phone == phone {
+		t.Fatalf("phone should be masked, got %+v", items[0].Phone)
+	}
+	if items[0].IDCard == nil || *items[0].IDCard == idCard {
+		t.Fatalf("id_card should be masked, got %+v", items[0].IDCard)
+	}
+	if items[0].AlipayAccount == "piece-worker@example.com" {
+		t.Fatalf("alipay account should be masked, got %q", items[0].AlipayAccount)
+	}
+}
+
+func TestHRUpsertProfilePreservesExistingPIIWhenOmitted(t *testing.T) {
+	phone := "13800000991"
+	idCard := "330100199001010000"
+	onboardedAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	workbenchRepo := &profileListRepo{items: []*domain.AssetWorkbenchProfile{
+		{
+			ID:            10,
+			UserID:        77,
+			WorkerType:    domain.AssetWorkbenchWorkerTypeParttime,
+			JobGrade:      "J1",
+			RealName:      "计件人员",
+			Phone:         &phone,
+			IDCard:        &idCard,
+			Gender:        "female",
+			AlipayAccount: "piece-worker@example.com",
+			OnboardedAt:   &onboardedAt,
+			Status:        domain.AssetWorkbenchProfileStatusPending,
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	saved, appErr := svc.HRUpsertProfile(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleHRAdmin},
+	}, 77, UpsertProfileParams{
+		WorkerType: domain.AssetWorkbenchWorkerTypeFulltime,
+		JobGrade:   "P1",
+		RealName:   "计件人员",
+		Province:   "浙江",
+		City:       "杭州",
+		Status:     domain.AssetWorkbenchProfileStatusActive,
+		Reason:     "HR 定级",
+	})
+	if appErr != nil {
+		t.Fatalf("HRUpsertProfile() error = %+v", appErr)
+	}
+	if saved.Phone == nil || *saved.Phone != phone {
+		t.Fatalf("phone should be preserved, got %+v", saved.Phone)
+	}
+	if saved.IDCard == nil || *saved.IDCard != idCard {
+		t.Fatalf("id_card should be preserved, got %+v", saved.IDCard)
+	}
+	if saved.AlipayAccount != "piece-worker@example.com" || saved.Gender != "female" || saved.OnboardedAt == nil || !saved.OnboardedAt.Equal(onboardedAt) {
+		t.Fatalf("PII should be preserved, got %+v", saved)
+	}
+	if !saved.PIICompleted {
+		t.Fatalf("preserved PII should keep profile completed: %+v", saved)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].Reason != "HR 定级" {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestGetFileDownloadSignsVisibleFileAndWritesEvent(t *testing.T) {
+	workbenchRepo := &downloadFileRepo{files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+		10: {
+			ID:               10,
+			SubmissionID:     20,
+			SubmissionItemID: 30,
+			OwnerUserID:      77,
+			ObjectKey:        "asset-workbench/uploads/2026/06/s1/final.psd",
+			OriginalFilename: "final.psd",
+			MimeType:         "image/vnd.adobe.photoshop",
+			FileSize:         1024,
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithOSSDirect(testWorkbenchOSSDirect()),
+	)
+
+	meta, appErr := svc.GetFileDownload(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, 10)
+	if appErr != nil {
+		t.Fatalf("GetFileDownload() error = %+v", appErr)
+	}
+	if meta.DownloadURL == "" || meta.Filename != "final.psd" || meta.FileID != 10 {
+		t.Fatalf("download meta = %+v", meta)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventFileDownloaded {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestBatchDownloadManifestSkipsInvisibleAndDeduplicatesNames(t *testing.T) {
+	workbenchRepo := &downloadFileRepo{files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+		10: {
+			ID:               10,
+			SubmissionID:     20,
+			SubmissionItemID: 30,
+			OwnerUserID:      77,
+			ObjectKey:        "asset-workbench/uploads/2026/06/s1/final.psd",
+			OriginalFilename: "final.psd",
+		},
+		11: {
+			ID:               11,
+			SubmissionID:     21,
+			SubmissionItemID: 31,
+			OwnerUserID:      77,
+			ObjectKey:        "asset-workbench/uploads/2026/06/s2/final.psd",
+			OriginalFilename: "final.psd",
+		},
+		12: {
+			ID:               12,
+			SubmissionID:     22,
+			SubmissionItemID: 32,
+			OwnerUserID:      88,
+			ObjectKey:        "asset-workbench/uploads/2026/06/s3/hidden.psd",
+			OriginalFilename: "hidden.psd",
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithOSSDirect(testWorkbenchOSSDirect()),
+	)
+
+	manifest, appErr := svc.BuildFileBatchDownloadManifest(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, []int64{10, 11, 12})
+	if appErr != nil {
+		t.Fatalf("BuildFileBatchDownloadManifest() error = %+v", appErr)
+	}
+	if len(manifest.Items) != 2 || len(manifest.Failures) != 1 {
+		t.Fatalf("manifest = %+v", manifest)
+	}
+	if manifest.Items[0].Filename != "final.psd" || manifest.Items[1].Filename != "final-2.psd" {
+		t.Fatalf("filenames = %+v", manifest.Items)
+	}
+	if manifest.Failures[0].FileID != 12 || manifest.Failures[0].Reason != "not_visible" {
+		t.Fatalf("failures = %+v", manifest.Failures)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventFileBatchDownloaded {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestImportErrorRecordsMatchesUniqueItemsAndCountsAmbiguous(t *testing.T) {
+	payee100 := int64(100)
+	workbenchRepo := &errorImportRepo{items: []*domain.AssetWorkbenchSubmissionItem{
+		{ID: 501, PayeeUserID: 100, OrderNo: "ORD-1", QCStatus: domain.AssetWorkbenchSubmissionStatusSubmitted},
+		{ID: 502, PayeeUserID: 101, OrderNo: "ORD-1", QCStatus: domain.AssetWorkbenchSubmissionStatusSubmitted},
+		{ID: 503, PayeeUserID: 100, OrderNo: "ORD-2", QCStatus: domain.AssetWorkbenchSubmissionStatusChecked},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	batch, appErr := svc.ImportErrorRecords(context.Background(), actor, ImportErrorRecordsParams{
+		BusinessMonth:    "2026-06",
+		OriginalFilename: "errors.xlsx",
+		Records: []ImportErrorRecordInput{
+			{OrderNo: "ORD-1", PayeeUserID: &payee100, ErrorCount: 2},
+			{OrderNo: "ORD-1", ErrorCount: 3},
+			{OrderNo: "MISS", ErrorCount: 1},
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("ImportErrorRecords() error = %+v", appErr)
+	}
+	if batch.MatchedRows != 1 || batch.AmbiguousRows != 1 || batch.UnmatchedRows != 1 {
+		t.Fatalf("batch counts = matched:%d ambiguous:%d unmatched:%d", batch.MatchedRows, batch.AmbiguousRows, batch.UnmatchedRows)
+	}
+	if len(workbenchRepo.records) != 3 {
+		t.Fatalf("records = %+v", workbenchRepo.records)
+	}
+	if workbenchRepo.records[0].MatchStatus != domain.AssetWorkbenchErrorMatchStatusMatched || workbenchRepo.records[0].SubmissionItemID == nil || *workbenchRepo.records[0].SubmissionItemID != 501 {
+		t.Fatalf("matched record = %+v", workbenchRepo.records[0])
+	}
+	if workbenchRepo.records[1].MatchStatus != domain.AssetWorkbenchErrorMatchStatusAmbiguous || workbenchRepo.records[1].SubmissionItemID != nil {
+		t.Fatalf("ambiguous record = %+v", workbenchRepo.records[1])
+	}
+	if workbenchRepo.records[2].MatchStatus != domain.AssetWorkbenchErrorMatchStatusUnmatched || workbenchRepo.records[2].SubmissionItemID != nil {
+		t.Fatalf("unmatched record = %+v", workbenchRepo.records[2])
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventErrorImportCreated {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestCreateSettlementSupplementWritesDuplicateHintWithoutBlocking(t *testing.T) {
+	workbenchRepo := &supplementRepo{
+		items: []*domain.AssetWorkbenchSubmissionItem{
+			{ID: 501, PayeeUserID: 1001, OrderNo: "ORD-1", QCStatus: domain.AssetWorkbenchSubmissionStatusChecked},
+		},
+		supplements: []*domain.AssetWorkbenchSettlementSupplement{
+			{ID: 601, PayeeUserID: 1001, BusinessMonth: "2026-06", OrderNo: "ORD-1", Status: domain.AssetWorkbenchSupplementStatusApproved},
+		},
+		permissions: []*domain.AssetWorkbenchSupplementPermission{
+			{ID: 1, PayeeUserID: 1001, BusinessMonth: "2026-06", Enabled: true, GrantedBy: 99},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	created, appErr := svc.CreateSettlementSupplement(context.Background(), actor, CreateSettlementSupplementParams{
+		PayeeUserID:     1001,
+		BusinessMonth:   "2026-06",
+		OrderNo:         "ORD-1",
+		DifficultyClass: "A",
+		PageCount:       1,
+		GrossAmount:     12,
+		Status:          domain.AssetWorkbenchSupplementStatusApproved,
+	})
+	if appErr != nil {
+		t.Fatalf("CreateSettlementSupplement() error = %+v", appErr)
+	}
+	var hint map[string]interface{}
+	if err := json.Unmarshal(created.DuplicateHint, &hint); err != nil {
+		t.Fatalf("duplicate hint json: %v", err)
+	}
+	if hint["has_duplicates"] != true {
+		t.Fatalf("duplicate hint = %#v", hint)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSupplementCreated {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestBootstrapTreatsTwoPayrollRowsAsActiveContract(t *testing.T) {
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	result, appErr := svc.Bootstrap(context.Background(), domain.RequestActor{
+		ID:    1001,
+		Roles: []domain.Role{domain.RoleAssetSubmitter},
+	})
+	if appErr != nil {
+		t.Fatalf("Bootstrap() error = %+v", appErr)
+	}
+	for _, item := range result.DeferredBusinessItems {
+		if item.Key == "employee_month_two_rows" {
+			t.Fatalf("employee_month_two_rows should not be deferred after payroll_rows contract was implemented: %+v", result.DeferredBusinessItems)
+		}
+	}
+	if !containsString(result.ArchitectureGuardrails, "payroll_rows always emit normal piecework and supplement piecework rows per payee/month") {
+		t.Fatalf("guardrails = %+v, want payroll_rows contract", result.ArchitectureGuardrails)
+	}
+}
+
+func TestBootstrapDerivesWorkbenchCapabilitiesForHRAndSuperAdmin(t *testing.T) {
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	hrResult, appErr := svc.Bootstrap(context.Background(), domain.RequestActor{
+		ID:    1001,
+		Roles: []domain.Role{domain.RoleHRAdmin},
+	})
+	if appErr != nil {
+		t.Fatalf("Bootstrap(HRAdmin) error = %+v", appErr)
+	}
+	if !containsString(hrResult.Capabilities, "asset.workbench.profile.manage") {
+		t.Fatalf("HR capabilities = %+v, want profile.manage", hrResult.Capabilities)
+	}
+
+	superResult, appErr := svc.Bootstrap(context.Background(), domain.RequestActor{
+		ID:    1002,
+		Roles: []domain.Role{domain.RoleSuperAdmin},
+	})
+	if appErr != nil {
+		t.Fatalf("Bootstrap(SuperAdmin) error = %+v", appErr)
+	}
+	for _, capability := range []string{
+		"asset.workbench.submit",
+		"asset.workbench.system_search",
+		"asset.workbench.cost_center.manage",
+		"asset.workbench.settlement",
+	} {
+		if !containsString(superResult.Capabilities, capability) {
+			t.Fatalf("super admin capabilities = %+v, missing %s", superResult.Capabilities, capability)
+		}
+	}
+}
+
+func TestCreateSettlementSupplementRequiresOpenPermission(t *testing.T) {
+	workbenchRepo := &supplementRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	_, appErr := svc.CreateSettlementSupplement(context.Background(), actor, CreateSettlementSupplementParams{
+		PayeeUserID:     1001,
+		BusinessMonth:   "2026-06",
+		OrderNo:         "ORD-1",
+		DifficultyClass: "A",
+		PageCount:       1,
+		GrossAmount:     12,
+		Status:          domain.AssetWorkbenchSupplementStatusApproved,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("CreateSettlementSupplement() error = %+v, want permission denied", appErr)
+	}
+	if workbenchRepo.created != nil {
+		t.Fatalf("created supplement without permission: %+v", workbenchRepo.created)
+	}
+}
+
+func TestUpsertSupplementPermissionWritesEvent(t *testing.T) {
+	workbenchRepo := &supplementRepo{confirmedMonths: map[int64][]string{1001: []string{"2026-06"}}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	saved, appErr := svc.UpsertSupplementPermission(context.Background(), actor, UpsertSupplementPermissionParams{
+		PayeeUserID:   1001,
+		BusinessMonth: "2026-06",
+		Enabled:       true,
+		Reason:        "漏上传补录",
+	})
+	if appErr != nil {
+		t.Fatalf("UpsertSupplementPermission() error = %+v", appErr)
+	}
+	if saved.PayeeUserID != 1001 || !saved.Enabled {
+		t.Fatalf("saved permission = %+v", saved)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSupplementPermissionChanged {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestUpsertSupplementPermissionRequiresConfirmedSettlementMonth(t *testing.T) {
+	workbenchRepo := &supplementRepo{confirmedMonths: map[int64][]string{1001: []string{"2026-05"}}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	_, appErr := svc.UpsertSupplementPermission(context.Background(), actor, UpsertSupplementPermissionParams{
+		PayeeUserID:   1001,
+		BusinessMonth: "2026-06",
+		Enabled:       true,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("UpsertSupplementPermission() error = %+v, want invalid request", appErr)
+	}
+	if len(workbenchRepo.permissions) != 0 || len(workbenchRepo.events) != 0 {
+		t.Fatalf("permission should not be saved without confirmed settlement month: permissions=%+v events=%+v", workbenchRepo.permissions, workbenchRepo.events)
+	}
+}
+
+func TestListSupplementEligibleMonthsReturnsConfirmedSettlementMonths(t *testing.T) {
+	workbenchRepo := &supplementRepo{confirmedMonths: map[int64][]string{1001: []string{"2026-06", "2026-05"}}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	months, appErr := svc.ListSupplementEligibleMonths(context.Background(), actor, 1001)
+	if appErr != nil {
+		t.Fatalf("ListSupplementEligibleMonths() error = %+v", appErr)
+	}
+	if len(months) != 2 || months[0] != "2026-06" || months[1] != "2026-05" {
+		t.Fatalf("months = %+v, want confirmed months", months)
+	}
+}
+
+func TestCreateSettlementAdjustmentRequiresConfirmedBatch(t *testing.T) {
+	workbenchRepo := &adjustmentRepo{batch: &domain.AssetWorkbenchSettlementBatch{
+		ID:            9001,
+		BatchNo:       "AWB-1",
+		BusinessMonth: "2026-06",
+		Status:        domain.AssetWorkbenchBatchStatusGenerated,
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	_, appErr := svc.CreateSettlementAdjustment(context.Background(), actor, CreateSettlementAdjustmentParams{
+		BatchID:     9001,
+		PayeeUserID: 1001,
+		Amount:      12,
+		Reason:      "已生成批次应取消后重结算",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("CreateSettlementAdjustment(generated batch) appErr = %+v", appErr)
+	}
+	if workbenchRepo.adjustment != nil || workbenchRepo.settlementItem != nil {
+		t.Fatalf("adjustment should not be created for generated batch: adj=%+v item=%+v", workbenchRepo.adjustment, workbenchRepo.settlementItem)
+	}
+}
+
+func TestCreateSettlementAdjustmentAppendsItemAndSignedTotals(t *testing.T) {
+	workbenchRepo := &adjustmentRepo{batch: &domain.AssetWorkbenchSettlementBatch{
+		ID:            9001,
+		BatchNo:       "AWB-1",
+		BusinessMonth: "2026-06",
+		Status:        domain.AssetWorkbenchBatchStatusConfirmed,
+		NetAmount:     100,
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	created, appErr := svc.CreateSettlementAdjustment(context.Background(), actor, CreateSettlementAdjustmentParams{
+		BatchID:        9001,
+		PayeeUserID:    1001,
+		AdjustmentType: domain.AssetWorkbenchAdjustmentTypeReversal,
+		Amount:         12,
+		Reason:         "重复结算冲正",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateSettlementAdjustment() error = %+v", appErr)
+	}
+	if created.Amount != -12 || created.AdjustmentType != domain.AssetWorkbenchAdjustmentTypeReversal {
+		t.Fatalf("adjustment = %+v", created)
+	}
+	if workbenchRepo.settlementItem == nil || workbenchRepo.settlementItem.ItemType != domain.AssetWorkbenchItemTypeReversal || workbenchRepo.settlementItem.Direction != "debit" || workbenchRepo.settlementItem.Amount != 12 {
+		t.Fatalf("settlement item = %+v", workbenchRepo.settlementItem)
+	}
+	if workbenchRepo.appliedAmount != -12 || workbenchRepo.batch.NetAmount != 88 {
+		t.Fatalf("applied amount = %v batch = %+v", workbenchRepo.appliedAmount, workbenchRepo.batch)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSettlementAdjusted {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestBuildSettlementPayrollRowsFromItemsIncludesAdjustmentsInNormalRow(t *testing.T) {
+	rows := buildSettlementPayrollRowsFromItems("2026-06", []*domain.AssetWorkbenchSettlementItem{
+		{
+			ID:            1,
+			ItemType:      domain.AssetWorkbenchItemTypeGrossPiecework,
+			PayeeUserID:   1001,
+			BusinessMonth: "2026-06",
+			Amount:        120,
+			Quantity:      4,
+			Direction:     "credit",
+		},
+		{
+			ID:            2,
+			ItemType:      domain.AssetWorkbenchItemTypeAdjustment,
+			PayeeUserID:   1001,
+			BusinessMonth: "2026-06",
+			Amount:        20,
+			Quantity:      1,
+			Direction:     "credit",
+		},
+		{
+			ID:            3,
+			ItemType:      domain.AssetWorkbenchItemTypeReversal,
+			PayeeUserID:   1001,
+			BusinessMonth: "2026-06",
+			Amount:        12,
+			Quantity:      1,
+			Direction:     "debit",
+		},
+		{
+			ID:            4,
+			ItemType:      domain.AssetWorkbenchItemTypeSupplement,
+			PayeeUserID:   1001,
+			BusinessMonth: "2026-06",
+			Amount:        18,
+			Quantity:      2,
+			Direction:     "credit",
+		},
+	})
+	if len(rows) != 2 {
+		t.Fatalf("payroll rows = %+v, want fixed normal+supplement rows", rows)
+	}
+	normal := rows[0]
+	supplement := rows[1]
+	if normal.RowType != domain.AssetWorkbenchPayrollRowTypeNormalPiecework || normal.AdjustmentAmount != 8 || normal.NetAmount != 128 {
+		t.Fatalf("normal payroll row = %+v, want adjustment 8 and net 128", normal)
+	}
+	if supplement.RowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework || supplement.SupplementAmount != 18 || supplement.NetAmount != 18 {
+		t.Fatalf("supplement payroll row = %+v, want supplement net 18", supplement)
+	}
+}
+
+func TestGenerateSettlementBatchAttachesSubmissionItemsAtItemLevel(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	workbenchRepo := &settlementBatchRepo{items: []*domain.AssetWorkbenchSubmissionItem{
+		{
+			ID:                 501,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-501",
+			DifficultyClass:    "A",
+			PageCount:          2,
+			GrossAmount:        20,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			BusinessMonth:      "2026-06",
+			SubmittedAt:        submittedAt,
+		},
+		{
+			ID:                 502,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-502",
+			DifficultyClass:    "B",
+			PageCount:          1,
+			GrossAmount:        12,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			BusinessMonth:      "2026-06",
+			SubmittedAt:        submittedAt,
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+
+	batch, appErr := svc.GenerateSettlementBatch(context.Background(), domain.RequestActor{
+		ID:    9,
+		Roles: []domain.Role{domain.RoleAssetSettlement},
+	}, "2026-06")
+	if appErr != nil {
+		t.Fatalf("GenerateSettlementBatch() error = %+v", appErr)
+	}
+	if batch == nil || batch.ID != 8801 || batch.NetAmount != 32 {
+		t.Fatalf("batch = %+v, want net 32", batch)
+	}
+	if len(workbenchRepo.attachedItemIDs) != 2 || workbenchRepo.attachedItemIDs[0] != 501 || workbenchRepo.attachedItemIDs[1] != 502 {
+		t.Fatalf("attached item ids = %+v", workbenchRepo.attachedItemIDs)
+	}
+	if len(workbenchRepo.settlementItems) != 2 {
+		t.Fatalf("settlement items = %+v, want one gross line per submission item", workbenchRepo.settlementItems)
+	}
+	for _, item := range workbenchRepo.settlementItems {
+		if item.ItemType != domain.AssetWorkbenchItemTypeGrossPiecework || item.SubmissionItemID == nil {
+			t.Fatalf("settlement item should reference submission_item gross line: %+v", item)
+		}
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSettlementGenerated {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestConfirmAndCancelSettlementBatchWriteEvents(t *testing.T) {
+	workbenchRepo := &settlementBatchRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 9, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	if appErr := svc.ConfirmSettlementBatch(context.Background(), actor, 8801); appErr != nil {
+		t.Fatalf("ConfirmSettlementBatch() error = %+v", appErr)
+	}
+	if workbenchRepo.confirmedBatchID != 8801 {
+		t.Fatalf("confirmed batch id = %d", workbenchRepo.confirmedBatchID)
+	}
+	if appErr := svc.CancelSettlementBatch(context.Background(), actor, 8802, ""); appErr == nil || appErr.Code != domain.ErrCodeReasonRequired {
+		t.Fatalf("CancelSettlementBatch(empty reason) appErr = %+v", appErr)
+	}
+	if appErr := svc.CancelSettlementBatch(context.Background(), actor, 8802, "  生成错误  "); appErr != nil {
+		t.Fatalf("CancelSettlementBatch() error = %+v", appErr)
+	}
+	if workbenchRepo.cancelledBatchID != 8802 || workbenchRepo.cancelReason != "生成错误" {
+		t.Fatalf("cancelled batch = %d reason = %q", workbenchRepo.cancelledBatchID, workbenchRepo.cancelReason)
+	}
+	if len(workbenchRepo.events) != 2 ||
+		workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSettlementConfirmed ||
+		workbenchRepo.events[1].EventType != domain.AssetWorkbenchEventSettlementCancelled {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestSystemAssetDownloadRequiresManagerRole(t *testing.T) {
+	downloader := &systemAssetDownloaderStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetDownloader(downloader))
+
+	_, appErr := svc.SystemAssetDownload(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, 1001)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("SystemAssetDownload(submitter) appErr = %+v", appErr)
+	}
+	if downloader.downloadCalls != 0 {
+		t.Fatalf("downloadCalls = %d, want 0", downloader.downloadCalls)
+	}
+}
+
+func TestSystemAssetBatchDownloadDelegatesAndWritesEvent(t *testing.T) {
+	workbenchRepo := &downloadFileRepo{}
+	downloader := &systemAssetDownloaderStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetDownloader(downloader),
+	)
+
+	manifest, appErr := svc.SystemAssetBatchDownloadManifest(
+		context.Background(),
+		domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}},
+		SystemAssetBatchDownloadParams{AssetIDs: []int64{1001, 1002}, NamingMode: "business"},
+	)
+	if appErr != nil {
+		t.Fatalf("SystemAssetBatchDownloadManifest() error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 2 || len(manifest.Items) != 2 {
+		t.Fatalf("manifest = %+v", manifest)
+	}
+	if downloader.batchCalls != 1 || len(downloader.batchAssetIDs) != 2 || downloader.batchAssetIDs[0] != 1001 || downloader.batchAssetIDs[1] != 1002 {
+		t.Fatalf("downloader calls = %d ids = %+v", downloader.batchCalls, downloader.batchAssetIDs)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSystemAssetBatchDownloaded {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestUpdateSubmissionItemQCRequiresReasonForNeedsFixAndWritesEvent(t *testing.T) {
+	item := &domain.AssetWorkbenchSubmissionItem{
+		ID:               501,
+		SubmissionID:     9001,
+		PayeeUserID:      77,
+		OrderNo:          "ORD-501",
+		QCStatus:         domain.AssetWorkbenchSubmissionStatusSubmitted,
+		SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled,
+	}
+	workbenchRepo := &itemActionRepo{items: map[int64]*domain.AssetWorkbenchSubmissionItem{501: item}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}}
+
+	if _, appErr := svc.UpdateSubmissionItemQC(context.Background(), actor, 501, UpdateSubmissionItemQCParams{QCStatus: domain.AssetWorkbenchSubmissionStatusNeedsFix}); appErr == nil || appErr.Code != domain.ErrCodeReasonRequired {
+		t.Fatalf("UpdateSubmissionItemQC(needs_fix without reason) appErr = %+v", appErr)
+	}
+	updated, appErr := svc.UpdateSubmissionItemQC(context.Background(), actor, 501, UpdateSubmissionItemQCParams{QCStatus: domain.AssetWorkbenchSubmissionStatusChecked})
+	if appErr != nil {
+		t.Fatalf("UpdateSubmissionItemQC(checked) error = %+v", appErr)
+	}
+	if updated.QCStatus != domain.AssetWorkbenchSubmissionStatusChecked {
+		t.Fatalf("qc_status = %q", updated.QCStatus)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventItemQCUpdated {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestVoidSubmissionItemRequiresUnsettledAndRefreshesTotals(t *testing.T) {
+	batchID := int64(123)
+	workbenchRepo := &itemActionRepo{items: map[int64]*domain.AssetWorkbenchSubmissionItem{
+		501: {
+			ID:                       501,
+			SubmissionID:             9001,
+			PayeeUserID:              77,
+			OrderNo:                  "ORD-501",
+			QCStatus:                 domain.AssetWorkbenchSubmissionStatusChecked,
+			SettlementStatus:         domain.AssetWorkbenchSettlementStatusInBatch,
+			CurrentSettlementBatchID: &batchID,
+		},
+		502: {
+			ID:               502,
+			SubmissionID:     9001,
+			PayeeUserID:      77,
+			OrderNo:          "ORD-502",
+			QCStatus:         domain.AssetWorkbenchSubmissionStatusChecked,
+			SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled,
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	if _, appErr := svc.VoidSubmissionItem(context.Background(), actor, 501, VoidSubmissionItemParams{Reason: "重复提交"}); appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("VoidSubmissionItem(in batch) appErr = %+v", appErr)
+	}
+	updated, appErr := svc.VoidSubmissionItem(context.Background(), actor, 502, VoidSubmissionItemParams{Reason: "重复提交"})
+	if appErr != nil {
+		t.Fatalf("VoidSubmissionItem(unsettled) error = %+v", appErr)
+	}
+	if updated.QCStatus != domain.AssetWorkbenchSubmissionStatusVoided || updated.VoidReason != "重复提交" {
+		t.Fatalf("voided item = %+v", updated)
+	}
+	if workbenchRepo.refreshCalls != 1 {
+		t.Fatalf("refreshCalls = %d, want 1", workbenchRepo.refreshCalls)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventItemVoided {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestRepriceSubmissionItemUsesFrozenWorkerSnapshot(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	workbenchRepo := &itemActionRepo{
+		items: map[int64]*domain.AssetWorkbenchSubmissionItem{
+			501: {
+				ID:                 501,
+				SubmissionID:       9001,
+				PayeeUserID:        77,
+				OrderNo:            "ORD-501",
+				DifficultyClass:    "A",
+				Finalized:          true,
+				PageCount:          3,
+				ItemCount:          1,
+				BusinessMonth:      "2026-06",
+				SubmittedAt:        submittedAt,
+				WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+				JobGradeSnapshot:   "P1",
+				GrossAmount:        15,
+				PricingStatus:      domain.AssetWorkbenchPricingStatusPriced,
+				QCStatus:           domain.AssetWorkbenchSubmissionStatusSubmitted,
+				SettlementStatus:   domain.AssetWorkbenchSettlementStatusUnsettled,
+			},
+		},
+		price: &domain.AssetWorkbenchPriceMatrix{
+			ID:              88,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGrade:        "P1",
+			DifficultyClass: "A",
+			UnitPrice:       20,
+			EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	updated, appErr := svc.RepriceSubmissionItem(context.Background(), actor, 501, RepriceSubmissionItemParams{Reason: "补价"})
+	if appErr != nil {
+		t.Fatalf("RepriceSubmissionItem() error = %+v", appErr)
+	}
+	if updated.GrossAmount != 60 || updated.BasePriceRuleID == nil || *updated.BasePriceRuleID != 88 {
+		t.Fatalf("repriced item = %+v", updated)
+	}
+	if workbenchRepo.refreshCalls != 1 {
+		t.Fatalf("refreshCalls = %d, want 1", workbenchRepo.refreshCalls)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventItemRepriced {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestBuildSubmissionItemFreezesGrossOnly(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &priceOnlyRepo{price: &domain.AssetWorkbenchPriceMatrix{
+		ID:              42,
+		WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+		JobGrade:        "P1",
+		DifficultyClass: "A",
+		UnitPrice:       12.5,
+		EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+	}}
+
+	item, appErr := svc.buildSubmissionItem(context.Background(), 1001, 2002, submittedAt, "2026-06", &domain.AssetWorkbenchProfile{
+		UserID:     1001,
+		WorkerType: domain.AssetWorkbenchWorkerTypeFulltime,
+		JobGrade:   "P1",
+	}, CreateSubmissionItemParams{
+		OrderNo:         "ORD-1",
+		DifficultyClass: "A",
+		PageCount:       3,
+	})
+	if appErr != nil {
+		t.Fatalf("buildSubmissionItem returned app error: %v", appErr)
+	}
+	if item.GrossAmount != 37.5 {
+		t.Fatalf("gross amount = %v, want 37.5", item.GrossAmount)
+	}
+	if item.PricingStatus != domain.AssetWorkbenchPricingStatusPriced {
+		t.Fatalf("pricing status = %q", item.PricingStatus)
+	}
+
+	var snapshot map[string]interface{}
+	if err := json.Unmarshal(item.PricingSnapshot, &snapshot); err != nil {
+		t.Fatalf("pricing snapshot json: %v", err)
+	}
+	if snapshot["deduction_timing"] != "settlement_time" {
+		t.Fatalf("deduction_timing = %v, want settlement_time", snapshot["deduction_timing"])
+	}
+	if _, exists := snapshot["deduction_amount"]; exists {
+		t.Fatalf("submission pricing snapshot must not freeze deduction_amount: %#v", snapshot)
+	}
+}
+
+func TestBuildSubmissionItemAppliesSingleWinnerPromoToGross(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	fixedPrice := 9.0
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &priceOnlyRepo{
+		price: &domain.AssetWorkbenchPriceMatrix{
+			ID:              42,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGrade:        "P1",
+			DifficultyClass: "A",
+			UnitPrice:       12.5,
+			EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+		coupons: []*domain.AssetWorkbenchPromoCoupon{
+			{
+				ID:              8,
+				CouponCode:      "618-A",
+				CouponName:      "618 A 类一口价",
+				Mode:            domain.AssetWorkbenchPromoModeFixedPrice,
+				Amount:          &fixedPrice,
+				Priority:        1,
+				WorkerType:      domain.AssetWorkbenchWorkerTypeAll,
+				JobGrade:        domain.AssetWorkbenchWorkerTypeAll,
+				DifficultyClass: "A",
+				Enabled:         true,
+			},
+		},
+	}
+
+	item, appErr := svc.buildSubmissionItem(context.Background(), 1001, 2002, submittedAt, "2026-06", &domain.AssetWorkbenchProfile{
+		UserID:     1001,
+		WorkerType: domain.AssetWorkbenchWorkerTypeFulltime,
+		JobGrade:   "P1",
+	}, CreateSubmissionItemParams{
+		OrderNo:         "ORD-1",
+		DifficultyClass: "A",
+		PageCount:       3,
+	})
+	if appErr != nil {
+		t.Fatalf("buildSubmissionItem returned app error: %v", appErr)
+	}
+	if item.GrossAmount != 27 {
+		t.Fatalf("gross amount = %v, want 27", item.GrossAmount)
+	}
+	if item.PromoCouponID == nil || *item.PromoCouponID != 8 {
+		t.Fatalf("promo coupon id = %v, want 8", item.PromoCouponID)
+	}
+	var snapshot map[string]interface{}
+	if err := json.Unmarshal(item.PricingSnapshot, &snapshot); err != nil {
+		t.Fatalf("pricing snapshot json: %v", err)
+	}
+	if snapshot["promo_applied"] != true {
+		t.Fatalf("promo_applied = %v, want true", snapshot["promo_applied"])
+	}
+	if snapshot["deduction_timing"] != "settlement_time" {
+		t.Fatalf("deduction_timing = %v, want settlement_time", snapshot["deduction_timing"])
+	}
+}
+
+func TestBuildSettlementPreviewCalculatesDeductionsAtSettlementTime(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &deductionOnlyRepo{rule: &domain.AssetWorkbenchDeductionRule{
+		ID:              7,
+		WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+		JobGrade:        "P1",
+		DifficultyClass: "A",
+		DeductionAmount: 4,
+		EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+	}}
+	itemID := int64(501)
+	preview, appErr := svc.buildSettlementPreview(context.Background(), "2026-06", []*domain.AssetWorkbenchSubmissionItem{
+		{
+			ID:                 itemID,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-1",
+			DifficultyClass:    "A",
+			PageCount:          2,
+			GrossAmount:        25,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			SubmittedAt:        submittedAt,
+		},
+	}, []*domain.AssetWorkbenchErrorRecord{
+		{
+			SubmissionItemID: &itemID,
+			OrderNo:          "ORD-1",
+			ErrorCount:       3,
+		},
+	}, nil)
+	if appErr != nil {
+		t.Fatalf("buildSettlementPreview returned app error: %v", appErr)
+	}
+	if preview.Totals.GrossAmount != 25 {
+		t.Fatalf("gross total = %v, want 25", preview.Totals.GrossAmount)
+	}
+	if preview.Totals.DeductionAmount != 12 {
+		t.Fatalf("deduction total = %v, want 12", preview.Totals.DeductionAmount)
+	}
+	if preview.Totals.NetAmount != 13 {
+		t.Fatalf("net total = %v, want 13", preview.Totals.NetAmount)
+	}
+	if len(preview.PayrollRows) != 2 {
+		t.Fatalf("payroll row count = %d, want 2", len(preview.PayrollRows))
+	}
+	if preview.PayrollRows[0].RowType != domain.AssetWorkbenchPayrollRowTypeNormalPiecework || preview.PayrollRows[0].NetAmount != 13 {
+		t.Fatalf("normal payroll row = %+v, want net 13", preview.PayrollRows[0])
+	}
+	if preview.PayrollRows[1].RowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework || preview.PayrollRows[1].NetAmount != 0 {
+		t.Fatalf("supplement payroll row = %+v, want zero supplement row", preview.PayrollRows[1])
+	}
+}
+
+func TestBuildSettlementPreviewKeepsSupplementInSecondPayrollRow(t *testing.T) {
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	preview, appErr := svc.buildSettlementPreview(context.Background(), "2026-06", []*domain.AssetWorkbenchSubmissionItem{
+		{
+			ID:              501,
+			PayeeUserID:     1001,
+			OrderNo:         "ORD-1",
+			DifficultyClass: "A",
+			PageCount:       2,
+			GrossAmount:     25,
+		},
+	}, nil, []*domain.AssetWorkbenchSettlementSupplement{
+		{
+			ID:            77,
+			PayeeUserID:   1001,
+			BusinessMonth: "2026-06",
+			OrderNo:       "SUP-1",
+			PageCount:     3,
+			GrossAmount:   18,
+			Status:        domain.AssetWorkbenchSupplementStatusApproved,
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("buildSettlementPreview returned app error: %v", appErr)
+	}
+	if len(preview.PayrollRows) != 2 {
+		t.Fatalf("payroll row count = %d, want fixed normal+supplement rows", len(preview.PayrollRows))
+	}
+	normal := preview.PayrollRows[0]
+	supplement := preview.PayrollRows[1]
+	if normal.RowType != domain.AssetWorkbenchPayrollRowTypeNormalPiecework || normal.NetAmount != 25 || normal.SupplementAmount != 0 {
+		t.Fatalf("normal payroll row = %+v, want normal net 25 without supplement amount", normal)
+	}
+	if supplement.RowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework || supplement.NetAmount != 18 || supplement.SupplementAmount != 18 {
+		t.Fatalf("supplement payroll row = %+v, want supplement net 18", supplement)
+	}
+	if preview.Totals.NetAmount != 43 || preview.Totals.SupplementAmount != 18 {
+		t.Fatalf("totals = %+v, want net 43 and supplement 18", preview.Totals)
+	}
+}
+
+func TestMatchedErrorCountIgnoresUnmatchedAndAmbiguousRecords(t *testing.T) {
+	itemID := int64(501)
+	item := &domain.AssetWorkbenchSubmissionItem{
+		ID:          itemID,
+		PayeeUserID: 1001,
+		OrderNo:     "ORD-1",
+	}
+
+	count := matchedErrorCount([]*domain.AssetWorkbenchErrorRecord{
+		{
+			SubmissionItemID: &itemID,
+			OrderNo:          "ORD-1",
+			ErrorCount:       2,
+			MatchStatus:      domain.AssetWorkbenchErrorMatchStatusMatched,
+		},
+		{
+			OrderNo:     "ORD-1",
+			ErrorCount:  3,
+			MatchStatus: domain.AssetWorkbenchErrorMatchStatusAmbiguous,
+		},
+		{
+			OrderNo:     "ORD-1",
+			ErrorCount:  4,
+			MatchStatus: domain.AssetWorkbenchErrorMatchStatusUnmatched,
+		},
+		{
+			OrderNo:     "ORD-1",
+			ErrorCount:  1,
+			MatchStatus: "",
+		},
+	}, item)
+	if count != 3 {
+		t.Fatalf("matched error count = %d, want matched + legacy fallback only", count)
+	}
+}
+
+func TestBuildSettlementPreviewAddsWelfareAndSupplementsByPersonMonth(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &deductionOnlyRepo{
+		rule: &domain.AssetWorkbenchDeductionRule{
+			ID:              7,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGrade:        "P1",
+			DifficultyClass: "A",
+			DeductionAmount: 0,
+			EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+		welfareRules: []*domain.AssetWorkbenchWelfareRule{
+			{
+				ID:         9,
+				RuleName:   "无差错奖",
+				WorkerType: domain.AssetWorkbenchWorkerTypeAll,
+				JobGrade:   domain.AssetWorkbenchWorkerTypeAll,
+				RuleType:   "manual",
+				Amount:     30,
+				Enabled:    true,
+			},
+		},
+	}
+	preview, appErr := svc.buildSettlementPreview(context.Background(), "2026-06", []*domain.AssetWorkbenchSubmissionItem{
+		{
+			ID:                 501,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-1",
+			DifficultyClass:    "A",
+			PageCount:          2,
+			GrossAmount:        25,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			SubmittedAt:        submittedAt,
+		},
+	}, nil, []*domain.AssetWorkbenchSettlementSupplement{
+		{
+			ID:            11,
+			PayeeUserID:   1001,
+			BusinessMonth: "2026-06",
+			Status:        domain.AssetWorkbenchSupplementStatusApproved,
+			OrderNo:       "MISS-1",
+			PageCount:     1,
+			GrossAmount:   15,
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("buildSettlementPreview returned app error: %v", appErr)
+	}
+	if preview.Totals.WelfareAmount != 30 {
+		t.Fatalf("welfare total = %v, want 30", preview.Totals.WelfareAmount)
+	}
+	if preview.Totals.SupplementAmount != 15 {
+		t.Fatalf("supplement total = %v, want 15", preview.Totals.SupplementAmount)
+	}
+	if preview.Totals.NetAmount != 70 {
+		t.Fatalf("net total = %v, want 70", preview.Totals.NetAmount)
+	}
+	if len(preview.PayrollRows) != 2 {
+		t.Fatalf("payroll row count = %d, want 2", len(preview.PayrollRows))
+	}
+	normal := preview.PayrollRows[0]
+	supplement := preview.PayrollRows[1]
+	if normal.RowType != domain.AssetWorkbenchPayrollRowTypeNormalPiecework || normal.NetAmount != 55 || normal.SupplementAmount != 0 {
+		t.Fatalf("normal payroll row = %+v, want normal net 55 without supplement", normal)
+	}
+	if supplement.RowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework || supplement.NetAmount != 15 || supplement.SupplementAmount != 15 {
+		t.Fatalf("supplement payroll row = %+v, want supplement net 15", supplement)
+	}
+}
+
+func TestBuildSettlementPreviewEmitsTwoPayrollRowsForSupplementOnlyPayee(t *testing.T) {
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &deductionOnlyRepo{}
+
+	preview, appErr := svc.buildSettlementPreview(context.Background(), "2026-06", nil, nil, []*domain.AssetWorkbenchSettlementSupplement{
+		{
+			ID:            11,
+			PayeeUserID:   1002,
+			BusinessMonth: "2026-06",
+			Status:        domain.AssetWorkbenchSupplementStatusApproved,
+			OrderNo:       "MISS-2",
+			PageCount:     3,
+			GrossAmount:   42,
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("buildSettlementPreview returned app error: %v", appErr)
+	}
+	if len(preview.PayrollRows) != 2 {
+		t.Fatalf("payroll row count = %d, want 2", len(preview.PayrollRows))
+	}
+	normal := preview.PayrollRows[0]
+	supplement := preview.PayrollRows[1]
+	if normal.PayeeUserID != 1002 || normal.RowType != domain.AssetWorkbenchPayrollRowTypeNormalPiecework || normal.NetAmount != 0 {
+		t.Fatalf("normal payroll row = %+v, want zero normal row for supplement-only payee", normal)
+	}
+	if supplement.PayeeUserID != 1002 || supplement.RowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework || supplement.PageCount != 3 || supplement.NetAmount != 42 {
+		t.Fatalf("supplement payroll row = %+v, want supplement net 42", supplement)
+	}
+}
+
+func TestBuildSettlementPayrollRowsFromBatchItems(t *testing.T) {
+	rows := buildSettlementPayrollRowsFromItems("2026-06", []*domain.AssetWorkbenchSettlementItem{
+		{ItemType: domain.AssetWorkbenchItemTypeGrossPiecework, PayeeUserID: 1001, BusinessMonth: "2026-06", Amount: 100, Quantity: 4, Direction: "credit"},
+		{ItemType: domain.AssetWorkbenchItemTypeErrorDeduction, PayeeUserID: 1001, BusinessMonth: "2026-06", Amount: 12, Quantity: 3, Direction: "debit"},
+		{ItemType: domain.AssetWorkbenchItemTypeWelfare, PayeeUserID: 1001, BusinessMonth: "2026-06", Amount: 30, Quantity: 1, Direction: "credit"},
+		{ItemType: domain.AssetWorkbenchItemTypeSupplement, PayeeUserID: 1001, BusinessMonth: "2026-06", Amount: 15, Quantity: 1, Direction: "credit"},
+	})
+	if len(rows) != 2 {
+		t.Fatalf("payroll row count = %d, want 2", len(rows))
+	}
+	if rows[0].RowType != domain.AssetWorkbenchPayrollRowTypeNormalPiecework || rows[0].NetAmount != 118 {
+		t.Fatalf("normal payroll row = %+v, want net 118", rows[0])
+	}
+	if rows[1].RowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework || rows[1].NetAmount != 15 {
+		t.Fatalf("supplement payroll row = %+v, want net 15", rows[1])
+	}
+}
+
+func TestParseErrorRecordsExcelSupportsChineseHeaders(t *testing.T) {
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(f.GetActiveSheetIndex())
+	if err := f.SetSheetRow(sheet, "A1", &[]interface{}{"订单号", "出错数", "人员ID"}); err != nil {
+		t.Fatalf("set header row: %v", err)
+	}
+	if err := f.SetSheetRow(sheet, "A2", &[]interface{}{"ORD-1", 3, 1001}); err != nil {
+		t.Fatalf("set data row: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	records, appErr := parseErrorRecordsExcel(bytes.NewReader(buf.Bytes()))
+	if appErr != nil {
+		t.Fatalf("parseErrorRecordsExcel appErr = %v", appErr)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records len = %d, want 1", len(records))
+	}
+	if records[0].OrderNo != "ORD-1" || records[0].ErrorCount != 3 {
+		t.Fatalf("record = %+v", records[0])
+	}
+	if records[0].PayeeUserID == nil || *records[0].PayeeUserID != 1001 {
+		t.Fatalf("payee = %v, want 1001", records[0].PayeeUserID)
+	}
+}

@@ -329,6 +329,10 @@ func (s *userAdminServiceStub) Register(context.Context, service.RegisterUserPar
 	return nil, nil
 }
 
+func (s *userAdminServiceStub) RegisterAssetWorkbenchUser(context.Context, service.RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError) {
+	return nil, nil
+}
+
 func (s *userAdminServiceStub) Login(context.Context, service.LoginParams) (*domain.AuthResult, *domain.AppError) {
 	return nil, nil
 }

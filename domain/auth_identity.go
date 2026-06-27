@@ -397,6 +397,30 @@ func DefaultRoleCatalog() []RoleCatalogEntry {
 			Capabilities: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete"},
 		},
 		{
+			Role:         RoleAssetSubmitter,
+			Name:         "Asset Submitter",
+			Description:  "Submit piecework delivery items in the independent asset workbench without granting main-ops menus.",
+			Capabilities: []string{"asset.workbench.submit", "asset.workbench.profile"},
+		},
+		{
+			Role:         RoleAssetManager,
+			Name:         "Asset Manager",
+			Description:  "Manage asset workbench submissions, review workbench assets, and search read-only system material sources.",
+			Capabilities: []string{"asset.workbench.manage", "asset.workbench.system_search"},
+		},
+		{
+			Role:         RoleAssetTemplateAdmin,
+			Name:         "Asset Template Admin",
+			Description:  "Maintain workbench cost-center configuration including price matrix, deduction rules, welfare rules, and promo coupons.",
+			Capabilities: []string{"asset.workbench.cost_center.manage", "asset.workbench.template.manage"},
+		},
+		{
+			Role:         RoleAssetSettlement,
+			Name:         "Asset Settlement",
+			Description:  "Preview, generate, confirm, cancel, and adjust asset workbench settlement batches.",
+			Capabilities: []string{"asset.workbench.settlement", "asset.workbench.export"},
+		},
+		{
 			Role:         RoleOutsource,
 			Name:         "Outsource",
 			Description:  "Handle outsource task creation and follow-up.",

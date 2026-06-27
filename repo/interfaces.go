@@ -266,6 +266,234 @@ type ExternalAssetRepo interface {
 	MarkPrepareFailed(ctx context.Context, id int64, target, message string) error
 }
 
+type AssetWorkbenchProfileFilter struct {
+	Keyword    string
+	WorkerType string
+	JobGrade   string
+	Status     string
+	Page       int
+	PageSize   int
+}
+
+type AssetWorkbenchPriceMatrixFilter struct {
+	WorkerType      string
+	JobGrade        string
+	DifficultyClass string
+	Enabled         *bool
+	Page            int
+	PageSize        int
+}
+
+type AssetWorkbenchDeductionRuleFilter struct {
+	WorkerType      string
+	JobGrade        string
+	DifficultyClass string
+	Enabled         *bool
+	Page            int
+	PageSize        int
+}
+
+type AssetWorkbenchWelfareRuleFilter struct {
+	WorkerType string
+	JobGrade   string
+	RuleType   string
+	Enabled    *bool
+	Page       int
+	PageSize   int
+}
+
+type AssetWorkbenchPromoCouponFilter struct {
+	WorkerType      string
+	JobGrade        string
+	DifficultyClass string
+	Enabled         *bool
+	Page            int
+	PageSize        int
+}
+
+type AssetWorkbenchGroupFilter struct {
+	Keyword  string
+	Enabled  *bool
+	Page     int
+	PageSize int
+}
+
+type AssetWorkbenchTemplateFilter struct {
+	Keyword         string
+	Category        string
+	DifficultyClass string
+	WorkerType      string
+	Enabled         *bool
+	Page            int
+	PageSize        int
+}
+
+type AssetWorkbenchTemplateAssignmentFilter struct {
+	TemplateID *int64
+	TargetType string
+	TargetID   *int64
+	Enabled    *bool
+	Page       int
+	PageSize   int
+}
+
+type AssetWorkbenchSubmissionFilter struct {
+	SubmitterUserID  *int64
+	PayeeUserID      *int64
+	BusinessMonth    string
+	Status           string
+	SettlementStatus string
+	Page             int
+	PageSize         int
+}
+
+type AssetWorkbenchPreviewClaim struct {
+	WorkerID string
+	Now      time.Time
+	LeaseTTL time.Duration
+	Limit    int
+}
+
+type AssetWorkbenchSettlementBatchFilter struct {
+	BusinessMonth string
+	Status        string
+	Page          int
+	PageSize      int
+}
+
+type AssetWorkbenchSettlementSupplementFilter struct {
+	PayeeUserID   *int64
+	BusinessMonth string
+	OrderNo       string
+	Status        string
+	Page          int
+	PageSize      int
+}
+
+type AssetWorkbenchSupplementPermissionFilter struct {
+	PayeeUserID   *int64
+	BusinessMonth string
+	Enabled       *bool
+	Page          int
+	PageSize      int
+}
+
+type AssetWorkbenchEventFilter struct {
+	EventType  string
+	EntityType string
+	EntityID   *int64
+	ActorID    *int64
+	Page       int
+	PageSize   int
+}
+
+type AssetWorkbenchSavedViewFilter struct {
+	UserID   int64
+	ViewType string
+}
+
+type AssetWorkbenchRepo interface {
+	GetProfileByUserID(ctx context.Context, userID int64) (*domain.AssetWorkbenchProfile, error)
+	ListProfiles(ctx context.Context, filter AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error)
+	UpsertProfile(ctx context.Context, tx Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error)
+	AppendGradePeriod(ctx context.Context, tx Tx, period *domain.AssetWorkbenchGradePeriod) (*domain.AssetWorkbenchGradePeriod, error)
+
+	ListPriceMatrix(ctx context.Context, filter AssetWorkbenchPriceMatrixFilter) ([]*domain.AssetWorkbenchPriceMatrix, int64, error)
+	LockPriceMatrixDimension(ctx context.Context, tx Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchPriceMatrix, error)
+	CreatePriceMatrix(ctx context.Context, tx Tx, item *domain.AssetWorkbenchPriceMatrix) (*domain.AssetWorkbenchPriceMatrix, error)
+	FindActivePrice(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchPriceMatrix, error)
+
+	ListDeductionRules(ctx context.Context, filter AssetWorkbenchDeductionRuleFilter) ([]*domain.AssetWorkbenchDeductionRule, int64, error)
+	LockDeductionRuleDimension(ctx context.Context, tx Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchDeductionRule, error)
+	CreateDeductionRule(ctx context.Context, tx Tx, item *domain.AssetWorkbenchDeductionRule) (*domain.AssetWorkbenchDeductionRule, error)
+
+	ListWelfareRules(ctx context.Context, filter AssetWorkbenchWelfareRuleFilter) ([]*domain.AssetWorkbenchWelfareRule, int64, error)
+	CreateWelfareRule(ctx context.Context, tx Tx, item *domain.AssetWorkbenchWelfareRule) (*domain.AssetWorkbenchWelfareRule, error)
+	FindActiveWelfareRules(ctx context.Context, workerType, jobGrade string, asOf time.Time) ([]*domain.AssetWorkbenchWelfareRule, error)
+
+	ListPromoCoupons(ctx context.Context, filter AssetWorkbenchPromoCouponFilter) ([]*domain.AssetWorkbenchPromoCoupon, int64, error)
+	CreatePromoCoupon(ctx context.Context, tx Tx, item *domain.AssetWorkbenchPromoCoupon) (*domain.AssetWorkbenchPromoCoupon, error)
+	ListActivePromoCoupons(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) ([]*domain.AssetWorkbenchPromoCoupon, error)
+
+	ListGroups(ctx context.Context, filter AssetWorkbenchGroupFilter) ([]*domain.AssetWorkbenchGroup, int64, error)
+	CreateGroup(ctx context.Context, tx Tx, group *domain.AssetWorkbenchGroup) (*domain.AssetWorkbenchGroup, error)
+	UpdateGroup(ctx context.Context, tx Tx, group *domain.AssetWorkbenchGroup) (*domain.AssetWorkbenchGroup, error)
+	SetGroupEnabled(ctx context.Context, tx Tx, groupID int64, enabled bool) (*domain.AssetWorkbenchGroup, error)
+	AddGroupMembers(ctx context.Context, tx Tx, groupID int64, userIDs []int64) error
+	RemoveGroupMembers(ctx context.Context, tx Tx, groupID int64, userIDs []int64) error
+	ListGroupMembers(ctx context.Context, groupID int64) ([]*domain.AssetWorkbenchGroupMember, error)
+
+	ListTemplates(ctx context.Context, filter AssetWorkbenchTemplateFilter) ([]*domain.AssetWorkbenchTemplate, int64, error)
+	GetTemplate(ctx context.Context, templateID int64) (*domain.AssetWorkbenchTemplate, error)
+	CreateTemplate(ctx context.Context, tx Tx, template *domain.AssetWorkbenchTemplate) (*domain.AssetWorkbenchTemplate, error)
+	UpdateTemplate(ctx context.Context, tx Tx, template *domain.AssetWorkbenchTemplate) (*domain.AssetWorkbenchTemplate, error)
+	SetTemplateEnabled(ctx context.Context, tx Tx, templateID int64, enabled bool) (*domain.AssetWorkbenchTemplate, error)
+	ListTemplatesForUser(ctx context.Context, userID int64) ([]*domain.AssetWorkbenchTemplate, error)
+	IsTemplateAssignedToUser(ctx context.Context, userID, templateID int64) (bool, error)
+
+	ListTemplateAssignments(ctx context.Context, filter AssetWorkbenchTemplateAssignmentFilter) ([]*domain.AssetWorkbenchTemplateAssignment, int64, error)
+	CreateTemplateAssignment(ctx context.Context, tx Tx, assignment *domain.AssetWorkbenchTemplateAssignment) (*domain.AssetWorkbenchTemplateAssignment, error)
+	SetTemplateAssignmentEnabled(ctx context.Context, tx Tx, assignmentID int64, enabled bool) (*domain.AssetWorkbenchTemplateAssignment, error)
+
+	CreateUploadSession(ctx context.Context, tx Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error)
+	GetUploadSession(ctx context.Context, sessionID string) (*domain.AssetWorkbenchUploadSession, error)
+	UpdateUploadSessionStatus(ctx context.Context, tx Tx, sessionID, status string, uploadedAt *time.Time, cancelledAt *time.Time, submittedItemID *int64) error
+	ListExpiredUploadSessions(ctx context.Context, now time.Time, limit int) ([]*domain.AssetWorkbenchUploadSession, error)
+
+	CreateSubmission(ctx context.Context, tx Tx, submission *domain.AssetWorkbenchSubmission) (*domain.AssetWorkbenchSubmission, error)
+	GetSubmission(ctx context.Context, submissionID int64) (*domain.AssetWorkbenchSubmission, error)
+	CreateSubmissionItem(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error)
+	GetSubmissionItem(ctx context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error)
+	UpdateSubmissionItemQCStatus(ctx context.Context, tx Tx, itemID int64, qcStatus string) (*domain.AssetWorkbenchSubmissionItem, error)
+	VoidSubmissionItem(ctx context.Context, tx Tx, itemID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmissionItem, error)
+	UpdateSubmissionItemPricing(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error)
+	CreateSubmissionFile(ctx context.Context, tx Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error)
+	RefreshSubmissionTotals(ctx context.Context, tx Tx, submissionID int64) error
+	ListSubmissions(ctx context.Context, filter AssetWorkbenchSubmissionFilter) ([]*domain.AssetWorkbenchSubmission, int64, error)
+	ListSubmissionItems(ctx context.Context, submissionID int64) ([]*domain.AssetWorkbenchSubmissionItem, error)
+	ListSubmissionItemsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)
+	ListSubmissionFiles(ctx context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
+	GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error)
+
+	ClaimPendingPreviewFiles(ctx context.Context, claim AssetWorkbenchPreviewClaim) ([]*domain.AssetWorkbenchSubmissionFile, error)
+	MarkPreviewReady(ctx context.Context, tx Tx, fileID int64, previewKey string) error
+	MarkPreviewFailed(ctx context.Context, tx Tx, fileID int64, attempts int, message string, nextRetryAt *time.Time) error
+
+	CreateErrorImportBatch(ctx context.Context, tx Tx, batch *domain.AssetWorkbenchErrorImportBatch) (*domain.AssetWorkbenchErrorImportBatch, error)
+	CreateErrorRecord(ctx context.Context, tx Tx, record *domain.AssetWorkbenchErrorRecord) (*domain.AssetWorkbenchErrorRecord, error)
+	ListErrorRecordsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchErrorRecord, error)
+	FindActiveDeductionRule(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchDeductionRule, error)
+
+	LockSettleableItems(ctx context.Context, tx Tx, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)
+	LockSettleableSupplements(ctx context.Context, tx Tx, businessMonth string) ([]*domain.AssetWorkbenchSettlementSupplement, error)
+	CreateSettlementBatch(ctx context.Context, tx Tx, batch *domain.AssetWorkbenchSettlementBatch) (*domain.AssetWorkbenchSettlementBatch, error)
+	CreateSettlementItem(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementItem) (*domain.AssetWorkbenchSettlementItem, error)
+	AttachItemsToSettlementBatch(ctx context.Context, tx Tx, batchID int64, itemIDs []int64) error
+	AttachSupplementsToSettlementBatch(ctx context.Context, tx Tx, batchID int64, supplementIDs []int64) error
+	ConfirmSettlementBatch(ctx context.Context, tx Tx, batchID int64, actorID int64, at time.Time) error
+	CancelGeneratedSettlementBatch(ctx context.Context, tx Tx, batchID int64, actorID int64, reason string, at time.Time) error
+	LockSettlementBatch(ctx context.Context, tx Tx, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error)
+	GetSettlementBatch(ctx context.Context, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error)
+	ListSettlementBatches(ctx context.Context, filter AssetWorkbenchSettlementBatchFilter) ([]*domain.AssetWorkbenchSettlementBatch, int64, error)
+	ListSettlementItemsByBatch(ctx context.Context, batchID int64) ([]*domain.AssetWorkbenchSettlementItem, error)
+	ListConfirmedSettlementItemsByPayee(ctx context.Context, payeeUserID int64) ([]*domain.AssetWorkbenchSettlementItem, error)
+	HasConfirmedSettlementForPayeeMonth(ctx context.Context, payeeUserID int64, businessMonth string) (bool, error)
+	ListConfirmedSettlementMonthsByPayee(ctx context.Context, payeeUserID int64) ([]string, error)
+	CreateSettlementAdjustment(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementAdjustment) (*domain.AssetWorkbenchSettlementAdjustment, error)
+	ApplySettlementBatchAdjustment(ctx context.Context, tx Tx, batchID int64, signedAmount float64) error
+	ListSettlementSupplements(ctx context.Context, filter AssetWorkbenchSettlementSupplementFilter) ([]*domain.AssetWorkbenchSettlementSupplement, int64, error)
+	CreateSettlementSupplement(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementSupplement) (*domain.AssetWorkbenchSettlementSupplement, error)
+	GetSupplementPermission(ctx context.Context, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error)
+	ListSupplementPermissions(ctx context.Context, filter AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, error)
+	UpsertSupplementPermission(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSupplementPermission) (*domain.AssetWorkbenchSupplementPermission, error)
+
+	AppendEvent(ctx context.Context, tx Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error)
+	ListEvents(ctx context.Context, filter AssetWorkbenchEventFilter) ([]*domain.AssetWorkbenchEvent, int64, error)
+	ListSavedViews(ctx context.Context, filter AssetWorkbenchSavedViewFilter) ([]*domain.AssetWorkbenchSavedView, error)
+	UpsertSavedView(ctx context.Context, tx Tx, view *domain.AssetWorkbenchSavedView) (*domain.AssetWorkbenchSavedView, error)
+	DeleteSavedView(ctx context.Context, tx Tx, userID, viewID int64) error
+}
+
 // ERPSyncRunRepo stores ERP sync execution history.
 type ERPSyncRunRepo interface {
 	Create(ctx context.Context, tx Tx, run *domain.ERPSyncRun) (int64, error)

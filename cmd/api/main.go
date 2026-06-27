@@ -144,7 +144,6 @@ func main() {
 	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
 	businessTrendRepo := mysqlrepo.NewBusinessTrendRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
-
 	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
 	auditSvc := service.NewAuditService(auditRepo, skuRepo, assetVersionRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
 	agentSvc := service.NewAgentService(assetVersionRepo, skuRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
@@ -378,13 +377,12 @@ func main() {
 		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
 		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
 	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
-
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
 	agentH := handler.NewAgentHandler(agentSvc)
 	incidentH := handler.NewIncidentHandler(incidentSvc)
 	policyH := handler.NewPolicyHandler(policySvc)
-	authH := handler.NewAuthHandler(identitySvc)
+	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()
 	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc, workflowTraceEventSvc)
 
@@ -445,11 +443,20 @@ func main() {
 	predictionH := handler.NewPredictionHandler(predictionSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, nil, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
-	workers.NewGroup(db, rdb, logger, erpSyncSvc, productManagementSvc, skuComboSyncSvc, cfg.ERP.Enabled, cfg.ERP.Interval).Start(workerCtx)
+	workers.NewGroup(workers.GroupDeps{
+		DB:                db,
+		Redis:             rdb,
+		Logger:            logger,
+		ERPSync:           erpSyncSvc,
+		ProductManagement: productManagementSvc,
+		SKUComboSync:      skuComboSyncSvc,
+		ERPEnabled:        cfg.ERP.Enabled,
+		ERPInterval:       cfg.ERP.Interval,
+	}).Start(workerCtx)
 	if wecomSender.Start(workerCtx) {
 		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
 	}

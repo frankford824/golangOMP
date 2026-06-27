@@ -36,6 +36,14 @@ type RegisterUserParams struct {
 	ManagedDepartments *[]string
 }
 
+type RegisterAssetWorkbenchUserParams struct {
+	Username    string
+	DisplayName string
+	Mobile      string
+	Email       string
+	Password    string
+}
+
 type LoginParams struct {
 	Username string
 	Password string
@@ -155,6 +163,7 @@ type IdentityService interface {
 	CreateTeam(ctx context.Context, p CreateOrgTeamParams) (*domain.OrgTeam, *domain.AppError)
 	UpdateTeam(ctx context.Context, p UpdateOrgTeamParams) (*domain.OrgTeam, *domain.AppError)
 	Register(ctx context.Context, p RegisterUserParams) (*domain.AuthResult, *domain.AppError)
+	RegisterAssetWorkbenchUser(ctx context.Context, p RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError)
 	Login(ctx context.Context, p LoginParams) (*domain.AuthResult, *domain.AppError)
 	ChangePassword(ctx context.Context, p ChangePasswordParams) *domain.AppError
 	CreateManagedUser(ctx context.Context, p CreateManagedUserParams) (*domain.User, *domain.AppError)
@@ -506,6 +515,117 @@ func (s *identityService) Register(ctx context.Context, p RegisterUserParams) (*
 		Reason:         reason,
 		Method:         "POST",
 		RoutePath:      "/v1/auth/register",
+	})
+	return &domain.AuthResult{
+		User: user,
+		Session: &domain.AuthSession{
+			SessionID: session.SessionID,
+			Token:     rawToken,
+			TokenType: "Bearer",
+			ExpiresAt: session.ExpiresAt,
+		},
+	}, nil
+}
+
+func (s *identityService) RegisterAssetWorkbenchUser(ctx context.Context, p RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError) {
+	username := normalizeUsername(p.Username)
+	displayName := strings.TrimSpace(p.DisplayName)
+	mobile := strings.TrimSpace(p.Mobile)
+	email := strings.TrimSpace(p.Email)
+
+	if username == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "account is required", nil)
+	}
+	if displayName == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name is required", nil)
+	}
+	if appErr := validateMobile(mobile); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := validateOptionalEmail(email); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.validatePassword(p.Password, "password"); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.ensureUniqueIdentity(ctx, username, mobile, 0); appErr != nil {
+		return nil, appErr
+	}
+
+	team, appErr := s.defaultUnassignedPoolTeam()
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.validateDepartment(domain.DepartmentUnassigned); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.validateTeam(domain.DepartmentUnassigned, team); appErr != nil {
+		return nil, appErr
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(p.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, infraError("hash asset workbench password", err)
+	}
+
+	now := time.Now().UTC()
+	user := &domain.User{
+		Username:       username,
+		DisplayName:    displayName,
+		Department:     domain.DepartmentUnassigned,
+		Team:           team,
+		Mobile:         mobile,
+		Email:          email,
+		PasswordHash:   string(hash),
+		Status:         domain.UserStatusActive,
+		EmploymentType: domain.EmploymentTypePartTime,
+		LastLoginAt:    &now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	roles := []domain.Role{domain.RoleAssetSubmitter}
+
+	rawToken, tokenHash, err := generateSessionToken()
+	if err != nil {
+		return nil, infraError("generate session token during asset workbench register", err)
+	}
+	session := &domain.UserSession{
+		SessionID:  uuid.NewString(),
+		TokenHash:  tokenHash,
+		ExpiresAt:  now.Add(s.sessionTTL),
+		LastSeenAt: &now,
+		CreatedAt:  now,
+	}
+
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		userID, err := s.userRepo.Create(ctx, tx, user)
+		if err != nil {
+			return err
+		}
+		user.ID = userID
+		if err := s.userRepo.ReplaceRoles(ctx, tx, userID, roles); err != nil {
+			return err
+		}
+		session.UserID = userID
+		if _, err := s.sessionRepo.Create(ctx, tx, session); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, infraError("register asset workbench user tx", err)
+	}
+
+	user.Roles = domain.NormalizeRoleValues(roles)
+	s.prepareUserForResponse(user)
+	s.recordPermissionAction(ctx, domain.PermissionLog{
+		ActionType:     domain.PermissionActionRegister,
+		TargetUserID:   actorIDPtr(user.ID),
+		TargetUsername: user.Username,
+		TargetRoles:    user.Roles,
+		Granted:        true,
+		Reason:         "asset workbench user self-registered",
+		Method:         "POST",
+		RoutePath:      "/v1/asset-workbench/register",
 	})
 	return &domain.AuthResult{
 		User: user,

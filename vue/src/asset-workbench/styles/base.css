@@ -1,0 +1,117 @@
+html,
+body,
+#asset-workbench-app {
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
+}
+
+.aw-root {
+  box-sizing: border-box;
+  min-height: 100vh;
+  min-width: 0;
+  width: 100%;
+  overflow-x: hidden;
+  color: var(--aw-ink);
+  background: var(--aw-paper);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-font-size-md);
+  line-height: 1.55;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.aw-root h1,
+.aw-root h2,
+.aw-root h3,
+.aw-root h4 {
+  font-family: var(--aw-font-sans);
+  font-weight: var(--aw-weight-strong);
+  letter-spacing: var(--aw-tracking-tight);
+  line-height: 1.25;
+}
+
+.aw-root *,
+.aw-root *::before,
+.aw-root *::after {
+  box-sizing: border-box;
+}
+
+.aw-root button,
+.aw-root input,
+.aw-root select,
+.aw-root textarea {
+  font: inherit;
+}
+
+.aw-root button {
+  cursor: pointer;
+}
+
+.aw-root button:disabled,
+.aw-root input:disabled,
+.aw-root select:disabled,
+.aw-root textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.aw-root input:not([type='checkbox']):not([type='radio']),
+.aw-root select,
+.aw-root textarea {
+  width: 100%;
+  min-height: var(--aw-row-md);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface);
+  color: var(--aw-ink);
+  padding: 0 var(--aw-space-3);
+}
+
+.aw-root input[type='checkbox'],
+.aw-root input[type='radio'] {
+  width: var(--aw-control-check);
+  height: var(--aw-control-check);
+  min-height: 0;
+  accent-color: var(--aw-accent);
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+}
+
+.aw-root textarea {
+  min-height: calc(var(--aw-row-md) * 2);
+  padding-block: var(--aw-space-3);
+  resize: vertical;
+}
+
+.aw-root input::placeholder,
+.aw-root textarea::placeholder {
+  color: var(--aw-ink-muted);
+}
+
+.aw-root input:hover,
+.aw-root select:hover,
+.aw-root textarea:hover {
+  border-color: var(--aw-hairline-strong);
+}
+
+.aw-root :focus-visible {
+  outline: 2px solid var(--aw-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-root *,
+  .aw-root *::before,
+  .aw-root *::after {
+    scroll-behavior: auto;
+    transition-duration: 1ms;
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+  }
+}
