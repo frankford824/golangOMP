@@ -20,6 +20,7 @@ export interface AssetWorkbenchProfile {
   province?: string
   city?: string
   id_card?: string
+  gender?: string
   alipay_account?: string
   status: string
   pii_completed: boolean
@@ -60,6 +61,7 @@ export interface UpsertProfilePayload {
   province?: string
   city?: string
   id_card?: string
+  gender?: string
   alipay_account?: string
   status?: string
   reason?: string
@@ -138,6 +140,30 @@ export interface WorkbenchGroupRow {
   created_by: number
 }
 
+export interface WorkbenchMemberRow {
+  user_id: number
+  username: string
+  display_name: string
+  real_name: string
+  worker_type: string
+  job_grade: string
+  status: string
+  pii_completed: boolean
+  identity: 'admin' | 'normal'
+}
+
+export interface WorkbenchGroupMemberRow {
+  group_id: number
+  user_id: number
+  username?: string
+  display_name?: string
+  real_name?: string
+  worker_type?: string
+  job_grade?: string
+  identity?: 'admin' | 'normal'
+  pii_completed?: boolean
+}
+
 export interface WorkbenchTemplateRow {
   id: number
   name: string
@@ -152,8 +178,10 @@ export interface WorkbenchTemplateRow {
 export interface WorkbenchTemplateAssignmentRow {
   id: number
   template_id: number
+  template_name?: string
   target_type: 'user' | 'group'
   target_id: number
+  target_name?: string
   enabled: boolean
   assigned_by: number
 }
@@ -688,6 +716,25 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async listMembers(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchMemberRow>> {
+    const res = await http.get<ApiEnvelope<WorkbenchMemberRow[]>>('/v1/asset-workbench/members', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async searchPeople(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchMemberRow>> {
+    const res = await http.get<ApiEnvelope<WorkbenchMemberRow[]>>('/v1/asset-workbench/people-lookup', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async updateMemberIdentity(userId: number, identity: 'admin' | 'normal', reason?: string, signal?: AbortSignal): Promise<WorkbenchMemberRow> {
+    const res = await http.patch<ApiEnvelope<WorkbenchMemberRow>>(
+      `/v1/asset-workbench/members/${userId}/identity`,
+      { identity, reason },
+      { signal },
+    )
+    return unwrap(res.data)
+  },
+
   async listDeductionRules(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<DeductionRuleRow>> {
     const res = await http.get<ApiEnvelope<DeductionRuleRow[]>>('/v1/asset-workbench/deduction-rules', { params, signal })
     return unwrapPaginated(res.data)
@@ -735,6 +782,11 @@ export const assetWorkbenchApi = {
 
   async addGroupMembers(groupId: number, userIds: number[], signal?: AbortSignal): Promise<unknown> {
     const res = await http.put<ApiEnvelope<unknown>>(`/v1/asset-workbench/groups/${groupId}/members`, { user_ids: userIds }, { signal })
+    return unwrap(res.data)
+  },
+
+  async listGroupMembers(groupId: number, signal?: AbortSignal): Promise<WorkbenchGroupMemberRow[]> {
+    const res = await http.get<ApiEnvelope<WorkbenchGroupMemberRow[]>>(`/v1/asset-workbench/groups/${groupId}/members`, { signal })
     return unwrap(res.data)
   },
 

@@ -8,14 +8,17 @@ import {
   FileUp,
   LayoutDashboard,
   Library,
+  LogOut,
   ReceiptText,
   ScrollText,
   Search,
   Send,
+  UserRound,
   UsersRound,
 } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '../app/useAssetWorkbenchBootstrap'
+import { useWorkbenchSession } from '../app/useWorkbenchSession'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +27,7 @@ const commandQuery = ref('')
 const commandIndex = ref(0)
 const commandInputRef = ref<HTMLInputElement | null>(null)
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
+const { logout } = useWorkbenchSession()
 
 const navItems = [
   { to: '/', label: '总览', icon: LayoutDashboard, requires: ['asset.workbench.bootstrap'] },
@@ -34,7 +38,9 @@ const navItems = [
   { to: '/template-assignments', label: '下发', icon: Send, requires: ['asset.workbench.template.assign'] },
   { to: '/settlement', label: '结算', icon: ReceiptText, requires: ['asset.workbench.settlement'] },
   { to: '/people', label: '人员', icon: UsersRound, requires: ['asset.workbench.profile', 'asset.workbench.profile.manage'] },
+  { to: '/members', label: '权限', icon: UserRound, requires: ['asset.workbench.member.identity'] },
   { to: '/events', label: '日志', icon: ScrollText, requires: ['asset.workbench.manage', 'asset.workbench.cost_center.manage', 'asset.workbench.settlement'] },
+  { to: '/account', label: '账号', icon: UserRound, requires: ['asset.workbench.bootstrap'] },
 ]
 
 const activeLabel = computed(() => String(route.meta.label || '资产工作台'))
@@ -71,6 +77,7 @@ const profileState = computed(() => {
 const businessMonth = computed(() =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date()),
 )
+const displayName = computed(() => bootstrap.value?.profile?.real_name || bootstrap.value?.user?.name || bootstrap.value?.user?.username || '我的账号')
 
 function hasAnyCapability(required: string[]) {
   const capabilities = new Set(bootstrap.value?.capabilities ?? [])
@@ -182,11 +189,21 @@ watch(commandQuery, () => {
           <p class="aw-eyebrow">资产交付与计件结算</p>
           <h1>{{ activeLabel }}</h1>
         </div>
-        <button class="aw-command-button" type="button" @click="toggleCommand">
-          <Search :size="16" aria-hidden="true" />
-          <span>搜索或执行动作</span>
-          <kbd>⌘K</kbd>
-        </button>
+        <div class="aw-page-bar__actions">
+          <button class="aw-command-button" type="button" @click="toggleCommand">
+            <Search :size="16" aria-hidden="true" />
+            <span>搜索或执行动作</span>
+            <kbd>⌘K</kbd>
+          </button>
+          <RouterLink class="aw-secondary-button" to="/account">
+            <UserRound :size="16" aria-hidden="true" />
+            {{ displayName }}
+          </RouterLink>
+          <button class="aw-secondary-button" type="button" @click="logout">
+            <LogOut :size="16" aria-hidden="true" />
+            退出
+          </button>
+        </div>
       </header>
 
       <main class="aw-shell__content">

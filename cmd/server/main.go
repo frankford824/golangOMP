@@ -475,6 +475,7 @@ func main() {
 		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
 	},
 		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
+		assetworkbench.WithUserRepository(userRepo),
 		assetworkbench.WithIdentityRegistrar(identitySvc),
 		assetworkbench.WithOSSDirect(ossDirectSvc),
 		assetworkbench.WithPreviewRenderer(service.NewExternalAssetPreviewRenderer()),

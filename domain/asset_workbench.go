@@ -117,6 +117,7 @@ const (
 	AssetWorkbenchEventTemplateUpserted            = "template.upserted"
 	AssetWorkbenchEventTemplateAssigned            = "template.assigned"
 	AssetWorkbenchEventTemplateAssignmentRemoved   = "template_assignment.removed"
+	AssetWorkbenchEventMemberIdentityChanged       = "member.identity_changed"
 
 	AssetWorkbenchEntityProfile              = "profile"
 	AssetWorkbenchEntityPriceMatrix          = "price_matrix"
@@ -137,6 +138,7 @@ const (
 	AssetWorkbenchEntityGroup                = "group"
 	AssetWorkbenchEntityTemplate             = "template"
 	AssetWorkbenchEntityTemplateAssignment   = "template_assignment"
+	AssetWorkbenchEntityMember               = "member"
 )
 
 type AssetWorkbenchProfile struct {
@@ -257,9 +259,16 @@ type AssetWorkbenchGroup struct {
 }
 
 type AssetWorkbenchGroupMember struct {
-	GroupID   int64     `json:"group_id" db:"group_id"`
-	UserID    int64     `json:"user_id" db:"user_id"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	GroupID      int64     `json:"group_id" db:"group_id"`
+	UserID       int64     `json:"user_id" db:"user_id"`
+	Username     string    `json:"username,omitempty" db:"-"`
+	DisplayName  string    `json:"display_name,omitempty" db:"-"`
+	RealName     string    `json:"real_name,omitempty" db:"-"`
+	WorkerType   string    `json:"worker_type,omitempty" db:"-"`
+	JobGrade     string    `json:"job_grade,omitempty" db:"-"`
+	Identity     string    `json:"identity,omitempty" db:"-"`
+	PIICompleted bool      `json:"pii_completed,omitempty" db:"-"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
 type AssetWorkbenchTemplate struct {
@@ -276,14 +285,30 @@ type AssetWorkbenchTemplate struct {
 }
 
 type AssetWorkbenchTemplateAssignment struct {
-	ID         int64     `json:"id" db:"id"`
-	TemplateID int64     `json:"template_id" db:"template_id"`
-	TargetType string    `json:"target_type" db:"target_type"`
-	TargetID   int64     `json:"target_id" db:"target_id"`
-	Enabled    bool      `json:"enabled" db:"enabled"`
-	AssignedBy int64     `json:"assigned_by" db:"assigned_by"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
+	ID           int64     `json:"id" db:"id"`
+	TemplateID   int64     `json:"template_id" db:"template_id"`
+	TemplateName string    `json:"template_name,omitempty" db:"-"`
+	TargetType   string    `json:"target_type" db:"target_type"`
+	TargetID     int64     `json:"target_id" db:"target_id"`
+	TargetName   string    `json:"target_name,omitempty" db:"-"`
+	Enabled      bool      `json:"enabled" db:"enabled"`
+	AssignedBy   int64     `json:"assigned_by" db:"assigned_by"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type AssetWorkbenchMember struct {
+	UserID       int64     `json:"user_id"`
+	Username     string    `json:"username"`
+	DisplayName  string    `json:"display_name"`
+	RealName     string    `json:"real_name"`
+	WorkerType   string    `json:"worker_type"`
+	JobGrade     string    `json:"job_grade"`
+	Status       string    `json:"status"`
+	PIICompleted bool      `json:"pii_completed"`
+	Identity     string    `json:"identity"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type AssetWorkbenchUploadSession struct {

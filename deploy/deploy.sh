@@ -205,7 +205,9 @@ REMOTE_PREP
     ssh_runner "$SSH_TARGET" \
       "DEPLOY_BASE_DIR=$(printf '%q' "$DEPLOY_BASE_DIR") ARTIFACT_NAME=$(printf '%q' "$PACKAGE_ARTIFACT_NAME") ARTIFACT_DIR_NAME=$(printf '%q' "$PACKAGE_ARTIFACT_DIR_NAME") VERSION=$(printf '%q' "$VERSION") KEEP_RELEASES=$(printf '%q' "${DEPLOY_KEEP_RELEASES:-5}") MAIN_ENV=$(printf '%q' "$([ "$PARALLEL_DEPLOY" = "true" ] && [ -n "$RUNTIME_ENV_FILE" ] && printf '%s' "$REMOTE_PARALLEL_MAIN_ENV" || printf '%s' "$REMOTE_MAIN_ENV")") BRIDGE_ENV=$(printf '%q' "$REMOTE_BRIDGE_ENV") PARALLEL_DEPLOY=$(printf '%q' "$PARALLEL_DEPLOY") PARALLEL_PORT=$(printf '%q' "$PARALLEL_PORT") bash -s" <<'REMOTE_DEPLOY'
 set -euo pipefail
-tar -xzf "$DEPLOY_BASE_DIR/incoming/$ARTIFACT_NAME" -C "$DEPLOY_BASE_DIR/incoming"
+# Local and remote clocks can differ by a few seconds during WSL/SSH deploys.
+# Suppress GNU tar's non-fatal future timestamp noise while preserving errors.
+tar --warning=no-timestamp -xzf "$DEPLOY_BASE_DIR/incoming/$ARTIFACT_NAME" -C "$DEPLOY_BASE_DIR/incoming"
 if [ "$PARALLEL_DEPLOY" = "true" ]; then
   bash "$DEPLOY_BASE_DIR/incoming/$ARTIFACT_DIR_NAME/deploy/remote-deploy.sh" \
     --package-root "$DEPLOY_BASE_DIR/incoming/$ARTIFACT_DIR_NAME" \

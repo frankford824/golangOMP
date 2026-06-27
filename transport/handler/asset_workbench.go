@@ -126,6 +126,69 @@ func (h *AssetWorkbenchHandler) UpsertProfile(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) ListMembers(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	items, total, appErr := h.svc.ListMembers(c.Request.Context(), actor, repo.AssetWorkbenchMemberFilter{
+		Keyword:  c.Query("q"),
+		Identity: c.Query("identity"),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) SearchPeople(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	items, total, appErr := h.svc.SearchPeople(c.Request.Context(), actor, repo.AssetWorkbenchMemberFilter{
+		Keyword:  c.Query("q"),
+		Identity: c.Query("identity"),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) UpdateMemberIdentity(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("user_id")), 10, 64)
+	if err != nil || userID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user_id", nil))
+		return
+	}
+	var req assetworkbench.UpdateMemberIdentityParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateMemberIdentity(c.Request.Context(), actor, userID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) ListMyTemplates(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -260,6 +323,24 @@ func (h *AssetWorkbenchHandler) RemoveGroupMembers(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"status": "ok"})
+}
+
+func (h *AssetWorkbenchHandler) ListGroupMembers(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid group_id", nil))
+		return
+	}
+	result, appErr := h.svc.ListGroupMembers(c.Request.Context(), actor, groupID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *AssetWorkbenchHandler) ListTemplates(c *gin.Context) {

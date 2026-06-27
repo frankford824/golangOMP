@@ -36,6 +36,7 @@ type Option func(*Service)
 type Service struct {
 	cfg             Config
 	repo            repo.AssetWorkbenchRepo
+	userRepo        repo.UserRepo
 	tx              repo.TxRunner
 	identity        WorkbenchIdentityRegistrar
 	oss             *baseservice.OSSDirectService
@@ -94,6 +95,12 @@ func WithRepository(workbenchRepo repo.AssetWorkbenchRepo, tx repo.TxRunner) Opt
 	return func(s *Service) {
 		s.repo = workbenchRepo
 		s.tx = tx
+	}
+}
+
+func WithUserRepository(userRepo repo.UserRepo) Option {
+	return func(s *Service) {
+		s.userRepo = userRepo
 	}
 }
 
@@ -187,6 +194,11 @@ type UpsertProfileParams struct {
 	GradeHidden   bool       `json:"grade_hidden"`
 	Status        string     `json:"status"`
 	Reason        string     `json:"reason"`
+}
+
+type UpdateMemberIdentityParams struct {
+	Identity string `json:"identity"`
+	Reason   string `json:"reason"`
 }
 
 type CreatePriceMatrixParams struct {
@@ -660,6 +672,91 @@ func (s *Service) ListProfiles(ctx context.Context, actor domain.RequestActor, f
 	return maskProfileListPII(items), total, nil
 }
 
+func (s *Service) ListMembers(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, 0, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list workbench members.", nil)
+	}
+	items, total, err := s.repo.ListMembers(ctx, filter)
+	if err != nil {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench members.", err.Error())
+	}
+	return items, total, nil
+}
+
+func (s *Service) SearchPeople(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, 0, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can search workbench people.", nil)
+	}
+	items, total, err := s.repo.SearchPeople(ctx, filter)
+	if err != nil {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to search asset workbench people.", err.Error())
+	}
+	return items, total, nil
+}
+
+func (s *Service) UpdateMemberIdentity(ctx context.Context, actor domain.RequestActor, userID int64, params UpdateMemberIdentityParams) (*domain.AssetWorkbenchMember, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if s.userRepo == nil || s.tx == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench user role repository is not configured.", nil)
+	}
+	if !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can change workbench identity.", nil)
+	}
+	if userID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required.", nil)
+	}
+	identity := strings.TrimSpace(params.Identity)
+	if identity != "admin" && identity != "normal" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "identity must be admin or normal.", nil)
+	}
+	currentRoles, err := s.userRepo.ListRoles(ctx, userID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load user roles.", err.Error())
+	}
+	nextRoles := applyAssetWorkbenchIdentity(currentRoles, identity)
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.userRepo.ReplaceRoles(ctx, tx, userID, nextRoles); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventMemberIdentityChanged, domain.AssetWorkbenchEntityMember, &userID, map[string]interface{}{
+			"roles":    currentRoles,
+			"identity": workbenchIdentityFromRoles(currentRoles),
+		}, map[string]interface{}{
+			"roles":    nextRoles,
+			"identity": identity,
+		}, strings.TrimSpace(params.Reason))
+	}); err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench member identity.", err.Error())
+	}
+	members, _, err := s.repo.ListMembers(ctx, repo.AssetWorkbenchMemberFilter{Page: 1, PageSize: 1, Keyword: strconv.FormatInt(userID, 10)})
+	if err == nil {
+		for _, item := range members {
+			if item != nil && item.UserID == userID {
+				return item, nil
+			}
+		}
+	}
+	user, userErr := s.userRepo.GetByID(ctx, userID)
+	if userErr != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load updated user.", userErr.Error())
+	}
+	return &domain.AssetWorkbenchMember{
+		UserID:      user.ID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		RealName:    firstNonEmpty(user.RealName, user.DisplayName, user.Username),
+		Identity:    identity,
+	}, nil
+}
+
 func maskProfileListPII(items []*domain.AssetWorkbenchProfile) []*domain.AssetWorkbenchProfile {
 	if len(items) == 0 {
 		return []*domain.AssetWorkbenchProfile{}
@@ -1031,6 +1128,23 @@ func (s *Service) RemoveGroupMembers(ctx context.Context, actor domain.RequestAc
 		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to remove asset workbench group members.", err.Error())
 	}
 	return nil
+}
+
+func (s *Service) ListGroupMembers(ctx context.Context, actor domain.RequestActor, groupID int64) ([]*domain.AssetWorkbenchGroupMember, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list group members.", nil)
+	}
+	if groupID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "group_id is required.", nil)
+	}
+	items, err := s.repo.ListGroupMembers(ctx, groupID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench group members.", err.Error())
+	}
+	return items, nil
 }
 
 func (s *Service) ListTemplates(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchTemplateFilter) ([]*domain.AssetWorkbenchTemplate, int64, *domain.AppError) {
@@ -4346,6 +4460,7 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.bootstrap",
 			"asset.workbench.manage",
 			"asset.workbench.group.manage",
+			"asset.workbench.member.manage",
 			"asset.workbench.template.assign",
 			"asset.workbench.system_search",
 			"asset.workbench.download",
@@ -4382,6 +4497,8 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.profile.manage",
 			"asset.workbench.manage",
 			"asset.workbench.group.manage",
+			"asset.workbench.member.manage",
+			"asset.workbench.member.identity",
 			"asset.workbench.system_search",
 			"asset.workbench.download",
 			"asset.workbench.cost_center.manage",
@@ -4392,6 +4509,44 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 		)
 	}
 	return dedupeStrings(actions)
+}
+
+func applyAssetWorkbenchIdentity(current []domain.Role, identity string) []domain.Role {
+	next := make([]domain.Role, 0, len(current)+4)
+	for _, role := range domain.NormalizeRoleValues(current) {
+		if isAssetWorkbenchRoleManagedByIdentity(role) {
+			continue
+		}
+		next = append(next, role)
+	}
+	next = append(next, domain.RoleAssetSubmitter)
+	if identity == "admin" {
+		next = append(next,
+			domain.RoleAssetManager,
+			domain.RoleAssetTemplateAdmin,
+			domain.RoleAssetSettlement,
+		)
+	}
+	return domain.NormalizeRoleValues(next)
+}
+
+func isAssetWorkbenchRoleManagedByIdentity(role domain.Role) bool {
+	switch role {
+	case domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement:
+		return true
+	default:
+		return false
+	}
+}
+
+func workbenchIdentityFromRoles(roles []domain.Role) string {
+	for _, role := range domain.NormalizeRoleValues(roles) {
+		switch role {
+		case domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement, domain.RoleHRAdmin, domain.RoleSuperAdmin:
+			return "admin"
+		}
+	}
+	return "normal"
 }
 
 func dedupeStrings(values []string) []string {

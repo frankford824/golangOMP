@@ -10,7 +10,7 @@ const route = useRoute()
 const router = useRouter()
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
 
-const allowedSimplePaths = new Set(['/', '/upload', '/my-settlement'])
+const allowedSimplePaths = new Set(['/', '/upload', '/my-settlement', '/account'])
 const isAdmin = computed(() => bootstrap.value?.is_admin === true)
 
 function redirectSimpleUser() {

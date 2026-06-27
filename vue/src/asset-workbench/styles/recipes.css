@@ -259,6 +259,7 @@
   justify-self: end;
   gap: var(--aw-space-2);
   color: var(--aw-ink-2);
+  text-decoration: none;
 }
 
 .aw-simple-user span {
@@ -396,12 +397,89 @@
   padding: var(--aw-space-4);
 }
 
-.aw-simple-income__row > div,
+.aw-simple-income__row > .aw-simple-income__month,
 .aw-compact-list__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--aw-space-3);
+}
+
+.aw-simple-income__month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+}
+
+.aw-simple-income__month > div {
+  display: grid;
+  gap: var(--aw-space-1);
+}
+
+.aw-simple-income__month small {
+  color: var(--aw-ink-2);
+}
+
+.aw-pay-slip-list {
+  display: grid;
+  gap: var(--aw-space-2);
+}
+
+.aw-pay-slip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--aw-space-3);
+  align-items: center;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  padding: var(--aw-space-3);
+  background: var(--aw-surface);
+}
+
+.aw-pay-slip__icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--aw-row-sm);
+  height: var(--aw-row-sm);
+  border-radius: var(--aw-radius-sm);
+  background: color-mix(in srgb, var(--aw-accent) 12%, var(--aw-surface));
+  color: var(--aw-accent);
+}
+
+.aw-pay-slip__icon--supplement {
+  background: color-mix(in srgb, var(--aw-money) 12%, var(--aw-surface));
+  color: var(--aw-money);
+}
+
+.aw-pay-slip__copy {
+  display: grid;
+  gap: var(--aw-space-1);
+  min-width: 0;
+}
+
+.aw-pay-slip__copy span,
+.aw-pay-slip__copy small {
+  color: var(--aw-ink-2);
+}
+
+.aw-simple-income__total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  border-top: 1px solid var(--aw-hairline);
+  padding-top: var(--aw-space-3);
+}
+
+.aw-simple-income__total span {
+  color: var(--aw-ink-2);
+}
+
+.aw-simple-income__total strong {
+  color: var(--aw-money);
+  font-family: var(--aw-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .aw-simple-income__row dl {
@@ -561,6 +639,13 @@
 .aw-primary-button:hover {
   border-color: var(--aw-accent-hover);
   background: var(--aw-accent-hover);
+}
+
+.aw-root .aw-primary-button:disabled,
+.aw-root .aw-primary-button:disabled:hover {
+  border-color: var(--aw-hairline);
+  background: var(--aw-surface-muted);
+  color: var(--aw-ink-muted);
 }
 
 .aw-secondary-button {
@@ -1383,6 +1468,87 @@
   margin-top: var(--aw-space-4);
 }
 
+.aw-simple-upload-list {
+  display: grid;
+  gap: var(--aw-space-3);
+  margin-top: var(--aw-space-4);
+}
+
+.aw-simple-upload-item {
+  display: grid;
+  gap: var(--aw-space-3);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  padding: var(--aw-space-4);
+  background: var(--aw-surface-raised);
+}
+
+.aw-simple-upload-item__main,
+.aw-simple-upload-item__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-3);
+}
+
+.aw-simple-upload-item__main {
+  justify-content: space-between;
+}
+
+.aw-simple-upload-item__main > svg {
+  flex: 0 0 auto;
+  color: var(--aw-accent);
+}
+
+.aw-simple-upload-item__main > div {
+  display: grid;
+  min-width: 0;
+  gap: var(--aw-space-1);
+  margin-right: auto;
+}
+
+.aw-simple-upload-item__main strong,
+.aw-simple-upload-item__main span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-simple-upload-item__main span {
+  color: var(--aw-ink-2);
+}
+
+.aw-simple-upload-item__main .aw-chip {
+  align-self: flex-start;
+}
+
+.aw-simple-upload-item__actions {
+  justify-content: flex-end;
+}
+
+.aw-simple-upload-item__details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, 0.35fr) auto;
+  gap: var(--aw-space-3);
+  align-items: end;
+  border-top: 1px solid var(--aw-hairline);
+  padding-top: var(--aw-space-3);
+}
+
+.aw-upload-progress {
+  overflow: hidden;
+  height: var(--aw-space-2);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-surface-muted);
+}
+
+.aw-upload-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--aw-accent);
+}
+
 .aw-upload-list > div {
   display: grid;
   grid-template-columns:
@@ -1426,8 +1592,7 @@
   margin: var(--aw-space-4) 0;
 }
 
-.aw-form-grid label,
-.aw-form-grid .aw-form-grid__full {
+.aw-form-grid label {
   display: grid;
   gap: var(--aw-space-1);
   color: var(--aw-ink-2);
@@ -1655,6 +1820,22 @@
   .aw-simple-card-grid,
   .aw-simple-income__row dl {
     grid-template-columns: 1fr;
+  }
+
+  .aw-pay-slip,
+  .aw-simple-upload-item__details {
+    grid-template-columns: 1fr;
+  }
+
+  .aw-simple-upload-item__main,
+  .aw-simple-upload-item__actions,
+  .aw-simple-income__total {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .aw-simple-upload-item__actions .aw-secondary-button {
+    width: 100%;
   }
 
   .aw-simple-hero {

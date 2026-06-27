@@ -34,6 +34,12 @@ const routes: RouteRecordRaw[] = [
     meta: { label: '看收入' },
   },
   {
+    path: '/account',
+    name: 'asset-account',
+    component: () => import('./pages/AccountPage.vue'),
+    meta: { label: '个人中心' },
+  },
+  {
     path: '/submissions',
     name: 'asset-submissions',
     component: () => import('./pages/SubmissionsPage.vue'),
@@ -68,6 +74,12 @@ const routes: RouteRecordRaw[] = [
     name: 'asset-people',
     component: () => import('./pages/PeoplePage.vue'),
     meta: { label: '人员' },
+  },
+  {
+    path: '/members',
+    name: 'asset-members',
+    component: () => import('./pages/MembersPage.vue'),
+    meta: { label: '成员与权限' },
   },
   {
     path: '/events',

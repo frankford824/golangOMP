@@ -43,13 +43,13 @@ const navItems = [
           <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
-      <div class="aw-simple-user" aria-label="我的资料">
+      <RouterLink class="aw-simple-user" to="/account" aria-label="我的资料">
         <UserRound :size="18" aria-hidden="true" />
         <span>
           <b>{{ displayName }}</b>
           <small>{{ profileHint }}</small>
         </span>
-      </div>
+      </RouterLink>
     </header>
 
     <main class="aw-simple">

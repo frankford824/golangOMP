@@ -30,6 +30,8 @@ tags:
     description: Configurable cost-rule center skeleton. Supports governed rule maintenance, lineage read models, version/effective-window traceability, and minimal preview without a full rule-expression engine or approval platform.
   - name: Workbench
     description: Frontend-facing workbench bootstrap and saved-preference APIs using session-backed user scope.
+  - name: AssetWorkbench
+    description: Independent assets.yongbo.cloud workbench APIs for piecework submission, template assignment, member lookup, and settlement support.
   - name: ExportCenter
     description: Export-center skeleton. Persists export jobs and static template metadata over existing stable read models without real file generation or storage.
   - name: IntegrationCenter
@@ -46,7 +48,7 @@ components:
   schemas:
     V7Role:
       type: string
-      enum: [Member, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, TeamLead, DesignDirector, DesignReviewer, Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, ERP, Admin, DepartmentAdmin, CustomizationReviewer, CustomizationOperator]
+      enum: [Member, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, TeamLead, DesignDirector, DesignReviewer, Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, ERP, Admin, DepartmentAdmin, CustomizationReviewer, CustomizationOperator, AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement]
     Department:
       type: string
       description: Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity and are not returned by `/v1/org/options` nor accepted by registration / user admin / task create inputs.
@@ -17614,6 +17616,168 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/asset-workbench/members:
+    get:
+      summary: List asset workbench members
+      description: Returns asset-workbench scoped members for the admin permissions page. Does not expose main-ops users that have no workbench profile or workbench role.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: identity
+          schema: { type: string, enum: [admin, normal] }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: Workbench members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id: { type: integer }
+                        username: { type: string }
+                        display_name: { type: string }
+                        real_name: { type: string }
+                        worker_type: { type: string }
+                        job_grade: { type: string }
+                        status: { type: string }
+                        pii_completed: { type: boolean }
+                        identity: { type: string, enum: [admin, normal] }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/members/{user_id}/identity:
+    patch:
+      summary: Change asset workbench member identity
+      description: SuperAdmin-only endpoint that changes asset-workbench roles between admin and normal without relying on a long-lived asset branch.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [SuperAdmin]
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identity]
+              properties:
+                identity: { type: string, enum: [admin, normal] }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_id: { type: integer }
+                      username: { type: string }
+                      real_name: { type: string }
+                      identity: { type: string, enum: [admin, normal] }
+        '400': { description: Invalid identity }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/people-lookup:
+    get:
+      summary: Search people for template assignment
+      description: Name-based lookup for assignment and group member selectors. Returns masked, non-PII workbench member summaries.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, AssetTemplateAdmin, SuperAdmin]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200':
+          description: People lookup results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id: { type: integer }
+                        username: { type: string }
+                        display_name: { type: string }
+                        real_name: { type: string }
+                        worker_type: { type: string }
+                        job_grade: { type: string }
+                        identity: { type: string, enum: [admin, normal] }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/groups/{group_id}/members:
+    get:
+      summary: List asset workbench group members
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, AssetTemplateAdmin, SuperAdmin]
+      parameters:
+        - in: path
+          name: group_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Group members with display names
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        group_id: { type: integer }
+                        user_id: { type: integer }
+                        username: { type: string }
+                        display_name: { type: string }
+                        real_name: { type: string }
+                        worker_type: { type: string }
+                        job_grade: { type: string }
+                        identity: { type: string, enum: [admin, normal] }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
   /ws/v1:
     get:
       summary: Open v1 websocket channel

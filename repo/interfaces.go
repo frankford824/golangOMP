@@ -337,6 +337,13 @@ type AssetWorkbenchTemplateAssignmentFilter struct {
 	PageSize   int
 }
 
+type AssetWorkbenchMemberFilter struct {
+	Keyword  string
+	Identity string
+	Page     int
+	PageSize int
+}
+
 type AssetWorkbenchSubmissionFilter struct {
 	SubmitterUserID  *int64
 	PayeeUserID      *int64
@@ -395,6 +402,8 @@ type AssetWorkbenchSavedViewFilter struct {
 type AssetWorkbenchRepo interface {
 	GetProfileByUserID(ctx context.Context, userID int64) (*domain.AssetWorkbenchProfile, error)
 	ListProfiles(ctx context.Context, filter AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error)
+	ListMembers(ctx context.Context, filter AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error)
+	SearchPeople(ctx context.Context, filter AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error)
 	UpsertProfile(ctx context.Context, tx Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error)
 	AppendGradePeriod(ctx context.Context, tx Tx, period *domain.AssetWorkbenchGradePeriod) (*domain.AssetWorkbenchGradePeriod, error)
 

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RefreshCw, Send, UsersRound } from 'lucide-vue-next'
+import { Plus, RefreshCw, Search, Send, Trash2, UsersRound, X } from 'lucide-vue-next'
 
 import {
   assetWorkbenchApi,
+  type WorkbenchGroupMemberRow,
   type WorkbenchGroupRow,
+  type WorkbenchMemberRow,
   type WorkbenchTemplateAssignmentRow,
   type WorkbenchTemplateRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -16,6 +19,8 @@ const error = ref('')
 const groups = ref<WorkbenchGroupRow[]>([])
 const templates = ref<WorkbenchTemplateRow[]>([])
 const assignments = ref<WorkbenchTemplateAssignmentRow[]>([])
+const people = ref<WorkbenchMemberRow[]>([])
+const groupMembers = ref<WorkbenchGroupMemberRow[]>([])
 
 const groupForm = ref({
   name: '',
@@ -28,43 +33,80 @@ const templateForm = ref({
   worker_type: '',
   sort_order: 0,
 })
-const assignmentForm = ref({
-  template_id: 0,
-  user_ids: '',
-  group_ids: '',
-})
-const memberForm = ref({
-  group_id: 0,
-  user_ids: '',
-})
+const peopleQuery = ref('')
+const activeTemplate = ref<WorkbenchTemplateRow | null>(null)
+const activeGroup = ref<WorkbenchGroupRow | null>(null)
+const selectedPeople = ref<WorkbenchMemberRow[]>([])
+const selectedGroups = ref<WorkbenchGroupRow[]>([])
+const selectedGroupPeople = ref<WorkbenchMemberRow[]>([])
 
-const enabledTemplates = computed(() => templates.value.filter((item) => item.enabled))
 const enabledGroups = computed(() => groups.value.filter((item) => item.enabled))
+const enabledTemplates = computed(() => templates.value.filter((item) => item.enabled))
+const selectedReachCount = computed(() => selectedPeople.value.length + selectedGroups.value.length)
 
-function parseIDs(raw: string) {
-  return raw
-    .split(/[,，\s]+/)
-    .map((item) => Number(item.trim()))
-    .filter((item, index, source) => Number.isFinite(item) && item > 0 && source.indexOf(item) === index)
+function personName(person: WorkbenchMemberRow | WorkbenchGroupMemberRow) {
+  return person.real_name || person.display_name || person.username || '未命名'
+}
+
+function resetMessage() {
+  notice.value = ''
+  error.value = ''
+}
+
+function isPersonSelected(person: WorkbenchMemberRow, source = selectedPeople.value) {
+  return source.some((item) => item.user_id === person.user_id)
+}
+
+function isGroupSelected(group: WorkbenchGroupRow) {
+  return selectedGroups.value.some((item) => item.id === group.id)
+}
+
+function togglePerson(person: WorkbenchMemberRow) {
+  if (isPersonSelected(person)) {
+    selectedPeople.value = selectedPeople.value.filter((item) => item.user_id !== person.user_id)
+    return
+  }
+  selectedPeople.value = [...selectedPeople.value, person]
+}
+
+function toggleGroupPerson(person: WorkbenchMemberRow) {
+  if (isPersonSelected(person, selectedGroupPeople.value)) {
+    selectedGroupPeople.value = selectedGroupPeople.value.filter((item) => item.user_id !== person.user_id)
+    return
+  }
+  selectedGroupPeople.value = [...selectedGroupPeople.value, person]
+}
+
+function toggleGroup(group: WorkbenchGroupRow) {
+  if (isGroupSelected(group)) {
+    selectedGroups.value = selectedGroups.value.filter((item) => item.id !== group.id)
+    return
+  }
+  selectedGroups.value = [...selectedGroups.value, group]
+}
+
+function openAssign(template: WorkbenchTemplateRow) {
+  activeTemplate.value = template
+  selectedPeople.value = []
+  selectedGroups.value = []
+  resetMessage()
 }
 
 async function loadAll() {
   loading.value = true
-  error.value = ''
+  resetMessage()
   try {
     const [groupRes, templateRes, assignmentRes] = await Promise.all([
       assetWorkbenchApi.listGroups({ page_size: 200 }),
       assetWorkbenchApi.listTemplates({ page_size: 200 }),
-      assetWorkbenchApi.listTemplateAssignments({ page_size: 200 }),
+      assetWorkbenchApi.listTemplateAssignments({ page_size: 200, enabled: true }),
     ])
     groups.value = groupRes.items
     templates.value = templateRes.items
     assignments.value = assignmentRes.items
-    if (!assignmentForm.value.template_id && enabledTemplates.value[0]) {
-      assignmentForm.value.template_id = enabledTemplates.value[0].id
-    }
-    if (!memberForm.value.group_id && enabledGroups.value[0]) {
-      memberForm.value.group_id = enabledGroups.value[0].id
+    if (!activeGroup.value && enabledGroups.value[0]) {
+      activeGroup.value = enabledGroups.value[0]
+      await loadGroupMembers(enabledGroups.value[0])
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '模板下发数据加载失败'
@@ -73,10 +115,24 @@ async function loadAll() {
   }
 }
 
+async function searchPeople() {
+  if (!peopleQuery.value.trim()) {
+    people.value = []
+    return
+  }
+  resetMessage()
+  try {
+    const result = await assetWorkbenchApi.searchPeople({ q: peopleQuery.value, page_size: 20 })
+    people.value = result.items
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '人员搜索失败'
+  }
+}
+
 async function createGroup() {
   if (!groupForm.value.name.trim()) return
   saving.value = true
-  error.value = ''
+  resetMessage()
   try {
     await assetWorkbenchApi.createGroup({
       name: groupForm.value.name,
@@ -96,7 +152,7 @@ async function createGroup() {
 async function createTemplate() {
   if (!templateForm.value.name.trim()) return
   saving.value = true
-  error.value = ''
+  resetMessage()
   try {
     await assetWorkbenchApi.createTemplate({
       name: templateForm.value.name,
@@ -116,16 +172,28 @@ async function createTemplate() {
   }
 }
 
-async function addMembers() {
-  const userIds = parseIDs(memberForm.value.user_ids)
-  if (!memberForm.value.group_id || userIds.length === 0) return
-  saving.value = true
-  error.value = ''
+async function loadGroupMembers(group: WorkbenchGroupRow) {
+  activeGroup.value = group
+  selectedGroupPeople.value = []
+  resetMessage()
   try {
-    await assetWorkbenchApi.addGroupMembers(memberForm.value.group_id, userIds)
-    memberForm.value.user_ids = ''
+    groupMembers.value = await assetWorkbenchApi.listGroupMembers(group.id)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '分组成员加载失败'
+  }
+}
+
+async function addMembersToGroup() {
+  if (!activeGroup.value || selectedGroupPeople.value.length === 0) return
+  saving.value = true
+  resetMessage()
+  try {
+    await assetWorkbenchApi.addGroupMembers(
+      activeGroup.value.id,
+      selectedGroupPeople.value.map((item) => item.user_id),
+    )
     notice.value = '成员已加入分组'
-    await loadAll()
+    await loadGroupMembers(activeGroup.value)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '成员加入失败'
   } finally {
@@ -133,24 +201,52 @@ async function addMembers() {
   }
 }
 
-async function assignTemplate() {
-  const userIds = parseIDs(assignmentForm.value.user_ids)
-  const groupIds = parseIDs(assignmentForm.value.group_ids)
-  if (!assignmentForm.value.template_id || (userIds.length === 0 && groupIds.length === 0)) return
+async function removeMemberFromGroup(member: WorkbenchGroupMemberRow) {
+  if (!activeGroup.value) return
   saving.value = true
-  error.value = ''
+  resetMessage()
+  try {
+    await assetWorkbenchApi.removeGroupMembers(activeGroup.value.id, [member.user_id])
+    notice.value = '成员已移出分组'
+    await loadGroupMembers(activeGroup.value)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '成员移出失败'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function assignTemplate() {
+  if (!activeTemplate.value || selectedReachCount.value === 0) return
+  saving.value = true
+  resetMessage()
   try {
     await assetWorkbenchApi.assignTemplate({
-      template_id: assignmentForm.value.template_id,
-      user_ids: userIds,
-      group_ids: groupIds,
+      template_id: activeTemplate.value.id,
+      user_ids: selectedPeople.value.map((item) => item.user_id),
+      group_ids: selectedGroups.value.map((item) => item.id),
     })
-    assignmentForm.value.user_ids = ''
-    assignmentForm.value.group_ids = ''
-    notice.value = '下发完成'
+    notice.value = `已下发给 ${selectedReachCount.value} 个对象`
+    activeTemplate.value = null
+    selectedPeople.value = []
+    selectedGroups.value = []
     await loadAll()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '下发失败'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeAssignment(item: WorkbenchTemplateAssignmentRow) {
+  saving.value = true
+  resetMessage()
+  try {
+    await assetWorkbenchApi.deleteTemplateAssignment(item.id)
+    notice.value = '下发记录已撤销'
+    await loadAll()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '撤销失败'
   } finally {
     saving.value = false
   }
@@ -167,7 +263,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">类型与分组</p>
         <h2>模板下发</h2>
-        <p>管理员维护作品类型和人员分组，再按人或按组下发。普通用户上传时只会看到分配给自己的类型。</p>
+        <p>管理员维护作品类型和人员分组，再按姓名或分组下发给员工。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadAll">
@@ -180,46 +276,27 @@ onMounted(() => {
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
 
-    <div class="aw-three-column">
-      <div class="aw-panel">
+    <div class="aw-two-column">
+      <section class="aw-panel">
         <div class="aw-panel__head">
           <div>
-            <p class="aw-eyebrow">分组</p>
-            <h3>人员分组</h3>
+            <p class="aw-eyebrow">作品类型</p>
+            <h3>新建类型</h3>
           </div>
+          <Plus :size="18" aria-hidden="true" />
         </div>
         <div class="aw-form-grid">
           <label>
-            <span>分组名</span>
-            <input v-model="groupForm.name" />
-          </label>
-          <label>
-            <span>说明</span>
-            <input v-model="groupForm.description" />
-          </label>
-          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="createGroup">新增分组</button>
-        </div>
-      </div>
-
-      <div class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <p class="aw-eyebrow">类型</p>
-            <h3>作品类型</h3>
-          </div>
-        </div>
-        <div class="aw-form-grid">
-          <label>
-            <span>名称</span>
-            <input v-model="templateForm.name" />
+            <span>类型名称</span>
+            <input v-model="templateForm.name" placeholder="如：海报 / 视频 / 小夜灯" />
           </label>
           <label>
             <span>分类</span>
-            <input v-model="templateForm.category" />
+            <input v-model="templateForm.category" placeholder="可不填" />
           </label>
           <label>
-            <span>难度类</span>
-            <input v-model="templateForm.difficulty_class" />
+            <span>计价类</span>
+            <input v-model="templateForm.difficulty_class" placeholder="A / B / C" />
           </label>
           <label>
             <span>人员类型</span>
@@ -229,82 +306,210 @@ onMounted(() => {
               <option value="parttime">兼职</option>
             </select>
           </label>
-          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="createTemplate">新增类型</button>
+          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="createTemplate">新增作品类型</button>
+        </div>
+      </section>
+
+      <section class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <p class="aw-eyebrow">人员分组</p>
+            <h3>新建分组</h3>
+          </div>
+          <UsersRound :size="18" aria-hidden="true" />
+        </div>
+        <div class="aw-form-grid">
+          <label>
+            <span>分组名</span>
+            <input v-model="groupForm.name" placeholder="如：兼职海报组" />
+          </label>
+          <label>
+            <span>说明</span>
+            <input v-model="groupForm.description" placeholder="可不填" />
+          </label>
+          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="createGroup">新增分组</button>
+        </div>
+      </section>
+    </div>
+
+    <section class="aw-data-surface">
+      <div class="aw-panel__head">
+        <div>
+          <p class="aw-eyebrow">下发</p>
+          <h3>作品类型</h3>
+        </div>
+        <span class="aw-chip aw-chip--neutral">{{ enabledTemplates.length }} 个启用</span>
+      </div>
+      <div class="aw-compact-list">
+        <article v-for="item in templates" :key="item.id" class="aw-compact-list__item">
+          <div>
+            <strong>{{ item.name }}</strong>
+            <span>{{ item.category || '未分类' }} · {{ item.difficulty_class }} · {{ workerTypeMeta(item.worker_type || 'all').label }}</span>
+          </div>
+          <div class="aw-page-bar__actions">
+            <span :class="chipClass(item.enabled ? 'success' : 'neutral')">{{ item.enabled ? '启用' : '停用' }}</span>
+            <button class="aw-secondary-button" type="button" :disabled="!item.enabled" @click="openAssign(item)">
+              <Send :size="16" aria-hidden="true" />
+              下发
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section v-if="activeTemplate" class="aw-panel aw-panel--stage">
+      <div class="aw-panel__head">
+        <div>
+          <p class="aw-eyebrow">选择对象</p>
+          <h3>下发「{{ activeTemplate.name }}」</h3>
+        </div>
+        <button class="aw-secondary-button" type="button" @click="activeTemplate = null">
+          <X :size="16" aria-hidden="true" />
+          关闭
+        </button>
+      </div>
+      <div class="aw-two-column">
+        <div class="aw-panel">
+          <div class="aw-panel__head">
+            <div>
+              <p class="aw-eyebrow">人员</p>
+              <h3>按姓名搜索</h3>
+            </div>
+          </div>
+          <div class="aw-form-grid">
+            <label class="aw-form-grid__full">
+              <span>搜索</span>
+              <input v-model="peopleQuery" placeholder="输入姓名、账号或手机号" @keydown.enter="searchPeople" />
+            </label>
+            <button class="aw-secondary-button" type="button" @click="searchPeople">
+              <Search :size="16" aria-hidden="true" />
+              搜索
+            </button>
+          </div>
+          <div class="aw-compact-list">
+            <button
+              v-for="person in people"
+              :key="person.user_id"
+              class="aw-secondary-button"
+              type="button"
+              :class="{ 'aw-template-option--active': isPersonSelected(person) }"
+              @click="togglePerson(person)"
+            >
+              {{ personName(person) }} · {{ person.username }}
+            </button>
+          </div>
+        </div>
+
+        <div class="aw-panel">
+          <div class="aw-panel__head">
+            <div>
+              <p class="aw-eyebrow">分组</p>
+              <h3>选择分组</h3>
+            </div>
+          </div>
+          <div class="aw-compact-list">
+            <button
+              v-for="group in enabledGroups"
+              :key="group.id"
+              class="aw-secondary-button"
+              type="button"
+              :class="{ 'aw-template-option--active': isGroupSelected(group) }"
+              @click="toggleGroup(group)"
+            >
+              {{ group.name }}
+            </button>
+          </div>
         </div>
       </div>
 
       <div class="aw-panel">
         <div class="aw-panel__head">
           <div>
-            <p class="aw-eyebrow">下发</p>
-            <h3>批量下发</h3>
+            <p class="aw-eyebrow">确认</p>
+            <h3>将应用到 {{ selectedReachCount }} 个对象</h3>
           </div>
-        </div>
-        <div class="aw-form-grid">
-          <label class="aw-form-grid__full">
-            <span>作品类型</span>
-            <select v-model.number="assignmentForm.template_id">
-              <option v-for="item in enabledTemplates" :key="item.id" :value="item.id">{{ item.name }}</option>
-            </select>
-          </label>
-          <label>
-            <span>用户 ID</span>
-            <input v-model="assignmentForm.user_ids" placeholder="用逗号分隔" />
-          </label>
-          <label>
-            <span>分组 ID</span>
-            <input v-model="assignmentForm.group_ids" placeholder="用逗号分隔" />
-          </label>
-          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="assignTemplate">
+          <button class="aw-primary-button" type="button" :disabled="saving || selectedReachCount === 0" @click="assignTemplate">
             <Send :size="16" aria-hidden="true" />
-            下发
+            确认下发
           </button>
         </div>
-      </div>
-    </div>
-
-    <div class="aw-panel">
-      <div class="aw-panel__head">
-        <div>
-          <p class="aw-eyebrow">成员</p>
-          <h3>加入分组</h3>
-        </div>
-        <UsersRound :size="18" aria-hidden="true" />
-      </div>
-      <div class="aw-form-grid">
-        <label>
-          <span>分组</span>
-          <select v-model.number="memberForm.group_id">
-            <option v-for="item in enabledGroups" :key="item.id" :value="item.id">{{ item.name }}</option>
-          </select>
-        </label>
-        <label>
-          <span>用户 ID</span>
-          <input v-model="memberForm.user_ids" placeholder="用逗号分隔" />
-        </label>
-        <button class="aw-secondary-button" type="button" :disabled="saving" @click="addMembers">加入</button>
-      </div>
-    </div>
-
-    <div class="aw-two-column">
-      <div class="aw-data-surface">
-        <div class="aw-panel__head">
-          <div>
-            <p class="aw-eyebrow">已建</p>
-            <h3>作品类型</h3>
-          </div>
-        </div>
         <div class="aw-compact-list">
-          <article v-for="item in templates" :key="item.id" class="aw-compact-list__item">
+          <article v-for="person in selectedPeople" :key="`p-${person.user_id}`" class="aw-compact-list__item">
             <div>
-              <strong>{{ item.name }}</strong>
-              <span>{{ item.category || '未分类' }} · {{ item.difficulty_class }}</span>
+              <strong>{{ personName(person) }}</strong>
+              <span>人员</span>
             </div>
-            <span class="aw-chip" :class="item.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ item.enabled ? '启用' : '停用' }}</span>
+            <button class="aw-secondary-button" type="button" @click="togglePerson(person)">移除</button>
+          </article>
+          <article v-for="group in selectedGroups" :key="`g-${group.id}`" class="aw-compact-list__item">
+            <div>
+              <strong>{{ group.name }}</strong>
+              <span>分组</span>
+            </div>
+            <button class="aw-secondary-button" type="button" @click="toggleGroup(group)">移除</button>
           </article>
         </div>
       </div>
-      <div class="aw-data-surface">
+    </section>
+
+    <div class="aw-two-column">
+      <section class="aw-data-surface">
+        <div class="aw-panel__head">
+          <div>
+            <p class="aw-eyebrow">分组成员</p>
+            <h3>人员分组</h3>
+          </div>
+        </div>
+        <div class="aw-compact-list">
+          <button
+            v-for="group in enabledGroups"
+            :key="group.id"
+            class="aw-secondary-button"
+            type="button"
+            :class="{ 'aw-template-option--active': activeGroup?.id === group.id }"
+            @click="loadGroupMembers(group)"
+          >
+            {{ group.name }}
+          </button>
+        </div>
+        <div v-if="activeGroup" class="aw-panel">
+          <div class="aw-panel__head">
+            <div>
+              <p class="aw-eyebrow">加入</p>
+              <h3>{{ activeGroup.name }}</h3>
+            </div>
+            <button class="aw-primary-button" type="button" :disabled="saving || selectedGroupPeople.length === 0" @click="addMembersToGroup">
+              加入 {{ selectedGroupPeople.length }} 人
+            </button>
+          </div>
+          <div class="aw-compact-list">
+            <button
+              v-for="person in people"
+              :key="`gm-${person.user_id}`"
+              class="aw-secondary-button"
+              type="button"
+              :class="{ 'aw-template-option--active': isPersonSelected(person, selectedGroupPeople) }"
+              @click="toggleGroupPerson(person)"
+            >
+              {{ personName(person) }} · {{ person.username }}
+            </button>
+          </div>
+          <div class="aw-compact-list">
+            <article v-for="member in groupMembers" :key="member.user_id" class="aw-compact-list__item">
+              <div>
+                <strong>{{ personName(member) }}</strong>
+                <span>{{ member.username }} · {{ workerTypeMeta(member.worker_type || 'all').label }} · {{ member.job_grade || '未定级' }}</span>
+              </div>
+              <button class="aw-secondary-button" type="button" :disabled="saving" @click="removeMemberFromGroup(member)">
+                <Trash2 :size="16" aria-hidden="true" />
+                移出
+              </button>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="aw-data-surface">
         <div class="aw-panel__head">
           <div>
             <p class="aw-eyebrow">记录</p>
@@ -314,13 +519,16 @@ onMounted(() => {
         <div class="aw-compact-list">
           <article v-for="item in assignments" :key="item.id" class="aw-compact-list__item">
             <div>
-              <strong>模板 {{ item.template_id }}</strong>
-              <span>{{ item.target_type === 'group' ? '分组' : '用户' }} {{ item.target_id }}</span>
+              <strong>{{ item.template_name || `作品类型 ${item.template_id}` }}</strong>
+              <span>{{ item.target_type === 'group' ? '分组' : '人员' }} · {{ item.target_name || '未命名' }}</span>
             </div>
-            <span class="aw-chip" :class="item.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ item.enabled ? '已下发' : '已停用' }}</span>
+            <div class="aw-page-bar__actions">
+              <span :class="chipClass(item.enabled ? 'success' : 'neutral')">{{ item.enabled ? '已下发' : '已撤销' }}</span>
+              <button v-if="item.enabled" class="aw-secondary-button" type="button" :disabled="saving" @click="removeAssignment(item)">撤销</button>
+            </div>
           </article>
         </div>
-      </div>
+      </section>
     </div>
   </section>
 </template>

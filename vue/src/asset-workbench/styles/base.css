@@ -60,6 +60,10 @@ body {
   opacity: 0.56;
 }
 
+.aw-root button:disabled {
+  opacity: 1;
+}
+
 .aw-root input:not([type='checkbox']):not([type='radio']),
 .aw-root select,
 .aw-root textarea {

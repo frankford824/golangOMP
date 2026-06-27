@@ -49,9 +49,13 @@ export default defineConfig({
   build: {
     outDir: 'dist-asset',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1100,
     sourcemap: false,
-    rollupOptions: {
+    rolldownOptions: {
       input: 'asset.html',
+      checks: {
+        pluginTimings: false,
+      },
       output: {
         manualChunks: sharedManualChunks,
       },

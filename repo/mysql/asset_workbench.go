@@ -67,6 +67,81 @@ func (r *assetWorkbenchRepo) ListProfiles(ctx context.Context, filter repo.Asset
 	return items, total, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) ListMembers(ctx context.Context, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error) {
+	return r.listMembers(ctx, filter, false)
+}
+
+func (r *assetWorkbenchRepo) SearchPeople(ctx context.Context, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error) {
+	return r.listMembers(ctx, filter, true)
+}
+
+func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetWorkbenchMemberFilter, lookup bool) ([]*domain.AssetWorkbenchMember, int64, error) {
+	where := []string{`(
+		p.user_id IS NOT NULL
+		OR EXISTS (
+			SELECT 1
+			FROM user_roles wur
+			WHERE wur.user_id = u.id
+			  AND wur.role IN (?, ?, ?, ?)
+		)
+	)`}
+	args := []interface{}{
+		domain.RoleAssetSubmitter,
+		domain.RoleAssetManager,
+		domain.RoleAssetTemplateAdmin,
+		domain.RoleAssetSettlement,
+	}
+	if v := strings.TrimSpace(filter.Keyword); v != "" {
+		like := "%" + v + "%"
+		where = append(where, "(u.username LIKE ? OR u.display_name LIKE ? OR u.mobile LIKE ? OR p.real_name LIKE ? OR p.phone LIKE ?)")
+		args = append(args, like, like, like, like, like)
+	}
+	if v := strings.TrimSpace(filter.Identity); v != "" {
+		switch v {
+		case "admin":
+			where = append(where, assetWorkbenchAdminExistsSQL())
+		case "normal":
+			where = append(where, "NOT "+assetWorkbenchAdminExistsSQL())
+		}
+	}
+	var total int64
+	countArgs := append([]interface{}{}, args...)
+	if err := r.db.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM users u
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id
+		WHERE `+strings.Join(where, " AND "), countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench members: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	if lookup && (filter.PageSize <= 0 || filter.PageSize > 50) {
+		pageSize = 20
+	}
+	queryArgs := append([]interface{}{}, args...)
+	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchMemberSelect()+`
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY
+			CASE WHEN p.real_name IS NULL OR p.real_name = '' THEN 1 ELSE 0 END ASC,
+			p.real_name ASC,
+			u.display_name ASC,
+			u.id DESC
+		LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list asset workbench members: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchMember{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchMember(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
 func (r *assetWorkbenchRepo) UpsertProfile(ctx context.Context, tx repo.Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error) {
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx, `
@@ -704,14 +779,27 @@ func (r *assetWorkbenchRepo) RemoveGroupMembers(ctx context.Context, tx repo.Tx,
 }
 
 func (r *assetWorkbenchRepo) ListGroupMembers(ctx context.Context, groupID int64) ([]*domain.AssetWorkbenchGroupMember, error) {
-	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchGroupMemberSelect()+` WHERE group_id = ? ORDER BY user_id ASC`, groupID)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT gm.group_id, gm.user_id, gm.created_at,
+		       COALESCE(u.username, ''),
+		       COALESCE(u.display_name, ''),
+		       COALESCE(NULLIF(p.real_name, ''), u.display_name, u.username, ''),
+		       COALESCE(p.worker_type, ''),
+		       COALESCE(p.job_grade, ''),
+		       CASE WHEN `+assetWorkbenchAdminExistsSQL()+` THEN 'admin' ELSE 'normal' END,
+		       COALESCE(p.pii_completed, 0)
+		FROM asset_workbench_group_members gm
+		LEFT JOIN users u ON u.id = gm.user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = gm.user_id
+		WHERE gm.group_id = ?
+		ORDER BY real_name ASC, u.display_name ASC, gm.user_id ASC`, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("list asset workbench group members: %w", err)
 	}
 	defer rows.Close()
 	items := []*domain.AssetWorkbenchGroupMember{}
 	for rows.Next() {
-		item, err := scanAssetWorkbenchGroupMember(rows)
+		item, err := scanAssetWorkbenchGroupMemberDetail(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -911,28 +999,29 @@ func (r *assetWorkbenchRepo) ListTemplateAssignments(ctx context.Context, filter
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if filter.TemplateID != nil {
-		where = append(where, "template_id = ?")
+		where = append(where, "a.template_id = ?")
 		args = append(args, *filter.TemplateID)
 	}
 	if v := strings.TrimSpace(filter.TargetType); v != "" {
-		where = append(where, "target_type = ?")
+		where = append(where, "a.target_type = ?")
 		args = append(args, v)
 	}
 	if filter.TargetID != nil {
-		where = append(where, "target_id = ?")
+		where = append(where, "a.target_id = ?")
 		args = append(args, *filter.TargetID)
 	}
 	if filter.Enabled != nil {
-		where = append(where, "enabled = ?")
+		where = append(where, "a.enabled = ?")
 		args = append(args, *filter.Enabled)
 	}
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_template_assignments WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_template_assignments a WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count asset workbench template assignments: %w", err)
 	}
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchTemplateAssignmentSelect()+` WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY updated_at DESC, id DESC
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchTemplateAssignmentDetailSelect()+`
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY a.updated_at DESC, a.id DESC
 		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list asset workbench template assignments: %w", err)
@@ -940,7 +1029,7 @@ func (r *assetWorkbenchRepo) ListTemplateAssignments(ctx context.Context, filter
 	defer rows.Close()
 	items := []*domain.AssetWorkbenchTemplateAssignment{}
 	for rows.Next() {
-		item, err := scanAssetWorkbenchTemplateAssignment(rows)
+		item, err := scanAssetWorkbenchTemplateAssignmentDetail(rows)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -2298,6 +2387,31 @@ func assetWorkbenchProfileSelect() string {
 		FROM asset_workbench_profiles`
 }
 
+func assetWorkbenchAdminExistsSQL() string {
+	return fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM user_roles aw_admin_roles
+		WHERE aw_admin_roles.user_id = u.id
+		  AND aw_admin_roles.role IN ('%s', '%s', '%s')
+	)`, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement)
+}
+
+func assetWorkbenchMemberSelect() string {
+	return `SELECT u.id,
+		       COALESCE(u.username, ''),
+		       COALESCE(u.display_name, ''),
+		       COALESCE(NULLIF(p.real_name, ''), u.display_name, u.username, ''),
+		       COALESCE(p.worker_type, ''),
+		       COALESCE(p.job_grade, ''),
+		       COALESCE(p.status, ''),
+		       COALESCE(p.pii_completed, 0),
+		       CASE WHEN ` + assetWorkbenchAdminExistsSQL() + ` THEN 'admin' ELSE 'normal' END,
+		       COALESCE(p.created_at, u.created_at),
+		       COALESCE(p.updated_at, u.updated_at)
+		FROM users u
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id`
+}
+
 func assetWorkbenchGradePeriodSelect() string {
 	return `SELECT id, profile_id, user_id, worker_type, job_grade, effective_from, effective_to, changed_by, reason, created_at
 		FROM asset_workbench_profile_grade_periods`
@@ -2376,6 +2490,21 @@ func assetWorkbenchTemplateAssignmentSelect() string {
 		FROM asset_workbench_template_assignments`
 }
 
+func assetWorkbenchTemplateAssignmentDetailSelect() string {
+	return `SELECT a.id, a.template_id, COALESCE(t.name, ''),
+		       a.target_type, a.target_id,
+		       CASE
+		         WHEN a.target_type = 'group' THEN COALESCE(g.name, CONCAT('分组 ', a.target_id))
+		         ELSE COALESCE(NULLIF(p.real_name, ''), u.display_name, u.username, CONCAT('用户 ', a.target_id))
+		       END,
+		       a.enabled, a.assigned_by, a.created_at, a.updated_at
+		FROM asset_workbench_template_assignments a
+		LEFT JOIN asset_workbench_templates t ON t.id = a.template_id
+		LEFT JOIN asset_workbench_groups g ON a.target_type = 'group' AND g.id = a.target_id
+		LEFT JOIN users u ON a.target_type = 'user' AND u.id = a.target_id
+		LEFT JOIN asset_workbench_profiles p ON a.target_type = 'user' AND p.user_id = a.target_id`
+}
+
 func assetWorkbenchErrorImportBatchSelect() string {
 	return `SELECT id, import_no, business_month, uploaded_by, original_filename, status, total_rows,
 		matched_rows, unmatched_rows, ambiguous_rows, error_message, created_at, updated_at
@@ -2445,6 +2574,26 @@ func scanAssetWorkbenchProfile(scanner interface{ Scan(...interface{}) error }) 
 	item.OnboardedAt = fromNullTime(onboardedAt)
 	item.CreatedBy = fromNullInt64(createdBy)
 	item.UpdatedBy = fromNullInt64(updatedBy)
+	return &item, nil
+}
+
+func scanAssetWorkbenchMember(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchMember, error) {
+	var item domain.AssetWorkbenchMember
+	if err := scanner.Scan(
+		&item.UserID,
+		&item.Username,
+		&item.DisplayName,
+		&item.RealName,
+		&item.WorkerType,
+		&item.JobGrade,
+		&item.Status,
+		&item.PIICompleted,
+		&item.Identity,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
 	return &item, nil
 }
 
@@ -2625,6 +2774,25 @@ func scanAssetWorkbenchGroupMember(scanner interface{ Scan(...interface{}) error
 	return &item, nil
 }
 
+func scanAssetWorkbenchGroupMemberDetail(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchGroupMember, error) {
+	var item domain.AssetWorkbenchGroupMember
+	if err := scanner.Scan(
+		&item.GroupID,
+		&item.UserID,
+		&item.CreatedAt,
+		&item.Username,
+		&item.DisplayName,
+		&item.RealName,
+		&item.WorkerType,
+		&item.JobGrade,
+		&item.Identity,
+		&item.PIICompleted,
+	); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
 func scanAssetWorkbenchTemplate(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchTemplate, error) {
 	var item domain.AssetWorkbenchTemplate
 	if err := scanner.Scan(
@@ -2641,6 +2809,25 @@ func scanAssetWorkbenchTemplateAssignment(scanner interface{ Scan(...interface{}
 	if err := scanner.Scan(
 		&item.ID, &item.TemplateID, &item.TargetType, &item.TargetID, &item.Enabled,
 		&item.AssignedBy, &item.CreatedAt, &item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func scanAssetWorkbenchTemplateAssignmentDetail(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchTemplateAssignment, error) {
+	var item domain.AssetWorkbenchTemplateAssignment
+	if err := scanner.Scan(
+		&item.ID,
+		&item.TemplateID,
+		&item.TemplateName,
+		&item.TargetType,
+		&item.TargetID,
+		&item.TargetName,
+		&item.Enabled,
+		&item.AssignedBy,
+		&item.CreatedAt,
+		&item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
