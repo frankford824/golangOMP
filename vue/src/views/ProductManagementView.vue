@@ -184,23 +184,20 @@
               <span v-if="specSummary(child.record)" class="pm-spec-chip" :title="specSummary(child.record)">
                 {{ specSummary(child.record) }}
               </span>
-              <span class="pm-area-row">
+              <span class="pm-metric-row">
+                <span class="pm-metric-label">面积</span>
                 <span class="pm-area-value">{{ areaTraceSummary(child.record) }}</span>
-                <span class="pm-area-help" tabindex="0" :aria-label="areaTraceAria(child.record)">
-                  ㎡
-                  <span class="pm-cost-popover pm-area-popover" role="tooltip">
-                    <strong>面积识别过程</strong>
-                    <span v-for="line in areaTraceLines(child.record)" :key="line">{{ line }}</span>
-                  </span>
-                </span>
               </span>
-              <span class="pm-cost-row">
+              <span class="pm-metric-row pm-cost-row">
+                <span class="pm-metric-label">成本</span>
                 <span class="pm-cost-value">{{ formatCost(child.record.cost_price) }}</span>
-                <span class="pm-cost-help" tabindex="0" :aria-label="costTraceAria(child.record)">
-                  i
+                <span class="pm-detail-help" tabindex="0" :aria-label="productTraceAria(child.record)">
+                  明细
                   <span class="pm-cost-popover" role="tooltip">
-                    <strong>成本计算过程</strong>
-                    <span v-for="line in costTraceLines(child.record)" :key="line">{{ line }}</span>
+                    <strong>面积识别</strong>
+                    <span v-for="line in areaTraceLines(child.record)" :key="`area-${line}`">{{ line }}</span>
+                    <strong>成本计算</strong>
+                    <span v-for="line in costTraceLines(child.record)" :key="`cost-${line}`">{{ line }}</span>
                   </span>
                 </span>
               </span>
@@ -739,11 +736,6 @@ function hasAreaWarning(record: ProductManagementRecord): boolean {
   return Boolean(record.area_trace?.warning)
 }
 
-function areaTraceAria(record: ProductManagementRecord): string {
-  const sku = record.sku_code || '当前 SKU'
-  return `查看 ${sku} 的面积识别过程`
-}
-
 function areaTraceSummary(record: ProductManagementRecord): string {
   const area = record.area_trace?.area_m2
   if (typeof area === 'number' && Number.isFinite(area) && area > 0) {
@@ -818,9 +810,9 @@ function areaTraceConfidenceLabel(confidence: string): string {
   }
 }
 
-function costTraceAria(record: ProductManagementRecord): string {
+function productTraceAria(record: ProductManagementRecord): string {
   const sku = record.sku_code || '当前 SKU'
-  return `查看 ${sku} 的成本计算过程`
+  return `查看 ${sku} 的面积和成本计算明细`
 }
 
 function costTraceLines(record: ProductManagementRecord): string[] {
@@ -1732,9 +1724,9 @@ function errorMessage(err: unknown): string {
 .pm-cost-cell {
   position: relative;
   display: grid;
-  width: min(16rem, 100%);
+  width: min(15rem, 100%);
   max-width: 100%;
-  gap: 0.35rem;
+  gap: 0.4rem;
   color: rgb(var(--yb-success-teal));
   font-weight: 900;
 }
@@ -1758,38 +1750,58 @@ function errorMessage(err: unknown): string {
   white-space: nowrap;
 }
 
-.pm-area-row,
-.pm-cost-row {
+.pm-metric-row {
   position: relative;
-  display: inline-flex;
-  width: max-content;
-  max-width: 100%;
+  display: grid;
+  width: 100%;
+  grid-template-columns: 2.35rem minmax(0, 1fr);
   align-items: center;
-  gap: 0.42rem;
+  column-gap: 0.4rem;
+  min-width: 0;
+}
+
+.pm-cost-row {
+  grid-template-columns: 2.35rem minmax(0, 1fr) auto;
+}
+
+.pm-metric-label {
+  color: rgb(var(--yb-text-muted));
+  font-family: var(--yb-font-text);
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .pm-area-value {
-  color: rgb(var(--yb-brand-subtle));
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(var(--yb-text));
   font-size: 0.88rem;
   font-weight: 900;
   line-height: 1;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .pm-cost-value {
+  min-width: 0;
+  overflow: hidden;
   font-size: 1.16rem;
   line-height: 1;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pm-cost-help,
-.pm-area-help {
+.pm-detail-help {
   position: relative;
   display: inline-flex;
-  width: 1.35rem;
+  width: auto;
+  min-width: 2.45rem;
   height: 1.35rem;
   align-items: center;
   justify-content: center;
+  padding: 0 0.48rem;
   border: 1px solid rgb(var(--yb-success-border-bright));
   border-radius: 999px;
   color: rgb(var(--yb-success-teal));
@@ -1797,22 +1809,15 @@ function errorMessage(err: unknown): string {
   box-shadow: 0 7px 18px rgba(var(--yb-success-teal-comma), 0.14);
   cursor: help;
   font-family: var(--yb-font-text);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 950;
+  line-height: 1;
   outline: none;
+  white-space: nowrap;
 }
 
-.pm-area-help {
-  border-color: rgba(var(--yb-brand-cyan-comma), 0.26);
-  color: rgb(var(--yb-brand-cyan));
-  background: rgba(var(--yb-brand-cyan-comma), 0.08);
-  box-shadow: 0 7px 18px rgba(var(--yb-brand-cyan-comma), 0.1);
-}
-
-.pm-cost-help:hover,
-.pm-cost-help:focus-visible,
-.pm-area-help:hover,
-.pm-area-help:focus-visible {
+.pm-detail-help:hover,
+.pm-detail-help:focus-visible {
   border-color: rgb(var(--yb-success-emerald-light));
   color: rgb(var(--yb-success-text-dark));
   background: rgb(var(--yb-surface-success-strong));
@@ -1855,12 +1860,9 @@ function errorMessage(err: unknown): string {
   line-height: 1.45;
 }
 
-.pm-cost-help:hover .pm-cost-popover,
-.pm-cost-help:focus-visible .pm-cost-popover,
-.pm-cost-help:focus-within .pm-cost-popover,
-.pm-area-help:hover .pm-cost-popover,
-.pm-area-help:focus-visible .pm-cost-popover,
-.pm-area-help:focus-within .pm-cost-popover {
+.pm-detail-help:hover .pm-cost-popover,
+.pm-detail-help:focus-visible .pm-cost-popover,
+.pm-detail-help:focus-within .pm-cost-popover {
   opacity: 1;
   transform: translateY(-50%) translateX(0) scale(1);
 }
@@ -1869,7 +1871,7 @@ function errorMessage(err: unknown): string {
   color: rgb(var(--yb-danger));
 }
 
-.pm-cost-cell.is-missing .pm-cost-help {
+.pm-cost-cell.is-missing .pm-detail-help {
   border-color: rgb(var(--yb-danger-border));
   color: rgb(var(--yb-danger-text));
   background: rgb(var(--yb-danger-wash));
@@ -1878,12 +1880,6 @@ function errorMessage(err: unknown): string {
 
 .pm-cost-cell.has-area-warning .pm-area-value {
   color: rgb(var(--yb-warning));
-}
-
-.pm-cost-cell.has-area-warning .pm-area-help {
-  border-color: rgb(var(--yb-warning-border));
-  color: rgb(var(--yb-warning));
-  background: rgb(var(--yb-warning-wash));
 }
 
 .pm-link {
@@ -2204,9 +2200,9 @@ function errorMessage(err: unknown): string {
     transform: translateY(0) translateX(-0.25rem) scale(0.98);
   }
 
-  .pm-cost-help:hover .pm-cost-popover,
-  .pm-cost-help:focus-visible .pm-cost-popover,
-  .pm-cost-help:focus-within .pm-cost-popover {
+  .pm-detail-help:hover .pm-cost-popover,
+  .pm-detail-help:focus-visible .pm-cost-popover,
+  .pm-detail-help:focus-within .pm-cost-popover {
     transform: translateY(0) translateX(0) scale(1);
   }
 
