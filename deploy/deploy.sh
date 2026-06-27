@@ -73,6 +73,23 @@ done
 ROOT="$(repo_root)"
 load_local_deploy_env "$ROOT"
 
+require_asset_workbench_routes() {
+  if [ "${DEPLOY_ALLOW_MISSING_ASSET_WORKBENCH:-false}" = "true" ]; then
+    return 0
+  fi
+
+  missing=()
+  [ -f "$ROOT/service/asset_workbench/service.go" ] || missing+=("service/asset_workbench/service.go")
+  [ -f "$ROOT/transport/routes_asset_workbench.go" ] || missing+=("transport/routes_asset_workbench.go")
+  grep -q "registerAssetWorkbenchRoutes(v1, access, assetWorkbenchH)" "$ROOT/transport/http.go" || missing+=("transport/http.go route registration")
+  grep -q "assetWorkbenchH := handler.NewAssetWorkbenchHandler" "$ROOT/cmd/server/main.go" || missing+=("cmd/server/main.go handler wiring")
+  grep -q "AssetWorkbenchPreview:" "$ROOT/cmd/server/main.go" || missing+=("cmd/server/main.go worker wiring")
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    fail "Asset workbench routes are missing from this backend package: ${missing[*]}. Refusing deploy because assets.yongbo.cloud depends on /v1/asset-workbench/*. Set DEPLOY_ALLOW_MISSING_ASSET_WORKBENCH=true only for an intentional rollback."
+  fi
+}
+
 RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-${DEPLOY_RUNTIME_ENV_FILE:-}}"
 BRIDGE_ENV_FILE="${BRIDGE_ENV_FILE:-${DEPLOY_BRIDGE_ENV_FILE:-}}"
 PARALLEL_PORT="${PARALLEL_PORT:-${DEPLOY_PARALLEL_PORT:-18080}}"
@@ -103,6 +120,8 @@ if [ "$LOCAL_ONLY" != "true" ]; then
   DEPLOY_HOST_VALUE="$DEPLOY_HOST"
   DEPLOY_BASE_DIR_VALUE="$DEPLOY_BASE_DIR"
 fi
+
+require_asset_workbench_routes
 
 append_release_record \
   "$HISTORY_PATH" \

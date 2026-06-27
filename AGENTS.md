@@ -31,11 +31,21 @@ This file is an assistant guidance note. It is not the backend specification.
 - Before running commands, confirm the working directory: use the repository root for Go/backend commands, and `cd vue` for Node/Vue commands.
 - Do not move frontend files out of `vue/` or place new backend files under `vue/` unless the user explicitly requests a layout change.
 
+## Project Boundary Matrix
+
+- `main-ops`: the existing operations system. Frontend entry: `vue/src/main.ts`. Main-ops work must not import from `vue/src/asset-workbench/**`.
+- `asset-workbench`: the independent asset workbench. Frontend entry: `vue/src/asset-workbench/main.ts`. Asset-workbench work must not import the main-ops shell, router, views, or `main.css`.
+- `shared-backend`: the Go backend shared by both frontends. Production entrypoint: `cmd/server`. Route existence is still decided by `transport/http.go`.
+- Asset workbench backend routes live under `/v1/asset-workbench/*` and must remain mounted in every production backend release unless the owner explicitly requests an asset-workbench rollback.
+- Do not use a long-lived Git branch as an application boundary. Application separation is enforced by directory ownership, entrypoints, route prefixes, build commands, audit scripts, and deploy guards.
+
 ## Branch Review And Publish Rule
 
-- `dev/external-developer` is the external developer branch. Fetch it and inspect `origin/main...origin/dev/external-developer` before judging or publishing external work.
+- `dev/external-developer` is the single integration and release branch for both `main-ops` and `asset-workbench` work.
+- Short-lived feature branches are allowed, but they must merge back into `dev/external-developer` before any publish or handoff. Do not keep `feature/asset-workbench-piecework-settlement` or any other asset-workbench branch as a parallel long-lived release branch.
+- Fetch `dev/external-developer` and inspect `origin/main...origin/dev/external-developer` before judging or publishing external work.
 - External branch changes must be reviewed locally before any deploy or static publish.
-- Classify every external-branch diff as `backend`, `frontend`, or `both`.
+- Classify every external-branch diff as `main-ops frontend`, `asset-workbench frontend`, `shared-backend`, or `cross-project`.
 - Frontend publish authority is `deploy/FRONTEND_DIST_PUBLISH_SOP.md`; the static artifact path is `dist/front`, built from `vue/`.
 - Backend publish authority is `deploy/DEPLOYMENT_WORKFLOW.md`; do not replace it with frontend SOP commands.
 - If both sides changed and the frontend depends on new backend behavior, deploy or validate the backend first, then publish the frontend.
