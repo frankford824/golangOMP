@@ -63,6 +63,109 @@ func (h *AssetWorkbenchHandler) Bootstrap(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) Entry(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var result *assetworkbench.EntryResponse
+	result, appErr := h.svc.Entry(c.Request.Context(), actor)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) RequireActiveMembership() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if h == nil || h.svc == nil {
+			respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench service is not configured.", nil))
+			return
+		}
+		actor, ok := domain.RequestActorFromContext(c.Request.Context())
+		if !ok || !domain.IsSessionBackedRequestActor(actor) {
+			respondError(c, domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil))
+			return
+		}
+		access, appErr := h.svc.ResolveAssetWorkbenchAccess(c.Request.Context(), actor)
+		if appErr != nil {
+			respondError(c, appErr)
+			return
+		}
+		if access == nil || !access.IsEnabled {
+			status := ""
+			reason := "Asset workbench access is not active."
+			if access != nil {
+				status = access.MembershipStatus
+				if strings.TrimSpace(access.DeniedReason) != "" {
+					reason = access.DeniedReason
+				}
+			}
+			respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, reason, gin.H{"membership_status": status}))
+			return
+		}
+		c.Next()
+	}
+}
+
+func (h *AssetWorkbenchHandler) RequestAccess(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.AccessRequestParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	var result *domain.AppMembership
+	result, appErr := h.svc.RequestAccess(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) OpenAccess(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.AccessOpenParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	var result *domain.AppMembership
+	result, appErr := h.svc.OpenAccess(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) DisableAccess(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.AccessDisableParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	var result *domain.AppMembership
+	result, appErr := h.svc.DisableAccess(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) UpsertMyProfile(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -181,7 +284,70 @@ func (h *AssetWorkbenchHandler) UpdateMemberIdentity(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
+	var result *domain.AssetWorkbenchMember
 	result, appErr := h.svc.UpdateMemberIdentity(c.Request.Context(), actor, userID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateMemberRoles(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("user_id")), 10, 64)
+	if err != nil || userID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user_id", nil))
+		return
+	}
+	var req assetworkbench.UpdateMemberRolesParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	var result *domain.AssetWorkbenchMember
+	result, appErr := h.svc.UpdateMemberRoles(c.Request.Context(), actor, userID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) PreviewAccountMerge(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.AccountMergePreviewParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	var result *assetworkbench.AccountMergePreview
+	result, appErr := h.svc.PreviewAccountMerge(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) MergeAccounts(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.AccountMergeParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	var result *assetworkbench.AccountMergePreview
+	result, appErr := h.svc.MergeAccounts(c.Request.Context(), actor, req)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

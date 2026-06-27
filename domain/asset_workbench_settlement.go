@@ -41,6 +41,7 @@ type AssetWorkbenchSettlementItem struct {
 	ItemType         string          `json:"item_type" db:"item_type"`
 	SubmissionItemID *int64          `json:"submission_item_id,omitempty" db:"submission_item_id"`
 	PayeeUserID      int64           `json:"payee_user_id" db:"payee_user_id"`
+	PaidToUserID     *int64          `json:"paid_to_user_id,omitempty" db:"paid_to_user_id"`
 	BusinessMonth    string          `json:"business_month" db:"business_month"`
 	Amount           float64         `json:"amount" db:"amount"`
 	Quantity         float64         `json:"quantity" db:"quantity"`
@@ -49,6 +50,7 @@ type AssetWorkbenchSettlementItem struct {
 	SourceRefType    string          `json:"source_ref_type" db:"source_ref_type"`
 	SourceRefID      *int64          `json:"source_ref_id,omitempty" db:"source_ref_id"`
 	Snapshot         json.RawMessage `json:"snapshot_json,omitempty" db:"snapshot_json"`
+	PayoutSnapshot   json.RawMessage `json:"payout_snapshot_json,omitempty" db:"payout_snapshot_json"`
 	CreatedAt        time.Time       `json:"created_at" db:"created_at"`
 }
 

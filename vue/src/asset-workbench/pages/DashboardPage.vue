@@ -55,7 +55,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="aw-page-stack">
+  <section class="aw-page-stack aw-dashboard-page">
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
 
     <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日先处理这些事" :segments="ledgerSegments">

@@ -467,20 +467,24 @@ func main() {
 		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
 		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
 	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
-	assetWorkbenchSvc := assetworkbench.NewService(assetworkbench.Config{
-		Timezone:                 cfg.AssetWorkbench.Timezone,
-		OSSPrefix:                cfg.AssetWorkbench.OSSPrefix,
-		UploadSessionTTL:         cfg.AssetWorkbench.UploadSessionTTL,
-		PreviewWorkerLeaseTTL:    cfg.AssetWorkbench.PreviewWorkerLeaseTTL,
-		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
-	},
+	assetWorkbenchOptions := []assetworkbench.Option{
 		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
 		assetworkbench.WithUserRepository(userRepo),
 		assetworkbench.WithIdentityRegistrar(identitySvc),
 		assetworkbench.WithOSSDirect(ossDirectSvc),
 		assetworkbench.WithPreviewRenderer(service.NewExternalAssetPreviewRenderer()),
 		assetworkbench.WithSystemAssetSearcher(globalAssetCenterSvc),
-	)
+	}
+	if sessionRevoker, ok := userSessionRepo.(assetworkbench.UserSessionRevoker); ok {
+		assetWorkbenchOptions = append(assetWorkbenchOptions, assetworkbench.WithUserSessionRepository(sessionRevoker))
+	}
+	assetWorkbenchSvc := assetworkbench.NewService(assetworkbench.Config{
+		Timezone:                 cfg.AssetWorkbench.Timezone,
+		OSSPrefix:                cfg.AssetWorkbench.OSSPrefix,
+		UploadSessionTTL:         cfg.AssetWorkbench.UploadSessionTTL,
+		PreviewWorkerLeaseTTL:    cfg.AssetWorkbench.PreviewWorkerLeaseTTL,
+		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
+	}, assetWorkbenchOptions...)
 
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)

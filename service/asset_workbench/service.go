@@ -37,6 +37,7 @@ type Service struct {
 	cfg             Config
 	repo            repo.AssetWorkbenchRepo
 	userRepo        repo.UserRepo
+	sessionRevoker  UserSessionRevoker
 	tx              repo.TxRunner
 	identity        WorkbenchIdentityRegistrar
 	oss             *baseservice.OSSDirectService
@@ -49,6 +50,10 @@ type Service struct {
 
 type WorkbenchIdentityRegistrar interface {
 	RegisterAssetWorkbenchUser(ctx context.Context, p baseservice.RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError)
+}
+
+type UserSessionRevoker interface {
+	RevokeActiveByUserID(ctx context.Context, tx repo.Tx, userID int64, at time.Time) (int64, error)
 }
 
 type SystemAssetSearcher interface {
@@ -104,6 +109,12 @@ func WithUserRepository(userRepo repo.UserRepo) Option {
 	}
 }
 
+func WithUserSessionRepository(sessionRepo UserSessionRevoker) Option {
+	return func(s *Service) {
+		s.sessionRevoker = sessionRepo
+	}
+}
+
 func WithIdentityRegistrar(identity WorkbenchIdentityRegistrar) Option {
 	return func(s *Service) {
 		s.identity = identity
@@ -146,10 +157,29 @@ type BootstrapResponse struct {
 	OSSPrefix              string                        `json:"oss_prefix"`
 	UploadSessionTTL       int64                         `json:"upload_session_ttl_seconds"`
 	IsAdmin                bool                          `json:"is_admin"`
+	Access                 *AssetWorkbenchAccessState    `json:"access,omitempty"`
+	RoleLabels             []string                      `json:"role_labels"`
 	Capabilities           []string                      `json:"capabilities"`
 	SettlementItemTypes    []string                      `json:"settlement_item_types"`
 	DeferredBusinessItems  []DeferredBusinessItem        `json:"deferred_business_items"`
 	ArchitectureGuardrails []string                      `json:"architecture_guardrails"`
+}
+
+type AssetWorkbenchAccessState struct {
+	MembershipStatus string        `json:"membership_status"`
+	IsEnabled        bool          `json:"is_enabled"`
+	IsAdminShell     bool          `json:"is_admin_shell"`
+	AssetRoles       []domain.Role `json:"asset_roles"`
+	RoleLabels       []string      `json:"role_labels"`
+	Capabilities     []string      `json:"capabilities"`
+	DeniedReason     string        `json:"denied_reason"`
+}
+
+type EntryResponse struct {
+	State     string                     `json:"state"`
+	Message   string                     `json:"message"`
+	Access    *AssetWorkbenchAccessState `json:"access,omitempty"`
+	Bootstrap *BootstrapResponse         `json:"bootstrap,omitempty"`
 }
 
 type DeferredBusinessItem struct {
@@ -199,6 +229,55 @@ type UpsertProfileParams struct {
 type UpdateMemberIdentityParams struct {
 	Identity string `json:"identity"`
 	Reason   string `json:"reason"`
+}
+
+type AccessRequestParams struct {
+	IdentityType string `json:"identity_type"`
+	Reason       string `json:"reason"`
+}
+
+type AccessOpenParams struct {
+	UserID       int64         `json:"user_id"`
+	Roles        []domain.Role `json:"roles"`
+	IdentityType string        `json:"identity_type"`
+	Reason       string        `json:"reason"`
+}
+
+type AccessDisableParams struct {
+	UserID int64  `json:"user_id"`
+	Reason string `json:"reason"`
+}
+
+type UpdateMemberRolesParams struct {
+	Roles  []domain.Role `json:"roles"`
+	Reason string        `json:"reason"`
+}
+
+type AccountMergePreviewParams struct {
+	SourceUserID    int64 `json:"source_user_id"`
+	CanonicalUserID int64 `json:"canonical_user_id"`
+}
+
+type AccountMergeParams struct {
+	SourceUserID    int64             `json:"source_user_id"`
+	CanonicalUserID int64             `json:"canonical_user_id"`
+	ProfileChoices  map[string]string `json:"profile_choices"`
+	Reason          string            `json:"reason"`
+}
+
+type AccountMergePreview struct {
+	SourceUserID    int64                    `json:"source_user_id"`
+	CanonicalUserID int64                    `json:"canonical_user_id"`
+	Conflicts       map[string]MergeConflict `json:"conflicts"`
+	Counts          map[string]int64         `json:"counts"`
+	AffectedMonths  []string                 `json:"affected_months"`
+	SettlementNote  string                   `json:"settlement_note"`
+}
+
+type MergeConflict struct {
+	Field          string `json:"field"`
+	SourceValue    string `json:"source_value"`
+	CanonicalValue string `json:"canonical_value"`
 }
 
 type CreatePriceMatrixParams struct {
@@ -554,10 +633,70 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 	if appErr != nil {
 		return nil, appErr
 	}
+	if s.tx != nil {
+		if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+			_, err := s.repo.OpenMembership(ctx, tx, repo.AssetWorkbenchAccessOpenParams{
+				UserID:       auth.User.ID,
+				Status:       domain.AppMembershipStatusActive,
+				IdentityType: domain.AppMembershipIdentityExternal,
+				Source:       domain.AppMembershipSourceAssetRegistered,
+				OpenedBy:     auth.User.ID,
+			})
+			return err
+		}); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to open asset workbench access for registered user.", err.Error())
+		}
+	}
 	return &RegisterResponse{Auth: auth, Profile: profile}, nil
 }
 
+func (s *Service) Entry(ctx context.Context, actor domain.RequestActor) (*EntryResponse, *domain.AppError) {
+	if actor.ID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil)
+	}
+	access, appErr := s.ResolveAssetWorkbenchAccess(ctx, actor)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if access.IsEnabled {
+		bootstrap, appErr := s.buildBootstrap(ctx, actor, access)
+		if appErr != nil {
+			return nil, appErr
+		}
+		return &EntryResponse{State: "ready", Message: "工作台已开通", Access: access, Bootstrap: bootstrap}, nil
+	}
+	state := access.MembershipStatus
+	if state == "" {
+		state = "not_member"
+	}
+	message := access.DeniedReason
+	if message == "" {
+		switch state {
+		case domain.AppMembershipStatusPending:
+			message = "资产工作台开通申请正在处理。"
+		case domain.AppMembershipStatusDisabled:
+			message = "资产工作台访问已停用。"
+		case domain.AppMembershipStatusMerged:
+			message = "该账号已合并，请使用主账号登录。"
+		default:
+			message = "该账号尚未开通资产工作台。"
+		}
+	}
+	return &EntryResponse{State: state, Message: message, Access: access}, nil
+}
+
 func (s *Service) Bootstrap(ctx context.Context, actor domain.RequestActor) (*BootstrapResponse, *domain.AppError) {
+	access, appErr := s.ResolveAssetWorkbenchAccess(ctx, actor)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if !access.IsEnabled {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, firstNonEmpty(access.DeniedReason, "Asset workbench access is not active."), map[string]string{"membership_status": access.MembershipStatus})
+	}
+	return s.buildBootstrap(ctx, actor, access)
+}
+
+func (s *Service) buildBootstrap(ctx context.Context, actor domain.RequestActor, access *AssetWorkbenchAccessState) (*BootstrapResponse, *domain.AppError) {
 	var profile *domain.AssetWorkbenchProfile
 	if s.repo != nil && actor.ID > 0 {
 		item, err := s.repo.GetProfileByUserID(ctx, actor.ID)
@@ -575,7 +714,9 @@ func (s *Service) Bootstrap(ctx context.Context, actor domain.RequestActor) (*Bo
 		Timezone:            s.cfg.Timezone,
 		OSSPrefix:           s.cfg.OSSPrefix,
 		UploadSessionTTL:    int64(s.cfg.UploadSessionTTL.Seconds()),
-		IsAdmin:             isAssetWorkbenchAdmin(actor),
+		IsAdmin:             access != nil && access.IsAdminShell,
+		Access:              access,
+		RoleLabels:          roleLabelsForActor(actor),
 		Capabilities:        assetWorkbenchCapabilities(actor),
 		SettlementItemTypes: domain.DefaultAssetWorkbenchSettlementItemTypes(),
 		DeferredBusinessItems: []DeferredBusinessItem{
@@ -598,6 +739,62 @@ func (s *Service) Bootstrap(ctx context.Context, actor domain.RequestActor) (*Bo
 			"business months use Asia/Shanghai while persisted timestamps stay UTC",
 		},
 	}, nil
+}
+
+func (s *Service) ResolveAssetWorkbenchAccess(ctx context.Context, actor domain.RequestActor) (*AssetWorkbenchAccessState, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if actor.ID <= 0 {
+		return &AssetWorkbenchAccessState{MembershipStatus: "not_member", DeniedReason: "Authentication required."}, nil
+	}
+	membership, err := s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, actor.ID)
+	if errors.Is(err, sql.ErrNoRows) && actorHasAny(actor, domain.RoleSuperAdmin, domain.RoleHRAdmin) && s.tx != nil {
+		if txErr := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+			openedBy := actor.ID
+			_, err := s.repo.UpsertMembership(ctx, tx, &domain.AppMembership{
+				AppCode:      domain.AssetWorkbenchAppCode,
+				UserID:       actor.ID,
+				Status:       domain.AppMembershipStatusActive,
+				IdentityType: domain.AppMembershipIdentityStaff,
+				Source:       domain.AppMembershipSourceGlobalAdminAuto,
+				OpenedBy:     &openedBy,
+			})
+			return err
+		}); txErr != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to auto-open asset workbench access.", txErr.Error())
+		}
+		membership, err = s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, actor.ID)
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to resolve asset workbench access.", err.Error())
+	}
+	status := "not_member"
+	if membership != nil {
+		status = membership.Status
+	}
+	access := &AssetWorkbenchAccessState{
+		MembershipStatus: status,
+		AssetRoles:       assetRolesFromActor(actor),
+		RoleLabels:       roleLabelsForActor(actor),
+		Capabilities:     assetWorkbenchCapabilities(actor),
+		IsAdminShell:     isAssetWorkbenchAdmin(actor),
+	}
+	if status == domain.AppMembershipStatusActive {
+		access.IsEnabled = true
+		return access, nil
+	}
+	switch status {
+	case domain.AppMembershipStatusPending:
+		access.DeniedReason = "资产工作台开通申请正在处理。"
+	case domain.AppMembershipStatusDisabled:
+		access.DeniedReason = "资产工作台访问已停用。"
+	case domain.AppMembershipStatusMerged:
+		access.DeniedReason = "该账号已合并，请使用主账号登录。"
+	default:
+		access.DeniedReason = "该账号尚未开通资产工作台。"
+	}
+	return access, nil
 }
 
 func (s *Service) UpsertMyProfile(ctx context.Context, actor domain.RequestActor, params UpsertProfileParams) (*domain.AssetWorkbenchProfile, *domain.AppError) {
@@ -683,6 +880,9 @@ func (s *Service) ListMembers(ctx context.Context, actor domain.RequestActor, fi
 	if err != nil {
 		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench members.", err.Error())
 	}
+	for _, item := range items {
+		decorateMemberForActor(item, actor)
+	}
 	return items, total, nil
 }
 
@@ -693,14 +893,108 @@ func (s *Service) SearchPeople(ctx context.Context, actor domain.RequestActor, f
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
 		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can search workbench people.", nil)
 	}
+	if strings.TrimSpace(filter.Scope) == "all_users" && !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can search all users.", nil)
+	}
 	items, total, err := s.repo.SearchPeople(ctx, filter)
 	if err != nil {
 		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to search asset workbench people.", err.Error())
+	}
+	for _, item := range items {
+		decorateMemberForActor(item, actor)
 	}
 	return items, total, nil
 }
 
 func (s *Service) UpdateMemberIdentity(ctx context.Context, actor domain.RequestActor, userID int64, params UpdateMemberIdentityParams) (*domain.AssetWorkbenchMember, *domain.AppError) {
+	return nil, domain.NewAppError(domain.ErrCodeUploadEndpointDeprecated, "This endpoint is deprecated. Use /asset-workbench/members/{user_id}/roles.", nil)
+}
+
+func (s *Service) RequestAccess(ctx context.Context, actor domain.RequestActor, params AccessRequestParams) (*domain.AppMembership, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if actor.ID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil)
+	}
+	identityType := normalizeMembershipIdentityType(params.IdentityType)
+	var membership *domain.AppMembership
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		membership, err = s.repo.RequestMembership(ctx, tx, domain.AssetWorkbenchAppCode, actor.ID, identityType)
+		if err != nil {
+			return err
+		}
+		return s.appendIdentityEvent(ctx, tx, actor.ID, actor.ID, domain.AppIdentityActionAccessRequested, nil, membership, strings.TrimSpace(params.Reason))
+	}); err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to request asset workbench access.", err.Error())
+	}
+	return membership, nil
+}
+
+func (s *Service) OpenAccess(ctx context.Context, actor domain.RequestActor, params AccessOpenParams) (*domain.AppMembership, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if s.userRepo == nil || s.tx == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench user role repository is not configured.", nil)
+	}
+	if params.UserID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required.", nil)
+	}
+	roles := normalizeAssetWorkbenchRoleSet(params.Roles, true)
+	grantsManagement := containsManagementAssetRole(roles)
+	if grantsManagement && !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can grant asset workbench management roles.", nil)
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can open submitter access.", nil)
+	}
+	currentMembership, err := s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, params.UserID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load membership.", err.Error())
+	}
+	if currentMembership != nil && currentMembership.Status == domain.AppMembershipStatusDisabled && !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can restore disabled workbench access.", nil)
+	}
+	currentRoles, err := s.userRepo.ListRoles(ctx, params.UserID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load user roles.", err.Error())
+	}
+	nextRoles := mergeAssetWorkbenchRoles(currentRoles, roles)
+	var membership *domain.AppMembership
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.userRepo.ReplaceRoles(ctx, tx, params.UserID, nextRoles); err != nil {
+			return err
+		}
+		var err error
+		membership, err = s.repo.OpenMembership(ctx, tx, repo.AssetWorkbenchAccessOpenParams{
+			UserID:       params.UserID,
+			Status:       domain.AppMembershipStatusActive,
+			IdentityType: normalizeMembershipIdentityType(params.IdentityType),
+			Source:       domain.AppMembershipSourceMainOpsOpened,
+			OpenedBy:     actor.ID,
+		})
+		if err != nil {
+			return err
+		}
+		return s.appendIdentityEvent(ctx, tx, actor.ID, params.UserID, domain.AppIdentityActionAccessOpened, map[string]interface{}{
+			"membership": currentMembership,
+			"roles":      currentRoles,
+		}, map[string]interface{}{
+			"membership": membership,
+			"roles":      nextRoles,
+		}, strings.TrimSpace(params.Reason))
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to open asset workbench access.", err.Error())
+	}
+	return membership, nil
+}
+
+func (s *Service) DisableAccess(ctx context.Context, actor domain.RequestActor, params AccessDisableParams) (*domain.AppMembership, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
@@ -708,53 +1002,344 @@ func (s *Service) UpdateMemberIdentity(ctx context.Context, actor domain.Request
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench user role repository is not configured.", nil)
 	}
 	if !actorHasAny(actor, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can change workbench identity.", nil)
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can disable workbench access.", nil)
+	}
+	if params.UserID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required.", nil)
+	}
+	reason := strings.TrimSpace(params.Reason)
+	if reason == "" {
+		return nil, domain.NewAppError(domain.ErrCodeReasonRequired, "A disable reason is required.", nil)
+	}
+	currentRoles, err := s.userRepo.ListRoles(ctx, params.UserID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load user roles.", err.Error())
+	}
+	nextRoles := removeAssetWorkbenchRoles(currentRoles)
+	var membership *domain.AppMembership
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		membership, err = s.repo.DisableMembership(ctx, tx, domain.AssetWorkbenchAppCode, params.UserID, actor.ID, reason, assetRolesFromRoles(currentRoles))
+		if err != nil {
+			return err
+		}
+		if err := s.userRepo.ReplaceRoles(ctx, tx, params.UserID, nextRoles); err != nil {
+			return err
+		}
+		return s.appendIdentityEvent(ctx, tx, actor.ID, params.UserID, domain.AppIdentityActionAccessDisabled, map[string]interface{}{
+			"roles": currentRoles,
+		}, map[string]interface{}{
+			"membership": membership,
+			"roles":      nextRoles,
+		}, reason)
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to disable asset workbench access.", err.Error())
+	}
+	return membership, nil
+}
+
+func (s *Service) UpdateMemberRoles(ctx context.Context, actor domain.RequestActor, userID int64, params UpdateMemberRolesParams) (*domain.AssetWorkbenchMember, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if s.userRepo == nil || s.tx == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench user role repository is not configured.", nil)
+	}
+	if !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can change workbench roles.", nil)
 	}
 	if userID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required.", nil)
 	}
-	identity := strings.TrimSpace(params.Identity)
-	if identity != "admin" && identity != "normal" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "identity must be admin or normal.", nil)
+	membership, err := s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, userID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Membership not found.", "Failed to load membership.")
+	}
+	if membership.Status != domain.AppMembershipStatusActive {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Only active workbench members can change roles.", map[string]string{"status": membership.Status})
 	}
 	currentRoles, err := s.userRepo.ListRoles(ctx, userID)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load user roles.", err.Error())
 	}
-	nextRoles := applyAssetWorkbenchIdentity(currentRoles, identity)
+	nextRoles := mergeAssetWorkbenchRoles(removeAssetWorkbenchRoles(currentRoles), normalizeAssetWorkbenchRoleSet(params.Roles, true))
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := s.userRepo.ReplaceRoles(ctx, tx, userID, nextRoles); err != nil {
 			return err
 		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventMemberIdentityChanged, domain.AssetWorkbenchEntityMember, &userID, map[string]interface{}{
-			"roles":    currentRoles,
-			"identity": workbenchIdentityFromRoles(currentRoles),
+		return s.appendIdentityEvent(ctx, tx, actor.ID, userID, domain.AppIdentityActionRolesUpdated, map[string]interface{}{
+			"roles": currentRoles,
 		}, map[string]interface{}{
-			"roles":    nextRoles,
-			"identity": identity,
+			"roles": nextRoles,
 		}, strings.TrimSpace(params.Reason))
 	}); err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench member identity.", err.Error())
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench member roles.", err.Error())
 	}
-	members, _, err := s.repo.ListMembers(ctx, repo.AssetWorkbenchMemberFilter{Page: 1, PageSize: 1, Keyword: strconv.FormatInt(userID, 10)})
-	if err == nil {
-		for _, item := range members {
-			if item != nil && item.UserID == userID {
-				return item, nil
-			}
+	member, appErr := s.loadMemberByID(ctx, actor, userID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return member, nil
+}
+
+func (s *Service) PreviewAccountMerge(ctx context.Context, actor domain.RequestActor, params AccountMergePreviewParams) (*AccountMergePreview, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can preview account merge.", nil)
+	}
+	if appErr := s.validateMergeUsers(ctx, params.SourceUserID, params.CanonicalUserID); appErr != nil {
+		return nil, appErr
+	}
+	conflicts, appErr := s.profileMergeConflicts(ctx, params.SourceUserID, params.CanonicalUserID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	counts, err := s.repo.CountAccountMergeImpact(ctx, params.SourceUserID, params.CanonicalUserID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to count account merge impact.", err.Error())
+	}
+	return &AccountMergePreview{
+		SourceUserID:    params.SourceUserID,
+		CanonicalUserID: params.CanonicalUserID,
+		Conflicts:       conflicts,
+		Counts:          mergeRewriteCountsMap(counts, 0),
+		SettlementNote:  "已确认结算的 payee 可迁到主账号用于工作台归属；paid_to_user_id 与 payout_snapshot_json 不变，财务导出仍按真实发放对象读取。",
+	}, nil
+}
+
+func (s *Service) MergeAccounts(ctx context.Context, actor domain.RequestActor, params AccountMergeParams) (*AccountMergePreview, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if s.userRepo == nil || s.tx == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench merge dependencies are not configured.", nil)
+	}
+	if !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can merge workbench accounts.", nil)
+	}
+	if appErr := s.validateMergeUsers(ctx, params.SourceUserID, params.CanonicalUserID); appErr != nil {
+		return nil, appErr
+	}
+	conflicts, appErr := s.profileMergeConflicts(ctx, params.SourceUserID, params.CanonicalUserID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	for field := range conflicts {
+		choice := strings.TrimSpace(params.ProfileChoices[field])
+		if choice != "source" && choice != "canonical" {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Profile conflict choice is required.", map[string]string{"field": field})
 		}
 	}
-	user, userErr := s.userRepo.GetByID(ctx, userID)
-	if userErr != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load updated user.", userErr.Error())
+	sourceUser, err := s.userRepo.GetByID(ctx, params.SourceUserID)
+	if err != nil || sourceUser == nil {
+		return nil, domain.NewAppError(domain.ErrCodeNotFound, "Source user not found.", nil)
 	}
-	return &domain.AssetWorkbenchMember{
-		UserID:      user.ID,
-		Username:    user.Username,
-		DisplayName: user.DisplayName,
-		RealName:    firstNonEmpty(user.RealName, user.DisplayName, user.Username),
-		Identity:    identity,
+	canonicalUser, err := s.userRepo.GetByID(ctx, params.CanonicalUserID)
+	if err != nil || canonicalUser == nil {
+		return nil, domain.NewAppError(domain.ErrCodeNotFound, "Canonical user not found.", nil)
+	}
+	sourceRoles, err := s.userRepo.ListRoles(ctx, params.SourceUserID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load source roles.", err.Error())
+	}
+	canonicalRoles, err := s.userRepo.ListRoles(ctx, params.CanonicalUserID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load canonical roles.", err.Error())
+	}
+	sourceMembership, err := s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, params.SourceUserID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Source membership not found.", "Failed to load source membership.")
+	}
+	sourceAssetRoles := []domain.Role{}
+	if sourceMembership.Status != domain.AppMembershipStatusDisabled {
+		sourceAssetRoles = assetRolesFromRoles(sourceRoles)
+	}
+	counts := repo.AssetWorkbenchMergeRewriteCounts{}
+	var revokedSessions int64
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if _, err := s.repo.LockMembership(ctx, tx, domain.AssetWorkbenchAppCode, params.SourceUserID); err != nil {
+			return err
+		}
+		canonicalMembership, err := s.repo.LockMembership(ctx, tx, domain.AssetWorkbenchAppCode, params.CanonicalUserID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if canonicalMembership != nil && canonicalMembership.Status == domain.AppMembershipStatusMerged {
+			return domain.NewAppError(domain.ErrCodeConflict, "Canonical user is already merged.", nil)
+		}
+		if err := s.repo.MarkMembershipMerged(ctx, tx, domain.AssetWorkbenchAppCode, params.SourceUserID); err != nil {
+			return err
+		}
+		sourceUser.Status = domain.UserStatusDisabled
+		sourceUser.UpdatedAt = s.nowFn().UTC()
+		if err := s.userRepo.Update(ctx, tx, sourceUser); err != nil {
+			return err
+		}
+		if s.sessionRevoker != nil {
+			var err error
+			revokedSessions, err = s.sessionRevoker.RevokeActiveByUserID(ctx, tx, params.SourceUserID, s.nowFn().UTC())
+			if err != nil {
+				return err
+			}
+		}
+		openedBy := actor.ID
+		if _, err := s.repo.UpsertMembership(ctx, tx, &domain.AppMembership{
+			AppCode:      domain.AssetWorkbenchAppCode,
+			UserID:       params.CanonicalUserID,
+			Status:       domain.AppMembershipStatusActive,
+			IdentityType: domain.AppMembershipIdentityStaff,
+			Source:       domain.AppMembershipSourceMerged,
+			OpenedBy:     &openedBy,
+		}); err != nil {
+			return err
+		}
+		nextCanonicalRoles := mergeAssetWorkbenchRoles(canonicalRoles, sourceAssetRoles)
+		if err := s.userRepo.ReplaceRoles(ctx, tx, params.CanonicalUserID, nextCanonicalRoles); err != nil {
+			return err
+		}
+		if err := s.userRepo.ReplaceRoles(ctx, tx, params.SourceUserID, removeAssetWorkbenchRoles(sourceRoles)); err != nil {
+			return err
+		}
+		if err := s.repo.MergeProfiles(ctx, tx, params.SourceUserID, params.CanonicalUserID, params.ProfileChoices, actor.ID); err != nil {
+			return err
+		}
+		var rewriteErr error
+		counts, rewriteErr = s.repo.RewriteAccountOwnership(ctx, tx, params.SourceUserID, params.CanonicalUserID)
+		if rewriteErr != nil {
+			return rewriteErr
+		}
+		if _, err := s.repo.CreateAccountLink(ctx, tx, &domain.AssetWorkbenchAccountLink{
+			SourceUserID:    params.SourceUserID,
+			CanonicalUserID: params.CanonicalUserID,
+			Status:          "merged",
+			CreatedBy:       actor.ID,
+		}); err != nil {
+			return err
+		}
+		if err := s.appendIdentityEvent(ctx, tx, actor.ID, params.CanonicalUserID, domain.AppIdentityActionAccountMerged, map[string]interface{}{
+			"source_user_id":    params.SourceUserID,
+			"canonical_user_id": params.CanonicalUserID,
+			"source_roles":      sourceRoles,
+			"canonical_roles":   canonicalRoles,
+		}, map[string]interface{}{
+			"source_user_id":          params.SourceUserID,
+			"canonical_user_id":       params.CanonicalUserID,
+			"canonical_roles":         nextCanonicalRoles,
+			"rewrite_counts":          counts,
+			"revoked_source_sessions": revokedSessions,
+			"paid_to_preserved":       true,
+		}, strings.TrimSpace(params.Reason)); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventAccountMerged, domain.AssetWorkbenchEntityMember, &params.CanonicalUserID, nil, map[string]interface{}{
+			"source_user_id":    params.SourceUserID,
+			"canonical_user_id": params.CanonicalUserID,
+			"rewrite_counts":    counts,
+			"paid_to_preserved": true,
+		}, strings.TrimSpace(params.Reason))
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to merge asset workbench accounts.", err.Error())
+	}
+	return &AccountMergePreview{
+		SourceUserID:    params.SourceUserID,
+		CanonicalUserID: params.CanonicalUserID,
+		Conflicts:       conflicts,
+		Counts:          mergeRewriteCountsMap(counts, revokedSessions),
+		SettlementNote:  "工作台归属已迁移到主账号；历史真实发放对象仍由 paid_to_user_id 与 payout_snapshot_json 固定。",
 	}, nil
+}
+
+func mergeRewriteCountsMap(counts repo.AssetWorkbenchMergeRewriteCounts, revokedSessions int64) map[string]int64 {
+	return map[string]int64{
+		"submissions":              counts.Submissions,
+		"submission_items":         counts.SubmissionItems,
+		"upload_sessions":          counts.UploadSessions,
+		"submission_files":         counts.SubmissionFiles,
+		"error_records":            counts.ErrorRecords,
+		"settlement_supplements":   counts.SettlementSupplements,
+		"settlement_items":         counts.SettlementItems,
+		"settlement_items_deduped": counts.SettlementItemsDeduped,
+		"group_members":            counts.GroupMembers,
+		"template_assignments":     counts.TemplateAssignments,
+		"saved_views":              counts.SavedViews,
+		"grade_periods":            counts.GradePeriods,
+		"supplement_permissions":   counts.SupplementPermissions,
+		"revoked_source_sessions":  revokedSessions,
+	}
+}
+
+func (s *Service) validateMergeUsers(ctx context.Context, sourceUserID, canonicalUserID int64) *domain.AppError {
+	if sourceUserID <= 0 || canonicalUserID <= 0 || sourceUserID == canonicalUserID {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "source_user_id and canonical_user_id must be different positive values.", nil)
+	}
+	sourceMembership, err := s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, sourceUserID)
+	if err != nil {
+		return mapRepoReadError(err, "Source membership not found.", "Failed to load source membership.")
+	}
+	if sourceMembership.Status == domain.AppMembershipStatusMerged {
+		return domain.NewAppError(domain.ErrCodeConflict, "Source user is already merged.", nil)
+	}
+	if link, err := s.repo.GetAccountLinkBySource(ctx, sourceUserID); err == nil && link != nil {
+		return domain.NewAppError(domain.ErrCodeConflict, "Source user already has an account link.", nil)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to check source account link.", err.Error())
+	}
+	canonicalMembership, err := s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, canonicalUserID)
+	if err == nil && canonicalMembership != nil && canonicalMembership.Status == domain.AppMembershipStatusMerged {
+		return domain.NewAppError(domain.ErrCodeConflict, "Canonical user is already merged.", nil)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to load canonical membership.", err.Error())
+	}
+	if link, err := s.repo.GetAccountLinkBySource(ctx, canonicalUserID); err == nil && link != nil {
+		return domain.NewAppError(domain.ErrCodeConflict, "Canonical user cannot be a merged source account.", nil)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to check canonical account link.", err.Error())
+	}
+	return nil
+}
+
+func (s *Service) profileMergeConflicts(ctx context.Context, sourceUserID, canonicalUserID int64) (map[string]MergeConflict, *domain.AppError) {
+	source, err := s.repo.GetProfileByUserID(ctx, sourceUserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return map[string]MergeConflict{}, nil
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load source profile.", err.Error())
+	}
+	canonical, err := s.repo.GetProfileByUserID(ctx, canonicalUserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return map[string]MergeConflict{}, nil
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load canonical profile.", err.Error())
+	}
+	conflicts := map[string]MergeConflict{}
+	add := func(field, sourceValue, canonicalValue string) {
+		sourceValue = strings.TrimSpace(sourceValue)
+		canonicalValue = strings.TrimSpace(canonicalValue)
+		if sourceValue != "" && canonicalValue != "" && sourceValue != canonicalValue {
+			conflicts[field] = MergeConflict{Field: field, SourceValue: sourceValue, CanonicalValue: canonicalValue}
+		}
+	}
+	ptrValue := func(v *string) string {
+		if v == nil {
+			return ""
+		}
+		return *v
+	}
+	add("real_name", source.RealName, canonical.RealName)
+	add("phone", ptrValue(source.Phone), ptrValue(canonical.Phone))
+	add("id_card", ptrValue(source.IDCard), ptrValue(canonical.IDCard))
+	add("alipay_account", source.AlipayAccount, canonical.AlipayAccount)
+	return conflicts, nil
 }
 
 func maskProfileListPII(items []*domain.AssetWorkbenchProfile) []*domain.AssetWorkbenchProfile {
@@ -2337,13 +2922,30 @@ func (s *Service) ConfirmSettlementBatch(ctx context.Context, actor domain.Reque
 	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
 		return domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can confirm settlement batches.", nil)
 	}
+	items, err := s.repo.ListSettlementItemsByBatch(ctx, batchID)
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to load settlement items.", err.Error())
+	}
+	payoutSnapshots, appErr := s.buildPayoutSnapshots(ctx, items, batchID)
+	if appErr != nil {
+		return appErr
+	}
+	confirmedAt := s.nowFn().UTC()
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.repo.ConfirmSettlementBatch(ctx, tx, batchID, actor.ID, s.nowFn().UTC()); err != nil {
+		if _, err := s.repo.LockSettlementBatch(ctx, tx, batchID); err != nil {
+			return err
+		}
+		if err := s.repo.FreezeSettlementPayouts(ctx, tx, batchID, confirmedAt, payoutSnapshots); err != nil {
+			return err
+		}
+		if err := s.repo.ConfirmSettlementBatch(ctx, tx, batchID, actor.ID, confirmedAt); err != nil {
 			return err
 		}
 		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSettlementConfirmed, domain.AssetWorkbenchEntitySettlement, &batchID, nil, map[string]interface{}{
-			"batch_id": batchID,
-			"status":   domain.AssetWorkbenchBatchStatusConfirmed,
+			"batch_id":         batchID,
+			"status":           domain.AssetWorkbenchBatchStatusConfirmed,
+			"payout_snapshots": len(payoutSnapshots),
+			"confirmed_at_utc": confirmedAt,
 		}, "")
 	}); err != nil {
 		if appErr := asAppError(err); appErr != nil {
@@ -2352,6 +2954,64 @@ func (s *Service) ConfirmSettlementBatch(ctx context.Context, actor domain.Reque
 		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to confirm settlement batch.", err.Error())
 	}
 	return nil
+}
+
+func (s *Service) buildPayoutSnapshots(ctx context.Context, items []*domain.AssetWorkbenchSettlementItem, batchID int64) (map[int64]json.RawMessage, *domain.AppError) {
+	payees := map[int64]struct{}{}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		payees[item.PayeeUserID] = struct{}{}
+	}
+	if len(payees) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Settlement batch has no payable items.", nil)
+	}
+	snapshots := make(map[int64]json.RawMessage, len(payees))
+	for payeeID := range payees {
+		profile, err := s.repo.GetProfileByUserID(ctx, payeeID)
+		if err != nil {
+			return nil, mapRepoReadError(err, "Payee profile not found.", "Failed to load payee payout profile.")
+		}
+		if profile == nil || strings.TrimSpace(profile.RealName) == "" || strings.TrimSpace(profile.AlipayAccount) == "" || profile.IDCard == nil || strings.TrimSpace(*profile.IDCard) == "" {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Payee payout profile is incomplete; confirm is blocked.", map[string]interface{}{
+				"batch_id":      batchID,
+				"payee_user_id": payeeID,
+			})
+		}
+		snapshots[payeeID] = mustJSON(map[string]interface{}{
+			"source":           "confirm_time",
+			"payee_user_id":    payeeID,
+			"real_name":        profile.RealName,
+			"alipay_account":   profile.AlipayAccount,
+			"id_card_masked":   maskSensitiveValue(*profile.IDCard, 0, 4),
+			"business_months":  settlementItemMonthsForPayee(items, payeeID),
+			"confirmed_at_utc": s.nowFn().UTC(),
+			"payout_authority": "paid_to_user_id+payout_snapshot_json",
+		})
+	}
+	return snapshots, nil
+}
+
+func settlementItemMonthsForPayee(items []*domain.AssetWorkbenchSettlementItem, payeeID int64) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, item := range items {
+		if item == nil || item.PayeeUserID != payeeID {
+			continue
+		}
+		month := strings.TrimSpace(item.BusinessMonth)
+		if month == "" {
+			continue
+		}
+		if _, ok := seen[month]; ok {
+			continue
+		}
+		seen[month] = struct{}{}
+		out = append(out, month)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *Service) CancelSettlementBatch(ctx context.Context, actor domain.RequestActor, batchID int64, reason string) *domain.AppError {
@@ -4547,6 +5207,151 @@ func workbenchIdentityFromRoles(roles []domain.Role) string {
 		}
 	}
 	return "normal"
+}
+
+func normalizeMembershipIdentityType(value string) string {
+	switch strings.TrimSpace(value) {
+	case domain.AppMembershipIdentityStaff, domain.AppMembershipIdentityExternal, domain.AppMembershipIdentityContractor:
+		return strings.TrimSpace(value)
+	default:
+		return domain.AppMembershipIdentityStaff
+	}
+}
+
+func assetRolesFromActor(actor domain.RequestActor) []domain.Role {
+	return assetRolesFromRoles(actor.Roles)
+}
+
+func assetRolesFromRoles(roles []domain.Role) []domain.Role {
+	out := make([]domain.Role, 0, 6)
+	for _, role := range domain.NormalizeRoleValues(roles) {
+		switch role {
+		case domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement, domain.RoleHRAdmin, domain.RoleSuperAdmin:
+			out = append(out, role)
+		}
+	}
+	return domain.NormalizeRoleValues(out)
+}
+
+func normalizeAssetWorkbenchRoleSet(roles []domain.Role, keepSubmitter bool) []domain.Role {
+	out := make([]domain.Role, 0, len(roles)+1)
+	if keepSubmitter {
+		out = append(out, domain.RoleAssetSubmitter)
+	}
+	for _, role := range domain.NormalizeRoleValues(roles) {
+		switch role {
+		case domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement:
+			out = append(out, role)
+		}
+	}
+	return domain.NormalizeRoleValues(out)
+}
+
+func mergeAssetWorkbenchRoles(current []domain.Role, assetRoles []domain.Role) []domain.Role {
+	next := removeAssetWorkbenchRoles(current)
+	next = append(next, normalizeAssetWorkbenchRoleSet(assetRoles, true)...)
+	return domain.NormalizeRoleValues(next)
+}
+
+func removeAssetWorkbenchRoles(current []domain.Role) []domain.Role {
+	next := make([]domain.Role, 0, len(current))
+	for _, role := range domain.NormalizeRoleValues(current) {
+		switch role {
+		case domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement:
+			continue
+		default:
+			next = append(next, role)
+		}
+	}
+	return domain.NormalizeRoleValues(next)
+}
+
+func containsManagementAssetRole(roles []domain.Role) bool {
+	for _, role := range domain.NormalizeRoleValues(roles) {
+		switch role {
+		case domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement:
+			return true
+		}
+	}
+	return false
+}
+
+func roleLabelsForActor(actor domain.RequestActor) []string {
+	return roleLabelsForRoles(actor.Roles)
+}
+
+func roleLabelsForRoles(roles []domain.Role) []string {
+	labels := make([]string, 0, len(roles))
+	for _, role := range domain.NormalizeRoleValues(roles) {
+		if label := assetWorkbenchRoleLabel(role); label != "" {
+			labels = append(labels, label)
+		}
+	}
+	return dedupeStrings(labels)
+}
+
+func assetWorkbenchRoleLabel(role domain.Role) string {
+	switch role {
+	case domain.RoleAssetSubmitter:
+		return "交付人员"
+	case domain.RoleAssetManager:
+		return "作品管理"
+	case domain.RoleAssetTemplateAdmin:
+		return "类型与计价"
+	case domain.RoleAssetSettlement:
+		return "结算财务"
+	case domain.RoleSuperAdmin:
+		return "超级管理员"
+	case domain.RoleHRAdmin:
+		return "人员档案"
+	default:
+		return ""
+	}
+}
+
+func decorateMemberForActor(member *domain.AssetWorkbenchMember, actor domain.RequestActor) {
+	if member == nil {
+		return
+	}
+	member.RoleLabels = roleLabelsForRoles(member.Roles)
+	member.CanEditRoles = member.Status == domain.AppMembershipStatusActive && actorHasAny(actor, domain.RoleSuperAdmin)
+}
+
+func (s *Service) loadMemberByID(ctx context.Context, actor domain.RequestActor, userID int64) (*domain.AssetWorkbenchMember, *domain.AppError) {
+	items, _, err := s.repo.ListMembers(ctx, repo.AssetWorkbenchMemberFilter{Page: 1, PageSize: 1, Keyword: strconv.FormatInt(userID, 10)})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load asset workbench member.", err.Error())
+	}
+	for _, item := range items {
+		if item != nil && item.UserID == userID {
+			decorateMemberForActor(item, actor)
+			return item, nil
+		}
+	}
+	return nil, domain.NewAppError(domain.ErrCodeNotFound, "Asset workbench member not found.", nil)
+}
+
+func (s *Service) appendIdentityEvent(ctx context.Context, tx repo.Tx, actorID, targetID int64, action string, before interface{}, after interface{}, reason string) error {
+	var actorPtr, targetPtr *int64
+	if actorID > 0 {
+		actorCopy := actorID
+		actorPtr = &actorCopy
+	}
+	if targetID > 0 {
+		targetCopy := targetID
+		targetPtr = &targetCopy
+	}
+	_, err := s.repo.CreateAppIdentityEvent(ctx, tx, &domain.AppIdentityEvent{
+		ActorUserID:  actorPtr,
+		TargetUserID: targetPtr,
+		SourceApp:    "main_ops",
+		TargetApp:    domain.AssetWorkbenchAppCode,
+		Action:       action,
+		Before:       mustJSON(before),
+		After:        mustJSON(after),
+		Reason:       strings.TrimSpace(reason),
+	})
+	return err
 }
 
 func dedupeStrings(values []string) []string {

@@ -17616,10 +17616,183 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/asset-workbench/entry:
+    get:
+      summary: Resolve asset workbench entry state
+      description: Returns not_member, pending, disabled, merged, or ready with inline bootstrap. This route is intentionally outside the active-membership gate.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: []
+      responses:
+        '200':
+          description: Entry state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      state: { type: string, enum: [ready, not_member, pending, disabled, merged] }
+                      message: { type: string }
+                      access:
+                        type: object
+                        properties:
+                          membership_status: { type: string }
+                          is_enabled: { type: boolean }
+                          is_admin_shell: { type: boolean }
+                          asset_roles:
+                            type: array
+                            items: { type: string }
+                          role_labels:
+                            type: array
+                            items: { type: string }
+                          capabilities:
+                            type: array
+                            items: { type: string }
+                          denied_reason: { type: string }
+                      bootstrap:
+                        type: object
+        '401': { description: Unauthenticated }
+  /v1/asset-workbench/access/request:
+    post:
+      summary: Request asset workbench access
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                identity_type: { type: string, enum: [staff, external, contractor] }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Pending membership or existing membership
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      app_code: { type: string }
+                      user_id: { type: integer }
+                      status: { type: string }
+                      identity_type: { type: string }
+                      source: { type: string }
+                      last_asset_roles_json: { type: object, additionalProperties: true }
+                      opened_by: { type: integer, nullable: true }
+                      disabled_by: { type: integer, nullable: true }
+                      disabled_reason: { type: string }
+                      created_at: { type: string, format: date-time }
+                      updated_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+  /v1/asset-workbench/access/open:
+    post:
+      summary: Open or restore asset workbench access
+      description: AssetManager may first-open submitter-only access; SuperAdmin is required for restore or management roles.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: integer }
+                roles:
+                  type: array
+                  items: { type: string, enum: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement] }
+                identity_type: { type: string, enum: [staff, external, contractor] }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Opened membership
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      app_code: { type: string }
+                      user_id: { type: integer }
+                      status: { type: string }
+                      identity_type: { type: string }
+                      source: { type: string }
+                      last_asset_roles_json: { type: object, additionalProperties: true }
+                      opened_by: { type: integer, nullable: true }
+                      disabled_by: { type: integer, nullable: true }
+                      disabled_reason: { type: string }
+                      created_at: { type: string, format: date-time }
+                      updated_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/access/disable:
+    post:
+      summary: Disable asset workbench access
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, reason]
+              properties:
+                user_id: { type: integer }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Disabled membership
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      app_code: { type: string }
+                      user_id: { type: integer }
+                      status: { type: string }
+                      identity_type: { type: string }
+                      source: { type: string }
+                      last_asset_roles_json: { type: object, additionalProperties: true }
+                      opened_by: { type: integer, nullable: true }
+                      disabled_by: { type: integer, nullable: true }
+                      disabled_reason: { type: string }
+                      created_at: { type: string, format: date-time }
+                      updated_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
   /v1/asset-workbench/members:
     get:
       summary: List asset workbench members
-      description: Returns asset-workbench scoped members for the admin permissions page. Does not expose main-ops users that have no workbench profile or workbench role.
+      description: Returns members from app_memberships, including pending, active, disabled, and merged states.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -17632,6 +17805,9 @@ paths:
         - in: query
           name: identity
           schema: { type: string, enum: [admin, normal] }
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, active, disabled, merged] }
         - in: query
           name: page
           schema: { type: integer, minimum: 1 }
@@ -17659,13 +17835,20 @@ paths:
                         job_grade: { type: string }
                         status: { type: string }
                         pii_completed: { type: boolean }
-                        identity: { type: string, enum: [admin, normal] }
+                        identity: { type: string }
+                        roles:
+                          type: array
+                          items: { type: string }
+                        role_labels:
+                          type: array
+                          items: { type: string }
+                        can_edit_roles: { type: boolean }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/members/{user_id}/identity:
     patch:
-      summary: Change asset workbench member identity
-      description: SuperAdmin-only endpoint that changes asset-workbench roles between admin and normal without relying on a long-lived asset branch.
+      summary: Deprecated asset workbench binary identity endpoint
+      description: Deprecated. Returns 410. Use PATCH /v1/asset-workbench/members/{user_id}/roles.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -17687,6 +17870,37 @@ paths:
                 identity: { type: string, enum: [admin, normal] }
                 reason: { type: string }
       responses:
+        '410': { description: Deprecated endpoint }
+        '400': { description: Invalid identity }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/members/{user_id}/roles:
+    patch:
+      summary: Update asset workbench member roles
+      description: SuperAdmin-only endpoint for composable business capabilities.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [SuperAdmin]
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                roles:
+                  type: array
+                  items: { type: string, enum: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement] }
+                reason: { type: string }
+      responses:
         '200':
           description: Updated member
           content:
@@ -17699,11 +17913,126 @@ paths:
                     properties:
                       user_id: { type: integer }
                       username: { type: string }
+                      display_name: { type: string }
                       real_name: { type: string }
-                      identity: { type: string, enum: [admin, normal] }
-        '400': { description: Invalid identity }
+                      worker_type: { type: string }
+                      job_grade: { type: string }
+                      status: { type: string }
+                      pii_completed: { type: boolean }
+                      identity: { type: string }
+                      roles:
+                        type: array
+                        items: { type: string }
+                      role_labels:
+                        type: array
+                        items: { type: string }
+                      can_edit_roles: { type: boolean }
+                      created_at: { type: string, format: date-time }
+                      updated_at: { type: string, format: date-time }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+        '409': { description: Membership is not active }
+  /v1/asset-workbench/accounts/merge/preview:
+    post:
+      summary: Preview asset workbench account merge
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_user_id, canonical_user_id]
+              properties:
+                source_user_id: { type: integer }
+                canonical_user_id: { type: integer }
+      responses:
+        '200':
+          description: Merge preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      source_user_id: { type: integer }
+                      canonical_user_id: { type: integer }
+                      conflicts:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          properties:
+                            field: { type: string }
+                            source_value: { type: string }
+                            canonical_value: { type: string }
+                      counts:
+                        type: object
+                        additionalProperties: { type: integer }
+                      affected_months:
+                        type: array
+                        items: { type: string }
+                      settlement_note: { type: string }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/accounts/merge:
+    post:
+      summary: Confirm asset workbench account merge
+      description: Rewrites workbench ownership to canonical user. paid_to_user_id and payout_snapshot_json are never rewritten.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_user_id, canonical_user_id, profile_choices]
+              properties:
+                source_user_id: { type: integer }
+                canonical_user_id: { type: integer }
+                profile_choices:
+                  type: object
+                  additionalProperties: { type: string, enum: [source, canonical] }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Merge result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      source_user_id: { type: integer }
+                      canonical_user_id: { type: integer }
+                      conflicts:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          properties:
+                            field: { type: string }
+                            source_value: { type: string }
+                            canonical_value: { type: string }
+                      counts:
+                        type: object
+                        additionalProperties: { type: integer }
+                      affected_months:
+                        type: array
+                        items: { type: string }
+                      settlement_note: { type: string }
+        '400': { description: Missing conflict choices }
+        '403': { description: Forbidden }
+        '409': { description: Merge conflict }
   /v1/asset-workbench/people-lookup:
     get:
       summary: Search people for template assignment

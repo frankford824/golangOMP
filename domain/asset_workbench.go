@@ -32,6 +32,33 @@ func DefaultAssetWorkbenchSettlementItemTypes() []string {
 }
 
 const (
+	AssetWorkbenchAppCode = "asset_workbench"
+)
+
+const (
+	AppMembershipStatusPending  = "pending"
+	AppMembershipStatusActive   = "active"
+	AppMembershipStatusDisabled = "disabled"
+	AppMembershipStatusMerged   = "merged"
+
+	AppMembershipIdentityStaff      = "staff"
+	AppMembershipIdentityExternal   = "external"
+	AppMembershipIdentityContractor = "contractor"
+
+	AppMembershipSourceMainOpsOpened   = "main_ops_opened"
+	AppMembershipSourceAssetRegistered = "asset_registered"
+	AppMembershipSourceRequestApproved = "request_approved"
+	AppMembershipSourceGlobalAdminAuto = "global_admin_auto"
+	AppMembershipSourceMerged          = "merged"
+
+	AppIdentityActionAccessRequested = "access.requested"
+	AppIdentityActionAccessOpened    = "access.opened"
+	AppIdentityActionAccessDisabled  = "access.disabled"
+	AppIdentityActionRolesUpdated    = "roles.updated"
+	AppIdentityActionAccountMerged   = "account.merged"
+)
+
+const (
 	AssetWorkbenchWorkerTypeFulltime = "fulltime"
 	AssetWorkbenchWorkerTypeParttime = "parttime"
 	AssetWorkbenchWorkerTypeAll      = "all"
@@ -118,6 +145,7 @@ const (
 	AssetWorkbenchEventTemplateAssigned            = "template.assigned"
 	AssetWorkbenchEventTemplateAssignmentRemoved   = "template_assignment.removed"
 	AssetWorkbenchEventMemberIdentityChanged       = "member.identity_changed"
+	AssetWorkbenchEventAccountMerged               = "account.merged"
 
 	AssetWorkbenchEntityProfile              = "profile"
 	AssetWorkbenchEntityPriceMatrix          = "price_matrix"
@@ -307,8 +335,48 @@ type AssetWorkbenchMember struct {
 	Status       string    `json:"status"`
 	PIICompleted bool      `json:"pii_completed"`
 	Identity     string    `json:"identity"`
+	Roles        []Role    `json:"roles,omitempty"`
+	RoleLabels   []string  `json:"role_labels,omitempty"`
+	CanEditRoles bool      `json:"can_edit_roles"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type AppMembership struct {
+	ID                 int64           `json:"id" db:"id"`
+	AppCode            string          `json:"app_code" db:"app_code"`
+	UserID             int64           `json:"user_id" db:"user_id"`
+	Status             string          `json:"status" db:"status"`
+	IdentityType       string          `json:"identity_type" db:"identity_type"`
+	Source             string          `json:"source" db:"source"`
+	LastAssetRolesJSON json.RawMessage `json:"last_asset_roles_json,omitempty" db:"last_asset_roles_json"`
+	OpenedBy           *int64          `json:"opened_by,omitempty" db:"opened_by"`
+	DisabledBy         *int64          `json:"disabled_by,omitempty" db:"disabled_by"`
+	DisabledReason     string          `json:"disabled_reason" db:"disabled_reason"`
+	CreatedAt          time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+type AppIdentityEvent struct {
+	ID           int64           `json:"id" db:"id"`
+	ActorUserID  *int64          `json:"actor_user_id,omitempty" db:"actor_user_id"`
+	TargetUserID *int64          `json:"target_user_id,omitempty" db:"target_user_id"`
+	SourceApp    string          `json:"source_app" db:"source_app"`
+	TargetApp    string          `json:"target_app" db:"target_app"`
+	Action       string          `json:"action" db:"action"`
+	Before       json.RawMessage `json:"before_json,omitempty" db:"before_json"`
+	After        json.RawMessage `json:"after_json,omitempty" db:"after_json"`
+	Reason       string          `json:"reason" db:"reason"`
+	CreatedAt    time.Time       `json:"created_at" db:"created_at"`
+}
+
+type AssetWorkbenchAccountLink struct {
+	ID              int64     `json:"id" db:"id"`
+	SourceUserID    int64     `json:"source_user_id" db:"source_user_id"`
+	CanonicalUserID int64     `json:"canonical_user_id" db:"canonical_user_id"`
+	Status          string    `json:"status" db:"status"`
+	CreatedBy       int64     `json:"created_by" db:"created_by"`
+	CreatedAt       time.Time `json:"created_at" db:"created_at"`
 }
 
 type AssetWorkbenchUploadSession struct {

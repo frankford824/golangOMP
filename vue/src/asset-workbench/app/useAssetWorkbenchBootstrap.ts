@@ -2,12 +2,12 @@ import { onBeforeUnmount, ref } from 'vue'
 
 import { assetWorkbenchApi, type AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 
-export function useAssetWorkbenchBootstrap() {
-  const bootstrap = ref<AssetWorkbenchBootstrap | null>(null)
-  const loading = ref(false)
-  const error = ref('')
-  let controller: AbortController | null = null
+const bootstrap = ref<AssetWorkbenchBootstrap | null>(null)
+const loading = ref(false)
+const error = ref('')
+let controller: AbortController | null = null
 
+export function useAssetWorkbenchBootstrap() {
   async function refresh() {
     controller?.abort()
     controller = new AbortController()
@@ -24,5 +24,10 @@ export function useAssetWorkbenchBootstrap() {
 
   onBeforeUnmount(() => controller?.abort())
 
-  return { bootstrap, loading, error, refresh }
+  function setBootstrap(next: AssetWorkbenchBootstrap | null) {
+    bootstrap.value = next
+    error.value = ''
+  }
+
+  return { bootstrap, loading, error, refresh, setBootstrap }
 }

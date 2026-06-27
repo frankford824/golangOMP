@@ -76,25 +76,24 @@ func (r *assetWorkbenchRepo) SearchPeople(ctx context.Context, filter repo.Asset
 }
 
 func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetWorkbenchMemberFilter, lookup bool) ([]*domain.AssetWorkbenchMember, int64, error) {
-	where := []string{`(
-		p.user_id IS NOT NULL
-		OR EXISTS (
-			SELECT 1
-			FROM user_roles wur
-			WHERE wur.user_id = u.id
-			  AND wur.role IN (?, ?, ?, ?)
-		)
-	)`}
-	args := []interface{}{
-		domain.RoleAssetSubmitter,
-		domain.RoleAssetManager,
-		domain.RoleAssetTemplateAdmin,
-		domain.RoleAssetSettlement,
+	allUsers := lookup && strings.TrimSpace(filter.Scope) == "all_users"
+	where := []string{}
+	args := []interface{}{}
+	if !allUsers {
+		where = append(where, "am.app_code = ?")
+		args = append(args, domain.AssetWorkbenchAppCode)
 	}
 	if v := strings.TrimSpace(filter.Keyword); v != "" {
 		like := "%" + v + "%"
 		where = append(where, "(u.username LIKE ? OR u.display_name LIKE ? OR u.mobile LIKE ? OR p.real_name LIKE ? OR p.phone LIKE ?)")
 		args = append(args, like, like, like, like, like)
+	}
+	if v := strings.TrimSpace(filter.Status); v != "" && !allUsers {
+		where = append(where, "am.status = ?")
+		args = append(args, v)
+	} else if lookup && !allUsers {
+		where = append(where, "am.status = ?")
+		args = append(args, domain.AppMembershipStatusActive)
 	}
 	if v := strings.TrimSpace(filter.Identity); v != "" {
 		switch v {
@@ -104,11 +103,15 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 			where = append(where, "NOT "+assetWorkbenchAdminExistsSQL())
 		}
 	}
+	if len(where) == 0 {
+		where = append(where, "1=1")
+	}
 	var total int64
 	countArgs := append([]interface{}{}, args...)
 	if err := r.db.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM users u
+		LEFT JOIN app_memberships am ON am.user_id = u.id AND am.app_code = 'asset_workbench'
 		LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id
 		WHERE `+strings.Join(where, " AND "), countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count asset workbench members: %w", err)
@@ -121,6 +124,7 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
 	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchMemberSelect()+`
 		WHERE `+strings.Join(where, " AND ")+`
+		GROUP BY u.id, am.status, p.id
 		ORDER BY
 			CASE WHEN p.real_name IS NULL OR p.real_name = '' THEN 1 ELSE 0 END ASC,
 			p.real_name ASC,
@@ -140,6 +144,176 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) GetMembership(ctx context.Context, appCode string, userID int64) (*domain.AppMembership, error) {
+	row := r.db.db.QueryRowContext(ctx, appMembershipSelect()+` WHERE app_code = ? AND user_id = ?`, appCode, userID)
+	return scanAppMembership(row)
+}
+
+func (r *assetWorkbenchRepo) LockMembership(ctx context.Context, tx repo.Tx, appCode string, userID int64) (*domain.AppMembership, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, appMembershipSelect()+` WHERE app_code = ? AND user_id = ? FOR UPDATE`, appCode, userID)
+	return scanAppMembership(row)
+}
+
+func (r *assetWorkbenchRepo) UpsertMembership(ctx context.Context, tx repo.Tx, membership *domain.AppMembership) (*domain.AppMembership, error) {
+	_, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO app_memberships (
+			app_code, user_id, status, identity_type, source, last_asset_roles_json, opened_by, disabled_by, disabled_reason
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			status = VALUES(status),
+			identity_type = VALUES(identity_type),
+			source = CASE WHEN VALUES(source) = '' THEN source ELSE VALUES(source) END,
+			last_asset_roles_json = VALUES(last_asset_roles_json),
+			opened_by = VALUES(opened_by),
+			disabled_by = VALUES(disabled_by),
+			disabled_reason = VALUES(disabled_reason),
+			updated_at = CURRENT_TIMESTAMP`,
+		membership.AppCode,
+		membership.UserID,
+		membership.Status,
+		membership.IdentityType,
+		membership.Source,
+		nullableJSON(membership.LastAssetRolesJSON),
+		toNullInt64(membership.OpenedBy),
+		toNullInt64(membership.DisabledBy),
+		membership.DisabledReason,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("upsert app membership: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, appMembershipSelect()+` WHERE app_code = ? AND user_id = ?`, membership.AppCode, membership.UserID)
+	return scanAppMembership(row)
+}
+
+func (r *assetWorkbenchRepo) RequestMembership(ctx context.Context, tx repo.Tx, appCode string, userID int64, identityType string) (*domain.AppMembership, error) {
+	_, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO app_memberships (
+			app_code, user_id, status, identity_type, source
+		) VALUES (?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE updated_at = updated_at`,
+		appCode, userID, domain.AppMembershipStatusPending, identityType, domain.AppMembershipSourceRequestApproved,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("request app membership: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, appMembershipSelect()+` WHERE app_code = ? AND user_id = ?`, appCode, userID)
+	return scanAppMembership(row)
+}
+
+func (r *assetWorkbenchRepo) OpenMembership(ctx context.Context, tx repo.Tx, params repo.AssetWorkbenchAccessOpenParams) (*domain.AppMembership, error) {
+	openedBy := &params.OpenedBy
+	membership := &domain.AppMembership{
+		AppCode:      domain.AssetWorkbenchAppCode,
+		UserID:       params.UserID,
+		Status:       params.Status,
+		IdentityType: params.IdentityType,
+		Source:       params.Source,
+		OpenedBy:     openedBy,
+	}
+	return r.UpsertMembership(ctx, tx, membership)
+}
+
+func (r *assetWorkbenchRepo) DisableMembership(ctx context.Context, tx repo.Tx, appCode string, userID int64, disabledBy int64, reason string, lastRoles []domain.Role) (*domain.AppMembership, error) {
+	raw, _ := json.Marshal(lastRoles)
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE app_memberships
+		SET status = ?, disabled_by = ?, disabled_reason = ?, last_asset_roles_json = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE app_code = ? AND user_id = ? AND status = ?`,
+		domain.AppMembershipStatusDisabled,
+		disabledBy,
+		reason,
+		raw,
+		appCode,
+		userID,
+		domain.AppMembershipStatusActive,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("disable app membership: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected != 1 {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Membership is not active.", nil)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, appMembershipSelect()+` WHERE app_code = ? AND user_id = ?`, appCode, userID)
+	return scanAppMembership(row)
+}
+
+func (r *assetWorkbenchRepo) MarkMembershipMerged(ctx context.Context, tx repo.Tx, appCode string, sourceUserID int64) error {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE app_memberships
+		SET status = ?, source = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE app_code = ? AND user_id = ?`,
+		domain.AppMembershipStatusMerged,
+		domain.AppMembershipSourceMerged,
+		appCode,
+		sourceUserID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark app membership merged: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *assetWorkbenchRepo) CreateAppIdentityEvent(ctx context.Context, tx repo.Tx, event *domain.AppIdentityEvent) (*domain.AppIdentityEvent, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO app_identity_events (
+			actor_user_id, target_user_id, source_app, target_app, action, before_json, after_json, reason
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		toNullInt64(event.ActorUserID),
+		toNullInt64(event.TargetUserID),
+		event.SourceApp,
+		event.TargetApp,
+		event.Action,
+		nullableJSON(event.Before),
+		nullableJSON(event.After),
+		event.Reason,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert app identity event: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("app identity event last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, appIdentityEventSelect()+` WHERE id = ?`, id)
+	return scanAppIdentityEvent(row)
+}
+
+func (r *assetWorkbenchRepo) CreateAccountLink(ctx context.Context, tx repo.Tx, link *domain.AssetWorkbenchAccountLink) (*domain.AssetWorkbenchAccountLink, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_account_links (
+			source_user_id, canonical_user_id, status, created_by
+		) VALUES (?, ?, ?, ?)`,
+		link.SourceUserID,
+		link.CanonicalUserID,
+		"merged",
+		link.CreatedBy,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench account link: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench account link last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchAccountLinkSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchAccountLink(row)
+}
+
+func (r *assetWorkbenchRepo) GetAccountLinkBySource(ctx context.Context, sourceUserID int64) (*domain.AssetWorkbenchAccountLink, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchAccountLinkSelect()+` WHERE source_user_id = ?`, sourceUserID)
+	return scanAssetWorkbenchAccountLink(row)
+}
+
+func (r *assetWorkbenchRepo) GetAccountLinkByCanonical(ctx context.Context, canonicalUserID int64) (*domain.AssetWorkbenchAccountLink, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchAccountLinkSelect()+` WHERE canonical_user_id = ? LIMIT 1`, canonicalUserID)
+	return scanAssetWorkbenchAccountLink(row)
 }
 
 func (r *assetWorkbenchRepo) UpsertProfile(ctx context.Context, tx repo.Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error) {
@@ -1780,8 +1954,8 @@ func (r *assetWorkbenchRepo) CreateSettlementItem(ctx context.Context, tx repo.T
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_settlement_items (
 			batch_id, item_type, submission_item_id, payee_user_id, business_month, amount,
-			quantity, unit_price, direction, source_ref_type, source_ref_id, snapshot_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			quantity, unit_price, direction, source_ref_type, source_ref_id, snapshot_json, paid_to_user_id, payout_snapshot_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.BatchID,
 		item.ItemType,
 		toNullInt64(item.SubmissionItemID),
@@ -1794,6 +1968,8 @@ func (r *assetWorkbenchRepo) CreateSettlementItem(ctx context.Context, tx repo.T
 		item.SourceRefType,
 		toNullInt64(item.SourceRefID),
 		nullableJSON(item.Snapshot),
+		toNullInt64(item.PaidToUserID),
+		nullableJSON(item.PayoutSnapshot),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert asset workbench settlement item: %w", err)
@@ -1870,6 +2046,46 @@ func (r *assetWorkbenchRepo) ConfirmSettlementBatch(ctx context.Context, tx repo
 		WHERE linked_batch_id = ? AND status = ?`,
 		domain.AssetWorkbenchSupplementStatusSettled, batchID, domain.AssetWorkbenchSupplementStatusInBatch); err != nil {
 		return fmt.Errorf("mark asset workbench supplements settled: %w", err)
+	}
+	return nil
+}
+
+func (r *assetWorkbenchRepo) FreezeSettlementPayouts(ctx context.Context, tx repo.Tx, batchID int64, at time.Time, snapshots map[int64]json.RawMessage) error {
+	if len(snapshots) == 0 {
+		return nil
+	}
+	sqlTx := Unwrap(tx)
+	for payeeUserID, snapshot := range snapshots {
+		res, err := sqlTx.ExecContext(ctx, `
+			UPDATE asset_workbench_settlement_items
+			SET paid_to_user_id = payee_user_id,
+			    payout_snapshot_json = ?
+			WHERE batch_id = ?
+			  AND payee_user_id = ?
+			  AND paid_to_user_id IS NULL`,
+			nullableJSON(snapshot),
+			batchID,
+			payeeUserID,
+		)
+		if err != nil {
+			return fmt.Errorf("freeze asset workbench settlement payout: %w", err)
+		}
+		if affected, _ := res.RowsAffected(); affected == 0 {
+			continue
+		}
+	}
+	var missing int
+	if err := sqlTx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM asset_workbench_settlement_items
+		WHERE batch_id = ?
+		  AND paid_to_user_id IS NULL`,
+		batchID,
+	).Scan(&missing); err != nil {
+		return fmt.Errorf("count missing asset workbench payout snapshots: %w", err)
+	}
+	if missing > 0 {
+		return domain.NewAppError(domain.ErrCodeConflict, "Some settlement items are missing payout snapshots.", map[string]int{"missing": missing})
 	}
 	return nil
 }
@@ -1970,8 +2186,8 @@ func (r *assetWorkbenchRepo) ListSettlementItemsByBatch(ctx context.Context, bat
 
 func (r *assetWorkbenchRepo) ListConfirmedSettlementItemsByPayee(ctx context.Context, payeeUserID int64) ([]*domain.AssetWorkbenchSettlementItem, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT si.id, si.batch_id, si.item_type, si.submission_item_id, si.payee_user_id, si.business_month,
-			si.amount, si.quantity, si.unit_price, si.direction, si.source_ref_type, si.source_ref_id, si.snapshot_json, si.created_at
+		SELECT si.id, si.batch_id, si.item_type, si.submission_item_id, si.payee_user_id, si.paid_to_user_id, si.business_month,
+			si.amount, si.quantity, si.unit_price, si.direction, si.source_ref_type, si.source_ref_id, si.snapshot_json, si.payout_snapshot_json, si.created_at
 		FROM asset_workbench_settlement_items si
 		JOIN asset_workbench_settlement_batches sb ON sb.id = si.batch_id
 		WHERE si.payee_user_id = ?
@@ -2381,10 +2597,454 @@ func (r *assetWorkbenchRepo) DeleteSavedView(ctx context.Context, tx repo.Tx, us
 	return nil
 }
 
+func (r *assetWorkbenchRepo) MergeProfiles(ctx context.Context, tx repo.Tx, sourceUserID, canonicalUserID int64, fieldChoices map[string]string, actorID int64) error {
+	sqlTx := Unwrap(tx)
+	source, err := scanAssetWorkbenchProfile(sqlTx.QueryRowContext(ctx, assetWorkbenchProfileSelect()+` WHERE user_id = ? FOR UPDATE`, sourceUserID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lock source asset workbench profile: %w", err)
+	}
+	canonical, err := scanAssetWorkbenchProfile(sqlTx.QueryRowContext(ctx, assetWorkbenchProfileSelect()+` WHERE user_id = ? FOR UPDATE`, canonicalUserID))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("lock canonical asset workbench profile: %w", err)
+	}
+	if canonical == nil {
+		if _, err := sqlTx.ExecContext(ctx, `
+			UPDATE asset_workbench_profiles
+			SET user_id = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE user_id = ?`,
+			canonicalUserID, actorID, sourceUserID,
+		); err != nil {
+			return fmt.Errorf("move source asset workbench profile: %w", err)
+		}
+		if _, err := sqlTx.ExecContext(ctx, `
+			UPDATE asset_workbench_profile_grade_periods
+			SET user_id = ?
+			WHERE user_id = ?`,
+			canonicalUserID, sourceUserID,
+		); err != nil {
+			return fmt.Errorf("move source asset workbench grade periods user: %w", err)
+		}
+		return nil
+	}
+
+	merged := *canonical
+	mergeString := func(field, sourceValue, canonicalValue string) string {
+		if strings.TrimSpace(canonicalValue) == "" {
+			return sourceValue
+		}
+		if strings.TrimSpace(sourceValue) == "" {
+			return canonicalValue
+		}
+		if strings.EqualFold(strings.TrimSpace(fieldChoices[field]), "source") {
+			return sourceValue
+		}
+		return canonicalValue
+	}
+	mergePtr := func(field string, sourceValue, canonicalValue *string) *string {
+		if canonicalValue == nil || strings.TrimSpace(*canonicalValue) == "" {
+			return sourceValue
+		}
+		if sourceValue == nil || strings.TrimSpace(*sourceValue) == "" {
+			return canonicalValue
+		}
+		if strings.EqualFold(strings.TrimSpace(fieldChoices[field]), "source") {
+			return sourceValue
+		}
+		return canonicalValue
+	}
+	merged.WorkerType = mergeString("worker_type", source.WorkerType, canonical.WorkerType)
+	merged.JobGrade = mergeString("job_grade", source.JobGrade, canonical.JobGrade)
+	merged.RealName = mergeString("real_name", source.RealName, canonical.RealName)
+	merged.Phone = mergePtr("phone", source.Phone, canonical.Phone)
+	merged.Province = mergeString("province", source.Province, canonical.Province)
+	merged.City = mergeString("city", source.City, canonical.City)
+	merged.IDCard = mergePtr("id_card", source.IDCard, canonical.IDCard)
+	merged.Gender = mergeString("gender", source.Gender, canonical.Gender)
+	merged.AlipayAccount = mergeString("alipay_account", source.AlipayAccount, canonical.AlipayAccount)
+	if merged.OnboardedAt == nil {
+		merged.OnboardedAt = source.OnboardedAt
+	}
+	merged.Status = mergeString("status", source.Status, canonical.Status)
+	merged.PIICompleted = merged.RealName != "" && merged.Phone != nil && *merged.Phone != "" && merged.IDCard != nil && *merged.IDCard != "" && merged.AlipayAccount != ""
+
+	if _, err := sqlTx.ExecContext(ctx, `
+		UPDATE asset_workbench_profiles
+		SET worker_type = ?, job_grade = ?, real_name = ?, phone = ?, province = ?, city = ?,
+		    id_card = ?, gender = ?, alipay_account = ?, onboarded_at = ?, status = ?,
+		    pii_completed = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		merged.WorkerType,
+		merged.JobGrade,
+		merged.RealName,
+		toNullStringPtr(merged.Phone),
+		merged.Province,
+		merged.City,
+		toNullStringPtr(merged.IDCard),
+		merged.Gender,
+		merged.AlipayAccount,
+		toNullTime(merged.OnboardedAt),
+		merged.Status,
+		merged.PIICompleted,
+		actorID,
+		canonical.ID,
+	); err != nil {
+		return fmt.Errorf("merge canonical asset workbench profile: %w", err)
+	}
+
+	if _, err := sqlTx.ExecContext(ctx, `
+		INSERT INTO asset_workbench_profile_grade_periods (
+			profile_id, user_id, worker_type, job_grade, effective_from, effective_to, changed_by, reason
+		)
+		SELECT ?, ?, sgp.worker_type, sgp.job_grade, sgp.effective_from, sgp.effective_to, ?, CONCAT('merged from user ', ?)
+		FROM asset_workbench_profile_grade_periods sgp
+		WHERE sgp.user_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM asset_workbench_profile_grade_periods cgp
+			WHERE cgp.user_id = ?
+			  AND cgp.effective_from <= COALESCE(sgp.effective_to, '9999-12-31')
+			  AND COALESCE(cgp.effective_to, '9999-12-31') >= sgp.effective_from
+		  )`,
+		canonical.ID,
+		canonicalUserID,
+		actorID,
+		sourceUserID,
+		sourceUserID,
+		canonicalUserID,
+	); err != nil {
+		return fmt.Errorf("merge asset workbench grade periods: %w", err)
+	}
+	if _, err := sqlTx.ExecContext(ctx, `DELETE FROM asset_workbench_profile_grade_periods WHERE user_id = ?`, sourceUserID); err != nil {
+		return fmt.Errorf("delete source asset workbench grade periods: %w", err)
+	}
+	if _, err := sqlTx.ExecContext(ctx, `DELETE FROM asset_workbench_profiles WHERE id = ?`, source.ID); err != nil {
+		return fmt.Errorf("delete source asset workbench profile: %w", err)
+	}
+	return nil
+}
+
+func (r *assetWorkbenchRepo) CountAccountMergeImpact(ctx context.Context, sourceUserID, canonicalUserID int64) (repo.AssetWorkbenchMergeRewriteCounts, error) {
+	var counts repo.AssetWorkbenchMergeRewriteCounts
+	count := func(target *int64, query string, args ...interface{}) error {
+		if err := r.db.db.QueryRowContext(ctx, query, args...).Scan(target); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := count(&counts.Submissions, `SELECT COUNT(*) FROM asset_workbench_submissions WHERE submitter_user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge submissions impact: %w", err)
+	}
+	if err := count(&counts.SubmissionItems, `SELECT COUNT(*) FROM asset_workbench_submission_items WHERE payee_user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge submission items impact: %w", err)
+	}
+	if err := count(&counts.UploadSessions, `SELECT COUNT(*) FROM asset_workbench_upload_sessions WHERE owner_user_id = ? AND status IN ('created', 'uploading', 'uploaded', 'submitted')`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge upload sessions impact: %w", err)
+	}
+	if err := count(&counts.SubmissionFiles, `SELECT COUNT(*) FROM asset_workbench_submission_files WHERE owner_user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge submission files impact: %w", err)
+	}
+	if err := count(&counts.ErrorRecords, `SELECT COUNT(*) FROM asset_workbench_error_records WHERE payee_user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge error records impact: %w", err)
+	}
+	if err := count(&counts.SettlementSupplements, `SELECT COUNT(*) FROM asset_workbench_settlement_supplements WHERE payee_user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge settlement supplements impact: %w", err)
+	}
+	if err := count(&counts.SettlementItems, `SELECT COUNT(*) FROM asset_workbench_settlement_items WHERE payee_user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge settlement items impact: %w", err)
+	}
+	if err := count(&counts.SettlementItemsDeduped, `
+		SELECT COALESCE(SUM(duplicate_count), 0)
+		FROM (
+			SELECT COUNT(*) - 1 AS duplicate_count
+			FROM asset_workbench_settlement_items si
+			JOIN asset_workbench_settlement_batches sb ON sb.id = si.batch_id
+			WHERE si.payee_user_id IN (?, ?)
+			  AND sb.status = ?
+			GROUP BY si.batch_id, si.item_type, si.business_month, si.direction,
+				CASE WHEN si.submission_item_id IS NULL THEN 0 ELSE si.submission_item_id END,
+				CASE WHEN si.submission_item_id IS NULL THEN IFNULL(si.source_ref_type, '') ELSE '' END,
+				CASE WHEN si.submission_item_id IS NULL THEN IFNULL(si.source_ref_id, 0) ELSE 0 END
+			HAVING COUNT(*) > 1
+		) d`,
+		sourceUserID,
+		canonicalUserID,
+		domain.AssetWorkbenchBatchStatusGenerated,
+	); err != nil {
+		return counts, fmt.Errorf("count merge settlement item duplicate impact: %w", err)
+	}
+	if err := count(&counts.GroupMembers, `SELECT COUNT(*) FROM asset_workbench_group_members WHERE user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge group members impact: %w", err)
+	}
+	if err := count(&counts.TemplateAssignments, `SELECT COUNT(*) FROM asset_workbench_template_assignments WHERE target_type = 'user' AND target_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge template assignments impact: %w", err)
+	}
+	if err := count(&counts.SavedViews, `SELECT COUNT(*) FROM asset_workbench_saved_views WHERE user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge saved views impact: %w", err)
+	}
+	if err := count(&counts.GradePeriods, `SELECT COUNT(*) FROM asset_workbench_profile_grade_periods WHERE user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge grade periods impact: %w", err)
+	}
+	if err := count(&counts.SupplementPermissions, `SELECT COUNT(*) FROM asset_workbench_supplement_permissions WHERE payee_user_id = ?`, sourceUserID); err != nil {
+		return counts, fmt.Errorf("count merge supplement permissions impact: %w", err)
+	}
+	return counts, nil
+}
+
+func (r *assetWorkbenchRepo) RewriteAccountOwnership(ctx context.Context, tx repo.Tx, sourceUserID, canonicalUserID int64) (repo.AssetWorkbenchMergeRewriteCounts, error) {
+	sqlTx := Unwrap(tx)
+	var counts repo.AssetWorkbenchMergeRewriteCounts
+	execCount := func(target *int64, query string, args ...interface{}) error {
+		res, err := sqlTx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		*target = affected
+		return nil
+	}
+	if err := execCount(&counts.Submissions, `UPDATE asset_workbench_submissions SET submitter_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE submitter_user_id = ?`, canonicalUserID, sourceUserID); err != nil {
+		return counts, fmt.Errorf("rewrite asset workbench submissions owner: %w", err)
+	}
+	if err := execCount(&counts.SubmissionItems, `UPDATE asset_workbench_submission_items SET payee_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE payee_user_id = ?`, canonicalUserID, sourceUserID); err != nil {
+		return counts, fmt.Errorf("rewrite asset workbench submission items payee: %w", err)
+	}
+	if err := execCount(&counts.UploadSessions, `UPDATE asset_workbench_upload_sessions SET owner_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE owner_user_id = ? AND status IN ('created', 'uploading', 'uploaded', 'submitted')`, canonicalUserID, sourceUserID); err != nil {
+		return counts, fmt.Errorf("rewrite asset workbench upload sessions owner: %w", err)
+	}
+	if err := execCount(&counts.SubmissionFiles, `UPDATE asset_workbench_submission_files SET owner_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE owner_user_id = ?`, canonicalUserID, sourceUserID); err != nil {
+		return counts, fmt.Errorf("rewrite asset workbench submission files owner: %w", err)
+	}
+	if err := execCount(&counts.ErrorRecords, `UPDATE asset_workbench_error_records SET payee_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE payee_user_id = ?`, canonicalUserID, sourceUserID); err != nil {
+		return counts, fmt.Errorf("rewrite asset workbench error record payee: %w", err)
+	}
+	if err := execCount(&counts.SettlementSupplements, `UPDATE asset_workbench_settlement_supplements SET payee_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE payee_user_id = ?`, canonicalUserID, sourceUserID); err != nil {
+		return counts, fmt.Errorf("rewrite asset workbench settlement supplement payee: %w", err)
+	}
+	if err := execCount(&counts.SettlementItems, `UPDATE asset_workbench_settlement_items SET payee_user_id = ? WHERE payee_user_id = ?`, canonicalUserID, sourceUserID); err != nil {
+		return counts, fmt.Errorf("rewrite asset workbench settlement item payee: %w", err)
+	}
+	deduped, err := mergeGeneratedSettlementItemDuplicates(ctx, sqlTx, canonicalUserID)
+	if err != nil {
+		return counts, fmt.Errorf("dedupe generated asset workbench settlement items: %w", err)
+	}
+	counts.SettlementItemsDeduped = deduped
+
+	if err := mergeUniqueUserRows(ctx, sqlTx, "asset_workbench_group_members", "user_id", "group_id", sourceUserID, canonicalUserID, &counts.GroupMembers); err != nil {
+		return counts, fmt.Errorf("merge asset workbench group members: %w", err)
+	}
+	if err := mergeUniqueUserRows(ctx, sqlTx, "asset_workbench_template_assignments", "target_id", "template_id", sourceUserID, canonicalUserID, &counts.TemplateAssignments, "target_type = 'user'"); err != nil {
+		return counts, fmt.Errorf("merge asset workbench template assignments: %w", err)
+	}
+	if err := mergeUniqueUserRows(ctx, sqlTx, "asset_workbench_saved_views", "user_id", "CONCAT(view_type, ':', view_name)", sourceUserID, canonicalUserID, &counts.SavedViews); err != nil {
+		return counts, fmt.Errorf("merge asset workbench saved views: %w", err)
+	}
+	if err := mergeUniqueUserRows(ctx, sqlTx, "asset_workbench_supplement_permissions", "payee_user_id", "business_month", sourceUserID, canonicalUserID, &counts.SupplementPermissions); err != nil {
+		return counts, fmt.Errorf("merge asset workbench supplement permissions: %w", err)
+	}
+	return counts, nil
+}
+
+type generatedSettlementItemMergeRow struct {
+	ID               int64
+	BatchID          int64
+	ItemType         string
+	SubmissionItemID sql.NullInt64
+	BusinessMonth    string
+	Amount           float64
+	Quantity         float64
+	UnitPrice        sql.NullFloat64
+	Direction        string
+	SourceRefType    string
+	SourceRefID      sql.NullInt64
+}
+
+type generatedSettlementItemMergeKey struct {
+	BatchID       int64
+	ItemType      string
+	BusinessMonth string
+	Direction     string
+	SubmissionKey int64
+	SourceRefType string
+	SourceRefKey  int64
+}
+
+func mergeGeneratedSettlementItemDuplicates(ctx context.Context, tx *sql.Tx, canonicalUserID int64) (int64, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT si.id, si.batch_id, si.item_type, si.submission_item_id, si.business_month,
+			si.amount, si.quantity, si.unit_price, si.direction, si.source_ref_type, si.source_ref_id
+		FROM asset_workbench_settlement_items si
+		JOIN asset_workbench_settlement_batches sb ON sb.id = si.batch_id
+		WHERE si.payee_user_id = ?
+		  AND sb.status = ?
+		ORDER BY si.batch_id ASC, si.item_type ASC, si.business_month ASC, si.id ASC`,
+		canonicalUserID,
+		domain.AssetWorkbenchBatchStatusGenerated,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	groups := map[generatedSettlementItemMergeKey][]generatedSettlementItemMergeRow{}
+	for rows.Next() {
+		var row generatedSettlementItemMergeRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.BatchID,
+			&row.ItemType,
+			&row.SubmissionItemID,
+			&row.BusinessMonth,
+			&row.Amount,
+			&row.Quantity,
+			&row.UnitPrice,
+			&row.Direction,
+			&row.SourceRefType,
+			&row.SourceRefID,
+		); err != nil {
+			return 0, err
+		}
+		groups[row.mergeKey()] = append(groups[row.mergeKey()], row)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	var deduped int64
+	for _, group := range groups {
+		if len(group) <= 1 {
+			continue
+		}
+		keep := group[0]
+		deleteIDs := make([]int64, 0, len(group)-1)
+		totalAmount := 0.0
+		totalQuantity := 0.0
+		for _, row := range group {
+			totalAmount += row.Amount
+			totalQuantity += row.Quantity
+			if row.ID != keep.ID {
+				deleteIDs = append(deleteIDs, row.ID)
+			}
+		}
+		var unitPrice sql.NullFloat64
+		if totalQuantity != 0 {
+			unitPrice = sql.NullFloat64{Float64: totalAmount / totalQuantity, Valid: true}
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE asset_workbench_settlement_items
+			SET amount = ?, quantity = ?, unit_price = ?
+			WHERE id = ?`,
+			totalAmount,
+			totalQuantity,
+			unitPrice,
+			keep.ID,
+		); err != nil {
+			return deduped, err
+		}
+		query, args := inClause(`DELETE FROM asset_workbench_settlement_items WHERE id IN (`, `)`, int64SliceToInterfaces(deleteIDs)...)
+		res, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return deduped, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return deduped, err
+		}
+		deduped += affected
+	}
+	return deduped, nil
+}
+
+func (r generatedSettlementItemMergeRow) mergeKey() generatedSettlementItemMergeKey {
+	key := generatedSettlementItemMergeKey{
+		BatchID:       r.BatchID,
+		ItemType:      r.ItemType,
+		BusinessMonth: r.BusinessMonth,
+		Direction:     r.Direction,
+	}
+	if r.SubmissionItemID.Valid {
+		key.SubmissionKey = r.SubmissionItemID.Int64
+		return key
+	}
+	key.SourceRefType = r.SourceRefType
+	if r.SourceRefID.Valid {
+		key.SourceRefKey = r.SourceRefID.Int64
+	}
+	return key
+}
+
+func mergeUniqueUserRows(ctx context.Context, tx *sql.Tx, table, userColumn, uniqueExpr string, sourceUserID, canonicalUserID int64, target *int64, extraWhere ...string) error {
+	where := fmt.Sprintf("%s = ?", userColumn)
+	args := []interface{}{sourceUserID}
+	if len(extraWhere) > 0 && strings.TrimSpace(extraWhere[0]) != "" {
+		where += " AND " + extraWhere[0]
+	}
+	updateSQL := fmt.Sprintf(`
+		UPDATE %s src
+		LEFT JOIN %s dst
+		  ON dst.%s = ?
+		 AND %s = %s
+		SET src.%s = ?
+		WHERE src.%s = ?
+		  AND dst.%s IS NULL`,
+		table, table, userColumn, uniqueExprForAlias("dst", uniqueExpr), uniqueExprForAlias("src", uniqueExpr), userColumn, userColumn, userColumn,
+	)
+	if len(extraWhere) > 0 && strings.TrimSpace(extraWhere[0]) != "" {
+		if strings.Contains(extraWhere[0], "target_type") {
+			updateSQL = strings.Replace(updateSQL, "SET src."+userColumn, "AND dst.target_type = src.target_type\n\t\tSET src."+userColumn, 1)
+		}
+		updateSQL += " AND " + strings.ReplaceAll(extraWhere[0], "target_type", "src.target_type")
+	}
+	res, err := tx.ExecContext(ctx, updateSQL, canonicalUserID, canonicalUserID, sourceUserID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	*target += affected
+	deleteSQL := fmt.Sprintf(`DELETE FROM %s WHERE %s`, table, where)
+	if _, err := tx.ExecContext(ctx, deleteSQL, args...); err != nil {
+		return err
+	}
+	return nil
+}
+
+func uniqueExprForAlias(alias, expr string) string {
+	expr = strings.TrimSpace(expr)
+	if expr == "CONCAT(view_type, ':', view_name)" {
+		return "CONCAT(" + alias + ".view_type, ':', " + alias + ".view_name)"
+	}
+	return alias + "." + expr
+}
+
 func assetWorkbenchProfileSelect() string {
 	return `SELECT id, user_id, worker_type, job_grade, real_name, phone, province, city, id_card, gender,
 		alipay_account, onboarded_at, grade_hidden, status, pii_completed, created_by, updated_by, created_at, updated_at
 		FROM asset_workbench_profiles`
+}
+
+func appMembershipSelect() string {
+	return `SELECT id, app_code, user_id, status, identity_type, source, last_asset_roles_json,
+		opened_by, disabled_by, disabled_reason, created_at, updated_at
+		FROM app_memberships`
+}
+
+func appIdentityEventSelect() string {
+	return `SELECT id, actor_user_id, target_user_id, source_app, target_app, action,
+		before_json, after_json, reason, created_at
+		FROM app_identity_events`
+}
+
+func assetWorkbenchAccountLinkSelect() string {
+	return `SELECT id, source_user_id, canonical_user_id, status, created_by, created_at
+		FROM asset_workbench_account_links`
 }
 
 func assetWorkbenchAdminExistsSQL() string {
@@ -2403,13 +3063,16 @@ func assetWorkbenchMemberSelect() string {
 		       COALESCE(NULLIF(p.real_name, ''), u.display_name, u.username, ''),
 		       COALESCE(p.worker_type, ''),
 		       COALESCE(p.job_grade, ''),
-		       COALESCE(p.status, ''),
+		       COALESCE(am.status, ''),
 		       COALESCE(p.pii_completed, 0),
 		       CASE WHEN ` + assetWorkbenchAdminExistsSQL() + ` THEN 'admin' ELSE 'normal' END,
+		       COALESCE(GROUP_CONCAT(DISTINCT ur.role ORDER BY ur.role SEPARATOR ','), ''),
 		       COALESCE(p.created_at, u.created_at),
 		       COALESCE(p.updated_at, u.updated_at)
 		FROM users u
-		LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id`
+		LEFT JOIN app_memberships am ON am.user_id = u.id AND am.app_code = 'asset_workbench'
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id
+		LEFT JOIN user_roles ur ON ur.user_id = u.id`
 }
 
 func assetWorkbenchGradePeriodSelect() string {
@@ -2525,8 +3188,8 @@ func assetWorkbenchSettlementBatchSelect() string {
 }
 
 func assetWorkbenchSettlementItemSelect() string {
-	return `SELECT id, batch_id, item_type, submission_item_id, payee_user_id, business_month,
-		amount, quantity, unit_price, direction, source_ref_type, source_ref_id, snapshot_json, created_at
+	return `SELECT id, batch_id, item_type, submission_item_id, payee_user_id, paid_to_user_id, business_month,
+		amount, quantity, unit_price, direction, source_ref_type, source_ref_id, snapshot_json, payout_snapshot_json, created_at
 		FROM asset_workbench_settlement_items`
 }
 
@@ -2579,6 +3242,7 @@ func scanAssetWorkbenchProfile(scanner interface{ Scan(...interface{}) error }) 
 
 func scanAssetWorkbenchMember(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchMember, error) {
 	var item domain.AssetWorkbenchMember
+	var rolesCSV string
 	if err := scanner.Scan(
 		&item.UserID,
 		&item.Username,
@@ -2589,12 +3253,88 @@ func scanAssetWorkbenchMember(scanner interface{ Scan(...interface{}) error }) (
 		&item.Status,
 		&item.PIICompleted,
 		&item.Identity,
+		&rolesCSV,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	item.Roles = parseRoleCSV(rolesCSV)
 	return &item, nil
+}
+
+func scanAppMembership(scanner interface{ Scan(...interface{}) error }) (*domain.AppMembership, error) {
+	var item domain.AppMembership
+	var lastRoles sql.NullString
+	var openedBy, disabledBy sql.NullInt64
+	if err := scanner.Scan(
+		&item.ID,
+		&item.AppCode,
+		&item.UserID,
+		&item.Status,
+		&item.IdentityType,
+		&item.Source,
+		&lastRoles,
+		&openedBy,
+		&disabledBy,
+		&item.DisabledReason,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.LastAssetRolesJSON = cloneValidJSON(lastRoles)
+	item.OpenedBy = fromNullInt64(openedBy)
+	item.DisabledBy = fromNullInt64(disabledBy)
+	return &item, nil
+}
+
+func scanAppIdentityEvent(scanner interface{ Scan(...interface{}) error }) (*domain.AppIdentityEvent, error) {
+	var item domain.AppIdentityEvent
+	var actorID, targetID sql.NullInt64
+	var beforeJSON, afterJSON sql.NullString
+	if err := scanner.Scan(
+		&item.ID,
+		&actorID,
+		&targetID,
+		&item.SourceApp,
+		&item.TargetApp,
+		&item.Action,
+		&beforeJSON,
+		&afterJSON,
+		&item.Reason,
+		&item.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.ActorUserID = fromNullInt64(actorID)
+	item.TargetUserID = fromNullInt64(targetID)
+	item.Before = cloneValidJSON(beforeJSON)
+	item.After = cloneValidJSON(afterJSON)
+	return &item, nil
+}
+
+func scanAssetWorkbenchAccountLink(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchAccountLink, error) {
+	var item domain.AssetWorkbenchAccountLink
+	if err := scanner.Scan(
+		&item.ID,
+		&item.SourceUserID,
+		&item.CanonicalUserID,
+		&item.Status,
+		&item.CreatedBy,
+		&item.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func parseRoleCSV(raw string) []domain.Role {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	return domain.NormalizeRoles(strings.Split(raw, ","))
 }
 
 func scanAssetWorkbenchGradePeriod(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchGradePeriod, error) {
@@ -2884,20 +3624,22 @@ func scanAssetWorkbenchSettlementBatch(scanner interface{ Scan(...interface{}) e
 
 func scanAssetWorkbenchSettlementItem(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSettlementItem, error) {
 	var item domain.AssetWorkbenchSettlementItem
-	var submissionItemID, sourceRefID sql.NullInt64
+	var submissionItemID, paidToUserID, sourceRefID sql.NullInt64
 	var unitPrice sql.NullFloat64
-	var snapshot sql.NullString
+	var snapshot, payoutSnapshot sql.NullString
 	if err := scanner.Scan(
-		&item.ID, &item.BatchID, &item.ItemType, &submissionItemID, &item.PayeeUserID,
+		&item.ID, &item.BatchID, &item.ItemType, &submissionItemID, &item.PayeeUserID, &paidToUserID,
 		&item.BusinessMonth, &item.Amount, &item.Quantity, &unitPrice, &item.Direction,
-		&item.SourceRefType, &sourceRefID, &snapshot, &item.CreatedAt,
+		&item.SourceRefType, &sourceRefID, &snapshot, &payoutSnapshot, &item.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
 	item.SubmissionItemID = fromNullInt64(submissionItemID)
+	item.PaidToUserID = fromNullInt64(paidToUserID)
 	item.UnitPrice = fromNullFloat64(unitPrice)
 	item.SourceRefID = fromNullInt64(sourceRefID)
 	item.Snapshot = cloneValidJSON(snapshot)
+	item.PayoutSnapshot = cloneValidJSON(payoutSnapshot)
 	return &item, nil
 }
 

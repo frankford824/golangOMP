@@ -461,6 +461,25 @@ func (r *userSessionRepo) Touch(ctx context.Context, sessionID string, at time.T
 	return nil
 }
 
+func (r *userSessionRepo) RevokeActiveByUserID(ctx context.Context, tx repo.Tx, userID int64, at time.Time) (int64, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE user_sessions
+		SET revoked_at = ?
+		WHERE user_id = ?
+		  AND revoked_at IS NULL
+		  AND expires_at > ?`,
+		at, userID, at,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("revoke user sessions: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("revoke user sessions rows affected: %w", err)
+	}
+	return affected, nil
+}
+
 type permissionLogRepo struct{ db *DB }
 
 func NewPermissionLogRepo(db *DB) repo.PermissionLogRepo { return &permissionLogRepo{db: db} }

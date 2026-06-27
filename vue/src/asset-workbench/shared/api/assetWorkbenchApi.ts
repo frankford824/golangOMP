@@ -74,12 +74,31 @@ export interface AssetWorkbenchBootstrap {
   oss_prefix: string
   upload_session_ttl_seconds: number
   is_admin: boolean
+  access?: WorkbenchAccessState
+  role_labels?: string[]
   user?: BackendUser
   profile?: AssetWorkbenchProfile
   capabilities: string[]
   settlement_item_types: string[]
   deferred_business_items: Array<{ key: string; status: string; note: string }>
   architecture_guardrails: string[]
+}
+
+export interface WorkbenchAccessState {
+  membership_status: 'not_member' | 'pending' | 'active' | 'disabled' | 'merged' | string
+  is_enabled: boolean
+  is_admin_shell: boolean
+  asset_roles: string[]
+  role_labels: string[]
+  capabilities: string[]
+  denied_reason?: string
+}
+
+export interface WorkbenchEntryResult {
+  state: 'ready' | 'not_member' | 'pending' | 'disabled' | 'merged' | string
+  message: string
+  access?: WorkbenchAccessState
+  bootstrap?: AssetWorkbenchBootstrap
 }
 
 export interface PriceMatrixRow {
@@ -149,7 +168,10 @@ export interface WorkbenchMemberRow {
   job_grade: string
   status: string
   pii_completed: boolean
-  identity: 'admin' | 'normal'
+  identity?: string
+  roles?: string[]
+  role_labels?: string[]
+  can_edit_roles?: boolean
 }
 
 export interface WorkbenchGroupMemberRow {
@@ -160,8 +182,19 @@ export interface WorkbenchGroupMemberRow {
   real_name?: string
   worker_type?: string
   job_grade?: string
-  identity?: 'admin' | 'normal'
+  identity?: string
+  roles?: string[]
+  role_labels?: string[]
   pii_completed?: boolean
+}
+
+export interface AccountMergePreview {
+  source_user_id: number
+  canonical_user_id: number
+  conflicts: Record<string, { field: string; source_value: string; canonical_value: string }>
+  counts: Record<string, number>
+  affected_months?: string[]
+  settlement_note: string
 }
 
 export interface WorkbenchTemplateRow {
@@ -686,6 +719,11 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async entry(signal?: AbortSignal): Promise<WorkbenchEntryResult> {
+    const res = await http.get<ApiEnvelope<WorkbenchEntryResult>>('/v1/asset-workbench/entry', { signal })
+    return unwrap(res.data)
+  },
+
   async listMyTemplates(signal?: AbortSignal): Promise<WorkbenchTemplateRow[]> {
     const res = await http.get<ApiEnvelope<WorkbenchTemplateRow[]>>('/v1/asset-workbench/my-templates', { signal })
     return unwrap(res.data)
@@ -732,6 +770,35 @@ export const assetWorkbenchApi = {
       { identity, reason },
       { signal },
     )
+    return unwrap(res.data)
+  },
+
+  async updateMemberRoles(userId: number, roles: string[], reason?: string, signal?: AbortSignal): Promise<WorkbenchMemberRow> {
+    const res = await http.patch<ApiEnvelope<WorkbenchMemberRow>>(
+      `/v1/asset-workbench/members/${userId}/roles`,
+      { roles, reason },
+      { signal },
+    )
+    return unwrap(res.data)
+  },
+
+  async openAccess(payload: { user_id: number; roles?: string[]; identity_type?: string; reason?: string }, signal?: AbortSignal) {
+    const res = await http.post<ApiEnvelope<unknown>>('/v1/asset-workbench/access/open', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async disableAccess(payload: { user_id: number; reason: string }, signal?: AbortSignal) {
+    const res = await http.post<ApiEnvelope<unknown>>('/v1/asset-workbench/access/disable', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async previewAccountMerge(payload: { source_user_id: number; canonical_user_id: number }, signal?: AbortSignal): Promise<AccountMergePreview> {
+    const res = await http.post<ApiEnvelope<AccountMergePreview>>('/v1/asset-workbench/accounts/merge/preview', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async mergeAccounts(payload: { source_user_id: number; canonical_user_id: number; profile_choices: Record<string, string>; reason?: string }, signal?: AbortSignal): Promise<AccountMergePreview> {
+    const res = await http.post<ApiEnvelope<AccountMergePreview>>('/v1/asset-workbench/accounts/merge', payload, { signal })
     return unwrap(res.data)
   },
 

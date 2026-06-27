@@ -174,6 +174,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("DELETE", "/v1/task-drafts/:draft_id"):                                  "legitimate-reserved-placeholder-route",
 	knownGapKey("DELETE", "/v1/users/:id"):                                              "legitimate-reserved-placeholder-route",
 	knownGapKey("DELETE", "/v1/users/:id/roles/:role"):                                  "tool-deref-limit-inline-route",
+	knownGapKey("POST", "/v1/me/avatar"):                                                "legitimate-reserved-placeholder-route",
 	knownGapKey("GET", "/v1/assets/files/*path"):                                        "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/assets/search"):                                             "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/assets/:asset_id"):                                          "tool-deref-limit-dynamic-payload-documented",

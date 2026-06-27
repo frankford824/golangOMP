@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"workflow/domain"
@@ -340,8 +341,34 @@ type AssetWorkbenchTemplateAssignmentFilter struct {
 type AssetWorkbenchMemberFilter struct {
 	Keyword  string
 	Identity string
+	Status   string
+	Scope    string
 	Page     int
 	PageSize int
+}
+
+type AssetWorkbenchAccessOpenParams struct {
+	UserID       int64
+	Status       string
+	IdentityType string
+	Source       string
+	OpenedBy     int64
+}
+
+type AssetWorkbenchMergeRewriteCounts struct {
+	Submissions            int64 `json:"submissions"`
+	SubmissionItems        int64 `json:"submission_items"`
+	UploadSessions         int64 `json:"upload_sessions"`
+	SubmissionFiles        int64 `json:"submission_files"`
+	ErrorRecords           int64 `json:"error_records"`
+	SettlementSupplements  int64 `json:"settlement_supplements"`
+	SettlementItems        int64 `json:"settlement_items"`
+	SettlementItemsDeduped int64 `json:"settlement_items_deduped"`
+	GroupMembers           int64 `json:"group_members"`
+	TemplateAssignments    int64 `json:"template_assignments"`
+	SavedViews             int64 `json:"saved_views"`
+	GradePeriods           int64 `json:"grade_periods"`
+	SupplementPermissions  int64 `json:"supplement_permissions"`
 }
 
 type AssetWorkbenchSubmissionFilter struct {
@@ -406,6 +433,17 @@ type AssetWorkbenchRepo interface {
 	SearchPeople(ctx context.Context, filter AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error)
 	UpsertProfile(ctx context.Context, tx Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error)
 	AppendGradePeriod(ctx context.Context, tx Tx, period *domain.AssetWorkbenchGradePeriod) (*domain.AssetWorkbenchGradePeriod, error)
+	GetMembership(ctx context.Context, appCode string, userID int64) (*domain.AppMembership, error)
+	LockMembership(ctx context.Context, tx Tx, appCode string, userID int64) (*domain.AppMembership, error)
+	UpsertMembership(ctx context.Context, tx Tx, membership *domain.AppMembership) (*domain.AppMembership, error)
+	RequestMembership(ctx context.Context, tx Tx, appCode string, userID int64, identityType string) (*domain.AppMembership, error)
+	OpenMembership(ctx context.Context, tx Tx, params AssetWorkbenchAccessOpenParams) (*domain.AppMembership, error)
+	DisableMembership(ctx context.Context, tx Tx, appCode string, userID int64, disabledBy int64, reason string, lastRoles []domain.Role) (*domain.AppMembership, error)
+	MarkMembershipMerged(ctx context.Context, tx Tx, appCode string, sourceUserID int64) error
+	CreateAppIdentityEvent(ctx context.Context, tx Tx, event *domain.AppIdentityEvent) (*domain.AppIdentityEvent, error)
+	CreateAccountLink(ctx context.Context, tx Tx, link *domain.AssetWorkbenchAccountLink) (*domain.AssetWorkbenchAccountLink, error)
+	GetAccountLinkBySource(ctx context.Context, sourceUserID int64) (*domain.AssetWorkbenchAccountLink, error)
+	GetAccountLinkByCanonical(ctx context.Context, canonicalUserID int64) (*domain.AssetWorkbenchAccountLink, error)
 
 	ListPriceMatrix(ctx context.Context, filter AssetWorkbenchPriceMatrixFilter) ([]*domain.AssetWorkbenchPriceMatrix, int64, error)
 	LockPriceMatrixDimension(ctx context.Context, tx Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchPriceMatrix, error)
@@ -480,6 +518,7 @@ type AssetWorkbenchRepo interface {
 	AttachItemsToSettlementBatch(ctx context.Context, tx Tx, batchID int64, itemIDs []int64) error
 	AttachSupplementsToSettlementBatch(ctx context.Context, tx Tx, batchID int64, supplementIDs []int64) error
 	ConfirmSettlementBatch(ctx context.Context, tx Tx, batchID int64, actorID int64, at time.Time) error
+	FreezeSettlementPayouts(ctx context.Context, tx Tx, batchID int64, at time.Time, snapshots map[int64]json.RawMessage) error
 	CancelGeneratedSettlementBatch(ctx context.Context, tx Tx, batchID int64, actorID int64, reason string, at time.Time) error
 	LockSettlementBatch(ctx context.Context, tx Tx, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error)
 	GetSettlementBatch(ctx context.Context, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error)
@@ -501,6 +540,9 @@ type AssetWorkbenchRepo interface {
 	ListSavedViews(ctx context.Context, filter AssetWorkbenchSavedViewFilter) ([]*domain.AssetWorkbenchSavedView, error)
 	UpsertSavedView(ctx context.Context, tx Tx, view *domain.AssetWorkbenchSavedView) (*domain.AssetWorkbenchSavedView, error)
 	DeleteSavedView(ctx context.Context, tx Tx, userID, viewID int64) error
+	MergeProfiles(ctx context.Context, tx Tx, sourceUserID, canonicalUserID int64, fieldChoices map[string]string, actorID int64) error
+	CountAccountMergeImpact(ctx context.Context, sourceUserID, canonicalUserID int64) (AssetWorkbenchMergeRewriteCounts, error)
+	RewriteAccountOwnership(ctx context.Context, tx Tx, sourceUserID, canonicalUserID int64) (AssetWorkbenchMergeRewriteCounts, error)
 }
 
 // ERPSyncRunRepo stores ERP sync execution history.

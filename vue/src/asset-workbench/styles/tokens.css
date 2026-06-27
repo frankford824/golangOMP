@@ -4,6 +4,7 @@
 @import '@fontsource/geist-mono/latin-400.css';
 @import '@fontsource/geist-mono/latin-500.css';
 @import '@fontsource/geist-mono/latin-700.css';
+@import '@fontsource/space-grotesk/latin-400.css';
 @import '@fontsource/space-grotesk/latin-500.css';
 @import '@fontsource/space-grotesk/latin-600.css';
 @import '@fontsource/space-grotesk/latin-700.css';
@@ -66,34 +67,34 @@
 
 .aw-root {
   /* Worksheet (light) — where dense data is read */
-  --aw-paper: #eceef2;
-  --aw-paper-2: #e4e8ed;
+  --aw-paper: #f1efea;
+  --aw-paper-2: #e8e5de;
   --aw-surface: #ffffff;
-  --aw-surface-muted: #eef1f4;
-  --aw-surface-raised: #f7f9fb;
-  --aw-hairline: #dce1e7;
-  --aw-hairline-strong: #c4ccd4;
-  --aw-ink: #13151a;
-  --aw-ink-2: #515965;
-  --aw-ink-muted: #858d99;
+  --aw-surface-muted: #f2f0eb;
+  --aw-surface-raised: #faf9f6;
+  --aw-hairline: #e4e0d8;
+  --aw-hairline-strong: #d0cabe;
+  --aw-ink: #1c1a16;
+  --aw-ink-2: #5c574d;
+  --aw-ink-muted: #8f897c;
 
   /* Console (dark) — the instrument frame (rail) and the overview readout */
-  --aw-stage: #0b0d11;
-  --aw-stage-surface: #181c23;
-  --aw-stage-line: #242a33;
-  --aw-stage-line-strong: #333b46;
-  --aw-stage-raised: #11141a;
-  --aw-on-console: #eef1f6;
-  --aw-on-console-2: #a3acba;
-  --aw-on-console-muted: #69727f;
+  --aw-stage: #14110d;
+  --aw-stage-surface: #201c16;
+  --aw-stage-line: #2c2820;
+  --aw-stage-line-strong: #3b352b;
+  --aw-stage-raised: #1a160f;
+  --aw-on-console: #f1efe8;
+  --aw-on-console-2: #aaa294;
+  --aw-on-console-muted: #756d5f;
 
   /* Accents — green means settled/go; gold is money under the lamp */
   --aw-accent: #0f7a5a;
   --aw-accent-hover: #0c684c;
   --aw-accent-pressed: #094f3b;
-  --aw-accent-glow: #2fcb91;
+  --aw-accent-glow: #4fae86;
   --aw-money: #936023;
-  --aw-money-glow: #f2bd6a;
+  --aw-money-glow: #d9ab63;
   --aw-danger: #c0453b;
   --aw-warn: #c5882a;
   --aw-status-submitted: #4a6fa5;
@@ -108,14 +109,14 @@
   --aw-chip-money-bg: color-mix(in srgb, var(--aw-money-glow) 16%, var(--aw-surface));
 
   /* Lamp + glow (raw rgba only allowed in this token file) */
-  --aw-lamp-wash: radial-gradient(118% 150% at 50% -28%, rgba(242, 189, 106, 0.12), rgba(242, 189, 106, 0) 58%);
-  --aw-glow-money: 0 0 0 1px color-mix(in srgb, var(--aw-money-glow) 26%, transparent), 0 14px 44px rgba(242, 189, 106, 0.14);
-  --aw-glow-accent: 0 0 0 1px color-mix(in srgb, var(--aw-accent-glow) 42%, transparent);
+  --aw-lamp-wash: radial-gradient(118% 150% at 50% -28%, rgba(217, 171, 99, 0.07), rgba(217, 171, 99, 0) 58%);
+  --aw-glow-money: 0 0 0 1px color-mix(in srgb, var(--aw-money-glow) 18%, transparent), 0 8px 24px rgba(217, 171, 99, 0.08);
+  --aw-glow-accent: 0 0 0 1px color-mix(in srgb, var(--aw-accent-glow) 24%, transparent);
 
-  --aw-shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
-  --aw-shadow-panel: 0 1px 0 rgba(16, 24, 40, 0.03), 0 16px 40px rgba(16, 24, 40, 0.07);
-  --aw-shadow-popover: 0 24px 78px rgba(8, 10, 14, 0.30);
-  --aw-shadow-console: 0 28px 76px rgba(7, 9, 13, 0.34);
+  --aw-shadow-soft: 0 1px 2px rgba(28, 24, 18, 0.05);
+  --aw-shadow-panel: 0 1px 2px rgba(28, 24, 18, 0.05);
+  --aw-shadow-popover: 0 12px 34px rgba(10, 8, 5, 0.20);
+  --aw-shadow-console: 0 10px 30px rgba(10, 8, 5, 0.20);
 
   --aw-radius-xs: 4px;
   --aw-radius-sm: 7px;
@@ -132,6 +133,7 @@
   --aw-space-7: 28px;
   --aw-space-8: 32px;
   --aw-space-10: 40px;
+  --aw-space-12: 48px;
   --aw-row-sm: 34px;
   --aw-row-md: 42px;
   --aw-row-lg: 50px;
@@ -141,12 +143,13 @@
   --aw-font-size-md: 14px;
   --aw-font-size-lg: 16px;
   --aw-font-size-h3: 17px;
-  --aw-font-size-h2: 20px;
-  --aw-font-size-h1: 23px;
+  --aw-font-size-h2: 24px;
+  --aw-font-size-h1: 28px;
   --aw-font-size-readout: 28px;
   --aw-font-size-display: 46px;
-  --aw-tracking-tight: -0.012em;
+  --aw-tracking-tight: 0;
   --aw-tracking-label: 0.1em;
+  --aw-weight-display: 400;
   --aw-weight-strong: 600;
   --aw-motion-fast: 140ms;
   --aw-motion-standard: 200ms;

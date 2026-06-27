@@ -5,6 +5,7 @@ import { RefreshCw, Search, ShieldCheck, UserRound } from 'lucide-vue-next'
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { assetWorkbenchApi, type WorkbenchMemberRow } from '@aw/shared/api/assetWorkbenchApi'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
+import { managedAssetRoles, roleDisplayList, roleDisplayName } from '@aw/shared/format/roleDisplay'
 
 const loading = ref(false)
 const savingUserId = ref<number | null>(null)
@@ -13,9 +14,10 @@ const notice = ref('')
 const query = ref('')
 const members = ref<WorkbenchMemberRow[]>([])
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
+const roleOptions = managedAssetRoles.filter((role) => role !== 'AssetSubmitter')
 
 const total = computed(() => members.value.length)
-const canChangeIdentity = computed(() =>
+const canChangeRoles = computed(() =>
   (bootstrap.value?.capabilities ?? []).includes('asset.workbench.member.identity'),
 )
 
@@ -43,21 +45,35 @@ async function loadPage() {
   await Promise.allSettled([refreshBootstrap(), loadMembers()])
 }
 
-async function setIdentity(member: WorkbenchMemberRow, identity: 'admin' | 'normal') {
-  if (member.identity === identity) return
-  if (!canChangeIdentity.value) {
-    error.value = '仅超级管理员可以切换成员身份'
+function memberRoles(member: WorkbenchMemberRow) {
+  return new Set(member.roles ?? [])
+}
+
+function memberLabels(member: WorkbenchMemberRow) {
+  return member.role_labels?.length ? member.role_labels : roleDisplayList(member.roles ?? [])
+}
+
+async function toggleRole(member: WorkbenchMemberRow, role: string, checked: boolean) {
+  if (!canChangeRoles.value || member.status !== 'active') {
+    error.value = '仅超级管理员可以调整 active 成员能力'
     return
   }
+  const roles = memberRoles(member)
+  roles.add('AssetSubmitter')
+  if (checked) roles.add(role)
+  else roles.delete(role)
   savingUserId.value = member.user_id
   error.value = ''
   notice.value = ''
   try {
-    const updated = await assetWorkbenchApi.updateMemberIdentity(member.user_id, identity, 'workbench identity update')
-    member.identity = updated.identity
-    notice.value = `${memberName(member)} 已切换为${identity === 'admin' ? '管理员' : '普通用户'}`
+    const updated = await assetWorkbenchApi.updateMemberRoles(member.user_id, Array.from(roles), 'workbench role update')
+    member.roles = updated.roles
+    member.role_labels = updated.role_labels
+    member.status = updated.status
+    member.can_edit_roles = updated.can_edit_roles
+    notice.value = `${memberName(member)} 的工作台能力已更新`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '身份切换失败'
+    error.value = err instanceof Error ? err.message : '能力更新失败'
   } finally {
     savingUserId.value = null
   }
@@ -74,7 +90,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">权限</p>
         <h2>成员与权限</h2>
-        <p>{{ canChangeIdentity ? '按姓名找到账号，只切换资产工作台里的管理员或普通用户身份。' : '你可以查看成员，身份切换仅超级管理员可用。' }}</p>
+        <p>{{ canChangeRoles ? '按姓名找到账号，调整资产工作台内的业务能力。' : '你可以查看成员，能力调整仅超级管理员可用。' }}</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadMembers">
@@ -86,7 +102,7 @@ onMounted(() => {
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <p v-if="!canChangeIdentity" class="aw-inline-alert">仅超级管理员可以切换成员身份。</p>
+    <p v-if="!canChangeRoles" class="aw-inline-alert">仅超级管理员可以调整成员能力。</p>
 
     <section class="aw-panel">
       <div class="aw-panel__head">
@@ -128,17 +144,19 @@ onMounted(() => {
             </div>
           </div>
           <div class="aw-page-bar__actions">
-            <span :class="chipClass(member.identity === 'admin' ? 'info' : 'neutral')">
-              {{ member.identity === 'admin' ? '管理员' : '普通用户' }}
+            <span :class="chipClass(member.status === 'active' ? 'success' : member.status === 'pending' ? 'warn' : 'neutral')">
+              {{ member.status === 'active' ? '已开通' : member.status === 'pending' ? '待处理' : member.status === 'disabled' ? '已停用' : member.status === 'merged' ? '已合并' : member.status }}
             </span>
-            <select
-              :value="member.identity"
-              :disabled="!canChangeIdentity || savingUserId === member.user_id"
-              @change="setIdentity(member, ($event.target as HTMLSelectElement).value as 'admin' | 'normal')"
-            >
-              <option value="normal">普通用户</option>
-              <option value="admin">管理员</option>
-            </select>
+            <span v-for="label in memberLabels(member)" :key="`${member.user_id}-${label}`" class="aw-chip aw-chip--info">{{ label }}</span>
+            <label v-for="role in roleOptions" :key="`${member.user_id}-${role}`" class="aw-inline-check">
+              <input
+                type="checkbox"
+                :checked="memberRoles(member).has(role)"
+                :disabled="!canChangeRoles || member.status !== 'active' || savingUserId === member.user_id"
+                @change="toggleRole(member, role, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ roleDisplayName(role) }}</span>
+            </label>
           </div>
         </article>
         <p v-if="!loading && members.length === 0" class="aw-inline-alert">没有找到成员</p>

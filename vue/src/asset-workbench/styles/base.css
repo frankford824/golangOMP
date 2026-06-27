@@ -26,7 +26,13 @@ body {
 }
 
 .aw-root h1,
-.aw-root h2,
+.aw-root h2 {
+  font-family: var(--aw-font-display);
+  font-weight: var(--aw-weight-display);
+  letter-spacing: var(--aw-tracking-tight);
+  line-height: 1.2;
+}
+
 .aw-root h3,
 .aw-root h4 {
   font-family: var(--aw-font-sans);

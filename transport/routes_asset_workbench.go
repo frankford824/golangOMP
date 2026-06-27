@@ -20,6 +20,15 @@ func registerAssetWorkbenchRoutes(
 	group := v1.Group("/asset-workbench")
 	{
 		group.POST("/register", assetWorkbenchH.Register)
+		group.GET("/entry", access(group, http.MethodGet, "/entry", domain.APIReadinessReadyForFrontend), assetWorkbenchH.Entry)
+		group.POST("/access/request", access(group, http.MethodPost, "/access/request", domain.APIReadinessReadyForFrontend), assetWorkbenchH.RequestAccess)
+
+		protected := group.Group("")
+		protected.Use(assetWorkbenchH.RequireActiveMembership())
+		group = protected
+
+		group.POST("/access/open", access(group, http.MethodPost, "/access/open", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.OpenAccess)
+		group.POST("/access/disable", access(group, http.MethodPost, "/access/disable", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.DisableAccess)
 		group.GET("/bootstrap", access(group, http.MethodGet, "/bootstrap", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.Bootstrap)
 		group.GET("/my-templates", access(group, http.MethodGet, "/my-templates", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.ListMyTemplates)
 		group.PATCH("/profile", access(group, http.MethodPatch, "/profile", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.UpsertMyProfile)
@@ -27,6 +36,9 @@ func registerAssetWorkbenchRoutes(
 		group.PATCH("/profiles/:user_id", access(group, http.MethodPatch, "/profiles/:user_id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.UpsertProfile)
 		group.GET("/members", access(group, http.MethodGet, "/members", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.ListMembers)
 		group.PATCH("/members/:user_id/identity", access(group, http.MethodPatch, "/members/:user_id/identity", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.UpdateMemberIdentity)
+		group.PATCH("/members/:user_id/roles", access(group, http.MethodPatch, "/members/:user_id/roles", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.UpdateMemberRoles)
+		group.POST("/accounts/merge/preview", access(group, http.MethodPost, "/accounts/merge/preview", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.PreviewAccountMerge)
+		group.POST("/accounts/merge", access(group, http.MethodPost, "/accounts/merge", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.MergeAccounts)
 		group.GET("/people-lookup", access(group, http.MethodGet, "/people-lookup", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin), assetWorkbenchH.SearchPeople)
 		group.GET("/groups", access(group, http.MethodGet, "/groups", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin), assetWorkbenchH.ListGroups)
 		group.POST("/groups", access(group, http.MethodPost, "/groups", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin), assetWorkbenchH.CreateGroup)

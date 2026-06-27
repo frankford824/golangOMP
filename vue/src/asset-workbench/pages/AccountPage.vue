@@ -6,6 +6,7 @@ import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { useWorkbenchSession } from '@aw/app/useWorkbenchSession'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
 import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
+import { roleDisplayList } from '@aw/shared/format/roleDisplay'
 
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
 const { logout } = useWorkbenchSession()
@@ -24,7 +25,12 @@ const form = reactive({
 })
 
 const displayName = computed(() => bootstrap.value?.profile?.real_name || bootstrap.value?.user?.name || bootstrap.value?.user?.username || '我的账号')
-const identityLabel = computed(() => (bootstrap.value?.is_admin ? '管理员' : '普通用户'))
+const identityLabel = computed(() => {
+  const labels = bootstrap.value?.role_labels?.length
+    ? bootstrap.value.role_labels
+    : roleDisplayList(bootstrap.value?.access?.asset_roles ?? [])
+  return labels.length ? labels.join(' / ') : '未开通'
+})
 const profileState = computed(() => {
   if (!bootstrap.value?.profile) return '资料待填写'
   if (!bootstrap.value.profile.pii_completed) return '资料待补全'

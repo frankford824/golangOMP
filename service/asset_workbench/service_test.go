@@ -262,6 +262,7 @@ type settlementBatchRepo struct {
 	cancelledBatchID      int64
 	cancelReason          string
 	confirmedBatchID      int64
+	frozenBatchID         int64
 	events                []*domain.AssetWorkbenchEvent
 }
 
@@ -310,6 +311,45 @@ func (r *settlementBatchRepo) ConfirmSettlementBatch(_ context.Context, _ repo.T
 	return nil
 }
 
+func (r *settlementBatchRepo) LockSettlementBatch(_ context.Context, _ repo.Tx, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error) {
+	return &domain.AssetWorkbenchSettlementBatch{ID: batchID, Status: domain.AssetWorkbenchBatchStatusGenerated}, nil
+}
+
+func (r *settlementBatchRepo) ListSettlementItemsByBatch(_ context.Context, batchID int64) ([]*domain.AssetWorkbenchSettlementItem, error) {
+	if len(r.settlementItems) > 0 {
+		return r.settlementItems, nil
+	}
+	return []*domain.AssetWorkbenchSettlementItem{{
+		ID:            1,
+		BatchID:       batchID,
+		ItemType:      domain.AssetWorkbenchItemTypeGrossPiecework,
+		PayeeUserID:   77,
+		BusinessMonth: "2026-06",
+		Amount:        32,
+		Quantity:      1,
+		Direction:     "credit",
+	}}, nil
+}
+
+func (r *settlementBatchRepo) FreezeSettlementPayouts(_ context.Context, _ repo.Tx, batchID int64, _ time.Time, snapshots map[int64]json.RawMessage) error {
+	if len(snapshots) == 0 {
+		return domain.NewAppError(domain.ErrCodeConflict, "missing snapshots", nil)
+	}
+	r.frozenBatchID = batchID
+	return nil
+}
+
+func (r *settlementBatchRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
+	idCard := "330100199001010000"
+	return &domain.AssetWorkbenchProfile{
+		UserID:        userID,
+		RealName:      "结算人员",
+		IDCard:        &idCard,
+		AlipayAccount: "payee@example.com",
+		Status:        domain.AssetWorkbenchProfileStatusActive,
+	}, nil
+}
+
 func (r *settlementBatchRepo) CancelGeneratedSettlementBatch(_ context.Context, _ repo.Tx, batchID int64, _ int64, reason string, _ time.Time) error {
 	r.cancelledBatchID = batchID
 	r.cancelReason = reason
@@ -349,6 +389,7 @@ func (s *registerIdentityStub) RegisterAssetWorkbenchUser(_ context.Context, p b
 type registerProfileRepo struct {
 	repo.AssetWorkbenchRepo
 	profile      *domain.AssetWorkbenchProfile
+	membership   *domain.AppMembership
 	gradePeriods []*domain.AssetWorkbenchGradePeriod
 	events       []*domain.AssetWorkbenchEvent
 }
@@ -372,6 +413,36 @@ func (r *registerProfileRepo) AppendEvent(_ context.Context, _ repo.Tx, event *d
 	copyEvent.ID = int64(len(r.events) + 1)
 	r.events = append(r.events, &copyEvent)
 	return &copyEvent, nil
+}
+
+func (r *registerProfileRepo) OpenMembership(_ context.Context, _ repo.Tx, params repo.AssetWorkbenchAccessOpenParams) (*domain.AppMembership, error) {
+	r.membership = &domain.AppMembership{
+		ID:           1,
+		AppCode:      domain.AssetWorkbenchAppCode,
+		UserID:       params.UserID,
+		Status:       params.Status,
+		IdentityType: params.IdentityType,
+		Source:       params.Source,
+	}
+	return r.membership, nil
+}
+
+type bootstrapAccessRepo struct {
+	repo.AssetWorkbenchRepo
+}
+
+func (r *bootstrapAccessRepo) GetMembership(_ context.Context, _ string, userID int64) (*domain.AppMembership, error) {
+	return &domain.AppMembership{
+		ID:           1,
+		AppCode:      domain.AssetWorkbenchAppCode,
+		UserID:       userID,
+		Status:       domain.AppMembershipStatusActive,
+		IdentityType: domain.AppMembershipIdentityStaff,
+	}, nil
+}
+
+func (r *bootstrapAccessRepo) GetProfileByUserID(context.Context, int64) (*domain.AssetWorkbenchProfile, error) {
+	return nil, sql.ErrNoRows
 }
 
 type profileListRepo struct {
@@ -882,7 +953,7 @@ func TestCreateSettlementSupplementWritesDuplicateHintWithoutBlocking(t *testing
 }
 
 func TestBootstrapTreatsTwoPayrollRowsAsActiveContract(t *testing.T) {
-	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(&bootstrapAccessRepo{}, assetWorkbenchTestTxRunner{}))
 	result, appErr := svc.Bootstrap(context.Background(), domain.RequestActor{
 		ID:    1001,
 		Roles: []domain.Role{domain.RoleAssetSubmitter},
@@ -901,7 +972,7 @@ func TestBootstrapTreatsTwoPayrollRowsAsActiveContract(t *testing.T) {
 }
 
 func TestBootstrapDerivesWorkbenchCapabilitiesForHRAndSuperAdmin(t *testing.T) {
-	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(&bootstrapAccessRepo{}, assetWorkbenchTestTxRunner{}))
 	hrResult, appErr := svc.Bootstrap(context.Background(), domain.RequestActor{
 		ID:    1001,
 		Roles: []domain.Role{domain.RoleHRAdmin},
