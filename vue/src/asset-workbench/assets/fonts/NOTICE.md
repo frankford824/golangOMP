@@ -6,7 +6,8 @@ The asset workbench uses self-hosted fonts only. No runtime font CDN is used.
 
 | Font | Package | Version | License | Usage |
 | --- | --- | --- | --- | --- |
-| Source Han Sans CN VF | `@fontpkg/source-han-sans-cn-vf` | `2.5.2` | OFL-1.1 | Chinese UI text and headings |
+| Source Han Sans CN AW Core | generated from `@fontpkg/source-han-sans-cn-vf` | `2.5.2` | OFL-1.1 | Asset workbench Chinese UI subset |
+| Source Han Sans CN VF Fallback | `@fontpkg/source-han-sans-cn-vf` | `2.5.2` | OFL-1.1 | On-demand fallback for CJK glyphs outside the UI subset |
 | Geist Sans | `@fontsource/geist-sans` | `5.2.5` | OFL-1.1 | Latin UI text |
 | Geist Mono | `@fontsource/geist-mono` | `5.2.8` | OFL-1.1 | Numbers, IDs, money, hashes, dates |
 | Space Grotesk | `@fontsource/space-grotesk` | `5.2.10` | OFL-1.1 | Display labels and page accents |
@@ -22,6 +23,20 @@ Full license texts are provided by the installed npm packages:
 
 ## Loading Policy
 
-The workbench imports the single Source Han Sans CN VF WOFF2 file already present in the repository dependencies and keeps `Noto Sans SC` / system CJK fonts as fallbacks. MiSans is not used as the workbench Chinese UI font.
+The workbench loads `SourceHanSansCN-AW-Core.woff2` first. It is generated from the installed Source Han Sans CN VF package and contains only the workbench UI glyph set plus common business text. The full Source Han Sans CN VF file remains available through a separate `unicode-range` fallback face and should load only when user/content text uses CJK glyphs outside the core subset.
+
+Regenerate the subset from the `vue/` directory after adding substantial new Chinese UI copy:
+
+```bash
+PYFTSUBSET=/path/to/pyftsubset node scripts/generate-asset-cjk-subset.mjs
+```
+
+If `pyftsubset` is already on `PATH`, run:
+
+```bash
+node scripts/generate-asset-cjk-subset.mjs
+```
+
+`Noto Sans SC` / system CJK fonts remain after the Source Han faces as platform fallbacks. MiSans is not used as the workbench Chinese UI font.
 
 Keep this notice in sync with `src/asset-workbench/styles/tokens.css` and `package.json`.

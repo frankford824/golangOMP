@@ -8,15 +8,7 @@
 @import '@fontsource/space-grotesk/latin-500.css';
 @import '@fontsource/space-grotesk/latin-600.css';
 @import '@fontsource/space-grotesk/latin-700.css';
-
-
-@font-face {
-  font-family: 'Source Han Sans CN VF';
-  font-style: normal;
-  font-weight: 250 900;
-  font-display: swap;
-  src: url('../../../node_modules/@fontpkg/source-han-sans-cn-vf/SourceHanSansCN-VF.ttf.woff2') format('woff2');
-}
+@import './font-subset.css';
 
 .aw-root {
   /* Worksheet (light) — where dense data is read */
@@ -108,8 +100,8 @@
   --aw-motion-standard: 200ms;
   --aw-motion-slow: 320ms;
   --aw-ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --aw-font-cjk: 'Source Han Sans CN VF', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  --aw-font-cjk: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
   --aw-font-sans: 'Geist Sans', var(--aw-font-cjk);
-  --aw-font-display: 'Source Han Sans CN VF', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
-  --aw-font-mono: 'Geist Mono', 'Source Han Sans CN VF', 'Noto Sans SC', 'SFMono-Regular', ui-monospace, monospace;
+  --aw-font-display: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Geist Sans', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  --aw-font-mono: 'Geist Mono', 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'SFMono-Regular', ui-monospace, monospace;
 }
