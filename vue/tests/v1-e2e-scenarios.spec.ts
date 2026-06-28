@@ -1,9 +1,25 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import http from '../src/services/http'
 import { authApi } from '../src/services/api/authApi'
 import { tasksApi } from '../src/services/api/tasksApi'
 import { taskDraftsApi } from '../src/services/api/taskDraftsApi'
 import { notificationsApi } from '../src/services/api/notificationsApi'
+
+const storage = new Map<string, string>()
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, String(value)),
+    removeItem: (key: string) => storage.delete(key),
+    clear: () => storage.clear(),
+  },
+  configurable: true,
+})
+
+beforeEach(() => {
+  storage.clear()
+})
 
 describe('V1 mock E2E flow', () => {
   it('auth login + me returns demo user with super_admin frontend_access', async () => {

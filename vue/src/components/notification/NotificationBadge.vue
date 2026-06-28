@@ -17,15 +17,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useNotificationsStore } from '@/stores/notifications.store'
-import { useRealtimeStore } from '@/stores/realtime.store'
 
 const emit = defineEmits<{ open: [] }>()
 const notificationsStore = useNotificationsStore()
-const realtimeStore = useRealtimeStore()
 const unreadCount = computed(() => notificationsStore.unreadCount)
 
 async function openNotifications(): Promise<void> {
-  await realtimeStore.requestBrowserPermission().catch(() => undefined)
   emit('open')
 }
 

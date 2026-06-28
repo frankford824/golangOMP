@@ -105,6 +105,7 @@ function displayType(item: NotificationItem): string {
   if (item.notification_type === 'task_closed') return '已结单'
   if (item.notification_type === 'task_rejected') return '任务驳回'
   if (item.notification_type === 'task_cancelled') return '任务取消'
+  if (item.notification_type === 'task_sku_sync_failed') return 'SKU同步失败'
   return '系统通知'
 }
 

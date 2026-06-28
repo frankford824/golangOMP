@@ -2,6 +2,8 @@ package notification
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -89,6 +91,13 @@ func (n *WeComNotifier) format(ctx context.Context, notification domain.Notifica
 		operator := firstNonEmpty(payloadString(p, "closed_by_name"), n.nameByID(ctx, payloadInt64(p, "closed_by")), "系统")
 		return fmt.Sprintf("已结单 | %s\n结单人: %s", taskLabel, operator),
 			fmt.Sprintf("%s:%d", notification.NotificationType, taskID), true
+	case domain.NotificationTypeTaskSKUSyncFailed:
+		count := payloadInt64(p, "failed_count")
+		if count <= 0 {
+			count = 1
+		}
+		return fmt.Sprintf("SKU同步失败 | %s\n失败数量: %d 个SKU，请进入站内通知中心查看明细。", taskLabel, count),
+			fmt.Sprintf("%s:%d:%s:%d:%d:%s", notification.NotificationType, taskID, payloadString(p, "source"), payloadInt64(p, "record_id"), payloadInt64(p, "erp_sync_version"), compactPayloadHash(notification.Payload)), true
 	default:
 		return "", "", false
 	}
@@ -135,6 +144,11 @@ func (n *WeComNotifier) shouldSuppress(key string) bool {
 	}
 	n.seen[key] = now.Add(n.ttl)
 	return false
+}
+
+func compactPayloadHash(payload []byte) string {
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:8])
 }
 
 func (n *WeComNotifier) loadTask(ctx context.Context, taskID int64) *domain.Task {

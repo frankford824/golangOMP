@@ -14,6 +14,7 @@ import { setToken, clearToken } from '@/services/http'
 import { useNotificationsStore } from '@/stores/notifications.store'
 import { useRealtimeStore } from '@/stores/realtime.store'
 import { useTasksStore } from '@/stores/tasks'
+import { useWebPushStore } from '@/stores/webPush.store'
 import type { BackendUser, FrontendAccess, LoginResponse } from '@/services/apiTypes'
 
 const BACKEND_MENU_TO_SHELL_KEY: Record<string, string> = {
@@ -325,6 +326,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
     )
     void authApi.refreshAssetCookie().catch(() => undefined)
     void useNotificationsStore().load().catch(() => undefined)
+    void useWebPushStore().initAfterLogin().catch(() => undefined)
     useRealtimeStore().start()
   }
 
@@ -459,6 +461,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
   }
 
   function logout() {
+    void useWebPushStore().cleanupOnLogout().catch(() => undefined)
     void authApi.logout().catch(() => undefined)
     clearToken()
     useRealtimeStore().stop()

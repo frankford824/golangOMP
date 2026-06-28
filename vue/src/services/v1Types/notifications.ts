@@ -7,6 +7,7 @@ export type NotificationType =
   | 'pool_reassigned'
   | 'task_cancelled'
   | 'system_broadcast'
+  | 'task_sku_sync_failed'
 
 export interface TaskAssignedPayload {
   task_id: number
@@ -93,6 +94,23 @@ export interface SystemBroadcastPayload {
   broadcast_recipient_count?: number
 }
 
+export interface TaskSKUSyncFailedPayload {
+  task_id: number
+  task_no?: string
+  source?: string
+  record_id?: number
+  erp_sync_version?: number
+  failed_count?: number
+  failed_items?: Array<{
+    sku_item_id?: number
+    sku_code?: string
+    product_name?: string
+    error?: string
+  }>
+  summary?: string
+  url?: string
+}
+
 export type NotificationPayload =
   | TaskAssignedPayload
   | TaskRejectedPayload
@@ -102,6 +120,7 @@ export type NotificationPayload =
   | PoolReassignedPayload
   | TaskCancelledPayload
   | SystemBroadcastPayload
+  | TaskSKUSyncFailedPayload
   | Record<string, unknown>
 
 export interface NotificationRecord {

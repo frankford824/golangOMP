@@ -221,6 +221,7 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 	if err := s.persistTaskFilingState(ctx, task, detail, p.OperatorID, p.Source, summary.LastResult, summary.LastCallLog, summary.ItemResults, attempted, ""); err != nil {
 		return nil, infraError("persist filing attempt result", err)
 	}
+	s.afterTaskFilingPersisted(task, detail, summary.ItemResults)
 	return s.buildTaskFilingStatusView(ctx, task, detail)
 }
 
@@ -849,6 +850,73 @@ func (s *taskService) refreshProductManagementReadModelAfterFiling(ctx context.C
 	if appErr := s.productManagementCloseSyncer.RefreshReadModelNow(ctx); appErr != nil {
 		log.Printf("product_management_read_model_refresh_after_filing_failed task_id=%d err=%s", task.ID, appErr.Message)
 	}
+}
+
+func (s *taskService) afterTaskFilingPersisted(task *domain.Task, detail *domain.TaskDetail, itemResults []taskFilingItemResult) {
+	if s == nil || task == nil || detail == nil || s.notifications == nil {
+		return
+	}
+	notifier, ok := s.notifications.(taskSKUSyncFailureNotificationService)
+	if !ok {
+		return
+	}
+	scope := fmt.Sprintf("task_sku_sync_failed:v1:filing:%d", task.ID)
+	if detail.FilingStatus == domain.FilingStatusFiled {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := notifier.ClearNotificationDedupeScope(ctx, scope); err != nil {
+				log.Printf("task_filing_notification_dedupe_clear_failed task_id=%d err=%v", task.ID, err)
+			}
+		}()
+		return
+	}
+	if detail.FilingStatus != domain.FilingStatusFilingFailed {
+		return
+	}
+	if !detail.ERPSyncRequired {
+		return
+	}
+	req := domain.SKUSyncFailureNotificationRequest{
+		Source:         domain.SKUSyncFailureSourceTaskFiling,
+		TaskID:         task.ID,
+		TaskNo:         task.TaskNo,
+		ERPSyncVersion: detail.ERPSyncVersion,
+		Summary:        detail.FilingErrorMessage,
+		FailureItems:   taskFilingFailureItems(task, detail, itemResults),
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := notifier.NotifyTaskSKUSyncFailure(ctx, req); err != nil {
+			log.Printf("task_filing_failure_notification_failed task_id=%d err=%v", req.TaskID, err)
+		}
+	}()
+}
+
+func taskFilingFailureItems(task *domain.Task, detail *domain.TaskDetail, itemResults []taskFilingItemResult) []domain.SKUSyncFailureItem {
+	items := make([]domain.SKUSyncFailureItem, 0, len(itemResults))
+	for _, result := range itemResults {
+		if result.Succeeded || result.Pending {
+			continue
+		}
+		if strings.TrimSpace(result.Failure) == "" {
+			continue
+		}
+		items = append(items, domain.SKUSyncFailureItem{
+			SKUItemID: result.SKUItemID,
+			SKUCode:   result.SKUCode,
+			Error:     result.Failure,
+		})
+	}
+	if len(items) > 0 {
+		return items
+	}
+	return []domain.SKUSyncFailureItem{{
+		SKUCode:     task.SKUCode,
+		ProductName: task.ProductNameSnapshot,
+		Error:       detail.FilingErrorMessage,
+	}}
 }
 
 func (s *taskService) syncSingleSKUItemCostProjectionFromDetail(ctx context.Context, tx repo.Tx, task *domain.Task, detail *domain.TaskDetail) error {

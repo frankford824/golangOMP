@@ -33,6 +33,52 @@
       </div>
     </header>
 
+    <section class="notif-webpush">
+      <div class="notif-section-head">
+        <div>
+          <div class="notif-eyebrow">
+            <BellRing class="h-4 w-4" />
+            系统通知
+          </div>
+          <h2>Web Push 提醒</h2>
+        </div>
+        <p>{{ webPushStatusText }}</p>
+      </div>
+      <div class="notif-webpush-actions">
+        <button
+          v-if="!webPushActive"
+          type="button"
+          class="notif-btn notif-btn--primary"
+          :disabled="webPushLoading || !webPushCanEnable"
+          @click="enableWebPush"
+        >
+          <BellRing class="h-4 w-4" />
+          开启系统通知
+        </button>
+        <button
+          v-else
+          type="button"
+          class="notif-btn notif-btn--ghost"
+          :disabled="webPushLoading"
+          @click="disableWebPush"
+        >
+          关闭系统通知
+        </button>
+        <button
+          type="button"
+          class="notif-btn notif-btn--ghost"
+          :disabled="webPushLoading || !webPushActive"
+          @click="sendWebPushTest"
+        >
+          <Send class="h-4 w-4" />
+          发送测试
+        </button>
+      </div>
+      <p v-if="webPushMessage" class="notif-webpush-message" :class="{ 'is-error': webPushMessageType === 'error' }">
+        {{ webPushMessage }}
+      </p>
+    </section>
+
     <section v-if="canBroadcast" class="notif-broadcast">
       <div class="notif-section-head">
         <div>
@@ -199,6 +245,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bell,
+  BellRing,
   CheckCircle2,
   Circle,
   Inbox,
@@ -213,6 +260,7 @@ import { notificationsApi } from '@/services/api/notificationsApi'
 import { usersApi } from '@/services/api/usersApi'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
 import { usePermissionsStore } from '@/stores/permissions'
+import { useWebPushStore } from '@/stores/webPush.store'
 import { RoleEnum } from '@/types'
 import { formatDateTimeBeijing, taskInstantMs } from '@/utils/date'
 
@@ -232,6 +280,7 @@ interface DirectoryUser {
 const router = useRouter()
 const notificationsStore = useNotificationsStore()
 const permissionsStore = usePermissionsStore()
+const webPushStore = useWebPushStore()
 
 const items = computed(() => notificationsStore.items)
 const filter = ref<FilterMode>('all')
@@ -245,6 +294,8 @@ const usersLoading = ref(false)
 const sendingBroadcast = ref(false)
 const broadcastMessage = ref('广播会写入通知中心，用户离线或重新登录后仍可看到未读记录。')
 const broadcastMessageType = ref<MessageType>('info')
+const webPushMessage = ref('')
+const webPushMessageType = ref<MessageType>('info')
 
 const filterOptions: Array<{ label: string; value: FilterMode }> = [
   { label: '全部', value: 'all' },
@@ -274,6 +325,16 @@ const selectedUsers = computed(() => {
   const byID = new Map(userOptions.value.map((user) => [normalizeUserID(user.id), user]))
   return selectedUserIds.value.map((id) => byID.get(id) ?? ({ id, display_name: `用户 ${id}` } as DirectoryUser))
 })
+const webPushActive = computed(() => webPushStore.active)
+const webPushLoading = computed(() => webPushStore.loading)
+const webPushCanEnable = computed(() => webPushStore.supported && webPushStore.serverEnabled)
+const webPushStatusText = computed(() => {
+  if (!webPushStore.supported) return '当前浏览器或当前访问环境不支持系统级通知。'
+  if (!webPushStore.serverEnabled) return '服务端 Web Push 尚未启用。'
+  if (webPushStore.permission === 'denied') return '浏览器已拒绝通知权限，需要在浏览器设置中重新允许。'
+  if (webPushStore.active) return '已开启，浏览器关闭或后台时仍可收到高优先级提醒。'
+  return '开启后，SKU同步失败等高优先级通知会进入系统通知。'
+})
 
 function isRead(item: NotificationItem): boolean {
   return Boolean(item.read ?? item.is_read)
@@ -298,6 +359,7 @@ function displayType(item: NotificationItem): string {
   if (item.notification_type === 'task_closed') return '已结单'
   if (item.notification_type === 'task_rejected') return '任务驳回'
   if (item.notification_type === 'task_cancelled') return '任务取消'
+  if (item.notification_type === 'task_sku_sync_failed') return 'SKU同步失败'
   return '系统通知'
 }
 
@@ -428,6 +490,42 @@ async function markAllRead(): Promise<void> {
   await notificationsStore.readAll()
 }
 
+async function enableWebPush(): Promise<void> {
+  webPushMessage.value = ''
+  try {
+    await webPushStore.enable()
+    webPushMessageType.value = 'info'
+    webPushMessage.value = '系统通知已开启。'
+  } catch (err) {
+    webPushMessageType.value = 'error'
+    webPushMessage.value = webPushStore.errorMessage || errorMessage(err, '开启系统通知失败')
+  }
+}
+
+async function disableWebPush(): Promise<void> {
+  webPushMessage.value = ''
+  try {
+    await webPushStore.disable()
+    webPushMessageType.value = 'info'
+    webPushMessage.value = '系统通知已关闭。'
+  } catch (err) {
+    webPushMessageType.value = 'error'
+    webPushMessage.value = errorMessage(err, '关闭系统通知失败')
+  }
+}
+
+async function sendWebPushTest(): Promise<void> {
+  webPushMessage.value = ''
+  try {
+    await webPushStore.sendTest()
+    webPushMessageType.value = 'info'
+    webPushMessage.value = '测试通知已发送，请留意系统通知。'
+  } catch (err) {
+    webPushMessageType.value = 'error'
+    webPushMessage.value = webPushStore.errorMessage || errorMessage(err, '发送测试通知失败')
+  }
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   const root = err && typeof err === 'object' ? (err as Record<string, unknown>) : {}
   const response = root.response && typeof root.response === 'object' ? (root.response as Record<string, unknown>) : {}
@@ -438,6 +536,7 @@ function errorMessage(err: unknown, fallback: string): string {
 
 onMounted(() => {
   void notificationsStore.load()
+  void webPushStore.refresh().catch(() => undefined)
   if (canBroadcast.value) {
     void searchUsers()
   }
@@ -453,6 +552,7 @@ onMounted(() => {
 }
 
 .notif-hero,
+.notif-webpush,
 .notif-broadcast,
 .notif-list-panel,
 .notif-summary {
@@ -571,6 +671,32 @@ onMounted(() => {
   background: rgb(var(--yb-xhs-brand));
   color: rgb(var(--yb-surface));
   box-shadow: 0 12px 24px rgb(var(--yb-xhs-brand) / 0.18);
+}
+
+.notif-webpush {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  border-radius: 0.875rem;
+  padding: 1.25rem;
+}
+
+.notif-webpush-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.notif-webpush-message {
+  margin: 0;
+  color: rgb(var(--yb-text-zinc-soft));
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.notif-webpush-message.is-error {
+  color: rgb(var(--yb-danger));
 }
 
 .notif-broadcast {

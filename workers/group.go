@@ -20,10 +20,16 @@ type Group struct {
 	erpSyncSvc                    service.ERPSyncService
 	productMgmt                   service.ProductManagementService
 	skuComboSync                  service.SKUComboSyncService
+	notificationProcessor         NotificationProcessor
 	assetWorkbenchPreview         AssetWorkbenchPreviewProcessor
 	assetWorkbenchMaintenance     AssetWorkbenchMaintenanceProcessor
 	erpEnabled                    bool
 	erpInterval                   time.Duration
+	webPushEnabled                bool
+	webPushInterval               time.Duration
+	webPushLimit                  int
+	skuFailureReconcileInterval   time.Duration
+	skuFailureReconcileLimit      int
 	assetWorkbenchPreviewEnabled  bool
 	assetWorkbenchPreviewInterval time.Duration
 	assetWorkbenchPreviewLimit    int
@@ -33,22 +39,28 @@ type Group struct {
 }
 
 type GroupDeps struct {
-	DB                            *sql.DB
-	Redis                         *redis.Client
-	Logger                        *zap.Logger
-	ERPSync                       service.ERPSyncService
-	ProductManagement             service.ProductManagementService
-	SKUComboSync                  service.SKUComboSyncService
-	AssetWorkbenchPreview         AssetWorkbenchPreviewProcessor
-	AssetWorkbenchMaintenance     AssetWorkbenchMaintenanceProcessor
-	ERPEnabled                    bool
-	ERPInterval                   time.Duration
-	AssetWorkbenchPreviewEnabled  bool
-	AssetWorkbenchPreviewInterval time.Duration
-	AssetWorkbenchPreviewLimit    int
-	AssetWorkbenchExpiryEnabled   bool
-	AssetWorkbenchExpiryInterval  time.Duration
-	AssetWorkbenchExpiryLimit     int
+	DB                              *sql.DB
+	Redis                           *redis.Client
+	Logger                          *zap.Logger
+	ERPSync                         service.ERPSyncService
+	ProductManagement               service.ProductManagementService
+	SKUComboSync                    service.SKUComboSyncService
+	Notification                    NotificationProcessor
+	AssetWorkbenchPreview           AssetWorkbenchPreviewProcessor
+	AssetWorkbenchMaintenance       AssetWorkbenchMaintenanceProcessor
+	ERPEnabled                      bool
+	ERPInterval                     time.Duration
+	WebPushEnabled                  bool
+	WebPushInterval                 time.Duration
+	WebPushLimit                    int
+	SKUSyncFailureReconcileInterval time.Duration
+	SKUSyncFailureReconcileLimit    int
+	AssetWorkbenchPreviewEnabled    bool
+	AssetWorkbenchPreviewInterval   time.Duration
+	AssetWorkbenchPreviewLimit      int
+	AssetWorkbenchExpiryEnabled     bool
+	AssetWorkbenchExpiryInterval    time.Duration
+	AssetWorkbenchExpiryLimit       int
 }
 
 type AssetWorkbenchPreviewProcessor interface {
@@ -67,10 +79,16 @@ func NewGroup(deps GroupDeps) *Group {
 		erpSyncSvc:                    deps.ERPSync,
 		productMgmt:                   deps.ProductManagement,
 		skuComboSync:                  deps.SKUComboSync,
+		notificationProcessor:         deps.Notification,
 		assetWorkbenchPreview:         deps.AssetWorkbenchPreview,
 		assetWorkbenchMaintenance:     deps.AssetWorkbenchMaintenance,
 		erpEnabled:                    deps.ERPEnabled,
 		erpInterval:                   deps.ERPInterval,
+		webPushEnabled:                deps.WebPushEnabled,
+		webPushInterval:               deps.WebPushInterval,
+		webPushLimit:                  deps.WebPushLimit,
+		skuFailureReconcileInterval:   deps.SKUSyncFailureReconcileInterval,
+		skuFailureReconcileLimit:      deps.SKUSyncFailureReconcileLimit,
 		assetWorkbenchPreviewEnabled:  deps.AssetWorkbenchPreviewEnabled,
 		assetWorkbenchPreviewInterval: deps.AssetWorkbenchPreviewInterval,
 		assetWorkbenchPreviewLimit:    deps.AssetWorkbenchPreviewLimit,
@@ -95,6 +113,12 @@ func (g *Group) Start(ctx context.Context) {
 	if g.shouldStartSKUComboSyncWorker() {
 		go NewSKUComboSyncWorker(g.skuComboSync, g.logger, time.Minute).Run(ctx)
 	}
+	if g.shouldStartNotificationWebPushWorker() {
+		go NewNotificationWebPushWorker(g.notificationProcessor, g.logger, g.webPushInterval, g.webPushLimit).Run(ctx)
+	}
+	if g.shouldStartSKUSyncFailureNotificationWorker() {
+		go NewSKUSyncFailureNotificationWorker(g.notificationProcessor, g.logger, g.skuFailureReconcileInterval, g.skuFailureReconcileLimit).Run(ctx)
+	}
 	if g.shouldStartAssetWorkbenchPreviewWorker() {
 		go NewAssetWorkbenchPreviewWorker(g.assetWorkbenchPreview, g.logger, g.assetWorkbenchPreviewInterval, g.assetWorkbenchPreviewLimit).Run(ctx)
 	}
@@ -109,6 +133,14 @@ func (g *Group) shouldStartProductManagementSyncWorker() bool {
 
 func (g *Group) shouldStartSKUComboSyncWorker() bool {
 	return g.erpEnabled && g.skuComboSync != nil
+}
+
+func (g *Group) shouldStartNotificationWebPushWorker() bool {
+	return g.webPushEnabled && g.notificationProcessor != nil
+}
+
+func (g *Group) shouldStartSKUSyncFailureNotificationWorker() bool {
+	return g.notificationProcessor != nil
 }
 
 func (g *Group) shouldStartAssetWorkbenchPreviewWorker() bool {

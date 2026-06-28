@@ -34,20 +34,21 @@ type ProductManagementService interface {
 type ProductManagementServiceOption func(*productManagementService)
 
 type productManagementService struct {
-	records      repo.ProductManagementRepo
-	taskAssets   repo.TaskAssetRepo
-	assetSearch  repo.TaskAssetSearchRepo
-	taskEvents   repo.TaskEventRepo
-	skuCombos    repo.SKUComboRepo
-	txRunner     repo.TxRunner
-	erpBridge    ERPBridgeService
-	ossDirect    *OSSDirectService
-	uploadClient UploadServiceClient
-	imageProxy   *ERPImageProxySigner
-	now          func() time.Time
-	refreshEvery time.Duration
-	refreshMu    sync.Mutex
-	lastRefresh  time.Time
+	records       repo.ProductManagementRepo
+	taskAssets    repo.TaskAssetRepo
+	assetSearch   repo.TaskAssetSearchRepo
+	taskEvents    repo.TaskEventRepo
+	skuCombos     repo.SKUComboRepo
+	txRunner      repo.TxRunner
+	erpBridge     ERPBridgeService
+	ossDirect     *OSSDirectService
+	uploadClient  UploadServiceClient
+	imageProxy    *ERPImageProxySigner
+	notifications taskNotificationService
+	now           func() time.Time
+	refreshEvery  time.Duration
+	refreshMu     sync.Mutex
+	lastRefresh   time.Time
 }
 
 func NewProductManagementService(records repo.ProductManagementRepo, taskAssets repo.TaskAssetRepo, assetSearch repo.TaskAssetSearchRepo, txRunner repo.TxRunner, opts ...ProductManagementServiceOption) ProductManagementService {
@@ -95,6 +96,12 @@ func WithProductManagementTaskEventRepo(taskEvents repo.TaskEventRepo) ProductMa
 func WithProductManagementSKUComboRepo(skuCombos repo.SKUComboRepo) ProductManagementServiceOption {
 	return func(s *productManagementService) {
 		s.skuCombos = skuCombos
+	}
+}
+
+func WithProductManagementNotificationService(notifications taskNotificationService) ProductManagementServiceOption {
+	return func(s *productManagementService) {
+		s.notifications = notifications
 	}
 }
 
@@ -928,7 +935,7 @@ func (s *productManagementService) markProductManagementBaseSyncSucceeded(ctx co
 		next := now.Add(5 * time.Minute)
 		cooldown = &next
 	}
-	_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := s.records.UpdateBaseSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
 			Status:            domain.ProductManagementERPSyncStatusSynced,
 			BaseStatus:        domain.ProductManagementERPSyncStatusSynced,
@@ -942,7 +949,10 @@ func (s *productManagementService) markProductManagementBaseSyncSucceeded(ctx co
 			return err
 		}
 		return s.records.MarkBaseSyncProjectionSynced(ctx, tx, record.TaskID, record.TaskSKUItemID, now)
-	})
+	}); err != nil {
+		return
+	}
+	s.clearProductManagementBaseSyncDedupe(record)
 }
 
 func (s *productManagementService) markProductManagementBaseSyncFailed(ctx context.Context, record *domain.ProductManagementRecord, message string) {
@@ -956,7 +966,7 @@ func (s *productManagementService) markProductManagementBaseSyncFailed(ctx conte
 		cooldown = &next
 	}
 	msg := truncateProductManagementSyncError(message)
-	_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		return s.records.UpdateBaseSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
 			Status:            domain.ProductManagementERPSyncStatusFailed,
 			BaseStatus:        domain.ProductManagementERPSyncStatusFailed,
@@ -965,7 +975,61 @@ func (s *productManagementService) markProductManagementBaseSyncFailed(ctx conte
 			LastSyncError:     msg,
 			BaseSyncError:     msg,
 		})
-	})
+	}); err != nil {
+		return
+	}
+	s.notifyProductManagementBaseSyncFailed(record, msg)
+}
+
+func (s *productManagementService) notifyProductManagementBaseSyncFailed(record *domain.ProductManagementRecord, message string) {
+	if s == nil || record == nil || s.notifications == nil {
+		return
+	}
+	notifier, ok := s.notifications.(taskSKUSyncFailureNotificationService)
+	if !ok {
+		return
+	}
+	req := domain.SKUSyncFailureNotificationRequest{
+		Source:   domain.SKUSyncFailureSourceProductBaseSync,
+		TaskID:   record.TaskID,
+		TaskNo:   record.TaskNo,
+		RecordID: record.ID,
+		Summary:  message,
+		FailureItems: []domain.SKUSyncFailureItem{{
+			SKUItemID:   derefInt64Ptr(record.TaskSKUItemID),
+			SKUCode:     record.SKUCode,
+			ProductName: record.ProductName,
+			Error:       message,
+		}},
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = notifier.NotifyTaskSKUSyncFailure(ctx, req)
+	}()
+}
+
+func (s *productManagementService) clearProductManagementBaseSyncDedupe(record *domain.ProductManagementRecord) {
+	if s == nil || record == nil || s.notifications == nil {
+		return
+	}
+	notifier, ok := s.notifications.(taskSKUSyncFailureNotificationService)
+	if !ok {
+		return
+	}
+	scope := fmt.Sprintf("task_sku_sync_failed:v1:pm_base:%d", record.ID)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = notifier.ClearNotificationDedupeScope(ctx, scope)
+	}()
+}
+
+func derefInt64Ptr(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func (s *productManagementService) markProductManagementImageSyncSucceeded(ctx context.Context, record *domain.ProductManagementRecord) {

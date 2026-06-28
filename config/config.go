@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"workflow/domain"
@@ -31,8 +32,10 @@ type Config struct {
 	AssetWorkbench AssetWorkbenchConfig
 	AssetCleanup   AssetCleanupConfig
 	AI             AIConfig
+	Experience     ExperienceConfig
 	BusinessTrend  BusinessTrendConfig
 	WeCom          WeComConfig
+	WebPush        WebPushConfig
 	Log            LogConfig
 	Auth           domain.AuthSettings
 	FrontendAccess domain.FrontendAccessSettings
@@ -47,6 +50,20 @@ type WeComConfig struct {
 	AiBotQueueSize     int
 }
 
+type WebPushConfig struct {
+	Enabled                    bool
+	VAPIDPublicKey             string
+	VAPIDPrivateKey            string
+	VAPIDSubject               string
+	WorkerInterval             time.Duration
+	WorkerLimit                int
+	LeaseTTL                   time.Duration
+	RetryBaseDelay             time.Duration
+	MaxAttempts                int
+	SKUSyncFailureScanInterval time.Duration
+	SKUSyncFailureScanLimit    int
+}
+
 type AIConfig struct {
 	Enabled         bool
 	Provider        string
@@ -57,6 +74,19 @@ type AIConfig struct {
 	MaxTokens       int
 	RateLimitWindow time.Duration
 	RateLimitMax    int
+}
+
+type ExperienceConfig struct {
+	UIEnabled         bool
+	CaptureEnabled    bool
+	AIFeedbackEnabled bool
+	WorkerEnabled     bool
+	WorkerInterval    time.Duration
+	WorkerBatchSize   int
+	WorkerMaxAttempts int
+	OutboxLeaseTTL    time.Duration
+	RuntimeConfigFile string
+	RetentionDays     int
 }
 
 type BusinessTrendConfig struct {
@@ -356,6 +386,18 @@ func Load() (*Config, error) {
 			RateLimitWindow: mustParseDuration(getEnv("AI_AGENT_RATE_LIMIT_WINDOW", "5h")),
 			RateLimitMax:    mustParseInt(getEnv("AI_AGENT_RATE_LIMIT_MAX_CALLS", "800")),
 		},
+		Experience: ExperienceConfig{
+			UIEnabled:         mustParseBool(getEnv("EXPERIENCE_UI_ENABLED", "false")),
+			CaptureEnabled:    mustParseBool(getEnv("EXPERIENCE_CAPTURE_ENABLED", "false")),
+			AIFeedbackEnabled: mustParseBool(getEnv("EXPERIENCE_AI_FEEDBACK_ENABLED", "false")),
+			WorkerEnabled:     mustParseBool(getEnv("EXPERIENCE_WORKER_ENABLED", "false")),
+			WorkerInterval:    mustParseDuration(getEnv("EXPERIENCE_WORKER_INTERVAL", "15s")),
+			WorkerBatchSize:   mustParseInt(getEnv("EXPERIENCE_WORKER_BATCH_SIZE", "50")),
+			WorkerMaxAttempts: mustParseInt(getEnv("EXPERIENCE_WORKER_MAX_ATTEMPTS", "5")),
+			OutboxLeaseTTL:    mustParseDuration(getEnv("EXPERIENCE_OUTBOX_LEASE_TTL", "5m")),
+			RuntimeConfigFile: getEnv("EXPERIENCE_RUNTIME_CONFIG_FILE", ""),
+			RetentionDays:     mustParseInt(getEnv("EXPERIENCE_RETENTION_DAYS", "180")),
+		},
 		BusinessTrend: BusinessTrendConfig{
 			ChinaHotURL:         getEnv("BUSINESS_TREND_CHINA_HOT_URL", ""),
 			ApifyToken:          getEnv("APIFY_TOKEN", ""),
@@ -377,6 +419,19 @@ func Load() (*Config, error) {
 			AiBotWSURL:         getEnv("WECOM_AIBOT_WS_URL", "wss://openws.work.weixin.qq.com"),
 			AiBotQueueSize:     mustParseInt(getEnv("WECOM_AIBOT_QUEUE_SIZE", "200")),
 		},
+		WebPush: WebPushConfig{
+			Enabled:                    mustParseBool(getEnv("WEB_PUSH_ENABLED", "false")),
+			VAPIDPublicKey:             getEnv("WEB_PUSH_VAPID_PUBLIC_KEY", ""),
+			VAPIDPrivateKey:            getEnv("WEB_PUSH_VAPID_PRIVATE_KEY", ""),
+			VAPIDSubject:               getEnv("WEB_PUSH_SUBJECT", "mailto:ops@yongbo.cloud"),
+			WorkerInterval:             mustParseDuration(getEnv("WEB_PUSH_WORKER_INTERVAL", "10s")),
+			WorkerLimit:                mustParseInt(getEnv("WEB_PUSH_WORKER_LIMIT", "20")),
+			LeaseTTL:                   mustParseDuration(getEnv("WEB_PUSH_LEASE_TTL", "2m")),
+			RetryBaseDelay:             mustParseDuration(getEnv("WEB_PUSH_RETRY_BASE_DELAY", "30s")),
+			MaxAttempts:                mustParseInt(getEnv("WEB_PUSH_MAX_ATTEMPTS", "5")),
+			SKUSyncFailureScanInterval: mustParseDuration(getEnv("SKU_SYNC_FAILURE_NOTIFICATION_SCAN_INTERVAL", "5m")),
+			SKUSyncFailureScanLimit:    mustParseInt(getEnv("SKU_SYNC_FAILURE_NOTIFICATION_SCAN_LIMIT", "50")),
+		},
 		Log: LogConfig{
 			Level: getEnv("LOG_LEVEL", "info"),
 		},
@@ -385,6 +440,21 @@ func Load() (*Config, error) {
 	}
 	if cfg.MySQL.DSN == "" {
 		return nil, fmt.Errorf("MYSQL_DSN is required (no built-in default; set the environment variable explicitly)")
+	}
+	if cfg.WebPush.Enabled {
+		missing := make([]string, 0, 3)
+		if strings.TrimSpace(cfg.WebPush.VAPIDPublicKey) == "" {
+			missing = append(missing, "WEB_PUSH_VAPID_PUBLIC_KEY")
+		}
+		if strings.TrimSpace(cfg.WebPush.VAPIDPrivateKey) == "" {
+			missing = append(missing, "WEB_PUSH_VAPID_PRIVATE_KEY")
+		}
+		if strings.TrimSpace(cfg.WebPush.VAPIDSubject) == "" {
+			missing = append(missing, "WEB_PUSH_SUBJECT")
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("WEB_PUSH_ENABLED=true requires %s", strings.Join(missing, ", "))
+		}
 	}
 	return cfg, nil
 }

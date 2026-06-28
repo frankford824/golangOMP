@@ -36,6 +36,8 @@ tags:
     description: Export-center skeleton. Persists export jobs and static template metadata over existing stable read models without real file generation or storage.
   - name: IntegrationCenter
     description: Integration-center boundary. Persists internal API call logs plus explicit execution attempts for mostly placeholder connectors, and also carries the narrow ERP Bridge product-filing trace used by task business-info filing. This is observability for the Bridge-owned mutation boundary, not a general-purpose ERP mutation surface on MAIN.
+  - name: ExperienceLearning
+    description: Stable-first experience capture and observation half-loop. All write-side capture is side-channel and feature-flagged; read endpoints are SuperAdmin-only and must not drive business decisions.
   - name: JSTSync8082
     description: Resident JST sync service contract (port 8082). Documented here for cross-service integration clarity; not served by 8080/8081 cmd/server runtime.
   - name: InternalPlaceholder
@@ -126,6 +128,99 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/PredictionBundle'
+    ExperienceRuntimeFlags:
+      type: object
+      required: [ui_enabled, capture_enabled, ai_feedback_enabled, worker_enabled]
+      properties:
+        ui_enabled: { type: boolean }
+        capture_enabled: { type: boolean }
+        ai_feedback_enabled: { type: boolean }
+        worker_enabled: { type: boolean }
+    ExperienceReasonTag:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        scene: { type: string }
+        code: { type: string }
+        name: { type: string }
+        group: { type: string }
+        severity: { type: string }
+        version: { type: integer }
+        enabled: { type: boolean }
+        deleted_at: { type: string, format: date-time, nullable: true }
+        sort_order: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ExperienceEvent:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        event_key: { type: string }
+        schema_version: { type: integer }
+        event_time: { type: string, format: date-time }
+        source_type: { type: string }
+        source_id: { type: string }
+        task_id: { type: integer, format: int64, nullable: true }
+        action: { type: string }
+        outcome: { type: string }
+        actor_snapshot: { type: object, additionalProperties: true, nullable: true }
+        business_snapshot: { type: object, additionalProperties: true, nullable: true }
+        payload: { type: object, additionalProperties: true, nullable: true }
+        data_classification: { type: string }
+        ground_truth_status: { type: string }
+        created_at: { type: string, format: date-time }
+    ExperienceStats:
+      type: object
+      required: [flags, total_events, outbox_queued, outbox_processing, outbox_dead_letter, generated_at]
+      properties:
+        flags:
+          $ref: '#/components/schemas/ExperienceRuntimeFlags'
+        total_events: { type: integer, format: int64 }
+        outbox_queued: { type: integer, format: int64 }
+        outbox_processing: { type: integer, format: int64 }
+        outbox_processed_24h: { type: integer, format: int64 }
+        outbox_failed_24h: { type: integer, format: int64 }
+        outbox_dead_letter: { type: integer, format: int64 }
+        capture_success_rate_24h: { type: number, format: double }
+        capture_failure_rate_24h: { type: number, format: double }
+        tag_total: { type: integer, format: int64 }
+        tag_enabled: { type: integer, format: int64 }
+        tag_coverage_rate: { type: number, format: double }
+        ai_suggestion_events: { type: integer, format: int64 }
+        ai_feedback_events: { type: integer, format: int64 }
+        ai_feedback_rate: { type: number, format: double }
+        task_profiles: { type: integer, format: int64 }
+        asset_quality_labels: { type: integer, format: int64 }
+        latest_profile_rebuilt_at: { type: string, format: date-time, nullable: true }
+        generated_at: { type: string, format: date-time }
+    AISuggestionFeedbackRequest:
+      type: object
+      required: [feedback_value]
+      properties:
+        suggestion_event_id:
+          type: string
+          description: Optional when supplied by the path parameter.
+        feedback_value:
+          type: string
+          enum: [accepted, rejected, partially_accepted]
+        reason_code: { type: string }
+        reason_note: { type: string }
+        outcome_source_type: { type: string }
+        outcome_source_id: { type: string }
+        payload: { type: object, additionalProperties: true }
+    AISuggestionFeedback:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        suggestion_event_id: { type: string }
+        feedback_value: { type: string, enum: [accepted, rejected, partially_accepted] }
+        reason_code: { type: string }
+        reason_note: { type: string }
+        outcome_source_type: { type: string }
+        outcome_source_id: { type: string }
+        actor_id: { type: integer, format: int64, nullable: true }
+        payload: { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
     RuleTemplate:
       type: object
       properties:
@@ -7558,8 +7653,8 @@ components:
                 nullable: true
     NotificationType:
       type: string
-      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). Current values: `task_assigned_to_me`, `task_rejected`, `task_pending_audit`, `task_closed`, `claim_conflict`, `pool_reassigned`, `task_cancelled`, and `system_broadcast`."
-      enum: [task_assigned_to_me, task_rejected, task_pending_audit, task_closed, claim_conflict, pool_reassigned, task_cancelled, system_broadcast]
+      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). Current values include task workflow notifications, `system_broadcast`, and `task_sku_sync_failed`."
+      enum: [task_assigned_to_me, task_rejected, task_pending_audit, task_closed, claim_conflict, pool_reassigned, task_cancelled, system_broadcast, task_sku_sync_failed]
     Notification:
       type: object
       description: |
@@ -7590,6 +7685,8 @@ components:
           `cancelled_by_name`, `module_key`.
         - `system_broadcast`: `title`, `content`; optional `broadcast_by`,
           `broadcast_by_name`, `broadcast_audience`, `broadcast_recipient_count`.
+        - `task_sku_sync_failed`: `task_id`, `failed_count`, `failed_items`; optional
+          `task_no`, `source`, `record_id`, `erp_sync_version`, `summary`, `url`.
       properties:
         id:
           type: integer
@@ -7608,6 +7705,85 @@ components:
         created_at:
           type: string
           format: date-time
+    WebPushConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        public_key:
+          type: string
+        vapid_key_hash:
+          type: string
+        subject:
+          type: string
+        reason:
+          type: string
+    WebPushSubscriptionInput:
+      type: object
+      required: [endpoint, keys]
+      properties:
+        endpoint:
+          type: string
+        keys:
+          type: object
+          required: [p256dh, auth]
+          properties:
+            p256dh:
+              type: string
+            auth:
+              type: string
+        user_agent:
+          type: string
+        platform:
+          type: string
+    WebPushSubscription:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        user_id:
+          type: integer
+          format: int64
+        endpoint_hash:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled, stale]
+        vapid_key_hash:
+          type: string
+        last_seen_at:
+          type: string
+          format: date-time
+    NotificationPreferences:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          format: int64
+        web_push_enabled:
+          type: boolean
+        last_test_sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        vapid_key_hash:
+          type: string
+    NotificationPreferencesPatch:
+      type: object
+      properties:
+        web_push_enabled:
+          type: boolean
+    WebPushTestResult:
+      type: object
+      properties:
+        notification_id:
+          type: integer
+          format: int64
+        queued:
+          type: boolean
+        message:
+          type: string
     OrgMoveRequestState:
       type: string
       description: "Source: V1_INFORMATION_ARCHITECTURE §5.2."
@@ -16737,6 +16913,230 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/experience/config:
+    get:
+      summary: Get experience learning runtime flags
+      description: Returns the current feature flags for the stable-first experience learning half-loop.
+      tags: [ExperienceLearning, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [SuperAdmin]
+      responses:
+        '200':
+          description: Runtime flags
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExperienceRuntimeFlags'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/experience/reason-tags:
+    get:
+      summary: List controlled experience reason tags
+      description: Returns versioned, administrator-maintained reason tags. When the experience UI flag is off, the backend returns an empty list without reading the new tables.
+      tags: [ExperienceLearning, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [SuperAdmin]
+      parameters:
+        - in: query
+          name: scene
+          schema: { type: string }
+          description: Optional tag scene filter.
+      responses:
+        '200':
+          description: Reason tags
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceReasonTag'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/reports/experience/stats:
+    get:
+      summary: Get experience learning observation metrics
+      description: SuperAdmin-only read model for capture success, outbox backlog, dead-letter count, tag coverage, AI feedback rate, profile generation, and asset quality labels.
+      tags: [ExperienceLearning, Reports, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [SuperAdmin]
+      responses:
+        '200':
+          description: Experience observation metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExperienceStats'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/reports/experience/samples:
+    get:
+      summary: List experience event samples
+      description: SuperAdmin-only sample pool. The query reads only `experience_events` and never joins core task or asset tables.
+      tags: [ExperienceLearning, Reports, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [SuperAdmin]
+      parameters:
+        - in: query
+          name: source_type
+          schema: { type: string }
+        - in: query
+          name: source_id
+          schema: { type: string }
+        - in: query
+          name: task_id
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: action
+          schema: { type: string }
+        - in: query
+          name: outcome
+          schema: { type: string }
+        - in: query
+          name: from
+          schema: { type: string }
+          description: ISO date or RFC3339 timestamp, inclusive.
+        - in: query
+          name: to
+          schema: { type: string }
+          description: ISO date or RFC3339 timestamp, inclusive.
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Experience event samples
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceEvent'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '400':
+          description: Invalid query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/ai-suggestions/{suggestion_event_id}/feedback:
+    post:
+      summary: Record AI suggestion feedback
+      description: Records human feedback for an AI or rule suggestion into the side-channel feedback table. This endpoint never executes a business action and returns 403 when the AI feedback flag is off.
+      tags: [ExperienceLearning, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: suggestion_event_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AISuggestionFeedbackRequest'
+      responses:
+        '201':
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AISuggestionFeedback'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden or experience AI feedback disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/me/notifications:
     get:
       summary: List my notifications
@@ -16861,6 +17261,178 @@ paths:
                     properties:
                       unread_count:
                         type: integer
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/notifications/web-push/config:
+    get:
+      summary: Get Web Push runtime config
+      description: Returns whether Web Push is enabled and the current VAPID public key for the authenticated user session.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: V1.11
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      responses:
+        '200':
+          description: Web Push config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WebPushConfig'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/notifications/web-push/subscriptions:
+    post:
+      summary: Register current browser Web Push subscription
+      description: Upserts by global endpoint hash and reassigns ownership to the current user, preventing shared-browser leakage after account switch.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: V1.11
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebPushSubscriptionInput'
+      responses:
+        '200':
+          description: Registered subscription
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WebPushSubscription'
+        '400':
+          description: Web Push disabled or invalid subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/notifications/web-push/subscriptions/current:
+    delete:
+      summary: Disable the current browser Web Push subscription
+      description: Disables the provided endpoint only when it belongs to the authenticated user. Missing endpoints are treated as idempotent no-ops.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: V1.11
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endpoint:
+                  type: string
+      responses:
+        '204': { description: Current subscription disabled if present }
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/notifications/web-push/test:
+    post:
+      summary: Send a Web Push test notification
+      description: Queues a lightweight test notification for the current user and rate-limits repeated test sends.
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: V1.11
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      responses:
+        '200':
+          description: Test notification queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WebPushTestResult'
+        '400':
+          description: Web Push disabled or test is rate-limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/me/notifications/preferences:
+    get:
+      summary: Get my notification preferences
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: V1.11
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      responses:
+        '200':
+          description: Notification preferences
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/NotificationPreferences'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update my notification preferences
+      tags: [Me, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-owner-round: V1.11
+      x-rbac-placeholder:
+        auth_mode: session_token_authenticated
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreferencesPatch'
+      responses:
+        '200':
+          description: Updated notification preferences
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/NotificationPreferences'
         '401':
           description: Unauthenticated
           content:

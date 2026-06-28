@@ -4,6 +4,7 @@ import { formatNotification } from '@/domain/notification-text'
 import { authApi } from '@/services/api/authApi'
 import { V1SocketClient, type V1WsEventDetail } from '@/services/ws/v1Socket'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
+import { useWebPushStore } from '@/stores/webPush.store'
 
 export const useRealtimeStore = defineStore('realtime', () => {
   const started = ref(false)
@@ -57,6 +58,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
 
   function showBrowserNotification(item: NotificationItem): void {
     if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (useWebPushStore().active) return
     browserPermission.value = Notification.permission
     if (browserPermission.value !== 'granted') return
     if (document.visibilityState === 'visible') return

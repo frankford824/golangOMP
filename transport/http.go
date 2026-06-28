@@ -68,6 +68,7 @@ func NewRouter(
 	designSourceH *handler.DesignSourceHandler,
 	searchH *handler.SearchHandler,
 	reportL1H *handler.ReportL1Handler,
+	experienceH *handler.ExperienceHandler,
 	predictionH *handler.PredictionHandler,
 	wsH *transportws.Handler,
 	routeAccessCatalog *RouteAccessCatalog,
@@ -126,6 +127,23 @@ func NewRouter(
 			predictionGroup.GET("/task-create", access(predictionGroup, http.MethodGet, "/task-create", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin), predictionH.TaskCreate)
 			predictionGroup.GET("/assets", access(predictionGroup, http.MethodGet, "/assets", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), predictionH.Assets)
 			predictionGroup.GET("/management", access(predictionGroup, http.MethodGet, "/management", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin, domain.RoleAdmin), predictionH.Management)
+		}
+	}
+
+	if experienceH != nil {
+		experienceGroup := v1.Group("/experience")
+		{
+			experienceGroup.GET("/config", access(experienceGroup, http.MethodGet, "/config", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.Config)
+			experienceGroup.GET("/reason-tags", access(experienceGroup, http.MethodGet, "/reason-tags", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.ReasonTags)
+		}
+		experienceReportsGroup := v1.Group("/reports/experience")
+		{
+			experienceReportsGroup.GET("/stats", access(experienceReportsGroup, http.MethodGet, "/stats", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.Stats)
+			experienceReportsGroup.GET("/samples", access(experienceReportsGroup, http.MethodGet, "/samples", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.Samples)
+		}
+		aiSuggestionGroup := v1.Group("/ai-suggestions")
+		{
+			aiSuggestionGroup.POST("/:suggestion_event_id/feedback", access(aiSuggestionGroup, http.MethodPost, "/:suggestion_event_id/feedback", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.AISuggestionFeedback)
 		}
 	}
 
@@ -563,6 +581,12 @@ func v1R1ContractRouteSpecs() []v1R1RouteSpec {
 		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/me/notifications/:id/read", OwnerRound: "R4-SA-C", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/notifications/7/read"},
 		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/me/notifications/read-all", OwnerRound: "R4-SA-C", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/notifications/read-all"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me/notifications/unread-count", OwnerRound: "R4-SA-C", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/notifications/unread-count"},
+		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me/notifications/web-push/config", OwnerRound: "V1.11", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/me/notifications/web-push/config"},
+		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/me/notifications/web-push/subscriptions", OwnerRound: "V1.11", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/me/notifications/web-push/subscriptions"},
+		{GroupBase: "/v1", Method: http.MethodDelete, RelativePath: "/me/notifications/web-push/subscriptions/current", OwnerRound: "V1.11", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/me/notifications/web-push/subscriptions/current"},
+		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/me/notifications/web-push/test", OwnerRound: "V1.11", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/me/notifications/web-push/test"},
+		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me/notifications/preferences", OwnerRound: "V1.11", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/me/notifications/preferences"},
+		{GroupBase: "/v1", Method: http.MethodPatch, RelativePath: "/me/notifications/preferences", OwnerRound: "V1.11", RequiredRoles: v1R1AllLoggedInRoles(), OverlapsLiveRoute: true, SamplePath: "/v1/me/notifications/preferences"},
 		{GroupBase: "/v1", Method: http.MethodGet, RelativePath: "/me", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me"},
 		{GroupBase: "/v1", Method: http.MethodPatch, RelativePath: "/me", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me"},
 		{GroupBase: "/v1", Method: http.MethodPost, RelativePath: "/me/avatar", OwnerRound: "R4-SA-B", RequiredRoles: v1R1AllLoggedInRoles(), SamplePath: "/v1/me/avatar"},

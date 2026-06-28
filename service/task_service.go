@@ -366,6 +366,11 @@ type taskNotificationService interface {
 	CreateNotification(ctx context.Context, tx repo.Tx, userID int64, ntype domain.NotificationType, payload json.RawMessage) (*domain.Notification, error)
 }
 
+type taskSKUSyncFailureNotificationService interface {
+	NotifyTaskSKUSyncFailure(ctx context.Context, req domain.SKUSyncFailureNotificationRequest) error
+	ClearNotificationDedupeScope(ctx context.Context, scope string) error
+}
+
 const (
 	taskCostPrefillSourcePreview             = "cost_rule_preview"
 	taskCostPrefillSourceManualRuleReference = "manual_rule_reference"

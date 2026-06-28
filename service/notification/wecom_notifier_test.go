@@ -125,3 +125,30 @@ func TestWeComNotifierFormatsSystemBroadcastOnce(t *testing.T) {
 		t.Fatalf("message = %q, want %q", sender.messages[0], want)
 	}
 }
+
+func TestWeComNotifierDoesNotSuppressChangedSKUSyncFailureFingerprint(t *testing.T) {
+	sender := &captureWeComSender{}
+	notifier := NewWeComNotifier(sender, nil, nil, nil)
+
+	for _, failure := range []string{"ERP频控", "ERP成本不一致"} {
+		notifier.Notify(context.Background(), domain.Notification{
+			ID:               10,
+			UserID:           100,
+			NotificationType: domain.NotificationTypeTaskSKUSyncFailed,
+			Payload: mustRaw(map[string]interface{}{
+				"task_id":          9901,
+				"task_no":          "RW-9901",
+				"source":           string(domain.SKUSyncFailureSourceTaskFiling),
+				"erp_sync_version": 3,
+				"failed_count":     1,
+				"failed_items": []map[string]interface{}{
+					{"sku_code": "SKU-A", "error": failure},
+				},
+			}),
+		})
+	}
+
+	if len(sender.messages) != 2 {
+		t.Fatalf("messages = %d, want 2 for changed SKU failure payloads", len(sender.messages))
+	}
+}

@@ -1,10 +1,10 @@
-# V1 API 速查表(243 path · 一行一条)
+# V1 API 速查表(253 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 243 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 253 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -162,6 +162,9 @@
 | GET | `/v1/predictions/task-create` | Get task-create form prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/predictions/assets` | Get asset-center prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/predictions/management` | Get management prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/experience/config` | Get experience learning runtime flags | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/experience/reason-tags` | List controlled experience reason tags | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/ai-suggestions/{suggestion_event_id}/feedback` | Record AI suggestion feedback | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/notifications/broadcast` | Broadcast a notification to one, many, or all users | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/entry` | Resolve asset workbench entry state | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/access/request` | Request asset workbench access | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -215,6 +218,11 @@
 | POST | `/v1/me/notifications/{id}/read` | Mark one notification as read | POST:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
 | POST | `/v1/me/notifications/read-all` | Mark all notifications as read | POST:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
 | GET | `/v1/me/notifications/unread-count` | Get unread notification count | GET:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
+| GET | `/v1/me/notifications/web-push/config` | Get Web Push runtime config | GET:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
+| POST | `/v1/me/notifications/web-push/subscriptions` | Register current browser Web Push subscription | POST:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
+| DELETE | `/v1/me/notifications/web-push/subscriptions/current` | Disable the current browser Web Push subscription | DELETE:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
+| POST | `/v1/me/notifications/web-push/test` | Send a Web Push test notification | POST:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
+| GET, PATCH | `/v1/me/notifications/preferences` | Get my notification preferences；Update my notification preferences | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
 | GET | `/v1/tasks/batch-create/template.xlsx` | Download batch create Excel template | GET:已登录 / scope-aware | [V1_API_BATCH.md](V1_API_BATCH.md) |
 | POST | `/v1/tasks/batch-create/parse-excel` | Parse a batch create Excel file | POST:已登录 / scope-aware | [V1_API_BATCH.md](V1_API_BATCH.md) |
 | GET | `/v1/erp/products` | Search ERP Bridge products | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |
@@ -248,6 +256,8 @@
 | GET | `/v1/assets/search` | Search assets across tasks | GET:已登录 / scope-aware | [V1_API_SEARCH.md](V1_API_SEARCH.md) |
 | GET | `/v1/design-sources/search` | Search design source entries | GET:已登录 / scope-aware | [V1_API_SEARCH.md](V1_API_SEARCH.md) |
 | GET | `/v1/search` | Perform a global search | GET:已登录 / scope-aware | [V1_API_SEARCH.md](V1_API_SEARCH.md) |
+| GET | `/v1/reports/experience/stats` | Get experience learning observation metrics | GET:已登录 / scope-aware | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
+| GET | `/v1/reports/experience/samples` | List experience event samples | GET:已登录 / scope-aware | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/cards` | Get L1 report cards | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/throughput` | Get L1 throughput report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/module-dwell` | Get L1 module dwell report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |

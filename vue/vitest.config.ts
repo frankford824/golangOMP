@@ -12,7 +12,8 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'jsdom',
+    // Keep the default runtime cheap; DOM-specific specs should opt into jsdom per file.
+    environment: 'node',
     maxWorkers: 4,
   },
 })

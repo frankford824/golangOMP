@@ -88,6 +88,31 @@ func TestLoadIncludesUploadServiceDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsEnabledWebPushWithoutVAPIDConfig(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+	t.Setenv("WEB_PUSH_ENABLED", "true")
+	t.Setenv("WEB_PUSH_VAPID_PUBLIC_KEY", "")
+	t.Setenv("WEB_PUSH_VAPID_PRIVATE_KEY", "")
+	t.Setenv("WEB_PUSH_SUBJECT", "   ")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want missing VAPID config rejection")
+	}
+	for _, want := range []string{
+		"WEB_PUSH_ENABLED=true requires",
+		"WEB_PUSH_VAPID_PUBLIC_KEY",
+		"WEB_PUSH_VAPID_PRIVATE_KEY",
+		"WEB_PUSH_SUBJECT",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Load() error = %v, want substring %q", err, want)
+		}
+	}
+}
+
 func TestLoadPrefersUploadServiceInternalToken(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
 	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")

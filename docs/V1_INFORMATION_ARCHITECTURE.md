@@ -29,7 +29,8 @@
 ├── 报表              ← 一级菜单,仅 SuperAdmin 可见
 │    ├── 任务吞吐看板
 │    ├── 模块驻留时长
-│    └── 个人/组效能(R5+)
+│    ├── 个人/组效能(R5+)
+│    └── 经验学习观测(v1.12, SuperAdmin-only)
 │
 └── [头像下拉]        ← 所有登录用户;无一级菜单
      ├── 个人中心
@@ -73,6 +74,14 @@ v1 报表只做 L1(3 个 endpoint:`cards` / `throughput` / `module-dwell`);以�
 5. **搜索 `users[]` 可见角色**(R1.7-D Q1=A1 补白):**仅 SuperAdmin + HRAdmin** 两个角色的 `users[]` 返匹配行;其余角色(含 DeptAdmin / TeamLead / Member / Operator / 各业务角色)`users[]` **永远返 `[]`**;搜索 tasks/assets/products 三数组不受此限制 · 按任务可见性规则(§6.1 Layer 1 全员可见未删除任务)返。
 
 > v2 / R5+ 规划若引入 L2(跨部门宽表)/ L3(经营看板)/ 导出 CSV / ES 高亮 · 以上 §2.1 规则作为 v1 基线保留;R6+ 视压力评估物化表替代直查。
+
+### 2.2 经验学习观测半环(v1.12)
+
+- 入口归属:报表/Data Center 内的 SuperAdmin-only 观测面板,不进入普通个人中心。
+- 端点:`GET /v1/experience/config`,`GET /v1/experience/reason-tags`,`GET /v1/reports/experience/stats`,`GET /v1/reports/experience/samples`,`POST /v1/ai-suggestions/{suggestion_event_id}/feedback`。
+- 数据边界:所有经验事件、AI 建议展示、反馈均为 side-channel,不反写核心任务/资产/ERP 表,不作为业务状态真源。
+- 指标口径:AI suggestion 展示事件按每次展示唯一记账;稳定 suggestion 身份保留在 `suggestion_id`,避免重复展示被唯一键吞掉。
+- 开关:后端以运行时配置控制 UI、采集、AI 反馈和 worker;关闭时读面板返回空观测数据,写侧 best-effort 不影响主业务。
 
 ---
 
@@ -383,6 +392,7 @@ task_drafts (
 | `claim_conflict` | 我尝试接单但抢先(占位,Q5.3 必做) | `{ task_id, module_key }` |
 | `pool_reassigned` | 我所在组新增一条 pool 任务(可配置开关) | `{ task_id, module_key }` |
 | `task_cancelled` | 我参与的任务被关闭 | `{ task_id, cancel_reason, cancelled_by }` |
+| `task_sku_sync_failed` | 任务建档同步或商品同步队列出现 SKU 失败 | `{ task_id, task_no, source, failed_count, failed_items[0..20], error_summary, url }` |
 
 > **`task_mentioned`(@评论触发通知)暂不进 v1 枚举**(v3 评审追加):FE Plan 评审中前端曾提议新增一类 `task_mentioned` 用于评论 `@成员` 触发的通知。经评估:通知 type 扩展会同时牵动 `notifications` 表、WebSocket 推送(§9)、通知中心筛选 UI、前端通知 iconography 多处改动,与 v1 交付目标冲突。**v1 仅前端在评论区做 `@` 命中的 UI 高亮**(悬停显示被 @ 用户卡片),**不触发通知**;`task_mentioned` 作为 `notification_type` 延后到 v1.x 再评估,由届时统一扩展决策。
 
@@ -401,6 +411,13 @@ notifications (
 )
 ```
 
+v1.11 起,Web Push 和 SKU 同步失败通知增加以下附属表,但 `notifications` 仍是站内通知真源:
+
+- `web_push_subscriptions`:全局唯一 `endpoint_hash`,同浏览器切换账号时归属覆盖到当前登录用户。
+- `notification_delivery_outbox`:按 `(notification_id, subscription_id, channel)` 粒度投递,每个设备独立 `pending/sending/retry/sent/dead`。
+- `notification_dedupe_claims`:独立去重表,不依赖用户已读/删除语义。
+- `notification_preferences`:保存 Web Push 开关、测试通知节流、VAPID key hash/version。
+
 ### 8.3 端点
 
 | 端点 | 说明 |
@@ -409,18 +426,27 @@ notifications (
 | `POST /v1/me/notifications/{id}/read` | 标记已读 |
 | `POST /v1/me/notifications/read-all` | 全部已读 |
 | `GET /v1/me/notifications/unread-count` | 右上角 badge 用 |
+| `GET /v1/me/notifications/web-push/config` | Web Push 可用性与 VAPID public key |
+| `POST /v1/me/notifications/web-push/subscriptions` | 绑定/切换当前浏览器订阅归属 |
+| `DELETE /v1/me/notifications/web-push/subscriptions/current` | 停用当前用户拥有的 endpoint |
+| `POST /v1/me/notifications/web-push/test` | 发送测试通知(按用户节流) |
+| `GET/PATCH /v1/me/notifications/preferences` | 通知偏好 |
 
 ### 8.4 渠道
 
-- **仅站内**(Q7.1)
-- 头像右上角 badge 显示未读数,点击进通知中心
-- **不做** 企微 / 钉钉 / 邮件推送(v1 限定)
+- 站内通知为主记录,头像右上角 badge 显示未读数,点击进通知中心。
+- WebSocket 只负责在线实时刷新站内状态,不再作为主要系统通知通道。
+- Web Push 为用户显式开启的系统级补充;浏览器关闭或后台时仍可提示。推送 payload 只放 `notification_id/type/title/body/url/tag/task_id`,失败 SKU 明细只在站内读取。
+- 企微 bot 保持群广播能力,SKU 同步失败只发聚合摘要,不发送 SKU 明细或错误详情。
+- 钉钉 / 邮件推送仍不在当前 V1 范围内。
 
 ### 8.5 生成策略
 
-- 后端在 `task_module_events` 写入时同事务触发"通知生成器",按规则决定是否给哪些 user_id 生成 `notifications` 行
-- 生成器 = 一组规则(`domain/notification_rules.go`,R3 落地)
-- 失败不回滚主事务(fire-and-forget,写日志)
+- 常规通知在业务事件提交后 best-effort 创建,失败只写日志,不回滚主流程。
+- `notifications` 行与 Web Push outbox 行必须在同一个通知事务内写入;WebSocket、企微 bot、Web Push 实际发送均在提交后异步执行。
+- Web Push worker 使用 claim token + `lease_until` 乐观租约;失效/缺失 subscription 的待投递 outbox 终结为 `dead`,不进入永久 claim 循环。
+- SKU 同步失败收件人:active 创建人 + active TeamLead,且 department/team 与任务 owner_department/owner_team 精确 trim 后匹配;部门或组为空时只通知 active 创建人。
+- SKU 同步失败 dedupe:建档失败按 `task_id + erp_sync_version + sorted(sku_code + normalized_error)`;商品同步队列失败按 `record_id + sku_code + normalized_error`;成功后清理对应 source scope 的 dedupe claims。
 
 ---
 
@@ -446,6 +472,7 @@ v1 仅推送以下事件到在线客户端:
 - WebSocket 入口:`/ws/v1`(Bearer token 鉴权)
 - 消息格式:`{ "type": "...", "payload": {...} }`
 - 客户端无连接时依赖轮询补偿(前端 15s 回退轮询)
+- Web Push 开启时,前端不得再由 WebSocket 分支弹浏览器 Notification,避免 Service Worker 通知与旧浏览器通知重复。
 
 ---
 
@@ -481,6 +508,10 @@ v1 仅推送以下事件到在线客户端:
 | IA-A6 | 个人中心头像下拉包含 6 个板块(账户 / 安全 / 我的组织 / 我的任务 / 我的待接单 / 通知中心) | §7.2 |
 | IA-A7 | 通知中心在 audit 驳回事件 5s 内生成一条 `task_rejected` 通知 | §8 |
 | IA-A8 | WebSocket 仅推送 §9.1 的 3 类事件;池 tab 数字在接单 1s 内更新 | §9 |
+| IA-A17 | `task_sku_sync_failed` 同一 unresolved failure window 内相同 dedupe key 只生成一次通知;失败集合变化或成功清理后可再次通知 | §8.5 |
+| IA-A18 | Web Push outbox 按 subscription 独立投递;410/404 停用对应订阅并标记 dead,429/5xx 仅重试该 subscription | §8.2 / §8.5 |
+| IA-A19 | 同浏览器 A 登出 B 登录后,endpoint 归属切到 B,A 的通知不会推到该浏览器 | §8.2 / §8.3 |
+| IA-A20 | 经验学习观测端点仅 SuperAdmin 可见,采集数据不参与主业务状态判断 | §2.2 |
 
 ---
 
@@ -493,6 +524,8 @@ v1 仅推送以下事件到在线客户端:
 | Draft v3 | 2026-04-17 | 合并 FE Plan 评审:§3.5.9 新增任务草稿端点(7 天过期、20 条上限、创建成功级联删除)、IA-A13~A16 验收;§7.2 我的任务新增"草稿"子 tab;§8.1 `task_mentioned` 暂不进 v1 明确标注 | **已签字**(2026-04-17) |
 | v1.1 | 2026-04-17 | **R1.5 DDL 对齐 · 仅审计**:核查全文所有列引用,未发现字段幻觉(`priority` 真实列、`task_drafts` / `notifications` / `org_move_requests` 为 v1 新表)。不修改表结构或端点定义。依据 `docs/iterations/V1_R1_5_DDL_ALIGNMENT.md` | **已签字**(2026-04-17,审计 only,无结构变更) |
 | v1.2 | 2026-04-25 | **R4-SA-D 签字生效 · §2.1 报表 L1 实装规则快照新增**:5 条合同级规则固化(数据源走 task_module_events JOIN task_modules JOIN tasks · dwell 语义校正:module_key/task_id 在 task_modules 侧 · task_module_events 无 state_enter_at/state_exit_at 列 · CTE 配对 enter-like/exit-like event + window rank P95 · 5 module_key 固定返行;throughput.archived v1 与 completed 同集合;SuperAdmin-only 报表 + `reports_super_admin_only` deny + `report_access_denied` 审计;搜索 `users[]` 仅 SuperAdmin+HRAdmin 可见 · 其余角色永返 [])。依据 `docs/iterations/V1_R4_SA_D_REPORT.md` §Architect Adjudication | **已签字**(2026-04-25) |
+| v1.11 | 2026-06-27 | **通知增强**:§8 固化 Web Push、SKU 同步失败通知、subscription 粒度 outbox、独立 dedupe claims、企微聚合摘要边界;§9 补充 WebSocket 不再负责系统通知弹窗。 | **待签字** |
+| v1.12 | 2026-06-27 | **经验学习观测半环**:§2.2 固化 Experience Learning SuperAdmin-only 观测入口、side-channel 数据边界、AI suggestion 展示事件按每次展示记账。 | **待签字** |
 
 ---
 

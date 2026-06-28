@@ -88,6 +88,18 @@ func registerV1IdentityRoutes(
 		v1.POST("/me/notifications/:id/read", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.MarkRead)
 		v1.POST("/me/notifications/read-all", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.MarkAllRead)
 		v1.GET("/me/notifications/unread-count", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.UnreadCount)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodGet, "/v1/me/notifications/web-push/config", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...))
+		v1.GET("/me/notifications/web-push/config", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.WebPushConfig)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPost, "/v1/me/notifications/web-push/subscriptions", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...))
+		v1.POST("/me/notifications/web-push/subscriptions", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.RegisterWebPushSubscription)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodDelete, "/v1/me/notifications/web-push/subscriptions/current", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...))
+		v1.DELETE("/me/notifications/web-push/subscriptions/current", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.DeleteCurrentWebPushSubscription)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPost, "/v1/me/notifications/web-push/test", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...))
+		v1.POST("/me/notifications/web-push/test", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.SendWebPushTest)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodGet, "/v1/me/notifications/preferences", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...))
+		v1.GET("/me/notifications/preferences", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.GetPreferences)
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodPatch, "/v1/me/notifications/preferences", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...))
+		v1.PATCH("/me/notifications/preferences", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), notificationH.PatchPreferences)
 	}
 	if wsH != nil {
 		r.GET("/ws/v1", wsH.Upgrade)

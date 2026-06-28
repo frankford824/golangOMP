@@ -30,6 +30,7 @@ type Service struct {
 	logs          repo.PermissionLogRepo
 	hub           Broadcaster
 	external      ExternalNotifier
+	webPush       WebPushConfig
 	now           func() time.Time
 	logger        *zap.Logger
 }
@@ -61,6 +62,35 @@ func WithTxRunner(txRunner repo.TxRunner) ServiceOption {
 func WithExternalNotifier(notifier ExternalNotifier) ServiceOption {
 	return func(s *Service) {
 		s.external = notifier
+	}
+}
+
+type WebPushConfig struct {
+	Enabled     bool
+	PublicKey   string
+	PrivateKey  string
+	Subject     string
+	KeyHash     string
+	LeaseTTL    time.Duration
+	RetryBase   time.Duration
+	MaxAttempts int
+}
+
+func WithWebPushConfig(config WebPushConfig) ServiceOption {
+	return func(s *Service) {
+		if strings.TrimSpace(config.KeyHash) == "" {
+			config.KeyHash = PublicKeyHash(config.PublicKey)
+		}
+		if config.LeaseTTL <= 0 {
+			config.LeaseTTL = 2 * time.Minute
+		}
+		if config.RetryBase <= 0 {
+			config.RetryBase = 30 * time.Second
+		}
+		if config.MaxAttempts <= 0 {
+			config.MaxAttempts = 5
+		}
+		s.webPush = config
 	}
 }
 
@@ -297,6 +327,9 @@ func (s *Service) CreateNotification(ctx context.Context, tx repo.Tx, userID int
 	payload = s.enrichPayload(ctx, userID, ntype, payload)
 	n, err := s.notifications.Create(ctx, tx, &domain.Notification{UserID: userID, NotificationType: ntype, Payload: payload})
 	if err != nil {
+		return nil, err
+	}
+	if err := s.enqueueWebPushDeliveries(ctx, tx, n); err != nil {
 		return nil, err
 	}
 	if s.hub != nil || s.external != nil {

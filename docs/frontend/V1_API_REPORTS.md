@@ -11,7 +11,143 @@ L1 卡片、吞吐与模块停留报表。
 
 - L1 报表仅 super_admin 可用。
 - 403 时重点展示 `reports_super_admin_only`。
-- 本文件覆盖 `4` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `6` 个 `/v1` path；同一路径多 method 合并在同一节。
+
+## GET /v1/reports/experience/stats
+
+### 简介
+支持方法: GET。
+
+- `GET`: SuperAdmin-only read model for capture success, outbox backlog, dead-letter count, tag coverage, AI feedback rate, profile generation, and asset quality labels.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "flags": {
+      "ui_enabled": "...",
+      "capture_enabled": "...",
+      "ai_feedback_enabled": "...",
+      "worker_enabled": "..."
+    },
+    "total_events": 123,
+    "outbox_queued": 123,
+    "outbox_processing": 123,
+    "outbox_dead_letter": 123,
+    "generated_at": "2026-04-25T10:30:41Z"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | ExperienceStats | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/reports/experience/stats \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- L1 报表仅 super_admin 可用。
+- 403 时重点展示 `reports_super_admin_only`。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/reports/experience/samples
+
+### 简介
+支持方法: GET。
+
+- `GET`: SuperAdmin-only sample pool. The query reads only `experience_events` and never joins core task or asset tables.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `source_type` | query | string | 否 | - |
+| `source_id` | query | string | 否 | - |
+| `task_id` | query | integer | 否 | - |
+| `action` | query | string | 否 | - |
+| `outcome` | query | string | 否 | - |
+| `from` | query | string | 否 | ISO date or RFC3339 timestamp, inclusive. |
+| `to` | query | string | 否 | ISO date or RFC3339 timestamp, inclusive. |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "event_key": "...",
+      "schema_version": "...",
+      "event_time": "..."
+    }
+  ],
+  "pagination": {
+    "page": 123,
+    "page_size": 123,
+    "total": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<ExperienceEvent> | 是 | - |
+| `pagination` | PaginationMeta | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid query |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/reports/experience/samples \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- L1 报表仅 super_admin 可用。
+- 403 时重点展示 `reports_super_admin_only`。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/reports/l1/cards
 

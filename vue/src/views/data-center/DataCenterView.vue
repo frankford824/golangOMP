@@ -37,6 +37,7 @@
 
       <section class="module-body">
         <KpiOverviewPanel v-if="activeTab === 'kpi'" :key="`kpi-${refreshToken}`" />
+        <ExperienceLearningPanel v-else-if="activeTab === 'experience'" :key="`experience-${refreshToken}`" />
         <ExportCenterView v-else-if="activeTab === 'export'" :key="`export-${refreshToken}`" embedded />
         <LogsManagementView
           v-else-if="activeTab === 'business'"
@@ -76,13 +77,14 @@ import { useRoute, useRouter } from 'vue-router'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BusinessTrendPilotModal from '@/components/data-center/BusinessTrendPilotModal.vue'
+import ExperienceLearningPanel from '@/components/data-center/ExperienceLearningPanel.vue'
 import KpiOverviewPanel from '@/components/data-center/KpiOverviewPanel.vue'
 import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
 import ExportCenterView from '@/views/export/ExportCenterView.vue'
 import LogsManagementView from '@/views/logs/LogsManagementView.vue'
 
-type DataCenterTab = 'kpi' | 'export' | 'business' | 'operation' | 'permission' | 'server'
+type DataCenterTab = 'kpi' | 'experience' | 'export' | 'business' | 'operation' | 'permission' | 'server'
 
 interface DataCenterTabItem {
   key: DataCenterTab
@@ -109,10 +111,12 @@ const canKpi = computed(
     permissionsStore.hasMenu('report_center') ||
     permissionsStore.hasMenu('finance'),
 )
+const canExperience = computed(() => permissionsStore.isSuperAdmin)
 
 const visibleTabs = computed<DataCenterTabItem[]>(() => {
   const tabs: DataCenterTabItem[] = []
   if (canKpi.value) tabs.push({ key: 'kpi', label: '绩效看板', hint: '运营 / 设计 / 审核' })
+  if (canExperience.value) tabs.push({ key: 'experience', label: '经验观测', hint: '样本 / 标签 / AI' })
   if (canExport.value) tabs.push({ key: 'export', label: '导出', hint: '任务与业务记录' })
   if (canTrace.value) tabs.push({ key: 'business', label: '业务追踪', hint: '人员与任务链路' })
   if (canTrace.value) tabs.push({ key: 'operation', label: '操作明细', hint: '任务 / 导出 / 集成' })
@@ -125,7 +129,7 @@ function normalizeTab(raw: unknown): DataCenterTab | '' {
   const value = String(raw ?? '').trim()
   if (value === 'export-center' || value === 'exports') return 'export'
   if (value === 'logs' || value === 'trace') return 'business'
-  if (['kpi', 'export', 'business', 'operation', 'permission', 'server'].includes(value)) {
+  if (['kpi', 'experience', 'export', 'business', 'operation', 'permission', 'server'].includes(value)) {
     return value as DataCenterTab
   }
   return ''

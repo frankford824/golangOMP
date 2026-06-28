@@ -158,6 +158,7 @@ func main() {
 	businessTrendRepo := mysqlrepo.NewBusinessTrendRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
 	assetWorkbenchRepo := mysqlrepo.NewAssetWorkbenchRepo(mdb)
+	experienceRepo := mysqlrepo.NewExperienceRepo(mdb)
 
 	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
 	auditSvc := service.NewAuditService(auditRepo, skuRepo, assetVersionRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
@@ -321,13 +322,23 @@ func main() {
 		notificationsvc.WithUserRepo(userRepo),
 		notificationsvc.WithTaskRepo(taskRepo),
 		notificationsvc.WithTxRunner(mdb),
-		notificationsvc.WithExternalNotifier(wecomNotifier))
+		notificationsvc.WithExternalNotifier(wecomNotifier),
+		notificationsvc.WithWebPushConfig(notificationsvc.WebPushConfig{
+			Enabled:     cfg.WebPush.Enabled,
+			PublicKey:   cfg.WebPush.VAPIDPublicKey,
+			PrivateKey:  cfg.WebPush.VAPIDPrivateKey,
+			Subject:     cfg.WebPush.VAPIDSubject,
+			LeaseTTL:    cfg.WebPush.LeaseTTL,
+			RetryBase:   cfg.WebPush.RetryBaseDelay,
+			MaxAttempts: cfg.WebPush.MaxAttempts,
+		}))
 	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
 		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
 		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
 		service.WithProductManagementERPImageProxy(erpImageProxySigner),
 		service.WithProductManagementTaskEventRepo(taskEventRepo),
-		service.WithProductManagementSKUComboRepo(skuComboRepo))
+		service.WithProductManagementSKUComboRepo(skuComboRepo),
+		service.WithProductManagementNotificationService(notificationSvc))
 	skuComboSyncSvc := service.NewSKUComboSyncService(productManagementERPBridgeSvc, skuComboRepo, mdb)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
@@ -425,6 +436,16 @@ func main() {
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
 	predictionSvc := predictionsvc.NewService(predictionRepo)
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
+	experienceSvc := service.NewExperienceService(experienceRepo, service.ExperienceServiceConfig{
+		UIEnabled:         cfg.Experience.UIEnabled,
+		CaptureEnabled:    cfg.Experience.CaptureEnabled,
+		AIFeedbackEnabled: cfg.Experience.AIFeedbackEnabled,
+		WorkerEnabled:     cfg.Experience.WorkerEnabled,
+		WorkerBatchSize:   cfg.Experience.WorkerBatchSize,
+		WorkerMaxAttempts: cfg.Experience.WorkerMaxAttempts,
+		OutboxLeaseTTL:    cfg.Experience.OutboxLeaseTTL,
+		RuntimeConfigFile: cfg.Experience.RuntimeConfigFile,
+	}, logger.Named("experience"))
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
 	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen))
@@ -551,33 +572,42 @@ func main() {
 	designSourceH := handler.NewDesignSourceHandler(designSourceSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
 	reportL1H := handler.NewReportL1Handler(reportL1Svc, permissionLogRepo)
+	experienceH := handler.NewExperienceHandler(experienceSvc)
 	predictionH := handler.NewPredictionHandler(predictionSvc)
+	predictionH.SetExperienceService(experienceSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	workers.NewGroup(workers.GroupDeps{
-		DB:                            db,
-		Redis:                         rdb,
-		Logger:                        logger,
-		ERPSync:                       erpSyncSvc,
-		ProductManagement:             productManagementSvc,
-		SKUComboSync:                  skuComboSyncSvc,
-		AssetWorkbenchPreview:         assetWorkbenchSvc,
-		AssetWorkbenchMaintenance:     assetWorkbenchSvc,
-		ERPEnabled:                    cfg.ERP.Enabled,
-		ERPInterval:                   cfg.ERP.Interval,
-		AssetWorkbenchPreviewEnabled:  cfg.AssetWorkbench.PreviewWorkerEnabled,
-		AssetWorkbenchPreviewInterval: cfg.AssetWorkbench.PreviewWorkerInterval,
-		AssetWorkbenchPreviewLimit:    cfg.AssetWorkbench.PreviewWorkerLimit,
-		AssetWorkbenchExpiryEnabled:   cfg.AssetWorkbench.UploadExpiryWorkerEnabled,
-		AssetWorkbenchExpiryInterval:  cfg.AssetWorkbench.UploadExpiryWorkerInterval,
-		AssetWorkbenchExpiryLimit:     cfg.AssetWorkbench.UploadExpiryWorkerLimit,
+		DB:                              db,
+		Redis:                           rdb,
+		Logger:                          logger,
+		ERPSync:                         erpSyncSvc,
+		ProductManagement:               productManagementSvc,
+		SKUComboSync:                    skuComboSyncSvc,
+		Notification:                    notificationSvc,
+		AssetWorkbenchPreview:           assetWorkbenchSvc,
+		AssetWorkbenchMaintenance:       assetWorkbenchSvc,
+		ERPEnabled:                      cfg.ERP.Enabled,
+		ERPInterval:                     cfg.ERP.Interval,
+		WebPushEnabled:                  cfg.WebPush.Enabled,
+		WebPushInterval:                 cfg.WebPush.WorkerInterval,
+		WebPushLimit:                    cfg.WebPush.WorkerLimit,
+		SKUSyncFailureReconcileInterval: cfg.WebPush.SKUSyncFailureScanInterval,
+		SKUSyncFailureReconcileLimit:    cfg.WebPush.SKUSyncFailureScanLimit,
+		AssetWorkbenchPreviewEnabled:    cfg.AssetWorkbench.PreviewWorkerEnabled,
+		AssetWorkbenchPreviewInterval:   cfg.AssetWorkbench.PreviewWorkerInterval,
+		AssetWorkbenchPreviewLimit:      cfg.AssetWorkbench.PreviewWorkerLimit,
+		AssetWorkbenchExpiryEnabled:     cfg.AssetWorkbench.UploadExpiryWorkerEnabled,
+		AssetWorkbenchExpiryInterval:    cfg.AssetWorkbench.UploadExpiryWorkerInterval,
+		AssetWorkbenchExpiryLimit:       cfg.AssetWorkbench.UploadExpiryWorkerLimit,
 	}).Start(workerCtx)
+	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
 	if wecomSender.Start(workerCtx) {
 		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
 	}
@@ -802,6 +832,53 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 				return
 			case <-ticker.C:
 				runPrepare()
+			}
+		}
+	}()
+}
+
+func startExperienceWorker(ctx context.Context, svc service.ExperienceService, cfg config.ExperienceConfig, logger *zap.Logger) {
+	if svc == nil {
+		return
+	}
+	interval := cfg.WorkerInterval
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	batchSize := cfg.WorkerBatchSize
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		logger.Info("experience worker loop started", zap.Duration("interval", interval), zap.Int("batch_size", batchSize))
+		runOnce := func() {
+			if !svc.RuntimeFlags().WorkerEnabled {
+				return
+			}
+			runCtx, cancel := context.WithTimeout(ctx, interval)
+			defer cancel()
+			result, appErr := svc.ProcessOutbox(runCtx, batchSize)
+			if appErr != nil {
+				logger.Warn("experience worker run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+				return
+			}
+			if result.Claimed > 0 || result.Failed > 0 || result.DeadLetter > 0 {
+				logger.Info("experience worker run finished",
+					zap.Int("claimed", result.Claimed),
+					zap.Int("processed", result.Processed),
+					zap.Int("failed", result.Failed),
+					zap.Int("dead_letter", result.DeadLetter))
+			}
+		}
+		runOnce()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runOnce()
 			}
 		}
 	}()

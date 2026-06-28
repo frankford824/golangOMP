@@ -8,6 +8,7 @@ import type {
   TaskClosedPayload,
   TaskPendingAuditPayload,
   TaskRejectedPayload,
+  TaskSKUSyncFailedPayload,
 } from '@/services/v1Types'
 
 export interface NotificationText {
@@ -132,6 +133,15 @@ export function formatNotification(
       const title = String(p.title ?? '').trim() || '系统广播'
       const content = String(p.content ?? '').trim() || '你收到一条系统广播'
       return { title, content }
+    }
+    case 'task_sku_sync_failed': {
+      const p = safePayload as unknown as TaskSKUSyncFailedPayload
+      const count = Number(p.failed_count ?? p.failed_items?.length ?? 0)
+      const summary = String(p.summary ?? '').trim()
+      return {
+        title: 'SKU同步失败',
+        content: summary || `${task}有 ${Number.isFinite(count) && count > 0 ? count : 1} 个SKU同步失败，请查看明细`,
+      }
     }
     default:
       return { title: '系统通知', content: '你收到一条新通知' }
