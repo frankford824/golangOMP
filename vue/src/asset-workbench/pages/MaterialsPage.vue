@@ -392,7 +392,7 @@ onMounted(() => {
       <p v-if="error" class="aw-inline-alert">{{ error }}</p>
     </div>
 
-    <div class="aw-material-browser">
+    <div class="aw-material-browser" :class="{ 'aw-material-browser--detail': viewMode === 'table' }">
       <div class="aw-material-browser__main">
         <MaterialGallery
           v-if="viewMode === 'gallery'"
