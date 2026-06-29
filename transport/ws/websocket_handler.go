@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,6 +25,8 @@ type Handler struct {
 	hub      *svcws.Hub
 	upgrader gws.Upgrader
 }
+
+const wsBearerProtocolPrefix = "wf-token."
 
 // wsAllowedOrigins lists extra cross-origin sources allowed to open WebSocket
 // connections (comma-separated full origins, e.g. "https://app.example.com").
@@ -66,23 +69,20 @@ func NewHandler(resolver RequestActorResolver, hub *svcws.Hub) *Handler {
 	return &Handler{
 		resolver: resolver,
 		hub:      hub,
-		upgrader: gws.Upgrader{CheckOrigin: checkWSOrigin},
+		upgrader: gws.Upgrader{
+			CheckOrigin:  checkWSOrigin,
+			Subprotocols: []string{"workflow-v1"},
+		},
 	}
 }
 
 func (h *Handler) Upgrade(c *gin.Context) {
-	token := bearerToken(c.GetHeader("Authorization"))
-	if token == "" {
-		if cookie, err := c.Cookie(handler.WSTokenCookie); err == nil {
-			token = strings.TrimSpace(cookie)
-		}
-	}
-	if token == "" || h.resolver == nil {
+	if h.resolver == nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, domain.APIErrorResponse{Error: domain.ErrUnauthorized})
 		return
 	}
-	actor, appErr := h.resolver.ResolveRequestActor(c.Request.Context(), token)
-	if appErr != nil || actor == nil || actor.ID <= 0 {
+	actor := resolveActorFromWSTokens(c, h.resolver)
+	if actor == nil || actor.ID <= 0 {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, domain.APIErrorResponse{Error: domain.ErrUnauthorized})
 		return
 	}
@@ -102,4 +102,52 @@ func bearerToken(header string) string {
 		return ""
 	}
 	return strings.TrimSpace(header[6:])
+}
+
+func resolveActorFromWSTokens(c *gin.Context, resolver RequestActorResolver) *domain.RequestActor {
+	for _, token := range wsAuthTokenCandidates(c) {
+		actor, appErr := resolver.ResolveRequestActor(c.Request.Context(), token)
+		if appErr == nil && actor != nil && actor.ID > 0 {
+			return actor
+		}
+	}
+	return nil
+}
+
+func wsAuthTokenCandidates(c *gin.Context) []string {
+	var tokens []string
+	add := func(token string) {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			return
+		}
+		for _, existing := range tokens {
+			if existing == token {
+				return
+			}
+		}
+		tokens = append(tokens, token)
+	}
+	add(bearerToken(c.GetHeader("Authorization")))
+	if cookie, err := c.Cookie(handler.WSTokenCookie); err == nil {
+		add(cookie)
+	}
+	add(bearerTokenFromWSProtocol(c.GetHeader("Sec-WebSocket-Protocol")))
+	return tokens
+}
+
+func bearerTokenFromWSProtocol(header string) string {
+	for _, item := range strings.Split(header, ",") {
+		item = strings.TrimSpace(item)
+		if !strings.HasPrefix(item, wsBearerProtocolPrefix) {
+			continue
+		}
+		encoded := strings.TrimPrefix(item, wsBearerProtocolPrefix)
+		raw, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	return ""
 }

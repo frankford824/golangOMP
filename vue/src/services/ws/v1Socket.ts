@@ -1,3 +1,5 @@
+import { getToken } from '@/services/http'
+
 export type V1WsEventType =
   | 'task_pool_count_changed'
   | 'my_task_updated'
@@ -15,12 +17,28 @@ export interface V1SocketOptions {
 
 const MAX_RECONNECT_DELAY_MS = 30_000
 const FALLBACK_POLL_INTERVAL_MS = 15_000
+const WS_TOKEN_PROTOCOL_PREFIX = 'wf-token.'
 
 function resolveWsUrl(): string {
   const explicit = String(import.meta.env.VITE_WS_BASE_URL ?? '').trim()
   const base = explicit || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
   const url = new URL('/ws/v1', base)
   return url.toString()
+}
+
+function resolveWsProtocols(): string[] | undefined {
+  const token = getToken()
+  if (!token) return undefined
+  return ['workflow-v1', `${WS_TOKEN_PROTOCOL_PREFIX}${base64UrlEncode(token)}`]
+}
+
+function base64UrlEncode(value: string): string {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '')
 }
 
 export class V1SocketClient {
@@ -38,7 +56,8 @@ export class V1SocketClient {
     this.clearReconnectTimer()
 
     try {
-      this.socket = new WebSocket(resolveWsUrl())
+      const protocols = resolveWsProtocols()
+      this.socket = protocols ? new WebSocket(resolveWsUrl(), protocols) : new WebSocket(resolveWsUrl())
     } catch {
       this.scheduleReconnect()
       return
