@@ -1639,6 +1639,42 @@ body.aw-ledger-locked {
   align-items: center;
 }
 
+.aw-material-client-list,
+.aw-material-admin-list,
+.aw-upload-result-list {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-material-client-item,
+.aw-material-admin-item,
+.aw-upload-result-list li {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.8fr) auto auto auto;
+  gap: var(--aw-space-3);
+  align-items: center;
+  min-height: var(--aw-row-md);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  padding: var(--aw-space-2) var(--aw-space-3);
+  background: var(--aw-surface-raised);
+}
+
+.aw-material-client-item {
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) auto;
+}
+
+.aw-material-admin-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.4fr) minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: var(--aw-space-3);
+  align-items: center;
+  margin: var(--aw-space-3) 0;
+}
+
 .aw-view-toggle {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2528,6 +2564,10 @@ body.aw-ledger-locked {
   .aw-upload-list > div,
   .aw-material-browser,
   .aw-material-search,
+  .aw-material-admin-form,
+  .aw-material-client-item,
+  .aw-material-admin-item,
+  .aw-upload-result-list li,
   .aw-material-preview,
   .aw-member-row,
   .aw-form-grid {

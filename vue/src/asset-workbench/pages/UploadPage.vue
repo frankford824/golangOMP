@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, XCircle } f
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { assetWorkbenchApi, type SubmissionFileRow, type WorkbenchTemplateRow } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type SubmissionFileRow, type UploadDirectoryRow, type WorkbenchTemplateRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
@@ -23,7 +23,20 @@ interface QueueItem {
   progress: number
   status: QueueStatus
   sessionId?: string
+  uploadDirectoryId?: number
+  uploadDirectoryName?: string
   error?: string
+}
+
+interface UploadContext {
+  templates: WorkbenchTemplateRow[]
+  directories: UploadDirectoryRow[]
+}
+
+interface UploadBatchResult {
+  total: number
+  success: number
+  failed: number
 }
 
 const queue = ref<QueueItem[]>([])
@@ -34,16 +47,24 @@ const error = ref('')
 const notice = ref('')
 const submittedFiles = ref<SubmissionFileRow[]>([])
 const templates = ref<WorkbenchTemplateRow[]>([])
+const uploadDirectories = ref<UploadDirectoryRow[]>([])
 const selectedTemplateId = ref(0)
+const selectedUploadDirectoryId = ref(0)
+const lastUploadResult = ref<UploadBatchResult | null>(null)
+const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
 const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
 const { bootstrap, refresh } = useAssetWorkbenchBootstrap()
-const contextRequest = usePageRequest<WorkbenchTemplateRow[]>(
+const contextRequest = usePageRequest<UploadContext>(
   async () => {
     await refresh()
-    return assetWorkbenchApi.listMyTemplates()
+    const [nextTemplates, nextDirectories] = await Promise.all([
+      assetWorkbenchApi.listMyTemplates(),
+      assetWorkbenchApi.listUploadDirectories(),
+    ])
+    return { templates: nextTemplates, directories: nextDirectories }
   },
-  [],
+  { templates: [], directories: [] },
   '作品类型加载失败',
 )
 const contextLoading = contextRequest.loading
@@ -51,6 +72,9 @@ const contextError = contextRequest.error
 
 const uploadedItems = computed(() => queue.value.filter((item) => item.status === 'uploaded'))
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
+const requiresUploadDirectory = computed(() => uploadDirectories.value.length > 0)
+const selectedUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === selectedUploadDirectoryId.value))
+const canUseUploadDirectory = computed(() => !requiresUploadDirectory.value || selectedUploadDirectoryId.value > 0)
 const hasPendingUploads = computed(() => queue.value.some((item) => item.status === 'queued' || item.status === 'failed'))
 const canSubmit = computed(() => {
   if (uploadedItems.value.length === 0 || uploading.value || submitting.value) return false
@@ -60,15 +84,35 @@ const canSubmit = computed(() => {
 const canSimpleSubmit = computed(() => {
   if (!isSimpleUser.value) return false
   if (!queue.value.length || uploading.value || submitting.value) return false
-  return selectedTemplateId.value > 0 && queue.value.every((item) => item.status !== 'uploading')
+  return selectedTemplateId.value > 0 && canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading')
 })
 const totalPages = computed(() => queue.value.reduce((sum, item) => sum + item.pageCount, 0))
+const uploadStats = computed(() => {
+  const total = queue.value.length
+  const uploaded = queue.value.filter((item) => item.status === 'uploaded').length
+  const failed = queue.value.filter((item) => item.status === 'failed').length
+  const uploadingCount = queue.value.filter((item) => item.status === 'uploading').length
+  const progressTotal = queue.value.reduce((sum, item) => {
+    if (item.status === 'uploaded') return sum + 100
+    if (item.status === 'failed') return sum + item.progress
+    if (item.status === 'uploading') return sum + item.progress
+    return sum
+  }, 0)
+  return {
+    total,
+    uploaded,
+    failed,
+    uploading: uploadingCount,
+    percent: total > 0 ? Math.round(progressTotal / total) : 0,
+  }
+})
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === selectedTemplateId.value))
 const simplePrimaryLabel = computed(() => {
   if (uploading.value) return '正在上传'
   if (submitting.value) return '正在交上去'
   if (!queue.value.length) return '先选择文件'
   if (!selectedTemplateId.value) return '先选作品类型'
+  if (!canUseUploadDirectory.value) return '先选上传目录'
   return `交上去 ${formatInt(queue.value.length)} 个文件`
 })
 const submitButtonLabel = computed(() => {
@@ -97,6 +141,8 @@ function enqueueFiles(files: FileList | null | undefined) {
   notice.value = ''
   error.value = ''
   submittedFiles.value = []
+  lastUploadResult.value = null
+  lastSubmissionResult.value = null
   for (const file of Array.from(files)) {
     queue.value.push({
       id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
@@ -113,16 +159,26 @@ function enqueueFiles(files: FileList | null | undefined) {
 }
 
 async function uploadQueuedItems() {
+  if (!canUseUploadDirectory.value) {
+    error.value = '先选择这次上传要进入的目录'
+    return false
+  }
   uploading.value = true
   error.value = ''
   notice.value = ''
+  lastUploadResult.value = null
+  const uploadDirectoryId = selectedUploadDirectoryId.value || undefined
+  const uploadDirectoryName = selectedUploadDirectory.value?.name ?? ''
   for (const item of queue.value) {
     if (item.status !== 'queued' && item.status !== 'failed') continue
     item.status = 'uploading'
     item.error = ''
     item.progress = 0
+    item.uploadDirectoryId = uploadDirectoryId
+    item.uploadDirectoryName = uploadDirectoryName
     try {
       const uploaded = await uploadWorkbenchFile(item.file, {
+        uploadDirectoryId,
         onProgress: (progress) => {
           item.progress = progress.percent
         },
@@ -136,7 +192,13 @@ async function uploadQueuedItems() {
     }
   }
   uploading.value = false
-  return queue.value.every((item) => item.status !== 'failed')
+  const failed = queue.value.filter((item) => item.status === 'failed').length
+  const success = queue.value.filter((item) => item.status === 'uploaded').length
+  lastUploadResult.value = { total: queue.value.length, success, failed }
+  if (failed === 0 && queue.value.length > 0) {
+    notice.value = `上传完成：成功 ${formatInt(success)} 个，失败 0 个`
+  }
+  return failed === 0
 }
 
 async function uploadAll() {
@@ -165,10 +227,13 @@ async function createSubmission() {
       })),
     })
     submittedFiles.value = detail.items.flatMap((item) => item.files)
-    notice.value = isSimpleUser.value ? '作品已交上去' : '提交已创建'
+    lastSubmissionResult.value = { total: uploadedItems.value.length, success: submittedFiles.value.length, failed: 0 }
+    notice.value = isSimpleUser.value
+      ? `作品已交上去：${formatInt(submittedFiles.value.length)} 个文件`
+      : `提交已创建：${formatInt(submittedFiles.value.length)} 个文件`
     queue.value = queue.value.filter((item) => item.status !== 'uploaded')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '提交失败'
+    error.value = err instanceof Error ? `上传已完成，但提交失败：${err.message}` : '上传已完成，但提交失败'
   } finally {
     submitting.value = false
   }
@@ -206,6 +271,16 @@ function selectTemplate(template: WorkbenchTemplateRow) {
 
 function templateName(templateId: number) {
   return templates.value.find((item) => item.id === templateId)?.name ?? '未选择'
+}
+
+function selectUploadDirectory(directory: UploadDirectoryRow) {
+  selectedUploadDirectoryId.value = directory.id
+  for (const item of queue.value) {
+    if (item.status === 'queued' || item.status === 'failed') {
+      item.uploadDirectoryId = directory.id
+      item.uploadDirectoryName = directory.name
+    }
+  }
 }
 
 function removeItem(id: string) {
@@ -256,9 +331,13 @@ function filenameWithoutExt(filename: string) {
 
 async function loadContext() {
   const next = await contextRequest.run()
-  templates.value = next ?? []
+  templates.value = next?.templates ?? []
+  uploadDirectories.value = next?.directories ?? []
   if (!selectedTemplateId.value && templates.value[0]) {
     selectedTemplateId.value = templates.value[0].id
+  }
+  if (!selectedUploadDirectoryId.value && uploadDirectories.value[0]) {
+    selectedUploadDirectoryId.value = uploadDirectories.value[0].id
   }
 }
 
@@ -280,13 +359,48 @@ onMounted(() => {
         <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
           {{ simplePrimaryLabel }}
         </button>
-        <button v-else class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0" @click="uploadAll">
+        <button v-else class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0 || !canUseUploadDirectory" @click="uploadAll">
           上传队列
         </button>
       </div>
     </div>
 
     <input ref="inputRef" class="aw-visually-hidden" type="file" multiple aria-label="选择作品文件" @change="handleInput" />
+
+    <div class="aw-panel">
+      <div class="aw-panel__head">
+        <div>
+          <p class="aw-eyebrow">上传目录</p>
+          <h3>选择这次文件进入的位置</h3>
+        </div>
+        <span v-if="selectedUploadDirectory" class="aw-chip aw-chip--info">{{ selectedUploadDirectory.name }}</span>
+        <span v-else class="aw-chip aw-chip--neutral">默认目录</span>
+      </div>
+      <AsyncBoundary
+        :loading="contextLoading"
+        :error="contextError"
+        loading-label="正在加载上传目录"
+        @retry="loadContext"
+      >
+        <div v-if="uploadDirectories.length" class="aw-template-option-grid">
+          <button
+            v-for="directory in uploadDirectories"
+            :key="directory.id"
+            class="aw-template-option"
+            :class="{ 'aw-template-option--active': selectedUploadDirectoryId === directory.id }"
+            type="button"
+            @click="selectUploadDirectory(directory)"
+          >
+            <strong>{{ directory.name }}</strong>
+            <span>{{ directory.description || directory.oss_prefix }}</span>
+          </button>
+        </div>
+        <div v-else class="aw-empty-state">
+          <h3>使用默认目录</h3>
+          <p>管理端配置上传目录后，这里会要求先选择目录再上传。</p>
+        </div>
+      </AsyncBoundary>
+    </div>
 
     <div v-if="isSimpleUser" class="aw-panel">
       <div class="aw-panel__head">
@@ -332,6 +446,8 @@ onMounted(() => {
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
         <span>{{ formatInt(queue.length) }} 个文件</span>
+        <span v-if="queue.length">{{ formatInt(uploadStats.percent) }}%</span>
+        <span v-if="queue.length">成功 {{ formatInt(uploadStats.uploaded) }} · 失败 {{ formatInt(uploadStats.failed) }}</span>
         <span v-if="!isSimpleUser">{{ formatInt(totalPages) }} 页</span>
         <button v-if="isSimpleUser" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">{{ simplePrimaryLabel }}</button>
         <button v-else type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
@@ -342,7 +458,7 @@ onMounted(() => {
             <component :is="statusIcon(item.status)" :size="22" aria-hidden="true" />
             <div>
               <strong>{{ item.file.name }}</strong>
-              <span>{{ templateName(item.templateId) }} · {{ formatFileSize(item.file.size) }}</span>
+              <span>{{ templateName(item.templateId) }} · {{ item.uploadDirectoryName || selectedUploadDirectory?.name || '默认目录' }} · {{ formatFileSize(item.file.size) }}</span>
             </div>
             <span class="aw-chip" :class="statusTone(item.status)">
               {{ item.status === 'uploading' ? `${item.progress}%` : statusLabel(item.status) }}
@@ -392,6 +508,7 @@ onMounted(() => {
             定稿
           </label>
           <strong>{{ item.status === 'uploading' ? `${item.progress}%` : statusLabel(item.status) }}</strong>
+          <span class="aw-cell-text">{{ item.uploadDirectoryName || selectedUploadDirectory?.name || '默认目录' }}</span>
           <button type="button" :disabled="item.status === 'uploading'" @click="removeItem(item.id)">移除</button>
           <span v-if="item.error" class="aw-upload-row__error">{{ item.error }}</span>
         </div>
@@ -400,6 +517,25 @@ onMounted(() => {
         <h3>等待文件</h3>
         <p>{{ isSimpleUser ? '支持一次交多个文件。交上去以后，可以在看收入里查看金额。' : '支持批量拖拽上传。完成后进入维护专区，管理员可以质检、修正、下载和结算。' }}</p>
       </div>
+    </div>
+
+    <div v-if="lastUploadResult || lastSubmissionResult" class="aw-panel aw-panel--stage">
+      <h3>本次上传结论</h3>
+      <p v-if="lastUploadResult" class="aw-copy">
+        上传：共 {{ formatInt(lastUploadResult.total) }} 个，成功 {{ formatInt(lastUploadResult.success) }} 个，失败 {{ formatInt(lastUploadResult.failed) }} 个。
+      </p>
+      <p v-if="lastSubmissionResult" class="aw-copy">
+        提交：已生成 {{ formatInt(lastSubmissionResult.success) }} 个文件记录。
+      </p>
+      <div v-if="queue.some((item) => item.status === 'failed')" class="aw-inline-actions">
+        <button class="aw-primary-button" type="button" :disabled="uploading || !canUseUploadDirectory" @click="uploadAll">重试失败文件</button>
+      </div>
+      <ul v-if="queue.some((item) => item.status === 'failed')" class="aw-upload-result-list">
+        <li v-for="item in queue.filter((entry) => entry.status === 'failed')" :key="item.id">
+          <strong>{{ item.file.name }}</strong>
+          <span>{{ item.error || '上传失败' }}</span>
+        </li>
+      </ul>
     </div>
 
     <div v-if="submittedFiles.length" class="aw-panel aw-panel--stage">

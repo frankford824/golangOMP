@@ -21,11 +21,21 @@ function bootstrap(overrides: Partial<AssetWorkbenchBootstrap>): AssetWorkbenchB
 
 describe('asset workbench access rules', () => {
   it('keeps simple user routes available to non-admin accounts', () => {
-    const user = bootstrap({ is_admin: false, capabilities: [] })
+    const user = bootstrap({ is_admin: false, capabilities: ['asset.workbench.submit', 'asset.workbench.material.download'] })
 
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload'))).toBe(true)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/materials'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/my-settlement'))).toBe(true)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/account'))).toBe(true)
+  })
+
+  it('keeps capability-gated simple routes closed when the capability is missing', () => {
+    const user = bootstrap({ is_admin: false, capabilities: [] })
+
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/'))).toBe(true)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload'))).toBe(false)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/materials'))).toBe(false)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/account'))).toBe(true)
   })
 

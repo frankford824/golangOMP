@@ -18679,6 +18679,353 @@ paths:
                         identity: { type: string, enum: [admin, normal] }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/upload-directories:
+    get:
+      summary: List enabled asset workbench upload directories
+      description: Client-visible upload destinations. When this list is non-empty, upload session creation requires `upload_directory_id`.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      responses:
+        '200':
+          description: Enabled upload directories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchUploadDirectory
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        oss_prefix: { type: string }
+                        description: { type: string }
+                        enabled: { type: boolean }
+                        sort_order: { type: integer }
+                        created_by: { type: integer }
+                        updated_by: { type: integer, nullable: true }
+                        created_at: { type: string, format: date-time }
+                        updated_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+    post:
+      summary: Create asset workbench upload directory
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, oss_prefix]
+              properties:
+                name: { type: string }
+                oss_prefix: { type: string, description: Relative OSS prefix under asset-workbench/uploads. }
+                description: { type: string }
+                enabled: { type: boolean }
+                sort_order: { type: integer }
+      responses:
+        '201':
+          description: Created upload directory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchUploadDirectory
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/upload-directories/admin:
+    get:
+      summary: List all asset workbench upload directories for administration
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      responses:
+        '200':
+          description: All upload directories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: *AssetWorkbenchUploadDirectory
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/upload-directories/{directory_id}:
+    patch:
+      summary: Update asset workbench upload directory
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: path
+          name: directory_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                oss_prefix: { type: string }
+                description: { type: string }
+                enabled: { type: boolean }
+                sort_order: { type: integer }
+      responses:
+        '200':
+          description: Updated upload directory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchUploadDirectory
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Upload directory not found }
+  /v1/asset-workbench/client-materials:
+    get:
+      summary: List client-downloadable materials
+      description: Returns enabled materials for clients. AssetManager/SuperAdmin may pass `admin=1` to include disabled materials.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      parameters:
+        - in: query
+          name: admin
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Client material rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchClientMaterial
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        asset_id: { type: integer }
+                        title: { type: string }
+                        description: { type: string }
+                        filename_snapshot: { type: string }
+                        mime_type_snapshot: { type: string }
+                        file_size_snapshot: { type: integer }
+                        enabled: { type: boolean }
+                        sort_order: { type: integer }
+                        published_by: { type: integer }
+                        updated_by: { type: integer, nullable: true }
+                        published_at: { type: string, format: date-time }
+                        created_at: { type: string, format: date-time }
+                        updated_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+    post:
+      summary: Publish a system asset to client materials
+      description: Publishes an existing system asset by `asset_id`. Clients can download only published enabled rows.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset_id]
+              properties:
+                asset_id: { type: integer }
+                title: { type: string }
+                description: { type: string }
+                enabled: { type: boolean }
+                sort_order: { type: integer }
+      responses:
+        '201':
+          description: Published client material
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchClientMaterial
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/client-materials/{material_id}:
+    patch:
+      summary: Update client material publication
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: path
+          name: material_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                asset_id: { type: integer }
+                title: { type: string }
+                description: { type: string }
+                enabled: { type: boolean }
+                sort_order: { type: integer }
+      responses:
+        '200':
+          description: Updated client material
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchClientMaterial
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Client material not found }
+    delete:
+      summary: Delete client material publication
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: path
+          name: material_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Deleted client material publication }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Client material not found }
+  /v1/asset-workbench/client-materials/{material_id}/download:
+    get:
+      summary: Get client material download info
+      description: Returns a direct download manifest only when the material is published and enabled for clients.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      parameters:
+        - in: path
+          name: material_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Download info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      download_mode: { type: string }
+                      download_url: { type: string }
+                      filename: { type: string }
+                      file_size: { type: integer }
+                      mime_type: { type: string }
+                      expires_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Client material not found }
+  /v1/asset-workbench/client-materials/batch-download:
+    post:
+      summary: Batch download client materials
+      description: Builds a direct-download manifest for published client material IDs. The backend does not open system search to clients.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [material_ids]
+              properties:
+                material_ids:
+                  type: array
+                  items: { type: integer }
+                naming_mode: { type: string, enum: [business, original] }
+      responses:
+        '200':
+          description: Batch direct-download manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            asset_id: { type: integer }
+                            task_id: { type: integer }
+                            filename: { type: string }
+                            file_size: { type: integer }
+                            mime_type: { type: string }
+                            download_url: { type: string }
+                            expires_at: { type: string, format: date-time }
+                      failures:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            asset_id: { type: integer }
+                            reason: { type: string }
+                      success_count: { type: integer }
+                      failure_count: { type: integer }
+                      total_size: { type: integer }
+                      expires_at: { type: string, format: date-time }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
   /v1/asset-workbench/system-assets/{asset_id}/preview:
     get:
       summary: Get asset workbench system asset preview

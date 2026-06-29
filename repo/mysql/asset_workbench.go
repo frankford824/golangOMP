@@ -1260,14 +1260,194 @@ func (r *assetWorkbenchRepo) SetTemplateAssignmentEnabled(ctx context.Context, t
 	return scanAssetWorkbenchTemplateAssignment(row)
 }
 
+func (r *assetWorkbenchRepo) ListUploadDirectories(ctx context.Context, filter repo.AssetWorkbenchUploadDirectoryFilter) ([]*domain.AssetWorkbenchUploadDirectory, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if filter.Enabled != nil {
+		where = append(where, "enabled = ?")
+		args = append(args, *filter.Enabled)
+	}
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchUploadDirectorySelect()+` WHERE `+strings.Join(where, " AND ")+` ORDER BY sort_order ASC, id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench upload directories: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchUploadDirectory{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchUploadDirectory(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) GetUploadDirectory(ctx context.Context, directoryID int64) (*domain.AssetWorkbenchUploadDirectory, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchUploadDirectorySelect()+` WHERE id = ?`, directoryID)
+	return scanAssetWorkbenchUploadDirectory(row)
+}
+
+func (r *assetWorkbenchRepo) CreateUploadDirectory(ctx context.Context, tx repo.Tx, directory *domain.AssetWorkbenchUploadDirectory) (*domain.AssetWorkbenchUploadDirectory, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_upload_directories (
+			name, oss_prefix, description, enabled, sort_order, created_by, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		directory.Name,
+		directory.OSSPrefix,
+		directory.Description,
+		directory.Enabled,
+		directory.SortOrder,
+		directory.CreatedBy,
+		toNullInt64(directory.UpdatedBy),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench upload directory: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench upload directory last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchUploadDirectorySelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchUploadDirectory(row)
+}
+
+func (r *assetWorkbenchRepo) UpdateUploadDirectory(ctx context.Context, tx repo.Tx, directory *domain.AssetWorkbenchUploadDirectory) (*domain.AssetWorkbenchUploadDirectory, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_upload_directories
+		SET name = ?, oss_prefix = ?, description = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		directory.Name,
+		directory.OSSPrefix,
+		directory.Description,
+		directory.Enabled,
+		directory.SortOrder,
+		toNullInt64(directory.UpdatedBy),
+		directory.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench upload directory: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench upload directory rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchUploadDirectorySelect()+` WHERE id = ?`, directory.ID)
+	return scanAssetWorkbenchUploadDirectory(row)
+}
+
+func (r *assetWorkbenchRepo) ListClientMaterials(ctx context.Context, filter repo.AssetWorkbenchClientMaterialFilter) ([]*domain.AssetWorkbenchClientMaterial, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if filter.Enabled != nil {
+		where = append(where, "enabled = ?")
+		args = append(args, *filter.Enabled)
+	}
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchClientMaterialSelect()+` WHERE `+strings.Join(where, " AND ")+` ORDER BY sort_order ASC, id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench client materials: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchClientMaterial{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchClientMaterial(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) GetClientMaterial(ctx context.Context, materialID int64) (*domain.AssetWorkbenchClientMaterial, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchClientMaterialSelect()+` WHERE id = ?`, materialID)
+	return scanAssetWorkbenchClientMaterial(row)
+}
+
+func (r *assetWorkbenchRepo) CreateClientMaterial(ctx context.Context, tx repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_client_materials (
+			asset_id, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
+			enabled, sort_order, published_by, updated_by, published_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		material.AssetID,
+		material.Title,
+		material.Description,
+		material.FilenameSnapshot,
+		material.MimeTypeSnapshot,
+		material.FileSizeSnapshot,
+		material.Enabled,
+		material.SortOrder,
+		material.PublishedBy,
+		toNullInt64(material.UpdatedBy),
+		material.PublishedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench client material: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench client material last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchClientMaterialSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchClientMaterial(row)
+}
+
+func (r *assetWorkbenchRepo) UpdateClientMaterial(ctx context.Context, tx repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_client_materials
+		SET asset_id = ?, title = ?, description = ?, filename_snapshot = ?, mime_type_snapshot = ?,
+		    file_size_snapshot = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		material.AssetID,
+		material.Title,
+		material.Description,
+		material.FilenameSnapshot,
+		material.MimeTypeSnapshot,
+		material.FileSizeSnapshot,
+		material.Enabled,
+		material.SortOrder,
+		toNullInt64(material.UpdatedBy),
+		material.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench client material: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench client material rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchClientMaterialSelect()+` WHERE id = ?`, material.ID)
+	return scanAssetWorkbenchClientMaterial(row)
+}
+
+func (r *assetWorkbenchRepo) DeleteClientMaterial(ctx context.Context, tx repo.Tx, materialID int64) error {
+	res, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM asset_workbench_client_materials WHERE id = ?`, materialID)
+	if err != nil {
+		return fmt.Errorf("delete asset workbench client material: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("asset workbench client material delete rows affected: %w", err)
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *assetWorkbenchRepo) CreateUploadSession(ctx context.Context, tx repo.Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_upload_sessions (
-			session_id, owner_user_id, status, object_key, original_filename, file_size, mime_type,
+			session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix,
+			status, object_key, original_filename, file_size, mime_type,
 			file_hash, upload_id, multipart_plan_json, expires_at, uploaded_at, cancelled_at, submitted_item_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.SessionID,
 		session.OwnerUserID,
+		toNullInt64(session.UploadDirectoryID),
+		session.UploadDirectoryName,
+		session.UploadDirectoryPrefix,
 		session.Status,
 		session.ObjectKey,
 		session.OriginalFilename,
@@ -1517,13 +1697,18 @@ func (r *assetWorkbenchRepo) UpdateSubmissionItemPricing(ctx context.Context, tx
 func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_submission_files (
-			submission_id, submission_item_id, upload_session_id, owner_user_id, object_key, preview_key,
+			submission_id, submission_item_id, upload_session_id, owner_user_id,
+			upload_directory_id, upload_directory_name, upload_directory_prefix,
+			object_key, preview_key,
 			preview_status, original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		file.SubmissionID,
 		file.SubmissionItemID,
 		toNullInt64(file.UploadSessionID),
 		file.OwnerUserID,
+		toNullInt64(file.UploadDirectoryID),
+		file.UploadDirectoryName,
+		file.UploadDirectoryPrefix,
 		file.ObjectKey,
 		file.PreviewKey,
 		file.PreviewStatus,
@@ -3087,7 +3272,8 @@ func assetWorkbenchPriceMatrixSelect() string {
 }
 
 func assetWorkbenchUploadSessionSelect() string {
-	return `SELECT id, session_id, owner_user_id, status, object_key, original_filename, file_size, mime_type,
+	return `SELECT id, session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix,
+		status, object_key, original_filename, file_size, mime_type,
 		file_hash, upload_id, multipart_plan_json, expires_at, uploaded_at, cancelled_at, submitted_item_id, created_at, updated_at
 		FROM asset_workbench_upload_sessions`
 }
@@ -3108,10 +3294,22 @@ func assetWorkbenchSubmissionItemSelect() string {
 }
 
 func assetWorkbenchSubmissionFileSelect() string {
-	return `SELECT id, submission_id, submission_item_id, upload_session_id, owner_user_id, object_key, preview_key,
+	return `SELECT id, submission_id, submission_item_id, upload_session_id, owner_user_id,
+		upload_directory_id, upload_directory_name, upload_directory_prefix, object_key, preview_key,
 		preview_status, preview_attempts, preview_error, preview_next_retry_at, preview_worker_id, preview_lease_expires_at,
 		original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order, created_at, updated_at
 		FROM asset_workbench_submission_files`
+}
+
+func assetWorkbenchUploadDirectorySelect() string {
+	return `SELECT id, name, oss_prefix, description, enabled, sort_order, created_by, updated_by, created_at, updated_at
+		FROM asset_workbench_upload_directories`
+}
+
+func assetWorkbenchClientMaterialSelect() string {
+	return `SELECT id, asset_id, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
+		enabled, sort_order, published_by, updated_by, published_at, created_at, updated_at
+		FROM asset_workbench_client_materials`
 }
 
 func assetWorkbenchDeductionRuleSelect() string {
@@ -3369,19 +3567,68 @@ func scanAssetWorkbenchPriceMatrix(scanner interface{ Scan(...interface{}) error
 func scanAssetWorkbenchUploadSession(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchUploadSession, error) {
 	var item domain.AssetWorkbenchUploadSession
 	var rawPlan sql.NullString
+	var uploadDirectoryID sql.NullInt64
 	var uploadedAt, cancelledAt sql.NullTime
 	var submittedItemID sql.NullInt64
 	if err := scanner.Scan(
-		&item.ID, &item.SessionID, &item.OwnerUserID, &item.Status, &item.ObjectKey, &item.OriginalFilename,
+		&item.ID, &item.SessionID, &item.OwnerUserID, &uploadDirectoryID, &item.UploadDirectoryName,
+		&item.UploadDirectoryPrefix, &item.Status, &item.ObjectKey, &item.OriginalFilename,
 		&item.FileSize, &item.MimeType, &item.FileHash, &item.UploadID, &rawPlan, &item.ExpiresAt,
 		&uploadedAt, &cancelledAt, &submittedItemID, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	item.UploadDirectoryID = fromNullInt64(uploadDirectoryID)
 	item.MultipartPlan = cloneValidJSON(rawPlan)
 	item.UploadedAt = fromNullTime(uploadedAt)
 	item.CancelledAt = fromNullTime(cancelledAt)
 	item.SubmittedItemID = fromNullInt64(submittedItemID)
+	return &item, nil
+}
+
+func scanAssetWorkbenchUploadDirectory(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchUploadDirectory, error) {
+	var item domain.AssetWorkbenchUploadDirectory
+	var updatedBy sql.NullInt64
+	if err := scanner.Scan(
+		&item.ID,
+		&item.Name,
+		&item.OSSPrefix,
+		&item.Description,
+		&item.Enabled,
+		&item.SortOrder,
+		&item.CreatedBy,
+		&updatedBy,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.UpdatedBy = fromNullInt64(updatedBy)
+	return &item, nil
+}
+
+func scanAssetWorkbenchClientMaterial(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchClientMaterial, error) {
+	var item domain.AssetWorkbenchClientMaterial
+	var updatedBy sql.NullInt64
+	if err := scanner.Scan(
+		&item.ID,
+		&item.AssetID,
+		&item.Title,
+		&item.Description,
+		&item.FilenameSnapshot,
+		&item.MimeTypeSnapshot,
+		&item.FileSizeSnapshot,
+		&item.Enabled,
+		&item.SortOrder,
+		&item.PublishedBy,
+		&updatedBy,
+		&item.PublishedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.UpdatedBy = fromNullInt64(updatedBy)
 	return &item, nil
 }
 
@@ -3428,10 +3675,11 @@ func scanAssetWorkbenchSubmissionItem(scanner interface{ Scan(...interface{}) er
 
 func scanAssetWorkbenchSubmissionFile(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSubmissionFile, error) {
 	var item domain.AssetWorkbenchSubmissionFile
-	var uploadSessionID sql.NullInt64
+	var uploadSessionID, uploadDirectoryID sql.NullInt64
 	var previewNextRetryAt, previewLeaseExpiresAt sql.NullTime
 	if err := scanner.Scan(
 		&item.ID, &item.SubmissionID, &item.SubmissionItemID, &uploadSessionID, &item.OwnerUserID,
+		&uploadDirectoryID, &item.UploadDirectoryName, &item.UploadDirectoryPrefix,
 		&item.ObjectKey, &item.PreviewKey, &item.PreviewStatus, &item.PreviewAttempts,
 		&item.PreviewError, &previewNextRetryAt, &item.PreviewWorkerID, &previewLeaseExpiresAt,
 		&item.OriginalFilename, &item.FileExt, &item.FileType, &item.MimeType, &item.FileSize,
@@ -3440,6 +3688,7 @@ func scanAssetWorkbenchSubmissionFile(scanner interface{ Scan(...interface{}) er
 		return nil, err
 	}
 	item.UploadSessionID = fromNullInt64(uploadSessionID)
+	item.UploadDirectoryID = fromNullInt64(uploadDirectoryID)
 	item.PreviewNextRetryAt = fromNullTime(previewNextRetryAt)
 	item.PreviewLeaseExpiresAt = fromNullTime(previewLeaseExpiresAt)
 	return &item, nil

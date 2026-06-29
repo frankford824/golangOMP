@@ -507,8 +507,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Roles:   []string{"asset_submitter"},
 			Scopes:  []string{"asset_workbench"},
 			Menus:   []string{"asset_workbench"},
-			Pages:   []string{"asset_workbench_upload", "asset_workbench_submissions", "asset_workbench_profile"},
-			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.submit", "asset.workbench.profile"},
+			Pages:   []string{"asset_workbench_upload", "asset_workbench_materials", "asset_workbench_submissions", "asset_workbench_profile"},
+			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.submit", "asset.workbench.profile", "asset.workbench.material.download"},
 		}
 	case RoleAssetManager:
 		return FrontendAccessSpec{

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -525,12 +526,14 @@ func (r *downloadFileRepo) AppendEvent(_ context.Context, _ repo.Tx, event *doma
 type systemAssetDownloaderStub struct {
 	downloadCalls int
 	batchCalls    int
+	assetIDs      []int64
 	batchAssetIDs []int64
 	info          *domain.AssetDownloadInfo
 }
 
 func (s *systemAssetDownloaderStub) DownloadLatest(_ context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	s.downloadCalls++
+	s.assetIDs = append(s.assetIDs, assetID)
 	if s.info != nil {
 		copyInfo := *s.info
 		return &copyInfo, nil
@@ -543,6 +546,74 @@ func (s *systemAssetDownloaderStub) DownloadLatest(_ context.Context, assetID in
 		FileSize:     2048,
 		MimeType:     "image/vnd.adobe.photoshop",
 	}, nil
+}
+
+type uploadDirectorySessionRepo struct {
+	repo.AssetWorkbenchRepo
+	directories []*domain.AssetWorkbenchUploadDirectory
+	created     *domain.AssetWorkbenchUploadSession
+	events      []*domain.AssetWorkbenchEvent
+}
+
+func (r *uploadDirectorySessionRepo) ListUploadDirectories(_ context.Context, filter repo.AssetWorkbenchUploadDirectoryFilter) ([]*domain.AssetWorkbenchUploadDirectory, error) {
+	items := make([]*domain.AssetWorkbenchUploadDirectory, 0, len(r.directories))
+	for _, item := range r.directories {
+		if item == nil {
+			continue
+		}
+		if filter.Enabled != nil && item.Enabled != *filter.Enabled {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+	}
+	return items, nil
+}
+
+func (r *uploadDirectorySessionRepo) GetUploadDirectory(_ context.Context, directoryID int64) (*domain.AssetWorkbenchUploadDirectory, error) {
+	for _, item := range r.directories {
+		if item != nil && item.ID == directoryID {
+			copyItem := *item
+			return &copyItem, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *uploadDirectorySessionRepo) CreateUploadSession(_ context.Context, _ repo.Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error) {
+	copySession := *session
+	copySession.ID = 9101
+	r.created = &copySession
+	return &copySession, nil
+}
+
+func (r *uploadDirectorySessionRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type clientMaterialRepo struct {
+	repo.AssetWorkbenchRepo
+	materials map[int64]*domain.AssetWorkbenchClientMaterial
+	events    []*domain.AssetWorkbenchEvent
+}
+
+func (r *clientMaterialRepo) GetClientMaterial(_ context.Context, materialID int64) (*domain.AssetWorkbenchClientMaterial, error) {
+	item := r.materials[materialID]
+	if item == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyItem := *item
+	return &copyItem, nil
+}
+
+func (r *clientMaterialRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
 }
 
 func (s *systemAssetDownloaderStub) BuildBatchDownloadManifest(_ context.Context, assetIDs []int64, _ ...assetcenter.BatchDownloadOption) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
@@ -1288,6 +1359,78 @@ func TestSystemAssetDownloadRequiresManagerRole(t *testing.T) {
 	}
 	if downloader.downloadCalls != 0 {
 		t.Fatalf("downloadCalls = %d, want 0", downloader.downloadCalls)
+	}
+}
+
+func TestCreateUploadSessionRequiresDirectoryWhenConfigured(t *testing.T) {
+	workbenchRepo := &uploadDirectorySessionRepo{directories: []*domain.AssetWorkbenchUploadDirectory{
+		{ID: 11, Name: "客户端 A", OSSPrefix: "client-a", Enabled: true},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithOSSDirect(testWorkbenchOSSDirect()),
+	)
+	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	_, appErr := svc.CreateUploadSession(context.Background(), actor, CreateUploadSessionParams{
+		OriginalFilename: "final.psd",
+		FileSize:         128,
+		MimeType:         "image/vnd.adobe.photoshop",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("CreateUploadSession(without directory) appErr = %+v", appErr)
+	}
+	if workbenchRepo.created != nil {
+		t.Fatalf("created session = %+v, want nil", workbenchRepo.created)
+	}
+}
+
+func TestUploadDirectorySnapshotObjectKeyUsesDirectoryPrefix(t *testing.T) {
+	workbenchRepo := &uploadDirectorySessionRepo{directories: []*domain.AssetWorkbenchUploadDirectory{
+		{ID: 11, Name: "客户端 A", OSSPrefix: "client-a", Enabled: true},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	directory, appErr := svc.resolveUploadDirectoryForSession(context.Background(), 11)
+	if appErr != nil {
+		t.Fatalf("resolveUploadDirectoryForSession() error = %+v", appErr)
+	}
+	if directory.ID != 11 || directory.Name != "客户端 A" || directory.OSSPrefix != "client-a" {
+		t.Fatalf("directory = %+v", directory)
+	}
+	key := svc.buildObjectKey(time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), "session-1", "../final.psd", directory)
+	if !strings.Contains(key, "/uploads/client-a/2026/06/session-1/final.psd") || strings.Contains(key, "..") {
+		t.Fatalf("object key = %q", key)
+	}
+}
+
+func TestClientMaterialDownloadRequiresEnabledPublishedMaterial(t *testing.T) {
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
+		1: {ID: 1, AssetID: 1001, Title: "素材 A", Enabled: true},
+		2: {ID: 2, AssetID: 1002, Title: "素材 B", Enabled: false},
+	}}
+	downloader := &systemAssetDownloaderStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetDownloader(downloader),
+	)
+	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	info, appErr := svc.ClientMaterialDownload(context.Background(), actor, 1)
+	if appErr != nil {
+		t.Fatalf("ClientMaterialDownload(enabled) error = %+v", appErr)
+	}
+	if info == nil || downloader.downloadCalls != 1 || downloader.assetIDs[0] != 1001 {
+		t.Fatalf("download info = %+v calls = %d ids = %+v", info, downloader.downloadCalls, downloader.assetIDs)
+	}
+	_, appErr = svc.ClientMaterialDownload(context.Background(), actor, 2)
+	if appErr == nil || appErr.Code != domain.ErrCodeNotFound {
+		t.Fatalf("ClientMaterialDownload(disabled) appErr = %+v", appErr)
+	}
+	if downloader.downloadCalls != 1 {
+		t.Fatalf("downloadCalls = %d, want 1", downloader.downloadCalls)
 	}
 }
 

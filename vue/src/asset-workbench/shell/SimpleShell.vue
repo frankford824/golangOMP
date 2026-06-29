@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { HandCoins, ImagePlus, UserRound } from 'lucide-vue-next'
+import { HandCoins, ImagePlus, Library, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
@@ -20,9 +20,14 @@ const profileHint = computed(() => {
 })
 
 const navItems = [
-  { to: '/upload', label: '交作品', icon: ImagePlus },
+  { to: '/upload', label: '交作品', icon: ImagePlus, capability: 'asset.workbench.submit' },
+  { to: '/materials', label: '素材下载', icon: Library, capability: 'asset.workbench.material.download' },
   { to: '/my-settlement', label: '看收入', icon: HandCoins },
 ]
+const visibleNavItems = computed(() => {
+  const capabilities = new Set(props.bootstrap?.capabilities ?? [])
+  return navItems.filter((item) => !item.capability || capabilities.has(item.capability))
+})
 </script>
 
 <template>
@@ -34,7 +39,7 @@ const navItems = [
       </RouterLink>
       <nav class="aw-simple-nav" aria-label="常用入口">
         <RouterLink
-          v-for="item in navItems"
+          v-for="item in visibleNavItems"
           :key="item.to"
           :to="item.to"
           class="aw-simple-nav__item"

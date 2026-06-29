@@ -663,6 +663,73 @@ func (h *AssetWorkbenchHandler) DeleteTemplateAssignment(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) ListUploadDirectories(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.ListUploadDirectories(c.Request.Context(), actor, false)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) ListUploadDirectoriesAdmin(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.ListUploadDirectories(c.Request.Context(), actor, true)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) CreateUploadDirectory(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.CreateUploadDirectoryParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.CreateUploadDirectory(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateUploadDirectory(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	directoryID, err := strconv.ParseInt(c.Param("directory_id"), 10, 64)
+	if err != nil || directoryID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid directory_id", nil))
+		return
+	}
+	var req assetworkbench.UpdateUploadDirectoryParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateUploadDirectory(c.Request.Context(), actor, directoryID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) ListPriceMatrix(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -1513,6 +1580,114 @@ func (h *AssetWorkbenchHandler) DeleteSavedView(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"status": "ok"})
+}
+
+func (h *AssetWorkbenchHandler) ListClientMaterials(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	admin := c.Query("admin") == "1" || strings.EqualFold(c.Query("admin"), "true") || strings.EqualFold(c.Query("scope"), "admin")
+	result, appErr := h.svc.ListClientMaterials(c.Request.Context(), actor, admin)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) CreateClientMaterial(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.CreateClientMaterialParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.CreateClientMaterial(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateClientMaterial(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	materialID, err := strconv.ParseInt(c.Param("material_id"), 10, 64)
+	if err != nil || materialID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid material_id", nil))
+		return
+	}
+	var req assetworkbench.UpdateClientMaterialParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateClientMaterial(c.Request.Context(), actor, materialID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) DeleteClientMaterial(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	materialID, err := strconv.ParseInt(c.Param("material_id"), 10, 64)
+	if err != nil || materialID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid material_id", nil))
+		return
+	}
+	if appErr := h.svc.DeleteClientMaterial(c.Request.Context(), actor, materialID); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, gin.H{"status": "ok"})
+}
+
+func (h *AssetWorkbenchHandler) DownloadClientMaterial(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	materialID, err := strconv.ParseInt(c.Param("material_id"), 10, 64)
+	if err != nil || materialID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid material_id", nil))
+		return
+	}
+	result, appErr := h.svc.ClientMaterialDownload(c.Request.Context(), actor, materialID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) BatchDownloadClientMaterials(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.ClientMaterialBatchDownloadParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.ClientMaterialBatchDownloadManifest(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *AssetWorkbenchHandler) SystemSearch(c *gin.Context) {

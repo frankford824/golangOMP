@@ -400,7 +400,7 @@ func DefaultRoleCatalog() []RoleCatalogEntry {
 			Role:         RoleAssetSubmitter,
 			Name:         "Asset Submitter",
 			Description:  "Submit piecework delivery items in the independent asset workbench without granting main-ops menus.",
-			Capabilities: []string{"asset.workbench.submit", "asset.workbench.profile"},
+			Capabilities: []string{"asset.workbench.submit", "asset.workbench.profile", "asset.workbench.material.download"},
 		},
 		{
 			Role:         RoleAssetManager,

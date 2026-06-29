@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Download, Grid3X3, List, Search, X } from 'lucide-vue-next'
 
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
-import { assetWorkbenchApi, type SystemAssetPreviewMeta, type SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
+import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
+import {
+  assetWorkbenchApi,
+  type ClientMaterialRow,
+  type SystemAssetPreviewMeta,
+  type SystemAssetRow,
+  type UploadDirectoryRow,
+} from '@aw/shared/api/assetWorkbenchApi'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt } from '@aw/shared/format/number'
@@ -48,6 +55,19 @@ const typeFilter = ref('all')
 const previewFilter = ref('all')
 const previewLoading = ref(false)
 const notice = ref('')
+const { bootstrap } = useAssetWorkbenchBootstrap()
+const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
+const clientMaterials = ref<ClientMaterialRow[]>([])
+const adminClientMaterials = ref<ClientMaterialRow[]>([])
+const uploadDirectories = ref<UploadDirectoryRow[]>([])
+const selectedClientMaterialIds = ref<Set<number>>(new Set())
+const clientMaterialsLoading = ref(false)
+const clientMaterialAssetId = ref<number | null>(null)
+const clientMaterialTitle = ref('')
+const clientMaterialDescription = ref('')
+const directoryName = ref('')
+const directoryPrefix = ref('')
+const directoryDescription = ref('')
 const materialsRequest = usePageRequest(
   (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, limit: 100 }, signal),
   { items: [], total: 0, page: 1, size: 0 },
@@ -57,6 +77,7 @@ const loading = materialsRequest.loading
 const error = materialsRequest.error
 let previewController: AbortController | null = null
 let lastSelectedIndex = -1
+let initializedMode: 'admin' | 'client' | '' = ''
 
 const downloadableAssetIds = computed(() => filteredRows.value.map((row) => row.id).filter((id) => id > 0))
 const fileTypeOptions = computed(() => {
@@ -95,6 +116,8 @@ const materialGridColumns = computed<GridColumn[]>(() => [
 ])
 const selectedCount = computed(() => selectedAssetIds.value.size)
 const selectedLabel = computed(() => (selectedCount.value > 0 ? `已选 ${formatInt(selectedCount.value)} 个素材` : '未选择素材'))
+const selectedClientCount = computed(() => selectedClientMaterialIds.value.size)
+const selectedClientLabel = computed(() => (selectedClientCount.value > 0 ? `已选 ${formatInt(selectedClientCount.value)} 个素材` : '未选择素材'))
 const activeDetailRows = computed(() => {
   const asset = activeAsset.value
   if (!asset) return []
@@ -319,17 +342,236 @@ async function downloadSelectedAssets() {
   }
 }
 
+async function loadClientMaterials(admin = false) {
+  clientMaterialsLoading.value = true
+  error.value = ''
+  try {
+    const rows = await assetWorkbenchApi.listClientMaterials(admin)
+    if (admin) adminClientMaterials.value = rows
+    else clientMaterials.value = rows
+    selectedClientMaterialIds.value = new Set()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '客户端素材加载失败'
+  } finally {
+    clientMaterialsLoading.value = false
+  }
+}
+
+async function loadUploadDirectoriesAdmin() {
+  try {
+    uploadDirectories.value = await assetWorkbenchApi.listUploadDirectoriesAdmin()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '上传目录加载失败'
+  }
+}
+
+function toggleClientMaterial(row: ClientMaterialRow, checked: boolean) {
+  const next = new Set(selectedClientMaterialIds.value)
+  if (checked) next.add(row.id)
+  else next.delete(row.id)
+  selectedClientMaterialIds.value = next
+}
+
+function toggleAllClientMaterials(checked: boolean) {
+  selectedClientMaterialIds.value = checked ? new Set(clientMaterials.value.map((item) => item.id)) : new Set()
+}
+
+async function downloadClientMaterial(row: ClientMaterialRow) {
+  notice.value = ''
+  error.value = ''
+  try {
+    const info = await assetWorkbenchApi.downloadClientMaterial(row.id)
+    if (!info.download_url) throw new Error('当前素材没有可用下载链接')
+    window.open(info.download_url, '_blank', 'noopener,noreferrer')
+    notice.value = `已生成下载链接：${info.filename || row.title}`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '素材下载失败'
+  }
+}
+
+async function downloadSelectedClientMaterials() {
+  const ids = Array.from(selectedClientMaterialIds.value)
+  if (!ids.length) {
+    notice.value = '请选择要下载的素材'
+    return
+  }
+  notice.value = '正在生成素材下载包'
+  error.value = ''
+  try {
+    const manifest = await assetWorkbenchApi.batchDownloadClientMaterials(ids)
+    const result = await downloadBatchAsZip({
+      items: manifest.items.map((item) => ({
+        key: String(item.asset_id),
+        filename: item.filename,
+        downloadURL: item.download_url,
+        fallbackName: `client-material-${item.asset_id}`,
+      })),
+      serverFailures: (manifest.failures ?? []).map((failure) => `asset_id=${failure.asset_id} reason=${failure.reason}`),
+      zipFilename: buildTimestampedZipFilename('asset-workbench-client-materials'),
+      onStatus: (message) => {
+        notice.value = message
+      },
+    })
+    notice.value = `已打包 ${result.writtenCount} 个素材，失败 ${result.failureCount} 个`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '素材批量下载失败'
+  }
+}
+
+async function publishClientMaterial(asset?: SystemAssetRow) {
+  const assetId = asset?.id || clientMaterialAssetId.value || 0
+  if (!assetId) {
+    error.value = '请输入要发布的素材 ID'
+    return
+  }
+  error.value = ''
+  try {
+    await assetWorkbenchApi.createClientMaterial({
+      asset_id: assetId,
+      title: clientMaterialTitle.value || (asset ? titleOf(asset) : undefined),
+      description: clientMaterialDescription.value,
+      enabled: true,
+      sort_order: adminClientMaterials.value.length + 1,
+    })
+    clientMaterialAssetId.value = null
+    clientMaterialTitle.value = ''
+    clientMaterialDescription.value = ''
+    notice.value = '已发布给客户端'
+    await loadClientMaterials(true)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '发布客户端素材失败'
+  }
+}
+
+async function toggleClientMaterialEnabled(row: ClientMaterialRow) {
+  try {
+    await assetWorkbenchApi.updateClientMaterial(row.id, { enabled: !row.enabled })
+    await loadClientMaterials(true)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '更新客户端素材失败'
+  }
+}
+
+async function removeClientMaterial(row: ClientMaterialRow) {
+  try {
+    await assetWorkbenchApi.deleteClientMaterial(row.id)
+    notice.value = '已下架客户端素材'
+    await loadClientMaterials(true)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '下架客户端素材失败'
+  }
+}
+
+async function createUploadDirectory() {
+  if (!directoryName.value.trim() || !directoryPrefix.value.trim()) {
+    error.value = '目录名称和 OSS 前缀必填'
+    return
+  }
+  error.value = ''
+  try {
+    await assetWorkbenchApi.createUploadDirectory({
+      name: directoryName.value,
+      oss_prefix: directoryPrefix.value,
+      description: directoryDescription.value,
+      enabled: true,
+      sort_order: uploadDirectories.value.length + 1,
+    })
+    directoryName.value = ''
+    directoryPrefix.value = ''
+    directoryDescription.value = ''
+    notice.value = '上传目录已创建'
+    await loadUploadDirectoriesAdmin()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '创建上传目录失败'
+  }
+}
+
+async function toggleUploadDirectory(row: UploadDirectoryRow) {
+  try {
+    await assetWorkbenchApi.updateUploadDirectory(row.id, { enabled: !row.enabled })
+    await loadUploadDirectoriesAdmin()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '更新上传目录失败'
+  }
+}
+
 onBeforeUnmount(() => {
   previewController?.abort()
 })
 
-onMounted(() => {
-  void searchMaterials()
-})
+function initializeMaterialsMode(isAdmin: boolean | undefined) {
+  if (isAdmin === undefined) return
+  const mode = isAdmin ? 'admin' : 'client'
+  if (initializedMode === mode) return
+  initializedMode = mode
+  if (mode === 'client') {
+    void loadClientMaterials(false)
+  } else {
+    void searchMaterials()
+    void loadClientMaterials(true)
+    void loadUploadDirectoriesAdmin()
+  }
+}
+
+watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: true })
 </script>
 
 <template>
   <section class="aw-page-stack">
+    <template v-if="isSimpleUser">
+      <div class="aw-page-bar">
+        <div class="aw-page-bar__copy">
+          <p class="aw-eyebrow">素材下载</p>
+          <h2>可下载素材</h2>
+          <p>这里展示管理端发布给你的素材，支持单个下载和批量打包。</p>
+        </div>
+        <div class="aw-page-bar__actions">
+          <button class="aw-primary-button" type="button" :disabled="!selectedClientMaterialIds.size" @click="downloadSelectedClientMaterials">
+            <Download :size="16" aria-hidden="true" />
+            批量下载
+          </button>
+        </div>
+      </div>
+
+      <div class="aw-data-surface">
+        <div class="aw-grid-toolbar">
+          <span>{{ formatInt(clientMaterials.length) }} 个素材</span>
+          <span>{{ selectedClientLabel }}</span>
+          <label class="aw-inline-check">
+            <input
+              type="checkbox"
+              :checked="clientMaterials.length > 0 && selectedClientMaterialIds.size === clientMaterials.length"
+              @change="toggleAllClientMaterials(($event.target as HTMLInputElement).checked)"
+            />
+            <span>全选</span>
+          </label>
+        </div>
+        <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
+        <p v-if="error" class="aw-inline-alert">{{ error }}</p>
+        <AsyncBoundary :loading="clientMaterialsLoading" :error="error" loading-label="正在加载素材" @retry="loadClientMaterials(false)">
+          <div v-if="clientMaterials.length" class="aw-material-client-list">
+            <article v-for="material in clientMaterials" :key="material.id" class="aw-material-client-item">
+              <label class="aw-inline-check">
+                <input
+                  type="checkbox"
+                  :checked="selectedClientMaterialIds.has(material.id)"
+                  @change="toggleClientMaterial(material, ($event.target as HTMLInputElement).checked)"
+                />
+                <span>{{ material.title || material.filename_snapshot || `素材 ${material.asset_id}` }}</span>
+              </label>
+              <span class="aw-cell-text">{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
+              <button class="aw-secondary-button" type="button" @click="downloadClientMaterial(material)">下载</button>
+            </article>
+          </div>
+          <div v-else class="aw-empty-state">
+            <h3>暂无可下载素材</h3>
+            <p>管理端发布素材后，会显示在这里。</p>
+          </div>
+        </AsyncBoundary>
+      </div>
+    </template>
+
+    <template v-else>
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">只读素材</p>
@@ -385,6 +627,52 @@ onMounted(() => {
 
       <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
       <p v-if="error" class="aw-inline-alert">{{ error }}</p>
+    </div>
+
+    <div class="aw-data-surface">
+      <div class="aw-grid-toolbar">
+        <span>客户端素材</span>
+        <span>{{ formatInt(adminClientMaterials.length) }} 个已发布</span>
+        <button type="button" :disabled="!activeAsset" @click="activeAsset && publishClientMaterial(activeAsset)">发布当前素材</button>
+      </div>
+      <div class="aw-material-admin-form">
+        <input v-model.number="clientMaterialAssetId" type="number" min="1" placeholder="素材 ID" aria-label="素材 ID" />
+        <input v-model="clientMaterialTitle" type="text" placeholder="展示名称" aria-label="展示名称" />
+        <input v-model="clientMaterialDescription" type="text" placeholder="说明" aria-label="说明" />
+        <button class="aw-secondary-button" type="button" @click="publishClientMaterial()">按 ID 发布</button>
+      </div>
+      <div v-if="adminClientMaterials.length" class="aw-material-admin-list">
+        <article v-for="material in adminClientMaterials" :key="material.id" class="aw-material-admin-item">
+          <strong>{{ material.title || material.filename_snapshot || `素材 ${material.asset_id}` }}</strong>
+          <span>{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
+          <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ material.enabled ? '已发布' : '已停用' }}</span>
+          <button type="button" @click="toggleClientMaterialEnabled(material)">{{ material.enabled ? '停用' : '启用' }}</button>
+          <button type="button" @click="removeClientMaterial(material)">下架</button>
+        </article>
+      </div>
+      <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
+    </div>
+
+    <div class="aw-data-surface">
+      <div class="aw-grid-toolbar">
+        <span>上传目录</span>
+        <span>{{ formatInt(uploadDirectories.length) }} 个目录</span>
+      </div>
+      <div class="aw-material-admin-form">
+        <input v-model="directoryName" type="text" placeholder="目录名称" aria-label="目录名称" />
+        <input v-model="directoryPrefix" type="text" placeholder="OSS 前缀，如 studio-a" aria-label="OSS 前缀" />
+        <input v-model="directoryDescription" type="text" placeholder="说明" aria-label="说明" />
+        <button class="aw-secondary-button" type="button" @click="createUploadDirectory">创建目录</button>
+      </div>
+      <div v-if="uploadDirectories.length" class="aw-material-admin-list">
+        <article v-for="directory in uploadDirectories" :key="directory.id" class="aw-material-admin-item">
+          <strong>{{ directory.name }}</strong>
+          <span>{{ directory.oss_prefix }}</span>
+          <span class="aw-chip" :class="directory.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ directory.enabled ? '已启用' : '已停用' }}</span>
+          <button type="button" @click="toggleUploadDirectory(directory)">{{ directory.enabled ? '停用' : '启用' }}</button>
+        </article>
+      </div>
+      <p v-else class="aw-copy">没有上传目录时，客户端会继续使用默认目录。</p>
     </div>
 
     <div class="aw-material-browser" :class="{ 'aw-material-browser--detail': viewMode === 'table' }">
@@ -531,5 +819,6 @@ onMounted(() => {
         <button class="aw-primary-button" type="button" @click="downloadAsset(previewAsset)">下载这个素材</button>
       </aside>
     </section>
+    </template>
   </section>
 </template>

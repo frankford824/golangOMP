@@ -426,6 +426,14 @@ type AssetWorkbenchSavedViewFilter struct {
 	ViewType string
 }
 
+type AssetWorkbenchUploadDirectoryFilter struct {
+	Enabled *bool
+}
+
+type AssetWorkbenchClientMaterialFilter struct {
+	Enabled *bool
+}
+
 type AssetWorkbenchRepo interface {
 	GetProfileByUserID(ctx context.Context, userID int64) (*domain.AssetWorkbenchProfile, error)
 	ListProfiles(ctx context.Context, filter AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error)
@@ -481,6 +489,17 @@ type AssetWorkbenchRepo interface {
 	ListTemplateAssignments(ctx context.Context, filter AssetWorkbenchTemplateAssignmentFilter) ([]*domain.AssetWorkbenchTemplateAssignment, int64, error)
 	CreateTemplateAssignment(ctx context.Context, tx Tx, assignment *domain.AssetWorkbenchTemplateAssignment) (*domain.AssetWorkbenchTemplateAssignment, error)
 	SetTemplateAssignmentEnabled(ctx context.Context, tx Tx, assignmentID int64, enabled bool) (*domain.AssetWorkbenchTemplateAssignment, error)
+
+	ListUploadDirectories(ctx context.Context, filter AssetWorkbenchUploadDirectoryFilter) ([]*domain.AssetWorkbenchUploadDirectory, error)
+	GetUploadDirectory(ctx context.Context, directoryID int64) (*domain.AssetWorkbenchUploadDirectory, error)
+	CreateUploadDirectory(ctx context.Context, tx Tx, directory *domain.AssetWorkbenchUploadDirectory) (*domain.AssetWorkbenchUploadDirectory, error)
+	UpdateUploadDirectory(ctx context.Context, tx Tx, directory *domain.AssetWorkbenchUploadDirectory) (*domain.AssetWorkbenchUploadDirectory, error)
+
+	ListClientMaterials(ctx context.Context, filter AssetWorkbenchClientMaterialFilter) ([]*domain.AssetWorkbenchClientMaterial, error)
+	GetClientMaterial(ctx context.Context, materialID int64) (*domain.AssetWorkbenchClientMaterial, error)
+	CreateClientMaterial(ctx context.Context, tx Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error)
+	UpdateClientMaterial(ctx context.Context, tx Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error)
+	DeleteClientMaterial(ctx context.Context, tx Tx, materialID int64) error
 
 	CreateUploadSession(ctx context.Context, tx Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error)
 	GetUploadSession(ctx context.Context, sessionID string) (*domain.AssetWorkbenchUploadSession, error)

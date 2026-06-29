@@ -247,8 +247,9 @@ function isNoiseMessage(raw: string): boolean {
 
 /**
  * 统一错误展示文案：
- * 1. 具体 message（非噪声）优先；
- * 2. 泛化 code（INVALID_REQUEST 等）命中后才在缺失 message 时作兜底；
+ * 1. 明确 deny_code 优先，避免业务态错误退化成英文技术口径；
+ * 2. 具体 message（非噪声）优先；
+ * 3. 泛化 code（INVALID_REQUEST 等）命中后才在缺失 message 时作兜底；
  * 3. 语义清晰的 code（UNAUTHORIZED / FORBIDDEN / NOT_FOUND 等）仍优先于英文原文 message，
  *    避免出现「invalid credentials」这类漏网；
  * 4. 最后按 detail → HTTP status → Error.message 逐级兜底。
@@ -267,12 +268,12 @@ export function resolveApiUserMessage(
 
   let main = ''
 
-  if (shouldPreferBackendMessage && hasRealMessage) {
-    main = mapRawBackendMessageToZh(parsed.message!)
+  if (denyZh) {
+    main = denyZh
   }
 
-  if (!main && denyZh) {
-    main = denyZh
+  if (!main && shouldPreferBackendMessage && hasRealMessage) {
+    main = mapRawBackendMessageToZh(parsed.message!)
   }
 
   if (!main && codeZh) {

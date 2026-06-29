@@ -22,7 +22,8 @@ export const assetWorkbenchRouteAccess = {
   },
   '/materials': {
     label: '素材库',
-    requiresAnyCapability: ['asset.workbench.system_search'],
+    simple: true,
+    requiresAnyCapability: ['asset.workbench.material.download', 'asset.workbench.system_search'],
   },
   '/cost-center': {
     label: '成本中心',
@@ -75,6 +76,9 @@ export function canAccessAssetWorkbenchRoute(
 ): boolean {
   if (!access || access.anyAuthenticated) return true
   if (!bootstrap) return true
-  if (!bootstrap.is_admin) return access.simple === true
+  if (!bootstrap.is_admin) {
+    if (access.simple !== true) return false
+    return hasAnyCapability(bootstrap, access.requiresAnyCapability)
+  }
   return hasAnyCapability(bootstrap, access.requiresAnyCapability)
 }

@@ -1,10 +1,10 @@
-# V1 API 速查表(253 path · 一行一条)
+# V1 API 速查表(260 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 253 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 260 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -177,6 +177,13 @@
 | POST | `/v1/asset-workbench/accounts/merge` | Confirm asset workbench account merge | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/people-lookup` | Search people for template assignment | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/groups/{group_id}/members` | List asset workbench group members | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/upload-directories` | List enabled asset workbench upload directories；Create asset workbench upload directory | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/upload-directories/admin` | List all asset workbench upload directories for administration | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/asset-workbench/upload-directories/{directory_id}` | Update asset workbench upload directory | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/client-materials` | List client-downloadable materials；Publish a system asset to client materials | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH, DELETE | `/v1/asset-workbench/client-materials/{material_id}` | Update client material publication；Delete client material publication | PATCH:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/client-materials/{material_id}/download` | Get client material download info | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/client-materials/batch-download` | Batch download client materials | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/system-assets/{asset_id}/preview` | Get asset workbench system asset preview | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/task-create/asset-center/upload-sessions` | Create task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/task-create/asset-center/upload-sessions/{session_id}` | Get task-create reference upload session | GET:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |

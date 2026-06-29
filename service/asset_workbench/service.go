@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -354,11 +355,49 @@ type AssignTemplateParams struct {
 	GroupIDs   []int64 `json:"group_ids"`
 }
 
+type CreateUploadDirectoryParams struct {
+	Name        string `json:"name"`
+	OSSPrefix   string `json:"oss_prefix"`
+	Description string `json:"description"`
+	Enabled     *bool  `json:"enabled"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+type UpdateUploadDirectoryParams struct {
+	Name        *string `json:"name"`
+	OSSPrefix   *string `json:"oss_prefix"`
+	Description *string `json:"description"`
+	Enabled     *bool   `json:"enabled"`
+	SortOrder   *int    `json:"sort_order"`
+}
+
+type CreateClientMaterialParams struct {
+	AssetID     int64  `json:"asset_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Enabled     *bool  `json:"enabled"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+type UpdateClientMaterialParams struct {
+	AssetID     *int64  `json:"asset_id"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Enabled     *bool   `json:"enabled"`
+	SortOrder   *int    `json:"sort_order"`
+}
+
+type ClientMaterialBatchDownloadParams struct {
+	MaterialIDs []int64 `json:"material_ids"`
+	NamingMode  string  `json:"naming_mode,omitempty"`
+}
+
 type CreateUploadSessionParams struct {
-	OriginalFilename string `json:"original_filename"`
-	FileSize         int64  `json:"file_size"`
-	MimeType         string `json:"mime_type"`
-	FileHash         string `json:"file_hash"`
+	OriginalFilename  string `json:"original_filename"`
+	FileSize          int64  `json:"file_size"`
+	MimeType          string `json:"mime_type"`
+	FileHash          string `json:"file_hash"`
+	UploadDirectoryID int64  `json:"upload_directory_id"`
 }
 
 type CompleteUploadSessionParams struct {
@@ -1951,6 +1990,126 @@ func (s *Service) DeleteTemplateAssignment(ctx context.Context, actor domain.Req
 	return updated, nil
 }
 
+func (s *Service) ListUploadDirectories(ctx context.Context, actor domain.RequestActor, admin bool) ([]*domain.AssetWorkbenchUploadDirectory, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if admin {
+		if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list upload directories for administration.", nil)
+		}
+		items, err := s.repo.ListUploadDirectories(ctx, repo.AssetWorkbenchUploadDirectoryFilter{})
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench upload directories.", err.Error())
+		}
+		return items, nil
+	}
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can list upload directories.", nil)
+	}
+	enabled := true
+	items, err := s.repo.ListUploadDirectories(ctx, repo.AssetWorkbenchUploadDirectoryFilter{Enabled: &enabled})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench upload directories.", err.Error())
+	}
+	return items, nil
+}
+
+func (s *Service) CreateUploadDirectory(ctx context.Context, actor domain.RequestActor, params CreateUploadDirectoryParams) (*domain.AssetWorkbenchUploadDirectory, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can create upload directories.", nil)
+	}
+	name := strings.TrimSpace(params.Name)
+	if name == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name is required.", nil)
+	}
+	prefix, appErr := normalizeUploadDirectoryPrefix(params.OSSPrefix)
+	if appErr != nil {
+		return nil, appErr
+	}
+	item := &domain.AssetWorkbenchUploadDirectory{
+		Name:        name,
+		OSSPrefix:   prefix,
+		Description: strings.TrimSpace(params.Description),
+		Enabled:     boolValueDefault(params.Enabled, true),
+		SortOrder:   params.SortOrder,
+		CreatedBy:   actor.ID,
+	}
+	var created *domain.AssetWorkbenchUploadDirectory
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		created, err = s.repo.CreateUploadDirectory(ctx, tx, item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventUploadDirectoryUpserted, domain.AssetWorkbenchEntityUploadDirectory, &created.ID, nil, created, "create upload directory")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench upload directory.", err.Error())
+	}
+	return created, nil
+}
+
+func (s *Service) UpdateUploadDirectory(ctx context.Context, actor domain.RequestActor, directoryID int64, params UpdateUploadDirectoryParams) (*domain.AssetWorkbenchUploadDirectory, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can update upload directories.", nil)
+	}
+	if directoryID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "directory_id is required.", nil)
+	}
+	existing, err := s.repo.GetUploadDirectory(ctx, directoryID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Upload directory not found.", "Failed to load upload directory.")
+	}
+	item := *existing
+	if params.Name != nil {
+		item.Name = strings.TrimSpace(*params.Name)
+	}
+	if item.Name == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name is required.", nil)
+	}
+	if params.OSSPrefix != nil {
+		prefix, appErr := normalizeUploadDirectoryPrefix(*params.OSSPrefix)
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.OSSPrefix = prefix
+	}
+	if params.Description != nil {
+		item.Description = strings.TrimSpace(*params.Description)
+	}
+	if params.Enabled != nil {
+		item.Enabled = *params.Enabled
+	}
+	if params.SortOrder != nil {
+		item.SortOrder = *params.SortOrder
+	}
+	item.UpdatedBy = &actor.ID
+	var updated *domain.AssetWorkbenchUploadDirectory
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateUploadDirectory(ctx, tx, &item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventUploadDirectoryUpserted, domain.AssetWorkbenchEntityUploadDirectory, &updated.ID, existing, updated, "update upload directory")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Upload directory not found.", "Failed to update asset workbench upload directory.")
+	}
+	return updated, nil
+}
+
 func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestActor, params CreateUploadSessionParams) (*UploadSessionResponse, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
@@ -1968,9 +2127,13 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 	if params.FileSize < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_size must be non-negative.", nil)
 	}
+	directory, appErr := s.resolveUploadDirectoryForSession(ctx, params.UploadDirectoryID)
+	if appErr != nil {
+		return nil, appErr
+	}
 	now := s.nowFn().UTC()
 	sessionID := uuid.NewString()
-	objectKey := s.buildObjectKey(now, sessionID, filename)
+	objectKey := s.buildObjectKey(now, sessionID, filename, directory)
 	plan, err := s.oss.CreateMultipartUploadPlan(ctx, objectKey, params.FileSize, params.MimeType)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to create OSS upload plan.", err.Error())
@@ -1988,6 +2151,11 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 		UploadID:         plan.UploadID,
 		MultipartPlan:    planJSON,
 		ExpiresAt:        now.Add(s.cfg.UploadSessionTTL),
+	}
+	if directory != nil {
+		session.UploadDirectoryID = &directory.ID
+		session.UploadDirectoryName = directory.Name
+		session.UploadDirectoryPrefix = directory.OSSPrefix
 	}
 	var created *domain.AssetWorkbenchUploadSession
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -2188,19 +2356,22 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 					return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session must be uploaded before submission.", map[string]string{"session_id": session.SessionID})
 				}
 				file := &domain.AssetWorkbenchSubmissionFile{
-					SubmissionID:     createdSubmission.ID,
-					SubmissionItemID: createdItem.ID,
-					UploadSessionID:  &session.ID,
-					OwnerUserID:      actor.ID,
-					ObjectKey:        session.ObjectKey,
-					PreviewStatus:    initialPreviewStatus(session.OriginalFilename, session.MimeType),
-					OriginalFilename: session.OriginalFilename,
-					FileExt:          strings.TrimPrefix(strings.ToLower(filepath.Ext(session.OriginalFilename)), "."),
-					FileType:         inferFileType(session.OriginalFilename, session.MimeType),
-					MimeType:         session.MimeType,
-					FileSize:         session.FileSize,
-					FileHash:         session.FileHash,
-					SortOrder:        index,
+					SubmissionID:          createdSubmission.ID,
+					SubmissionItemID:      createdItem.ID,
+					UploadSessionID:       &session.ID,
+					OwnerUserID:           actor.ID,
+					UploadDirectoryID:     session.UploadDirectoryID,
+					UploadDirectoryName:   session.UploadDirectoryName,
+					UploadDirectoryPrefix: session.UploadDirectoryPrefix,
+					ObjectKey:             session.ObjectKey,
+					PreviewStatus:         initialPreviewStatus(session.OriginalFilename, session.MimeType),
+					OriginalFilename:      session.OriginalFilename,
+					FileExt:               strings.TrimPrefix(strings.ToLower(filepath.Ext(session.OriginalFilename)), "."),
+					FileType:              inferFileType(session.OriginalFilename, session.MimeType),
+					MimeType:              session.MimeType,
+					FileSize:              session.FileSize,
+					FileHash:              session.FileHash,
+					SortOrder:             index,
 				}
 				createdFile, err := s.repo.CreateSubmissionFile(ctx, tx, file)
 				if err != nil {
@@ -3503,6 +3674,228 @@ func (s *Service) SystemAssetBatchDownloadManifest(ctx context.Context, actor do
 	return manifest, nil
 }
 
+func (s *Service) ListClientMaterials(ctx context.Context, actor domain.RequestActor, admin bool) ([]*domain.AssetWorkbenchClientMaterial, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if admin {
+		if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list client materials for administration.", nil)
+		}
+		items, err := s.repo.ListClientMaterials(ctx, repo.AssetWorkbenchClientMaterialFilter{})
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench client materials.", err.Error())
+		}
+		return items, nil
+	}
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can list client materials.", nil)
+	}
+	enabled := true
+	items, err := s.repo.ListClientMaterials(ctx, repo.AssetWorkbenchClientMaterialFilter{Enabled: &enabled})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench client materials.", err.Error())
+	}
+	return items, nil
+}
+
+func (s *Service) CreateClientMaterial(ctx context.Context, actor domain.RequestActor, params CreateClientMaterialParams) (*domain.AssetWorkbenchClientMaterial, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can publish client materials.", nil)
+	}
+	if params.AssetID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
+	}
+	info, appErr := s.systemDownloadSnapshot(ctx, params.AssetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	now := s.nowFn().UTC()
+	item := &domain.AssetWorkbenchClientMaterial{
+		AssetID:          params.AssetID,
+		Title:            clientMaterialTitle(params.Title, params.AssetID, info),
+		Description:      strings.TrimSpace(params.Description),
+		FilenameSnapshot: strings.TrimSpace(info.Filename),
+		MimeTypeSnapshot: strings.TrimSpace(info.MimeType),
+		FileSizeSnapshot: info.FileSize,
+		Enabled:          boolValueDefault(params.Enabled, true),
+		SortOrder:        params.SortOrder,
+		PublishedBy:      actor.ID,
+		PublishedAt:      now,
+	}
+	var created *domain.AssetWorkbenchClientMaterial
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		created, err = s.repo.CreateClientMaterial(ctx, tx, item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventClientMaterialUpserted, domain.AssetWorkbenchEntityClientMaterial, &created.ID, nil, created, "publish client material")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to publish asset workbench client material.", err.Error())
+	}
+	return created, nil
+}
+
+func (s *Service) UpdateClientMaterial(ctx context.Context, actor domain.RequestActor, materialID int64, params UpdateClientMaterialParams) (*domain.AssetWorkbenchClientMaterial, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can update client materials.", nil)
+	}
+	if materialID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_id is required.", nil)
+	}
+	existing, err := s.repo.GetClientMaterial(ctx, materialID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Client material not found.", "Failed to load client material.")
+	}
+	item := *existing
+	if params.AssetID != nil {
+		if *params.AssetID <= 0 {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
+		}
+		info, appErr := s.systemDownloadSnapshot(ctx, *params.AssetID)
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.AssetID = *params.AssetID
+		item.FilenameSnapshot = strings.TrimSpace(info.Filename)
+		item.MimeTypeSnapshot = strings.TrimSpace(info.MimeType)
+		item.FileSizeSnapshot = info.FileSize
+		if params.Title == nil && strings.TrimSpace(item.Title) == "" {
+			item.Title = clientMaterialTitle("", item.AssetID, info)
+		}
+	}
+	if params.Title != nil {
+		item.Title = clientMaterialTitle(*params.Title, item.AssetID, &domain.AssetDownloadInfo{Filename: item.FilenameSnapshot})
+	}
+	if params.Description != nil {
+		item.Description = strings.TrimSpace(*params.Description)
+	}
+	if params.Enabled != nil {
+		item.Enabled = *params.Enabled
+	}
+	if params.SortOrder != nil {
+		item.SortOrder = *params.SortOrder
+	}
+	item.UpdatedBy = &actor.ID
+	var updated *domain.AssetWorkbenchClientMaterial
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateClientMaterial(ctx, tx, &item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventClientMaterialUpserted, domain.AssetWorkbenchEntityClientMaterial, &updated.ID, existing, updated, "update client material")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Client material not found.", "Failed to update asset workbench client material.")
+	}
+	return updated, nil
+}
+
+func (s *Service) DeleteClientMaterial(ctx context.Context, actor domain.RequestActor, materialID int64) *domain.AppError {
+	if err := s.requireRepo(); err != nil {
+		return err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can delete client materials.", nil)
+	}
+	if materialID <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "material_id is required.", nil)
+	}
+	existing, err := s.repo.GetClientMaterial(ctx, materialID)
+	if err != nil {
+		return mapRepoReadError(err, "Client material not found.", "Failed to load client material.")
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.repo.DeleteClientMaterial(ctx, tx, materialID); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventClientMaterialDeleted, domain.AssetWorkbenchEntityClientMaterial, &materialID, existing, nil, "delete client material")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return appErr
+		}
+		return mapRepoReadError(err, "Client material not found.", "Failed to delete asset workbench client material.")
+	}
+	return nil
+}
+
+func (s *Service) ClientMaterialDownload(ctx context.Context, actor domain.RequestActor, materialID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can download client materials.", nil)
+	}
+	material, appErr := s.resolveDownloadableClientMaterial(ctx, actor, materialID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	info, appErr := s.systemDownloadSnapshot(ctx, material.AssetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	_ = s.recordSystemAssetDownloadEvent(ctx, actor, domain.AssetWorkbenchEventClientMaterialDownloaded, &material.ID, map[string]interface{}{
+		"material_id": material.ID,
+		"asset_id":    material.AssetID,
+		"filename":    info.Filename,
+		"mode":        info.DownloadMode,
+	})
+	return info, nil
+}
+
+func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor domain.RequestActor, params ClientMaterialBatchDownloadParams) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can batch download client materials.", nil)
+	}
+	materialIDs := positiveUniqueInt64s(params.MaterialIDs)
+	if len(materialIDs) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_ids is required.", nil)
+	}
+	if s.systemDownloads == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
+	}
+	assetIDs := make([]int64, 0, len(materialIDs))
+	for _, materialID := range materialIDs {
+		material, appErr := s.resolveDownloadableClientMaterial(ctx, actor, materialID)
+		if appErr != nil {
+			return nil, appErr
+		}
+		assetIDs = append(assetIDs, material.AssetID)
+	}
+	manifest, appErr := s.systemDownloads.BuildBatchDownloadManifest(
+		ctx,
+		assetIDs,
+		assetcenter.WithBatchDownloadNamingMode(assetcenter.NormalizeBatchDownloadNamingMode(params.NamingMode)),
+	)
+	if appErr != nil {
+		return nil, appErr
+	}
+	_ = s.recordSystemAssetDownloadEvent(ctx, actor, domain.AssetWorkbenchEventClientMaterialBatchDownload, nil, map[string]interface{}{
+		"material_ids":    materialIDs,
+		"requested_count": len(materialIDs),
+		"success_count":   manifest.SuccessCount,
+		"failure_count":   manifest.FailureCount,
+		"naming_mode":     assetcenter.NormalizeBatchDownloadNamingMode(params.NamingMode),
+	})
+	return manifest, nil
+}
+
 func (s *Service) ProcessPendingPreviews(ctx context.Context, limit int) (int, *domain.AppError) {
 	if s.repo == nil || s.tx == nil {
 		return 0, nil
@@ -4464,12 +4857,102 @@ func matchImportedErrorRecord(items []*domain.AssetWorkbenchSubmissionItem, inpu
 	}
 }
 
-func (s *Service) buildObjectKey(now time.Time, sessionID, filename string) string {
+func (s *Service) resolveUploadDirectoryForSession(ctx context.Context, directoryID int64) (*domain.AssetWorkbenchUploadDirectory, *domain.AppError) {
+	if directoryID > 0 {
+		directory, err := s.repo.GetUploadDirectory(ctx, directoryID)
+		if err != nil {
+			return nil, mapRepoReadError(err, "Upload directory not found.", "Failed to load upload directory.")
+		}
+		if directory == nil || !directory.Enabled {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_directory_id is not enabled.", map[string]interface{}{"upload_directory_id": directoryID})
+		}
+		return directory, nil
+	}
+	enabled := true
+	directories, err := s.repo.ListUploadDirectories(ctx, repo.AssetWorkbenchUploadDirectoryFilter{Enabled: &enabled})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench upload directories.", err.Error())
+	}
+	if len(directories) > 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_directory_id is required.", nil)
+	}
+	return nil, nil
+}
+
+func (s *Service) buildObjectKey(now time.Time, sessionID, filename string, directory *domain.AssetWorkbenchUploadDirectory) string {
 	clean := strings.TrimSpace(filepath.Base(filename))
 	if clean == "." || clean == string(filepath.Separator) || clean == "" {
 		clean = "upload.bin"
 	}
-	return fmt.Sprintf("%s/uploads/%s/%s/%s", strings.Trim(s.cfg.OSSPrefix, "/"), now.Format("2006/01"), sessionID, clean)
+	base := strings.Trim(s.cfg.OSSPrefix, "/")
+	if directory == nil || strings.TrimSpace(directory.OSSPrefix) == "" {
+		return fmt.Sprintf("%s/uploads/%s/%s/%s", base, now.Format("2006/01"), sessionID, clean)
+	}
+	return fmt.Sprintf("%s/uploads/%s/%s/%s/%s", base, directory.OSSPrefix, now.Format("2006/01"), sessionID, clean)
+}
+
+func normalizeUploadDirectoryPrefix(raw string) (string, *domain.AppError) {
+	value := strings.Trim(strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/")), "/")
+	if value == "" {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_prefix is required.", nil)
+	}
+	clean := path.Clean(value)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_prefix cannot escape the asset workbench upload namespace.", nil)
+	}
+	parts := strings.Split(clean, "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.Contains(part, "\x00") {
+			return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_prefix contains invalid path segments.", nil)
+		}
+	}
+	return clean, nil
+}
+
+func boolValueDefault(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func (s *Service) systemDownloadSnapshot(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.systemDownloads == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
+	}
+	info, appErr := s.systemDownloads.DownloadLatest(ctx, assetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if info == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset download info is empty.", nil)
+	}
+	return info, nil
+}
+
+func (s *Service) resolveDownloadableClientMaterial(ctx context.Context, actor domain.RequestActor, materialID int64) (*domain.AssetWorkbenchClientMaterial, *domain.AppError) {
+	if materialID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_id is required.", nil)
+	}
+	material, err := s.repo.GetClientMaterial(ctx, materialID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Client material not found.", "Failed to load client material.")
+	}
+	if material == nil || (!material.Enabled && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin)) {
+		return nil, domain.NewAppError(domain.ErrCodeNotFound, "Client material not found.", nil)
+	}
+	return material, nil
+}
+
+func clientMaterialTitle(raw string, assetID int64, info *domain.AssetDownloadInfo) string {
+	title := strings.TrimSpace(raw)
+	if title != "" {
+		return title
+	}
+	if info != nil && strings.TrimSpace(info.Filename) != "" {
+		return strings.TrimSpace(info.Filename)
+	}
+	return fmt.Sprintf("素材 %d", assetID)
 }
 
 func (s *Service) buildPreviewKey(now time.Time, fileID int64) string {

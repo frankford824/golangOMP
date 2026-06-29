@@ -255,6 +255,9 @@ export interface SubmissionFileRow {
   id: number
   submission_id: number
   submission_item_id: number
+  upload_directory_id?: number
+  upload_directory_name?: string
+  upload_directory_prefix?: string
   original_filename: string
   file_type: string
   mime_type: string
@@ -535,6 +538,36 @@ export interface SystemAssetBatchDownloadManifest {
   expires_at?: string
 }
 
+export interface UploadDirectoryRow {
+  id: number
+  name: string
+  oss_prefix: string
+  description: string
+  enabled: boolean
+  sort_order: number
+  created_by: number
+  updated_by?: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ClientMaterialRow {
+  id: number
+  asset_id: number
+  title: string
+  description: string
+  filename_snapshot: string
+  mime_type_snapshot: string
+  file_size_snapshot: number
+  enabled: boolean
+  sort_order: number
+  published_by: number
+  updated_by?: number
+  published_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface PaginatedResult<T> {
   items: T[]
   total: number
@@ -545,6 +578,7 @@ export interface CreateUploadSessionPayload {
   file_size: number
   mime_type: string
   file_hash?: string
+  upload_directory_id?: number
 }
 
 export interface UploadSessionRow {
@@ -552,6 +586,9 @@ export interface UploadSessionRow {
   session_id: string
   status: string
   object_key: string
+  upload_directory_id?: number
+  upload_directory_name?: string
+  upload_directory_prefix?: string
   original_filename: string
   file_size: number
   mime_type: string
@@ -701,6 +738,22 @@ export interface AssignTemplatePayload {
   template_id: number
   user_ids?: number[]
   group_ids?: number[]
+}
+
+export interface UpsertUploadDirectoryPayload {
+  name?: string
+  oss_prefix?: string
+  description?: string
+  enabled?: boolean
+  sort_order?: number
+}
+
+export interface UpsertClientMaterialPayload {
+  asset_id?: number
+  title?: string
+  description?: string
+  enabled?: boolean
+  sort_order?: number
 }
 
 function unwrap<T>(payload: ApiEnvelope<T> | T): T {
@@ -920,6 +973,26 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async listUploadDirectories(signal?: AbortSignal): Promise<UploadDirectoryRow[]> {
+    const res = await http.get<ApiEnvelope<UploadDirectoryRow[]>>('/v1/asset-workbench/upload-directories', { signal })
+    return unwrap(res.data)
+  },
+
+  async listUploadDirectoriesAdmin(signal?: AbortSignal): Promise<UploadDirectoryRow[]> {
+    const res = await http.get<ApiEnvelope<UploadDirectoryRow[]>>('/v1/asset-workbench/upload-directories/admin', { signal })
+    return unwrap(res.data)
+  },
+
+  async createUploadDirectory(payload: UpsertUploadDirectoryPayload, signal?: AbortSignal): Promise<UploadDirectoryRow> {
+    const res = await http.post<ApiEnvelope<UploadDirectoryRow>>('/v1/asset-workbench/upload-directories', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async updateUploadDirectory(directoryId: number, payload: UpsertUploadDirectoryPayload, signal?: AbortSignal): Promise<UploadDirectoryRow> {
+    const res = await http.patch<ApiEnvelope<UploadDirectoryRow>>(`/v1/asset-workbench/upload-directories/${directoryId}`, payload, { signal })
+    return unwrap(res.data)
+  },
+
   async listSubmissions(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<SubmissionRow>> {
     const res = await http.get<ApiEnvelope<SubmissionRow[]>>('/v1/asset-workbench/submissions', { params, signal })
     return unwrapPaginated(res.data)
@@ -1081,6 +1154,42 @@ export const assetWorkbenchApi = {
   async batchDownloadSystemAssets(assetIds: number[], namingMode = 'business', signal?: AbortSignal): Promise<SystemAssetBatchDownloadManifest> {
     const res = await http.post<ApiEnvelope<SystemAssetBatchDownloadManifest>>('/v1/asset-workbench/system-assets/batch-download', {
       asset_ids: assetIds,
+      naming_mode: namingMode,
+    }, { signal })
+    return unwrap(res.data)
+  },
+
+  async listClientMaterials(admin = false, signal?: AbortSignal): Promise<ClientMaterialRow[]> {
+    const res = await http.get<ApiEnvelope<ClientMaterialRow[]>>('/v1/asset-workbench/client-materials', {
+      params: admin ? { admin: 1 } : undefined,
+      signal,
+    })
+    return unwrap(res.data)
+  },
+
+  async createClientMaterial(payload: UpsertClientMaterialPayload, signal?: AbortSignal): Promise<ClientMaterialRow> {
+    const res = await http.post<ApiEnvelope<ClientMaterialRow>>('/v1/asset-workbench/client-materials', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async updateClientMaterial(materialId: number, payload: UpsertClientMaterialPayload, signal?: AbortSignal): Promise<ClientMaterialRow> {
+    const res = await http.patch<ApiEnvelope<ClientMaterialRow>>(`/v1/asset-workbench/client-materials/${materialId}`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async deleteClientMaterial(materialId: number, signal?: AbortSignal): Promise<unknown> {
+    const res = await http.delete<ApiEnvelope<unknown>>(`/v1/asset-workbench/client-materials/${materialId}`, { signal })
+    return unwrap(res.data)
+  },
+
+  async downloadClientMaterial(materialId: number, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
+    const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/asset-workbench/client-materials/${materialId}/download`, { signal })
+    return unwrap(res.data)
+  },
+
+  async batchDownloadClientMaterials(materialIds: number[], namingMode = 'business', signal?: AbortSignal): Promise<SystemAssetBatchDownloadManifest> {
+    const res = await http.post<ApiEnvelope<SystemAssetBatchDownloadManifest>>('/v1/asset-workbench/client-materials/batch-download', {
+      material_ids: materialIds,
       naming_mode: namingMode,
     }, { signal })
     return unwrap(res.data)

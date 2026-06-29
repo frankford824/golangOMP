@@ -22,6 +22,7 @@ export async function uploadWorkbenchFile(
   options: {
     signal?: AbortSignal
     onProgress?: (progress: WorkbenchUploadProgress) => void
+    uploadDirectoryId?: number
   } = {},
 ): Promise<UploadedWorkbenchFile> {
   const fileHash = await computeWorkbenchFileHash(file)
@@ -31,6 +32,7 @@ export async function uploadWorkbenchFile(
       file_size: file.size,
       mime_type: file.type || 'application/octet-stream',
       file_hash: fileHash,
+      upload_directory_id: options.uploadDirectoryId,
     },
     options.signal,
   )
