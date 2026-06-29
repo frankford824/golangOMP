@@ -350,6 +350,24 @@ func defaultBatchItemCategoryCode(p CreateTaskParams, item CreateTaskBatchSKUIte
 			return normalized
 		}
 	}
+	if inferred := inferBatchItemCategoryCodeFromText(item); inferred != "" {
+		return inferred
+	}
+	if p.TaskType == domain.TaskTypeNewProductDevelopment {
+		return "GENERAL"
+	}
+	return ""
+}
+
+func inferBatchItemCategoryCodeFromText(item CreateTaskBatchSKUItemParams) string {
+	text := strings.Join([]string{
+		strings.TrimSpace(item.ProductName),
+		strings.TrimSpace(item.ProductShortName),
+		strings.TrimSpace(item.DesignRequirement),
+	}, " ")
+	if aliases := costCategoryAliasesFromText("", text); len(aliases) > 0 {
+		return aliases[0]
+	}
 	return ""
 }
 

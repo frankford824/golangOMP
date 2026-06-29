@@ -4057,6 +4057,57 @@ func TestTaskServiceCreateBatchNewProductDevelopmentSucceeds(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateBatchNewProductInfersCategoryWhenProductIIDMissing(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:     domain.TaskTypeNewProductDevelopment,
+		SourceMode:   domain.TaskSourceModeNewProduct,
+		CreatorID:    9,
+		OwnerTeam:    domain.AllValidTeams()[0],
+		DeadlineAt:   timePtr(),
+		BatchSKUMode: "multiple",
+		BatchItems: []CreateTaskBatchSKUItemParams{
+			{
+				ProductName:       "润蝶/常规KT板/生日快乐平安喜乐/约35*20cm/共6块",
+				DesignRequirement: "按照图片1:1绘画",
+			},
+			{
+				ProductName:       "润蝶/常规KT板/50岁生日快乐平安喜乐/约35*20cm/共8块",
+				DesignRequirement: "同上",
+			},
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if !task.IsBatchTask {
+		t.Fatal("Create() is_batch_task = false, want true")
+	}
+	items := taskRepo.skuItems[task.ID]
+	if len(items) != 2 {
+		t.Fatalf("task_sku_items len = %d, want 2", len(items))
+	}
+	for idx, item := range items {
+		if item.CategoryCode != "KT_STANDARD" {
+			t.Fatalf("item[%d].category_code = %q, want KT_STANDARD", idx, item.CategoryCode)
+		}
+		if item.SKUCode == "" {
+			t.Fatalf("item[%d].sku_code is empty", idx)
+		}
+	}
+}
+
 func TestTaskServiceCreateBatchPurchaseTaskSucceeds(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	procurementRepo := &prdProcurementRepo{}

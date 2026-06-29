@@ -520,6 +520,7 @@ const {
 function handleModalOpened(): void {
   submitError.value = ''
   actionId.value = generateActionId()
+  lastSubmitPayloadSignature.value = ''
   loadDesigners()
   showCloseConfirm.value = false
   const nextDraftId = String(props.initialDraftId ?? '').trim()
@@ -984,6 +985,7 @@ watch(
 )
 
 const actionId = ref(generateActionId())
+const lastSubmitPayloadSignature = ref('')
 const dueAtHourFallback = 18
 
 const dueHourOptions = Array.from({ length: 24 }, (_, hour) => ({
@@ -1162,6 +1164,7 @@ const canSubmit = computed(() => {
 })
 
 function onExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchViolation[] }) {
+  submitError.value = ''
   batchPreviewRows.value = payload.preview
   excelViolations.value = payload.violations
   form.value.batchItems = payload.preview.map((row, idx) => ({
@@ -1176,10 +1179,19 @@ function onExcelParsed(payload: { preview: BatchPreviewRow[]; violations: BatchV
 }
 
 function onExcelReset() {
+  submitError.value = ''
   batchPreviewRows.value = []
   excelViolations.value = []
   form.value.batchItems = []
   form.value.batchTemplateSaved = false
+}
+
+function getTaskCreateSubmitSignature(payload: unknown): string {
+  try {
+    return JSON.stringify(payload)
+  } catch {
+    return `${Date.now()}-${Math.random()}`
+  }
 }
 
 function handleModalUpdate(nextOpen: boolean) {
@@ -1622,6 +1634,11 @@ async function submit() {
     })
   }
   try {
+    const submitSignature = getTaskCreateSubmitSignature(base)
+    if (submitSignature !== lastSubmitPayloadSignature.value) {
+      actionId.value = generateActionId()
+      lastSubmitPayloadSignature.value = submitSignature
+    }
     const created = await tasksStore.addTask(base as unknown as Partial<Task>, actionId.value)
     let procurementSyncFailed = false
     if (businessType === 'PURCHASE_TASK' && !isBatch) {

@@ -2345,7 +2345,7 @@ func TestBatchNewProductFilingPayloadFallsBackCategoryNameToProductIID(t *testin
 	}
 }
 
-func TestDefaultBatchItemCategoryCodePrefersProductIIDAndNeverFallsBackGeneral(t *testing.T) {
+func TestDefaultBatchItemCategoryCodePrefersProductIIDAndOnlyFallsBackGeneralForNewProduct(t *testing.T) {
 	got := defaultBatchItemCategoryCode(
 		CreateTaskParams{CategoryCode: "GENERAL", ProductIID: "常规kt板"},
 		CreateTaskBatchSKUItemParams{CategoryCode: "GENERAL", ProductIID: "河南kt板"},
@@ -2360,5 +2360,13 @@ func TestDefaultBatchItemCategoryCodePrefersProductIIDAndNeverFallsBackGeneral(t
 	)
 	if got != "" {
 		t.Fatalf("defaultBatchItemCategoryCode() = %q, want empty instead of GENERAL fallback", got)
+	}
+
+	got = defaultBatchItemCategoryCode(
+		CreateTaskParams{TaskType: domain.TaskTypeNewProductDevelopment},
+		CreateTaskBatchSKUItemParams{},
+	)
+	if got != "GENERAL" {
+		t.Fatalf("defaultBatchItemCategoryCode() = %q, want GENERAL fallback for new product batch", got)
 	}
 }

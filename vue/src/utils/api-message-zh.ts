@@ -231,6 +231,11 @@ const GENERIC_VALIDATION_CODES = new Set<string>([
   'VALIDATION_ERROR',
 ])
 
+const MESSAGE_FIRST_CODES = new Set<string>([
+  ...GENERIC_VALIDATION_CODES,
+  'CONFLICT',
+])
+
 /** 明显是无信息量的 message 噪声，遇到就跳过，回落到 code 映射 */
 function isNoiseMessage(raw: string): boolean {
   const t = raw.trim().toLowerCase()
@@ -257,12 +262,12 @@ export function resolveApiUserMessage(
 
   const codeZh = parsed.code ? API_ERROR_CODE_ZH[parsed.code] : undefined
   const denyZh = mapDenyCodeToZh(parsed.denyCode)
-  const isGenericCode = !!parsed.code && GENERIC_VALIDATION_CODES.has(parsed.code)
+  const shouldPreferBackendMessage = !!parsed.code && MESSAGE_FIRST_CODES.has(parsed.code)
   const hasRealMessage = !!parsed.message && !isNoiseMessage(parsed.message)
 
   let main = ''
 
-  if (isGenericCode && hasRealMessage) {
+  if (shouldPreferBackendMessage && hasRealMessage) {
     main = mapRawBackendMessageToZh(parsed.message!)
   }
 
