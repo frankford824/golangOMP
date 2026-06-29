@@ -80,7 +80,7 @@ curl -X GET https://api.example.com/v1/reports/experience/stats \
 ### 简介
 支持方法: GET。
 
-- `GET`: SuperAdmin-only sample pool. The query reads only `experience_events` and never joins core task or asset tables.
+- `GET`: SuperAdmin-only sample pool. The query reads `experience_events` plus side-channel `ai_suggestion_events`, and never joins core task or asset tables.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

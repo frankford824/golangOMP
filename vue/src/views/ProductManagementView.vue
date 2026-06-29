@@ -181,18 +181,15 @@
             </div>
 
             <div class="pm-cost-cell" :class="{ 'is-missing': !hasCost(child.record), 'has-area-warning': hasAreaWarning(child.record) }">
-              <span v-if="specSummary(child.record)" class="pm-spec-chip" :title="specSummary(child.record)">
-                {{ specSummary(child.record) }}
-              </span>
-              <span class="pm-metric-row">
-                <span class="pm-metric-label">面积</span>
-                <span class="pm-area-value">{{ areaTraceSummary(child.record) }}</span>
-              </span>
-              <span class="pm-metric-row pm-cost-row">
-                <span class="pm-metric-label">成本</span>
-                <span class="pm-cost-value">{{ formatCost(child.record.cost_price) }}</span>
-                <span class="pm-detail-help" tabindex="0" :aria-label="productTraceAria(child.record)">
-                  明细
+              <div class="pm-cost-topline">
+                <span v-if="specSummary(child.record)" class="pm-spec-chip" :title="specSummary(child.record)">
+                  {{ specSummary(child.record) }}
+                </span>
+                <span v-else class="pm-spec-chip pm-spec-chip--empty">规格待补</span>
+                <span class="pm-detail-wrap">
+                  <button type="button" class="pm-detail-help" :aria-label="productTraceAria(child.record)">
+                    明细
+                  </button>
                   <span class="pm-cost-popover" role="tooltip">
                     <strong>面积识别</strong>
                     <span v-for="line in areaTraceLines(child.record)" :key="`area-${line}`">{{ line }}</span>
@@ -200,7 +197,17 @@
                     <span v-for="line in costTraceLines(child.record)" :key="`cost-${line}`">{{ line }}</span>
                   </span>
                 </span>
-              </span>
+              </div>
+              <div class="pm-metric-stack">
+                <span class="pm-metric-row pm-cost-row">
+                  <span class="pm-metric-label">成本</span>
+                  <span class="pm-cost-value">{{ formatCost(child.record.cost_price) }}</span>
+                </span>
+                <span class="pm-metric-row pm-area-row">
+                  <span class="pm-metric-label">面积</span>
+                  <span class="pm-area-value">{{ areaTraceSummary(child.record) }}</span>
+                </span>
+              </div>
             </div>
 
             <div class="pm-info-cell">
@@ -1702,7 +1709,8 @@ function errorMessage(err: unknown): string {
 }
 
 .pm-mono,
-.pm-cost-cell {
+.pm-cost-value,
+.pm-area-value {
   font-family: var(--yb-font-data);
 }
 
@@ -1723,31 +1731,63 @@ function errorMessage(err: unknown): string {
 
 .pm-cost-cell {
   position: relative;
-  display: grid;
-  width: min(15rem, 100%);
+  display: flex;
+  width: min(11.75rem, 100%);
   max-width: 100%;
-  gap: 0.4rem;
-  color: rgb(var(--yb-success-teal));
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.5rem 0.55rem 0.55rem;
+  border: 1px solid rgb(var(--yb-border-page-soft));
+  border-radius: 0.5rem;
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface));
+  font-family: var(--yb-font-text);
   font-weight: 900;
+  box-shadow: inset 3px 0 0 rgb(var(--yb-success-soft));
+}
+
+.pm-cost-topline {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid rgba(var(--yb-border-comma), 0.58);
 }
 
 .pm-spec-chip {
   display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
-  width: max-content;
   align-items: center;
   overflow: hidden;
-  padding: 0.24rem 0.55rem;
-  border: 1px solid rgba(var(--yb-brand-cyan-comma), 0.24);
+  padding: 0.16rem 0.44rem;
+  border: 1px solid rgb(var(--yb-border-muted-blue));
   border-radius: 999px;
-  color: rgb(var(--yb-brand-cyan));
-  background: rgba(var(--yb-brand-cyan-comma), 0.08);
+  color: rgb(var(--yb-text-soft));
+  background: rgb(var(--yb-surface-blue-subtle));
   font-family: var(--yb-font-text);
-  font-size: 0.72rem;
-  font-weight: 950;
+  font-size: 0.7rem;
+  font-weight: 850;
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pm-spec-chip--empty {
+  border-color: rgba(var(--yb-border-comma), 0.78);
+  color: rgb(var(--yb-text-muted));
+  background: rgb(var(--yb-surface));
+}
+
+.pm-metric-stack {
+  display: grid;
+  min-width: 0;
+  gap: 0.28rem;
 }
 
 .pm-metric-row {
@@ -1761,14 +1801,19 @@ function errorMessage(err: unknown): string {
 }
 
 .pm-cost-row {
-  grid-template-columns: 2.35rem minmax(0, 1fr) auto;
+  grid-template-columns: 2.35rem minmax(0, 1fr);
+  align-items: baseline;
+}
+
+.pm-area-row {
+  opacity: 0.86;
 }
 
 .pm-metric-label {
-  color: rgb(var(--yb-text-muted));
+  color: rgb(var(--yb-text-muted-strong));
   font-family: var(--yb-font-text);
-  font-size: 0.72rem;
-  font-weight: 850;
+  font-size: 0.7rem;
+  font-weight: 780;
   line-height: 1;
   white-space: nowrap;
 }
@@ -1776,9 +1821,9 @@ function errorMessage(err: unknown): string {
 .pm-area-value {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--yb-text));
-  font-size: 0.88rem;
-  font-weight: 900;
+  color: rgb(var(--yb-text-soft));
+  font-size: 0.82rem;
+  font-weight: 760;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1787,14 +1832,22 @@ function errorMessage(err: unknown): string {
 .pm-cost-value {
   min-width: 0;
   overflow: hidden;
-  font-size: 1.16rem;
-  line-height: 1;
+  color: rgb(var(--yb-text));
+  font-size: 1.08rem;
+  font-weight: 820;
+  line-height: 1.05;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pm-detail-help {
+.pm-detail-wrap {
   position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.pm-detail-help {
   display: inline-flex;
   width: auto;
   min-width: 2.45rem;
@@ -1802,15 +1855,15 @@ function errorMessage(err: unknown): string {
   align-items: center;
   justify-content: center;
   padding: 0 0.48rem;
-  border: 1px solid rgb(var(--yb-success-border-bright));
+  border: 1px solid rgb(var(--yb-border-muted-blue));
   border-radius: 999px;
-  color: rgb(var(--yb-success-teal));
-  background: linear-gradient(135deg, rgb(var(--yb-success-soft)), rgb(var(--yb-success-soft-strong)));
-  box-shadow: 0 7px 18px rgba(var(--yb-success-teal-comma), 0.14);
+  color: rgb(var(--yb-text-soft));
+  background: rgb(var(--yb-surface));
+  box-shadow: none;
   cursor: help;
   font-family: var(--yb-font-text);
-  font-size: 0.72rem;
-  font-weight: 950;
+  font-size: 0.7rem;
+  font-weight: 820;
   line-height: 1;
   outline: none;
   white-space: nowrap;
@@ -1818,56 +1871,73 @@ function errorMessage(err: unknown): string {
 
 .pm-detail-help:hover,
 .pm-detail-help:focus-visible {
-  border-color: rgb(var(--yb-success-emerald-light));
-  color: rgb(var(--yb-success-text-dark));
-  background: rgb(var(--yb-surface-success-strong));
+  border-color: rgb(var(--yb-brand-border-strong));
+  color: rgb(var(--yb-brand-strong));
+  background: rgb(var(--yb-brand-soft));
 }
 
 .pm-cost-popover {
   pointer-events: none;
   position: absolute;
-  top: 50%;
-  left: calc(100% + 0.65rem);
+  top: calc(100% + 0.5rem);
+  right: 0;
   z-index: 40;
   display: grid;
-  width: min(26rem, 52vw);
-  min-width: 21rem;
+  width: min(24rem, 48vw);
+  min-width: 19rem;
   max-height: 20rem;
-  gap: 0.45rem;
+  gap: 0.38rem;
   overflow: auto;
-  padding: 0.9rem 1rem;
-  border: 1px solid rgba(var(--yb-shadow-comma), 0.12);
-  border-radius: 0.95rem;
-  color: rgb(var(--yb-brand-subtle));
-  background: rgba(var(--yb-shadow-comma), 0.96);
-  box-shadow: 0 18px 42px rgba(var(--yb-shadow-comma), 0.32);
+  padding: 0.78rem 0.85rem;
+  border: 1px solid rgb(var(--yb-border-strong));
+  border-radius: 0.65rem;
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 18px 38px rgba(var(--yb-shadow-comma), 0.16);
   opacity: 0;
-  transform: translateY(-50%) translateX(-0.25rem) scale(0.98);
+  text-align: left;
+  transform: translateY(-0.25rem) scale(0.98);
   transition: opacity 0.14s ease, transform 0.14s ease;
 }
 
 .pm-cost-popover strong {
-  color: rgb(var(--yb-surface));
+  display: block;
+  justify-self: stretch;
+  color: rgb(var(--yb-brand-strong));
   font-family: var(--yb-font-text);
-  font-size: 0.92rem;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.pm-cost-popover strong:not(:first-child) {
+  margin-top: 0.25rem;
 }
 
 .pm-cost-popover span {
-  color: rgb(var(--yb-text-disabled));
+  display: block;
+  justify-self: stretch;
+  color: rgb(var(--yb-text-muted-strong));
   font-family: var(--yb-font-text);
-  font-size: 0.79rem;
-  font-weight: 750;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  font-weight: 720;
+  line-height: 1.42;
+  text-align: left;
 }
 
-.pm-detail-help:hover .pm-cost-popover,
-.pm-detail-help:focus-visible .pm-cost-popover,
-.pm-detail-help:focus-within .pm-cost-popover {
+.pm-detail-wrap:hover .pm-cost-popover,
+.pm-detail-wrap:focus-within .pm-cost-popover {
   opacity: 1;
-  transform: translateY(-50%) translateX(0) scale(1);
+  transform: translateY(0) scale(1);
 }
 
 .pm-cost-cell.is-missing {
+  border-color: rgb(var(--yb-danger-border));
+  background: rgb(var(--yb-danger-wash));
+  box-shadow: inset 3px 0 0 rgb(var(--yb-danger-border));
+}
+
+.pm-cost-cell.is-missing .pm-cost-value {
   color: rgb(var(--yb-danger));
 }
 
@@ -2194,15 +2264,15 @@ function errorMessage(err: unknown): string {
 
   .pm-cost-popover {
     top: calc(100% + 0.65rem);
+    right: auto;
     left: 0;
     width: min(22rem, calc(100vw - 2rem));
     min-width: min(22rem, calc(100vw - 2rem));
     transform: translateY(0) translateX(-0.25rem) scale(0.98);
   }
 
-  .pm-detail-help:hover .pm-cost-popover,
-  .pm-detail-help:focus-visible .pm-cost-popover,
-  .pm-detail-help:focus-within .pm-cost-popover {
+  .pm-detail-wrap:hover .pm-cost-popover,
+  .pm-detail-wrap:focus-within .pm-cost-popover {
     transform: translateY(0) translateX(0) scale(1);
   }
 

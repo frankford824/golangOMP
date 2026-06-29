@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,6 +66,115 @@ func (r *experienceRepo) ListReasonTags(ctx context.Context, scene string) ([]*d
 }
 
 func (r *experienceRepo) ListExperienceEvents(ctx context.Context, filter repo.ExperienceEventListFilter) ([]*domain.ExperienceEvent, int64, error) {
+	querySQL, args := buildExperienceSampleUnion(filter)
+	if querySQL == "" {
+		return []*domain.ExperienceEvent{}, 0, nil
+	}
+
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+querySQL+`) experience_sample_count`, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count experience events: %w", err)
+	}
+
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	offset := (page - 1) * pageSize
+	listArgs := append(append([]interface{}{}, args...), pageSize, offset)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, event_key, schema_version, event_time, source_type, source_id, task_id, action, outcome,
+		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status, created_at
+		FROM (`+querySQL+`) experience_samples
+		ORDER BY event_time DESC, id DESC
+		LIMIT ? OFFSET ?`, listArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list experience events: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]*domain.ExperienceEvent, 0)
+	for rows.Next() {
+		event, err := scanExperienceEvent(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate experience events: %w", err)
+	}
+	return events, total, nil
+}
+
+func buildExperienceSampleUnion(filter repo.ExperienceEventListFilter) (string, []interface{}) {
+	queries := make([]string, 0, 2)
+	args := make([]interface{}, 0, 12)
+
+	if shouldIncludeBusinessExperienceSamples(filter) {
+		whereSQL, whereArgs := buildBusinessExperienceSampleWhere(filter)
+		queries = append(queries, `
+		SELECT id, event_key, schema_version, event_time, source_type, source_id, task_id, action, outcome,
+		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status, created_at
+		FROM experience_events
+		WHERE `+whereSQL)
+		args = append(args, whereArgs...)
+	}
+
+	if shouldIncludeAISuggestionSamples(filter) {
+		whereSQL, whereArgs := buildAISuggestionSampleWhere(filter)
+		queries = append(queries, `
+		SELECT -id AS id,
+		       suggestion_event_id AS event_key,
+		       1 AS schema_version,
+		       displayed_at AS event_time,
+		       'ai_suggestion' AS source_type,
+		       source AS source_id,
+		       CASE WHEN target_type = 'task' AND target_id REGEXP '^[0-9]+$' THEN CAST(target_id AS SIGNED) ELSE NULL END AS task_id,
+		       suggestion_type AS action,
+		       'displayed' AS outcome,
+		       CASE
+		         WHEN actor_id IS NULL THEN NULL
+		         ELSE JSON_OBJECT('actor_id', actor_id, 'actor_type', 'user', 'surface', 'ai_suggestion')
+		       END AS actor_snapshot_json,
+		       JSON_OBJECT('target_type', target_type, 'target_id', target_id) AS business_snapshot_json,
+		       JSON_OBJECT(
+		         'suggestion_id', suggestion_id,
+		         'source', source,
+		         'confidence', confidence,
+		         'model', model,
+		         'provider', provider,
+		         'model_version', model_version,
+		         'target_type', target_type,
+		         'target_id', target_id
+		       ) AS payload_json,
+		       'ai_suggestion' AS data_classification,
+		       'displayed' AS ground_truth_status,
+		       created_at
+		FROM ai_suggestion_events
+		WHERE `+whereSQL)
+		args = append(args, whereArgs...)
+	}
+
+	if len(queries) == 0 {
+		return "", nil
+	}
+	return strings.Join(queries, "\n\t\tUNION ALL\n"), args
+}
+
+func shouldIncludeBusinessExperienceSamples(filter repo.ExperienceEventListFilter) bool {
+	sourceType := strings.TrimSpace(filter.SourceType)
+	return sourceType == "" || sourceType != "ai_suggestion"
+}
+
+func shouldIncludeAISuggestionSamples(filter repo.ExperienceEventListFilter) bool {
+	if sourceType := strings.TrimSpace(filter.SourceType); sourceType != "" && sourceType != "ai_suggestion" {
+		return false
+	}
+	if outcome := strings.TrimSpace(filter.Outcome); outcome != "" && outcome != "displayed" {
+		return false
+	}
+	return true
+}
+
+func buildBusinessExperienceSampleWhere(filter repo.ExperienceEventListFilter) (string, []interface{}) {
 	where := []string{"1=1"}
 	args := make([]interface{}, 0, 8)
 	if value := strings.TrimSpace(filter.SourceType); value != "" {
@@ -95,40 +205,34 @@ func (r *experienceRepo) ListExperienceEvents(ctx context.Context, filter repo.E
 		where = append(where, "event_time <= ?")
 		args = append(args, *filter.To)
 	}
-	whereSQL := strings.Join(where, " AND ")
+	return strings.Join(where, " AND "), args
+}
 
-	var total int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM experience_events WHERE `+whereSQL, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count experience events: %w", err)
+func buildAISuggestionSampleWhere(filter repo.ExperienceEventListFilter) (string, []interface{}) {
+	where := []string{"1=1"}
+	args := make([]interface{}, 0, 8)
+	if value := strings.TrimSpace(filter.SourceID); value != "" {
+		where = append(where, "source = ?")
+		args = append(args, value)
 	}
-
-	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	offset := (page - 1) * pageSize
-	listArgs := append(append([]interface{}{}, args...), pageSize, offset)
-	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, event_key, schema_version, event_time, source_type, source_id, task_id, action, outcome,
-		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status, created_at
-		FROM experience_events
-		WHERE `+whereSQL+`
-		ORDER BY event_time DESC, id DESC
-		LIMIT ? OFFSET ?`, listArgs...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("list experience events: %w", err)
+	if filter.TaskID != nil {
+		where = append(where, "target_type = 'task'")
+		where = append(where, "target_id = ?")
+		args = append(args, strconv.FormatInt(*filter.TaskID, 10))
 	}
-	defer rows.Close()
-
-	events := make([]*domain.ExperienceEvent, 0)
-	for rows.Next() {
-		event, err := scanExperienceEvent(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		events = append(events, event)
+	if value := strings.TrimSpace(filter.Action); value != "" {
+		where = append(where, "suggestion_type = ?")
+		args = append(args, value)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate experience events: %w", err)
+	if filter.From != nil {
+		where = append(where, "displayed_at >= ?")
+		args = append(args, *filter.From)
 	}
-	return events, total, nil
+	if filter.To != nil {
+		where = append(where, "displayed_at <= ?")
+		args = append(args, *filter.To)
+	}
+	return strings.Join(where, " AND "), args
 }
 
 func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.ExperienceStats, error) {

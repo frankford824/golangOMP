@@ -17019,7 +17019,7 @@ paths:
   /v1/reports/experience/samples:
     get:
       summary: List experience event samples
-      description: SuperAdmin-only sample pool. The query reads only `experience_events` and never joins core task or asset tables.
+      description: SuperAdmin-only sample pool. The query reads `experience_events` plus side-channel `ai_suggestion_events`, and never joins core task or asset tables.
       tags: [ExperienceLearning, Reports, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
