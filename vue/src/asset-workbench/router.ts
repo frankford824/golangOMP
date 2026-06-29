@@ -3,7 +3,6 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { getToken } from '@/services/http'
 import { canAccessAssetWorkbenchRoute, routeAccessForPath } from './app/access'
 import { useAssetWorkbenchSessionStore } from './app/session.store'
-import { prefersReducedMotion } from './shared/motion/tokens'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -155,27 +154,4 @@ router.beforeEach(async (to) => {
     return { path: '/403', query: { from: to.fullPath } }
   }
   return true
-})
-
-router.beforeResolve((to, from, next) => {
-  if (!from.matched.length || to.fullPath === from.fullPath || prefersReducedMotion()) {
-    next()
-    return
-  }
-  const documentWithTransitions = document as Document & {
-    startViewTransition?: (callback: () => Promise<void>) => { finished: Promise<void> }
-  }
-  if (typeof documentWithTransitions.startViewTransition !== 'function') {
-    next()
-    return
-  }
-
-  const transition = documentWithTransitions.startViewTransition(
-    () =>
-      new Promise<void>((resolve) => {
-        next()
-        requestAnimationFrame(() => resolve())
-      }),
-  )
-  transition.finished.catch(() => undefined)
 })

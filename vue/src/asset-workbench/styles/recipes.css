@@ -2305,10 +2305,6 @@ body.aw-ledger-locked {
   min-width: 0;
 }
 
-.aw-route-view {
-  view-transition-name: aw-route;
-}
-
 .aw-motion-reveal {
   opacity: 0;
   transform: translateY(var(--aw-motion-shift-distance, 8px));
@@ -2327,14 +2323,6 @@ body.aw-ledger-locked {
     opacity: 1;
     transform: none;
     transition: none;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  ::view-transition-old(aw-route),
-  ::view-transition-new(aw-route) {
-    animation-duration: var(--aw-motion-standard);
-    animation-timing-function: var(--aw-ease-standard);
   }
 }
 

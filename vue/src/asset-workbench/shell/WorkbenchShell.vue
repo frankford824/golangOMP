@@ -89,6 +89,7 @@ const businessMonth = computed(() =>
 const displayName = computed(() => bootstrap.value?.profile?.real_name || bootstrap.value?.user?.name || bootstrap.value?.user?.username || '我的账号')
 
 function hasAnyCapability(required: readonly string[]) {
+  if (required.length === 0) return true
   const capabilities = new Set(bootstrap.value?.capabilities ?? [])
   return required.some((item) => capabilities.has(item))
 }
