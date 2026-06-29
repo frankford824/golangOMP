@@ -11,9 +11,11 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { chipClass, previewStatusMeta, pricingStatusMeta, qcStatusMeta, submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 type ItemActionKind = 'needs_fix' | 'void' | 'reprice'
 
@@ -40,14 +42,19 @@ const savedViews = ref<AssetWorkbenchSavedView[]>([])
 const selectedDetail = ref<SubmissionDetail | null>(null)
 const selectedFileIds = ref<Set<number>>(new Set())
 const pendingAction = ref<PendingItemAction | null>(null)
-const loading = ref(false)
 const detailLoading = ref(false)
-const error = ref('')
 const notice = ref('')
 const viewName = ref('默认维护视图')
 const groupBy = ref('business_month')
 const density = ref('compact')
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
+const submissionsRequest = usePageRequest(
+  () => assetWorkbenchApi.listSubmissions({ page: 1, page_size: 50 }),
+  { items: [], total: 0 },
+  '提交列表加载失败',
+)
+const loading = submissionsRequest.loading
+const error = submissionsRequest.error
 
 const selectedFiles = computed(() => {
   const detail = selectedDetail.value
@@ -114,17 +121,9 @@ const pendingActionTitle = computed(() => {
 const canManageItems = computed(() => bootstrap.value?.capabilities.includes('asset.workbench.manage') === true)
 
 async function loadSubmissions() {
-  loading.value = true
-  error.value = ''
-  try {
-    const result = await assetWorkbenchApi.listSubmissions({ page: 1, page_size: 50 })
-    rows.value = result.items
-    total.value = result.total
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '提交列表加载失败'
-  } finally {
-    loading.value = false
-  }
+  const result = await submissionsRequest.run()
+  rows.value = result?.items ?? []
+  total.value = result?.total ?? 0
 }
 
 async function loadSavedViews() {
@@ -338,35 +337,40 @@ onMounted(async () => {
           {{ view.view_name }}
         </button>
       </div>
-      <WorkbenchDataGrid
-        v-if="rows.length"
-        :columns="submissionGridColumns"
-        :rows="submissionGridRows"
-        row-key="id"
-        storage-key="submissions"
-        :group-by="groupBy"
-        :height="420"
-        :row-height="gridRowHeight"
+      <AsyncBoundary
+        :loading="loading"
+        :error="error"
+        loading-label="正在加载提交列表"
+        @retry="loadSubmissions"
       >
-        <template #cell="{ row, column, value }">
-          <button v-if="column.key === 'action'" type="button" @click="openSubmission(gridRowAsSubmission(row))">文件</button>
-          <span
-            v-else-if="column.key === 'status_label'"
-            :class="chipClass(submissionStatusMeta(gridRowAsSubmission(row).status).tone)"
-          >
-            {{ value }}
-          </span>
-          <span v-else-if="column.key === 'gross_total'" class="aw-cell-money">{{ formatMoney(value) }}</span>
-          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ formatInt(value) }}</span>
-          <span v-else>{{ value || '—' }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <div v-else class="aw-empty-state">
-        <h3>还没有提交明细</h3>
-        <p v-if="loading">正在加载提交列表</p>
-        <p v-else-if="error">{{ error }}</p>
-        <p v-else>当前没有可维护的提交。上传成品后，可以在这里质检、修正、下载和保存常用视图。</p>
-      </div>
+        <WorkbenchDataGrid
+          v-if="rows.length"
+          :columns="submissionGridColumns"
+          :rows="submissionGridRows"
+          row-key="id"
+          storage-key="submissions"
+          :group-by="groupBy"
+          :height="420"
+          :row-height="gridRowHeight"
+        >
+          <template #cell="{ row, column, value }">
+            <button v-if="column.key === 'action'" type="button" @click="openSubmission(gridRowAsSubmission(row))">文件</button>
+            <span
+              v-else-if="column.key === 'status_label'"
+              :class="chipClass(submissionStatusMeta(gridRowAsSubmission(row).status).tone)"
+            >
+              {{ value }}
+            </span>
+            <span v-else-if="column.key === 'gross_total'" class="aw-cell-money">{{ formatMoney(value) }}</span>
+            <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ formatInt(value) }}</span>
+            <span v-else>{{ value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <div v-else class="aw-empty-state">
+          <h3>还没有提交明细</h3>
+          <p>当前没有可维护的提交。上传成品后，可以在这里质检、修正、下载和保存常用视图。</p>
+        </div>
+      </AsyncBoundary>
     </div>
 
     <div v-if="selectedDetail || detailLoading" class="aw-data-surface">

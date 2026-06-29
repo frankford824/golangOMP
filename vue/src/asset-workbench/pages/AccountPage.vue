@@ -7,6 +7,7 @@ import { useWorkbenchSession } from '@aw/app/useWorkbenchSession'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
 import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
 import { roleDisplayList } from '@aw/shared/format/roleDisplay'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
 const { logout } = useWorkbenchSession()
@@ -68,7 +69,7 @@ async function saveProfile() {
       reason: 'self profile update',
     })
     notice.value = '资料已保存'
-    await refresh()
+    await refresh({ force: true })
   } catch (err) {
     saveError.value = err instanceof Error ? err.message : '资料保存失败'
   } finally {
@@ -99,12 +100,18 @@ watch(bootstrap, syncForm)
       </div>
     </div>
 
-    <p v-if="error" class="aw-inline-alert">{{ error }}</p>
-    <p v-else-if="loading && !bootstrap" class="aw-inline-alert">正在加载账号资料</p>
-    <p v-else-if="saveError" class="aw-inline-alert">{{ saveError }}</p>
+    <p v-if="saveError" class="aw-inline-alert">{{ saveError }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
 
-    <div class="aw-two-column">
+    <AsyncBoundary
+      :loading="loading && !bootstrap"
+      :error="error"
+      :empty="!bootstrap"
+      loading-label="正在加载账号资料"
+      empty-label="暂无账号资料"
+      @retry="refresh"
+    >
+      <div class="aw-two-column">
       <section class="aw-panel">
         <div class="aw-panel__head">
           <div>
@@ -193,6 +200,7 @@ watch(bootstrap, syncForm)
           </button>
         </div>
       </section>
-    </div>
+      </div>
+    </AsyncBoundary>
   </section>
 </template>

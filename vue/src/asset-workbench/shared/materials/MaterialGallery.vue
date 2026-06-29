@@ -219,6 +219,7 @@ watch(
               <input
                 type="checkbox"
                 :checked="selectedIds.has(asset.id)"
+                :aria-label="`${selectedIds.has(asset.id) ? '取消选择' : '选择'}素材 ${titleOf(asset)}`"
                 @change="toggleAsset(asset, ($event.target as HTMLInputElement).checked, index, $event)"
               />
             </label>

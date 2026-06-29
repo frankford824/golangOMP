@@ -10,4 +10,6 @@ coverage
 *.local
 tests/visual/current/
 tests/a11y/latest.json
+tests/asset-workbench/visual/current/
+tests/asset-workbench/a11y/latest.json
 tests/load/latest.json

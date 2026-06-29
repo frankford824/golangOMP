@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { HandCoins, ImagePlus, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
+import MotionReveal from '../shared/ui/MotionReveal.vue'
 
 const props = defineProps<{
   bootstrap: AssetWorkbenchBootstrap | null
@@ -53,7 +54,11 @@ const navItems = [
     </header>
 
     <main class="aw-simple">
-      <RouterView />
+      <RouterView v-slot="{ Component, route: activeRoute }">
+        <MotionReveal :key="activeRoute.fullPath" class="aw-route-view">
+          <component :is="Component" />
+        </MotionReveal>
+      </RouterView>
     </main>
   </div>
 </template>

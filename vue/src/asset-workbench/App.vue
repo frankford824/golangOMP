@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { NConfigProvider, NDialogProvider, NMessageProvider, type GlobalThemeOverrides } from 'naive-ui'
 
+import MotionReveal from './shared/ui/MotionReveal.vue'
 import ShellGate from './shell/ShellGate.vue'
 
 const route = useRoute()
@@ -40,7 +41,11 @@ const themeOverrides: GlobalThemeOverrides = {
     <NMessageProvider>
       <NDialogProvider>
         <div v-if="isPublicRoute" class="aw-root aw-root--auth">
-          <RouterView />
+          <RouterView v-slot="{ Component, route: activeRoute }">
+            <MotionReveal :key="activeRoute.fullPath" class="aw-route-view">
+              <component :is="Component" />
+            </MotionReveal>
+          </RouterView>
         </div>
         <ShellGate v-else />
       </NDialogProvider>

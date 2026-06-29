@@ -19,6 +19,8 @@ import {
 
 import { useAssetWorkbenchBootstrap } from '../app/useAssetWorkbenchBootstrap'
 import { useWorkbenchSession } from '../app/useWorkbenchSession'
+import { assetWorkbenchRouteAccess } from '../app/access'
+import MotionReveal from '../shared/ui/MotionReveal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,16 +32,16 @@ const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
 const { logout } = useWorkbenchSession()
 
 const navItems = [
-  { group: '工作台', to: '/', label: '总览', icon: LayoutDashboard, requires: ['asset.workbench.bootstrap'] },
-  { group: '工作台', to: '/upload', label: '交作品', icon: FileUp, requires: ['asset.workbench.submit'] },
-  { group: '工作台', to: '/submissions', label: '维护区', icon: Boxes, requires: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'] },
-  { group: '工作台', to: '/materials', label: '素材库', icon: Library, requires: ['asset.workbench.system_search'] },
-  { group: '管理', to: '/template-assignments', label: '作品下发', icon: Send, requires: ['asset.workbench.template.assign'] },
-  { group: '管理', to: '/cost-center', label: '成本中心', icon: Calculator, requires: ['asset.workbench.cost_center.manage'] },
-  { group: '管理', to: '/settlement', label: '结算工资', icon: ReceiptText, requires: ['asset.workbench.settlement'] },
-  { group: '管理', to: '/people', label: '人员资料', icon: UsersRound, requires: ['asset.workbench.profile', 'asset.workbench.profile.manage'] },
-  { group: '管理', to: '/members', label: '成员管理', icon: UserRound, requires: ['asset.workbench.member.identity'] },
-  { group: '管理', to: '/events', label: '操作日志', icon: ScrollText, requires: ['asset.workbench.manage', 'asset.workbench.cost_center.manage', 'asset.workbench.settlement'] },
+  { group: '工作台', to: '/', label: '总览', icon: LayoutDashboard, requires: [] },
+  { group: '工作台', to: '/upload', label: '交作品', icon: FileUp, requires: assetWorkbenchRouteAccess['/upload'].requiresAnyCapability ?? [] },
+  { group: '工作台', to: '/submissions', label: '维护区', icon: Boxes, requires: assetWorkbenchRouteAccess['/submissions'].requiresAnyCapability ?? [] },
+  { group: '工作台', to: '/materials', label: '素材库', icon: Library, requires: assetWorkbenchRouteAccess['/materials'].requiresAnyCapability ?? [] },
+  { group: '管理', to: '/template-assignments', label: '作品下发', icon: Send, requires: assetWorkbenchRouteAccess['/template-assignments'].requiresAnyCapability ?? [] },
+  { group: '管理', to: '/cost-center', label: '成本中心', icon: Calculator, requires: assetWorkbenchRouteAccess['/cost-center'].requiresAnyCapability ?? [] },
+  { group: '管理', to: '/settlement', label: '结算工资', icon: ReceiptText, requires: assetWorkbenchRouteAccess['/settlement'].requiresAnyCapability ?? [] },
+  { group: '管理', to: '/people', label: '人员资料', icon: UsersRound, requires: assetWorkbenchRouteAccess['/people'].requiresAnyCapability ?? [] },
+  { group: '管理', to: '/members', label: '成员管理', icon: UserRound, requires: assetWorkbenchRouteAccess['/members'].requiresAnyCapability ?? [] },
+  { group: '管理', to: '/events', label: '操作日志', icon: ScrollText, requires: assetWorkbenchRouteAccess['/events'].requiresAnyCapability ?? [] },
 ]
 
 const activeLabel = computed(() => String(route.meta.label || '资产工作台'))
@@ -86,7 +88,7 @@ const businessMonth = computed(() =>
 )
 const displayName = computed(() => bootstrap.value?.profile?.real_name || bootstrap.value?.user?.name || bootstrap.value?.user?.username || '我的账号')
 
-function hasAnyCapability(required: string[]) {
+function hasAnyCapability(required: readonly string[]) {
   const capabilities = new Set(bootstrap.value?.capabilities ?? [])
   return required.some((item) => capabilities.has(item))
 }
@@ -229,7 +231,11 @@ watch(commandQuery, () => {
           <span class="aw-statusline__sep">·</span>
           <span class="aw-statusline__item">{{ permissionSummary }}</span>
         </div>
-        <RouterView />
+        <RouterView v-slot="{ Component, route: activeRoute }">
+          <MotionReveal :key="activeRoute.fullPath" class="aw-route-view">
+            <component :is="Component" />
+          </MotionReveal>
+        </RouterView>
       </main>
     </section>
 

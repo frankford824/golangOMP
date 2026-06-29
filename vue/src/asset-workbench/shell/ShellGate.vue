@@ -1,49 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
 
 import { useAssetWorkbenchBootstrap } from '../app/useAssetWorkbenchBootstrap'
-import { assetWorkbenchApi, type WorkbenchEntryResult } from '../shared/api/assetWorkbenchApi'
 import SimpleShell from './SimpleShell.vue'
 import WorkbenchShell from './WorkbenchShell.vue'
 
-const route = useRoute()
-const router = useRouter()
-const { bootstrap, loading, error, setBootstrap } = useAssetWorkbenchBootstrap()
-const entry = ref<WorkbenchEntryResult | null>(null)
-const entryLoading = ref(false)
-const entryError = ref('')
-
-const allowedSimplePaths = new Set(['/', '/upload', '/my-settlement', '/account'])
+const { bootstrap, loading, error, entry, entryLoading, entryError, loadEntry } = useAssetWorkbenchBootstrap()
 const isAdmin = computed(() => bootstrap.value?.is_admin === true)
 const blockedState = computed(() => entry.value && entry.value.state !== 'ready' ? entry.value : null)
-
-function redirectSimpleUser() {
-  if (!bootstrap.value || isAdmin.value) return
-  if (!allowedSimplePaths.has(route.path)) {
-    void router.replace('/')
-  }
-}
 
 onMounted(() => {
   void loadEntry()
 })
-
-watch([bootstrap, () => route.path], redirectSimpleUser)
-
-async function loadEntry() {
-  entryLoading.value = true
-  entryError.value = ''
-  try {
-    const result = await assetWorkbenchApi.entry()
-    entry.value = result
-    setBootstrap(result.bootstrap ?? null)
-  } catch (err) {
-    entryError.value = err instanceof Error ? err.message : '工作台入口加载失败'
-  } finally {
-    entryLoading.value = false
-  }
-}
 </script>
 
 <template>

@@ -10,12 +10,12 @@ import {
   type WorkbenchTemplateAssignmentRow,
   type WorkbenchTemplateRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
-const loading = ref(false)
 const saving = ref(false)
 const notice = ref('')
-const error = ref('')
 const groups = ref<WorkbenchGroupRow[]>([])
 const templates = ref<WorkbenchTemplateRow[]>([])
 const assignments = ref<WorkbenchTemplateAssignmentRow[]>([])
@@ -39,6 +39,20 @@ const activeGroup = ref<WorkbenchGroupRow | null>(null)
 const selectedPeople = ref<WorkbenchMemberRow[]>([])
 const selectedGroups = ref<WorkbenchGroupRow[]>([])
 const selectedGroupPeople = ref<WorkbenchMemberRow[]>([])
+const templateRequest = usePageRequest(
+  async () => {
+    const [groupRes, templateRes, assignmentRes] = await Promise.all([
+      assetWorkbenchApi.listGroups({ page_size: 200 }),
+      assetWorkbenchApi.listTemplates({ page_size: 200 }),
+      assetWorkbenchApi.listTemplateAssignments({ page_size: 200, enabled: true }),
+    ])
+    return { groups: groupRes.items, templates: templateRes.items, assignments: assignmentRes.items }
+  },
+  null,
+  '模板下发数据加载失败',
+)
+const loading = templateRequest.loading
+const error = templateRequest.error
 
 const enabledGroups = computed(() => groups.value.filter((item) => item.enabled))
 const enabledTemplates = computed(() => templates.value.filter((item) => item.enabled))
@@ -93,25 +107,15 @@ function openAssign(template: WorkbenchTemplateRow) {
 }
 
 async function loadAll() {
-  loading.value = true
   resetMessage()
-  try {
-    const [groupRes, templateRes, assignmentRes] = await Promise.all([
-      assetWorkbenchApi.listGroups({ page_size: 200 }),
-      assetWorkbenchApi.listTemplates({ page_size: 200 }),
-      assetWorkbenchApi.listTemplateAssignments({ page_size: 200, enabled: true }),
-    ])
-    groups.value = groupRes.items
-    templates.value = templateRes.items
-    assignments.value = assignmentRes.items
-    if (!activeGroup.value && enabledGroups.value[0]) {
-      activeGroup.value = enabledGroups.value[0]
-      await loadGroupMembers(enabledGroups.value[0])
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '模板下发数据加载失败'
-  } finally {
-    loading.value = false
+  const data = await templateRequest.run()
+  if (!data) return
+  groups.value = data.groups
+  templates.value = data.templates
+  assignments.value = data.assignments
+  if (!activeGroup.value && enabledGroups.value[0]) {
+    activeGroup.value = enabledGroups.value[0]
+    await loadGroupMembers(enabledGroups.value[0])
   }
 }
 
@@ -340,21 +344,32 @@ onMounted(() => {
         </div>
         <span class="aw-chip aw-chip--neutral">{{ enabledTemplates.length }} 个启用</span>
       </div>
-      <div class="aw-compact-list">
-        <article v-for="item in templates" :key="item.id" class="aw-compact-list__item">
-          <div>
-            <strong>{{ item.name }}</strong>
-            <span>{{ item.category || '未分类' }} · {{ item.difficulty_class }} · {{ workerTypeMeta(item.worker_type || 'all').label }}</span>
-          </div>
-          <div class="aw-page-bar__actions">
-            <span :class="chipClass(item.enabled ? 'success' : 'neutral')">{{ item.enabled ? '启用' : '停用' }}</span>
-            <button class="aw-secondary-button" type="button" :disabled="!item.enabled" @click="openAssign(item)">
-              <Send :size="16" aria-hidden="true" />
-              下发
-            </button>
-          </div>
-        </article>
-      </div>
+      <AsyncBoundary
+        :loading="loading"
+        :error="error"
+        loading-label="正在加载作品类型"
+        @retry="loadAll"
+      >
+        <div v-if="templates.length" class="aw-compact-list">
+          <article v-for="item in templates" :key="item.id" class="aw-compact-list__item">
+            <div>
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.category || '未分类' }} · {{ item.difficulty_class }} · {{ workerTypeMeta(item.worker_type || 'all').label }}</span>
+            </div>
+            <div class="aw-page-bar__actions">
+              <span :class="chipClass(item.enabled ? 'success' : 'neutral')">{{ item.enabled ? '启用' : '停用' }}</span>
+              <button class="aw-secondary-button" type="button" :disabled="!item.enabled" @click="openAssign(item)">
+                <Send :size="16" aria-hidden="true" />
+                下发
+              </button>
+            </div>
+          </article>
+        </div>
+        <div v-else class="aw-empty-state">
+          <h3>还没有作品类型</h3>
+          <p>先新建作品类型，再按人员或分组下发。</p>
+        </div>
+      </AsyncBoundary>
     </section>
 
     <section v-if="activeTemplate" class="aw-panel aw-panel--stage">

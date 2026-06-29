@@ -4,12 +4,12 @@ import { RefreshCw, Search, ShieldCheck, UserRound } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { assetWorkbenchApi, type AccountMergePreview, type WorkbenchMemberRow } from '@aw/shared/api/assetWorkbenchApi'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 import { managedAssetRoles, roleDisplayList, roleDisplayName } from '@aw/shared/format/roleDisplay'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
-const loading = ref(false)
 const savingUserId = ref<number | null>(null)
-const error = ref('')
 const notice = ref('')
 const query = ref('')
 const statusFilter = ref('active')
@@ -27,6 +27,21 @@ const mergeReason = ref('合并资产工作台账号')
 const mergePreview = ref<AccountMergePreview | null>(null)
 const mergeChoices = ref<Record<string, string>>({})
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
+const membersRequest = usePageRequest<WorkbenchMemberRow[]>(
+  async () => {
+    const params: Record<string, unknown> = {
+      q: query.value,
+      page_size: 200,
+    }
+    if (statusFilter.value !== 'all') params.status = statusFilter.value
+    const result = await assetWorkbenchApi.listMembers(params)
+    return result.items
+  },
+  [],
+  '成员加载失败',
+)
+const loading = membersRequest.loading
+const error = membersRequest.error
 const roleOptions = managedAssetRoles.filter((role) => role !== 'AssetSubmitter')
 const statusOptions = [
   { value: 'active', label: '已开通' },
@@ -58,21 +73,7 @@ function statusMeta(status?: string) {
 }
 
 async function loadMembers() {
-  loading.value = true
-  error.value = ''
-  try {
-    const params: Record<string, unknown> = {
-      q: query.value,
-      page_size: 200,
-    }
-    if (statusFilter.value !== 'all') params.status = statusFilter.value
-    const result = await assetWorkbenchApi.listMembers(params)
-    members.value = result.items
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '成员加载失败'
-  } finally {
-    loading.value = false
-  }
+  members.value = (await membersRequest.run()) ?? []
 }
 
 async function loadPage() {
@@ -360,53 +361,60 @@ onMounted(() => {
         </div>
         <ShieldCheck :size="18" aria-hidden="true" />
       </div>
-      <div class="aw-compact-list">
-        <article v-for="member in members" :key="member.user_id" class="aw-member-row">
-          <div class="aw-member-row__identity">
-            <span class="aw-template-option__icon">
-              <UserRound :size="16" aria-hidden="true" />
-            </span>
-            <div>
-              <strong>{{ memberName(member) }}</strong>
-              <span>{{ member.username }} · {{ workerTypeMeta(member.worker_type).label }} · {{ member.job_grade || '未定级' }}</span>
+      <AsyncBoundary
+        :loading="loading"
+        :error="error"
+        loading-label="正在加载成员"
+        @retry="loadMembers"
+      >
+        <div class="aw-compact-list">
+          <article v-for="member in members" :key="member.user_id" class="aw-member-row">
+            <div class="aw-member-row__identity">
+              <span class="aw-template-option__icon">
+                <UserRound :size="16" aria-hidden="true" />
+              </span>
+              <div>
+                <strong>{{ memberName(member) }}</strong>
+                <span>{{ member.username }} · {{ workerTypeMeta(member.worker_type).label }} · {{ member.job_grade || '未定级' }}</span>
+              </div>
             </div>
-          </div>
-          <div class="aw-member-row__badges">
-            <span :class="chipClass(statusMeta(member.status).tone)">
-              {{ statusMeta(member.status).label }}
-            </span>
-            <span v-for="label in memberLabels(member)" :key="`${member.user_id}-${label}`" class="aw-chip aw-chip--info">{{ label }}</span>
-          </div>
-          <div class="aw-member-row__controls">
-            <label v-for="role in roleOptions" :key="`${member.user_id}-${role}`" class="aw-inline-check">
-              <input
-                type="checkbox"
-                :checked="memberRoles(member).has(role)"
-                :disabled="!canChangeRoles || member.status !== 'active' || savingUserId === member.user_id"
-                @change="toggleRole(member, role, ($event.target as HTMLInputElement).checked)"
-              />
-              <span>{{ roleDisplayName(role) }}</span>
-            </label>
-            <button
-              v-if="canChangeRoles && member.status === 'active'"
-              class="aw-secondary-button"
-              type="button"
-              @click="startDisable(member)"
-            >
-              停用
-            </button>
-            <button
-              v-if="canChangeRoles && member.status === 'disabled'"
-              class="aw-primary-button"
-              type="button"
-              @click="restoreMember(member)"
-            >
-              恢复
-            </button>
-          </div>
-        </article>
-        <p v-if="!loading && members.length === 0" class="aw-inline-alert">没有找到成员</p>
-      </div>
+            <div class="aw-member-row__badges">
+              <span :class="chipClass(statusMeta(member.status).tone)">
+                {{ statusMeta(member.status).label }}
+              </span>
+              <span v-for="label in memberLabels(member)" :key="`${member.user_id}-${label}`" class="aw-chip aw-chip--info">{{ label }}</span>
+            </div>
+            <div class="aw-member-row__controls">
+              <label v-for="role in roleOptions" :key="`${member.user_id}-${role}`" class="aw-inline-check">
+                <input
+                  type="checkbox"
+                  :checked="memberRoles(member).has(role)"
+                  :disabled="!canChangeRoles || member.status !== 'active' || savingUserId === member.user_id"
+                  @change="toggleRole(member, role, ($event.target as HTMLInputElement).checked)"
+                />
+                <span>{{ roleDisplayName(role) }}</span>
+              </label>
+              <button
+                v-if="canChangeRoles && member.status === 'active'"
+                class="aw-secondary-button"
+                type="button"
+                @click="startDisable(member)"
+              >
+                停用
+              </button>
+              <button
+                v-if="canChangeRoles && member.status === 'disabled'"
+                class="aw-primary-button"
+                type="button"
+                @click="restoreMember(member)"
+              >
+                恢复
+              </button>
+            </div>
+          </article>
+          <p v-if="members.length === 0" class="aw-inline-alert">没有找到成员</p>
+        </div>
+      </AsyncBoundary>
     </section>
 
     <section v-if="disableTarget" class="aw-panel">

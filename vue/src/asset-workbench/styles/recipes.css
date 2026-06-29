@@ -1098,12 +1098,14 @@ body.aw-ledger-locked {
 .aw-ledger-sheet__backdrop {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background: color-mix(in srgb, var(--aw-stage) 64%, transparent);
   backdrop-filter: blur(6px);
 }
 
 .aw-ledger-sheet {
   position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   width: min(960px, 100%);
@@ -1183,7 +1185,7 @@ body.aw-ledger-locked {
   overflow: auto;
   padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-6);
   background: var(--aw-surface);
-  animation: aw-sheet-content-in var(--aw-motion-slow) var(--aw-ease-standard) 140ms both;
+  animation: aw-sheet-content-in var(--aw-motion-slow) var(--aw-ease-standard) var(--aw-motion-stagger) both;
 }
 
 @keyframes aw-sheet-content-in {
@@ -2264,6 +2266,7 @@ body.aw-ledger-locked {
   gap: var(--aw-space-2);
 }
 
+.aw-visually-hidden,
 .aw-root input.aw-visually-hidden,
 .aw-root input.aw-visually-hidden:not([type='checkbox']):not([type='radio']),
 .aw-root .aw-visually-hidden {
@@ -2276,6 +2279,63 @@ body.aw-ledger-locked {
   padding: 0;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+.aw-async-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  width: 100%;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  color: var(--aw-ink-2);
+  padding: var(--aw-space-4);
+  box-shadow: var(--aw-shadow-soft);
+}
+
+.aw-async-state--error {
+  border-color: color-mix(in srgb, var(--aw-danger) 38%, var(--aw-hairline));
+  color: var(--aw-danger);
+}
+
+.aw-route-view,
+.aw-motion-reveal {
+  min-width: 0;
+}
+
+.aw-route-view {
+  view-transition-name: aw-route;
+}
+
+.aw-motion-reveal {
+  opacity: 0;
+  transform: translateY(var(--aw-motion-shift-distance, 8px));
+  transition:
+    opacity var(--aw-motion-enter) var(--aw-ease-enter),
+    transform var(--aw-motion-enter) var(--aw-ease-enter);
+}
+
+.aw-motion-reveal.aw-motion-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-motion-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(aw-route),
+  ::view-transition-new(aw-route) {
+    animation-duration: var(--aw-motion-standard);
+    animation-timing-function: var(--aw-ease-standard);
+  }
 }
 
 .aw-command {

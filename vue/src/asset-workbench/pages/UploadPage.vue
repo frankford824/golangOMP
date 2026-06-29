@@ -5,8 +5,10 @@ import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, XCircle } f
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi, type SubmissionFileRow, type WorkbenchTemplateRow } from '@aw/shared/api/assetWorkbenchApi'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
 
@@ -36,6 +38,16 @@ const selectedTemplateId = ref(0)
 const expandedItemIds = ref<Set<string>>(new Set())
 const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
 const { bootstrap, refresh } = useAssetWorkbenchBootstrap()
+const contextRequest = usePageRequest<WorkbenchTemplateRow[]>(
+  async () => {
+    await refresh()
+    return assetWorkbenchApi.listMyTemplates()
+  },
+  [],
+  '作品类型加载失败',
+)
+const contextLoading = contextRequest.loading
+const contextError = contextRequest.error
 
 const uploadedItems = computed(() => queue.value.filter((item) => item.status === 'uploaded'))
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
@@ -243,8 +255,8 @@ function filenameWithoutExt(filename: string) {
 }
 
 async function loadContext() {
-  await refresh()
-  templates.value = await assetWorkbenchApi.listMyTemplates()
+  const next = await contextRequest.run()
+  templates.value = next ?? []
   if (!selectedTemplateId.value && templates.value[0]) {
     selectedTemplateId.value = templates.value[0].id
   }
@@ -274,7 +286,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <input ref="inputRef" class="aw-visually-hidden" type="file" multiple @change="handleInput" />
+    <input ref="inputRef" class="aw-visually-hidden" type="file" multiple aria-label="选择作品文件" @change="handleInput" />
 
     <div v-if="isSimpleUser" class="aw-panel">
       <div class="aw-panel__head">
@@ -283,23 +295,30 @@ onMounted(() => {
           <h3>选择这次要交的类型</h3>
         </div>
       </div>
-      <div v-if="templates.length" class="aw-template-option-grid">
-        <button
-          v-for="template in templates"
-          :key="template.id"
-          class="aw-template-option"
-          :class="{ 'aw-template-option--active': selectedTemplateId === template.id }"
-          type="button"
-          @click="selectTemplate(template)"
-        >
-          <strong>{{ template.name }}</strong>
-          <span>{{ template.category || '常规作品' }}</span>
-        </button>
-      </div>
-      <div v-else class="aw-empty-state">
-        <h3>还没有可选类型</h3>
-        <p>管理员下发作品类型后，你就能在这里选择并上传。</p>
-      </div>
+      <AsyncBoundary
+        :loading="contextLoading"
+        :error="contextError"
+        loading-label="正在加载作品类型"
+        @retry="loadContext"
+      >
+        <div v-if="templates.length" class="aw-template-option-grid">
+          <button
+            v-for="template in templates"
+            :key="template.id"
+            class="aw-template-option"
+            :class="{ 'aw-template-option--active': selectedTemplateId === template.id }"
+            type="button"
+            @click="selectTemplate(template)"
+          >
+            <strong>{{ template.name }}</strong>
+            <span>{{ template.category || '常规作品' }}</span>
+          </button>
+        </div>
+        <div v-else class="aw-empty-state">
+          <h3>还没有可选类型</h3>
+          <p>管理员下发作品类型后，你就能在这里选择并上传。</p>
+        </div>
+      </AsyncBoundary>
     </div>
 
     <div class="aw-dropzone" tabindex="0" @dragover.prevent @drop.prevent="handleDrop">

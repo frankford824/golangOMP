@@ -1,6 +1,31 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 import { getToken } from '@/services/http'
+import { canAccessAssetWorkbenchRoute, routeAccessForPath } from './app/access'
+import { useAssetWorkbenchSessionStore } from './app/session.store'
+import { prefersReducedMotion } from './shared/motion/tokens'
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    label?: string
+    public?: boolean
+    anyAuthenticated?: boolean
+    simple?: boolean
+    requiresAnyCapability?: readonly string[]
+  }
+}
+
+function accessMeta(path: string) {
+  const access = routeAccessForPath(path)
+  return access
+    ? {
+        label: access.label,
+        anyAuthenticated: access.anyAuthenticated,
+        simple: access.simple,
+        requiresAnyCapability: access.requiresAnyCapability,
+      }
+    : {}
+}
 
 const routes: RouteRecordRaw[] = [
   {
@@ -19,73 +44,79 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     name: 'asset-dashboard',
     component: () => import('./pages/HomePage.vue'),
-    meta: { label: '首页' },
+    meta: accessMeta('/'),
   },
   {
     path: '/upload',
     name: 'asset-upload',
     component: () => import('./pages/UploadPage.vue'),
-    meta: { label: '交作品' },
+    meta: accessMeta('/upload'),
   },
   {
     path: '/my-settlement',
     name: 'asset-my-settlement',
     component: () => import('./pages/MySettlementPage.vue'),
-    meta: { label: '看收入' },
+    meta: accessMeta('/my-settlement'),
   },
   {
     path: '/account',
     name: 'asset-account',
     component: () => import('./pages/AccountPage.vue'),
-    meta: { label: '个人中心' },
+    meta: accessMeta('/account'),
   },
   {
     path: '/submissions',
     name: 'asset-submissions',
     component: () => import('./pages/SubmissionsPage.vue'),
-    meta: { label: '维护专区' },
+    meta: accessMeta('/submissions'),
   },
   {
     path: '/materials',
     name: 'asset-materials',
     component: () => import('./pages/MaterialsPage.vue'),
-    meta: { label: '素材库' },
+    meta: accessMeta('/materials'),
   },
   {
     path: '/cost-center',
     name: 'asset-cost-center',
     component: () => import('./pages/CostCenterPage.vue'),
-    meta: { label: '成本中心' },
+    meta: accessMeta('/cost-center'),
   },
   {
     path: '/template-assignments',
     name: 'asset-template-assignments',
     component: () => import('./pages/TemplateAssignPage.vue'),
-    meta: { label: '模板下发' },
+    meta: accessMeta('/template-assignments'),
   },
   {
     path: '/settlement',
     name: 'asset-settlement',
     component: () => import('./pages/SettlementPage.vue'),
-    meta: { label: '结算' },
+    meta: accessMeta('/settlement'),
   },
   {
     path: '/people',
     name: 'asset-people',
     component: () => import('./pages/PeoplePage.vue'),
-    meta: { label: '人员' },
+    meta: accessMeta('/people'),
   },
   {
     path: '/members',
     name: 'asset-members',
     component: () => import('./pages/MembersPage.vue'),
-    meta: { label: '成员管理' },
+    meta: accessMeta('/members'),
   },
   {
     path: '/events',
     name: 'asset-events',
     component: () => import('./pages/EventsPage.vue'),
-    meta: { label: '日志' },
+    meta: accessMeta('/events'),
+  },
+  {
+    path: '/403',
+    name: 'asset-forbidden',
+    component: () => import('./pages/ForbiddenPage.vue'),
+    meta: accessMeta('/403'),
   },
 ]
 
@@ -112,4 +143,39 @@ router.beforeEach((to) => {
     return normalizeAssetRedirectTarget(to.query.redirect)
   }
   return true
+})
+
+router.beforeEach(async (to) => {
+  if (to.meta.public || !getToken()) return true
+  const session = useAssetWorkbenchSessionStore()
+  const entry = await session.loadEntry()
+  if (entry && entry.state !== 'ready') return true
+  const allowed = canAccessAssetWorkbenchRoute(session.bootstrap, routeAccessForPath(to.path))
+  if (!allowed && to.path !== '/403') {
+    return { path: '/403', query: { from: to.fullPath } }
+  }
+  return true
+})
+
+router.beforeResolve((to, from, next) => {
+  if (!from.matched.length || to.fullPath === from.fullPath || prefersReducedMotion()) {
+    next()
+    return
+  }
+  const documentWithTransitions = document as Document & {
+    startViewTransition?: (callback: () => Promise<void>) => { finished: Promise<void> }
+  }
+  if (typeof documentWithTransitions.startViewTransition !== 'function') {
+    next()
+    return
+  }
+
+  const transition = documentWithTransitions.startViewTransition(
+    () =>
+      new Promise<void>((resolve) => {
+        next()
+        requestAnimationFrame(() => resolve())
+      }),
+  )
+  transition.finished.catch(() => undefined)
 })

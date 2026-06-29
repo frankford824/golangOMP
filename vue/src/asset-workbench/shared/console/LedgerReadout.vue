@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Maximize2, X } from 'lucide-vue-next'
+import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
+
+import { animateOpacity, ledgerCloseMotion, ledgerOpenMotion } from '@aw/shared/motion/useFlip'
+import { prefersReducedMotion, readAssetMotionTokens } from '@aw/shared/motion/tokens'
+import { useScrollLock } from '@aw/shared/motion/useScrollLock'
 
 interface LedgerSegment {
   key?: string
@@ -18,32 +23,18 @@ defineProps<{
 }>()
 
 const activeSegment = ref<LedgerSegment | null>(null)
-const layerRef = ref<HTMLElement | null>(null)
 const backdropRef = ref<HTMLElement | null>(null)
 const surfaceRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const closeBtnRef = ref<HTMLButtonElement | null>(null)
+const { lock, unlock } = useScrollLock('aw-ledger-locked')
 
 let originEl: HTMLElement | null = null
 let lastFocused: HTMLElement | null = null
 let busy = false
 
-const OPEN_EASE = 'cubic-bezier(0.2, 0, 0, 1)'
-const CLOSE_EASE = 'cubic-bezier(0.4, 0, 1, 1)'
-
-function prefersReducedMotion() {
-  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
-
 function segmentId(segment: LedgerSegment, index: number) {
   return segment.key || `seg-${index}`
-}
-
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') {
-    event.stopPropagation()
-    void closeSegment()
-  }
 }
 
 async function openSegment(segment: LedgerSegment, event: MouseEvent) {
@@ -52,16 +43,16 @@ async function openSegment(segment: LedgerSegment, event: MouseEvent) {
   originEl = event.currentTarget as HTMLElement
   lastFocused = (document.activeElement as HTMLElement) ?? null
   activeSegment.value = segment
-  document.body.classList.add('aw-ledger-locked')
-  window.addEventListener('keydown', onKeydown, true)
+  lock()
 
   await nextTick()
   const surface = surfaceRef.value
   const backdrop = backdropRef.value
-  closeBtnRef.value?.focus()
+  void focusCloseButton()
+  const motion = readAssetMotionTokens(surface)
 
-  if (backdrop) {
-    backdrop.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'ease', fill: 'both' })
+  if (backdrop && !prefersReducedMotion()) {
+    animateOpacity(backdrop, 0, 1, motion.standard, 'ease')
   }
 
   if (!surface || !originEl || prefersReducedMotion()) {
@@ -69,63 +60,50 @@ async function openSegment(segment: LedgerSegment, event: MouseEvent) {
     return
   }
 
-  const first = originEl.getBoundingClientRect()
-  const last = surface.getBoundingClientRect()
-  const dx = first.left - last.left
-  const dy = first.top - last.top
-  const sx = Math.max(0.0001, first.width / last.width)
-  const sy = Math.max(0.0001, first.height / last.height)
-
-  surface.style.transformOrigin = 'top left'
-  const surfaceAnim = surface.animate(
-    [
-      { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
-      { transform: 'translate(0, 0) scale(1, 1)' },
-    ],
-    { duration: 400, easing: OPEN_EASE, fill: 'both' },
-  )
+  const surfaceAnim = ledgerOpenMotion(surface, originEl)
 
   // The body table reveal is a static motion, owned by recipes.css
   // (.aw-ledger-sheet__body animation) so business source stays token-only.
 
-  surfaceAnim.finished.finally(() => {
+  surfaceAnim.finished.catch(() => {}).finally(() => {
     busy = false
   })
+}
+
+function onDialogOpenChange(open: boolean) {
+  if (!open) void closeSegment()
+}
+
+async function focusCloseButton() {
+  await nextTick()
+  const focus = () => {
+    const closeButton =
+      (closeBtnRef.value instanceof HTMLButtonElement ? closeBtnRef.value : null) ??
+      document.querySelector<HTMLButtonElement>('.aw-ledger-sheet__close')
+    closeButton?.focus()
+  }
+  window.requestAnimationFrame(focus)
+  window.setTimeout(focus, readAssetMotionTokens().fast)
 }
 
 async function closeSegment() {
   if (!activeSegment.value || busy) return
   busy = true
-  window.removeEventListener('keydown', onKeydown, true)
 
   const surface = surfaceRef.value
   const backdrop = backdropRef.value
   const tasks: Promise<unknown>[] = []
+  const motion = readAssetMotionTokens(surface)
 
-  if (backdrop) {
-    tasks.push(backdrop.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease', fill: 'both' }).finished.catch(() => {}))
+  if (backdrop && !prefersReducedMotion()) {
+    tasks.push(animateOpacity(backdrop, 1, 0, motion.exit, 'ease').finished.catch(() => {}))
   }
 
   if (surface && originEl && !prefersReducedMotion()) {
-    const first = originEl.getBoundingClientRect()
-    const last = surface.getBoundingClientRect()
-    const dx = first.left - last.left
-    const dy = first.top - last.top
-    const sx = Math.max(0.0001, first.width / last.width)
-    const sy = Math.max(0.0001, first.height / last.height)
-    surface.style.transformOrigin = 'top left'
-    contentRef.value?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 130, easing: CLOSE_EASE, fill: 'both' })
-    tasks.push(
-      surface
-        .animate(
-          [
-            { transform: 'translate(0, 0) scale(1, 1)' },
-            { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
-          ],
-          { duration: 300, easing: CLOSE_EASE, fill: 'both' },
-        )
-        .finished.catch(() => {}),
-    )
+    if (contentRef.value) {
+      animateOpacity(contentRef.value, 1, 0, motion.shift, motion.easeExit)
+    }
+    tasks.push(ledgerCloseMotion(surface, originEl).finished.catch(() => {}))
   }
 
   await Promise.all(tasks)
@@ -135,16 +113,25 @@ async function closeSegment() {
 function teardown() {
   activeSegment.value = null
   originEl = null
-  document.body.classList.remove('aw-ledger-locked')
+  unlock()
   lastFocused?.focus?.()
   lastFocused = null
   busy = false
 }
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKeydown, true)
-  document.body.classList.remove('aw-ledger-locked')
+  unlock()
 })
+
+watch(
+  activeSegment,
+  (segment) => {
+    if (segment) {
+      void focusCloseButton()
+    }
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>
@@ -185,33 +172,47 @@ onBeforeUnmount(() => {
   </section>
 
   <Teleport to="body">
-    <div v-if="activeSegment" ref="layerRef" class="aw-ledger-sheet-layer">
-      <div ref="backdropRef" class="aw-ledger-sheet__backdrop" @click="closeSegment" />
-      <div
-        ref="surfaceRef"
-        class="aw-ledger-sheet"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="`${activeSegment.label} 明细`"
-      >
-        <header class="aw-ledger-sheet__head">
-          <div class="aw-ledger-sheet__head-copy">
-            <p class="aw-eyebrow">{{ eyebrow }} · {{ activeSegment.label }}</p>
-            <p class="aw-ledger-sheet__value" :class="{ 'is-money': activeSegment.money }">
-              {{ activeSegment.value }}
-            </p>
-            <p v-if="activeSegment.hint" class="aw-ledger-sheet__hint">{{ activeSegment.hint }}</p>
-          </div>
-          <button ref="closeBtnRef" class="aw-ledger-sheet__close" type="button" aria-label="收起明细" @click="closeSegment">
-            <X :size="18" aria-hidden="true" />
-          </button>
-        </header>
-        <div ref="contentRef" class="aw-ledger-sheet__body">
-          <slot name="detail" :segment="activeSegment">
-            <p class="aw-copy">这一项暂无展开明细。</p>
-          </slot>
+    <DialogRoot :open="Boolean(activeSegment)" @update:open="onDialogOpenChange">
+      <DialogPortal>
+        <div v-if="activeSegment" class="aw-token-scope aw-ledger-sheet-layer">
+          <DialogOverlay as-child>
+            <div ref="backdropRef" class="aw-ledger-sheet__backdrop" @click="closeSegment" />
+          </DialogOverlay>
+          <DialogContent
+            as-child
+            :aria-label="`${activeSegment.label} 明细`"
+            @open-auto-focus.prevent="focusCloseButton"
+            @close-auto-focus.prevent
+          >
+            <div ref="surfaceRef" class="aw-ledger-sheet">
+              <header class="aw-ledger-sheet__head">
+                <div class="aw-ledger-sheet__head-copy">
+                  <DialogTitle as-child>
+                    <p class="aw-eyebrow">{{ eyebrow }} · {{ activeSegment.label }}</p>
+                  </DialogTitle>
+                  <p class="aw-ledger-sheet__value" :class="{ 'is-money': activeSegment.money }">
+                    {{ activeSegment.value }}
+                  </p>
+                  <p v-if="activeSegment.hint" class="aw-ledger-sheet__hint">{{ activeSegment.hint }}</p>
+                  <DialogDescription as-child>
+                    <p class="aw-visually-hidden">{{ activeSegment.hint || `${activeSegment.label} 明细` }}</p>
+                  </DialogDescription>
+                </div>
+                <DialogClose as-child>
+                  <button ref="closeBtnRef" class="aw-ledger-sheet__close" type="button" aria-label="收起明细" autofocus>
+                    <X :size="18" aria-hidden="true" />
+                  </button>
+                </DialogClose>
+              </header>
+              <div ref="contentRef" class="aw-ledger-sheet__body">
+                <slot name="detail" :segment="activeSegment">
+                  <p class="aw-copy">这一项暂无展开明细。</p>
+                </slot>
+              </div>
+            </div>
+          </DialogContent>
         </div>
-      </div>
-    </div>
+      </DialogPortal>
+    </DialogRoot>
   </Teleport>
 </template>

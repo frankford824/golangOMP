@@ -2,14 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { assetWorkbenchApi, type AssetWorkbenchEventRow } from '@aw/shared/api/assetWorkbenchApi'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt } from '@aw/shared/format/number'
 import { chipClass, entityTypeMeta, eventReasonText, eventTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
-const rows = ref<AssetWorkbenchEventRow[]>([])
-const total = ref(0)
-const loading = ref(false)
-const error = ref('')
 const filters = ref({
   event_type: 'all',
   entity_type: 'all',
@@ -37,6 +35,21 @@ const entityFilterOptions = [
   { value: 'member', label: '成员管理' },
   { value: 'profile', label: '人员资料' },
 ]
+const eventsRequest = usePageRequest(
+  async () =>
+    assetWorkbenchApi.listEvents({
+      page: 1,
+      page_size: 50,
+      event_type: filters.value.event_type === 'all' ? undefined : filters.value.event_type,
+      entity_type: filters.value.entity_type === 'all' ? undefined : filters.value.entity_type,
+    }),
+  { items: [], total: 0 },
+  '操作日志加载失败',
+)
+const rows = computed(() => eventsRequest.data.value?.items ?? [])
+const total = computed(() => eventsRequest.data.value?.total ?? 0)
+const loading = eventsRequest.loading
+const error = eventsRequest.error
 
 const eventGridRowsWithLabels = computed<EventGridRow[]>(() =>
   rows.value.map((row) => ({
@@ -76,22 +89,7 @@ function gridRowAsEvent(row: Record<string, unknown>): EventGridRow {
 }
 
 async function loadEvents() {
-  loading.value = true
-  error.value = ''
-  try {
-    const result = await assetWorkbenchApi.listEvents({
-      page: 1,
-      page_size: 50,
-      event_type: filters.value.event_type === 'all' ? undefined : filters.value.event_type,
-      entity_type: filters.value.entity_type === 'all' ? undefined : filters.value.entity_type,
-    })
-    rows.value = result.items
-    total.value = result.total
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '操作日志加载失败'
-  } finally {
-    loading.value = false
-  }
+  await eventsRequest.run()
 }
 
 onMounted(() => {
@@ -123,39 +121,44 @@ onMounted(() => {
         <button type="button" @click="loadEvents">筛选</button>
         <span>{{ formatInt(total) }} 条日志</span>
       </div>
-      <p v-if="loading" class="aw-copy">正在加载操作日志</p>
-      <p v-else-if="error" class="aw-copy">{{ error }}</p>
-      <WorkbenchDataGrid
-        v-else-if="rows.length"
-        :columns="eventGridColumns"
-        :rows="eventGridRows"
-        row-key="id"
-        storage-key="events"
-        group-by="event_label"
+      <AsyncBoundary
+        :loading="loading"
+        :error="error"
+        loading-label="正在加载操作日志"
+        @retry="loadEvents"
       >
-        <template #cell="{ row, column, value }">
-          <span
-            v-if="column.key === 'event_label'"
-            :class="chipClass(eventTypeMeta(gridRowAsEvent(row).event_type).tone)"
-          >
-            {{ value }}
-          </span>
-          <span
-            v-else-if="column.key === 'entity_label'"
-            :class="chipClass(entityTypeMeta(gridRowAsEvent(row).entity_type).tone)"
-          >
-            {{ value }}
-          </span>
-          <span v-else-if="column.key === 'entity_id'" class="aw-cell-num">{{ value || '—' }}</span>
-          <span v-else-if="column.key === 'actor_label'">{{ value }}</span>
-          <span v-else-if="column.key === 'created_at_label'" class="aw-cell-num">{{ value }}</span>
-          <span v-else>{{ value || '—' }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <div v-else class="aw-empty-state">
-        <h3>暂无操作日志</h3>
-        <p>上传、质检、结算、资料维护等关键操作会在这里留下记录。当前筛选返回 {{ total }} 条。</p>
-      </div>
+        <WorkbenchDataGrid
+          v-if="rows.length"
+          :columns="eventGridColumns"
+          :rows="eventGridRows"
+          row-key="id"
+          storage-key="events"
+          group-by="event_label"
+        >
+          <template #cell="{ row, column, value }">
+            <span
+              v-if="column.key === 'event_label'"
+              :class="chipClass(eventTypeMeta(gridRowAsEvent(row).event_type).tone)"
+            >
+              {{ value }}
+            </span>
+            <span
+              v-else-if="column.key === 'entity_label'"
+              :class="chipClass(entityTypeMeta(gridRowAsEvent(row).entity_type).tone)"
+            >
+              {{ value }}
+            </span>
+            <span v-else-if="column.key === 'entity_id'" class="aw-cell-num">{{ value || '—' }}</span>
+            <span v-else-if="column.key === 'actor_label'">{{ value }}</span>
+            <span v-else-if="column.key === 'created_at_label'" class="aw-cell-num">{{ value }}</span>
+            <span v-else>{{ value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <div v-else class="aw-empty-state">
+          <h3>暂无操作日志</h3>
+          <p>上传、质检、结算、资料维护等关键操作会在这里留下记录。当前筛选返回 {{ total }} 条。</p>
+        </div>
+      </AsyncBoundary>
     </div>
   </section>
 </template>

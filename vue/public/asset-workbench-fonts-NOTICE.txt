@@ -3,10 +3,10 @@ Asset Workbench Font Notice
 The asset workbench uses self-hosted fonts only. No runtime font CDN is used.
 
 Fonts:
-- MiSans CJK Lite, package misans 4.1.0, Apache-2.0, uses only common UI glyph shards MiSans-Regular.117/118/119.woff2.
+- Source Han Sans CN AW Core, generated from @fontpkg/source-han-sans-cn-vf 2.5.2, OFL-1.1, used for the asset workbench Chinese UI subset.
+- Source Han Sans CN VF Fallback, package @fontpkg/source-han-sans-cn-vf 2.5.2, OFL-1.1, used for CJK glyphs outside the UI subset.
 - Geist Sans, package @fontsource/geist-sans 5.2.5, OFL-1.1, used for Latin UI text.
 - Geist Mono, package @fontsource/geist-mono 5.2.8, OFL-1.1, used for numbers, IDs, money, hashes, and dates.
-- Space Grotesk, package @fontsource/space-grotesk 5.2.10, OFL-1.1, used for display labels and page accents.
 
 Full license texts are included in the corresponding npm packages in the source distribution.
-MiSans full Normal CSS is not imported; missing CJK glyphs fall back to system CJK fonts.
+Missing CJK glyphs fall back to Source Han Sans CN VF Fallback first, then system CJK fonts.

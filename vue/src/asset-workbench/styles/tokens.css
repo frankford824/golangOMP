@@ -4,13 +4,10 @@
 @import '@fontsource/geist-mono/latin-400.css';
 @import '@fontsource/geist-mono/latin-500.css';
 @import '@fontsource/geist-mono/latin-700.css';
-@import '@fontsource/space-grotesk/latin-400.css';
-@import '@fontsource/space-grotesk/latin-500.css';
-@import '@fontsource/space-grotesk/latin-600.css';
-@import '@fontsource/space-grotesk/latin-700.css';
 @import './font-subset.css';
 
-.aw-root {
+.aw-root,
+.aw-token-scope {
   /* Worksheet (light) — where dense data is read */
   --aw-paper: #f1efea;
   --aw-paper-2: #e8e5de;
@@ -67,6 +64,7 @@
   --aw-radius-sm: 7px;
   --aw-radius-md: 10px;
   --aw-radius-lg: 14px;
+  --aw-radius-pill: 999px;
   --aw-rail-width: 232px;
   --aw-content-max: 1280px;
   --aw-space-1: 4px;
@@ -83,6 +81,10 @@
   --aw-row-md: 42px;
   --aw-row-lg: 50px;
   --aw-control-check: 16px;
+  --aw-icon-xs: 12px;
+  --aw-icon-sm: 16px;
+  --aw-icon-md: 18px;
+  --aw-icon-lg: 22px;
   --aw-font-size-xs: 12px;
   --aw-font-size-sm: 13px;
   --aw-font-size-md: 14px;
@@ -96,10 +98,19 @@
   --aw-tracking-label: 0.1em;
   --aw-weight-display: 400;
   --aw-weight-strong: 600;
+  --aw-motion-instant: 0ms;
   --aw-motion-fast: 140ms;
   --aw-motion-standard: 200ms;
   --aw-motion-slow: 320ms;
+  --aw-motion-deliberate: 400ms;
+  --aw-motion-enter: var(--aw-motion-deliberate);
+  --aw-motion-exit: 300ms;
+  --aw-motion-stagger: var(--aw-motion-fast);
+  --aw-motion-shift: 130ms;
+  --aw-motion-shift-distance: 8px;
   --aw-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --aw-ease-enter: var(--aw-ease-standard);
+  --aw-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --aw-font-cjk: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
   --aw-font-sans: 'Geist Sans', var(--aw-font-cjk);
   --aw-font-display: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Geist Sans', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;

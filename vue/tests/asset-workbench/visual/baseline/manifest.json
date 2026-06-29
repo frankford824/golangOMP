@@ -1,0 +1,164 @@
+{
+  "mode": "baseline",
+  "baseUrl": "http://127.0.0.1:4184",
+  "generatedAt": "2026-06-29T09:19:36.000Z",
+  "reportOnly": false,
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "screenshots": [
+    {
+      "id": "desktop:admin-dashboard",
+      "name": "admin-dashboard",
+      "role": "admin",
+      "viewport": "desktop",
+      "path": "/",
+      "file": "desktop-admin-dashboard.png",
+      "sha256": "a20fd05292ade7c5b6bde852292039c0b64de24489802d3240599f6d5f46a093"
+    },
+    {
+      "id": "desktop:admin-ledger-sheet",
+      "name": "admin-ledger-sheet",
+      "role": "admin",
+      "viewport": "desktop",
+      "path": "/",
+      "file": "desktop-admin-ledger-sheet.png",
+      "sha256": "1b928af89449debbf48fa783a999acf5714d37bd87570715212d4641f1a15684"
+    },
+    {
+      "id": "desktop:admin-submissions",
+      "name": "admin-submissions",
+      "role": "admin",
+      "viewport": "desktop",
+      "path": "/submissions",
+      "file": "desktop-admin-submissions.png",
+      "sha256": "776166549800e50a6f63b44cb179d5e619ce0f92323be007405884f57c32e499"
+    },
+    {
+      "id": "desktop:admin-settlement",
+      "name": "admin-settlement",
+      "role": "admin",
+      "viewport": "desktop",
+      "path": "/settlement",
+      "file": "desktop-admin-settlement.png",
+      "sha256": "798a499a90906a1237952fca8422c42efd83b296f9198b99fe7712a8b13aff44"
+    },
+    {
+      "id": "desktop:admin-materials",
+      "name": "admin-materials",
+      "role": "admin",
+      "viewport": "desktop",
+      "path": "/materials",
+      "file": "desktop-admin-materials.png",
+      "sha256": "e8f229da4bed327574911e58d1135caed1f5953c74b8bd662bfd6a8a93ec0c4f"
+    },
+    {
+      "id": "desktop:simple-home",
+      "name": "simple-home",
+      "role": "simple",
+      "viewport": "desktop",
+      "path": "/",
+      "file": "desktop-simple-home.png",
+      "sha256": "cc6c96965b603d25c81355305f0244b34e83758271baef6d961c1b62a766850b"
+    },
+    {
+      "id": "desktop:simple-upload",
+      "name": "simple-upload",
+      "role": "simple",
+      "viewport": "desktop",
+      "path": "/upload",
+      "file": "desktop-simple-upload.png",
+      "sha256": "0e3c01e2fea14a8d9d16f8e55df929a47a8ef6621d795ba6f7e25045e89b012f"
+    },
+    {
+      "id": "desktop:simple-income",
+      "name": "simple-income",
+      "role": "simple",
+      "viewport": "desktop",
+      "path": "/my-settlement",
+      "file": "desktop-simple-income.png",
+      "sha256": "f9cb7ddd068f39f070c8b53f178f999613e939a0168df7e5938347d94eebc5c6"
+    },
+    {
+      "id": "mobile:admin-dashboard",
+      "name": "admin-dashboard",
+      "role": "admin",
+      "viewport": "mobile",
+      "path": "/",
+      "file": "mobile-admin-dashboard.png",
+      "sha256": "3d696ce406f6d1647241d957e378b458ca240f418afd80bae44bdbb1b8039858"
+    },
+    {
+      "id": "mobile:admin-ledger-sheet",
+      "name": "admin-ledger-sheet",
+      "role": "admin",
+      "viewport": "mobile",
+      "path": "/",
+      "file": "mobile-admin-ledger-sheet.png",
+      "sha256": "76f7f99a026a8bb47a15441c7b3d432b4f20cb0bc7513e950539b73443f35ce8"
+    },
+    {
+      "id": "mobile:admin-submissions",
+      "name": "admin-submissions",
+      "role": "admin",
+      "viewport": "mobile",
+      "path": "/submissions",
+      "file": "mobile-admin-submissions.png",
+      "sha256": "2a2114771d9c7f11ce7b3b27a9275e30a5221a76327bd140e62b582f99612035"
+    },
+    {
+      "id": "mobile:admin-settlement",
+      "name": "admin-settlement",
+      "role": "admin",
+      "viewport": "mobile",
+      "path": "/settlement",
+      "file": "mobile-admin-settlement.png",
+      "sha256": "0ecbdc09627e7b078d9d1b15eac6ee6fd52a55a586bfa15eec9562be08c02c2a"
+    },
+    {
+      "id": "mobile:admin-materials",
+      "name": "admin-materials",
+      "role": "admin",
+      "viewport": "mobile",
+      "path": "/materials",
+      "file": "mobile-admin-materials.png",
+      "sha256": "49408ce2fe99fa60d1e1565cb1b85aff3de86248df3098a89b7f7bde61012ab7"
+    },
+    {
+      "id": "mobile:simple-home",
+      "name": "simple-home",
+      "role": "simple",
+      "viewport": "mobile",
+      "path": "/",
+      "file": "mobile-simple-home.png",
+      "sha256": "69e0f208d8877ac115569eef75453e28e7056b02836d721ab357a3dac93ac559"
+    },
+    {
+      "id": "mobile:simple-upload",
+      "name": "simple-upload",
+      "role": "simple",
+      "viewport": "mobile",
+      "path": "/upload",
+      "file": "mobile-simple-upload.png",
+      "sha256": "e932627a01527f3816446603ee58286fa8e58cb377af1cbb6e66f2463b2ce007"
+    },
+    {
+      "id": "mobile:simple-income",
+      "name": "simple-income",
+      "role": "simple",
+      "viewport": "mobile",
+      "path": "/my-settlement",
+      "file": "mobile-simple-income.png",
+      "sha256": "d6bf8c3176021320dc26a4b34d0ce50d49f874d2c872863ce24b5879b5d8c019"
+    }
+  ]
+}

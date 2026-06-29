@@ -3,16 +3,41 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { assetWorkbenchApi, type SettlementPreview, type SubmissionRow } from '@aw/shared/api/assetWorkbenchApi'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
+
+interface DashboardData {
+  submissions: SubmissionRow[]
+  settlement: SettlementPreview | null
+}
 
 const month = ref(new Date().toISOString().slice(0, 7))
-const submissions = ref<SubmissionRow[]>([])
-const settlement = ref<SettlementPreview | null>(null)
-const loading = ref(false)
-const error = ref('')
+const dashboardRequest = usePageRequest<DashboardData>(
+  async () => {
+    const [submissionResult, settlementResult] = await Promise.allSettled([
+      assetWorkbenchApi.listSubmissions({ page: 1, page_size: 20 }),
+      assetWorkbenchApi.previewSettlement(month.value),
+    ])
+    if (submissionResult.status === 'rejected' && settlementResult.status === 'rejected') {
+      throw settlementResult.reason
+    }
+    return {
+      submissions: submissionResult.status === 'fulfilled' ? submissionResult.value.items : [],
+      settlement: settlementResult.status === 'fulfilled' ? settlementResult.value : null,
+    }
+  },
+  { submissions: [], settlement: null },
+  '总览数据加载失败',
+)
+const dashboardData = computed(() => dashboardRequest.data.value ?? { submissions: [], settlement: null })
+const submissions = computed(() => dashboardData.value.submissions)
+const settlement = computed(() => dashboardData.value.settlement)
+const loading = dashboardRequest.loading
+const error = dashboardRequest.error
 
 const submittedCount = computed(() => settlement.value?.totals?.item_count ?? 0)
 const pendingSubmissionCount = computed(() => submissions.value.filter((item) => item.status !== 'checked').length)
@@ -57,29 +82,7 @@ function gridValue(key: string, value: unknown) {
   return value || '—'
 }
 
-async function loadDashboard() {
-  loading.value = true
-  error.value = ''
-  try {
-    const [submissionResult, settlementResult] = await Promise.allSettled([
-      assetWorkbenchApi.listSubmissions({ page: 1, page_size: 20 }),
-      assetWorkbenchApi.previewSettlement(month.value),
-    ])
-    if (submissionResult.status === 'fulfilled') {
-      submissions.value = submissionResult.value.items
-    }
-    if (settlementResult.status === 'fulfilled') {
-      settlement.value = settlementResult.value
-    }
-    if (submissionResult.status === 'rejected' && settlementResult.status === 'rejected') {
-      throw settlementResult.reason
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '总览数据加载失败'
-  } finally {
-    loading.value = false
-  }
-}
+const loadDashboard = dashboardRequest.run
 
 onMounted(() => {
   void loadDashboard()
@@ -88,8 +91,6 @@ onMounted(() => {
 
 <template>
   <section class="aw-page-stack aw-dashboard-page">
-    <p v-if="error" class="aw-inline-alert">{{ error }}</p>
-
     <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日先处理这些事" :segments="ledgerSegments">
       <template #actions>
         <button class="aw-console-button" type="button" :disabled="loading" @click="loadDashboard">刷新</button>
@@ -137,37 +138,44 @@ onMounted(() => {
       </template>
     </LedgerReadout>
 
-    <div class="aw-two-column">
-      <section class="aw-panel">
-        <div class="aw-panel__head"><h3>常用入口</h3></div>
-        <div class="aw-inline-actions">
-          <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
-          <RouterLink class="aw-secondary-button" to="/submissions">查看维护区</RouterLink>
-          <RouterLink class="aw-secondary-button" to="/settlement">生成结算预览</RouterLink>
-        </div>
-      </section>
-      <section class="aw-panel">
-        <div class="aw-panel__head">
-          <h3>最近提交</h3>
-          <RouterLink v-if="recentSubmissions.length" class="aw-link-button" to="/submissions">查看全部</RouterLink>
-        </div>
-        <div v-if="recentSubmissions.length" class="aw-contact-sheet">
-          <RouterLink
-            v-for="submission in recentSubmissions"
-            :key="submission.id"
-            class="aw-contact-tile"
-            to="/submissions"
-          >
-            <strong>{{ submission.submission_no }}</strong>
-            <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
-          </RouterLink>
-        </div>
-        <div v-else class="aw-empty-state">
-          <h3>还没有提交</h3>
-          <p>上传第一批成品后，这里会按提交时间显示需要质检的批次。</p>
-          <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
-        </div>
-      </section>
-    </div>
+    <AsyncBoundary
+      :loading="loading"
+      :error="error"
+      loading-label="正在加载总览数据"
+      @retry="loadDashboard"
+    >
+      <div class="aw-two-column">
+        <section class="aw-panel">
+          <div class="aw-panel__head"><h3>常用入口</h3></div>
+          <div class="aw-inline-actions">
+            <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
+            <RouterLink class="aw-secondary-button" to="/submissions">查看维护区</RouterLink>
+            <RouterLink class="aw-secondary-button" to="/settlement">生成结算预览</RouterLink>
+          </div>
+        </section>
+        <section class="aw-panel">
+          <div class="aw-panel__head">
+            <h3>最近提交</h3>
+            <RouterLink v-if="recentSubmissions.length" class="aw-link-button" to="/submissions">查看全部</RouterLink>
+          </div>
+          <div v-if="recentSubmissions.length" class="aw-contact-sheet">
+            <RouterLink
+              v-for="submission in recentSubmissions"
+              :key="submission.id"
+              class="aw-contact-tile"
+              to="/submissions"
+            >
+              <strong>{{ submission.submission_no }}</strong>
+              <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
+            </RouterLink>
+          </div>
+          <div v-else class="aw-empty-state">
+            <h3>还没有提交</h3>
+            <p>上传第一批成品后，这里会按提交时间显示需要质检的批次。</p>
+            <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
+          </div>
+        </section>
+      </div>
+    </AsyncBoundary>
   </section>
 </template>

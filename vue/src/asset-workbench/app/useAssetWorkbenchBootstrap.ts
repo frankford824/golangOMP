@@ -1,33 +1,25 @@
-import { onBeforeUnmount, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 
-import { assetWorkbenchApi, type AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
-
-const bootstrap = ref<AssetWorkbenchBootstrap | null>(null)
-const loading = ref(false)
-const error = ref('')
-let controller: AbortController | null = null
+import { useAssetWorkbenchSessionStore } from './session.store'
 
 export function useAssetWorkbenchBootstrap() {
-  async function refresh() {
-    controller?.abort()
-    controller = new AbortController()
-    loading.value = true
-    error.value = ''
-    try {
-      bootstrap.value = await assetWorkbenchApi.bootstrap(controller.signal)
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '加载工作台信息失败'
-    } finally {
-      loading.value = false
-    }
+  const session = useAssetWorkbenchSessionStore()
+  const { bootstrap, entry, loading, entryLoading, error, entryError } = storeToRefs(session)
+  const { refresh, loadEntry, ensureReady, setBootstrap, setEntry, reset, hasAnyCapability } = session
+
+  return {
+    bootstrap,
+    entry,
+    loading,
+    entryLoading,
+    error,
+    entryError,
+    refresh,
+    loadEntry,
+    ensureReady,
+    setBootstrap,
+    setEntry,
+    reset,
+    hasAnyCapability,
   }
-
-  onBeforeUnmount(() => controller?.abort())
-
-  function setBootstrap(next: AssetWorkbenchBootstrap | null) {
-    bootstrap.value = next
-    error.value = ''
-  }
-
-  return { bootstrap, loading, error, refresh, setBootstrap }
 }

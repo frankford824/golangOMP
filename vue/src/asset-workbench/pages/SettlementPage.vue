@@ -11,6 +11,7 @@ import {
   type SupplementPermissionRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { exportSettlementWorkbook } from '@aw/features/export/settlementExport'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import {
@@ -23,6 +24,7 @@ import {
   supplementStatusMeta,
 } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 interface GridColumn {
   key: string
@@ -55,12 +57,30 @@ const eligibleSupplementMonths = ref<string[]>([])
 const selectedBatch = ref<SettlementBatchDetail | null>(null)
 const pendingCancelBatch = ref<SettlementBatchRow | null>(null)
 const cancelReason = ref('')
-const loading = ref(false)
 const exporting = ref(false)
 const eligibleMonthsLoading = ref(false)
-const error = ref('')
 const notice = ref('')
 const errorInputRef = ref<HTMLInputElement | null>(null)
+const settlementRequest = usePageRequest(
+  async () => {
+    const [previewResult, batchResult, supplementResult, permissionResult] = await Promise.all([
+      assetWorkbenchApi.previewSettlement(month.value),
+      assetWorkbenchApi.listSettlementBatches({ business_month: month.value, page: 1, page_size: 20 }),
+      assetWorkbenchApi.listSettlementSupplements({ business_month: month.value, page: 1, page_size: 20 }),
+      assetWorkbenchApi.listSupplementPermissions({ business_month: month.value, page: 1, page_size: 50 }),
+    ])
+    return {
+      preview: previewResult,
+      batches: batchResult.items,
+      supplements: supplementResult.items,
+      supplementPermissions: permissionResult.items,
+    }
+  },
+  null,
+  '结算数据加载失败',
+)
+const loading = settlementRequest.loading
+const error = settlementRequest.error
 const supplementForm = ref({
   payee_user_id: 0,
   order_no: '',
@@ -223,26 +243,15 @@ function gridValue(key: string, value: unknown) {
 }
 
 async function loadSettlement(options: { keepNotice?: boolean } = {}) {
-  loading.value = true
   error.value = ''
   if (!options.keepNotice) notice.value = ''
-  try {
-    const [previewResult, batchResult, supplementResult, permissionResult] = await Promise.all([
-      assetWorkbenchApi.previewSettlement(month.value),
-      assetWorkbenchApi.listSettlementBatches({ business_month: month.value, page: 1, page_size: 20 }),
-      assetWorkbenchApi.listSettlementSupplements({ business_month: month.value, page: 1, page_size: 20 }),
-      assetWorkbenchApi.listSupplementPermissions({ business_month: month.value, page: 1, page_size: 50 }),
-    ])
-    preview.value = previewResult
-    batches.value = batchResult.items
-    supplements.value = supplementResult.items
-    supplementPermissions.value = permissionResult.items
-    selectedBatch.value = null
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '结算数据加载失败'
-  } finally {
-    loading.value = false
-  }
+  const data = await settlementRequest.run()
+  if (!data) return
+  preview.value = data.preview
+  batches.value = data.batches
+  supplements.value = data.supplements
+  supplementPermissions.value = data.supplementPermissions
+  selectedBatch.value = null
 }
 
 async function generateBatch() {
@@ -446,12 +455,19 @@ onMounted(() => {
         <button class="aw-primary-button" type="button" @click="generateBatch">生成批次</button>
       </div>
     </div>
-    <input ref="errorInputRef" class="aw-visually-hidden" type="file" accept=".xlsx,.xls" @change="handleErrorImport" />
+    <input
+      ref="errorInputRef"
+      class="aw-visually-hidden"
+      type="file"
+      accept=".xlsx,.xls"
+      aria-label="导入出错 Excel"
+      @change="handleErrorImport"
+    />
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
 
     <LedgerReadout :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
       <template #actions>
-        <input v-model="month" type="month" />
+        <input v-model="month" type="month" aria-label="结算月份" />
         <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
       </template>
       <template #detail>
@@ -485,24 +501,33 @@ onMounted(() => {
         <h3>工资条明细</h3>
         <span class="aw-chip aw-chip--neutral">无补录时第二行显示 0</span>
       </div>
-      <p v-if="loading" class="aw-copy">正在加载 {{ month }} 结算预览</p>
-      <p v-else-if="error" class="aw-copy">{{ error }}</p>
-      <WorkbenchDataGrid
-        v-if="payrollRows.length"
-        :columns="payrollGridColumns"
-        :rows="payrollGridRows"
-        row-key="grid_id"
-        storage-key="settlement-preview-payroll"
-        group-by="payee_user_id"
-        :height="260"
-        :row-height="34"
+      <AsyncBoundary
+        :loading="loading"
+        :error="error"
+        :loading-label="`正在加载 ${month} 结算预览`"
+        @retry="() => loadSettlement()"
       >
-        <template #cell="{ column, value }">
-          <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-          <span v-else>{{ gridValue(column.key, value) }}</span>
-        </template>
-      </WorkbenchDataGrid>
+        <WorkbenchDataGrid
+          v-if="payrollRows.length"
+          :columns="payrollGridColumns"
+          :rows="payrollGridRows"
+          row-key="grid_id"
+          storage-key="settlement-preview-payroll"
+          group-by="payee_user_id"
+          :height="260"
+          :row-height="34"
+        >
+          <template #cell="{ column, value }">
+            <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+            <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+            <span v-else>{{ gridValue(column.key, value) }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <div v-else class="aw-empty-state">
+          <h3>还没有可结算明细</h3>
+          <p>生成预览后会在这里显示工资条明细。</p>
+        </div>
+      </AsyncBoundary>
     </div>
 
     <div class="aw-data-surface">

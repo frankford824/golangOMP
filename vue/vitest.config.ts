@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.join(path.dirname(fileURLToPath(import.meta.url)), 'src'),
+      '@aw': path.join(path.dirname(fileURLToPath(import.meta.url)), 'src/asset-workbench'),
     },
   },
   test: {

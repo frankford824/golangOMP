@@ -8,9 +8,11 @@ import {
   type PromoCouponRow,
   type WelfareRuleRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatMoney, formatPercent } from '@aw/shared/format/number'
 import { chipClass, enabledMeta, promoModeMeta, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 interface GridColumn {
   key: string
@@ -23,6 +25,7 @@ type PriceGridRow = PriceMatrixRow & { worker_type_label: string; unit_price_lab
 type DeductionGridRow = DeductionRuleRow & { worker_type_label: string; deduction_amount_label: string; enabled_label: string }
 type WelfareGridRow = WelfareRuleRow & { worker_type_label: string; amount_label: string; enabled_label: string }
 type PromoGridRow = PromoCouponRow & { worker_type_label: string; mode_label: string; value_label: string; enabled_label: string }
+type CostCenterData = Awaited<ReturnType<typeof fetchCostCenter>>
 
 const priceRows = ref<PriceMatrixRow[]>([])
 const deductionRows = ref<DeductionRuleRow[]>([])
@@ -34,9 +37,10 @@ const totals = ref({
   welfare: 0,
   promo: 0,
 })
-const loading = ref(false)
-const error = ref('')
 const notice = ref('')
+const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, '成本中心加载失败')
+const loading = costCenterRequest.loading
+const error = costCenterRequest.error
 const today = new Date().toISOString().slice(0, 10)
 const priceForm = ref({
   worker_type: 'fulltime',
@@ -159,30 +163,28 @@ function gridRowAsPromo(row: Record<string, unknown>): PromoGridRow {
   return row as unknown as PromoGridRow
 }
 
+async function fetchCostCenter() {
+  const [prices, deductions, welfare, promos] = await Promise.all([
+    assetWorkbenchApi.listPriceMatrix({ page: 1, page_size: 20 }),
+    assetWorkbenchApi.listDeductionRules({ page: 1, page_size: 20 }),
+    assetWorkbenchApi.listWelfareRules({ page: 1, page_size: 20 }),
+    assetWorkbenchApi.listPromoCoupons({ page: 1, page_size: 20 }),
+  ])
+  return { prices, deductions, welfare, promos }
+}
+
 async function loadCostCenter() {
-  loading.value = true
-  error.value = ''
-  try {
-    const [prices, deductions, welfare, promos] = await Promise.all([
-      assetWorkbenchApi.listPriceMatrix({ page: 1, page_size: 20 }),
-      assetWorkbenchApi.listDeductionRules({ page: 1, page_size: 20 }),
-      assetWorkbenchApi.listWelfareRules({ page: 1, page_size: 20 }),
-      assetWorkbenchApi.listPromoCoupons({ page: 1, page_size: 20 }),
-    ])
-    priceRows.value = prices.items
-    deductionRows.value = deductions.items
-    welfareRows.value = welfare.items
-    promoRows.value = promos.items
-    totals.value = {
-      price: prices.total,
-      deduction: deductions.total,
-      welfare: welfare.total,
-      promo: promos.total,
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '成本中心加载失败'
-  } finally {
-    loading.value = false
+  const data = await costCenterRequest.run()
+  if (!data) return
+  priceRows.value = data.prices.items
+  deductionRows.value = data.deductions.items
+  welfareRows.value = data.welfare.items
+  promoRows.value = data.promos.items
+  totals.value = {
+    price: data.prices.total,
+    deduction: data.deductions.total,
+    welfare: data.welfare.total,
+    promo: data.promos.total,
   }
 }
 
@@ -317,9 +319,14 @@ onMounted(async () => {
           <input v-model="priceForm.effective_to" type="date" />
         </label>
       </div>
-      <p class="aw-copy" v-if="loading">正在加载价目矩阵</p>
-      <p class="aw-copy" v-else-if="error">{{ error }}</p>
-      <p class="aw-copy" v-else>已配置 {{ totals.price }} 条价目规则</p>
+      <AsyncBoundary
+        :loading="loading"
+        :error="error"
+        loading-label="正在加载价目矩阵"
+        @retry="loadCostCenter"
+      >
+        <p class="aw-copy">已配置 {{ totals.price }} 条价目规则</p>
+      </AsyncBoundary>
       <div class="aw-timeline-band">
         <span class="aw-timeline-band__past">过期</span>
         <span class="aw-timeline-band__active">生效中</span>

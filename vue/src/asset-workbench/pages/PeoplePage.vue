@@ -2,9 +2,11 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { assetWorkbenchApi, type AssetWorkbenchProfile } from '@aw/shared/api/assetWorkbenchApi'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 const form = reactive({
   worker_type: 'parttime',
@@ -17,12 +19,21 @@ const form = reactive({
   status: 'pending',
 })
 const profiles = ref<AssetWorkbenchProfile[]>([])
-const loading = ref(false)
 const saving = ref(false)
 const hrSaving = ref(false)
-const error = ref('')
 const notice = ref('')
 const selectedProfile = ref<AssetWorkbenchProfile | null>(null)
+const peopleRequest = usePageRequest(
+  async () => {
+    const bootstrap = await assetWorkbenchApi.bootstrap()
+    const result = await assetWorkbenchApi.listProfiles({ page: 1, page_size: 20 }).catch(() => ({ items: [], total: 0 }))
+    return { bootstrap, profiles: result.items }
+  },
+  null,
+  '人员资料加载失败',
+)
+const loading = peopleRequest.loading
+const error = peopleRequest.error
 const hrForm = reactive({
   worker_type: 'parttime',
   job_grade: '',
@@ -61,29 +72,21 @@ function gridRowAsProfile(row: Record<string, unknown>) {
 }
 
 async function loadPeople() {
-  loading.value = true
-  error.value = ''
-  try {
-    const bootstrap = await assetWorkbenchApi.bootstrap()
-    if (bootstrap.profile) {
-      Object.assign(form, {
-        worker_type: bootstrap.profile.worker_type || 'parttime',
-        job_grade: bootstrap.profile.job_grade || '',
-        real_name: bootstrap.profile.real_name || '',
-        phone: bootstrap.profile.phone || '',
-        province: bootstrap.profile.province || '',
-        city: bootstrap.profile.city || '',
-        alipay_account: bootstrap.profile.alipay_account || '',
-        status: bootstrap.profile.status || 'pending',
-      })
-    }
-    const result = await assetWorkbenchApi.listProfiles({ page: 1, page_size: 20 }).catch(() => ({ items: [], total: 0 }))
-    profiles.value = result.items
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '人员资料加载失败'
-  } finally {
-    loading.value = false
+  const data = await peopleRequest.run()
+  if (!data) return
+  if (data.bootstrap.profile) {
+    Object.assign(form, {
+      worker_type: data.bootstrap.profile.worker_type || 'parttime',
+      job_grade: data.bootstrap.profile.job_grade || '',
+      real_name: data.bootstrap.profile.real_name || '',
+      phone: data.bootstrap.profile.phone || '',
+      province: data.bootstrap.profile.province || '',
+      city: data.bootstrap.profile.city || '',
+      alipay_account: data.bootstrap.profile.alipay_account || '',
+      status: data.bootstrap.profile.status || 'pending',
+    })
   }
+  profiles.value = data.profiles
 }
 
 async function saveProfile() {
@@ -230,47 +233,53 @@ onMounted(() => {
         <span>管理视图</span>
         <span>{{ profiles.length }} 人</span>
       </div>
-      <p v-if="loading" class="aw-copy">正在加载人员资料</p>
-      <WorkbenchDataGrid
-        v-else-if="profiles.length"
-        :columns="profileGridColumns"
-        :rows="profileGridRows"
-        row-key="id"
-        storage-key="people-profiles"
-        group-by="worker_type_label"
-        row-clickable
-        :selected-row-key="selectedProfile?.id"
-        @row-click="selectProfile"
+      <AsyncBoundary
+        :loading="loading"
+        :error="error"
+        loading-label="正在加载人员资料"
+        @retry="loadPeople"
       >
-        <template #cell="{ row, column, value }">
-          <button
-            v-if="column.key === 'real_name'"
-            type="button"
-            class="aw-link-button"
-            @click="selectProfile(row)"
-          >
-            {{ value || row.user_id }}
-          </button>
-          <span
-            v-else-if="column.key === 'worker_type_label'"
-            :class="chipClass(workerTypeMeta(gridRowAsProfile(row).worker_type).tone)"
-          >
-            {{ value }}
-          </span>
-          <span v-else-if="column.key === 'job_grade'">{{ value || '未定级' }}</span>
-          <span
-            v-else-if="column.key === 'status_label'"
-            :class="chipClass(profileStatusMeta(gridRowAsProfile(row).status).tone)"
-          >
-            {{ value }}
-          </span>
-          <span v-else>{{ value || '—' }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <div v-else class="aw-empty-state">
-        <h3>没有可见资料</h3>
-        <p>普通提交人只维护自己的资料；管理和结算角色可查看人员列表。</p>
-      </div>
+        <WorkbenchDataGrid
+          v-if="profiles.length"
+          :columns="profileGridColumns"
+          :rows="profileGridRows"
+          row-key="id"
+          storage-key="people-profiles"
+          group-by="worker_type_label"
+          row-clickable
+          :selected-row-key="selectedProfile?.id"
+          @row-click="selectProfile"
+        >
+          <template #cell="{ row, column, value }">
+            <button
+              v-if="column.key === 'real_name'"
+              type="button"
+              class="aw-link-button"
+              @click="selectProfile(row)"
+            >
+              {{ value || row.user_id }}
+            </button>
+            <span
+              v-else-if="column.key === 'worker_type_label'"
+              :class="chipClass(workerTypeMeta(gridRowAsProfile(row).worker_type).tone)"
+            >
+              {{ value }}
+            </span>
+            <span v-else-if="column.key === 'job_grade'">{{ value || '未定级' }}</span>
+            <span
+              v-else-if="column.key === 'status_label'"
+              :class="chipClass(profileStatusMeta(gridRowAsProfile(row).status).tone)"
+            >
+              {{ value }}
+            </span>
+            <span v-else>{{ value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <div v-else class="aw-empty-state">
+          <h3>没有可见资料</h3>
+          <p>普通提交人只维护自己的资料；管理和结算角色可查看人员列表。</p>
+        </div>
+      </AsyncBoundary>
     </div>
 
     <div v-if="selectedProfile" class="aw-panel">

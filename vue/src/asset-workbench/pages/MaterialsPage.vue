@@ -5,10 +5,12 @@ import { Download, Grid3X3, List, Search, X } from 'lucide-vue-next'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { assetWorkbenchApi, type SystemAssetPreviewMeta, type SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt } from '@aw/shared/format/number'
 import { chipClass, systemPreviewMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import MaterialGallery from '@aw/shared/materials/MaterialGallery.vue'
+import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 import {
   canAttemptSystemAssetPreview,
   isSystemAssetImagePreviewable,
@@ -44,11 +46,15 @@ const previewLoadingIds = ref<Set<number>>(new Set())
 const viewMode = ref<ViewMode>('gallery')
 const typeFilter = ref('all')
 const previewFilter = ref('all')
-const loading = ref(false)
 const previewLoading = ref(false)
-const error = ref('')
 const notice = ref('')
-let controller: AbortController | null = null
+const materialsRequest = usePageRequest(
+  (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, limit: 100 }, signal),
+  { items: [], total: 0, page: 1, size: 0 },
+  '素材库搜索失败',
+)
+const loading = materialsRequest.loading
+const error = materialsRequest.error
 let previewController: AbortController | null = null
 let lastSelectedIndex = -1
 
@@ -117,25 +123,15 @@ const relatedAssets = computed(() => {
 })
 
 async function searchMaterials() {
-  controller?.abort()
-  controller = new AbortController()
-  loading.value = true
-  error.value = ''
   notice.value = ''
-  try {
-    const result = await assetWorkbenchApi.systemSearch({ q: keyword.value, limit: 100 }, controller.signal)
-    rows.value = result.items
-    total.value = result.total
-    selectedAssetIds.value = new Set()
-    activeAsset.value = result.items[0] ?? null
-    previewUrls.value = {}
-    lastSelectedIndex = -1
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') return
-    error.value = err instanceof Error ? err.message : '素材库搜索失败'
-  } finally {
-    loading.value = false
-  }
+  const result = await materialsRequest.run()
+  if (!result) return
+  rows.value = result.items
+  total.value = result.total
+  selectedAssetIds.value = new Set()
+  activeAsset.value = result.items[0] ?? null
+  previewUrls.value = {}
+  lastSelectedIndex = -1
 }
 
 function titleOf(asset: SystemAssetRow) {
@@ -324,7 +320,6 @@ async function downloadSelectedAssets() {
 }
 
 onBeforeUnmount(() => {
-  controller?.abort()
   previewController?.abort()
 })
 
@@ -408,46 +403,51 @@ onMounted(() => {
           @visible="preloadVisiblePreviews"
         />
         <div v-else class="aw-data-surface">
-          <p v-if="loading" class="aw-copy">正在搜索素材库</p>
-          <p v-else-if="error" class="aw-copy">{{ error }}</p>
-          <WorkbenchDataGrid
-            v-else-if="filteredRows.length"
-            :columns="materialGridColumns"
-            :rows="materialGridRows"
-            row-key="id"
-            storage-key="materials"
-            group-by="display_type"
-            :height="520"
-            :row-height="36"
+          <AsyncBoundary
+            :loading="loading"
+            :error="error"
+            loading-label="正在搜索素材库"
+            @retry="searchMaterials"
           >
-            <template #cell="{ row, column, value }">
-              <label v-if="column.key === 'select'" class="aw-inline-check">
-                <input
-                  type="checkbox"
-                  :checked="selectedAssetIds.has(gridRowAsAsset(row).id)"
-                  @change="toggleAsset(gridRowAsAsset(row), ($event.target as HTMLInputElement).checked)"
-                />
-                <span>{{ gridRowAsAsset(row).id }}</span>
-              </label>
-              <div v-else-if="column.key === 'actions'" class="aw-inline-actions">
-                <button type="button" :disabled="!canPreviewMaterial(gridRowAsAsset(row))" @click="openAssetPreview(gridRowAsAsset(row))">
-                  预览
-                </button>
-                <button type="button" @click="downloadAsset(gridRowAsAsset(row))">下载</button>
-              </div>
-              <span
-                v-else-if="column.key === 'preview_label'"
-                :class="chipClass(systemPreviewMeta(canPreviewMaterial(gridRowAsAsset(row))).tone)"
-              >
-                {{ value }}
-              </span>
-              <span v-else class="aw-cell-text">{{ value }}</span>
-            </template>
-          </WorkbenchDataGrid>
-          <div v-else class="aw-empty-state">
-            <h3>还没有搜索结果</h3>
-            <p>输入编码、产品名、款式或关键词后搜索。只有已开通素材库的账号可以查看和下载。</p>
-          </div>
+            <WorkbenchDataGrid
+              v-if="filteredRows.length"
+              :columns="materialGridColumns"
+              :rows="materialGridRows"
+              row-key="id"
+              storage-key="materials"
+              group-by="display_type"
+              :height="520"
+              :row-height="36"
+            >
+              <template #cell="{ row, column, value }">
+                <label v-if="column.key === 'select'" class="aw-inline-check">
+                  <input
+                    type="checkbox"
+                    :checked="selectedAssetIds.has(gridRowAsAsset(row).id)"
+                    @change="toggleAsset(gridRowAsAsset(row), ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span>{{ gridRowAsAsset(row).id }}</span>
+                </label>
+                <div v-else-if="column.key === 'actions'" class="aw-inline-actions">
+                  <button type="button" :disabled="!canPreviewMaterial(gridRowAsAsset(row))" @click="openAssetPreview(gridRowAsAsset(row))">
+                    预览
+                  </button>
+                  <button type="button" @click="downloadAsset(gridRowAsAsset(row))">下载</button>
+                </div>
+                <span
+                  v-else-if="column.key === 'preview_label'"
+                  :class="chipClass(systemPreviewMeta(canPreviewMaterial(gridRowAsAsset(row))).tone)"
+                >
+                  {{ value }}
+                </span>
+                <span v-else class="aw-cell-text">{{ value }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <div v-else class="aw-empty-state">
+              <h3>还没有搜索结果</h3>
+              <p>输入编码、产品名、款式或关键词后搜索。只有已开通素材库的账号可以查看和下载。</p>
+            </div>
+          </AsyncBoundary>
         </div>
         <div v-if="selectedAssetIds.size" class="aw-material-action-bar">
           <span>{{ selectedLabel }}</span>
