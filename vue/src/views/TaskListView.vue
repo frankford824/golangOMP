@@ -494,7 +494,7 @@ function selectedIdsAsNumericOrError(): number[] | null {
   const ids = Array.from(selectedIds)
   const nums = ids.map((id) => parseInt(id, 10))
   if (nums.some((n) => Number.isNaN(n))) {
-    listActionError.value = '选中任务 ID 无效，请刷新后重试'
+    listActionError.value = '选择的任务无效，请刷新后重试'
     return null
   }
   return nums

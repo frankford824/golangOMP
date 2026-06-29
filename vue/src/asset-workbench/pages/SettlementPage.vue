@@ -130,7 +130,7 @@ const payrollGridColumns = computed<GridColumn[]>(() => [
 ])
 const batchGridColumns = computed<GridColumn[]>(() => [
   { key: 'batch_no', label: '批次号', width: 190 },
-  { key: 'business_month', label: '业务月', width: 108 },
+  { key: 'business_month', label: '结算月', width: 108 },
   { key: 'status_label', label: '状态', width: 96 },
   { key: 'net_amount', label: '净额', width: 112, align: 'right' },
   { key: 'actions', label: '动作', width: 180, align: 'center' },
@@ -144,7 +144,7 @@ const batchItemGridColumns = computed<GridColumn[]>(() => [
 ])
 const permissionGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_user_id', label: '人员', width: 96 },
-  { key: 'business_month', label: '业务月', width: 108 },
+  { key: 'business_month', label: '结算月', width: 108 },
   { key: 'status_label', label: '状态', width: 96 },
   { key: 'reason_label', label: '备注', width: 180 },
 ])
@@ -338,13 +338,13 @@ async function upsertSupplementPermission() {
     permissionForm.value.reason = ''
     await loadSettlement({ keepNotice: true })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '更新补录权限失败'
+    error.value = err instanceof Error ? err.message : '保存补录开放设置失败'
   }
 }
 
 async function loadSupplementEligibleMonths() {
   if (!permissionForm.value.payee_user_id) {
-    error.value = '请先填写开放人员 ID'
+    error.value = '请先填写要开放补录的人员编号'
     return
   }
   error.value = ''
@@ -587,7 +587,7 @@ onMounted(() => {
         <p class="aw-copy">已确认批次不直接改原始明细。需要补发或扣回时，在这里追加调整记录并保留原因。</p>
         <div class="aw-form-grid">
           <label>
-            人员 ID
+            人员编号
             <input v-model.number="adjustmentForm.payee_user_id" type="number" min="1" />
           </label>
           <label>
@@ -622,14 +622,14 @@ onMounted(() => {
       <div class="aw-panel">
         <div class="aw-panel__head">
           <div>
-            <h3>补录权限</h3>
-            <p class="aw-copy">补录按人员 + 业务月手动开放。</p>
+            <h3>补录开放</h3>
+            <p class="aw-copy">补录按人员 + 结算月手动开放。</p>
           </div>
           <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
         </div>
         <div class="aw-form-grid">
           <label>
-            开放人员 ID
+            开放人员编号
             <input v-model.number="permissionForm.payee_user_id" type="number" min="1" />
           </label>
           <label>
@@ -655,7 +655,7 @@ onMounted(() => {
           <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
             读取可补录月份
           </button>
-          <button class="aw-primary-button" type="button" @click="upsertSupplementPermission">更新权限</button>
+          <button class="aw-primary-button" type="button" @click="upsertSupplementPermission">保存开放设置</button>
         </div>
       </div>
 
@@ -669,7 +669,7 @@ onMounted(() => {
         </div>
         <div class="aw-form-grid">
           <label>
-            人员 ID
+            人员编号
             <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
           </label>
           <label>
@@ -704,7 +704,7 @@ onMounted(() => {
 
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
-        <span>补录权限记录</span>
+        <span>补录开放记录</span>
         <span>{{ formatInt(supplementPermissions.length) }} 条</span>
       </div>
       <WorkbenchDataGrid
@@ -728,7 +728,7 @@ onMounted(() => {
           <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
-      <p v-else class="aw-copy">当前月份还没有开放补录权限</p>
+      <p v-else class="aw-copy">当前月份还没有补录开放记录</p>
     </div>
 
     <div class="aw-data-surface">

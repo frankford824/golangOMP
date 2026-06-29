@@ -2125,7 +2125,7 @@ export const useTasksStore = defineStore('tasks', () => {
     if (isPurchaseTask(task)) throw new Error('采购任务不走设计指派流程')
     if (!canAssign(task)) throw new Error('当前状态不可指派')
     const designerIdNum = parseInt(payload.assigneeId, 10)
-    if (Number.isNaN(designerIdNum)) throw new Error('设计师 ID 无效，请从用户列表选择')
+    if (Number.isNaN(designerIdNum)) throw new Error('请选择有效设计师')
     const assignPayload: AssignTaskPayload = {
       designer_id: designerIdNum,
       designer_name: payload.assigneeName,
@@ -2153,7 +2153,7 @@ export const useTasksStore = defineStore('tasks', () => {
       throw new Error('新设计师不能与当前负责人相同')
     }
     const designerIdNum = parseInt(payload.assigneeId, 10)
-    if (Number.isNaN(designerIdNum)) throw new Error('设计师 ID 无效，请从用户列表选择')
+    if (Number.isNaN(designerIdNum)) throw new Error('请选择有效设计师')
     const assignPayload: AssignTaskPayload = {
       designer_id: designerIdNum,
       designer_name: payload.assigneeName,

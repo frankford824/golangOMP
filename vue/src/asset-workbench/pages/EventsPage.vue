@@ -24,7 +24,7 @@ const eventFilterOptions = [
   { value: 'item.qc_updated', label: '更新质检' },
   { value: 'settlement.confirmed', label: '确认结算' },
   { value: 'template.assigned', label: '下发作品类型' },
-  { value: 'member.identity_changed', label: '调整成员能力' },
+  { value: 'member.identity_changed', label: '调整成员功能' },
   { value: 'account.merged', label: '合并账号' },
 ]
 const entityFilterOptions = [
@@ -32,10 +32,10 @@ const entityFilterOptions = [
   { value: 'submission', label: '作品提交' },
   { value: 'submission_item', label: '作品明细' },
   { value: 'submission_file', label: '交付文件' },
-  { value: 'system_asset', label: '系统素材' },
+  { value: 'system_asset', label: '素材库文件' },
   { value: 'settlement_batch', label: '结算批次' },
-  { value: 'member', label: '成员权限' },
-  { value: 'profile', label: '人员档案' },
+  { value: 'member', label: '成员管理' },
+  { value: 'profile', label: '人员资料' },
 ]
 
 const eventGridRowsWithLabels = computed<EventGridRow[]>(() =>
@@ -43,7 +43,7 @@ const eventGridRowsWithLabels = computed<EventGridRow[]>(() =>
     ...row,
     event_label: eventTypeMeta(row.event_type).label,
     entity_label: entityTypeMeta(row.entity_type).label,
-    actor_label: row.actor_display_name || row.actor_username || (row.actor_user_id ? `用户 #${row.actor_user_id}` : '系统'),
+    actor_label: row.actor_display_name || row.actor_username || (row.actor_user_id ? `人员编号 ${row.actor_user_id}` : '系统'),
     reason_label: eventReasonText(row.reason),
     created_at_label: formatEventTime(row.created_at),
   })),
@@ -52,7 +52,7 @@ const eventGridRows = computed(() => eventGridRowsWithLabels.value as unknown as
 const eventGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
   { key: 'event_label', label: '事件', width: 180 },
   { key: 'entity_label', label: '对象', width: 148 },
-  { key: 'entity_id', label: '对象 ID', width: 100, align: 'right' },
+  { key: 'entity_id', label: '记录编号', width: 100, align: 'right' },
   { key: 'actor_label', label: '操作者', width: 140 },
   { key: 'reason_label', label: '原因', width: 220 },
   { key: 'created_at_label', label: '时间', width: 190 },
@@ -105,7 +105,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">操作留痕</p>
         <h2>操作日志</h2>
-        <p>上传、质检、结算、档案维护等关键操作都会留下事件记录。</p>
+        <p>上传、质检、结算、资料维护等关键操作都会留下事件记录。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="loadEvents">刷新</button>
@@ -154,7 +154,7 @@ onMounted(() => {
       </WorkbenchDataGrid>
       <div v-else class="aw-empty-state">
         <h3>暂无操作日志</h3>
-        <p>上传、质检、结算、档案维护等关键操作会在这里留下记录。当前筛选返回 {{ total }} 条。</p>
+        <p>上传、质检、结算、资料维护等关键操作会在这里留下记录。当前筛选返回 {{ total }} 条。</p>
       </div>
     </div>
   </section>

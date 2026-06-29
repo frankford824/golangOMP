@@ -80,7 +80,7 @@ async function loadPeople() {
     const result = await assetWorkbenchApi.listProfiles({ page: 1, page_size: 20 }).catch(() => ({ items: [], total: 0 }))
     profiles.value = result.items
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '人员档案加载失败'
+    error.value = err instanceof Error ? err.message : '人员资料加载失败'
   } finally {
     loading.value = false
   }
@@ -92,9 +92,9 @@ async function saveProfile() {
   notice.value = ''
   try {
     const saved = await assetWorkbenchApi.upsertMyProfile({ ...form })
-    notice.value = saved.pii_completed ? '档案已保存' : '档案已保存，仍有待补字段'
+    notice.value = saved.pii_completed ? '资料已保存' : '资料已保存，仍有待补字段'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '档案保存失败'
+    error.value = err instanceof Error ? err.message : '资料保存失败'
   } finally {
     saving.value = false
   }
@@ -133,14 +133,14 @@ async function saveHRProfile() {
       city: hrForm.city,
       alipay_account: hrForm.alipay_account || undefined,
       status: hrForm.status,
-      reason: hrForm.reason || 'HR 维护工作台档案',
+      reason: hrForm.reason || '管理人员资料',
     })
-    notice.value = `已更新 ${hrForm.real_name || profile.user_id} 的工作台档案`
+    notice.value = `已更新 ${hrForm.real_name || profile.user_id} 的人员资料`
     await loadPeople()
     const refreshed = profiles.value.find((item) => item.user_id === profile.user_id)
     selectedProfile.value = refreshed ?? null
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '人员档案更新失败'
+    error.value = err instanceof Error ? err.message : '人员资料更新失败'
   } finally {
     hrSaving.value = false
   }
@@ -155,13 +155,13 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">人员档案</p>
+        <p class="aw-eyebrow">人员资料</p>
         <h2>人员账户维护</h2>
-        <p>工作台档案只服务资产交付和计件结算。岗级变化只影响新的提交快照。</p>
+        <p>工作台资料只服务资产交付和计件结算。岗级变化只影响新的提交快照。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="loadPeople">刷新</button>
-        <button class="aw-primary-button" type="button" :disabled="saving" @click="saveProfile">保存档案</button>
+        <button class="aw-primary-button" type="button" :disabled="saving" @click="saveProfile">保存资料</button>
       </div>
     </div>
 
@@ -169,7 +169,7 @@ onMounted(() => {
       <div class="aw-panel">
         <div class="aw-panel__head">
           <div>
-            <h3>我的档案</h3>
+            <h3>我的资料</h3>
             <p class="aw-copy">这里的信息会用于之后的上传计价。</p>
           </div>
           <span :class="chipClass(profileStatusMeta(form.status).tone)">{{ profileStatusMeta(form.status).label }}</span>
@@ -213,11 +213,11 @@ onMounted(() => {
 
       <div class="aw-panel">
         <div class="aw-panel__head">
-          <h3>档案边界</h3>
-          <span class="aw-chip aw-chip--neutral">PII 脱敏</span>
+          <h3>资料用途</h3>
+          <span class="aw-chip aw-chip--neutral">隐私保护</span>
         </div>
         <p class="aw-copy">
-          工作台档案只服务资产交付和计件结算，不进入主站运营菜单。
+          工作台资料只服务资产交付和计件结算，不用于其他业务页面。
         </p>
         <p class="aw-copy">
           身份证、手机号、支付账号默认脱敏展示；查看和导出完整信息会留下操作记录。
@@ -227,10 +227,10 @@ onMounted(() => {
 
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
-        <span>HR 视图</span>
+        <span>管理视图</span>
         <span>{{ profiles.length }} 人</span>
       </div>
-      <p v-if="loading" class="aw-copy">正在加载人员档案</p>
+      <p v-if="loading" class="aw-copy">正在加载人员资料</p>
       <WorkbenchDataGrid
         v-else-if="profiles.length"
         :columns="profileGridColumns"
@@ -268,16 +268,16 @@ onMounted(() => {
         </template>
       </WorkbenchDataGrid>
       <div v-else class="aw-empty-state">
-        <h3>没有可见档案</h3>
-        <p>普通提交人只维护自己的档案；HR 和结算角色可查看人员列表。</p>
+        <h3>没有可见资料</h3>
+        <p>普通提交人只维护自己的资料；管理和结算角色可查看人员列表。</p>
       </div>
     </div>
 
     <div v-if="selectedProfile" class="aw-panel">
       <div class="aw-panel__head">
         <div>
-          <h3>HR 定级维护</h3>
-          <p class="aw-copy">用户 #{{ selectedProfile.user_id }} · {{ maskPhone(selectedProfile.phone) }}</p>
+          <h3>人员定级维护</h3>
+          <p class="aw-copy">人员编号 {{ selectedProfile.user_id }} · {{ maskPhone(selectedProfile.phone) }}</p>
         </div>
         <span :class="chipClass(profileStatusMeta(selectedProfile.status).tone)">
           {{ profileStatusMeta(selectedProfile.status).label }}
@@ -330,7 +330,7 @@ onMounted(() => {
       </div>
       <div class="aw-inline-actions">
         <button class="aw-primary-button" type="button" :disabled="hrSaving" @click="saveHRProfile">
-          {{ hrSaving ? '保存中' : '保存 HR 档案' }}
+          {{ hrSaving ? '保存中' : '保存人员资料' }}
         </button>
         <button class="aw-secondary-button" type="button" @click="selectedProfile = null">取消</button>
       </div>

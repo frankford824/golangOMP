@@ -75,8 +75,8 @@ export async function exportSettlementWorkbook(input: SettlementWorkbookInput): 
 function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: SettlementPayrollExportRow[]) {
   const sheet = workbook.addWorksheet('工资条')
   sheet.columns = [
-    { header: '人员ID', key: 'payeeUserId', width: 12 },
-    { header: '业务月', key: 'businessMonth', width: 12 },
+    { header: '人员编号', key: 'payeeUserId', width: 12 },
+    { header: '结算月', key: 'businessMonth', width: 12 },
     { header: '工资条类型', key: 'rowTypeLabel', width: 16 },
     { header: '单数', key: 'itemCount', width: 10 },
     { header: '页数', key: 'pageCount', width: 10 },
@@ -95,7 +95,7 @@ function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: Settleme
 function appendSummarySheet(workbook: import('exceljs').Workbook, rows: SettlementPreviewRow[], totals: SettlementPreviewRow) {
   const sheet = workbook.addWorksheet('人月汇总')
   sheet.columns = [
-    { header: '人员ID', key: 'payee_user_id', width: 12 },
+    { header: '人员编号', key: 'payee_user_id', width: 12 },
     { header: '单数', key: 'item_count', width: 10 },
     { header: '页数', key: 'page_count', width: 10 },
     { header: '毛额', key: 'gross_amount', width: 12 },
@@ -114,14 +114,14 @@ function appendItemSheet(workbook: import('exceljs').Workbook, rows: SettlementI
   const sheet = workbook.addWorksheet('批次明细')
   sheet.columns = [
     { header: '类型', key: 'item_type', width: 18 },
-    { header: '人员ID', key: 'payee_user_id', width: 12 },
-    { header: '业务月', key: 'business_month', width: 12 },
+    { header: '人员编号', key: 'payee_user_id', width: 12 },
+    { header: '结算月', key: 'business_month', width: 12 },
     { header: '金额', key: 'amount', width: 12 },
     { header: '数量', key: 'quantity', width: 12 },
     { header: '单价', key: 'unit_price', width: 12 },
     { header: '方向', key: 'direction', width: 10 },
     { header: '来源', key: 'source_ref_type', width: 18 },
-    { header: '来源ID', key: 'source_ref_id', width: 12 },
+    { header: '来源编号', key: 'source_ref_id', width: 12 },
   ]
   sheet.addRows(rows)
   formatSheet(sheet)

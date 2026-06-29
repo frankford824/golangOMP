@@ -89,7 +89,7 @@ function memberLabels(member: WorkbenchMemberRow) {
 
 async function toggleRole(member: WorkbenchMemberRow, role: string, checked: boolean) {
   if (!canChangeRoles.value || member.status !== 'active') {
-    error.value = '仅超级管理员可以调整已开通成员能力'
+    error.value = '仅超级管理员可以调整成员可用功能'
     return
   }
   const roles = memberRoles(member)
@@ -102,9 +102,9 @@ async function toggleRole(member: WorkbenchMemberRow, role: string, checked: boo
   try {
     const updated = await assetWorkbenchApi.updateMemberRoles(member.user_id, Array.from(roles), 'workbench role update')
     Object.assign(member, updated)
-    notice.value = `${memberName(member)} 的工作台能力已更新`
+    notice.value = `${memberName(member)} 的可用功能已更新`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '能力更新失败'
+    error.value = err instanceof Error ? err.message : '功能更新失败'
   } finally {
     savingUserId.value = null
   }
@@ -212,7 +212,7 @@ async function previewMerge() {
   const source = Number(mergeSourceId.value)
   const canonical = Number(mergeCanonicalId.value)
   if (!source || !canonical) {
-    error.value = '请输入来源账号和主账号 ID'
+    error.value = '请输入来源账号编号和主账号编号'
     return
   }
   error.value = ''
@@ -258,9 +258,9 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">权限</p>
-        <h2>成员与权限</h2>
-        <p>{{ canChangeRoles ? '开通、停用、恢复和组合工作台能力。' : '你可以查看成员，权限维护仅超级管理员可用。' }}</p>
+        <p class="aw-eyebrow">成员</p>
+        <h2>成员管理</h2>
+        <p>{{ canChangeRoles ? '开通、停用、恢复和配置成员可用功能。' : '你可以查看成员，开通和调整仅超级管理员可用。' }}</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadMembers">
@@ -272,7 +272,7 @@ onMounted(() => {
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <p v-if="!canChangeRoles" class="aw-inline-alert">当前账号为只读权限，不会显示开通、停用、恢复或合并操作。</p>
+    <p v-if="!canChangeRoles" class="aw-inline-alert">当前账号只能查看成员，不会显示开通、停用、恢复或合并操作。</p>
 
     <div class="aw-two-column">
       <section class="aw-panel">
@@ -440,11 +440,11 @@ onMounted(() => {
       <p class="aw-copy">合并后工作台归属迁到主账号；历史已发放记录的真实收款人不会被改写。</p>
       <div class="aw-form-grid">
         <label>
-          来源账号 ID
+          来源账号编号
           <input v-model="mergeSourceId" inputmode="numeric" placeholder="外部资产账号" />
         </label>
         <label>
-          主账号 ID
+          主账号编号
           <input v-model="mergeCanonicalId" inputmode="numeric" placeholder="运营主账号" />
         </label>
         <label class="aw-form-grid__full">

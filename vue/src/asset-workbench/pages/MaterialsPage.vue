@@ -99,7 +99,7 @@ const activeDetailRows = computed(() => {
     ['任务号', asset.task_no || '—'],
     ['产品名', asset.product_name || '—'],
     ['原文件', asset.original_filename || asset.file_name || '—'],
-    ['资源 ID', asset.resource_id || '—'],
+    ['资源编号', asset.resource_id || '—'],
   ]
 })
 const relatedAssets = computed(() => {
@@ -290,7 +290,7 @@ async function downloadAsset(row: SystemAssetRow) {
     window.open(info.download_url, '_blank', 'noopener,noreferrer')
     notice.value = `已生成下载链接：${info.filename || titleOf(row)}`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '系统素材下载失败'
+    error.value = err instanceof Error ? err.message : '素材下载失败'
   }
 }
 
@@ -300,7 +300,7 @@ async function downloadSelectedAssets() {
     notice.value = '请选择要下载的素材'
     return
   }
-  notice.value = '正在生成系统素材下载包'
+  notice.value = '正在生成素材下载包'
   error.value = ''
   try {
     const manifest = await assetWorkbenchApi.batchDownloadSystemAssets(ids)
@@ -317,9 +317,9 @@ async function downloadSelectedAssets() {
         notice.value = message
       },
     })
-    notice.value = `已打包 ${result.writtenCount} 个系统素材，失败 ${result.failureCount} 个`
+    notice.value = `已打包 ${result.writtenCount} 个素材，失败 ${result.failureCount} 个`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '系统素材批量下载失败'
+    error.value = err instanceof Error ? err.message : '素材批量下载失败'
   }
 }
 
@@ -339,7 +339,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">只读素材</p>
         <h2>模板素材库</h2>
-        <p>用缩略图墙快速查阅系统素材，进入视区后按需加载预览，明细模式用于批量核对。</p>
+        <p>用缩略图墙快速查阅素材库文件，进入视区后按需加载预览，明细模式用于批量核对。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-primary-button" type="button" @click="downloadSelectedAssets">
@@ -372,7 +372,7 @@ onMounted(() => {
           <option value="all">全部类型</option>
           <option v-for="type in fileTypeOptions" :key="type" :value="type">{{ type }}</option>
         </select>
-        <select v-model="previewFilter" aria-label="预览能力筛选">
+        <select v-model="previewFilter" aria-label="预览状态筛选">
           <option value="all">全部预览状态</option>
           <option value="previewable">可预览</option>
           <option value="download_only">只下载</option>
@@ -408,7 +408,7 @@ onMounted(() => {
           @visible="preloadVisiblePreviews"
         />
         <div v-else class="aw-data-surface">
-          <p v-if="loading" class="aw-copy">正在搜索系统素材</p>
+          <p v-if="loading" class="aw-copy">正在搜索素材库</p>
           <p v-else-if="error" class="aw-copy">{{ error }}</p>
           <WorkbenchDataGrid
             v-else-if="filteredRows.length"
@@ -446,7 +446,7 @@ onMounted(() => {
           </WorkbenchDataGrid>
           <div v-else class="aw-empty-state">
             <h3>还没有搜索结果</h3>
-            <p>输入编码、产品名、款式或关键词后搜索。只有有素材库权限的账号可以查看和下载。</p>
+            <p>输入编码、产品名、款式或关键词后搜索。只有已开通素材库的账号可以查看和下载。</p>
           </div>
         </div>
         <div v-if="selectedAssetIds.size" class="aw-material-action-bar">

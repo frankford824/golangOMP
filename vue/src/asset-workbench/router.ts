@@ -79,7 +79,7 @@ const routes: RouteRecordRaw[] = [
     path: '/members',
     name: 'asset-members',
     component: () => import('./pages/MembersPage.vue'),
-    meta: { label: '成员与权限' },
+    meta: { label: '成员管理' },
   },
   {
     path: '/events',

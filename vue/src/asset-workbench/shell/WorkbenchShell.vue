@@ -37,8 +37,8 @@ const navItems = [
   { group: '管理', to: '/template-assignments', label: '作品下发', icon: Send, requires: ['asset.workbench.template.assign'] },
   { group: '管理', to: '/cost-center', label: '成本中心', icon: Calculator, requires: ['asset.workbench.cost_center.manage'] },
   { group: '管理', to: '/settlement', label: '结算工资', icon: ReceiptText, requires: ['asset.workbench.settlement'] },
-  { group: '管理', to: '/people', label: '人员档案', icon: UsersRound, requires: ['asset.workbench.profile', 'asset.workbench.profile.manage'] },
-  { group: '管理', to: '/members', label: '成员权限', icon: UserRound, requires: ['asset.workbench.member.identity'] },
+  { group: '管理', to: '/people', label: '人员资料', icon: UsersRound, requires: ['asset.workbench.profile', 'asset.workbench.profile.manage'] },
+  { group: '管理', to: '/members', label: '成员管理', icon: UserRound, requires: ['asset.workbench.member.identity'] },
   { group: '管理', to: '/events', label: '操作日志', icon: ScrollText, requires: ['asset.workbench.manage', 'asset.workbench.cost_center.manage', 'asset.workbench.settlement'] },
 ]
 
@@ -63,17 +63,17 @@ const filteredCommandItems = computed(() => {
 })
 const profileStatusLabel = computed(() => {
   const status = bootstrap.value?.profile?.status
-  if (!status) return '档案待完善'
+  if (!status) return '资料待完善，请补全资料'
   const labels: Record<string, string> = {
-    pending: '档案待审核',
-    active: '档案已生效',
-    disabled: '档案已停用',
+    pending: '资料审核中',
+    active: '资料已完成',
+    disabled: '账号已停用',
   }
-  return labels[status] ?? status
+  return labels[status] ?? '资料状态待确认'
 })
 const permissionSummary = computed(() => {
   const count = bootstrap.value?.capabilities.length ?? 0
-  return count > 0 ? `${count} 项权限已加载` : '暂无可用权限'
+  return count > 0 ? '可用功能已就绪' : '暂无可用功能，请联系管理员'
 })
 const profileState = computed(() => {
   const status = bootstrap.value?.profile?.status
@@ -220,10 +220,10 @@ watch(commandQuery, () => {
 
       <main class="aw-shell__content">
         <div v-if="error" class="aw-inline-alert">{{ error }}</div>
-        <div v-else-if="loading" class="aw-inline-alert">正在加载工作台信息</div>
+        <div v-else-if="loading" class="aw-inline-alert">正在进入工作台</div>
         <div v-else-if="bootstrap" class="aw-statusline">
           <span class="aw-statusline__dot" :data-state="profileState"></span>
-          <span class="aw-statusline__item">业务月 <b>{{ businessMonth }}</b>（北京时间）</span>
+          <span class="aw-statusline__item">本月结算 <b>{{ businessMonth }}</b>（北京时间）</span>
           <span class="aw-statusline__sep">·</span>
           <span class="aw-statusline__item">{{ profileStatusLabel }}</span>
           <span class="aw-statusline__sep">·</span>

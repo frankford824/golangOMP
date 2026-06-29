@@ -70,7 +70,7 @@ function titleOf(asset: SystemAssetRow) {
 }
 
 function codeOf(asset: SystemAssetRow) {
-  return asset.asset_no || asset.resource_id || `#${asset.id}`
+  return asset.asset_no || asset.resource_id || `编号 ${asset.id}`
 }
 
 function typeLabel(asset: SystemAssetRow) {
@@ -171,7 +171,7 @@ watch(
     <div v-if="loading" class="aw-material-gallery__loading">正在检索素材</div>
     <div v-else-if="items.length === 0" class="aw-empty-state">
       <h3>没有可见素材</h3>
-      <p>调整关键词或筛选条件后再试。素材库只展示你有权限查看的系统素材。</p>
+      <p>调整关键词或筛选条件后再试。素材库只展示你已开通查看范围内的素材。</p>
     </div>
     <div v-else class="aw-material-gallery__viewport" :style="{ height: gridStyle['--aw-material-gallery-height'] }">
       <div class="aw-material-gallery__grid" :style="gridStyle">

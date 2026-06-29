@@ -4,7 +4,7 @@ const roleLabels: Record<string, string> = {
   AssetTemplateAdmin: '类型与计价',
   AssetSettlement: '结算财务',
   SuperAdmin: '超级管理员',
-  HRAdmin: '人员档案',
+  HRAdmin: '人员资料',
 }
 
 export const managedAssetRoles = [

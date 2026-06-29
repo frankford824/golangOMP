@@ -1686,7 +1686,7 @@ function costOverrideActorBusinessLabel(value: unknown): string {
     const operatorID = operatorMatch[1]
     const creatorID = String(task.value?.creatorId ?? '').trim()
     if (operatorID && creatorID && operatorID === creatorID) return detailCreatorLabel.value
-    return `操作人 #${operatorID}`
+    return `操作人编号 ${operatorID}`
   }
   return raw
 }

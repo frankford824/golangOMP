@@ -80,7 +80,7 @@ const detailFileRows = computed<DetailFileGridRow[]>(() =>
 const detailFileGridRows = computed(() => detailFileRows.value as unknown as Record<string, unknown>[])
 const submissionGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
   { key: 'submission_no', label: '提交批次', width: 180 },
-  { key: 'business_month', label: '业务月', width: 108 },
+  { key: 'business_month', label: '结算月', width: 108 },
   { key: 'status_label', label: '状态', width: 96 },
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
   { key: 'page_count', label: '页数', width: 88, align: 'right' },
