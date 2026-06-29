@@ -35,8 +35,8 @@ const galleryRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const viewportHeight = ref(720)
 const containerWidth = ref(960)
-const cardMinWidth = 168
-const rowHeight = 238
+const cardMinWidth = 224
+const rowHeight = 306
 let resizeObserver: ResizeObserver | null = null
 
 const columnCount = computed(() => Math.max(1, Math.floor(containerWidth.value / cardMinWidth)))
@@ -202,37 +202,31 @@ watch(
               loading="lazy"
               decoding="async"
             />
-            <component v-else :is="iconFor(asset)" class="aw-material-card__icon" :size="34" aria-hidden="true" />
-            <span :class="chipClass(systemPreviewMeta(canPreview(asset)).tone)">
-              {{ systemPreviewMeta(canPreview(asset)).label }}
-            </span>
+            <component v-else :is="iconFor(asset)" class="aw-material-card__icon" :size="36" aria-hidden="true" />
           </button>
           <div class="aw-material-card__body">
-            <div>
-              <strong>{{ titleOf(asset) }}</strong>
-              <span>{{ codeOf(asset) }}</span>
-            </div>
+            <strong>{{ titleOf(asset) }}</strong>
+            <span class="aw-material-card__code">{{ codeOf(asset) }}</span>
             <div class="aw-material-card__meta">
               <span>{{ typeLabel(asset) }}</span>
-              <span>{{ asset.task_no || '无任务号' }}</span>
+              <span :class="chipClass(systemPreviewMeta(canPreview(asset)).tone)">
+                {{ systemPreviewMeta(canPreview(asset)).label }}
+              </span>
             </div>
           </div>
           <div class="aw-material-card__actions" @click.stop>
-            <label class="aw-inline-check">
+            <label class="aw-material-card__check" :title="selectedIds.has(asset.id) ? '取消选择' : '选择'">
               <input
                 type="checkbox"
                 :checked="selectedIds.has(asset.id)"
                 @change="toggleAsset(asset, ($event.target as HTMLInputElement).checked, index, $event)"
               />
-              <span>选择</span>
             </label>
-            <button type="button" :disabled="!canPreview(asset)" @click="emit('preview', asset)">
+            <button type="button" :disabled="!canPreview(asset)" title="预览" @click="emit('preview', asset)">
               <Eye :size="15" aria-hidden="true" />
-              预览
             </button>
-            <button type="button" @click="emit('download', asset)">
+            <button type="button" title="下载" @click="emit('download', asset)">
               <Download :size="15" aria-hidden="true" />
-              下载
             </button>
           </div>
         </article>
