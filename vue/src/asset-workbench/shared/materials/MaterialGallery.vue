@@ -32,12 +32,11 @@ const emit = defineEmits<{
 }>()
 
 const galleryRef = ref<HTMLElement | null>(null)
-const scrollerRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
-const viewportHeight = ref(560)
+const viewportHeight = ref(720)
 const containerWidth = ref(960)
-const cardMinWidth = 210
-const rowHeight = 292
+const cardMinWidth = 168
+const rowHeight = 238
 let resizeObserver: ResizeObserver | null = null
 
 const columnCount = computed(() => Math.max(1, Math.floor(containerWidth.value / cardMinWidth)))
@@ -104,17 +103,22 @@ function canPreview(asset: SystemAssetRow) {
   return canAttemptSystemAssetPreview(asset)
 }
 
-function onScroll(event: Event) {
-  const el = event.target as HTMLElement
-  scrollTop.value = el.scrollTop
-  viewportHeight.value = el.clientHeight
-}
-
 function updateSize() {
   const el = galleryRef.value
-  const scroller = scrollerRef.value
   if (el) containerWidth.value = Math.max(cardMinWidth, el.clientWidth)
-  if (scroller) viewportHeight.value = Math.max(rowHeight, scroller.clientHeight)
+}
+
+function updateViewportWindow() {
+  const el = galleryRef.value
+  viewportHeight.value = window.innerHeight
+  if (!el) {
+    scrollTop.value = 0
+    return
+  }
+  const rect = el.getBoundingClientRect()
+  const galleryTop = window.scrollY + rect.top
+  scrollTop.value = Math.max(0, window.scrollY - galleryTop)
+  updateSize()
 }
 
 function bindResizeObserver() {
@@ -133,19 +137,23 @@ function toggleAsset(asset: SystemAssetRow, checked: boolean, index: number, eve
 }
 
 onMounted(() => {
-  updateSize()
+  updateViewportWindow()
   bindResizeObserver()
+  window.addEventListener('scroll', updateViewportWindow, { passive: true })
+  window.addEventListener('resize', updateViewportWindow)
 })
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  window.removeEventListener('scroll', updateViewportWindow)
+  window.removeEventListener('resize', updateViewportWindow)
 })
 
 watch(
   () => props.items.length,
   () => {
     scrollTop.value = 0
-    if (scrollerRef.value) scrollerRef.value.scrollTop = 0
+    updateViewportWindow()
   },
 )
 
@@ -165,65 +173,69 @@ watch(
       <h3>没有可见素材</h3>
       <p>调整关键词或筛选条件后再试。素材库只展示你有权限查看的系统素材。</p>
     </div>
-    <div v-else ref="scrollerRef" class="aw-material-gallery__scroller" @scroll="onScroll">
-      <div class="aw-material-gallery__spacer" :style="{ height: gridStyle['--aw-material-gallery-height'] }">
-        <div class="aw-material-gallery__grid" :style="gridStyle">
-          <article
-            v-for="{ asset, index } in visibleItems"
-            :key="asset.id"
-            class="aw-material-card"
-            :class="{
-              'aw-material-card--selected': selectedIds.has(asset.id),
-              'aw-material-card--active': activeId === asset.id,
-            }"
-            tabindex="0"
-            @click="emit('select', asset)"
-            @keydown.enter.prevent="emit('select', asset)"
-            @keydown.space.prevent="emit('toggle', asset, !selectedIds.has(asset.id), index, false)"
+    <div v-else class="aw-material-gallery__viewport" :style="{ height: gridStyle['--aw-material-gallery-height'] }">
+      <div class="aw-material-gallery__grid" :style="gridStyle">
+        <article
+          v-for="{ asset, index } in visibleItems"
+          :key="asset.id"
+          class="aw-material-card"
+          :class="{
+            'aw-material-card--selected': selectedIds.has(asset.id),
+            'aw-material-card--active': activeId === asset.id,
+          }"
+          tabindex="0"
+          @click="emit('select', asset)"
+          @keydown.enter.prevent="emit('select', asset)"
+          @keydown.space.prevent="emit('toggle', asset, !selectedIds.has(asset.id), index, false)"
+        >
+          <button
+            class="aw-material-card__media"
+            type="button"
+            :disabled="!canPreview(asset)"
+            :title="canPreview(asset) ? '预览素材' : '当前素材只能下载'"
+            @click.stop="emit('preview', asset)"
           >
-            <div class="aw-material-card__media" @dblclick.stop="emit('preview', asset)">
-              <img
-                v-if="previewUrlFor(asset)"
-                :src="previewUrlFor(asset)"
-                :alt="titleOf(asset)"
-                loading="lazy"
-                decoding="async"
+            <img
+              v-if="previewUrlFor(asset)"
+              :src="previewUrlFor(asset)"
+              :alt="titleOf(asset)"
+              loading="lazy"
+              decoding="async"
+            />
+            <component v-else :is="iconFor(asset)" class="aw-material-card__icon" :size="34" aria-hidden="true" />
+            <span :class="chipClass(systemPreviewMeta(canPreview(asset)).tone)">
+              {{ systemPreviewMeta(canPreview(asset)).label }}
+            </span>
+          </button>
+          <div class="aw-material-card__body">
+            <div>
+              <strong>{{ titleOf(asset) }}</strong>
+              <span>{{ codeOf(asset) }}</span>
+            </div>
+            <div class="aw-material-card__meta">
+              <span>{{ typeLabel(asset) }}</span>
+              <span>{{ asset.task_no || '无任务号' }}</span>
+            </div>
+          </div>
+          <div class="aw-material-card__actions" @click.stop>
+            <label class="aw-inline-check">
+              <input
+                type="checkbox"
+                :checked="selectedIds.has(asset.id)"
+                @change="toggleAsset(asset, ($event.target as HTMLInputElement).checked, index, $event)"
               />
-              <component v-else :is="iconFor(asset)" class="aw-material-card__icon" :size="34" aria-hidden="true" />
-              <span :class="chipClass(systemPreviewMeta(canPreview(asset)).tone)">
-                {{ systemPreviewMeta(canPreview(asset)).label }}
-              </span>
-            </div>
-            <div class="aw-material-card__body">
-              <div>
-                <strong>{{ titleOf(asset) }}</strong>
-                <span>{{ codeOf(asset) }}</span>
-              </div>
-              <div class="aw-material-card__meta">
-                <span>{{ typeLabel(asset) }}</span>
-                <span>{{ asset.task_no || '无任务号' }}</span>
-              </div>
-            </div>
-            <div class="aw-material-card__actions" @click.stop>
-              <label class="aw-inline-check">
-                <input
-                  type="checkbox"
-                  :checked="selectedIds.has(asset.id)"
-                  @change="toggleAsset(asset, ($event.target as HTMLInputElement).checked, index, $event)"
-                />
-                <span>选择</span>
-              </label>
-              <button type="button" :disabled="!canPreview(asset)" @click="emit('preview', asset)">
-                <Eye :size="15" aria-hidden="true" />
-                预览
-              </button>
-              <button type="button" @click="emit('download', asset)">
-                <Download :size="15" aria-hidden="true" />
-                下载
-              </button>
-            </div>
-          </article>
-        </div>
+              <span>选择</span>
+            </label>
+            <button type="button" :disabled="!canPreview(asset)" @click="emit('preview', asset)">
+              <Eye :size="15" aria-hidden="true" />
+              预览
+            </button>
+            <button type="button" @click="emit('download', asset)">
+              <Download :size="15" aria-hidden="true" />
+              下载
+            </button>
+          </div>
+        </article>
       </div>
     </div>
   </section>
