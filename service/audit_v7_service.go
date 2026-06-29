@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -38,6 +39,7 @@ type auditV7Service struct {
 	dataScopeResolver DataScopeResolver
 	scopeUserRepo     repo.UserRepo
 	assetFlowRepo     AuditAssetFlowRepo
+	experienceSvc     ExperienceService
 }
 
 type auditTaskFilingTrigger interface {
@@ -76,6 +78,12 @@ func WithAuditV7ScopeUserRepo(userRepo repo.UserRepo) AuditV7ServiceOption {
 func WithAuditV7AssetFlowRepo(assetFlowRepo AuditAssetFlowRepo) AuditV7ServiceOption {
 	return func(s *auditV7Service) {
 		s.assetFlowRepo = assetFlowRepo
+	}
+}
+
+func WithAuditV7ExperienceService(experienceSvc ExperienceService) AuditV7ServiceOption {
+	return func(s *auditV7Service) {
+		s.experienceSvc = experienceSvc
 	}
 }
 
@@ -166,6 +174,7 @@ func (s *auditV7Service) Approve(ctx context.Context, p ApproveAuditParams) *dom
 	if appErr != nil {
 		return appErr
 	}
+	fromStatus := task.TaskStatus
 	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditApprove), []auditLaneAccessSubject{
 		{UserID: p.AuditorID, Label: "auditor_id"},
 	}); appErr != nil {
@@ -262,6 +271,19 @@ func (s *auditV7Service) Approve(ctx context.Context, p ApproveAuditParams) *dom
 			log.Printf("audit_final_approval_filing_trigger_failed task_id=%d err=%s", p.TaskID, filingErr.Message)
 		}
 	}
+	s.enqueueAuditExperienceEvent(ctx, task, auditExperienceEventParams{
+		AuditorID:  p.AuditorID,
+		Stage:      p.Stage,
+		Action:     domain.AuditActionTypeApprove,
+		FromStatus: fromStatus,
+		ToStatus:   p.NextStatus,
+		Outcome:    "approved",
+		Comment:    p.Comment,
+		IssueTypes: p.IssueTypes,
+		Extra: map[string]interface{}{
+			"need_outsource": needOutsource,
+		},
+	})
 	return nil
 }
 
@@ -270,6 +292,7 @@ func (s *auditV7Service) Reject(ctx context.Context, p RejectAuditParams) *domai
 	if appErr != nil {
 		return appErr
 	}
+	fromStatus := task.TaskStatus
 	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditReject), []auditLaneAccessSubject{
 		{UserID: p.AuditorID, Label: "auditor_id"},
 	}); appErr != nil {
@@ -347,7 +370,129 @@ func (s *auditV7Service) Reject(ctx context.Context, p RejectAuditParams) *domai
 	if txErr != nil {
 		return infraError("reject audit tx", txErr)
 	}
+	s.enqueueAuditExperienceEvent(ctx, task, auditExperienceEventParams{
+		AuditorID:     p.AuditorID,
+		Stage:         p.Stage,
+		Action:        domain.AuditActionTypeReject,
+		FromStatus:    fromStatus,
+		ToStatus:      nextStatus,
+		Outcome:       "rejected",
+		Comment:       p.Comment,
+		IssueTypes:    p.IssueTypes,
+		AffectsLaunch: p.AffectsLaunch,
+	})
 	return nil
+}
+
+type auditExperienceEventParams struct {
+	AuditorID     int64
+	Stage         domain.AuditRecordStage
+	Action        domain.AuditActionType
+	FromStatus    domain.TaskStatus
+	ToStatus      domain.TaskStatus
+	Outcome       string
+	Comment       string
+	IssueTypes    []string
+	AffectsLaunch bool
+	Extra         map[string]interface{}
+}
+
+func (s *auditV7Service) enqueueAuditExperienceEvent(ctx context.Context, task *domain.Task, p auditExperienceEventParams) {
+	if s == nil || s.experienceSvc == nil || task == nil {
+		return
+	}
+	occurredAt := time.Now().UTC()
+	payload := map[string]interface{}{
+		"stage":              string(p.Stage),
+		"audit_action":       string(p.Action),
+		"from_task_status":   string(p.FromStatus),
+		"to_task_status":     string(p.ToStatus),
+		"reason_note":        trimMax(strings.TrimSpace(p.Comment), experienceReasonNoteMaxLength),
+		"affects_launch":     p.AffectsLaunch,
+		"current_handler_id": cloneInt64Ptr(task.CurrentHandlerID),
+		"designer_id":        cloneInt64Ptr(task.DesignerID),
+	}
+	if len(p.IssueTypes) > 0 {
+		payload["reason_codes"] = append([]string(nil), p.IssueTypes...)
+	}
+	for key, value := range p.Extra {
+		payload[key] = value
+	}
+	taskID := task.ID
+	event := &domain.ExperienceOutboxEvent{
+		EventKey:           trimMax(fmt.Sprintf("task_audit:%d:%s:%s:%s:%d", task.ID, p.Stage, p.Action, p.ToStatus, occurredAt.UnixNano()), 191),
+		SourceType:         "task_audit",
+		SourceID:           auditExperienceSourceID(task),
+		TaskID:             &taskID,
+		Action:             auditExperienceAction(p.Action),
+		Outcome:            p.Outcome,
+		EventTime:          occurredAt,
+		ActorSnapshot:      auditExperienceJSON(map[string]interface{}{"actor_id": p.AuditorID, "actor_type": "user", "surface": "task_audit"}),
+		BusinessSnapshot:   auditExperienceJSON(auditExperienceTaskSnapshot(task, p.FromStatus, p.ToStatus)),
+		Payload:            auditExperienceJSON(payload),
+		DataClassification: "business_fact",
+		GroundTruthStatus:  "observed",
+	}
+	if appErr := s.experienceSvc.EnqueueEvent(ctx, event); appErr != nil {
+		log.Printf("audit_experience_enqueue_failed task_id=%d action=%s err=%s", task.ID, p.Action, appErr.Message)
+	}
+}
+
+func auditExperienceSourceID(task *domain.Task) string {
+	if task == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(task.TaskNo); value != "" {
+		return trimMax(value, 128)
+	}
+	return fmt.Sprintf("task-%d", task.ID)
+}
+
+func auditExperienceAction(action domain.AuditActionType) string {
+	switch action {
+	case domain.AuditActionTypeApprove:
+		return "audit_approved"
+	case domain.AuditActionTypeReject:
+		return "audit_rejected"
+	default:
+		return trimMax("audit_"+strings.TrimSpace(string(action)), 96)
+	}
+}
+
+func auditExperienceTaskSnapshot(task *domain.Task, fromStatus, toStatus domain.TaskStatus) map[string]interface{} {
+	snapshot := map[string]interface{}{}
+	if task == nil {
+		return snapshot
+	}
+	snapshot["task_id"] = task.ID
+	snapshot["task_no"] = task.TaskNo
+	snapshot["task_type"] = string(task.TaskType)
+	snapshot["source_mode"] = string(task.SourceMode)
+	snapshot["business_lane"] = string(domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired))
+	snapshot["workflow_lane"] = string(task.WorkflowLane())
+	snapshot["from_task_status"] = string(fromStatus)
+	snapshot["to_task_status"] = string(toStatus)
+	snapshot["sku_code"] = task.SKUCode
+	snapshot["primary_sku_code"] = task.PrimarySKUCode
+	snapshot["product_id"] = cloneInt64Ptr(task.ProductID)
+	snapshot["product_name_snapshot"] = task.ProductNameSnapshot
+	snapshot["owner_team"] = task.OwnerTeam
+	snapshot["owner_department"] = task.OwnerDepartment
+	snapshot["owner_org_team"] = task.OwnerOrgTeam
+	snapshot["priority"] = string(task.Priority)
+	snapshot["need_outsource"] = task.NeedOutsource
+	snapshot["is_outsource"] = task.IsOutsource
+	snapshot["is_batch_task"] = task.IsBatchTask
+	snapshot["batch_item_count"] = task.BatchItemCount
+	return snapshot
+}
+
+func auditExperienceJSON(value interface{}) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *domain.AppError {

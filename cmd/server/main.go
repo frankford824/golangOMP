@@ -404,10 +404,21 @@ func main() {
 		service.WithTaskDetailUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskDetailDesignAssetReadModel(designAssetRepo))
 	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo)
+	experienceSvc := service.NewExperienceService(experienceRepo, service.ExperienceServiceConfig{
+		UIEnabled:         cfg.Experience.UIEnabled,
+		CaptureEnabled:    cfg.Experience.CaptureEnabled,
+		AIFeedbackEnabled: cfg.Experience.AIFeedbackEnabled,
+		WorkerEnabled:     cfg.Experience.WorkerEnabled,
+		WorkerBatchSize:   cfg.Experience.WorkerBatchSize,
+		WorkerMaxAttempts: cfg.Experience.WorkerMaxAttempts,
+		OutboxLeaseTTL:    cfg.Experience.OutboxLeaseTTL,
+		RuntimeConfigFile: cfg.Experience.RuntimeConfigFile,
+	}, logger.Named("experience"))
 	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
 		service.WithAuditV7ScopeUserRepo(userRepo),
 		service.WithAuditV7FilingTrigger(taskSvc),
+		service.WithAuditV7ExperienceService(experienceSvc),
 	}
 	if assetFlowRepo, ok := taskAssetRepo.(service.AuditAssetFlowRepo); ok {
 		auditV7Options = append(auditV7Options, service.WithAuditV7AssetFlowRepo(assetFlowRepo))
@@ -436,16 +447,6 @@ func main() {
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
 	predictionSvc := predictionsvc.NewService(predictionRepo)
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
-	experienceSvc := service.NewExperienceService(experienceRepo, service.ExperienceServiceConfig{
-		UIEnabled:         cfg.Experience.UIEnabled,
-		CaptureEnabled:    cfg.Experience.CaptureEnabled,
-		AIFeedbackEnabled: cfg.Experience.AIFeedbackEnabled,
-		WorkerEnabled:     cfg.Experience.WorkerEnabled,
-		WorkerBatchSize:   cfg.Experience.WorkerBatchSize,
-		WorkerMaxAttempts: cfg.Experience.WorkerMaxAttempts,
-		OutboxLeaseTTL:    cfg.Experience.OutboxLeaseTTL,
-		RuntimeConfigFile: cfg.Experience.RuntimeConfigFile,
-	}, logger.Named("experience"))
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
 	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen))

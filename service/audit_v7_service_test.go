@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"workflow/domain"
@@ -116,6 +117,96 @@ func TestAuditV7ServiceRejectRoutesBackToDesigner(t *testing.T) {
 	}
 	if taskRepo.tasks[2].CurrentHandlerID == nil || *taskRepo.tasks[2].CurrentHandlerID != designerID {
 		t.Fatalf("Reject() current_handler_id = %+v, want %d", taskRepo.tasks[2].CurrentHandlerID, designerID)
+	}
+}
+
+func TestAuditV7ServiceApproveEnqueuesExperienceSample(t *testing.T) {
+	currentHandlerID := int64(71)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			25: {
+				ID:                  25,
+				TaskNo:              "RW-025",
+				SKUCode:             "SKU-025",
+				TaskType:            domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:          domain.TaskStatusPendingAuditA,
+				BusinessLane:        domain.TaskBusinessLaneNormal,
+				OwnerDepartment:     "运营部",
+				OwnerOrgTeam:        "淘系一组",
+				Priority:            domain.TaskPriorityHigh,
+				CurrentHandlerID:    &currentHandlerID,
+				ProductNameSnapshot: "测试商品",
+			},
+		},
+	}
+	experienceSvc := &auditExperienceServiceStub{}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ExperienceService(experienceSvc))
+
+	appErr := svc.Approve(context.Background(), ApproveAuditParams{
+		TaskID:     25,
+		AuditorID:  71,
+		Stage:      domain.AuditRecordStageA,
+		NextStatus: domain.TaskStatusPendingAuditB,
+		Comment:    "pass",
+	})
+	if appErr != nil {
+		t.Fatalf("Approve() unexpected error: %+v", appErr)
+	}
+	if len(experienceSvc.events) != 1 {
+		t.Fatalf("experience events = %d, want 1", len(experienceSvc.events))
+	}
+	event := experienceSvc.events[0]
+	if event.SourceType != "task_audit" || event.SourceID != "RW-025" || event.Action != "audit_approved" || event.Outcome != "approved" {
+		t.Fatalf("experience event identity = %#v", event)
+	}
+	if event.TaskID == nil || *event.TaskID != 25 {
+		t.Fatalf("experience task_id = %+v, want 25", event.TaskID)
+	}
+	var business map[string]interface{}
+	if err := json.Unmarshal(event.BusinessSnapshot, &business); err != nil {
+		t.Fatalf("business snapshot json: %v", err)
+	}
+	if business["from_task_status"] != string(domain.TaskStatusPendingAuditA) || business["to_task_status"] != string(domain.TaskStatusPendingAuditB) {
+		t.Fatalf("business status snapshot = %#v", business)
+	}
+}
+
+func TestAuditV7ServiceRejectExperienceFailureDoesNotBlockAudit(t *testing.T) {
+	designerID := int64(81)
+	auditorID := int64(82)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			26: {
+				ID:               26,
+				TaskNo:           "RW-026",
+				SKUCode:          "SKU-026",
+				TaskType:         domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:       domain.TaskStatusPendingAuditB,
+				DesignerID:       &designerID,
+				CurrentHandlerID: &auditorID,
+			},
+		},
+	}
+	experienceSvc := &auditExperienceServiceStub{failEnqueue: true}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ExperienceService(experienceSvc))
+
+	appErr := svc.Reject(context.Background(), RejectAuditParams{
+		TaskID:     26,
+		AuditorID:  auditorID,
+		Stage:      domain.AuditRecordStageB,
+		Comment:    "layout needs fix",
+		IssueTypes: []string{"layout_error"},
+	})
+	if appErr != nil {
+		t.Fatalf("Reject() unexpected error when experience enqueue fails: %+v", appErr)
+	}
+	if taskRepo.tasks[26].TaskStatus != domain.TaskStatusRejectedByAuditB {
+		t.Fatalf("task status = %s, want %s", taskRepo.tasks[26].TaskStatus, domain.TaskStatusRejectedByAuditB)
+	}
+	if experienceSvc.enqueueCalls != 1 {
+		t.Fatalf("experience enqueue calls = %d, want 1", experienceSvc.enqueueCalls)
 	}
 }
 
@@ -351,6 +442,56 @@ func TestAuditV7ServiceTakeoverRejectsCrossLaneHandover(t *testing.T) {
 type auditV7RepoStub struct {
 	records   []*domain.AuditRecord
 	handovers []*domain.AuditHandover
+}
+
+type auditExperienceServiceStub struct {
+	events       []*domain.ExperienceOutboxEvent
+	enqueueCalls int
+	failEnqueue  bool
+}
+
+func (s *auditExperienceServiceStub) RuntimeFlags() domain.ExperienceRuntimeFlags {
+	return domain.ExperienceRuntimeFlags{
+		UIEnabled:      true,
+		CaptureEnabled: true,
+		WorkerEnabled:  true,
+	}
+}
+
+func (s *auditExperienceServiceStub) ListReasonTags(context.Context, string) ([]*domain.ExperienceReasonTag, *domain.AppError) {
+	return nil, nil
+}
+
+func (s *auditExperienceServiceStub) ListSamples(context.Context, ExperienceEventFilter) ([]*domain.ExperienceEvent, domain.PaginationMeta, *domain.AppError) {
+	return nil, domain.PaginationMeta{}, nil
+}
+
+func (s *auditExperienceServiceStub) Stats(context.Context) (*domain.ExperienceStats, *domain.AppError) {
+	return &domain.ExperienceStats{}, nil
+}
+
+func (s *auditExperienceServiceStub) EnqueueEvent(_ context.Context, event *domain.ExperienceOutboxEvent) *domain.AppError {
+	s.enqueueCalls++
+	if event != nil {
+		copied := *event
+		s.events = append(s.events, &copied)
+	}
+	if s.failEnqueue {
+		return domain.NewAppError(domain.ErrCodeInternalError, "stub enqueue failed", nil)
+	}
+	return nil
+}
+
+func (s *auditExperienceServiceStub) RecordAISuggestionEvent(context.Context, *domain.AISuggestionEvent) *domain.AppError {
+	return nil
+}
+
+func (s *auditExperienceServiceStub) RecordAISuggestionFeedback(context.Context, domain.RequestActor, AISuggestionFeedbackRequest) (*domain.AISuggestionFeedback, *domain.AppError) {
+	return nil, nil
+}
+
+func (s *auditExperienceServiceStub) ProcessOutbox(context.Context, int) (domain.ExperienceWorkerRun, *domain.AppError) {
+	return domain.ExperienceWorkerRun{}, nil
 }
 
 func (r *auditV7RepoStub) CreateRecord(_ context.Context, _ repo.Tx, record *domain.AuditRecord) (int64, error) {
