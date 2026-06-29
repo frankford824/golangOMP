@@ -1,6 +1,8 @@
 .aw-root {
   display: grid;
   grid-template-columns: var(--aw-rail-width) minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--aw-paper);
 }
 
 .aw-root--simple {
@@ -104,16 +106,24 @@
 
 /* --- Instrument frame: the dark rail --- */
 .aw-shell__rail {
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  align-self: stretch;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--aw-space-6);
+  min-height: 100vh;
   border-right: 1px solid var(--aw-stage-line);
   background: var(--aw-stage);
   color: var(--aw-on-console);
+}
+
+.aw-shell__rail-inner {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--aw-space-6);
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--aw-space-6) var(--aw-space-4);
 }
 
@@ -215,6 +225,7 @@
 .aw-shell__workspace {
   min-width: 0;
   overflow-x: hidden;
+  background: var(--aw-paper);
 }
 
 .aw-simple-topbar {
@@ -1727,14 +1738,13 @@
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface);
 }
 
-.aw-data-grid__head,
+.aw-data-grid__head-row,
 .aw-data-grid__row {
   display: grid;
   grid-template-columns: var(--aw-grid-columns);
@@ -1743,6 +1753,10 @@
 }
 
 .aw-data-grid__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  overflow: hidden;
   border-bottom: 1px solid var(--aw-hairline);
   background: var(--aw-paper);
 }
@@ -1814,8 +1828,8 @@
 }
 
 .aw-data-grid__body {
+  overflow: auto;
   overflow-y: auto;
-  overflow-x: visible;
   max-width: 100%;
 }
 
@@ -2086,6 +2100,10 @@
   }
 
   .aw-shell__rail {
+    min-height: 0;
+  }
+
+  .aw-shell__rail-inner {
     position: static;
     height: auto;
     flex-direction: row;
@@ -2093,6 +2111,7 @@
     gap: var(--aw-space-4);
     max-width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
     padding: var(--aw-space-4);
   }
 

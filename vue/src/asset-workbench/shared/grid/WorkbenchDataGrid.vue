@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-vue-next'
 
+import { useSyncScroll } from '@aw/shared/composables/useSyncScroll'
+
 interface WorkbenchDataGridColumn {
   key: string
   label: string
@@ -45,6 +47,8 @@ const emit = defineEmits<{
 }>()
 
 const scrollTop = ref(0)
+const headRef = ref<HTMLElement | null>(null)
+const bodyRef = ref<HTMLElement | null>(null)
 const columnState = ref<GridColumnState>({ order: [], widths: {} })
 
 const storageName = computed(() => `aw:grid:${props.storageKey}`)
@@ -155,6 +159,7 @@ function activateRow(row: GridRow) {
 }
 
 onMounted(loadColumnState)
+useSyncScroll(bodyRef, headRef, { axis: 'x' })
 
 watch(
   () => props.storageKey,
@@ -170,31 +175,33 @@ watch(
     class="aw-data-grid"
     :style="{ '--aw-grid-columns': gridTemplateColumns, '--aw-grid-row-height': `${rowHeight}px` }"
   >
-    <div class="aw-data-grid__head">
-      <div
-        v-for="column in orderedColumns"
-        :key="column.key"
-        class="aw-data-grid__th"
-        :data-align="column.align || 'left'"
-      >
-        <span>{{ column.label }}</span>
-        <span class="aw-data-grid__tools">
-          <button type="button" title="左移列" @click="moveColumn(column.key, -1)">
-            <ChevronLeft :size="12" aria-hidden="true" />
-          </button>
-          <button type="button" title="右移列" @click="moveColumn(column.key, 1)">
-            <ChevronRight :size="12" aria-hidden="true" />
-          </button>
-          <button type="button" title="缩窄列" @click="resizeColumn(column.key, -16)">
-            <Minus :size="12" aria-hidden="true" />
-          </button>
-          <button type="button" title="加宽列" @click="resizeColumn(column.key, 16)">
-            <Plus :size="12" aria-hidden="true" />
-          </button>
-        </span>
+    <div ref="headRef" class="aw-data-grid__head">
+      <div class="aw-data-grid__head-row">
+        <div
+          v-for="column in orderedColumns"
+          :key="column.key"
+          class="aw-data-grid__th"
+          :data-align="column.align || 'left'"
+        >
+          <span>{{ column.label }}</span>
+          <span class="aw-data-grid__tools">
+            <button type="button" title="左移列" @click="moveColumn(column.key, -1)">
+              <ChevronLeft :size="12" aria-hidden="true" />
+            </button>
+            <button type="button" title="右移列" @click="moveColumn(column.key, 1)">
+              <ChevronRight :size="12" aria-hidden="true" />
+            </button>
+            <button type="button" title="缩窄列" @click="resizeColumn(column.key, -16)">
+              <Minus :size="12" aria-hidden="true" />
+            </button>
+            <button type="button" title="加宽列" @click="resizeColumn(column.key, 16)">
+              <Plus :size="12" aria-hidden="true" />
+            </button>
+          </span>
+        </div>
       </div>
     </div>
-    <div class="aw-data-grid__body" :style="{ maxHeight: `${height}px` }" @scroll="updateScroll">
+    <div ref="bodyRef" class="aw-data-grid__body" :style="{ maxHeight: `${height}px` }" @scroll="updateScroll">
       <div :style="{ height: `${topSpacerHeight}px` }" />
       <template v-for="item in visibleItems" :key="item.key">
         <div v-if="item.type === 'group'" class="aw-data-grid__group">

@@ -171,26 +171,28 @@ watch(commandQuery, () => {
 <template>
   <div class="aw-root">
     <aside class="aw-shell__rail" aria-label="资产工作台导航">
-      <div class="aw-shell__brand">
-        <span class="aw-shell__mark">AW</span>
-        <span class="aw-shell__brand-text">资产工作台</span>
-      </div>
+      <div class="aw-shell__rail-inner">
+        <div class="aw-shell__brand">
+          <span class="aw-shell__mark">AW</span>
+          <span class="aw-shell__brand-text">资产工作台</span>
+        </div>
 
-      <nav class="aw-shell__nav">
-        <section v-for="group in visibleNavGroups" :key="group.label" class="aw-nav-group">
-          <p>{{ group.label }}</p>
-          <RouterLink
-            v-for="item in group.items"
-            :key="item.to"
-            :to="item.to"
-            class="aw-nav-item"
-            active-class="aw-nav-item--active"
-          >
-            <component :is="item.icon" :size="18" stroke-width="2" aria-hidden="true" />
-            <span>{{ item.label }}</span>
-          </RouterLink>
-        </section>
-      </nav>
+        <nav class="aw-shell__nav">
+          <section v-for="group in visibleNavGroups" :key="group.label" class="aw-nav-group">
+            <p>{{ group.label }}</p>
+            <RouterLink
+              v-for="item in group.items"
+              :key="item.to"
+              :to="item.to"
+              class="aw-nav-item"
+              active-class="aw-nav-item--active"
+            >
+              <component :is="item.icon" :size="18" stroke-width="2" aria-hidden="true" />
+              <span>{{ item.label }}</span>
+            </RouterLink>
+          </section>
+        </nav>
+      </div>
     </aside>
 
     <section class="aw-shell__workspace">
