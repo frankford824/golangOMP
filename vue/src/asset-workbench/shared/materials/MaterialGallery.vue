@@ -4,6 +4,10 @@ import { Download, Eye, FileArchive, FileImage, FileText } from 'lucide-vue-next
 
 import type { SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
 import { chipClass, systemPreviewMeta } from '@aw/shared/format/status'
+import {
+  canAttemptSystemAssetPreview,
+  resolvedSystemAssetPreviewUrl,
+} from '@aw/shared/materials/systemAssetPreview'
 
 const props = withDefaults(
   defineProps<{
@@ -93,7 +97,11 @@ function iconFor(asset: SystemAssetRow) {
 }
 
 function previewUrlFor(asset: SystemAssetRow) {
-  return props.previewUrls?.[asset.id] || ''
+  return props.previewUrls?.[asset.id] || resolvedSystemAssetPreviewUrl(asset)
+}
+
+function canPreview(asset: SystemAssetRow) {
+  return canAttemptSystemAssetPreview(asset)
 }
 
 function onScroll(event: Event) {
@@ -182,8 +190,8 @@ watch(
                 decoding="async"
               />
               <component v-else :is="iconFor(asset)" class="aw-material-card__icon" :size="34" aria-hidden="true" />
-              <span :class="chipClass(systemPreviewMeta(asset.preview_available).tone)">
-                {{ systemPreviewMeta(asset.preview_available).label }}
+              <span :class="chipClass(systemPreviewMeta(canPreview(asset)).tone)">
+                {{ systemPreviewMeta(canPreview(asset)).label }}
               </span>
             </div>
             <div class="aw-material-card__body">
@@ -205,7 +213,7 @@ watch(
                 />
                 <span>选择</span>
               </label>
-              <button type="button" :disabled="!asset.preview_available" @click="emit('preview', asset)">
+              <button type="button" :disabled="!canPreview(asset)" @click="emit('preview', asset)">
                 <Eye :size="15" aria-hidden="true" />
                 预览
               </button>

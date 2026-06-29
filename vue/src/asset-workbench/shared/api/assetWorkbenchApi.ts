@@ -497,6 +497,7 @@ export interface SystemAssetRow {
   asset_no?: string
   file_name?: string
   original_filename?: string
+  download_url?: string
   mime_type?: string
   product_name?: string
   task_no?: string

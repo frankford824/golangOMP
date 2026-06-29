@@ -9,6 +9,11 @@ import { formatInt } from '@aw/shared/format/number'
 import { chipClass, systemPreviewMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import MaterialGallery from '@aw/shared/materials/MaterialGallery.vue'
+import {
+  canAttemptSystemAssetPreview,
+  isSystemAssetImagePreviewable,
+  resolvedSystemAssetPreviewUrl,
+} from '@aw/shared/materials/systemAssetPreview'
 
 interface GridColumn {
   key: string
@@ -56,8 +61,9 @@ const fileTypeOptions = computed(() => {
 const filteredRows = computed(() =>
   rows.value.filter((row) => {
     if (typeFilter.value !== 'all' && typeBucket(row) !== typeFilter.value) return false
-    if (previewFilter.value === 'previewable' && !row.preview_available) return false
-    if (previewFilter.value === 'download_only' && row.preview_available) return false
+    const canPreview = canPreviewMaterial(row)
+    if (previewFilter.value === 'previewable' && !canPreview) return false
+    if (previewFilter.value === 'download_only' && canPreview) return false
     return true
   }),
 )
@@ -67,7 +73,7 @@ const materialRowsWithLabels = computed<MaterialGridRow[]>(() =>
     display_no: codeOf(row),
     display_name: titleOf(row),
     display_type: typeLabel(row),
-    preview_label: systemPreviewMeta(row.preview_available).label,
+    preview_label: systemPreviewMeta(canPreviewMaterial(row)).label,
     task_label: row.task_no || '无任务号',
   })),
 )
@@ -186,8 +192,24 @@ function gridRowAsAsset(row: Record<string, unknown>): MaterialGridRow {
   return row as unknown as MaterialGridRow
 }
 
+function canPreviewMaterial(asset: SystemAssetRow) {
+  return canAttemptSystemAssetPreview(asset)
+}
+
 async function ensurePreview(asset: SystemAssetRow, silent = false) {
-  if (!asset.preview_available && !silent) {
+  const directUrl = resolvedSystemAssetPreviewUrl(asset)
+  if (directUrl) {
+    previewUrls.value = { ...previewUrls.value, [asset.id]: directUrl }
+    return {
+      asset_id: asset.id,
+      status: 'ready',
+      preparing: false,
+      preview_url: directUrl,
+      download_url: 'download_url' in asset ? asset.download_url : undefined,
+      preview_available: true,
+    } as SystemAssetPreviewMeta
+  }
+  if (!canPreviewMaterial(asset) && !silent) {
     notice.value = '这个素材当前只能下载，不能在线预览'
     return null
   }
@@ -206,10 +228,15 @@ async function ensurePreview(asset: SystemAssetRow, silent = false) {
   previewLoadingIds.value = next
   try {
     const meta = await assetWorkbenchApi.previewSystemAsset(asset.id)
-    if (meta.preview_url) {
-      previewUrls.value = { ...previewUrls.value, [asset.id]: meta.preview_url }
+    const previewUrl = resolvedSystemAssetPreviewUrl(meta)
+    if (previewUrl && isSystemAssetImagePreviewable(meta)) {
+      previewUrls.value = { ...previewUrls.value, [asset.id]: previewUrl }
     }
-    return meta
+    return {
+      ...meta,
+      preview_url: previewUrl || meta.preview_url,
+      preview_available: meta.preview_available || Boolean(previewUrl),
+    }
   } catch (err) {
     if (!silent) error.value = err instanceof Error ? err.message : '素材预览加载失败'
     return null
@@ -221,7 +248,9 @@ async function ensurePreview(asset: SystemAssetRow, silent = false) {
 }
 
 async function preloadVisiblePreviews(assets: SystemAssetRow[]) {
-  const candidates = assets.filter((asset) => asset.preview_available && !previewUrls.value[asset.id]).slice(0, 8)
+  const candidates = assets
+    .filter((asset) => isSystemAssetImagePreviewable(asset) && canPreviewMaterial(asset) && !previewUrls.value[asset.id])
+    .slice(0, 8)
   await Promise.allSettled(candidates.map((asset) => ensurePreview(asset, true)))
 }
 
@@ -235,9 +264,9 @@ async function openAssetPreview(asset: SystemAssetRow) {
   try {
     const meta = await ensurePreview(asset)
     previewMeta.value = meta
-    if (meta?.preview_url) {
+    if (resolvedSystemAssetPreviewUrl(meta)) {
       previewAsset.value = asset
-    } else if (asset.preview_available) {
+    } else if (canPreviewMaterial(asset)) {
       notice.value = '这个素材暂时没有可展示的预览图'
     }
   } finally {
@@ -401,14 +430,14 @@ onMounted(() => {
                 <span>{{ gridRowAsAsset(row).id }}</span>
               </label>
               <div v-else-if="column.key === 'actions'" class="aw-inline-actions">
-                <button type="button" :disabled="!gridRowAsAsset(row).preview_available" @click="openAssetPreview(gridRowAsAsset(row))">
+                <button type="button" :disabled="!canPreviewMaterial(gridRowAsAsset(row))" @click="openAssetPreview(gridRowAsAsset(row))">
                   预览
                 </button>
                 <button type="button" @click="downloadAsset(gridRowAsAsset(row))">下载</button>
               </div>
               <span
                 v-else-if="column.key === 'preview_label'"
-                :class="chipClass(systemPreviewMeta(gridRowAsAsset(row).preview_available).tone)"
+                :class="chipClass(systemPreviewMeta(canPreviewMaterial(gridRowAsAsset(row))).tone)"
               >
                 {{ value }}
               </span>
@@ -443,7 +472,7 @@ onMounted(() => {
             </div>
           </dl>
           <div class="aw-inline-actions">
-            <button class="aw-primary-button" type="button" :disabled="!activeAsset.preview_available || previewLoading" @click="openAssetPreview(activeAsset)">
+            <button class="aw-primary-button" type="button" :disabled="!canPreviewMaterial(activeAsset) || previewLoading" @click="openAssetPreview(activeAsset)">
               {{ previewLoading ? '加载中' : '预览素材' }}
             </button>
             <button class="aw-secondary-button" type="button" @click="downloadAsset(activeAsset)">下载</button>
@@ -477,7 +506,7 @@ onMounted(() => {
       <div class="aw-material-preview__stage" @click.self="closePreview">
         <AssetPreviewMedia
           class="aw-material-preview__media"
-          :resolved-preview-url="previewMeta?.preview_url"
+          :resolved-preview-url="resolvedSystemAssetPreviewUrl(previewMeta)"
           :fallback-src="previewMeta?.download_url"
           :alt="titleOf(previewAsset)"
         />
