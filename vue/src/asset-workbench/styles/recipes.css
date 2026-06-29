@@ -1042,6 +1042,187 @@
   color: color-mix(in srgb, var(--aw-money-glow) 52%, var(--aw-on-console-muted));
 }
 
+/* --- Expandable ledger cell: a readout you can pull onto the light table --- */
+.aw-ledger__cell--expandable {
+  appearance: none;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-ledger__cell--expandable:hover {
+  background: color-mix(in srgb, var(--aw-on-console) 5%, transparent);
+}
+
+.aw-ledger__cell--money.aw-ledger__cell--expandable:hover {
+  background: color-mix(in srgb, var(--aw-money-glow) 8%, transparent);
+}
+
+.aw-ledger__cell--expandable:focus-visible {
+  outline: 2px solid var(--aw-accent-glow);
+  outline-offset: -2px;
+}
+
+.aw-ledger__expand-hint {
+  color: var(--aw-on-console-muted);
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-ledger__cell--expandable:hover .aw-ledger__expand-hint,
+.aw-ledger__cell--expandable:focus-visible .aw-ledger__expand-hint {
+  opacity: 1;
+}
+
+/* --- FLIP detail sheet: the ledger laid open on the light table --- */
+body.aw-ledger-locked {
+  overflow: hidden;
+}
+
+.aw-ledger-sheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: var(--aw-space-6);
+}
+
+.aw-ledger-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--aw-stage) 64%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.aw-ledger-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  max-height: min(86vh, 720px);
+  overflow: hidden;
+  border: 1px solid var(--aw-hairline-strong);
+  border-radius: var(--aw-radius-lg);
+  background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-popover);
+  will-change: transform;
+}
+
+.aw-ledger-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--aw-space-4);
+  padding: var(--aw-space-5) var(--aw-space-6);
+  background: var(--aw-stage);
+  color: var(--aw-on-console);
+}
+
+.aw-ledger-sheet__head-copy {
+  min-width: 0;
+}
+
+.aw-ledger-sheet__head .aw-eyebrow {
+  color: var(--aw-on-console-muted);
+}
+
+.aw-ledger-sheet__value {
+  margin: var(--aw-space-2) 0 0;
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-h1);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  color: var(--aw-on-console);
+}
+
+.aw-ledger-sheet__value.is-money {
+  color: var(--aw-money-glow);
+}
+
+.aw-ledger-sheet__hint {
+  margin: var(--aw-space-2) 0 0;
+  color: var(--aw-on-console-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-ledger-sheet__close {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--aw-stage-line-strong);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-stage-surface);
+  color: var(--aw-on-console-2);
+  cursor: pointer;
+  transition: border-color var(--aw-motion-fast) var(--aw-ease-standard), color var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-ledger-sheet__close:hover {
+  border-color: var(--aw-accent-glow);
+  color: var(--aw-on-console);
+}
+
+.aw-ledger-sheet__close:focus-visible {
+  outline: 2px solid var(--aw-accent-glow);
+  outline-offset: 2px;
+}
+
+.aw-ledger-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-6);
+  background: var(--aw-surface);
+  animation: aw-sheet-content-in var(--aw-motion-slow) var(--aw-ease-standard) 140ms both;
+}
+
+@keyframes aw-sheet-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-ledger-sheet__body {
+    animation: none;
+  }
+}
+
+.aw-sheet-detail {
+  display: grid;
+  gap: var(--aw-space-3);
+}
+
+@media (max-width: 720px) {
+  .aw-ledger-sheet-layer {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  .aw-ledger-sheet {
+    width: 100%;
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
 /* --- Light worksheet surfaces --- */
 .aw-metric-grid,
 .aw-two-column,

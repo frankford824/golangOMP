@@ -90,17 +90,17 @@ const ledgerSegments = computed(() => {
   const value = totals.value
   if (!value) {
     return [
-      { key: 'gross', label: '正常计件', value: formatMoney(0), hint: '待生成预览' },
-      { key: 'deduction', label: '出错扣减', value: formatMoney(0), hint: '结算时读取出错表' },
-      { key: 'supplement', label: '补录计件', value: formatMoney(0), hint: '工资条第二行' },
-      { key: 'net', label: '应结净额', value: formatMoney(0), hint: '正常 + 补录 - 扣减', money: true },
+      { key: 'gross', label: '正常计件', value: formatMoney(0), hint: '待生成预览', expandable: true },
+      { key: 'deduction', label: '出错扣减', value: formatMoney(0), hint: '结算时读取出错表', expandable: true },
+      { key: 'supplement', label: '补录计件', value: formatMoney(0), hint: '工资条第二行', expandable: true },
+      { key: 'net', label: '应结净额', value: formatMoney(0), hint: '正常 + 补录 - 扣减', money: true, expandable: true },
     ]
   }
   return [
-    { key: 'gross', label: '正常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单 · ${formatInt(value.page_count)} 页` },
-    { key: 'deduction', label: '出错扣减', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错` },
-    { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行' },
-    { key: 'net', label: '应结净额', value: formatMoney(value.net_amount), hint: '正常工资行 + 补录工资行', money: true },
+    { key: 'gross', label: '正常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单 · ${formatInt(value.page_count)} 页`, expandable: true },
+    { key: 'deduction', label: '出错扣减', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错`, expandable: true },
+    { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行', expandable: true },
+    { key: 'net', label: '应结净额', value: formatMoney(value.net_amount), hint: '正常工资行 + 补录工资行', money: true, expandable: true },
   ]
 })
 const payrollGridRows = computed(() => payrollRows.value.map(toPayrollGridRow) as unknown as Record<string, unknown>[])
@@ -453,6 +453,30 @@ onMounted(() => {
       <template #actions>
         <input v-model="month" type="month" />
         <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
+      </template>
+      <template #detail>
+        <div class="aw-sheet-detail">
+          <WorkbenchDataGrid
+            v-if="payrollRows.length"
+            :columns="payrollGridColumns"
+            :rows="payrollGridRows"
+            row-key="grid_id"
+            storage-key="settlement-ledger-payroll"
+            group-by="payee_user_id"
+            :height="440"
+            :row-height="34"
+          >
+            <template #cell="{ column, value }">
+              <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+              <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+              <span v-else>{{ gridValue(column.key, value) }}</span>
+            </template>
+          </WorkbenchDataGrid>
+          <div v-else class="aw-empty-state">
+            <h3>还没有可结算明细</h3>
+            <p>先导入出错表并生成预览，这里会按人员分组显示每条工资行的毛额、扣减与净额。</p>
+          </div>
+        </div>
       </template>
     </LedgerReadout>
 

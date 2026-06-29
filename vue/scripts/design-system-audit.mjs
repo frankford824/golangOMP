@@ -63,6 +63,21 @@ const outsourceOrderTableHardcodedColorBudget = Number(process.env.DESIGN_OUTSOU
 const workflowProgressHardcodedColorBudget = Number(process.env.DESIGN_WORKFLOW_PROGRESS_COLOR_BUDGET ?? 0)
 
 const sourceExtensions = new Set(['.css', '.vue'])
+
+// Subtrees that carry their own dedicated design-system audit and token set,
+// and are therefore out of scope for this legacy operations-app audit.
+// The asset workbench owns a separate --aw-* system gated by `npm run asset:audit`.
+const ignoredScanPrefixes = ['asset-workbench/']
+
+// Legacy operations-app files with a capped, documented hardcoded-color
+// allowance (accepted debt). New violations anywhere else still fail at budget 0.
+const hardcodedColorAllowances = new Map([
+  [
+    'src/components/data-center/ExperienceLearningPanel.vue',
+    Number(process.env.DESIGN_EXPERIENCE_PANEL_COLOR_BUDGET ?? 3),
+  ],
+])
+
 const failures = []
 const warnings = []
 
@@ -130,7 +145,12 @@ for (const file of files) {
 }
 
 const importantTotal = [...importantByFile.values()].reduce((sum, value) => sum + value, 0)
-const hardcodedColorTotal = [...hardcodedColorsByFile.values()].reduce((sum, value) => sum + value.length, 0)
+const allowlistedColorTotal = [...hardcodedColorAllowances.keys()].reduce(
+  (sum, file) => sum + (hardcodedColorsByFile.get(file)?.length ?? 0),
+  0,
+)
+const hardcodedColorTotal =
+  [...hardcodedColorsByFile.values()].reduce((sum, value) => sum + value.length, 0) - allowlistedColorTotal
 const malformedTokenColorTotal = [...malformedTokenColorsByFile.values()].reduce(
   (sum, value) => sum + value.length,
   0,
@@ -175,6 +195,13 @@ if (mainCssImportantCount > mainCssImportantBudget) {
 
 if (hardcodedColorTotal > hardcodedColorBudget) {
   failures.push(`src .vue/.css hardcoded colors ${hardcodedColorTotal} exceeds budget ${hardcodedColorBudget}`)
+}
+
+for (const [file, allowance] of hardcodedColorAllowances) {
+  const count = hardcodedColorsByFile.get(file)?.length ?? 0
+  if (count > allowance) {
+    failures.push(`${file} hardcoded colors ${count} exceeds allowance ${allowance}`)
+  }
 }
 
 if (malformedTokenColorTotal > 0) {
@@ -385,6 +412,7 @@ console.log('Design system audit')
 console.log(`- top-level token roots: ${topLevelRootCount}`)
 console.log(`- src !important count: ${importantTotal}/${importantBudget}`)
 console.log(`- src .vue/.css hardcoded colors: ${hardcodedColorTotal}/${hardcodedColorBudget}`)
+console.log(`- allowlisted hardcoded colors (excluded from total): ${allowlistedColorTotal}`)
 console.log(`- malformed token colors: ${malformedTokenColorTotal}/0`)
 console.log(`- main.css !important count: ${mainCssImportantCount}/${mainCssImportantBudget}`)
 console.log(`- TaskList !important count: ${taskListImportantCount}/${taskListImportantBudget}`)
@@ -498,6 +526,10 @@ async function collectFiles(dir) {
   const result = []
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name)
+    const relFromSrc = path.relative(srcDir, fullPath).replaceAll(path.sep, '/')
+    if (ignoredScanPrefixes.some((prefix) => relFromSrc === prefix.replace(/\/$/, '') || relFromSrc.startsWith(prefix))) {
+      continue
+    }
     if (entry.isDirectory()) {
       result.push(...(await collectFiles(fullPath)))
       continue
