@@ -124,19 +124,27 @@ const simpleSubmitHint = computed(() => {
 })
 const adminUploadLabel = computed(() => {
   if (uploading.value) return '正在上传'
+  if (submitting.value) return '正在生成记录'
+  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `生成提交记录 ${uploadedItems.value.length} 个`
   return '上传文件'
 })
 const adminUploadHint = computed(() => {
   if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
   if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
   if (queue.value.some((item) => item.status === 'failed')) return '会重试失败文件'
+  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return '文件已上传，生成提交记录后才会进入上传记录'
   return `将上传 ${formatInt(queue.value.length)} 个文件`
 })
 const submitButtonLabel = computed(() => {
   if (submitting.value) return isSimpleUser.value ? '正在交作品' : '正在创建提交'
-  if (uploadedItems.value.length === 0) return '先上传队列'
+  if (uploadedItems.value.length === 0) return '先上传文件'
   if (isSimpleUser.value && uploadedItems.value.some((item) => item.templateId <= 0)) return '先选择作品类型'
-  return isSimpleUser.value ? `交作品 ${uploadedItems.value.length} 个` : `创建提交 ${uploadedItems.value.length} 单`
+  return isSimpleUser.value ? `交作品 ${uploadedItems.value.length} 个` : `生成提交记录 ${uploadedItems.value.length} 个`
+})
+const canUseAdminPrimaryAction = computed(() => {
+  if (uploading.value || submitting.value || queue.value.length === 0) return false
+  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return canSubmit.value
+  return canUseUploadDirectory.value
 })
 
 function openFilePicker() {
@@ -236,7 +244,9 @@ async function uploadQueuedItems() {
   const success = queue.value.filter((item) => item.status === 'uploaded').length
   lastUploadResult.value = { total: queue.value.length, success, failed }
   if (failed === 0 && queue.value.length > 0) {
-    notice.value = `上传完成：成功 ${formatInt(success)} 个，失败 0 个`
+    notice.value = isSimpleUser.value
+      ? `上传完成：成功 ${formatInt(success)} 个，失败 0 个`
+      : `文件已上传：成功 ${formatInt(success)} 个。请继续生成提交记录，生成后才会进入上传记录。`
   }
   return failed === 0
 }
@@ -246,6 +256,14 @@ async function uploadAll() {
   if (!ok) {
     error.value = isSimpleUser.value ? '有文件没传成功，请点重试后再交。' : '部分文件上传失败'
   }
+}
+
+async function runAdminPrimaryAction() {
+  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) {
+    await createSubmission()
+    return
+  }
+  await uploadAll()
 }
 
 async function createSubmission() {
@@ -269,8 +287,8 @@ async function createSubmission() {
     submittedFiles.value = detail.items.flatMap((item) => item.files)
     lastSubmissionResult.value = { total: uploadedItems.value.length, success: submittedFiles.value.length, failed: 0 }
     notice.value = isSimpleUser.value
-      ? `作品已交上去：${formatInt(submittedFiles.value.length)} 个文件`
-      : `提交已创建：${formatInt(submittedFiles.value.length)} 个文件`
+      ? `作品已交上去：${formatInt(submittedFiles.value.length)} 个文件，可在上传记录里查看。`
+      : `提交记录已生成：${formatInt(submittedFiles.value.length)} 个文件，可在查改作品里查看。`
     queue.value = queue.value.filter((item) => item.status !== 'uploaded')
   } catch (err) {
     error.value = err instanceof Error ? `上传已完成，但提交失败：${err.message}` : '上传已完成，但提交失败'
@@ -405,7 +423,7 @@ onMounted(() => {
             <FileUp :size="16" aria-hidden="true" />
             {{ simpleSubmitLabel }}
           </button>
-          <button v-else class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0 || !canUseUploadDirectory" @click="uploadAll">
+          <button v-else class="aw-primary-button" type="button" :disabled="!canUseAdminPrimaryAction" @click="runAdminPrimaryAction">
             <FileUp :size="16" aria-hidden="true" />
             {{ adminUploadLabel }}
           </button>
@@ -502,7 +520,7 @@ onMounted(() => {
         <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
           {{ simpleSubmitLabel }}
         </button>
-        <button v-else class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0 || !canUseUploadDirectory" @click="uploadAll">
+        <button v-else class="aw-primary-button" type="button" :disabled="!canUseAdminPrimaryAction" @click="runAdminPrimaryAction">
           {{ adminUploadLabel }}
         </button>
       </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import { HandCoins, ImagePlus } from 'lucide-vue-next'
+import { Boxes, HandCoins, ImagePlus } from 'lucide-vue-next'
 </script>
 
 <template>
@@ -28,6 +28,15 @@ import { HandCoins, ImagePlus } from 'lucide-vue-next'
         <span>
           <strong>看收入</strong>
           <small>查看这个月能拿多少</small>
+        </span>
+      </RouterLink>
+      <RouterLink class="aw-simple-card" to="/submissions">
+        <span class="aw-simple-card__icon">
+          <Boxes :size="32" aria-hidden="true" />
+        </span>
+        <span>
+          <strong>上传记录</strong>
+          <small>查看已提交的文件</small>
         </span>
       </RouterLink>
     </div>

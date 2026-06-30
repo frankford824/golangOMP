@@ -71,7 +71,8 @@ export const assetWorkbenchRouteAccess = {
   '/submissions': {
     label: '查改作品',
     subtitle: '质检、改量、作废',
-    aliases: ['维护区', '维护专区'],
+    aliases: ['维护区', '维护专区', '上传记录', '我的上传记录'],
+    simple: true,
     requiresAnyCapability: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'],
   },
   '/materials': {

@@ -79,6 +79,7 @@ const editForm = ref({
   reason: '',
 })
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
+const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
 const submissionsRequest = usePageRequest(
   () => assetWorkbenchApi.listSubmissions({ page: 1, page_size: 50, order_by: orderBy.value, order_dir: orderDir.value }),
   { items: [], total: 0 },
@@ -120,17 +121,20 @@ const detailFileRows = computed<DetailFileGridRow[]>(() =>
   })),
 )
 const detailFileGridRows = computed(() => detailFileRows.value as unknown as Record<string, unknown>[])
-const submissionGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
-  { key: 'submission_no', label: '提交批次', width: 180 },
-  { key: 'submitter_label', label: '创建人', width: 132 },
-  { key: 'business_month', label: '结算月', width: 108 },
-  { key: 'submitted_label', label: '创建时间', width: 168 },
-  { key: 'status_label', label: '状态', width: 96 },
-  { key: 'item_count', label: '单数', width: 88, align: 'right' },
-  { key: 'page_count', label: '页数', width: 88, align: 'right' },
-  { key: 'gross_total', label: '毛额', width: 108, align: 'right' },
-  { key: 'action', label: '动作', width: 96, align: 'center' },
-])
+const submissionGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => {
+  const columns: Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }> = [
+    { key: 'submission_no', label: '提交批次', width: 180 },
+    { key: 'submitter_label', label: '创建人', width: 132 },
+    { key: 'business_month', label: '结算月', width: 108 },
+    { key: 'submitted_label', label: '创建时间', width: 168 },
+    { key: 'status_label', label: '状态', width: 96 },
+    { key: 'item_count', label: '单数', width: 88, align: 'right' },
+    { key: 'page_count', label: '页数', width: 88, align: 'right' },
+    { key: 'gross_total', label: '毛额', width: 108, align: 'right' },
+    { key: 'action', label: '动作', width: 96, align: 'center' },
+  ]
+  return isSimpleUser.value ? columns.filter((column) => column.key !== 'submitter_label') : columns
+})
 const detailItemGridColumns = computed<GridColumn[]>(() => [
   { key: 'order_no', label: '订单号', width: 150 },
   { key: 'difficulty_class', label: '难度', width: 108 },
@@ -190,6 +194,24 @@ const canManageItems = computed(() => {
   return capabilities.includes('asset.workbench.manage') || capabilities.includes('asset.workbench.settlement')
 })
 const canManageFiles = computed(() => bootstrap.value?.capabilities.includes('asset.workbench.manage') === true)
+const pageEyebrow = computed(() => (isSimpleUser.value ? '我的记录' : '交付维护'))
+const pageTitle = computed(() => (isSimpleUser.value ? '我的上传记录' : '资产维护专区'))
+const pageDescription = computed(() =>
+  isSimpleUser.value
+    ? '这里显示已经生成提交记录的文件。只上传文件但没有提交时，不会进入记录。'
+    : '批量检查提交、文件预览、质检状态和结算前重计价。视图会记住分组、密度和列设置。',
+)
+const emptyTitle = computed(() => (isSimpleUser.value ? '还没有上传记录' : '还没有提交明细'))
+const emptyDescription = computed(() =>
+  isSimpleUser.value
+    ? '点“交作品”并完成提交后，这里会显示你的文件、处理状态和下载入口。'
+    : '当前没有可维护的提交。上传成品并生成提交记录后，可以在这里质检、修正、下载和保存常用视图。',
+)
+const detailDescription = computed(() =>
+  isSimpleUser.value
+    ? '查看本次提交的明细、处理状态、文件预览和下载入口。'
+    : '按明细处理质检、重计价、作废和文件批量下载。',
+)
 
 async function loadSubmissions() {
   const result = await submissionsRequest.run()
@@ -218,6 +240,10 @@ function pageCountForFile(file: SubmissionFileRow) {
 }
 
 async function loadSavedViews() {
+  if (isSimpleUser.value) {
+    savedViews.value = []
+    return
+  }
   try {
     savedViews.value = await assetWorkbenchApi.listSavedViews('submissions')
   } catch {
@@ -226,6 +252,10 @@ async function loadSavedViews() {
 }
 
 async function loadUploadDirectories() {
+  if (isSimpleUser.value) {
+    uploadDirectories.value = []
+    return
+  }
   try {
     uploadDirectories.value = await assetWorkbenchApi.listUploadDirectoriesAdmin()
     if (!moveDirectoryId.value && uploadDirectories.value[0]) moveDirectoryId.value = uploadDirectories.value[0].id
@@ -588,7 +618,8 @@ async function deleteSelectedFiles() {
 }
 
 onMounted(async () => {
-  await Promise.all([refreshBootstrap(), loadSubmissions(), loadSavedViews(), loadUploadDirectories()])
+  await refreshBootstrap()
+  await Promise.all([loadSubmissions(), loadSavedViews(), loadUploadDirectories()])
 })
 </script>
 
@@ -596,11 +627,11 @@ onMounted(async () => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">交付维护</p>
-        <h2>资产维护专区</h2>
-        <p>批量检查提交、文件预览、质检状态和结算前重计价。视图会记住分组、密度和列设置。</p>
+        <p class="aw-eyebrow">{{ pageEyebrow }}</p>
+        <h2>{{ pageTitle }}</h2>
+        <p>{{ pageDescription }}</p>
       </div>
-      <div class="aw-page-bar__actions">
+      <div v-if="!isSimpleUser" class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="downloadQCTemplate">质检模板</button>
         <button class="aw-secondary-button" type="button" @click="openQCImport">导入质检</button>
         <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">批量下载</button>
@@ -617,16 +648,18 @@ onMounted(async () => {
     />
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
-        <input v-model="viewName" aria-label="视图名称" />
-        <select v-model="groupBy" aria-label="分组字段">
-          <option value="business_month">按月份</option>
-          <option value="status">按状态</option>
-          <option value="submitter_user_id">按提交人</option>
-        </select>
-        <select v-model="density" aria-label="表格密度">
-          <option value="compact">紧凑</option>
-          <option value="comfortable">舒展</option>
-        </select>
+        <template v-if="!isSimpleUser">
+          <input v-model="viewName" aria-label="视图名称" />
+          <select v-model="groupBy" aria-label="分组字段">
+            <option value="business_month">按月份</option>
+            <option value="status">按状态</option>
+            <option value="submitter_user_id">按提交人</option>
+          </select>
+          <select v-model="density" aria-label="表格密度">
+            <option value="compact">紧凑</option>
+            <option value="comfortable">舒展</option>
+          </select>
+        </template>
         <select v-model="orderBy" aria-label="排序字段" @change="loadSubmissions()">
           <option value="submitted_at">按创建时间</option>
           <option value="file_type">按文件类型</option>
@@ -639,7 +672,7 @@ onMounted(async () => {
         <span>{{ formatInt(total) }} 个批次</span>
       </div>
       <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-      <div v-if="savedViews.length" class="aw-button-row">
+      <div v-if="!isSimpleUser && savedViews.length" class="aw-button-row">
         <button
           v-for="view in savedViews"
           :key="view.id"
@@ -668,7 +701,7 @@ onMounted(async () => {
         >
           <template #cell="{ row, column, value }">
             <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="openSubmission(gridRowAsSubmission(row))">文件</button>
+              <button type="button" @click="openSubmission(gridRowAsSubmission(row))">{{ isSimpleUser ? '查看' : '文件' }}</button>
               <button
                 v-if="canManageItems && gridRowAsSubmission(row).status !== 'voided'"
                 type="button"
@@ -690,8 +723,8 @@ onMounted(async () => {
           </template>
         </WorkbenchDataGrid>
         <div v-else class="aw-empty-state">
-          <h3>还没有提交明细</h3>
-          <p>当前没有可维护的提交。上传成品后，可以在这里质检、修正、下载和保存常用视图。</p>
+          <h3>{{ emptyTitle }}</h3>
+          <p>{{ emptyDescription }}</p>
         </div>
       </AsyncBoundary>
       <div v-if="pendingSubmissionVoid" class="aw-panel">
@@ -720,7 +753,7 @@ onMounted(async () => {
         <div class="aw-page-bar__copy">
           <p class="aw-eyebrow">提交文件</p>
           <h2>{{ selectedDetail?.submission.submission_no || '提交文件' }}</h2>
-          <p>按明细处理质检、重计价、作废和文件批量下载。</p>
+          <p>{{ detailDescription }}</p>
         </div>
         <div class="aw-page-bar__actions">
           <span class="aw-chip aw-chip--neutral">已选页数 {{ formatInt(selectedPageCount) }}</span>

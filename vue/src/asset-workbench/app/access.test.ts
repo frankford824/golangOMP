@@ -34,6 +34,7 @@ describe('asset workbench access rules', () => {
 
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload'))).toBe(true)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/submissions'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/materials'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/my-settlement'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/account'))).toBe(true)
@@ -51,7 +52,6 @@ describe('asset workbench access rules', () => {
   it('blocks non-admin accounts from maintenance-only routes', () => {
     const user = bootstrap({ is_admin: false, capabilities: ['asset.workbench.manage'] })
 
-    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/submissions'))).toBe(false)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/settlement'))).toBe(false)
   })
 

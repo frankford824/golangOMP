@@ -497,7 +497,7 @@
 
 .aw-simple-card-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--aw-space-5);
 }
 
@@ -1710,6 +1710,7 @@ body.aw-ledger-locked {
   grid-template-columns: minmax(180px, 0.22fr) auto minmax(260px, 1fr);
   gap: var(--aw-space-3);
   align-items: end;
+  margin-bottom: var(--aw-space-4);
 }
 
 .aw-report-toolbar__month {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { HandCoins, ImagePlus, Library, UserRound } from 'lucide-vue-next'
+import { Boxes, HandCoins, ImagePlus, Library, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
@@ -21,6 +21,7 @@ const profileHint = computed(() => {
 
 const navItems = [
   { to: '/upload', label: '交作品', icon: ImagePlus, capability: 'asset.workbench.submit' },
+  { to: '/submissions', label: '上传记录', icon: Boxes, capability: 'asset.workbench.submit' },
   { to: '/materials', label: '素材下载', icon: Library, capability: 'asset.workbench.material.download' },
   { to: '/my-settlement', label: '看收入', icon: HandCoins },
 ]

@@ -2006,7 +2006,7 @@ func buildAssetWorkbenchOverviewSubmissionWhere(filter repo.AssetWorkbenchOvervi
 	args := []interface{}{}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		where = append(where, `(s.submission_no LIKE ? OR s.notes LIKE ? OR COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ? OR EXISTS (
+		where = append(where, `(s.submission_no LIKE ? OR s.notes LIKE ? OR `+assetWorkbenchOverviewCreatorName("s.submitter_user_id")+` LIKE ? OR EXISTS (
 			SELECT 1 FROM asset_workbench_submission_items i WHERE i.submission_id = s.id AND i.order_no LIKE ?
 		) OR EXISTS (
 			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_id = s.id AND (f.original_filename LIKE ? OR f.file_type LIKE ?)
@@ -2015,7 +2015,7 @@ func buildAssetWorkbenchOverviewSubmissionWhere(filter repo.AssetWorkbenchOvervi
 	}
 	if creator := strings.TrimSpace(filter.Creator); creator != "" {
 		like := "%" + creator + "%"
-		where = append(where, `COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ?`)
+		where = append(where, assetWorkbenchOverviewCreatorName("s.submitter_user_id")+` LIKE ?`)
 		args = append(args, like)
 	}
 	if filter.CreatedFrom != nil {
@@ -2034,14 +2034,14 @@ func buildAssetWorkbenchOverviewItemWhere(filter repo.AssetWorkbenchOverviewSear
 	args := []interface{}{}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		where = append(where, `(i.order_no LIKE ? OR i.template_name_snapshot LIKE ? OR i.category_snapshot LIKE ? OR i.difficulty_class LIKE ? OR s.submission_no LIKE ? OR COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ? OR EXISTS (
+		where = append(where, `(i.order_no LIKE ? OR i.template_name_snapshot LIKE ? OR i.category_snapshot LIKE ? OR i.difficulty_class LIKE ? OR s.submission_no LIKE ? OR `+assetWorkbenchOverviewCreatorName("i.payee_user_id")+` LIKE ? OR EXISTS (
 			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_item_id = i.id AND (f.original_filename LIKE ? OR f.file_type LIKE ?)
 		))`)
 		args = append(args, like, like, like, like, like, like, like, like)
 	}
 	if creator := strings.TrimSpace(filter.Creator); creator != "" {
 		like := "%" + creator + "%"
-		where = append(where, `COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ?`)
+		where = append(where, assetWorkbenchOverviewCreatorName("i.payee_user_id")+` LIKE ?`)
 		args = append(args, like)
 	}
 	if filter.CreatedFrom != nil {
@@ -2053,6 +2053,23 @@ func buildAssetWorkbenchOverviewItemWhere(filter repo.AssetWorkbenchOverviewSear
 		args = append(args, *filter.CreatedTo)
 	}
 	return where, args
+}
+
+func assetWorkbenchOverviewText(expr string) string {
+	return "CAST((" + expr + ") AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_0900_ai_ci"
+}
+
+func assetWorkbenchOverviewNullIfBlank(expr string) string {
+	return "NULLIF(" + assetWorkbenchOverviewText(expr) + ", " + assetWorkbenchOverviewText("''") + ")"
+}
+
+func assetWorkbenchOverviewCreatorName(userIDExpr string) string {
+	return "COALESCE(" +
+		assetWorkbenchOverviewNullIfBlank("p.real_name") + ", " +
+		assetWorkbenchOverviewNullIfBlank("u.display_name") + ", " +
+		assetWorkbenchOverviewNullIfBlank("u.username") + ", " +
+		assetWorkbenchOverviewText("CONCAT('用户 ', "+userIDExpr+")") +
+		")"
 }
 
 func assetWorkbenchSubmissionOrderBy(orderBy, orderDir string) string {
@@ -3674,44 +3691,44 @@ func assetWorkbenchSubmissionListSelect() string {
 }
 
 func assetWorkbenchOverviewSubmissionSelect() string {
-	return `SELECT 'submission' AS source,
+	return `SELECT ` + assetWorkbenchOverviewText("'submission'") + ` AS source,
 		s.id AS id,
-		s.submission_no AS title,
-		s.submission_no AS primary_code,
-		'' AS secondary_code,
-		'' AS order_no,
+		` + assetWorkbenchOverviewText("s.submission_no") + ` AS title,
+		` + assetWorkbenchOverviewText("s.submission_no") + ` AS primary_code,
+		` + assetWorkbenchOverviewText("''") + ` AS secondary_code,
+		` + assetWorkbenchOverviewText("''") + ` AS order_no,
 		s.submitter_user_id AS creator_user_id,
-		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', s.submitter_user_id)) AS creator_name,
-		s.business_month AS business_month,
-		s.status AS status,
+		` + assetWorkbenchOverviewCreatorName("s.submitter_user_id") + ` AS creator_name,
+		` + assetWorkbenchOverviewText("s.business_month") + ` AS business_month,
+		` + assetWorkbenchOverviewText("s.status") + ` AS status,
 		s.page_count AS page_count,
 		s.gross_total AS amount,
 		s.submitted_at AS created_at,
 		s.updated_at AS updated_at,
-		CONCAT('/submissions?submission_id=', s.id) AS route_path,
-		JSON_OBJECT('item_count', s.item_count, 'file_count', s.file_count, 'notes', s.notes) AS meta_json
+		` + assetWorkbenchOverviewText("CONCAT('/submissions?submission_id=', s.id)") + ` AS route_path,
+		` + assetWorkbenchOverviewText("JSON_OBJECT('item_count', s.item_count, 'file_count', s.file_count, 'notes', s.notes)") + ` AS meta_json
 		FROM asset_workbench_submissions s
 		LEFT JOIN users u ON u.id = s.submitter_user_id
 		LEFT JOIN asset_workbench_profiles p ON p.user_id = s.submitter_user_id`
 }
 
 func assetWorkbenchOverviewItemSelect() string {
-	return `SELECT 'piecework_item' AS source,
+	return `SELECT ` + assetWorkbenchOverviewText("'piecework_item'") + ` AS source,
 		i.id AS id,
-		COALESCE(NULLIF(i.order_no, ''), CONCAT('计件明细 ', i.id)) AS title,
-		i.order_no AS primary_code,
-		COALESCE(NULLIF(i.template_name_snapshot, ''), NULLIF(i.category_snapshot, ''), i.difficulty_class) AS secondary_code,
-		i.order_no AS order_no,
+		COALESCE(` + assetWorkbenchOverviewNullIfBlank("i.order_no") + `, ` + assetWorkbenchOverviewText("CONCAT('计件明细 ', i.id)") + `) AS title,
+		` + assetWorkbenchOverviewText("i.order_no") + ` AS primary_code,
+		COALESCE(` + assetWorkbenchOverviewNullIfBlank("i.template_name_snapshot") + `, ` + assetWorkbenchOverviewNullIfBlank("i.category_snapshot") + `, ` + assetWorkbenchOverviewText("i.difficulty_class") + `) AS secondary_code,
+		` + assetWorkbenchOverviewText("i.order_no") + ` AS order_no,
 		i.payee_user_id AS creator_user_id,
-		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', i.payee_user_id)) AS creator_name,
-		i.business_month AS business_month,
-		CONCAT(i.qc_status, '/', i.settlement_status) AS status,
+		` + assetWorkbenchOverviewCreatorName("i.payee_user_id") + ` AS creator_name,
+		` + assetWorkbenchOverviewText("i.business_month") + ` AS business_month,
+		` + assetWorkbenchOverviewText("CONCAT(i.qc_status, '/', i.settlement_status)") + ` AS status,
 		i.page_count AS page_count,
 		i.gross_amount AS amount,
 		i.submitted_at AS created_at,
 		i.updated_at AS updated_at,
-		CONCAT('/submissions?submission_id=', i.submission_id, '&item_id=', i.id) AS route_path,
-		JSON_OBJECT('submission_id', i.submission_id, 'difficulty_class', i.difficulty_class, 'finalized', i.finalized, 'pricing_status', i.pricing_status, 'template_id', i.template_id) AS meta_json
+		` + assetWorkbenchOverviewText("CONCAT('/submissions?submission_id=', i.submission_id, '&item_id=', i.id)") + ` AS route_path,
+		` + assetWorkbenchOverviewText("JSON_OBJECT('submission_id', i.submission_id, 'difficulty_class', i.difficulty_class, 'finalized', i.finalized, 'pricing_status', i.pricing_status, 'template_id', i.template_id)") + ` AS meta_json
 		FROM asset_workbench_submission_items i
 		JOIN asset_workbench_submissions s ON s.id = i.submission_id
 		LEFT JOIN users u ON u.id = i.payee_user_id
