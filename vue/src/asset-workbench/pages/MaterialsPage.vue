@@ -464,11 +464,13 @@ async function loadClientMaterials(admin = false) {
   error.value = ''
   try {
     const rows = await assetWorkbenchApi.listClientMaterials(admin)
-    if (admin) adminClientMaterials.value = rows
-    else {
+    if (admin) {
+      adminClientMaterials.value = rows
+    } else {
       clientMaterials.value = rows
-      clientPreviewUrls.value = {}
     }
+    clientPreviewUrls.value = {}
+    void preloadClientMaterialPreviews(rows)
     selectedClientMaterialIds.value = new Set()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '客户端素材加载失败'
@@ -797,13 +799,20 @@ watch(
         <button class="aw-secondary-button" type="button" @click="publishClientMaterial()">按 ID 发布</button>
       </div>
       <div v-if="adminClientMaterials.length" class="aw-material-admin-list">
-        <article v-for="material in adminClientMaterials" :key="material.id" class="aw-material-admin-item">
+        <article v-for="material in adminClientMaterials" :key="material.id" class="aw-material-admin-item aw-material-admin-item--client">
+          <div class="aw-material-client-thumb aw-material-admin-thumb" :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }">
+            <img v-if="clientMaterialPreviewUrl(material)" :src="clientMaterialPreviewUrl(material)" :alt="clientMaterialTitleOf(material)" loading="lazy" decoding="async" />
+            <FileImage v-else :size="28" aria-hidden="true" />
+          </div>
           <div class="aw-material-admin-copy">
             <strong>{{ clientMaterialTitleOf(material) }}</strong>
             <small>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</small>
             <small v-if="material.description">{{ material.description }}</small>
           </div>
-          <span>{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
+          <span class="aw-material-admin-file">{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
+          <span :class="chipClass(systemPreviewMeta(canPreviewClientMaterial(material)).tone)">
+            {{ systemPreviewMeta(canPreviewClientMaterial(material)).label }}
+          </span>
           <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ material.enabled ? '已发布' : '已停用' }}</span>
           <button type="button" @click="toggleClientMaterialEnabled(material)">{{ material.enabled ? '停用' : '启用' }}</button>
           <button type="button" @click="removeClientMaterial(material)">下架</button>

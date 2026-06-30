@@ -68,7 +68,7 @@ function normalizeWorkbenchUploadPlan(plan: UploadPlan): OssDirectPlan {
   return {
     mode: plan.mode,
     upload_strategy: plan.mode,
-    upload_url: undefined,
+    upload_url: plan.upload_url,
     part_urls: parts.map((part) => part.upload_url).filter(Boolean),
     parts_total: parts.length,
     part_size_hint: plan.part_size,

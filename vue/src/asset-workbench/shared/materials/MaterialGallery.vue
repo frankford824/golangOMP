@@ -183,6 +183,7 @@ watch(
           :class="{
             'aw-material-card--selected': selectedIds.has(asset.id),
             'aw-material-card--active': activeId === asset.id,
+            'aw-material-card--download-only': !canPreview(asset),
           }"
           tabindex="0"
           @click="emit('select', asset)"
@@ -203,7 +204,10 @@ watch(
               loading="lazy"
               decoding="async"
             />
-            <component v-else :is="iconFor(asset)" class="aw-material-card__icon" :size="36" aria-hidden="true" />
+            <span v-else class="aw-material-card__file">
+              <component :is="iconFor(asset)" class="aw-material-card__icon" :size="30" aria-hidden="true" />
+              <span>{{ typeLabel(asset) }}</span>
+            </span>
           </button>
           <div class="aw-material-card__body">
             <strong>{{ titleOf(asset) }}</strong>

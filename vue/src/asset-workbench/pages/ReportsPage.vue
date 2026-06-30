@@ -182,21 +182,25 @@ onMounted(loadReport)
     </div>
 
     <section class="aw-panel">
-      <div class="aw-grid-toolbar">
-        <label class="aw-field">
+      <div class="aw-report-toolbar">
+        <label class="aw-field aw-report-toolbar__month">
           业务月
           <input v-model="month" type="month" />
         </label>
-        <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadReport">
-          <RefreshCw :size="16" aria-hidden="true" />
-          刷新
-        </button>
-        <button class="aw-primary-button" type="button" :disabled="exporting || !report" @click="exportReport">
-          <Download :size="16" aria-hidden="true" />
-          导出报表
-        </button>
-        <span class="aw-chip aw-chip--neutral">订单数=非空订单号去重</span>
-        <span class="aw-chip aw-chip--info">数据=待结算成品+已批准补录</span>
+        <div class="aw-report-toolbar__actions">
+          <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadReport">
+            <RefreshCw :size="16" aria-hidden="true" />
+            刷新
+          </button>
+          <button class="aw-primary-button" type="button" :disabled="exporting || !report" @click="exportReport">
+            <Download :size="16" aria-hidden="true" />
+            导出报表
+          </button>
+        </div>
+        <div class="aw-report-toolbar__notes">
+          <span class="aw-chip aw-chip--neutral">订单数=非空订单号去重</span>
+          <span class="aw-chip aw-chip--info">数据=待结算成品+已批准补录</span>
+        </div>
       </div>
       <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载计件报表" empty-label="暂无报表数据" @retry="loadReport">
         <div class="aw-metric-grid">
@@ -303,4 +307,5 @@ onMounted(loadReport)
 .aw-reports-page .aw-page-bar__copy h2 {
   white-space: nowrap;
 }
+
 </style>

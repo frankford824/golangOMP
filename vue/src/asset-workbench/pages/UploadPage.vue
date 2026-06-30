@@ -53,6 +53,7 @@ const selectedUploadDirectoryId = ref(0)
 const lastUploadResult = ref<UploadBatchResult | null>(null)
 const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
+const draggingFiles = ref(false)
 const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
 const { bootstrap, refresh } = useAssetWorkbenchBootstrap()
 const contextRequest = usePageRequest<UploadContext>(
@@ -107,13 +108,29 @@ const uploadStats = computed(() => {
   }
 })
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === selectedTemplateId.value))
-const simplePrimaryLabel = computed(() => {
+const simpleSubmitLabel = computed(() => {
   if (uploading.value) return '正在上传'
-  if (submitting.value) return '正在交上去'
-  if (!queue.value.length) return '先选择文件'
-  if (!selectedTemplateId.value) return '先选作品类型'
-  if (!canUseUploadDirectory.value) return '先选上传目录'
-  return `交上去 ${formatInt(queue.value.length)} 个文件`
+  if (submitting.value) return '正在提交'
+  return '提交上传'
+})
+const simpleSubmitHint = computed(() => {
+  if (contextLoading.value) return '正在加载作品类型和上传目录'
+  if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
+  if (!selectedTemplateId.value) return '先选择这批文件的作品类型'
+  if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
+  if (queue.value.some((item) => item.status === 'failed')) return '会先重试失败文件，再提交作品'
+  if (queue.value.some((item) => item.status === 'uploaded')) return `将提交 ${formatInt(uploadedItems.value.length)} 个已上传文件`
+  return `将上传并提交 ${formatInt(queue.value.length)} 个文件`
+})
+const adminUploadLabel = computed(() => {
+  if (uploading.value) return '正在上传'
+  return '上传文件'
+})
+const adminUploadHint = computed(() => {
+  if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
+  if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
+  if (queue.value.some((item) => item.status === 'failed')) return '会重试失败文件'
+  return `将上传 ${formatInt(queue.value.length)} 个文件`
 })
 const submitButtonLabel = computed(() => {
   if (submitting.value) return isSimpleUser.value ? '正在交作品' : '正在创建提交'
@@ -133,7 +150,30 @@ function handleInput(event: Event) {
 }
 
 function handleDrop(event: DragEvent) {
+  draggingFiles.value = false
   enqueueFiles(event.dataTransfer?.files)
+}
+
+function handleDragEnter(event: DragEvent) {
+  if (!isFileDrag(event)) return
+  draggingFiles.value = true
+}
+
+function handleDragLeave(event: DragEvent) {
+  if (!event.currentTarget || !(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) {
+    draggingFiles.value = false
+  }
+}
+
+function handleDropzoneKeydown(event: KeyboardEvent) {
+  if (event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  openFilePicker()
+}
+
+function isFileDrag(event: DragEvent) {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files')
 }
 
 function enqueueFiles(files: FileList | null | undefined) {
@@ -360,12 +400,17 @@ onMounted(() => {
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
-        <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
-          {{ simplePrimaryLabel }}
-        </button>
-        <button v-else class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0 || !canUseUploadDirectory" @click="uploadAll">
-          上传队列
-        </button>
+        <span class="aw-action-stack">
+          <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
+            <FileUp :size="16" aria-hidden="true" />
+            {{ simpleSubmitLabel }}
+          </button>
+          <button v-else class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0 || !canUseUploadDirectory" @click="uploadAll">
+            <FileUp :size="16" aria-hidden="true" />
+            {{ adminUploadLabel }}
+          </button>
+          <small>{{ isSimpleUser ? simpleSubmitHint : adminUploadHint }}</small>
+        </span>
       </div>
     </div>
 
@@ -439,9 +484,29 @@ onMounted(() => {
       </AsyncBoundary>
     </div>
 
-    <div class="aw-dropzone" tabindex="0" @dragover.prevent @drop.prevent="handleDrop">
-      <strong>拖拽文件到这里</strong>
-      <span>{{ isSimpleUser ? '文件名会自动识别；选好类型后点交上去。' : '系统会默认把文件名识别为订单号；提交前可以逐条修改难度、页数和定稿状态。' }}</span>
+    <div
+      class="aw-dropzone"
+      :class="{ 'aw-dropzone--active': draggingFiles }"
+      tabindex="0"
+      @dragenter.prevent="handleDragEnter"
+      @dragover.prevent="handleDragEnter"
+      @dragleave="handleDragLeave"
+      @drop.prevent="handleDrop"
+      @keydown="handleDropzoneKeydown"
+    >
+      <FileUp :size="30" aria-hidden="true" />
+      <strong>{{ queue.length ? '继续拖拽文件到这里' : '拖拽文件到这里' }}</strong>
+      <span>{{ isSimpleUser ? '拖入或选择文件后，点击提交上传会自动完成上传和提交。' : '拖入或选择文件后，先上传文件，再创建提交。' }}</span>
+      <div class="aw-dropzone__actions">
+        <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
+        <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
+          {{ simpleSubmitLabel }}
+        </button>
+        <button v-else class="aw-primary-button" type="button" :disabled="uploading || queue.length === 0 || !canUseUploadDirectory" @click="uploadAll">
+          {{ adminUploadLabel }}
+        </button>
+      </div>
+      <small class="aw-dropzone__hint">{{ isSimpleUser ? simpleSubmitHint : adminUploadHint }}</small>
     </div>
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
@@ -453,7 +518,7 @@ onMounted(() => {
         <span v-if="queue.length">{{ formatInt(uploadStats.percent) }}%</span>
         <span v-if="queue.length">成功 {{ formatInt(uploadStats.uploaded) }} · 失败 {{ formatInt(uploadStats.failed) }}</span>
         <span v-if="!isSimpleUser">{{ formatInt(totalPages) }} 页</span>
-        <button v-if="isSimpleUser" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">{{ simplePrimaryLabel }}</button>
+        <button v-if="isSimpleUser" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">{{ simpleSubmitLabel }}</button>
         <button v-else type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
       </div>
       <div v-if="queue.length && isSimpleUser" class="aw-simple-upload-list">

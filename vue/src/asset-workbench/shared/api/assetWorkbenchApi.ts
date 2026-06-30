@@ -741,6 +741,7 @@ export interface UploadPlanPart {
 
 export interface UploadPlan {
   mode?: string
+  upload_url?: string
   object_key?: string
   upload_id?: string
   parts?: UploadPlanPart[]
