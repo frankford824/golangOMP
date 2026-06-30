@@ -119,18 +119,28 @@ const (
 
 	AssetWorkbenchEventProfileUpserted             = "profile.upserted"
 	AssetWorkbenchEventPriceCreated                = "price.created"
+	AssetWorkbenchEventPriceUpdated                = "price.updated"
+	AssetWorkbenchEventPriceSuperseded             = "price.superseded"
 	AssetWorkbenchEventDeductionCreated            = "deduction.created"
+	AssetWorkbenchEventDeductionUpdated            = "deduction.updated"
+	AssetWorkbenchEventDeductionSuperseded         = "deduction.superseded"
 	AssetWorkbenchEventWelfareCreated              = "welfare.created"
+	AssetWorkbenchEventWelfareUpdated              = "welfare.updated"
+	AssetWorkbenchEventWelfareSuperseded           = "welfare.superseded"
 	AssetWorkbenchEventPromoCreated                = "promo.created"
+	AssetWorkbenchEventPromoUpdated                = "promo.updated"
+	AssetWorkbenchEventPromoSuperseded             = "promo.superseded"
 	AssetWorkbenchEventUploadSessionCreated        = "upload_session.created"
 	AssetWorkbenchEventUploadSessionUpdated        = "upload_session.updated"
 	AssetWorkbenchEventSubmissionCreated           = "submission.created"
+	AssetWorkbenchEventSubmissionVoided            = "submission.voided"
 	AssetWorkbenchEventErrorImportCreated          = "error_import.created"
 	AssetWorkbenchEventSettlementGenerated         = "settlement.generated"
 	AssetWorkbenchEventSettlementConfirmed         = "settlement.confirmed"
 	AssetWorkbenchEventSettlementCancelled         = "settlement.cancelled"
 	AssetWorkbenchEventSettlementAdjusted          = "settlement.adjusted"
 	AssetWorkbenchEventSupplementCreated           = "supplement.created"
+	AssetWorkbenchEventSupplementVoided            = "supplement.voided"
 	AssetWorkbenchEventSupplementPermissionChanged = "supplement_permission.changed"
 	AssetWorkbenchEventSavedViewUpserted           = "saved_view.upserted"
 	AssetWorkbenchEventFileDownloaded              = "file.downloaded"
@@ -143,8 +153,11 @@ const (
 	AssetWorkbenchEventClientMaterialDownloaded    = "client_material.downloaded"
 	AssetWorkbenchEventClientMaterialBatchDownload = "client_material.batch_downloaded"
 	AssetWorkbenchEventItemQCUpdated               = "item.qc_updated"
+	AssetWorkbenchEventItemUpdated                 = "item.updated"
 	AssetWorkbenchEventItemVoided                  = "item.voided"
 	AssetWorkbenchEventItemRepriced                = "item.repriced"
+	AssetWorkbenchEventFileMoved                   = "file.moved"
+	AssetWorkbenchEventFileDeleted                 = "file.deleted"
 	AssetWorkbenchEventGroupUpserted               = "group.upserted"
 	AssetWorkbenchEventTemplateUpserted            = "template.upserted"
 	AssetWorkbenchEventTemplateAssigned            = "template.assigned"
@@ -440,19 +453,21 @@ type AssetWorkbenchUploadSession struct {
 }
 
 type AssetWorkbenchSubmission struct {
-	ID              int64     `json:"id" db:"id"`
-	SubmissionNo    string    `json:"submission_no" db:"submission_no"`
-	SubmitterUserID int64     `json:"submitter_user_id" db:"submitter_user_id"`
-	BusinessMonth   string    `json:"business_month" db:"business_month"`
-	SubmittedAt     time.Time `json:"submitted_at" db:"submitted_at"`
-	Status          string    `json:"status" db:"status"`
-	ItemCount       int       `json:"item_count" db:"item_count"`
-	FileCount       int       `json:"file_count" db:"file_count"`
-	PageCount       int       `json:"page_count" db:"page_count"`
-	GrossTotal      float64   `json:"gross_total" db:"gross_total"`
-	Notes           string    `json:"notes" db:"notes"`
-	CreatedAt       time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
+	ID                int64     `json:"id" db:"id"`
+	SubmissionNo      string    `json:"submission_no" db:"submission_no"`
+	SubmitterUserID   int64     `json:"submitter_user_id" db:"submitter_user_id"`
+	SubmitterName     string    `json:"submitter_name,omitempty" db:"-"`
+	SubmitterUsername string    `json:"submitter_username,omitempty" db:"-"`
+	BusinessMonth     string    `json:"business_month" db:"business_month"`
+	SubmittedAt       time.Time `json:"submitted_at" db:"submitted_at"`
+	Status            string    `json:"status" db:"status"`
+	ItemCount         int       `json:"item_count" db:"item_count"`
+	FileCount         int       `json:"file_count" db:"file_count"`
+	PageCount         int       `json:"page_count" db:"page_count"`
+	GrossTotal        float64   `json:"gross_total" db:"gross_total"`
+	Notes             string    `json:"notes" db:"notes"`
+	CreatedAt         time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchSubmissionItem struct {
@@ -514,6 +529,25 @@ type AssetWorkbenchSubmissionFile struct {
 	SortOrder             int        `json:"sort_order" db:"sort_order"`
 	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+type AssetWorkbenchOverviewRow struct {
+	Source        string          `json:"source" db:"source"`
+	ID            int64           `json:"id" db:"id"`
+	Title         string          `json:"title" db:"title"`
+	PrimaryCode   string          `json:"primary_code" db:"primary_code"`
+	SecondaryCode string          `json:"secondary_code" db:"secondary_code"`
+	OrderNo       string          `json:"order_no" db:"order_no"`
+	CreatorUserID int64           `json:"creator_user_id,omitempty" db:"creator_user_id"`
+	CreatorName   string          `json:"creator_name" db:"creator_name"`
+	BusinessMonth string          `json:"business_month" db:"business_month"`
+	Status        string          `json:"status" db:"status"`
+	PageCount     int             `json:"page_count" db:"page_count"`
+	Amount        float64         `json:"amount" db:"amount"`
+	CreatedAt     time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at" db:"updated_at"`
+	RoutePath     string          `json:"route_path" db:"route_path"`
+	Meta          json.RawMessage `json:"meta_json,omitempty" db:"meta_json"`
 }
 
 type AssetWorkbenchSettlementBatch struct {

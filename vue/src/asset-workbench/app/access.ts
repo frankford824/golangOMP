@@ -16,6 +16,7 @@ export const assetWorkbenchRouteAccess = {
   },
   '/my-settlement': { label: '看收入', simple: true },
   '/account': { label: '个人中心', simple: true, anyAuthenticated: true },
+  '/notifications': { label: '通知', simple: true, anyAuthenticated: true },
   '/submissions': {
     label: '维护专区',
     requiresAnyCapability: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'],
@@ -24,6 +25,10 @@ export const assetWorkbenchRouteAccess = {
     label: '素材库',
     simple: true,
     requiresAnyCapability: ['asset.workbench.material.download', 'asset.workbench.system_search'],
+  },
+  '/overview': {
+    label: '总盘查询',
+    requiresAnyCapability: ['asset.workbench.manage', 'asset.workbench.settlement'],
   },
   '/cost-center': {
     label: '成本中心',
@@ -35,6 +40,10 @@ export const assetWorkbenchRouteAccess = {
   },
   '/settlement': {
     label: '结算',
+    requiresAnyCapability: ['asset.workbench.settlement'],
+  },
+  '/reports': {
+    label: '计件报表',
     requiresAnyCapability: ['asset.workbench.settlement'],
   },
   '/people': {

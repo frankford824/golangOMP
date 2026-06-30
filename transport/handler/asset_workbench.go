@@ -3,6 +3,7 @@ package handler
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -775,6 +776,52 @@ func (h *AssetWorkbenchHandler) CreatePriceMatrix(c *gin.Context) {
 	respondCreated(c, result)
 }
 
+func (h *AssetWorkbenchHandler) UpdatePriceMatrix(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid price matrix rule id.", nil))
+		return
+	}
+	var req assetworkbench.SetCostRuleEnabledParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SetPriceMatrixEnabled(c.Request.Context(), actor, ruleID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) SupersedePriceMatrix(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid price matrix rule id.", nil))
+		return
+	}
+	var req assetworkbench.CreatePriceMatrixParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SupersedePriceMatrix(c.Request.Context(), actor, ruleID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
 func (h *AssetWorkbenchHandler) ListDeductionRules(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -808,6 +855,52 @@ func (h *AssetWorkbenchHandler) CreateDeductionRule(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.CreateDeductionRule(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateDeductionRule(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid deduction rule id.", nil))
+		return
+	}
+	var req assetworkbench.SetCostRuleEnabledParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SetDeductionRuleEnabled(c.Request.Context(), actor, ruleID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) SupersedeDeductionRule(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid deduction rule id.", nil))
+		return
+	}
+	var req assetworkbench.CreateDeductionRuleParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SupersedeDeductionRule(c.Request.Context(), actor, ruleID, req)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -855,6 +948,52 @@ func (h *AssetWorkbenchHandler) CreateWelfareRule(c *gin.Context) {
 	respondCreated(c, result)
 }
 
+func (h *AssetWorkbenchHandler) UpdateWelfareRule(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid welfare rule id.", nil))
+		return
+	}
+	var req assetworkbench.SetCostRuleEnabledParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SetWelfareRuleEnabled(c.Request.Context(), actor, ruleID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) SupersedeWelfareRule(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid welfare rule id.", nil))
+		return
+	}
+	var req assetworkbench.CreateWelfareRuleParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SupersedeWelfareRule(c.Request.Context(), actor, ruleID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
 func (h *AssetWorkbenchHandler) ListPromoCoupons(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -888,6 +1027,52 @@ func (h *AssetWorkbenchHandler) CreatePromoCoupon(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.CreatePromoCoupon(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdatePromoCoupon(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid promo coupon id.", nil))
+		return
+	}
+	var req assetworkbench.SetCostRuleEnabledParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SetPromoCouponEnabled(c.Request.Context(), actor, ruleID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) SupersedePromoCoupon(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	ruleID, err := strconv.ParseInt(c.Param("rule_id"), 10, 64)
+	if err != nil || ruleID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid promo coupon id.", nil))
+		return
+	}
+	var req assetworkbench.CreatePromoCouponParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.SupersedePromoCoupon(c.Request.Context(), actor, ruleID, req)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -989,6 +1174,8 @@ func (h *AssetWorkbenchHandler) ListSubmissions(c *gin.Context) {
 		BusinessMonth:    c.Query("business_month"),
 		Status:           c.Query("status"),
 		SettlementStatus: c.Query("settlement_status"),
+		OrderBy:          c.Query("order_by"),
+		OrderDir:         c.Query("order_dir"),
 		Page:             page,
 		PageSize:         pageSize,
 	})
@@ -997,6 +1184,38 @@ func (h *AssetWorkbenchHandler) ListSubmissions(c *gin.Context) {
 		return
 	}
 	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) OverviewSearch(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	createdFrom, appErr := parseAssetWorkbenchOverviewDate(c.Query("date_from"), false)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	createdTo, appErr := parseAssetWorkbenchOverviewDate(c.Query("date_to"), true)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.OverviewSearch(c.Request.Context(), actor, assetworkbench.OverviewSearchParams{
+		Query:       c.Query("q"),
+		Creator:     c.Query("creator"),
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
+		Page:        page,
+		PageSize:    pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *AssetWorkbenchHandler) GetSubmissionDetail(c *gin.Context) {
@@ -1010,6 +1229,29 @@ func (h *AssetWorkbenchHandler) GetSubmissionDetail(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.GetSubmissionDetail(c.Request.Context(), actor, submissionID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) VoidSubmission(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	submissionID, err := strconv.ParseInt(c.Param("submission_id"), 10, 64)
+	if err != nil || submissionID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid submission_id", nil))
+		return
+	}
+	var req assetworkbench.VoidSubmissionParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.VoidSubmission(c.Request.Context(), actor, submissionID, req)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1071,6 +1313,42 @@ func (h *AssetWorkbenchHandler) BatchDownloadFiles(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) BatchMoveFiles(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.BatchMoveFilesParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.BatchMoveFiles(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) BatchDeleteFiles(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.BatchDeleteFilesParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.BatchDeleteFiles(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) DownloadSystemAsset(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -1125,6 +1403,29 @@ func (h *AssetWorkbenchHandler) BatchDownloadSystemAssets(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) UpdateSubmissionItem(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	itemID, err := strconv.ParseInt(c.Param("item_id"), 10, 64)
+	if err != nil || itemID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid item_id", nil))
+		return
+	}
+	var req assetworkbench.UpdateSubmissionItemParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateSubmissionItem(c.Request.Context(), actor, itemID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) UpdateSubmissionItemQC(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -1141,6 +1442,34 @@ func (h *AssetWorkbenchHandler) UpdateSubmissionItemQC(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.UpdateSubmissionItemQC(c.Request.Context(), actor, itemID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) ImportSubmissionItemQCExcel(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	businessMonth := strings.TrimSpace(c.PostForm("business_month"))
+	if businessMonth == "" {
+		businessMonth = strings.TrimSpace(c.Query("business_month"))
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", err.Error()))
+		return
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "failed to open uploaded file.", err.Error()))
+		return
+	}
+	defer file.Close()
+	result, appErr := h.svc.ImportSubmissionItemQCExcel(c.Request.Context(), actor, businessMonth, file)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1255,6 +1584,20 @@ func (h *AssetWorkbenchHandler) PreviewSettlement(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.PreviewSettlement(c.Request.Context(), actor, c.Query("business_month"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) SettlementReport(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var result *assetworkbench.SettlementReport
+	result, appErr := h.svc.SettlementReport(c.Request.Context(), actor, c.Query("business_month"))
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1500,6 +1843,61 @@ func (h *AssetWorkbenchHandler) CreateSettlementSupplement(c *gin.Context) {
 	respondCreated(c, result)
 }
 
+func (h *AssetWorkbenchHandler) ImportSettlementSupplementsExcel(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	businessMonth := strings.TrimSpace(c.PostForm("business_month"))
+	if businessMonth == "" {
+		businessMonth = strings.TrimSpace(c.Query("business_month"))
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", err.Error()))
+		return
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "failed to open uploaded file.", err.Error()))
+		return
+	}
+	defer file.Close()
+	result, appErr := h.svc.ImportSettlementSupplementsExcel(c.Request.Context(), actor, businessMonth, file)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) DeleteSettlementSupplement(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	supplementID, err := strconv.ParseInt(c.Param("supplement_id"), 10, 64)
+	if err != nil || supplementID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid supplement id.", nil))
+		return
+	}
+	req := struct {
+		Reason string `json:"reason"`
+	}{Reason: strings.TrimSpace(c.Query("reason"))}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+			return
+		}
+	}
+	result, appErr := h.svc.VoidSettlementSupplement(c.Request.Context(), actor, supplementID, req.Reason)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) ListEvents(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -1696,12 +2094,38 @@ func (h *AssetWorkbenchHandler) SystemSearch(c *gin.Context) {
 		return
 	}
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	result, appErr := h.svc.SystemSearch(c.Request.Context(), actor, c.Query("q"), limit)
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	if pageSize <= 0 {
+		pageSize = limit
+	}
+	result, appErr := h.svc.SystemSearch(c.Request.Context(), actor, c.Query("q"), page, pageSize)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	respondOK(c, result)
+}
+
+func parseAssetWorkbenchOverviewDate(raw string, endOfDay bool) (*time.Time, *domain.AppError) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		utc := parsed.UTC()
+		return &utc, nil
+	}
+	loc := time.FixedZone("Asia/Shanghai", 8*60*60)
+	parsed, err := time.ParseInLocation("2006-01-02", value, loc)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "date_from/date_to must be RFC3339 or YYYY-MM-DD.", map[string]string{"value": value})
+	}
+	if endOfDay {
+		parsed = parsed.Add(24*time.Hour - time.Nanosecond)
+	}
+	utc := parsed.UTC()
+	return &utc, nil
 }
 
 func (h *AssetWorkbenchHandler) sessionActor(c *gin.Context) (domain.RequestActor, bool) {

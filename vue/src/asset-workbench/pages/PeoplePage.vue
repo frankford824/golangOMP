@@ -8,6 +8,9 @@ import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
+const parttimeGrades = ['J1', 'J2', 'J3']
+const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
+
 const form = reactive({
   worker_type: 'parttime',
   job_grade: '',
@@ -15,6 +18,7 @@ const form = reactive({
   phone: '',
   province: '',
   city: '',
+  gender: '',
   alipay_account: '',
   status: 'pending',
 })
@@ -41,10 +45,14 @@ const hrForm = reactive({
   phone: '',
   province: '',
   city: '',
+  gender: '',
   alipay_account: '',
+  onboarded_at: '',
+  grade_hidden: false,
   status: 'pending',
   reason: '',
 })
+const gradeOptions = computed(() => (hrForm.worker_type === 'fulltime' ? fulltimeGrades : parttimeGrades))
 const profileGridRows = computed(() =>
   profiles.value.map((profile) => ({
     ...profile,
@@ -53,6 +61,8 @@ const profileGridRows = computed(() =>
     phone_label: maskPhone(profile.phone),
     id_card_label: maskIdCard(profile.id_card),
     alipay_label: maskAlipay(profile.alipay_account),
+    onboarded_label: formatDateInput(profile.onboarded_at),
+    grade_hidden_label: profile.grade_hidden ? '隐藏' : '展示',
   })) as unknown as Record<string, unknown>[],
 )
 const profileGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
@@ -62,6 +72,8 @@ const profileGridColumns = computed<Array<{ key: string; label: string; width: n
   { key: 'phone_label', label: '手机', width: 132 },
   { key: 'id_card_label', label: '证件', width: 150 },
   { key: 'alipay_label', label: '支付账号', width: 140 },
+  { key: 'onboarded_label', label: '入职时间', width: 112 },
+  { key: 'grade_hidden_label', label: '定级展示', width: 104 },
   { key: 'province', label: '省份', width: 96 },
   { key: 'city', label: '城市', width: 96 },
   { key: 'status_label', label: '状态', width: 100 },
@@ -82,6 +94,7 @@ async function loadPeople() {
       phone: data.bootstrap.profile.phone || '',
       province: data.bootstrap.profile.province || '',
       city: data.bootstrap.profile.city || '',
+      gender: data.bootstrap.profile.gender || '',
       alipay_account: data.bootstrap.profile.alipay_account || '',
       status: data.bootstrap.profile.status || 'pending',
     })
@@ -94,7 +107,16 @@ async function saveProfile() {
   error.value = ''
   notice.value = ''
   try {
-    const saved = await assetWorkbenchApi.upsertMyProfile({ ...form })
+    const saved = await assetWorkbenchApi.upsertMyProfile({
+      worker_type: form.worker_type,
+      real_name: form.real_name,
+      phone: form.phone,
+      province: form.province,
+      city: form.city,
+      gender: form.gender,
+      alipay_account: form.alipay_account,
+      reason: 'self profile update',
+    })
     notice.value = saved.pii_completed ? '资料已保存' : '资料已保存，仍有待补字段'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '资料保存失败'
@@ -111,12 +133,15 @@ function selectProfile(row: Record<string, unknown>) {
     worker_type: profile.worker_type || 'parttime',
     job_grade: profile.job_grade || '',
     real_name: profile.real_name || '',
-    phone: '',
-    province: profile.province || '',
-    city: profile.city || '',
-    alipay_account: '',
-    status: profile.status || 'pending',
-    reason: '',
+      phone: '',
+      province: profile.province || '',
+      city: profile.city || '',
+      gender: profile.gender || '',
+      alipay_account: '',
+      onboarded_at: formatDateInput(profile.onboarded_at),
+      grade_hidden: profile.grade_hidden === true,
+      status: profile.status || 'pending',
+      reason: '',
   })
 }
 
@@ -134,7 +159,10 @@ async function saveHRProfile() {
       phone: hrForm.phone || undefined,
       province: hrForm.province,
       city: hrForm.city,
+      gender: hrForm.gender,
       alipay_account: hrForm.alipay_account || undefined,
+      onboarded_at: hrForm.onboarded_at ? `${hrForm.onboarded_at}T00:00:00+08:00` : undefined,
+      grade_hidden: hrForm.grade_hidden,
       status: hrForm.status,
       reason: hrForm.reason || '管理人员资料',
     })
@@ -147,6 +175,13 @@ async function saveHRProfile() {
   } finally {
     hrSaving.value = false
   }
+}
+
+function formatDateInput(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10)
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(date)
 }
 
 onMounted(() => {
@@ -187,7 +222,7 @@ onMounted(() => {
           </label>
           <label>
             岗级
-            <input v-model="form.job_grade" placeholder="P1 / J1" />
+            <input v-model="form.job_grade" disabled placeholder="HR 定级后显示" />
           </label>
           <label>
             姓名
@@ -204,6 +239,14 @@ onMounted(() => {
           <label>
             城市
             <input v-model="form.city" />
+          </label>
+          <label>
+            性别
+            <select v-model="form.gender">
+              <option value="">不填写</option>
+              <option value="female">女</option>
+              <option value="male">男</option>
+            </select>
           </label>
           <label>
             支付账号
@@ -302,7 +345,10 @@ onMounted(() => {
         </label>
         <label>
           岗级
-          <input v-model="hrForm.job_grade" placeholder="P1 / J1" />
+          <select v-model="hrForm.job_grade">
+            <option value="">未定级</option>
+            <option v-for="grade in gradeOptions" :key="grade" :value="grade">{{ grade }}</option>
+          </select>
         </label>
         <label>
           姓名
@@ -317,8 +363,24 @@ onMounted(() => {
           </select>
         </label>
         <label>
+          入职时间
+          <input v-model="hrForm.onboarded_at" type="date" />
+        </label>
+        <label class="aw-inline-check">
+          <input v-model="hrForm.grade_hidden" type="checkbox" />
+          <span>客户端隐藏定级</span>
+        </label>
+        <label>
           手机
           <input v-model="hrForm.phone" placeholder="不填则保留原值" />
+        </label>
+        <label>
+          性别
+          <select v-model="hrForm.gender">
+            <option value="">不填写</option>
+            <option value="female">女</option>
+            <option value="male">男</option>
+          </select>
         </label>
         <label>
           支付账号

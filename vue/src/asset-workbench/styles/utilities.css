@@ -1,4 +1,5 @@
 .aw-copy {
   max-width: 780px;
   line-height: 1.75;
+  text-wrap: pretty;
 }

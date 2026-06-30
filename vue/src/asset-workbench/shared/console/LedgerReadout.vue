@@ -41,7 +41,7 @@ async function openSegment(segment: LedgerSegment, event: MouseEvent) {
   if (activeSegment.value || busy) return
   busy = true
   originEl = event.currentTarget as HTMLElement
-  lastFocused = (document.activeElement as HTMLElement) ?? null
+  lastFocused = originEl
   activeSegment.value = segment
   lock()
 
@@ -111,12 +111,22 @@ async function closeSegment() {
 }
 
 function teardown() {
+  const focusTarget = lastFocused
   activeSegment.value = null
   originEl = null
   unlock()
-  lastFocused?.focus?.()
   lastFocused = null
   busy = false
+  restoreFocus(focusTarget)
+}
+
+function restoreFocus(target: HTMLElement | null) {
+  if (!target?.isConnected) return
+  const focus = () => target.focus({ preventScroll: true })
+  void nextTick(() => {
+    window.requestAnimationFrame(focus)
+    window.setTimeout(focus, 0)
+  })
 }
 
 onBeforeUnmount(() => {

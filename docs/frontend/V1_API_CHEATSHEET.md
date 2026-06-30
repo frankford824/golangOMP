@@ -1,10 +1,10 @@
-# V1 API 速查表(260 path · 一行一条)
+# V1 API 速查表(283 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 260 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 283 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -177,6 +177,29 @@
 | POST | `/v1/asset-workbench/accounts/merge` | Confirm asset workbench account merge | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/people-lookup` | Search people for template assignment | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/groups/{group_id}/members` | List asset workbench group members | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/price-matrix` | List asset workbench price matrix rules；Create asset workbench price matrix rule | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/asset-workbench/price-matrix/{rule_id}` | Enable or disable a price matrix rule | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/price-matrix/{rule_id}/supersede` | Supersede a price matrix rule with a new revision | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/deduction-rules` | List asset workbench deduction rules；Create asset workbench deduction rule | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/asset-workbench/deduction-rules/{rule_id}` | Enable or disable a deduction rule | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/deduction-rules/{rule_id}/supersede` | Supersede a deduction rule with a new revision | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/welfare-rules` | List asset workbench welfare rules；Create asset workbench welfare rule | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/asset-workbench/welfare-rules/{rule_id}` | Enable or disable a welfare rule | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/welfare-rules/{rule_id}/supersede` | Supersede a welfare rule with a new row | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/promo-coupons` | List asset workbench promo coupons；Create asset workbench promo coupon | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/asset-workbench/promo-coupons/{rule_id}` | Enable or disable a promo coupon | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/promo-coupons/{rule_id}/supersede` | Supersede a promo coupon with a new row | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/overview-search` | Search asset workbench overview | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/submissions` | List asset workbench submissions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/submissions/{submission_id}/void` | Void an asset workbench submission | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/asset-workbench/items/{item_id}` | Update editable fields of a submission item | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/items/qc/excel` | Import submission item QC statuses from Excel | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/files/batch-move` | Batch move submission files to an upload directory | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/files/batch-delete` | Batch delete submission files | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/system-search` | Search system assets from asset workbench | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/settlement/report` | Get asset workbench settlement report | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/settlement/supplements/excel` | Import monthly settlement supplements from Excel | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| DELETE | `/v1/asset-workbench/settlement/supplements/{supplement_id}` | Delete a draft or approved settlement supplement | DELETE:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/upload-directories` | List enabled asset workbench upload directories；Create asset workbench upload directory | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/upload-directories/admin` | List all asset workbench upload directories for administration | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/asset-workbench/upload-directories/{directory_id}` | Update asset workbench upload directory | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

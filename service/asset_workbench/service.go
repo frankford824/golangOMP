@@ -39,6 +39,7 @@ type Service struct {
 	repo            repo.AssetWorkbenchRepo
 	userRepo        repo.UserRepo
 	sessionRevoker  UserSessionRevoker
+	notifications   ProfileCompletionNotifier
 	tx              repo.TxRunner
 	identity        WorkbenchIdentityRegistrar
 	oss             *baseservice.OSSDirectService
@@ -55,6 +56,10 @@ type WorkbenchIdentityRegistrar interface {
 
 type UserSessionRevoker interface {
 	RevokeActiveByUserID(ctx context.Context, tx repo.Tx, userID int64, at time.Time) (int64, error)
+}
+
+type ProfileCompletionNotifier interface {
+	CreateDedupedNotification(ctx context.Context, userID int64, ntype domain.NotificationType, payload json.RawMessage, dedupeScope, dedupeKey string) (*domain.Notification, bool, error)
 }
 
 type SystemAssetSearcher interface {
@@ -113,6 +118,12 @@ func WithUserRepository(userRepo repo.UserRepo) Option {
 func WithUserSessionRepository(sessionRepo UserSessionRevoker) Option {
 	return func(s *Service) {
 		s.sessionRevoker = sessionRepo
+	}
+}
+
+func WithNotificationCreator(notifier ProfileCompletionNotifier) Option {
+	return func(s *Service) {
+		s.notifications = notifier
 	}
 }
 
@@ -330,6 +341,11 @@ type CreatePromoCouponParams struct {
 	Remark          string          `json:"remark"`
 }
 
+type SetCostRuleEnabledParams struct {
+	Enabled bool   `json:"enabled"`
+	Reason  string `json:"reason"`
+}
+
 type UpsertGroupParams struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -429,11 +445,55 @@ type UpdateSubmissionItemQCParams struct {
 	Reason   string `json:"reason"`
 }
 
+type SubmissionItemQCImportResult struct {
+	Updated  []*domain.AssetWorkbenchSubmissionItem `json:"updated"`
+	Failures []SubmissionItemQCImportFailure        `json:"failures"`
+}
+
+type SubmissionItemQCImportFailure struct {
+	Row    int    `json:"row"`
+	Reason string `json:"reason"`
+}
+
+type UpdateSubmissionItemParams struct {
+	OrderNo         *string `json:"order_no"`
+	DifficultyClass *string `json:"difficulty_class"`
+	Finalized       *bool   `json:"finalized"`
+	PageCount       *int    `json:"page_count"`
+	Reason          string  `json:"reason"`
+}
+
+type VoidSubmissionParams struct {
+	Reason string `json:"reason"`
+}
+
 type VoidSubmissionItemParams struct {
 	Reason string `json:"reason"`
 }
 
 type RepriceSubmissionItemParams struct {
+	Reason string `json:"reason"`
+}
+
+type BatchMoveFilesParams struct {
+	FileIDs           []int64 `json:"file_ids"`
+	UploadDirectoryID int64   `json:"upload_directory_id"`
+	Reason            string  `json:"reason"`
+}
+
+type BatchDeleteFilesParams struct {
+	FileIDs []int64 `json:"file_ids"`
+	Reason  string  `json:"reason"`
+}
+
+type BatchFileMutationResult struct {
+	Files    []*domain.AssetWorkbenchSubmissionFile `json:"files,omitempty"`
+	Deleted  []int64                                `json:"deleted,omitempty"`
+	Failures []BatchFileMutationFailure             `json:"failures,omitempty"`
+}
+
+type BatchFileMutationFailure struct {
+	FileID int64  `json:"file_id"`
 	Reason string `json:"reason"`
 }
 
@@ -498,6 +558,22 @@ type SystemSearchResult struct {
 	Size  int                        `json:"size"`
 }
 
+type OverviewSearchParams struct {
+	Query       string
+	Creator     string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+	Page        int
+	PageSize    int
+}
+
+type OverviewSearchResult struct {
+	Items []*domain.AssetWorkbenchOverviewRow `json:"items"`
+	Total int64                               `json:"total"`
+	Page  int                                 `json:"page"`
+	Size  int                                 `json:"size"`
+}
+
 type SystemAssetBatchDownloadParams struct {
 	AssetIDs   []int64 `json:"asset_ids"`
 	NamingMode string  `json:"naming_mode,omitempty"`
@@ -555,6 +631,53 @@ type SettlementPayrollRow struct {
 	NetAmount        float64 `json:"net_amount"`
 }
 
+type SettlementReport struct {
+	BusinessMonth      string                `json:"business_month"`
+	DifficultyClasses  []string              `json:"difficulty_classes"`
+	Rows               []SettlementReportRow `json:"rows"`
+	Totals             SettlementReportRow   `json:"totals"`
+	GeneratedAt        time.Time             `json:"generated_at"`
+	OrderCountPolicy   string                `json:"order_count_policy"`
+	SettlementDataMode string                `json:"settlement_data_mode"`
+}
+
+type SettlementReportRow struct {
+	PayeeUserID       int64                              `json:"payee_user_id"`
+	BusinessMonth     string                             `json:"business_month"`
+	RowType           string                             `json:"row_type"`
+	CreatorName       string                             `json:"creator_name"`
+	JobGrade          string                             `json:"job_grade"`
+	CreatedDate       string                             `json:"created_date"`
+	OrderCount        int                                `json:"order_count"`
+	ItemCount         int                                `json:"item_count"`
+	PageCount         int                                `json:"page_count"`
+	GrossAmount       float64                            `json:"gross_amount"`
+	ErrorCount        int                                `json:"error_count"`
+	DeductionAmount   float64                            `json:"deduction_amount"`
+	WelfareAmount     float64                            `json:"welfare_amount"`
+	SupplementAmount  float64                            `json:"supplement_amount"`
+	NetAmount         float64                            `json:"net_amount"`
+	ErrorRate         float64                            `json:"error_rate"`
+	PageCountShare    float64                            `json:"page_count_share"`
+	ErrorCountShare   float64                            `json:"error_count_share"`
+	MonthAmountShare  float64                            `json:"month_amount_share"`
+	DifficultyMetrics []SettlementReportDifficultyMetric `json:"difficulty_metrics"`
+}
+
+type SettlementReportDifficultyMetric struct {
+	DifficultyClass     string  `json:"difficulty_class"`
+	OrderCount          int     `json:"order_count"`
+	ItemCount           int     `json:"item_count"`
+	PageCount           int     `json:"page_count"`
+	GrossAmount         float64 `json:"gross_amount"`
+	ErrorCount          int     `json:"error_count"`
+	DeductionAmount     float64 `json:"deduction_amount"`
+	ErrorRate           float64 `json:"error_rate"`
+	PageCountShare      float64 `json:"page_count_share"`
+	ErrorCountShare     float64 `json:"error_count_share"`
+	MonthPageCountShare float64 `json:"month_page_count_share"`
+}
+
 type MySettlementResponse struct {
 	CurrentMonth       string                 `json:"current_month"`
 	EstimatedNetAmount float64                `json:"estimated_net_amount"`
@@ -599,6 +722,16 @@ type CreateSettlementSupplementParams struct {
 	PageCount       int     `json:"page_count"`
 	GrossAmount     float64 `json:"gross_amount"`
 	Status          string  `json:"status"`
+}
+
+type SettlementSupplementImportResult struct {
+	Created  []*domain.AssetWorkbenchSettlementSupplement `json:"created"`
+	Failures []SettlementSupplementImportFailure          `json:"failures"`
+}
+
+type SettlementSupplementImportFailure struct {
+	Row    int    `json:"row"`
+	Reason string `json:"reason"`
 }
 
 type UpsertSupplementPermissionParams struct {
@@ -668,7 +801,8 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 		Source:   domain.RequestActorSourceSessionToken,
 		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
 	}
-	profile, appErr := s.UpsertMyProfile(ctx, actor, UpsertProfileParams{
+	onboardedAt := s.nowFn().UTC()
+	profileParams := UpsertProfileParams{
 		WorkerType:    workerType,
 		JobGrade:      "",
 		RealName:      name,
@@ -678,9 +812,15 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 		IDCard:        strings.TrimSpace(params.IDCard),
 		Gender:        strings.TrimSpace(params.Gender),
 		AlipayAccount: strings.TrimSpace(params.AlipayAccount),
+		OnboardedAt:   &onboardedAt,
 		Status:        domain.AssetWorkbenchProfileStatusPending,
 		Reason:        "asset workbench self-registration",
-	})
+	}
+	profile, appErr := s.normalizeProfile(auth.User.ID, auth.User.ID, profileParams)
+	if appErr != nil {
+		return nil, appErr
+	}
+	profile, appErr = s.upsertProfile(ctx, actor, profile, profileParams.Reason, true)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -855,11 +995,16 @@ func (s *Service) UpsertMyProfile(ctx context.Context, actor domain.RequestActor
 	if actor.ID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeUnauthorized, "Authentication required.", nil)
 	}
+	existing, err := s.repo.GetProfileByUserID(ctx, actor.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load asset workbench profile.", err.Error())
+	}
+	params = preserveSelfManagedProfileFields(params, existing, s.nowFn().UTC())
 	profile, appErr := s.normalizeProfile(actor.ID, actor.ID, params)
 	if appErr != nil {
 		return nil, appErr
 	}
-	return s.upsertProfile(ctx, actor, profile, params.Reason)
+	return s.upsertProfile(ctx, actor, profile, params.Reason, false)
 }
 
 func (s *Service) HRUpsertProfile(ctx context.Context, actor domain.RequestActor, userID int64, params UpsertProfileParams) (*domain.AssetWorkbenchProfile, *domain.AppError) {
@@ -881,7 +1026,7 @@ func (s *Service) HRUpsertProfile(ctx context.Context, actor domain.RequestActor
 	if appErr != nil {
 		return nil, appErr
 	}
-	return s.upsertProfile(ctx, actor, profile, params.Reason)
+	return s.upsertProfile(ctx, actor, profile, params.Reason, true)
 }
 
 func preserveExistingProfilePII(params UpsertProfileParams, existing *domain.AssetWorkbenchProfile) UpsertProfileParams {
@@ -903,6 +1048,32 @@ func preserveExistingProfilePII(params UpsertProfileParams, existing *domain.Ass
 	if params.OnboardedAt == nil {
 		params.OnboardedAt = existing.OnboardedAt
 	}
+	return params
+}
+
+func preserveSelfManagedProfileFields(params UpsertProfileParams, existing *domain.AssetWorkbenchProfile, now time.Time) UpsertProfileParams {
+	params = preserveExistingProfilePII(params, existing)
+	if existing == nil {
+		if strings.TrimSpace(params.WorkerType) == "" {
+			params.WorkerType = domain.AssetWorkbenchWorkerTypeParttime
+		}
+		params.JobGrade = ""
+		if params.OnboardedAt == nil {
+			params.OnboardedAt = &now
+		}
+		if strings.TrimSpace(params.Status) == "" {
+			params.Status = domain.AssetWorkbenchProfileStatusPending
+		}
+		params.GradeHidden = false
+		return params
+	}
+	if strings.TrimSpace(params.WorkerType) == "" {
+		params.WorkerType = existing.WorkerType
+	}
+	params.JobGrade = existing.JobGrade
+	params.OnboardedAt = existing.OnboardedAt
+	params.GradeHidden = existing.GradeHidden
+	params.Status = existing.Status
 	return params
 }
 
@@ -1480,6 +1651,101 @@ func (s *Service) CreatePriceMatrix(ctx context.Context, actor domain.RequestAct
 	return created, nil
 }
 
+func (s *Service) SetPriceMatrixEnabled(ctx context.Context, actor domain.RequestActor, ruleID int64, params SetCostRuleEnabledParams) (*domain.AssetWorkbenchPriceMatrix, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update price matrix rules.", nil)
+	}
+	var updated *domain.AssetWorkbenchPriceMatrix
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetPriceMatrixForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		if params.Enabled {
+			existing, err := s.repo.LockPriceMatrixDimension(ctx, tx, before.WorkerType, before.JobGrade, before.DifficultyClass)
+			if err != nil {
+				return err
+			}
+			for _, item := range existing {
+				if item.ID == before.ID {
+					item.Enabled = false
+				}
+			}
+			if overlapsPricePeriod(existing, before.EffectiveFrom, before.EffectiveTo) {
+				return domain.NewAppError(domain.ErrCodeConflict, "Price effective range overlaps an existing rule.", nil)
+			}
+		}
+		updated, err = s.repo.SetPriceMatrixEnabled(ctx, tx, ruleID, params.Enabled)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventPriceUpdated, domain.AssetWorkbenchEntityPriceMatrix, &updated.ID, before, updated, params.Reason)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Price matrix rule not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench price matrix rule.", err.Error())
+	}
+	return updated, nil
+}
+
+func (s *Service) SupersedePriceMatrix(ctx context.Context, actor domain.RequestActor, ruleID int64, params CreatePriceMatrixParams) (*domain.AssetWorkbenchPriceMatrix, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update price matrix rules.", nil)
+	}
+	next, appErr := normalizePriceMatrix(actor.ID, params)
+	if appErr != nil {
+		return nil, appErr
+	}
+	var created *domain.AssetWorkbenchPriceMatrix
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetPriceMatrixForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		existing, err := s.repo.LockPriceMatrixDimension(ctx, tx, next.WorkerType, next.JobGrade, next.DifficultyClass)
+		if err != nil {
+			return err
+		}
+		for _, item := range existing {
+			if item.ID == before.ID {
+				item.Enabled = false
+			}
+		}
+		if overlapsPricePeriod(existing, next.EffectiveFrom, next.EffectiveTo) {
+			return domain.NewAppError(domain.ErrCodeConflict, "Price effective range overlaps an existing rule.", nil)
+		}
+		next.RevisionNo = nextPriceRevision(existing)
+		disabled, err := s.repo.SetPriceMatrixEnabled(ctx, tx, before.ID, false)
+		if err != nil {
+			return err
+		}
+		created, err = s.repo.CreatePriceMatrix(ctx, tx, next)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventPriceSuperseded, domain.AssetWorkbenchEntityPriceMatrix, &created.ID, disabled, created, params.Remark)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Price matrix rule not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to supersede asset workbench price matrix rule.", err.Error())
+	}
+	return created, nil
+}
+
 func (s *Service) ListDeductionRules(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchDeductionRuleFilter) ([]*domain.AssetWorkbenchDeductionRule, int64, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, 0, err
@@ -1528,6 +1794,101 @@ func (s *Service) CreateDeductionRule(ctx context.Context, actor domain.RequestA
 	return created, nil
 }
 
+func (s *Service) SetDeductionRuleEnabled(ctx context.Context, actor domain.RequestActor, ruleID int64, params SetCostRuleEnabledParams) (*domain.AssetWorkbenchDeductionRule, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update deduction rules.", nil)
+	}
+	var updated *domain.AssetWorkbenchDeductionRule
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetDeductionRuleForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		if params.Enabled {
+			existing, err := s.repo.LockDeductionRuleDimension(ctx, tx, before.WorkerType, before.JobGrade, before.DifficultyClass)
+			if err != nil {
+				return err
+			}
+			for _, item := range existing {
+				if item.ID == before.ID {
+					item.Enabled = false
+				}
+			}
+			if overlapsDeductionPeriod(existing, before.EffectiveFrom, before.EffectiveTo) {
+				return domain.NewAppError(domain.ErrCodeConflict, "Deduction effective range overlaps an existing rule.", nil)
+			}
+		}
+		updated, err = s.repo.SetDeductionRuleEnabled(ctx, tx, ruleID, params.Enabled)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventDeductionUpdated, domain.AssetWorkbenchEntityDeductionRule, &updated.ID, before, updated, params.Reason)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Deduction rule not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench deduction rule.", err.Error())
+	}
+	return updated, nil
+}
+
+func (s *Service) SupersedeDeductionRule(ctx context.Context, actor domain.RequestActor, ruleID int64, params CreateDeductionRuleParams) (*domain.AssetWorkbenchDeductionRule, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update deduction rules.", nil)
+	}
+	next, appErr := normalizeDeductionRule(actor.ID, params)
+	if appErr != nil {
+		return nil, appErr
+	}
+	var created *domain.AssetWorkbenchDeductionRule
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetDeductionRuleForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		existing, err := s.repo.LockDeductionRuleDimension(ctx, tx, next.WorkerType, next.JobGrade, next.DifficultyClass)
+		if err != nil {
+			return err
+		}
+		for _, item := range existing {
+			if item.ID == before.ID {
+				item.Enabled = false
+			}
+		}
+		if overlapsDeductionPeriod(existing, next.EffectiveFrom, next.EffectiveTo) {
+			return domain.NewAppError(domain.ErrCodeConflict, "Deduction effective range overlaps an existing rule.", nil)
+		}
+		next.RevisionNo = nextDeductionRevision(existing)
+		disabled, err := s.repo.SetDeductionRuleEnabled(ctx, tx, before.ID, false)
+		if err != nil {
+			return err
+		}
+		created, err = s.repo.CreateDeductionRule(ctx, tx, next)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventDeductionSuperseded, domain.AssetWorkbenchEntityDeductionRule, &created.ID, disabled, created, params.Remark)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Deduction rule not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to supersede asset workbench deduction rule.", err.Error())
+	}
+	return created, nil
+}
+
 func (s *Service) ListWelfareRules(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchWelfareRuleFilter) ([]*domain.AssetWorkbenchWelfareRule, int64, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, 0, err
@@ -1567,6 +1928,74 @@ func (s *Service) CreateWelfareRule(ctx context.Context, actor domain.RequestAct
 	return created, nil
 }
 
+func (s *Service) SetWelfareRuleEnabled(ctx context.Context, actor domain.RequestActor, ruleID int64, params SetCostRuleEnabledParams) (*domain.AssetWorkbenchWelfareRule, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update welfare rules.", nil)
+	}
+	var updated *domain.AssetWorkbenchWelfareRule
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetWelfareRuleForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		updated, err = s.repo.SetWelfareRuleEnabled(ctx, tx, ruleID, params.Enabled)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventWelfareUpdated, domain.AssetWorkbenchEntityWelfareRule, &updated.ID, before, updated, params.Reason)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Welfare rule not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench welfare rule.", err.Error())
+	}
+	return updated, nil
+}
+
+func (s *Service) SupersedeWelfareRule(ctx context.Context, actor domain.RequestActor, ruleID int64, params CreateWelfareRuleParams) (*domain.AssetWorkbenchWelfareRule, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update welfare rules.", nil)
+	}
+	next, appErr := normalizeWelfareRule(actor.ID, params)
+	if appErr != nil {
+		return nil, appErr
+	}
+	var created *domain.AssetWorkbenchWelfareRule
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetWelfareRuleForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		disabled, err := s.repo.SetWelfareRuleEnabled(ctx, tx, before.ID, false)
+		if err != nil {
+			return err
+		}
+		created, err = s.repo.CreateWelfareRule(ctx, tx, next)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventWelfareSuperseded, domain.AssetWorkbenchEntityWelfareRule, &created.ID, disabled, created, params.Remark)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Welfare rule not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to supersede asset workbench welfare rule.", err.Error())
+	}
+	return created, nil
+}
+
 func (s *Service) ListPromoCoupons(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchPromoCouponFilter) ([]*domain.AssetWorkbenchPromoCoupon, int64, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, 0, err
@@ -1602,6 +2031,74 @@ func (s *Service) CreatePromoCoupon(ctx context.Context, actor domain.RequestAct
 		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventPromoCreated, domain.AssetWorkbenchEntityPromoCoupon, &created.ID, nil, created, params.Remark)
 	}); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench promo coupon.", err.Error())
+	}
+	return created, nil
+}
+
+func (s *Service) SetPromoCouponEnabled(ctx context.Context, actor domain.RequestActor, ruleID int64, params SetCostRuleEnabledParams) (*domain.AssetWorkbenchPromoCoupon, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update promo coupons.", nil)
+	}
+	var updated *domain.AssetWorkbenchPromoCoupon
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetPromoCouponForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		updated, err = s.repo.SetPromoCouponEnabled(ctx, tx, ruleID, params.Enabled)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventPromoUpdated, domain.AssetWorkbenchEntityPromoCoupon, &updated.ID, before, updated, params.Reason)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Promo coupon not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench promo coupon.", err.Error())
+	}
+	return updated, nil
+}
+
+func (s *Service) SupersedePromoCoupon(ctx context.Context, actor domain.RequestActor, ruleID int64, params CreatePromoCouponParams) (*domain.AssetWorkbenchPromoCoupon, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update promo coupons.", nil)
+	}
+	next, appErr := normalizePromoCoupon(actor.ID, params)
+	if appErr != nil {
+		return nil, appErr
+	}
+	var created *domain.AssetWorkbenchPromoCoupon
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetPromoCouponForUpdate(ctx, tx, ruleID)
+		if err != nil {
+			return err
+		}
+		disabled, err := s.repo.SetPromoCouponEnabled(ctx, tx, before.ID, false)
+		if err != nil {
+			return err
+		}
+		created, err = s.repo.CreatePromoCoupon(ctx, tx, next)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventPromoSuperseded, domain.AssetWorkbenchEntityPromoCoupon, &created.ID, disabled, created, params.Remark)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Promo coupon not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to supersede asset workbench promo coupon.", err.Error())
 	}
 	return created, nil
 }
@@ -2449,6 +2946,43 @@ func (s *Service) GetSubmissionDetail(ctx context.Context, actor domain.RequestA
 	return detail, nil
 }
 
+func (s *Service) VoidSubmission(ctx context.Context, actor domain.RequestActor, submissionID int64, params VoidSubmissionParams) (*domain.AssetWorkbenchSubmission, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers or settlement roles can void submissions.", nil)
+	}
+	if submissionID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "submission_id is required.", nil)
+	}
+	reason := strings.TrimSpace(params.Reason)
+	if reason == "" {
+		return nil, domain.NewAppError(domain.ErrCodeReasonRequired, "reason is required when voiding submission.", nil)
+	}
+	var updated *domain.AssetWorkbenchSubmission
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetSubmissionForUpdate(ctx, tx, submissionID)
+		if err != nil {
+			return err
+		}
+		updated, err = s.repo.VoidSubmission(ctx, tx, submissionID, actor.ID, reason, s.nowFn().UTC())
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSubmissionVoided, domain.AssetWorkbenchEntitySubmission, &submissionID, before, updated, reason)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Submission not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to void submission.", err.Error())
+	}
+	return updated, nil
+}
+
 func (s *Service) UpdateSubmissionItemQC(ctx context.Context, actor domain.RequestActor, itemID int64, params UpdateSubmissionItemQCParams) (*domain.AssetWorkbenchSubmissionItem, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
@@ -2485,6 +3019,67 @@ func (s *Service) UpdateSubmissionItemQC(ctx context.Context, actor domain.Reque
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update item QC status.", err.Error())
 	}
 	return updated, nil
+}
+
+func (s *Service) ImportSubmissionItemQCExcel(ctx context.Context, actor domain.RequestActor, businessMonth string, reader io.Reader) (*SubmissionItemQCImportResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers or settlement roles can import item QC status.", nil)
+	}
+	rows, appErr := parseSubmissionItemQCExcel(businessMonth, reader)
+	if appErr != nil {
+		return nil, appErr
+	}
+	orderNoToItemID := map[string]int64{}
+	if strings.TrimSpace(businessMonth) != "" {
+		items, err := s.repo.ListSubmissionItemsByMonth(ctx, strings.TrimSpace(businessMonth))
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission items for QC import.", err.Error())
+		}
+		duplicates := map[string]bool{}
+		for _, item := range items {
+			key := strings.TrimSpace(item.OrderNo)
+			if key == "" {
+				continue
+			}
+			if _, ok := orderNoToItemID[key]; ok {
+				duplicates[key] = true
+				continue
+			}
+			orderNoToItemID[key] = item.ID
+		}
+		for key := range duplicates {
+			delete(orderNoToItemID, key)
+		}
+	}
+	result := &SubmissionItemQCImportResult{
+		Updated:  []*domain.AssetWorkbenchSubmissionItem{},
+		Failures: []SubmissionItemQCImportFailure{},
+	}
+	for _, row := range rows {
+		itemID := row.itemID
+		if itemID <= 0 {
+			if row.orderNo == "" {
+				result.Failures = append(result.Failures, SubmissionItemQCImportFailure{Row: row.row, Reason: "item_id or order_no is required"})
+				continue
+			}
+			matched := orderNoToItemID[row.orderNo]
+			if matched <= 0 {
+				result.Failures = append(result.Failures, SubmissionItemQCImportFailure{Row: row.row, Reason: "order_no is not unique or not found in business_month"})
+				continue
+			}
+			itemID = matched
+		}
+		updated, appErr := s.UpdateSubmissionItemQC(ctx, actor, itemID, UpdateSubmissionItemQCParams{QCStatus: row.qcStatus, Reason: row.reason})
+		if appErr != nil {
+			result.Failures = append(result.Failures, SubmissionItemQCImportFailure{Row: row.row, Reason: appErr.Message})
+			continue
+		}
+		result.Updated = append(result.Updated, updated)
+	}
+	return result, nil
 }
 
 func (s *Service) VoidSubmissionItem(ctx context.Context, actor domain.RequestActor, itemID int64, params VoidSubmissionItemParams) (*domain.AssetWorkbenchSubmissionItem, *domain.AppError) {
@@ -2570,6 +3165,241 @@ func (s *Service) RepriceSubmissionItem(ctx context.Context, actor domain.Reques
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to reprice item.", err.Error())
 	}
 	return updated, nil
+}
+
+func (s *Service) UpdateSubmissionItem(ctx context.Context, actor domain.RequestActor, itemID int64, params UpdateSubmissionItemParams) (*domain.AssetWorkbenchSubmissionItem, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers or settlement roles can edit submission items.", nil)
+	}
+	before, appErr := s.loadMutableSubmissionItem(ctx, itemID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	req := CreateSubmissionItemParams{
+		OrderNo:         before.OrderNo,
+		DifficultyClass: before.DifficultyClass,
+		Finalized:       before.Finalized,
+		PageCount:       before.PageCount,
+		ItemCount:       before.ItemCount,
+	}
+	if params.OrderNo != nil {
+		req.OrderNo = strings.TrimSpace(*params.OrderNo)
+	}
+	if params.DifficultyClass != nil {
+		req.DifficultyClass = strings.TrimSpace(*params.DifficultyClass)
+	}
+	if params.Finalized != nil {
+		req.Finalized = *params.Finalized
+	}
+	if params.PageCount != nil {
+		req.PageCount = *params.PageCount
+	}
+	if req.PageCount <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_count must be greater than zero.", nil)
+	}
+	if !validWorkbenchDifficulty(req.DifficultyClass, false) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": req.DifficultyClass})
+	}
+	next, appErr := s.buildSubmissionItem(ctx, before.PayeeUserID, before.SubmissionID, before.SubmittedAt, before.BusinessMonth, &domain.AssetWorkbenchProfile{
+		UserID:     before.PayeeUserID,
+		WorkerType: before.WorkerTypeSnapshot,
+		JobGrade:   before.JobGradeSnapshot,
+	}, req, nil)
+	if appErr != nil {
+		return nil, appErr
+	}
+	next.ID = before.ID
+	next.TemplateID = before.TemplateID
+	next.TemplateNameSnapshot = before.TemplateNameSnapshot
+	next.CategorySnapshot = before.CategorySnapshot
+	next.QCStatus = before.QCStatus
+	next.SettlementStatus = before.SettlementStatus
+	next.CurrentSettlementBatchID = before.CurrentSettlementBatchID
+	next.VoidedAt = before.VoidedAt
+	next.VoidedBy = before.VoidedBy
+	next.VoidReason = before.VoidReason
+	var updated *domain.AssetWorkbenchSubmissionItem
+	reason := strings.TrimSpace(params.Reason)
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateSubmissionItemEditableFields(ctx, tx, next)
+		if err != nil {
+			return err
+		}
+		if err := s.repo.RefreshSubmissionTotals(ctx, tx, before.SubmissionID); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemUpdated, domain.AssetWorkbenchEntitySubmissionItem, &itemID, before, updated, reason)
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to edit submission item.", err.Error())
+	}
+	return updated, nil
+}
+
+func (s *Service) BatchMoveFiles(ctx context.Context, actor domain.RequestActor, params BatchMoveFilesParams) (*BatchFileMutationResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers can move submission files.", nil)
+	}
+	fileIDs := positiveUniqueInt64s(params.FileIDs)
+	if len(fileIDs) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_ids is required.", nil)
+	}
+	if params.UploadDirectoryID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_directory_id is required.", nil)
+	}
+	directory, err := s.repo.GetUploadDirectory(ctx, params.UploadDirectoryID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Upload directory not found.", "Failed to load upload directory.")
+	}
+	if directory == nil || !directory.Enabled {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_directory_id is not enabled.", map[string]interface{}{"upload_directory_id": params.UploadDirectoryID})
+	}
+	files, err := s.repo.ListSubmissionFilesByIDs(ctx, fileIDs)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission files.", err.Error())
+	}
+	byID := map[int64]*domain.AssetWorkbenchSubmissionFile{}
+	for _, file := range files {
+		byID[file.ID] = file
+	}
+	result := &BatchFileMutationResult{}
+	for _, fileID := range fileIDs {
+		file := byID[fileID]
+		if file == nil {
+			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: "file not found"})
+			continue
+		}
+		moved, appErr := s.moveSubmissionFile(ctx, actor, file, directory, strings.TrimSpace(params.Reason))
+		if appErr != nil {
+			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: appErr.Message})
+			continue
+		}
+		result.Files = append(result.Files, moved)
+	}
+	return result, nil
+}
+
+func (s *Service) BatchDeleteFiles(ctx context.Context, actor domain.RequestActor, params BatchDeleteFilesParams) (*BatchFileMutationResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers can delete submission files.", nil)
+	}
+	reason := strings.TrimSpace(params.Reason)
+	if reason == "" {
+		return nil, domain.NewAppError(domain.ErrCodeReasonRequired, "reason is required when deleting files.", nil)
+	}
+	fileIDs := positiveUniqueInt64s(params.FileIDs)
+	if len(fileIDs) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_ids is required.", nil)
+	}
+	files, err := s.repo.ListSubmissionFilesByIDs(ctx, fileIDs)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission files.", err.Error())
+	}
+	byID := map[int64]*domain.AssetWorkbenchSubmissionFile{}
+	for _, file := range files {
+		byID[file.ID] = file
+	}
+	result := &BatchFileMutationResult{}
+	for _, fileID := range fileIDs {
+		file := byID[fileID]
+		if file == nil {
+			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: "file not found"})
+			continue
+		}
+		if appErr := s.deleteSubmissionFile(ctx, actor, file, reason); appErr != nil {
+			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: appErr.Message})
+			continue
+		}
+		result.Deleted = append(result.Deleted, fileID)
+	}
+	return result, nil
+}
+
+func (s *Service) moveSubmissionFile(ctx context.Context, actor domain.RequestActor, file *domain.AssetWorkbenchSubmissionFile, directory *domain.AssetWorkbenchUploadDirectory, reason string) (*domain.AssetWorkbenchSubmissionFile, *domain.AppError) {
+	if file == nil || directory == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file and upload directory are required.", nil)
+	}
+	if s.oss == nil || !s.oss.Enabled() {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "OSS direct move is not enabled.", nil)
+	}
+	oldKey := strings.TrimSpace(file.ObjectKey)
+	if oldKey == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "submission file object key is empty.", map[string]interface{}{"file_id": file.ID})
+	}
+	next := *file
+	directoryID := directory.ID
+	next.UploadDirectoryID = &directoryID
+	next.UploadDirectoryName = directory.Name
+	next.UploadDirectoryPrefix = directory.OSSPrefix
+	next.ObjectKey = s.buildMovedFileObjectKey(s.nowFn().UTC(), file, directory)
+	if strings.TrimSpace(next.PreviewKey) == oldKey {
+		next.PreviewKey = next.ObjectKey
+	}
+	if next.ObjectKey == oldKey {
+		return &next, nil
+	}
+	if err := s.oss.CopyObject(ctx, oldKey, next.ObjectKey); err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to copy file to target upload directory.", err.Error())
+	}
+	var updated *domain.AssetWorkbenchSubmissionFile
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateSubmissionFileLocation(ctx, tx, &next)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileMoved, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, updated, reason)
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to move submission file.", err.Error())
+	}
+	_ = s.oss.DeleteObject(ctx, oldKey)
+	return updated, nil
+}
+
+func (s *Service) deleteSubmissionFile(ctx context.Context, actor domain.RequestActor, file *domain.AssetWorkbenchSubmissionFile, reason string) *domain.AppError {
+	if file == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", nil)
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.repo.DeleteSubmissionFile(ctx, tx, file.ID); err != nil {
+			return err
+		}
+		if err := s.repo.RefreshSubmissionTotals(ctx, tx, file.SubmissionID); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileDeleted, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, nil, reason)
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return appErr
+		}
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to delete submission file.", err.Error())
+	}
+	if s.oss != nil && s.oss.Enabled() {
+		objectKey := strings.TrimSpace(file.ObjectKey)
+		if objectKey != "" {
+			_ = s.oss.DeleteObject(ctx, objectKey)
+		}
+		previewKey := strings.TrimSpace(file.PreviewKey)
+		if previewKey != "" && previewKey != objectKey {
+			_ = s.oss.DeleteObject(ctx, previewKey)
+		}
+	}
+	return nil
 }
 
 func (s *Service) GetFilePreview(ctx context.Context, actor domain.RequestActor, fileID int64) (*FilePreviewMeta, *domain.AppError) {
@@ -2934,6 +3764,36 @@ func (s *Service) PreviewSettlement(ctx context.Context, actor domain.RequestAct
 		return nil, appErr
 	}
 	return preview, nil
+}
+
+func (s *Service) SettlementReport(ctx context.Context, actor domain.RequestActor, businessMonth string) (*SettlementReport, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can view settlement reports.", nil)
+	}
+	businessMonth = strings.TrimSpace(businessMonth)
+	if businessMonth == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month is required.", nil)
+	}
+	items, appErr := s.loadSettleableItems(ctx, businessMonth)
+	if appErr != nil {
+		return nil, appErr
+	}
+	supplements, appErr := s.loadSettleableSupplements(ctx, businessMonth)
+	if appErr != nil {
+		return nil, appErr
+	}
+	errorRecords, err := s.repo.ListErrorRecordsByMonth(ctx, businessMonth)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", err.Error())
+	}
+	report, appErr := s.buildSettlementReport(ctx, businessMonth, items, errorRecords, supplements)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return report, nil
 }
 
 func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.RequestActor, businessMonth string) (*domain.AssetWorkbenchSettlementBatch, *domain.AppError) {
@@ -3478,6 +4338,69 @@ func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.R
 	return created, nil
 }
 
+func (s *Service) ImportSettlementSupplementsExcel(ctx context.Context, actor domain.RequestActor, businessMonth string, reader io.Reader) (*SettlementSupplementImportResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can import settlement supplements.", nil)
+	}
+	rows, appErr := parseSettlementSupplementExcel(businessMonth, reader)
+	if appErr != nil {
+		return nil, appErr
+	}
+	result := &SettlementSupplementImportResult{
+		Created:  []*domain.AssetWorkbenchSettlementSupplement{},
+		Failures: []SettlementSupplementImportFailure{},
+	}
+	for _, row := range rows {
+		created, appErr := s.CreateSettlementSupplement(ctx, actor, row.params)
+		if appErr != nil {
+			result.Failures = append(result.Failures, SettlementSupplementImportFailure{Row: row.row, Reason: appErr.Message})
+			continue
+		}
+		result.Created = append(result.Created, created)
+	}
+	return result, nil
+}
+
+func (s *Service) VoidSettlementSupplement(ctx context.Context, actor domain.RequestActor, supplementID int64, reason string) (*domain.AssetWorkbenchSettlementSupplement, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can delete settlement supplements.", nil)
+	}
+	var updated *domain.AssetWorkbenchSettlementSupplement
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		before, err := s.repo.GetSettlementSupplementForUpdate(ctx, tx, supplementID)
+		if err != nil {
+			return err
+		}
+		switch before.Status {
+		case domain.AssetWorkbenchSupplementStatusInBatch, domain.AssetWorkbenchSupplementStatusSettled, domain.AssetWorkbenchSupplementStatusVoided:
+			return domain.NewAppError(domain.ErrCodeConflict, "Only draft or approved supplements can be deleted.", map[string]interface{}{
+				"supplement_id": supplementID,
+				"status":        before.Status,
+			})
+		}
+		updated, err = s.repo.VoidSettlementSupplement(ctx, tx, supplementID)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSupplementVoided, domain.AssetWorkbenchEntitySupplement, &updated.ID, before, updated, reason)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Settlement supplement not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to delete settlement supplement.", err.Error())
+	}
+	return updated, nil
+}
+
 func (s *Service) ListEvents(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchEventFilter) ([]*domain.AssetWorkbenchEvent, int64, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, 0, err
@@ -3559,7 +4482,80 @@ func (s *Service) DeleteSavedView(ctx context.Context, actor domain.RequestActor
 	return nil
 }
 
-func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, limit int) (*SystemSearchResult, *domain.AppError) {
+func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor, params OverviewSearchParams) (*OverviewSearchResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers or settlement roles can search the asset workbench overview.", nil)
+	}
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := params.PageSize
+	if pageSize <= 0 {
+		pageSize = 30
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	filter := repo.AssetWorkbenchOverviewSearchFilter{
+		Keyword:     strings.TrimSpace(params.Query),
+		Creator:     strings.TrimSpace(params.Creator),
+		CreatedFrom: params.CreatedFrom,
+		CreatedTo:   params.CreatedTo,
+		Page:        page,
+		PageSize:    pageSize,
+	}
+	rows, total, err := s.repo.SearchOverviewRows(ctx, filter)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to search asset workbench overview.", err.Error())
+	}
+	items := append([]*domain.AssetWorkbenchOverviewRow{}, rows...)
+	if actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) && s.systemAssets != nil {
+		systemResult, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
+			Keyword:        filter.Keyword,
+			CreatedFrom:    params.CreatedFrom,
+			CreatedTo:      params.CreatedTo,
+			Page:           page,
+			Size:           pageSize,
+			Source:         domain.AssetResourceSourceSystem,
+			UsableState:    domain.AssetUsableStateFilterAll,
+			FormatCategory: domain.AssetFormatCategoryAll,
+			IsArchived:     domain.AssetArchiveFilterFalse,
+			TaskStatus:     domain.AssetTaskStatusFilterAll,
+		})
+		if appErr != nil {
+			return nil, appErr
+		}
+		if systemResult != nil {
+			total += systemResult.Total
+			for _, asset := range systemResult.Items {
+				row := overviewRowFromSystemAsset(asset)
+				if row == nil || !overviewSystemAssetMatchesCreator(row, filter.Creator) {
+					continue
+				}
+				items = append(items, row)
+			}
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			if items[i].Source == items[j].Source {
+				return items[i].ID > items[j].ID
+			}
+			return items[i].Source < items[j].Source
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	if len(items) > pageSize {
+		items = items[:pageSize]
+	}
+	return &OverviewSearchResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
+}
+
+func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int) (*SystemSearchResult, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can search system assets from workbench.", nil)
 	}
@@ -3567,13 +4563,16 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset searcher is not configured.", nil)
 	}
 	query = strings.TrimSpace(query)
-	if limit <= 0 || limit > 100 {
-		limit = 50
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 50
 	}
 	result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
 		Keyword:        query,
-		Page:           1,
-		Size:           limit,
+		Page:           page,
+		Size:           pageSize,
 		Source:         domain.AssetResourceSourceSystem,
 		UsableState:    domain.AssetUsableStateFilterAll,
 		FormatCategory: domain.AssetFormatCategoryAll,
@@ -4328,7 +5327,7 @@ func marshalEventJSON(value interface{}) json.RawMessage {
 	return raw
 }
 
-func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, profile *domain.AssetWorkbenchProfile, reason string) (*domain.AssetWorkbenchProfile, *domain.AppError) {
+func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, profile *domain.AssetWorkbenchProfile, reason string, appendGradePeriod bool) (*domain.AssetWorkbenchProfile, *domain.AppError) {
 	var saved *domain.AssetWorkbenchProfile
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		var err error
@@ -4336,7 +5335,7 @@ func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, 
 		if err != nil {
 			return err
 		}
-		if profile.WorkerType != "" || profile.JobGrade != "" {
+		if appendGradePeriod && (profile.WorkerType != "" || profile.JobGrade != "") {
 			_, err = s.repo.AppendGradePeriod(ctx, tx, &domain.AssetWorkbenchGradePeriod{
 				ProfileID:     saved.ID,
 				UserID:        saved.UserID,
@@ -4354,7 +5353,50 @@ func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, 
 	}); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to save asset workbench profile.", err.Error())
 	}
+	s.notifyProfileCompletionRequired(ctx, saved)
 	return saved, nil
+}
+
+func (s *Service) notifyProfileCompletionRequired(ctx context.Context, profile *domain.AssetWorkbenchProfile) {
+	if s.notifications == nil || profile == nil || profile.UserID <= 0 || profile.PIICompleted {
+		return
+	}
+	payload := mustJSON(map[string]interface{}{
+		"source":         "asset_workbench",
+		"reason":         "missing_pii",
+		"action":         "complete_profile",
+		"profile_id":     profile.ID,
+		"user_id":        profile.UserID,
+		"missing_fields": missingProfileFields(profile),
+	})
+	_, _, _ = s.notifications.CreateDedupedNotification(
+		ctx,
+		profile.UserID,
+		domain.NotificationTypeSystemBroadcast,
+		payload,
+		"asset_workbench_profile_completion",
+		fmt.Sprintf("asset_workbench_profile_completion:%d", profile.UserID),
+	)
+}
+
+func missingProfileFields(profile *domain.AssetWorkbenchProfile) []string {
+	if profile == nil {
+		return nil
+	}
+	missing := []string{}
+	if strings.TrimSpace(profile.RealName) == "" {
+		missing = append(missing, "real_name")
+	}
+	if profile.Phone == nil || strings.TrimSpace(*profile.Phone) == "" {
+		missing = append(missing, "phone")
+	}
+	if profile.IDCard == nil || strings.TrimSpace(*profile.IDCard) == "" {
+		missing = append(missing, "id_card")
+	}
+	if strings.TrimSpace(profile.AlipayAccount) == "" {
+		missing = append(missing, "alipay_account")
+	}
+	return missing
 }
 
 func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfileParams) (*domain.AssetWorkbenchProfile, *domain.AppError) {
@@ -4366,12 +5408,16 @@ func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfilePa
 	if workerType != "" && workerType != domain.AssetWorkbenchWorkerTypeFulltime && workerType != domain.AssetWorkbenchWorkerTypeParttime {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type must be fulltime or parttime.", nil)
 	}
+	jobGrade := strings.TrimSpace(params.JobGrade)
+	if jobGrade != "" && !validWorkbenchJobGrade(workerType, jobGrade, false) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
+	}
 	createdBy := actorID
 	updatedBy := actorID
 	profile := &domain.AssetWorkbenchProfile{
 		UserID:        userID,
 		WorkerType:    workerType,
-		JobGrade:      strings.TrimSpace(params.JobGrade),
+		JobGrade:      jobGrade,
 		RealName:      strings.TrimSpace(params.RealName),
 		Phone:         stringPtr(strings.TrimSpace(params.Phone)),
 		Province:      strings.TrimSpace(params.Province),
@@ -4382,9 +5428,12 @@ func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfilePa
 		OnboardedAt:   params.OnboardedAt,
 		GradeHidden:   params.GradeHidden,
 		Status:        status,
-		PIICompleted:  strings.TrimSpace(params.RealName) != "" && strings.TrimSpace(params.Phone) != "" && strings.TrimSpace(params.IDCard) != "",
-		CreatedBy:     &createdBy,
-		UpdatedBy:     &updatedBy,
+		PIICompleted: strings.TrimSpace(params.RealName) != "" &&
+			strings.TrimSpace(params.Phone) != "" &&
+			strings.TrimSpace(params.IDCard) != "" &&
+			strings.TrimSpace(params.AlipayAccount) != "",
+		CreatedBy: &createdBy,
+		UpdatedBy: &updatedBy,
 	}
 	return profile, nil
 }
@@ -4538,6 +5587,231 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 	return &SettlementPreview{BusinessMonth: businessMonth, Rows: rows, Totals: total, PayrollRows: payrollRows}, nil
 }
 
+func (s *Service) buildSettlementReport(ctx context.Context, businessMonth string, items []*domain.AssetWorkbenchSubmissionItem, errorRecords []*domain.AssetWorkbenchErrorRecord, supplements []*domain.AssetWorkbenchSettlementSupplement) (*SettlementReport, *domain.AppError) {
+	rowsByKey := map[string]*SettlementReportRow{}
+	metricsByKey := map[string]map[string]*SettlementReportDifficultyMetric{}
+	orderNosByKey := map[string]map[string]struct{}{}
+	orderNosByKeyDifficulty := map[string]map[string]map[string]struct{}{}
+	allDifficulties := map[string]struct{}{}
+	totalOrderNos := map[string]struct{}{}
+	totalMetrics := map[string]*SettlementReportDifficultyMetric{}
+	totalOrderNosByDifficulty := map[string]map[string]struct{}{}
+	profiles := map[int64]*domain.AssetWorkbenchProfile{}
+	deductionCache := map[string]deductionRuleCacheEntry{}
+
+	ensureRow := func(payeeID int64, rowType string) *SettlementReportRow {
+		key := settlementReportRowKey(payeeID, rowType)
+		row := rowsByKey[key]
+		if row == nil {
+			row = &SettlementReportRow{
+				PayeeUserID:   payeeID,
+				BusinessMonth: businessMonth,
+				RowType:       rowType,
+			}
+			rowsByKey[key] = row
+		}
+		return row
+	}
+	ensureMetric := func(key string, difficultyClass string) *SettlementReportDifficultyMetric {
+		byDifficulty := metricsByKey[key]
+		if byDifficulty == nil {
+			byDifficulty = map[string]*SettlementReportDifficultyMetric{}
+			metricsByKey[key] = byDifficulty
+		}
+		metric := byDifficulty[difficultyClass]
+		if metric == nil {
+			metric = &SettlementReportDifficultyMetric{DifficultyClass: difficultyClass}
+			byDifficulty[difficultyClass] = metric
+		}
+		allDifficulties[difficultyClass] = struct{}{}
+		return metric
+	}
+	ensureTotalMetric := func(difficultyClass string) *SettlementReportDifficultyMetric {
+		metric := totalMetrics[difficultyClass]
+		if metric == nil {
+			metric = &SettlementReportDifficultyMetric{DifficultyClass: difficultyClass}
+			totalMetrics[difficultyClass] = metric
+		}
+		allDifficulties[difficultyClass] = struct{}{}
+		return metric
+	}
+	addOrderNo := func(bucket map[string]struct{}, orderNo string) {
+		orderNo = strings.TrimSpace(orderNo)
+		if orderNo == "" {
+			return
+		}
+		bucket[orderNo] = struct{}{}
+	}
+	addOrderNoByKey := func(key string, orderNo string) {
+		bucket := orderNosByKey[key]
+		if bucket == nil {
+			bucket = map[string]struct{}{}
+			orderNosByKey[key] = bucket
+		}
+		addOrderNo(bucket, orderNo)
+		addOrderNo(totalOrderNos, orderNo)
+	}
+	addOrderNoByDifficulty := func(key string, difficultyClass string, orderNo string) {
+		orderNo = strings.TrimSpace(orderNo)
+		if orderNo == "" {
+			return
+		}
+		byDifficulty := orderNosByKeyDifficulty[key]
+		if byDifficulty == nil {
+			byDifficulty = map[string]map[string]struct{}{}
+			orderNosByKeyDifficulty[key] = byDifficulty
+		}
+		bucket := byDifficulty[difficultyClass]
+		if bucket == nil {
+			bucket = map[string]struct{}{}
+			byDifficulty[difficultyClass] = bucket
+		}
+		bucket[orderNo] = struct{}{}
+		totalBucket := totalOrderNosByDifficulty[difficultyClass]
+		if totalBucket == nil {
+			totalBucket = map[string]struct{}{}
+			totalOrderNosByDifficulty[difficultyClass] = totalBucket
+		}
+		totalBucket[orderNo] = struct{}{}
+	}
+
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		rowType := domain.AssetWorkbenchPayrollRowTypeNormalPiecework
+		key := settlementReportRowKey(item.PayeeUserID, rowType)
+		row := ensureRow(item.PayeeUserID, rowType)
+		difficultyClass := settlementReportDifficultyClass(item.DifficultyClass)
+		metric := ensureMetric(key, difficultyClass)
+		totalMetric := ensureTotalMetric(difficultyClass)
+		row.ItemCount++
+		row.PageCount += item.PageCount
+		row.GrossAmount += item.GrossAmount
+		if strings.TrimSpace(row.JobGrade) == "" {
+			row.JobGrade = strings.TrimSpace(item.JobGradeSnapshot)
+		}
+		setSettlementReportCreatedDate(row, item.SubmittedAt, s.loc)
+		metric.ItemCount++
+		metric.PageCount += item.PageCount
+		metric.GrossAmount += item.GrossAmount
+		totalMetric.ItemCount++
+		totalMetric.PageCount += item.PageCount
+		totalMetric.GrossAmount += item.GrossAmount
+		addOrderNoByKey(key, item.OrderNo)
+		addOrderNoByDifficulty(key, difficultyClass, item.OrderNo)
+		errorCount := matchedErrorCount(errorRecords, item)
+		row.ErrorCount += errorCount
+		metric.ErrorCount += errorCount
+		totalMetric.ErrorCount += errorCount
+		if errorCount > 0 {
+			deduction, _, appErr := s.calculateDeductionCached(ctx, item, errorCount, deductionCache)
+			if appErr != nil {
+				return nil, appErr
+			}
+			row.DeductionAmount += deduction
+			metric.DeductionAmount += deduction
+			totalMetric.DeductionAmount += deduction
+		}
+	}
+
+	welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, items)
+	if appErr != nil {
+		return nil, appErr
+	}
+	for _, line := range welfareLines {
+		row := ensureRow(line.PayeeUserID, domain.AssetWorkbenchPayrollRowTypeNormalPiecework)
+		row.WelfareAmount += line.Amount
+	}
+
+	for _, supplement := range supplements {
+		if supplement == nil {
+			continue
+		}
+		rowType := domain.AssetWorkbenchPayrollRowTypeSupplementPiecework
+		key := settlementReportRowKey(supplement.PayeeUserID, rowType)
+		row := ensureRow(supplement.PayeeUserID, rowType)
+		difficultyClass := settlementReportDifficultyClass(supplement.DifficultyClass)
+		metric := ensureMetric(key, difficultyClass)
+		totalMetric := ensureTotalMetric(difficultyClass)
+		row.ItemCount++
+		row.PageCount += supplement.PageCount
+		row.SupplementAmount += supplement.GrossAmount
+		setSettlementReportCreatedDate(row, supplement.CreatedAt, s.loc)
+		metric.ItemCount++
+		metric.PageCount += supplement.PageCount
+		metric.GrossAmount += supplement.GrossAmount
+		totalMetric.ItemCount++
+		totalMetric.PageCount += supplement.PageCount
+		totalMetric.GrossAmount += supplement.GrossAmount
+		addOrderNoByKey(key, supplement.OrderNo)
+		addOrderNoByDifficulty(key, difficultyClass, supplement.OrderNo)
+	}
+
+	difficultyClasses := settlementReportDifficultyClasses(allDifficulties)
+	rows := make([]SettlementReportRow, 0, len(rowsByKey))
+	total := SettlementReportRow{
+		BusinessMonth: businessMonth,
+		RowType:       "total",
+		CreatorName:   "Total",
+	}
+	for key, row := range rowsByKey {
+		row.OrderCount = len(orderNosByKey[key])
+		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount
+		profile, appErr := s.settlementReportProfile(ctx, row.PayeeUserID, profiles)
+		if appErr != nil {
+			return nil, appErr
+		}
+		row.CreatorName = settlementReportCreatorName(row.PayeeUserID, profile)
+		if strings.TrimSpace(row.JobGrade) == "" && profile != nil {
+			row.JobGrade = strings.TrimSpace(profile.JobGrade)
+		}
+		total.ItemCount += row.ItemCount
+		total.PageCount += row.PageCount
+		total.GrossAmount += row.GrossAmount
+		total.ErrorCount += row.ErrorCount
+		total.DeductionAmount += row.DeductionAmount
+		total.WelfareAmount += row.WelfareAmount
+		total.SupplementAmount += row.SupplementAmount
+		total.NetAmount += row.NetAmount
+		rows = append(rows, *row)
+	}
+	total.OrderCount = len(totalOrderNos)
+	total.ErrorRate = safeReportRatio(total.ErrorCount, total.PageCount)
+	total.PageCountShare = boolReportShare(total.PageCount > 0)
+	total.ErrorCountShare = boolReportShare(total.ErrorCount > 0)
+	total.MonthAmountShare = boolReportShare(total.NetAmount != 0)
+	total.DifficultyMetrics = materializeSettlementReportMetrics(totalMetrics, totalOrderNosByDifficulty, difficultyClasses, total.PageCount, total.ErrorCount, total.PageCount)
+
+	for index := range rows {
+		key := settlementReportRowKey(rows[index].PayeeUserID, rows[index].RowType)
+		rows[index].ErrorRate = safeReportRatio(rows[index].ErrorCount, rows[index].PageCount)
+		rows[index].PageCountShare = safeReportRatio(rows[index].PageCount, total.PageCount)
+		rows[index].ErrorCountShare = safeReportRatio(rows[index].ErrorCount, total.ErrorCount)
+		rows[index].MonthAmountShare = safeReportAmountRatio(rows[index].NetAmount, total.NetAmount)
+		rows[index].DifficultyMetrics = materializeSettlementReportMetrics(metricsByKey[key], orderNosByKeyDifficulty[key], difficultyClasses, rows[index].PageCount, rows[index].ErrorCount, total.PageCount)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].RowType != rows[j].RowType {
+			return settlementReportRowRank(rows[i].RowType) < settlementReportRowRank(rows[j].RowType)
+		}
+		if rows[i].CreatorName != rows[j].CreatorName {
+			return rows[i].CreatorName < rows[j].CreatorName
+		}
+		return rows[i].PayeeUserID < rows[j].PayeeUserID
+	})
+
+	return &SettlementReport{
+		BusinessMonth:      businessMonth,
+		DifficultyClasses:  difficultyClasses,
+		Rows:               rows,
+		Totals:             total,
+		GeneratedAt:        s.nowFn().In(s.loc),
+		OrderCountPolicy:   "distinct_non_empty_order_no",
+		SettlementDataMode: "unconfirmed_settleable_items_and_approved_supplements",
+	}, nil
+}
+
 func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.AssetWorkbenchSettlementItem) []SettlementPayrollRow {
 	normalRowsByPayee := map[int64]*SettlementPayrollRow{}
 	supplementRowsByPayee := map[int64]*SettlementPayrollRow{}
@@ -4634,6 +5908,137 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 		rows = append(rows, *normal, *supplement)
 	}
 	return rows
+}
+
+func (s *Service) settlementReportProfile(ctx context.Context, payeeUserID int64, cache map[int64]*domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, *domain.AppError) {
+	if profile, ok := cache[payeeUserID]; ok {
+		return profile, nil
+	}
+	profile, err := s.repo.GetProfileByUserID(ctx, payeeUserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			cache[payeeUserID] = nil
+			return nil, nil
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load settlement report profile.", err.Error())
+	}
+	cache[payeeUserID] = profile
+	return profile, nil
+}
+
+func settlementReportRowKey(payeeID int64, rowType string) string {
+	return fmt.Sprintf("%d:%s", payeeID, strings.TrimSpace(rowType))
+}
+
+func settlementReportCreatorName(payeeID int64, profile *domain.AssetWorkbenchProfile) string {
+	if profile != nil && strings.TrimSpace(profile.RealName) != "" {
+		return strings.TrimSpace(profile.RealName)
+	}
+	return fmt.Sprintf("User %d", payeeID)
+}
+
+func settlementReportDifficultyClass(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unclassified"
+	}
+	return value
+}
+
+func settlementReportDifficultyClasses(values map[string]struct{}) []string {
+	classes := make([]string, 0, len(values))
+	for value := range values {
+		classes = append(classes, value)
+	}
+	sort.Slice(classes, func(i, j int) bool {
+		leftRank := settlementReportDifficultyRank(classes[i])
+		rightRank := settlementReportDifficultyRank(classes[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return classes[i] < classes[j]
+	})
+	return classes
+}
+
+func settlementReportDifficultyRank(value string) int {
+	switch strings.TrimSpace(value) {
+	case "A":
+		return 10
+	case "A+小夜灯":
+		return 20
+	case "B":
+		return 30
+	case "C":
+		return 40
+	case "unclassified":
+		return 10000
+	default:
+		return 1000
+	}
+}
+
+func settlementReportRowRank(rowType string) int {
+	switch rowType {
+	case domain.AssetWorkbenchPayrollRowTypeNormalPiecework:
+		return 10
+	case domain.AssetWorkbenchPayrollRowTypeSupplementPiecework:
+		return 20
+	default:
+		return 100
+	}
+}
+
+func setSettlementReportCreatedDate(row *SettlementReportRow, value time.Time, loc *time.Location) {
+	if row == nil || value.IsZero() {
+		return
+	}
+	if loc == nil {
+		loc = time.UTC
+	}
+	date := value.In(loc).Format("2006-01-02")
+	if row.CreatedDate == "" || date < row.CreatedDate {
+		row.CreatedDate = date
+	}
+}
+
+func materializeSettlementReportMetrics(metrics map[string]*SettlementReportDifficultyMetric, orderNos map[string]map[string]struct{}, classes []string, rowPageCount int, rowErrorCount int, totalPageCount int) []SettlementReportDifficultyMetric {
+	rows := make([]SettlementReportDifficultyMetric, 0, len(metrics))
+	for _, difficultyClass := range classes {
+		metric := metrics[difficultyClass]
+		if metric == nil {
+			continue
+		}
+		row := *metric
+		row.OrderCount = len(orderNos[difficultyClass])
+		row.ErrorRate = safeReportRatio(row.ErrorCount, row.PageCount)
+		row.PageCountShare = safeReportRatio(row.PageCount, rowPageCount)
+		row.ErrorCountShare = safeReportRatio(row.ErrorCount, rowErrorCount)
+		row.MonthPageCountShare = safeReportRatio(row.PageCount, totalPageCount)
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func safeReportRatio(numerator int, denominator int) float64 {
+	if denominator == 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
+}
+
+func safeReportAmountRatio(numerator float64, denominator float64) float64 {
+	if denominator == 0 {
+		return 0
+	}
+	return numerator / denominator
+}
+
+func boolReportShare(enabled bool) float64 {
+	if enabled {
+		return 1
+	}
+	return 0
 }
 
 func (s *Service) buildSettlementSupplementDuplicateHint(ctx context.Context, supplement *domain.AssetWorkbenchSettlementSupplement) (json.RawMessage, *domain.AppError) {
@@ -4763,22 +6168,49 @@ func (s *Service) buildWelfareLines(ctx context.Context, businessMonth string, i
 }
 
 func (s *Service) calculateDeduction(ctx context.Context, item *domain.AssetWorkbenchSubmissionItem, errorCount int) (float64, json.RawMessage, *domain.AppError) {
+	return s.calculateDeductionCached(ctx, item, errorCount, nil)
+}
+
+type deductionRuleCacheEntry struct {
+	rule    *domain.AssetWorkbenchDeductionRule
+	missing bool
+}
+
+func (s *Service) calculateDeductionCached(ctx context.Context, item *domain.AssetWorkbenchSubmissionItem, errorCount int, cache map[string]deductionRuleCacheEntry) (float64, json.RawMessage, *domain.AppError) {
 	if errorCount <= 0 {
 		return 0, nil, nil
 	}
-	rule, err := s.repo.FindActiveDeductionRule(ctx, item.WorkerTypeSnapshot, item.JobGradeSnapshot, item.DifficultyClass, item.SubmittedAt.In(s.loc))
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, mustJSON(map[string]interface{}{
-				"status":           "deduction_rule_missing",
-				"worker_type":      item.WorkerTypeSnapshot,
-				"job_grade":        item.JobGradeSnapshot,
-				"difficulty_class": item.DifficultyClass,
-				"error_count":      errorCount,
-			}), nil
-		}
-		return 0, nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to match deduction rule.", err.Error())
+	asOf := item.SubmittedAt.In(s.loc)
+	var entry deductionRuleCacheEntry
+	var ok bool
+	if cache != nil {
+		entry, ok = cache[deductionRuleCacheKey(item, asOf)]
 	}
+	if !ok {
+		rule, err := s.repo.FindActiveDeductionRule(ctx, item.WorkerTypeSnapshot, item.JobGradeSnapshot, item.DifficultyClass, asOf)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				entry = deductionRuleCacheEntry{missing: true}
+			} else {
+				return 0, nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to match deduction rule.", err.Error())
+			}
+		} else {
+			entry = deductionRuleCacheEntry{rule: rule}
+		}
+		if cache != nil {
+			cache[deductionRuleCacheKey(item, asOf)] = entry
+		}
+	}
+	if entry.missing || entry.rule == nil {
+		return 0, mustJSON(map[string]interface{}{
+			"status":           "deduction_rule_missing",
+			"worker_type":      item.WorkerTypeSnapshot,
+			"job_grade":        item.JobGradeSnapshot,
+			"difficulty_class": item.DifficultyClass,
+			"error_count":      errorCount,
+		}), nil
+	}
+	rule := entry.rule
 	amount := rule.DeductionAmount * float64(errorCount)
 	return amount, mustJSON(map[string]interface{}{
 		"status":            "matched",
@@ -4790,6 +6222,18 @@ func (s *Service) calculateDeduction(ctx context.Context, item *domain.AssetWork
 		"error_count":       errorCount,
 		"calculated_at":     s.nowFn().UTC().Format(time.RFC3339),
 	}), nil
+}
+
+func deductionRuleCacheKey(item *domain.AssetWorkbenchSubmissionItem, asOf time.Time) string {
+	if item == nil {
+		return "::::" + asOf.Format("2006-01-02")
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(item.WorkerTypeSnapshot),
+		strings.TrimSpace(item.JobGradeSnapshot),
+		strings.TrimSpace(item.DifficultyClass),
+		asOf.Format("2006-01-02"),
+	}, "\x1f")
 }
 
 func matchedErrorCount(records []*domain.AssetWorkbenchErrorRecord, item *domain.AssetWorkbenchSubmissionItem) int {
@@ -4891,6 +6335,26 @@ func (s *Service) buildObjectKey(now time.Time, sessionID, filename string, dire
 	return fmt.Sprintf("%s/uploads/%s/%s/%s/%s", base, directory.OSSPrefix, now.Format("2006/01"), sessionID, clean)
 }
 
+func (s *Service) buildMovedFileObjectKey(now time.Time, file *domain.AssetWorkbenchSubmissionFile, directory *domain.AssetWorkbenchUploadDirectory) string {
+	filename := "upload.bin"
+	if file != nil {
+		filename = firstNonEmpty(file.OriginalFilename, filepath.Base(file.ObjectKey))
+	}
+	clean := strings.TrimSpace(filepath.Base(filename))
+	if clean == "." || clean == string(filepath.Separator) || clean == "" {
+		clean = "upload.bin"
+	}
+	base := strings.Trim(s.cfg.OSSPrefix, "/")
+	prefix := ""
+	if directory != nil {
+		prefix = strings.Trim(directory.OSSPrefix, "/")
+	}
+	if prefix == "" {
+		return fmt.Sprintf("%s/uploads/%s/moved/%s-%s", base, now.Format("2006/01"), uuid.NewString(), clean)
+	}
+	return fmt.Sprintf("%s/uploads/%s/%s/moved/%s-%s", base, prefix, now.Format("2006/01"), uuid.NewString(), clean)
+}
+
 func normalizeUploadDirectoryPrefix(raw string) (string, *domain.AppError) {
 	value := strings.Trim(strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/")), "/")
 	if value == "" {
@@ -4928,6 +6392,68 @@ func (s *Service) systemDownloadSnapshot(ctx context.Context, assetID int64) (*d
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset download info is empty.", nil)
 	}
 	return info, nil
+}
+
+func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWorkbenchOverviewRow {
+	if asset == nil {
+		return nil
+	}
+	title := firstNonEmpty(asset.ProductName, asset.OriginalFilename, asset.FileName, asset.TaskNo, fmt.Sprintf("素材 %d", asset.ID))
+	primaryCode := firstNonEmpty(asset.AssetNo, asset.ResourceID, fmt.Sprintf("%d", asset.ID))
+	secondaryCode := firstNonEmpty(asset.ScopeSKUCode, asset.SKUCode, asset.PrimarySKUCode)
+	creatorID := asset.CreatedBy
+	creatorName := firstNonEmpty(asset.CreatedByName, asset.CreatedByUsername, asset.TaskCreatorName, asset.TaskCreatorUsername)
+	if creatorID <= 0 {
+		creatorID = asset.TaskCreatorID
+	}
+	if creatorName == "" && creatorID > 0 {
+		creatorName = fmt.Sprintf("用户 %d", creatorID)
+	}
+	status := strings.TrimSpace(string(asset.UsableState))
+	if status == "" {
+		status = strings.TrimSpace(string(asset.TaskStatus))
+	}
+	return &domain.AssetWorkbenchOverviewRow{
+		Source:        "system_asset",
+		ID:            asset.ID,
+		Title:         title,
+		PrimaryCode:   primaryCode,
+		SecondaryCode: secondaryCode,
+		OrderNo:       asset.TaskNo,
+		CreatorUserID: creatorID,
+		CreatorName:   creatorName,
+		Status:        status,
+		CreatedAt:     asset.CreatedAt,
+		UpdatedAt:     asset.UpdatedAt,
+		RoutePath:     fmt.Sprintf("/materials?asset_id=%d", asset.ID),
+		Meta: mustJSON(map[string]interface{}{
+			"asset_no":            asset.AssetNo,
+			"resource_id":         asset.ResourceID,
+			"task_no":             asset.TaskNo,
+			"product_name":        asset.ProductName,
+			"file_name":           asset.FileName,
+			"original_filename":   asset.OriginalFilename,
+			"mime_type":           asset.MimeType,
+			"scope_sku_code":      asset.ScopeSKUCode,
+			"sku_code":            asset.SKUCode,
+			"primary_sku_code":    asset.PrimarySKUCode,
+			"preview_available":   asset.PreviewAvailable,
+			"task_creator_name":   asset.TaskCreatorName,
+			"created_by_name":     asset.CreatedByName,
+			"created_by_username": asset.CreatedByUsername,
+		}),
+	}
+}
+
+func overviewSystemAssetMatchesCreator(row *domain.AssetWorkbenchOverviewRow, creator string) bool {
+	creator = strings.TrimSpace(strings.ToLower(creator))
+	if creator == "" {
+		return true
+	}
+	if row == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(row.CreatorName), creator)
 }
 
 func (s *Service) resolveDownloadableClientMaterial(ctx context.Context, actor domain.RequestActor, materialID int64) (*domain.AssetWorkbenchClientMaterial, *domain.AppError) {
@@ -4977,6 +6503,12 @@ func normalizePriceMatrix(actorID int64, params CreatePriceMatrixParams) (*domai
 	if workerType == "" || jobGrade == "" || difficulty == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type, job_grade and difficulty_class are required.", nil)
 	}
+	if !validWorkbenchJobGrade(workerType, jobGrade, true) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
+	}
+	if !validWorkbenchDifficulty(difficulty, false) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
+	}
 	if params.UnitPrice < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "unit_price must be non-negative.", nil)
 	}
@@ -5006,6 +6538,12 @@ func normalizeDeductionRule(actorID int64, params CreateDeductionRuleParams) (*d
 	difficulty := strings.TrimSpace(params.DifficultyClass)
 	if workerType == "" || jobGrade == "" || difficulty == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type, job_grade and difficulty_class are required.", nil)
+	}
+	if !validWorkbenchJobGrade(workerType, jobGrade, true) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
+	}
+	if !validWorkbenchDifficulty(difficulty, true) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
 	}
 	if params.DeductionAmount < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "deduction_amount must be non-negative.", nil)
@@ -5048,10 +6586,15 @@ func normalizeWelfareRule(actorID int64, params CreateWelfareRuleParams) (*domai
 	if ruleType == "" {
 		ruleType = "manual"
 	}
+	workerType := normalizeWorkerType(defaultAll(params.WorkerType))
+	jobGrade := strings.TrimSpace(defaultAll(params.JobGrade))
+	if !validWorkbenchJobGrade(workerType, jobGrade, true) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
+	}
 	return &domain.AssetWorkbenchWelfareRule{
 		RuleName:      ruleName,
-		WorkerType:    normalizeWorkerType(defaultAll(params.WorkerType)),
-		JobGrade:      strings.TrimSpace(defaultAll(params.JobGrade)),
+		WorkerType:    workerType,
+		JobGrade:      jobGrade,
 		RuleType:      ruleType,
 		Amount:        params.Amount,
 		Config:        normalizeJSON(params.Config),
@@ -5091,6 +6634,15 @@ func normalizePromoCoupon(actorID int64, params CreatePromoCouponParams) (*domai
 	if params.Priority == 0 {
 		params.Priority = 100
 	}
+	workerType := normalizeWorkerType(defaultAll(params.WorkerType))
+	jobGrade := strings.TrimSpace(defaultAll(params.JobGrade))
+	difficulty := strings.TrimSpace(defaultAll(params.DifficultyClass))
+	if !validWorkbenchJobGrade(workerType, jobGrade, true) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
+	}
+	if !validWorkbenchDifficulty(difficulty, true) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
+	}
 	return &domain.AssetWorkbenchPromoCoupon{
 		CouponCode:      code,
 		CouponName:      name,
@@ -5098,9 +6650,9 @@ func normalizePromoCoupon(actorID int64, params CreatePromoCouponParams) (*domai
 		Amount:          params.Amount,
 		Percent:         params.Percent,
 		Priority:        params.Priority,
-		WorkerType:      normalizeWorkerType(defaultAll(params.WorkerType)),
-		JobGrade:        strings.TrimSpace(defaultAll(params.JobGrade)),
-		DifficultyClass: strings.TrimSpace(defaultAll(params.DifficultyClass)),
+		WorkerType:      workerType,
+		JobGrade:        jobGrade,
+		DifficultyClass: difficulty,
 		EligibleUserIDs: normalizeJSON(params.EligibleUserIDs),
 		EligibleCodes:   normalizeJSON(params.EligibleCodes),
 		EffectiveFrom:   params.EffectiveFrom,
@@ -5218,6 +6770,26 @@ func overlapsDeductionPeriod(existing []*domain.AssetWorkbenchDeductionRule, sta
 	return false
 }
 
+func nextPriceRevision(existing []*domain.AssetWorkbenchPriceMatrix) int {
+	maxRevision := 0
+	for _, item := range existing {
+		if item.RevisionNo > maxRevision {
+			maxRevision = item.RevisionNo
+		}
+	}
+	return maxRevision + 1
+}
+
+func nextDeductionRevision(existing []*domain.AssetWorkbenchDeductionRule) int {
+	maxRevision := 0
+	for _, item := range existing {
+		if item.RevisionNo > maxRevision {
+			maxRevision = item.RevisionNo
+		}
+	}
+	return maxRevision + 1
+}
+
 func periodsOverlap(aStart time.Time, aEnd *time.Time, bStart time.Time, bEnd *time.Time) bool {
 	aEndValue := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
 	if aEnd != nil {
@@ -5294,6 +6866,41 @@ func defaultAll(value string) string {
 		return domain.AssetWorkbenchWorkerTypeAll
 	}
 	return value
+}
+
+func validWorkbenchJobGrade(workerType, jobGrade string, allowAll bool) bool {
+	workerType = normalizeWorkerType(workerType)
+	rawJobGrade := strings.TrimSpace(jobGrade)
+	if allowAll && (workerType == domain.AssetWorkbenchWorkerTypeAll || strings.EqualFold(rawJobGrade, domain.AssetWorkbenchWorkerTypeAll)) {
+		return workerType == domain.AssetWorkbenchWorkerTypeAll && strings.EqualFold(rawJobGrade, domain.AssetWorkbenchWorkerTypeAll)
+	}
+	jobGrade = strings.ToUpper(rawJobGrade)
+	switch workerType {
+	case domain.AssetWorkbenchWorkerTypeParttime:
+		return jobGrade == "J1" || jobGrade == "J2" || jobGrade == "J3"
+	case domain.AssetWorkbenchWorkerTypeFulltime:
+		switch jobGrade {
+		case "P1", "P2", "P3", "P4", "S1", "S2", "M1", "M2":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+func validWorkbenchDifficulty(value string, allowAll bool) bool {
+	value = strings.TrimSpace(value)
+	if allowAll && strings.EqualFold(value, domain.AssetWorkbenchWorkerTypeAll) {
+		return true
+	}
+	switch value {
+	case "A", "B", "C", "A+小夜灯":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeWorkbenchTemplate(actorID, templateID int64, params UpsertTemplateParams, enabled bool) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
@@ -5517,6 +7124,199 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 	return records, nil
 }
 
+type settlementSupplementExcelRow struct {
+	row    int
+	params CreateSettlementSupplementParams
+}
+
+type submissionItemQCExcelRow struct {
+	row      int
+	itemID   int64
+	orderNo  string
+	qcStatus string
+	reason   string
+}
+
+func parseSubmissionItemQCExcel(businessMonth string, reader io.Reader) ([]submissionItemQCExcelRow, *domain.AppError) {
+	if strings.TrimSpace(businessMonth) != "" {
+		if _, err := time.Parse("2006-01", strings.TrimSpace(businessMonth)); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month must use YYYY-MM.", nil)
+		}
+	}
+	f, err := excelize.OpenReader(reader)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to read QC Excel file.", err.Error())
+	}
+	defer func() { _ = f.Close() }()
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file has no readable sheet.", nil)
+	}
+	rows, err := f.GetRows(sheets[0])
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to read QC Excel rows.", err.Error())
+	}
+	if len(rows) < 2 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file must include a header row and at least one data row.", nil)
+	}
+	headers := map[string]int{}
+	for index, cell := range rows[0] {
+		headers[normalizeExcelHeader(cell)] = index
+	}
+	itemIDIndex, hasItemID := firstExcelColumn(headers, "item_id", "itemid", "明细id", "计件明细id")
+	orderIndex, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "单号")
+	statusIndex, ok := firstExcelColumn(headers, "qc_status", "qcstatus", "status", "质检状态", "状态")
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing qc_status column.", nil)
+	}
+	reasonIndex, hasReason := firstExcelColumn(headers, "reason", "message", "驳回原因", "原因", "备注")
+	parsed := make([]submissionItemQCExcelRow, 0, len(rows)-1)
+	for rowIndex, row := range rows[1:] {
+		currentRow := rowIndex + 2
+		itemIDRaw := ""
+		if hasItemID {
+			itemIDRaw = strings.TrimSpace(excelCell(row, itemIDIndex))
+		}
+		orderNo := ""
+		if hasOrder {
+			orderNo = strings.TrimSpace(excelCell(row, orderIndex))
+		}
+		status := normalizeQCStatusForImport(excelCell(row, statusIndex))
+		reason := ""
+		if hasReason {
+			reason = strings.TrimSpace(excelCell(row, reasonIndex))
+		}
+		if itemIDRaw == "" && orderNo == "" && status == "" && reason == "" {
+			continue
+		}
+		var itemID int64
+		if itemIDRaw != "" {
+			value, appErr := parseExcelNonNegativeInt64(itemIDRaw, "item_id", currentRow)
+			if appErr != nil {
+				return nil, appErr
+			}
+			itemID = value
+		}
+		if status == "" {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "qc_status must be submitted, checked or needs_fix.", map[string]int{"row": currentRow})
+		}
+		parsed = append(parsed, submissionItemQCExcelRow{row: currentRow, itemID: itemID, orderNo: orderNo, qcStatus: status, reason: reason})
+	}
+	if len(parsed) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file has no valid QC rows.", nil)
+	}
+	return parsed, nil
+}
+
+func parseSettlementSupplementExcel(businessMonth string, reader io.Reader) ([]settlementSupplementExcelRow, *domain.AppError) {
+	businessMonth = strings.TrimSpace(businessMonth)
+	if _, err := time.Parse("2006-01", businessMonth); err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month must use YYYY-MM.", nil)
+	}
+	f, err := excelize.OpenReader(reader)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to read supplement Excel file.", err.Error())
+	}
+	defer func() { _ = f.Close() }()
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file has no readable sheet.", nil)
+	}
+	rows, err := f.GetRows(sheets[0])
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to read supplement Excel rows.", err.Error())
+	}
+	if len(rows) < 2 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file must include a header row and at least one data row.", nil)
+	}
+	headers := map[string]int{}
+	for index, cell := range rows[0] {
+		headers[normalizeExcelHeader(cell)] = index
+	}
+	payeeIndex, ok := firstExcelColumn(headers, "payee_user_id", "payeeuserid", "user_id", "userid", "人员id", "用户id", "员工id")
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing payee_user_id column.", nil)
+	}
+	orderIndex, ok := firstExcelColumn(headers, "order_no", "orderno", "订单号", "单号")
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing order_no column.", nil)
+	}
+	difficultyIndex, ok := firstExcelColumn(headers, "difficulty_class", "difficulty", "难度")
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing difficulty_class column.", nil)
+	}
+	pageIndex, ok := firstExcelColumn(headers, "page_count", "pagecount", "pages", "页数", "作图量")
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing page_count column.", nil)
+	}
+	amountIndex, ok := firstExcelColumn(headers, "gross_amount", "grossamount", "amount", "补录金额", "金额")
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing gross_amount column.", nil)
+	}
+	finalizedIndex, hasFinalized := firstExcelColumn(headers, "finalized", "定稿", "是否定稿")
+	parsed := make([]settlementSupplementExcelRow, 0, len(rows)-1)
+	for rowIndex, row := range rows[1:] {
+		if len(parsed) >= 50000 {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel rows exceed supplement import limit.", map[string]int{"limit": 50000})
+		}
+		payeeRaw := strings.TrimSpace(excelCell(row, payeeIndex))
+		orderNo := strings.TrimSpace(excelCell(row, orderIndex))
+		difficulty := strings.TrimSpace(excelCell(row, difficultyIndex))
+		pageRaw := strings.TrimSpace(excelCell(row, pageIndex))
+		amountRaw := strings.TrimSpace(excelCell(row, amountIndex))
+		if payeeRaw == "" && orderNo == "" && difficulty == "" && pageRaw == "" && amountRaw == "" {
+			continue
+		}
+		currentRow := rowIndex + 2
+		payeeUserID, appErr := parseExcelNonNegativeInt64(payeeRaw, "payee_user_id", currentRow)
+		if appErr != nil {
+			return nil, appErr
+		}
+		pageCount, appErr := parseExcelNonNegativeInt(pageRaw, "page_count", currentRow)
+		if appErr != nil {
+			return nil, appErr
+		}
+		grossAmount, appErr := parseExcelNonNegativeDecimal(amountRaw, "gross_amount", currentRow)
+		if appErr != nil {
+			return nil, appErr
+		}
+		finalized := true
+		if hasFinalized {
+			finalized = parseExcelBoolDefault(excelCell(row, finalizedIndex), true)
+		}
+		parsed = append(parsed, settlementSupplementExcelRow{
+			row: currentRow,
+			params: CreateSettlementSupplementParams{
+				PayeeUserID:     payeeUserID,
+				BusinessMonth:   businessMonth,
+				OrderNo:         orderNo,
+				DifficultyClass: difficulty,
+				Finalized:       finalized,
+				PageCount:       pageCount,
+				GrossAmount:     grossAmount,
+				Status:          domain.AssetWorkbenchSupplementStatusApproved,
+			},
+		})
+	}
+	if len(parsed) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file has no valid supplement rows.", nil)
+	}
+	return parsed, nil
+}
+
+func normalizeQCStatusForImport(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case domain.AssetWorkbenchSubmissionStatusSubmitted, "待检", "待质检":
+		return domain.AssetWorkbenchSubmissionStatusSubmitted
+	case domain.AssetWorkbenchSubmissionStatusChecked, "通过", "合格", "已通过":
+		return domain.AssetWorkbenchSubmissionStatusChecked
+	case domain.AssetWorkbenchSubmissionStatusNeedsFix, "需修", "驳回", "不合格", "退回":
+		return domain.AssetWorkbenchSubmissionStatusNeedsFix
+	default:
+		return ""
+	}
+}
+
 func normalizeExcelHeader(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, " ", "")
@@ -5566,6 +7366,25 @@ func parseExcelNonNegativeFloat(raw string, field string, row int) (float64, *do
 		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, field+" must be an integer.", map[string]int{"row": row})
 	}
 	return value, nil
+}
+
+func parseExcelNonNegativeDecimal(raw string, field string, row int) (float64, *domain.AppError) {
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || value < 0 {
+		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, field+" must be a non-negative number.", map[string]int{"row": row})
+	}
+	return value, nil
+}
+
+func parseExcelBoolDefault(raw string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "0", "false", "否", "不", "no", "n", "未定稿":
+		return false
+	case "1", "true", "是", "已定稿", "定稿", "yes", "y":
+		return true
+	default:
+		return fallback
+	}
 }
 
 func truncateDate(t time.Time) time.Time {
@@ -5659,6 +7478,7 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.bootstrap",
 			"asset.workbench.submit",
 			"asset.workbench.profile",
+			"asset.workbench.material.download",
 			"asset.workbench.settlement.self",
 		)
 	}
@@ -5700,6 +7520,7 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.bootstrap",
 			"asset.workbench.submit",
 			"asset.workbench.profile",
+			"asset.workbench.material.download",
 			"asset.workbench.settlement.self",
 			"asset.workbench.profile.manage",
 			"asset.workbench.manage",

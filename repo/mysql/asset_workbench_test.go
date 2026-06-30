@@ -61,3 +61,44 @@ func TestLockPriceMatrixDimensionLocksParentDimensionBeforeExistingRules(t *test
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestAssetWorkbenchSubmissionOrderBySupportsFileAndTimeSorts(t *testing.T) {
+	tests := []struct {
+		name     string
+		orderBy  string
+		orderDir string
+		want     string
+	}{
+		{
+			name:     "file type desc",
+			orderBy:  "file_type",
+			orderDir: "desc",
+			want:     "(SELECT MIN(LOWER(f.file_type)) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id) DESC, s.submitted_at DESC, s.id DESC",
+		},
+		{
+			name:     "filename asc alias",
+			orderBy:  "filename",
+			orderDir: "asc",
+			want:     "(SELECT MIN(LOWER(f.original_filename)) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id) ASC, s.submitted_at DESC, s.id DESC",
+		},
+		{
+			name:     "created at asc",
+			orderBy:  "created_at",
+			orderDir: "asc",
+			want:     "s.created_at ASC, s.id ASC",
+		},
+		{
+			name:     "default",
+			orderBy:  "unknown",
+			orderDir: "asc",
+			want:     "s.submitted_at DESC, s.id DESC",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := assetWorkbenchSubmissionOrderBy(tt.orderBy, tt.orderDir); got != tt.want {
+				t.Fatalf("assetWorkbenchSubmissionOrderBy(%q, %q) = %q, want %q", tt.orderBy, tt.orderDir, got, tt.want)
+			}
+		})
+	}
+}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Download } from 'lucide-vue-next'
 
 import {
   assetWorkbenchApi,
@@ -10,7 +11,7 @@ import {
   type SettlementSupplementRow,
   type SupplementPermissionRow,
 } from '@aw/shared/api/assetWorkbenchApi'
-import { exportSettlementWorkbook } from '@aw/features/export/settlementExport'
+import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
@@ -46,21 +47,28 @@ type BatchItemGridRow = {
   amount: number
 }
 type PermissionGridRow = SupplementPermissionRow & { status_label: string; reason_label: string }
-type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string }
+type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string; action: string }
 
-const month = ref(new Date().toISOString().slice(0, 7))
+const month = ref(defaultBusinessMonth())
 const preview = ref<SettlementPreview | null>(null)
 const batches = ref<SettlementBatchRow[]>([])
 const supplements = ref<SettlementSupplementRow[]>([])
 const supplementPermissions = ref<SupplementPermissionRow[]>([])
 const eligibleSupplementMonths = ref<string[]>([])
+const entryEligibleSupplementMonths = ref<string[]>([])
+const entryEligiblePayeeUserId = ref(0)
+const supplementMonth = ref(month.value)
 const selectedBatch = ref<SettlementBatchDetail | null>(null)
 const pendingCancelBatch = ref<SettlementBatchRow | null>(null)
+const pendingDeleteSupplement = ref<SettlementSupplementRow | null>(null)
 const cancelReason = ref('')
+const supplementDeleteReason = ref('')
 const exporting = ref(false)
 const eligibleMonthsLoading = ref(false)
+const entryEligibleMonthsLoading = ref(false)
 const notice = ref('')
 const errorInputRef = ref<HTMLInputElement | null>(null)
+const supplementInputRef = ref<HTMLInputElement | null>(null)
 const settlementRequest = usePageRequest(
   async () => {
     const [previewResult, batchResult, supplementResult, permissionResult] = await Promise.all([
@@ -133,9 +141,13 @@ const supplementRowsWithLabels = computed<SupplementGridRow[]>(() =>
     ...row,
     status_label: supplementStatusMeta(row.status).label,
     duplicate_label: duplicateMeta(row.duplicate_hint_json?.has_duplicates).label,
+    action: 'actions',
   })),
 )
 const supplementGridRows = computed(() => supplementRowsWithLabels.value as unknown as Record<string, unknown>[])
+const entryEligibleReady = computed(() =>
+  entryEligiblePayeeUserId.value === supplementForm.value.payee_user_id && entryEligibleSupplementMonths.value.length > 0,
+)
 const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_user_id', label: '人员', width: 96 },
   { key: 'row_label', label: '工资条', width: 140 },
@@ -174,6 +186,7 @@ const supplementGridColumns = computed<GridColumn[]>(() => [
   { key: 'status_label', label: '状态', width: 96 },
   { key: 'duplicate_label', label: '查重', width: 108 },
   { key: 'gross_amount', label: '补录金额', width: 112, align: 'right' },
+  { key: 'action', label: '动作', width: 120, align: 'center' },
 ])
 
 function payrollRowLabel(row: SettlementPayrollRow) {
@@ -240,6 +253,14 @@ function gridValue(key: string, value: unknown) {
   if (moneyColumns.has(key)) return formatMoney(value)
   if (intColumns.has(key)) return formatInt(value)
   return value || '—'
+}
+
+function defaultBusinessMonth() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(new Date())
 }
 
 async function loadSettlement(options: { keepNotice?: boolean } = {}) {
@@ -317,6 +338,32 @@ function openErrorImport() {
   errorInputRef.value?.click()
 }
 
+function openSupplementImport() {
+  supplementInputRef.value?.click()
+}
+
+async function downloadErrorTemplate() {
+  error.value = ''
+  notice.value = ''
+  try {
+    await exportErrorImportTemplateWorkbook()
+    notice.value = '出错导入模板已生成'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '模板生成失败'
+  }
+}
+
+async function downloadSupplementTemplate() {
+  error.value = ''
+  notice.value = ''
+  try {
+    await exportSupplementImportTemplateWorkbook()
+    notice.value = '补录导入模板已生成'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '补录模板生成失败'
+  }
+}
+
 async function handleErrorImport(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
@@ -330,6 +377,55 @@ async function handleErrorImport(event: Event) {
     await loadSettlement({ keepNotice: true })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '出错 Excel 导入失败'
+  }
+}
+
+async function handleSupplementImport(event: Event) {
+  const target = event.target as HTMLInputElement
+  const files = Array.from(target.files ?? [])
+  target.value = ''
+  await importSupplementFiles(files)
+}
+
+async function handleSupplementDrop(event: DragEvent) {
+  const files = Array.from(event.dataTransfer?.files ?? []).filter(isExcelFile)
+  await importSupplementFiles(files)
+}
+
+function isExcelFile(file: File) {
+  return /\.(xlsx|xls)$/i.test(file.name)
+}
+
+async function importSupplementFiles(files: File[]) {
+  if (!files.length) return
+  error.value = ''
+  notice.value = ''
+  try {
+    if (!supplementMonth.value) {
+      error.value = '请选择补录月份'
+      return
+    }
+    let created = 0
+    let failed = 0
+    const messages: string[] = []
+    for (const file of files) {
+      try {
+        const result = await assetWorkbenchApi.importSettlementSupplementsExcel(supplementMonth.value, file)
+        created += result.created?.length ?? 0
+        failed += result.failures?.length ?? 0
+        messages.push(...(result.failures ?? []).slice(0, 3).map((item) => `${file.name} 第 ${item.row} 行：${item.reason}`))
+      } catch (err) {
+        failed += 1
+        messages.push(`${file.name}：${err instanceof Error ? err.message : '导入失败'}`)
+      }
+    }
+    notice.value = `补录 Excel 已导入：文件 ${formatInt(files.length)} 个，成功 ${formatInt(created)} 行，失败 ${formatInt(failed)} 项`
+    if (messages.length > 0) {
+      error.value = messages.slice(0, 5).join('；')
+    }
+    await loadSettlement({ keepNotice: true })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '补录 Excel 批量导入失败'
   }
 }
 
@@ -372,13 +468,58 @@ async function loadSupplementEligibleMonths() {
   }
 }
 
+async function loadEntrySupplementEligibleMonths() {
+  if (!supplementForm.value.payee_user_id) {
+    error.value = '请先填写补录人员编号'
+    return
+  }
+  error.value = ''
+  notice.value = ''
+  entryEligibleMonthsLoading.value = true
+  try {
+    const months = await assetWorkbenchApi.listSupplementEligibleMonths(supplementForm.value.payee_user_id)
+    entryEligibleSupplementMonths.value = months
+    entryEligiblePayeeUserId.value = supplementForm.value.payee_user_id
+    if (months.length && !months.includes(supplementMonth.value)) {
+      supplementMonth.value = months[0]
+    }
+    notice.value = months.length ? '已读取该人员可补录月份' : '该人员暂无已确认结算月份'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '读取补录录入月份失败'
+  } finally {
+    entryEligibleMonthsLoading.value = false
+  }
+}
+
+function requireEntrySupplementMonth() {
+  if (!supplementForm.value.payee_user_id) {
+    error.value = '请填写补录人员编号'
+    return ''
+  }
+  if (entryEligiblePayeeUserId.value !== supplementForm.value.payee_user_id) {
+    error.value = '请先读取该人员的可补录月份'
+    return ''
+  }
+  if (!entryEligibleSupplementMonths.value.length) {
+    error.value = '该人员暂无可补录月份'
+    return ''
+  }
+  if (!entryEligibleSupplementMonths.value.includes(supplementMonth.value)) {
+    error.value = '请选择该人员的可补录月份'
+    return ''
+  }
+  return supplementMonth.value
+}
+
 async function createSupplement() {
   error.value = ''
   notice.value = ''
+  const selectedMonth = requireEntrySupplementMonth()
+  if (!selectedMonth) return
   try {
     const payload = {
       ...supplementForm.value,
-      business_month: month.value,
+      business_month: selectedMonth,
       status: 'approved',
     }
     await assetWorkbenchApi.createSettlementSupplement(payload)
@@ -389,6 +530,32 @@ async function createSupplement() {
     await loadSettlement({ keepNotice: true })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '创建补录失败'
+  }
+}
+
+function startDeleteSupplement(row: SettlementSupplementRow) {
+  pendingDeleteSupplement.value = row
+  supplementDeleteReason.value = ''
+}
+
+async function deleteSupplement() {
+  const row = pendingDeleteSupplement.value
+  if (!row) return
+  const reason = supplementDeleteReason.value.trim()
+  if (!reason) {
+    error.value = '请填写删除原因'
+    return
+  }
+  error.value = ''
+  notice.value = ''
+  try {
+    await assetWorkbenchApi.deleteSettlementSupplement(row.id, reason)
+    notice.value = `已删除补录：${row.order_no}`
+    pendingDeleteSupplement.value = null
+    supplementDeleteReason.value = ''
+    await loadSettlement({ keepNotice: true })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '删除补录失败'
   }
 }
 
@@ -434,6 +601,12 @@ async function exportSettlement() {
   }
 }
 
+watch(month, (value) => {
+  if (!entryEligibleSupplementMonths.value.length) {
+    supplementMonth.value = value
+  }
+})
+
 onMounted(() => {
   void loadSettlement()
 })
@@ -448,6 +621,10 @@ onMounted(() => {
         <p>先导入出错表，再生成预览。每个员工固定两条工资行：正常计件工资一条，补录计件工资一条。</p>
       </div>
       <div class="aw-page-bar__actions">
+        <button class="aw-secondary-button" type="button" @click="downloadErrorTemplate">
+          <Download :size="16" aria-hidden="true" />
+          出错模板
+        </button>
         <button class="aw-secondary-button" type="button" @click="openErrorImport">导入出错</button>
         <button class="aw-secondary-button" type="button" :disabled="exporting || (!preview && !selectedBatch)" @click="exportSettlement">
           导出工资条
@@ -462,6 +639,15 @@ onMounted(() => {
       accept=".xlsx,.xls"
       aria-label="导入出错 Excel"
       @change="handleErrorImport"
+    />
+    <input
+      ref="supplementInputRef"
+      class="aw-visually-hidden"
+      type="file"
+      accept=".xlsx,.xls"
+      multiple
+      aria-label="导入补录 Excel"
+      @change="handleSupplementImport"
     />
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
 
@@ -714,12 +900,23 @@ onMounted(() => {
             <h3>补录录入</h3>
             <p class="aw-copy">已批准补录会在工资条中单独形成补录计件工资行。</p>
           </div>
-          <span class="aw-chip aw-chip--info">无补录显示 0</span>
+          <div class="aw-inline-actions">
+            <span class="aw-chip aw-chip--info">无补录显示 0</span>
+            <button class="aw-secondary-button" type="button" @click="downloadSupplementTemplate">补录模板</button>
+            <button class="aw-secondary-button" type="button" @click="openSupplementImport">导入补录</button>
+          </div>
         </div>
         <div class="aw-form-grid">
           <label>
             人员编号
             <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
+          </label>
+          <label>
+            补录月份
+            <select v-model="supplementMonth" :disabled="!entryEligibleReady">
+              <option v-if="!entryEligibleReady" :value="supplementMonth">{{ supplementMonth }}</option>
+              <option v-for="item in entryEligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
+            </select>
           </label>
           <label>
             订单号
@@ -747,7 +944,16 @@ onMounted(() => {
             定稿
           </label>
         </div>
-        <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
+        <div class="aw-inline-actions">
+          <button class="aw-secondary-button" type="button" :disabled="entryEligibleMonthsLoading" @click="loadEntrySupplementEligibleMonths">
+            读取录入月份
+          </button>
+          <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
+        </div>
+        <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
+          <span>补录 Excel 批量导入</span>
+          <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>
+        </div>
       </div>
     </div>
 
@@ -796,8 +1002,17 @@ onMounted(() => {
         :row-height="34"
       >
         <template #cell="{ row, column, value }">
+          <div v-if="column.key === 'action'" class="aw-inline-actions">
+            <button
+              type="button"
+              :disabled="['in_batch', 'settled', 'voided'].includes(gridRowAsSupplement(row).status)"
+              @click="startDeleteSupplement(gridRowAsSupplement(row))"
+            >
+              删除
+            </button>
+          </div>
           <span
-            v-if="column.key === 'status_label'"
+            v-else-if="column.key === 'status_label'"
             :class="chipClass(supplementStatusMeta(gridRowAsSupplement(row).status).tone)"
           >
             {{ value }}
@@ -812,7 +1027,26 @@ onMounted(() => {
           <span v-else>{{ gridValue(column.key, value) }}</span>
         </template>
       </WorkbenchDataGrid>
-      <p v-else class="aw-copy">当前月份没有补录记录</p>
+      <div v-if="pendingDeleteSupplement" class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>删除补录</h3>
+            <p class="aw-copy">{{ pendingDeleteSupplement.order_no }} · {{ pendingDeleteSupplement.business_month }}</p>
+          </div>
+          <span :class="chipClass(supplementStatusMeta(pendingDeleteSupplement.status).tone)">
+            {{ supplementStatusMeta(pendingDeleteSupplement.status).label }}
+          </span>
+        </div>
+        <label class="aw-field">
+          <span>删除原因</span>
+          <input v-model="supplementDeleteReason" required />
+        </label>
+        <div class="aw-inline-actions">
+          <button class="aw-primary-button" type="button" @click="deleteSupplement">确认删除</button>
+          <button class="aw-secondary-button" type="button" @click="pendingDeleteSupplement = null">取消</button>
+        </div>
+      </div>
+      <p v-else-if="!supplements.length" class="aw-copy">当前月份没有补录记录</p>
     </div>
   </section>
 </template>

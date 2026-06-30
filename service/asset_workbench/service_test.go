@@ -67,6 +67,30 @@ func (r *deductionOnlyRepo) FindActiveWelfareRules(context.Context, string, stri
 	return r.welfareRules, nil
 }
 
+type settlementReportRepo struct {
+	repo.AssetWorkbenchRepo
+	rule           *domain.AssetWorkbenchDeductionRule
+	deductionCalls int
+	profiles       map[int64]*domain.AssetWorkbenchProfile
+}
+
+func (r *settlementReportRepo) FindActiveDeductionRule(context.Context, string, string, string, time.Time) (*domain.AssetWorkbenchDeductionRule, error) {
+	r.deductionCalls++
+	return r.rule, nil
+}
+
+func (r *settlementReportRepo) FindActiveWelfareRules(context.Context, string, string, time.Time) ([]*domain.AssetWorkbenchWelfareRule, error) {
+	return nil, nil
+}
+
+func (r *settlementReportRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
+	profile := r.profiles[userID]
+	if profile == nil {
+		return nil, sql.ErrNoRows
+	}
+	return profile, nil
+}
+
 type errorImportRepo struct {
 	repo.AssetWorkbenchRepo
 	items   []*domain.AssetWorkbenchSubmissionItem
@@ -491,6 +515,29 @@ func (r *profileListRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domai
 	return &copyEvent, nil
 }
 
+type profileNotificationCall struct {
+	userID      int64
+	ntype       domain.NotificationType
+	payload     json.RawMessage
+	dedupeScope string
+	dedupeKey   string
+}
+
+type profileNotificationStub struct {
+	calls []profileNotificationCall
+}
+
+func (s *profileNotificationStub) CreateDedupedNotification(_ context.Context, userID int64, ntype domain.NotificationType, payload json.RawMessage, dedupeScope, dedupeKey string) (*domain.Notification, bool, error) {
+	s.calls = append(s.calls, profileNotificationCall{
+		userID:      userID,
+		ntype:       ntype,
+		payload:     payload,
+		dedupeScope: dedupeScope,
+		dedupeKey:   dedupeKey,
+	})
+	return &domain.Notification{ID: int64(len(s.calls)), UserID: userID, NotificationType: ntype, Payload: payload}, true, nil
+}
+
 type assetWorkbenchTestTx struct{}
 
 func (assetWorkbenchTestTx) IsTx() {}
@@ -724,6 +771,129 @@ func (r *itemActionRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain
 	return &copyEvent, nil
 }
 
+type batchFileMutationRepo struct {
+	repo.AssetWorkbenchRepo
+	directories   map[int64]*domain.AssetWorkbenchUploadDirectory
+	files         map[int64]*domain.AssetWorkbenchSubmissionFile
+	blockedDelete map[int64]bool
+	updatedFiles  []*domain.AssetWorkbenchSubmissionFile
+	deletedFiles  []int64
+	refreshed     []int64
+	events        []*domain.AssetWorkbenchEvent
+}
+
+func (r *batchFileMutationRepo) GetUploadDirectory(_ context.Context, directoryID int64) (*domain.AssetWorkbenchUploadDirectory, error) {
+	directory := r.directories[directoryID]
+	if directory == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyDirectory := *directory
+	return &copyDirectory, nil
+}
+
+func (r *batchFileMutationRepo) ListSubmissionFilesByIDs(_ context.Context, fileIDs []int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
+	items := make([]*domain.AssetWorkbenchSubmissionFile, 0, len(fileIDs))
+	seen := map[int64]bool{}
+	for _, fileID := range fileIDs {
+		if seen[fileID] {
+			continue
+		}
+		seen[fileID] = true
+		file := r.files[fileID]
+		if file == nil {
+			continue
+		}
+		copyFile := *file
+		items = append(items, &copyFile)
+	}
+	return items, nil
+}
+
+func (r *batchFileMutationRepo) UpdateSubmissionFileLocation(_ context.Context, _ repo.Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error) {
+	if file == nil || r.files[file.ID] == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyFile := *file
+	r.files[file.ID] = &copyFile
+	r.updatedFiles = append(r.updatedFiles, &copyFile)
+	return &copyFile, nil
+}
+
+func (r *batchFileMutationRepo) DeleteSubmissionFile(_ context.Context, _ repo.Tx, fileID int64) error {
+	if r.blockedDelete[fileID] {
+		return domain.NewAppError(domain.ErrCodeConflict, "blocked file", nil)
+	}
+	if r.files[fileID] == nil {
+		return sql.ErrNoRows
+	}
+	delete(r.files, fileID)
+	r.deletedFiles = append(r.deletedFiles, fileID)
+	return nil
+}
+
+func (r *batchFileMutationRepo) RefreshSubmissionTotals(_ context.Context, _ repo.Tx, submissionID int64) error {
+	r.refreshed = append(r.refreshed, submissionID)
+	return nil
+}
+
+func (r *batchFileMutationRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+type submissionVoidRepo struct {
+	repo.AssetWorkbenchRepo
+	submission *domain.AssetWorkbenchSubmission
+	items      []*domain.AssetWorkbenchSubmissionItem
+	events     []*domain.AssetWorkbenchEvent
+}
+
+func (r *submissionVoidRepo) GetSubmissionForUpdate(_ context.Context, _ repo.Tx, submissionID int64) (*domain.AssetWorkbenchSubmission, error) {
+	if r.submission == nil || r.submission.ID != submissionID {
+		return nil, sql.ErrNoRows
+	}
+	copySubmission := *r.submission
+	return &copySubmission, nil
+}
+
+func (r *submissionVoidRepo) VoidSubmission(_ context.Context, _ repo.Tx, submissionID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmission, error) {
+	if r.submission == nil || r.submission.ID != submissionID {
+		return nil, sql.ErrNoRows
+	}
+	if r.submission.Status == domain.AssetWorkbenchSubmissionStatusVoided {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "already voided", nil)
+	}
+	for _, item := range r.items {
+		if item == nil {
+			continue
+		}
+		if item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.CurrentSettlementBatchID != nil {
+			return nil, domain.NewAppError(domain.ErrCodeConflict, "blocked", nil)
+		}
+	}
+	for _, item := range r.items {
+		if item == nil || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
+			continue
+		}
+		item.QCStatus = domain.AssetWorkbenchSubmissionStatusVoided
+		item.VoidedAt = &at
+		item.VoidedBy = &actorID
+		item.VoidReason = reason
+	}
+	r.submission.Status = domain.AssetWorkbenchSubmissionStatusVoided
+	copySubmission := *r.submission
+	return &copySubmission, nil
+}
+
+func (r *submissionVoidRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
 func TestRegisterCreatesPendingProfileFromSelfRegistration(t *testing.T) {
 	identity := &registerIdentityStub{}
 	workbenchRepo := &registerProfileRepo{}
@@ -809,6 +979,82 @@ func TestListProfilesMasksPIIForListResponses(t *testing.T) {
 	}
 	if items[0].AlipayAccount == "piece-worker@example.com" {
 		t.Fatalf("alipay account should be masked, got %q", items[0].AlipayAccount)
+	}
+}
+
+func TestUpsertMyProfileCreatesMissingPIINotification(t *testing.T) {
+	workbenchRepo := &profileListRepo{}
+	notifier := &profileNotificationStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithNotificationCreator(notifier),
+	)
+
+	saved, appErr := svc.UpsertMyProfile(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, UpsertProfileParams{
+		RealName: "计件人员",
+		Province: "浙江",
+		City:     "杭州",
+	})
+	if appErr != nil {
+		t.Fatalf("UpsertMyProfile() error = %+v", appErr)
+	}
+	if saved.PIICompleted {
+		t.Fatalf("profile should be incomplete: %+v", saved)
+	}
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notification calls = %+v, want one", notifier.calls)
+	}
+	call := notifier.calls[0]
+	if call.userID != 77 || call.ntype != domain.NotificationTypeSystemBroadcast {
+		t.Fatalf("notification call = %+v", call)
+	}
+	if call.dedupeScope != "asset_workbench_profile_completion" || call.dedupeKey != "asset_workbench_profile_completion:77" {
+		t.Fatalf("dedupe = %q/%q", call.dedupeScope, call.dedupeKey)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(call.payload, &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	if payload["reason"] != "missing_pii" || payload["action"] != "complete_profile" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	missing, ok := payload["missing_fields"].([]interface{})
+	if !ok || len(missing) != 3 {
+		t.Fatalf("missing_fields = %+v", payload["missing_fields"])
+	}
+}
+
+func TestUpsertMyProfileRequiresAlipayForPIICompletion(t *testing.T) {
+	workbenchRepo := &profileListRepo{}
+	notifier := &profileNotificationStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithNotificationCreator(notifier),
+	)
+
+	saved, appErr := svc.UpsertMyProfile(context.Background(), domain.RequestActor{ID: 78, Roles: []domain.Role{domain.RoleAssetSubmitter}}, UpsertProfileParams{
+		RealName: "计件人员",
+		Phone:    "13800000078",
+		IDCard:   "330100199001010078",
+		Province: "浙江",
+		City:     "杭州",
+	})
+	if appErr != nil {
+		t.Fatalf("UpsertMyProfile() error = %+v", appErr)
+	}
+	if saved.PIICompleted {
+		t.Fatalf("profile without alipay should be incomplete: %+v", saved)
+	}
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notification calls = %+v, want one", notifier.calls)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(notifier.calls[0].payload, &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	missing, ok := payload["missing_fields"].([]interface{})
+	if !ok || len(missing) != 1 || missing[0] != "alipay_account" {
+		t.Fatalf("missing_fields = %+v, want alipay_account", payload["missing_fields"])
 	}
 }
 
@@ -1566,6 +1812,132 @@ func TestVoidSubmissionItemRequiresUnsettledAndRefreshesTotals(t *testing.T) {
 	}
 }
 
+func TestVoidSubmissionVoidsAllUnsettledItemsAndWritesEvent(t *testing.T) {
+	workbenchRepo := &submissionVoidRepo{
+		submission: &domain.AssetWorkbenchSubmission{ID: 9001, SubmissionNo: "AW-9001", Status: domain.AssetWorkbenchSubmissionStatusSubmitted},
+		items: []*domain.AssetWorkbenchSubmissionItem{
+			{ID: 501, SubmissionID: 9001, QCStatus: domain.AssetWorkbenchSubmissionStatusChecked, SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled},
+			{ID: 502, SubmissionID: 9001, QCStatus: domain.AssetWorkbenchSubmissionStatusSubmitted, SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	updated, appErr := svc.VoidSubmission(context.Background(), actor, 9001, VoidSubmissionParams{Reason: "整批重复上传"})
+	if appErr != nil {
+		t.Fatalf("VoidSubmission() error = %+v", appErr)
+	}
+	if updated.Status != domain.AssetWorkbenchSubmissionStatusVoided {
+		t.Fatalf("submission status = %q", updated.Status)
+	}
+	for _, item := range workbenchRepo.items {
+		if item.QCStatus != domain.AssetWorkbenchSubmissionStatusVoided || item.VoidReason != "整批重复上传" || item.VoidedBy == nil || *item.VoidedBy != 99 {
+			t.Fatalf("voided item = %+v", item)
+		}
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSubmissionVoided {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestVoidSubmissionBlocksInBatchItems(t *testing.T) {
+	batchID := int64(123)
+	workbenchRepo := &submissionVoidRepo{
+		submission: &domain.AssetWorkbenchSubmission{ID: 9001, SubmissionNo: "AW-9001", Status: domain.AssetWorkbenchSubmissionStatusSubmitted},
+		items: []*domain.AssetWorkbenchSubmissionItem{
+			{ID: 501, SubmissionID: 9001, QCStatus: domain.AssetWorkbenchSubmissionStatusChecked, SettlementStatus: domain.AssetWorkbenchSettlementStatusInBatch, CurrentSettlementBatchID: &batchID},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	_, appErr := svc.VoidSubmission(context.Background(), actor, 9001, VoidSubmissionParams{Reason: "整批重复上传"})
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("VoidSubmission(in batch) appErr = %+v, want conflict", appErr)
+	}
+	if workbenchRepo.submission.Status == domain.AssetWorkbenchSubmissionStatusVoided || len(workbenchRepo.events) != 0 {
+		t.Fatalf("submission should not be voided: submission=%+v events=%+v", workbenchRepo.submission, workbenchRepo.events)
+	}
+}
+
+func TestBatchMoveFilesReturnsPerFileFailuresWhenOSSDisabled(t *testing.T) {
+	workbenchRepo := &batchFileMutationRepo{
+		directories: map[int64]*domain.AssetWorkbenchUploadDirectory{
+			11: {ID: 11, Name: "客户端 A", OSSPrefix: "client-a", Enabled: true},
+		},
+		files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+			501: {
+				ID:               501,
+				SubmissionID:     9001,
+				SubmissionItemID: 8001,
+				ObjectKey:        "asset-workbench/uploads/2026/06/session-a/source.psd",
+				OriginalFilename: "source.psd",
+			},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}}
+
+	result, appErr := svc.BatchMoveFiles(context.Background(), actor, BatchMoveFilesParams{
+		FileIDs:           []int64{501, 999, 501, 0},
+		UploadDirectoryID: 11,
+		Reason:            "批量归档",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchMoveFiles() appErr = %+v", appErr)
+	}
+	if len(result.Files) != 0 || len(result.Failures) != 2 {
+		t.Fatalf("result = %+v, want 2 per-file failures and no moved files", result)
+	}
+	if result.Failures[0].FileID != 501 || !strings.Contains(result.Failures[0].Reason, "OSS direct move is not enabled") {
+		t.Fatalf("first failure = %+v", result.Failures[0])
+	}
+	if result.Failures[1].FileID != 999 || result.Failures[1].Reason != "file not found" {
+		t.Fatalf("second failure = %+v", result.Failures[1])
+	}
+	if len(workbenchRepo.updatedFiles) != 0 || len(workbenchRepo.events) != 0 {
+		t.Fatalf("move should not update files or events when OSS is disabled: updated=%+v events=%+v", workbenchRepo.updatedFiles, workbenchRepo.events)
+	}
+}
+
+func TestBatchDeleteFilesSplitsSuccessAndFailureAndWritesEvents(t *testing.T) {
+	workbenchRepo := &batchFileMutationRepo{
+		files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+			501: {ID: 501, SubmissionID: 9001, SubmissionItemID: 8001, ObjectKey: "asset-workbench/uploads/a.psd", PreviewKey: "asset-workbench/previews/a.jpg"},
+			502: {ID: 502, SubmissionID: 9002, SubmissionItemID: 8002, ObjectKey: "asset-workbench/uploads/b.psd"},
+		},
+		blockedDelete: map[int64]bool{502: true},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}}
+
+	if _, appErr := svc.BatchDeleteFiles(context.Background(), actor, BatchDeleteFilesParams{FileIDs: []int64{501}, Reason: " "}); appErr == nil || appErr.Code != domain.ErrCodeReasonRequired {
+		t.Fatalf("BatchDeleteFiles(empty reason) appErr = %+v", appErr)
+	}
+	result, appErr := svc.BatchDeleteFiles(context.Background(), actor, BatchDeleteFilesParams{
+		FileIDs: []int64{501, 502, 999, 501},
+		Reason:  "重复文件",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchDeleteFiles() appErr = %+v", appErr)
+	}
+	if len(result.Deleted) != 1 || result.Deleted[0] != 501 {
+		t.Fatalf("deleted = %+v, want [501]", result.Deleted)
+	}
+	if len(result.Failures) != 2 || result.Failures[0].FileID != 502 || result.Failures[1].FileID != 999 {
+		t.Fatalf("failures = %+v", result.Failures)
+	}
+	if _, ok := workbenchRepo.files[501]; ok {
+		t.Fatalf("file 501 should be deleted")
+	}
+	if len(workbenchRepo.refreshed) != 1 || workbenchRepo.refreshed[0] != 9001 {
+		t.Fatalf("refreshed = %+v, want [9001]", workbenchRepo.refreshed)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventFileDeleted {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
 func TestRepriceSubmissionItemUsesFrozenWorkerSnapshot(t *testing.T) {
 	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
 	workbenchRepo := &itemActionRepo{
@@ -1949,6 +2321,173 @@ func TestBuildSettlementPreviewEmitsTwoPayrollRowsForSupplementOnlyPayee(t *test
 	}
 	if supplement.PayeeUserID != 1002 || supplement.RowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework || supplement.PageCount != 3 || supplement.NetAmount != 42 {
 		t.Fatalf("supplement payroll row = %+v, want supplement net 42", supplement)
+	}
+}
+
+func TestBuildSettlementReportSplitsDifficultyAndDistinctOrders(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 1, 16, 30, 0, 0, time.UTC)
+	itemAID := int64(501)
+	itemBID := int64(502)
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &settlementReportRepo{
+		rule: &domain.AssetWorkbenchDeductionRule{
+			ID:              7,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGrade:        "P1",
+			DifficultyClass: "A",
+			DeductionAmount: 4,
+			EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+		profiles: map[int64]*domain.AssetWorkbenchProfile{
+			1001: {UserID: 1001, RealName: "Alice", JobGrade: "P1"},
+			1002: {UserID: 1002, RealName: "Bob", JobGrade: "P2"},
+		},
+	}
+
+	report, appErr := svc.buildSettlementReport(context.Background(), "2026-06", []*domain.AssetWorkbenchSubmissionItem{
+		{
+			ID:                 itemAID,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-1",
+			DifficultyClass:    "A",
+			PageCount:          2,
+			GrossAmount:        20,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			SubmittedAt:        submittedAt,
+		},
+		{
+			ID:                 itemBID,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-1",
+			DifficultyClass:    "B",
+			PageCount:          3,
+			GrossAmount:        30,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			SubmittedAt:        submittedAt.Add(time.Hour),
+		},
+		{
+			ID:                 503,
+			PayeeUserID:        1002,
+			OrderNo:            "ORD-2",
+			DifficultyClass:    "A",
+			PageCount:          5,
+			GrossAmount:        50,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P2",
+			SubmittedAt:        submittedAt,
+		},
+	}, []*domain.AssetWorkbenchErrorRecord{
+		{SubmissionItemID: &itemAID, OrderNo: "ORD-1", ErrorCount: 2, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched},
+	}, []*domain.AssetWorkbenchSettlementSupplement{
+		{
+			ID:              11,
+			PayeeUserID:     1001,
+			BusinessMonth:   "2026-06",
+			Status:          domain.AssetWorkbenchSupplementStatusApproved,
+			OrderNo:         "SUP-1",
+			DifficultyClass: "C",
+			PageCount:       1,
+			GrossAmount:     12,
+			CreatedAt:       submittedAt,
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("buildSettlementReport returned app error: %v", appErr)
+	}
+	if strings.Join(report.DifficultyClasses, ",") != "A,B,C" {
+		t.Fatalf("difficulty classes = %+v, want A,B,C", report.DifficultyClasses)
+	}
+	if report.Totals.OrderCount != 3 || report.Totals.PageCount != 11 || report.Totals.ErrorCount != 2 || report.Totals.DeductionAmount != 8 || report.Totals.NetAmount != 104 {
+		t.Fatalf("totals = %+v, want distinct orders=3 pages=11 errors=2 deduction=8 net=104", report.Totals)
+	}
+	var normal *SettlementReportRow
+	var supplement *SettlementReportRow
+	for index := range report.Rows {
+		row := &report.Rows[index]
+		if row.PayeeUserID == 1001 && row.RowType == domain.AssetWorkbenchPayrollRowTypeNormalPiecework {
+			normal = row
+		}
+		if row.PayeeUserID == 1001 && row.RowType == domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
+			supplement = row
+		}
+	}
+	if normal == nil {
+		t.Fatalf("missing normal report row: %+v", report.Rows)
+	}
+	if normal.CreatorName != "Alice" || normal.JobGrade != "P1" || normal.CreatedDate != "2026-06-02" {
+		t.Fatalf("normal identity fields = %+v, want Alice/P1/2026-06-02", normal)
+	}
+	if normal.OrderCount != 1 || normal.ItemCount != 2 || normal.PageCount != 5 || normal.GrossAmount != 50 || normal.ErrorCount != 2 || normal.DeductionAmount != 8 || normal.NetAmount != 42 {
+		t.Fatalf("normal row = %+v, want distinct order count and net after deduction", normal)
+	}
+	if normal.PageCountShare != float64(5)/float64(11) || normal.ErrorRate != float64(2)/float64(5) || normal.MonthAmountShare != float64(42)/float64(104) {
+		t.Fatalf("normal ratios = %+v, want page/error/month shares", normal)
+	}
+	if len(normal.DifficultyMetrics) != 2 || normal.DifficultyMetrics[0].DifficultyClass != "A" || normal.DifficultyMetrics[0].PageCount != 2 || normal.DifficultyMetrics[0].DeductionAmount != 8 {
+		t.Fatalf("normal difficulty metrics = %+v, want A/B split with deduction on A", normal.DifficultyMetrics)
+	}
+	if supplement == nil || supplement.OrderCount != 1 || supplement.SupplementAmount != 12 || supplement.NetAmount != 12 || len(supplement.DifficultyMetrics) != 1 || supplement.DifficultyMetrics[0].DifficultyClass != "C" {
+		t.Fatalf("supplement row = %+v, want C supplement metric", supplement)
+	}
+}
+
+func TestBuildSettlementReportCachesDeductionRulesByDimensionDate(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 3, 10, 0, 0, 0, time.UTC)
+	firstItemID := int64(601)
+	secondItemID := int64(602)
+	workbenchRepo := &settlementReportRepo{
+		rule: &domain.AssetWorkbenchDeductionRule{
+			ID:              7,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGrade:        "P1",
+			DifficultyClass: "A",
+			DeductionAmount: 4,
+			EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+		profiles: map[int64]*domain.AssetWorkbenchProfile{
+			1001: {UserID: 1001, RealName: "Alice", JobGrade: "P1"},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = workbenchRepo
+
+	report, appErr := svc.buildSettlementReport(context.Background(), "2026-06", []*domain.AssetWorkbenchSubmissionItem{
+		{
+			ID:                 firstItemID,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-601",
+			DifficultyClass:    "A",
+			PageCount:          1,
+			GrossAmount:        10,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			SubmittedAt:        submittedAt,
+		},
+		{
+			ID:                 secondItemID,
+			PayeeUserID:        1001,
+			OrderNo:            "ORD-602",
+			DifficultyClass:    "A",
+			PageCount:          1,
+			GrossAmount:        10,
+			WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeFulltime,
+			JobGradeSnapshot:   "P1",
+			SubmittedAt:        submittedAt.Add(30 * time.Minute),
+		},
+	}, []*domain.AssetWorkbenchErrorRecord{
+		{SubmissionItemID: &firstItemID, OrderNo: "ORD-601", ErrorCount: 1, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched},
+		{SubmissionItemID: &secondItemID, OrderNo: "ORD-602", ErrorCount: 2, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched},
+	}, nil)
+	if appErr != nil {
+		t.Fatalf("buildSettlementReport returned app error: %v", appErr)
+	}
+	if workbenchRepo.deductionCalls != 1 {
+		t.Fatalf("deduction rule lookups = %d, want 1", workbenchRepo.deductionCalls)
+	}
+	if report.Totals.DeductionAmount != 12 {
+		t.Fatalf("deduction total = %v, want 12", report.Totals.DeductionAmount)
 	}
 }
 

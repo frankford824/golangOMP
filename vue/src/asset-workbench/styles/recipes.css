@@ -331,12 +331,13 @@
 }
 
 .aw-simple-hero h1 {
-  font-size: var(--aw-font-size-display);
+  font-size: clamp(32px, 2.875rem, var(--aw-font-size-display));
   letter-spacing: var(--aw-tracking-tight);
 }
 
 .aw-simple-hero p {
   color: var(--aw-ink-2);
+  text-wrap: pretty;
 }
 
 .aw-simple-card-grid {
@@ -358,10 +359,15 @@
   color: var(--aw-ink);
   padding: var(--aw-space-7);
   text-decoration: none;
+  transition:
+    border-color var(--aw-motion-fast) var(--aw-ease-standard),
+    box-shadow var(--aw-motion-fast) var(--aw-ease-standard),
+    transform var(--aw-motion-fast) var(--aw-ease-standard);
 }
 
 .aw-simple-card:hover {
   border-color: var(--aw-hairline-strong);
+  box-shadow: var(--aw-shadow-raised);
   transform: translateY(-2px);
 }
 
@@ -397,7 +403,7 @@
 .aw-simple-income__amount {
   color: var(--aw-money-glow);
   font-family: var(--aw-font-mono);
-  font-size: var(--aw-font-size-display);
+  font-size: clamp(32px, 2.875rem, var(--aw-font-size-display));
   font-variant-numeric: tabular-nums;
 }
 
@@ -867,6 +873,7 @@
   max-width: 680px;
   color: var(--aw-ink-2);
   font-size: var(--aw-font-size-sm);
+  text-wrap: pretty;
 }
 
 .aw-page-bar__actions {
@@ -1014,7 +1021,7 @@
   gap: var(--aw-space-2);
   color: var(--aw-on-console);
   font-family: var(--aw-font-mono);
-  font-size: var(--aw-font-size-readout);
+  font-size: clamp(24px, 1.75rem, var(--aw-font-size-readout));
   font-variant-numeric: tabular-nums;
   letter-spacing: var(--aw-tracking-tight);
 }
@@ -1035,7 +1042,7 @@
 
 .aw-ledger__cell--money .aw-ledger__value {
   color: var(--aw-money-glow);
-  font-size: var(--aw-font-size-display);
+  font-size: clamp(32px, 2.875rem, var(--aw-font-size-display));
 }
 
 .aw-ledger__cell--money .aw-ledger__label {
@@ -1114,7 +1121,7 @@ body.aw-ledger-locked {
   border: 1px solid var(--aw-hairline-strong);
   border-radius: var(--aw-radius-lg);
   background: var(--aw-surface);
-  box-shadow: var(--aw-shadow-popover);
+  box-shadow: var(--aw-shadow-raised);
   will-change: transform;
 }
 
@@ -1250,6 +1257,10 @@ body.aw-ledger-locked {
   box-shadow: var(--aw-shadow-soft);
 }
 
+.aw-panel {
+  box-shadow: var(--aw-shadow-panel);
+}
+
 .aw-metric-card {
   display: grid;
   gap: var(--aw-space-2);
@@ -1274,7 +1285,7 @@ body.aw-ledger-locked {
 
 .aw-metric-card strong {
   font-family: var(--aw-font-mono);
-  font-size: var(--aw-font-size-readout);
+  font-size: clamp(24px, 1.75rem, var(--aw-font-size-readout));
   font-variant-numeric: tabular-nums;
   letter-spacing: var(--aw-tracking-tight);
 }
@@ -1596,6 +1607,12 @@ body.aw-ledger-locked {
   object-fit: cover;
 }
 
+.aw-preview-tile--table {
+  width: 72px;
+  height: 48px;
+  aspect-ratio: auto;
+}
+
 .aw-material-browser {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.32fr);
@@ -1750,7 +1767,7 @@ body.aw-ledger-locked {
 .aw-material-card:focus-visible,
 .aw-material-card--active {
   border-color: var(--aw-hairline-strong);
-  box-shadow: var(--aw-shadow-soft);
+  box-shadow: var(--aw-shadow-raised);
 }
 
 .aw-material-card--selected {
@@ -2657,6 +2674,6 @@ body.aw-ledger-locked {
 
   .aw-simple-hero h1,
   .aw-simple-income__amount {
-    font-size: var(--aw-font-size-readout);
+    font-size: clamp(24px, 1.75rem, var(--aw-font-size-readout));
   }
 }

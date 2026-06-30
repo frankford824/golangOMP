@@ -454,6 +454,11 @@ func (r *assetWorkbenchRepo) LockPriceMatrixDimension(ctx context.Context, tx re
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) GetPriceMatrixForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AssetWorkbenchPriceMatrix, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPriceMatrixSelect()+` WHERE id = ? FOR UPDATE`, id)
+	return scanAssetWorkbenchPriceMatrix(row)
+}
+
 func lockAssetWorkbenchPriceMatrixDimension(ctx context.Context, tx *sql.Tx, workerType, jobGrade, difficultyClass string) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO asset_workbench_price_matrix_dimensions (
@@ -496,6 +501,17 @@ func (r *assetWorkbenchRepo) CreatePriceMatrix(ctx context.Context, tx repo.Tx, 
 	id, err := res.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("asset workbench price matrix last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPriceMatrixSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchPriceMatrix(row)
+}
+
+func (r *assetWorkbenchRepo) SetPriceMatrixEnabled(ctx context.Context, tx repo.Tx, id int64, enabled bool) (*domain.AssetWorkbenchPriceMatrix, error) {
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_price_matrix
+		SET enabled = ?, updated_at = NOW()
+		WHERE id = ?`, enabled, id); err != nil {
+		return nil, fmt.Errorf("set asset workbench price matrix enabled: %w", err)
 	}
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPriceMatrixSelect()+` WHERE id = ?`, id)
 	return scanAssetWorkbenchPriceMatrix(row)
@@ -585,6 +601,11 @@ func (r *assetWorkbenchRepo) LockDeductionRuleDimension(ctx context.Context, tx 
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) GetDeductionRuleForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AssetWorkbenchDeductionRule, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchDeductionRuleSelect()+` WHERE id = ? FOR UPDATE`, id)
+	return scanAssetWorkbenchDeductionRule(row)
+}
+
 func (r *assetWorkbenchRepo) CreateDeductionRule(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchDeductionRule) (*domain.AssetWorkbenchDeductionRule, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_deduction_rules (
@@ -608,6 +629,17 @@ func (r *assetWorkbenchRepo) CreateDeductionRule(ctx context.Context, tx repo.Tx
 	id, err := res.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("asset workbench deduction rule last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchDeductionRuleSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchDeductionRule(row)
+}
+
+func (r *assetWorkbenchRepo) SetDeductionRuleEnabled(ctx context.Context, tx repo.Tx, id int64, enabled bool) (*domain.AssetWorkbenchDeductionRule, error) {
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_deduction_rules
+		SET enabled = ?, updated_at = NOW()
+		WHERE id = ?`, enabled, id); err != nil {
+		return nil, fmt.Errorf("set asset workbench deduction rule enabled: %w", err)
 	}
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchDeductionRuleSelect()+` WHERE id = ?`, id)
 	return scanAssetWorkbenchDeductionRule(row)
@@ -655,6 +687,11 @@ func (r *assetWorkbenchRepo) ListWelfareRules(ctx context.Context, filter repo.A
 	return items, total, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) GetWelfareRuleForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AssetWorkbenchWelfareRule, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchWelfareRuleSelect()+` WHERE id = ? FOR UPDATE`, id)
+	return scanAssetWorkbenchWelfareRule(row)
+}
+
 func (r *assetWorkbenchRepo) CreateWelfareRule(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchWelfareRule) (*domain.AssetWorkbenchWelfareRule, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_welfare_rules (
@@ -679,6 +716,17 @@ func (r *assetWorkbenchRepo) CreateWelfareRule(ctx context.Context, tx repo.Tx, 
 	id, err := res.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("asset workbench welfare rule last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchWelfareRuleSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchWelfareRule(row)
+}
+
+func (r *assetWorkbenchRepo) SetWelfareRuleEnabled(ctx context.Context, tx repo.Tx, id int64, enabled bool) (*domain.AssetWorkbenchWelfareRule, error) {
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_welfare_rules
+		SET enabled = ?, updated_at = NOW()
+		WHERE id = ?`, enabled, id); err != nil {
+		return nil, fmt.Errorf("set asset workbench welfare rule enabled: %w", err)
 	}
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchWelfareRuleSelect()+` WHERE id = ?`, id)
 	return scanAssetWorkbenchWelfareRule(row)
@@ -757,6 +805,11 @@ func (r *assetWorkbenchRepo) ListPromoCoupons(ctx context.Context, filter repo.A
 	return items, total, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) GetPromoCouponForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AssetWorkbenchPromoCoupon, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPromoCouponSelect()+` WHERE id = ? FOR UPDATE`, id)
+	return scanAssetWorkbenchPromoCoupon(row)
+}
+
 func (r *assetWorkbenchRepo) CreatePromoCoupon(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchPromoCoupon) (*domain.AssetWorkbenchPromoCoupon, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_promo_coupons (
@@ -788,6 +841,17 @@ func (r *assetWorkbenchRepo) CreatePromoCoupon(ctx context.Context, tx repo.Tx, 
 	id, err := res.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("asset workbench promo coupon last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPromoCouponSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchPromoCoupon(row)
+}
+
+func (r *assetWorkbenchRepo) SetPromoCouponEnabled(ctx context.Context, tx repo.Tx, id int64, enabled bool) (*domain.AssetWorkbenchPromoCoupon, error) {
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_promo_coupons
+		SET enabled = ?, updated_at = NOW()
+		WHERE id = ?`, enabled, id); err != nil {
+		return nil, fmt.Errorf("set asset workbench promo coupon enabled: %w", err)
 	}
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPromoCouponSelect()+` WHERE id = ?`, id)
 	return scanAssetWorkbenchPromoCoupon(row)
@@ -1560,6 +1624,62 @@ func (r *assetWorkbenchRepo) GetSubmission(ctx context.Context, submissionID int
 	return scanAssetWorkbenchSubmission(row)
 }
 
+func (r *assetWorkbenchRepo) GetSubmissionForUpdate(ctx context.Context, tx repo.Tx, submissionID int64) (*domain.AssetWorkbenchSubmission, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSubmissionSelect()+` WHERE id = ? FOR UPDATE`, submissionID)
+	return scanAssetWorkbenchSubmission(row)
+}
+
+func (r *assetWorkbenchRepo) VoidSubmission(ctx context.Context, tx repo.Tx, submissionID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmission, error) {
+	var blocked int
+	if err := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM asset_workbench_submission_items
+		WHERE submission_id = ?
+		  AND (settlement_status <> ? OR current_settlement_batch_id IS NOT NULL)`,
+		submissionID,
+		domain.AssetWorkbenchSettlementStatusUnsettled,
+	).Scan(&blocked); err != nil {
+		return nil, fmt.Errorf("check asset workbench submission voidability: %w", err)
+	}
+	if blocked > 0 {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission contains settled or in-batch items and cannot be voided.", map[string]interface{}{"submission_id": submissionID})
+	}
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_submission_items
+		SET qc_status = ?, voided_at = ?, voided_by = ?, void_reason = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE submission_id = ?
+		  AND qc_status <> ?`,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+		at,
+		actorID,
+		reason,
+		submissionID,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+	); err != nil {
+		return nil, fmt.Errorf("void asset workbench submission items: %w", err)
+	}
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_submissions
+		SET status = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status <> ?`,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+		submissionID,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("void asset workbench submission: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench void submission rows affected: %w", err)
+	}
+	if affected != 1 {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission is already voided.", map[string]interface{}{"submission_id": submissionID})
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSubmissionSelect()+` WHERE id = ?`, submissionID)
+	return scanAssetWorkbenchSubmission(row)
+}
+
 func (r *assetWorkbenchRepo) CreateSubmissionItem(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_submission_items (
@@ -1606,6 +1726,50 @@ func (r *assetWorkbenchRepo) CreateSubmissionItem(ctx context.Context, tx repo.T
 
 func (r *assetWorkbenchRepo) GetSubmissionItem(ctx context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error) {
 	row := r.db.db.QueryRowContext(ctx, assetWorkbenchSubmissionItemSelect()+` WHERE id = ?`, itemID)
+	return scanAssetWorkbenchSubmissionItem(row)
+}
+
+func (r *assetWorkbenchRepo) UpdateSubmissionItemEditableFields(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
+	if item == nil {
+		return nil, sql.ErrNoRows
+	}
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_submission_items
+		SET order_no = ?, difficulty_class = ?, finalized = ?, page_count = ?, item_count = ?,
+		    base_price_rule_id = ?, base_unit_price = ?, promo_coupon_id = ?,
+		    promo_snapshot_json = ?, pricing_snapshot_json = ?, gross_amount = ?,
+		    pricing_status = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+		  AND settlement_status = ?
+		  AND current_settlement_batch_id IS NULL
+		  AND qc_status <> ?`,
+		item.OrderNo,
+		item.DifficultyClass,
+		item.Finalized,
+		item.PageCount,
+		item.ItemCount,
+		toNullInt64(item.BasePriceRuleID),
+		toNullFloat64(item.BaseUnitPrice),
+		toNullInt64(item.PromoCouponID),
+		nullableJSON(item.PromoSnapshot),
+		nullableJSON(item.PricingSnapshot),
+		item.GrossAmount,
+		item.PricingStatus,
+		item.ID,
+		domain.AssetWorkbenchSettlementStatusUnsettled,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench submission item editable fields: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench editable item rows affected: %w", err)
+	}
+	if affected != 1 {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission item cannot be edited after settlement or void.", map[string]interface{}{"item_id": item.ID})
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSubmissionItemSelect()+` WHERE id = ?`, item.ID)
 	return scanAssetWorkbenchSubmissionItem(row)
 }
 
@@ -1750,38 +1914,38 @@ func (r *assetWorkbenchRepo) ListSubmissions(ctx context.Context, filter repo.As
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if filter.SubmitterUserID != nil {
-		where = append(where, "submitter_user_id = ?")
+		where = append(where, "s.submitter_user_id = ?")
 		args = append(args, *filter.SubmitterUserID)
 	}
 	if filter.PayeeUserID != nil {
 		where = append(where, `EXISTS (
 			SELECT 1 FROM asset_workbench_submission_items i
-			WHERE i.submission_id = asset_workbench_submissions.id AND i.payee_user_id = ?
+			WHERE i.submission_id = s.id AND i.payee_user_id = ?
 		)`)
 		args = append(args, *filter.PayeeUserID)
 	}
 	if v := strings.TrimSpace(filter.BusinessMonth); v != "" {
-		where = append(where, "business_month = ?")
+		where = append(where, "s.business_month = ?")
 		args = append(args, v)
 	}
 	if v := strings.TrimSpace(filter.Status); v != "" {
-		where = append(where, "status = ?")
+		where = append(where, "s.status = ?")
 		args = append(args, v)
 	}
 	if v := strings.TrimSpace(filter.SettlementStatus); v != "" {
 		where = append(where, `EXISTS (
 			SELECT 1 FROM asset_workbench_submission_items i
-			WHERE i.submission_id = asset_workbench_submissions.id AND i.settlement_status = ?
+			WHERE i.submission_id = s.id AND i.settlement_status = ?
 		)`)
 		args = append(args, v)
 	}
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_submissions WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_submissions s WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count asset workbench submissions: %w", err)
 	}
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchSubmissionSelect()+` WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY submitted_at DESC, id DESC
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchSubmissionListSelect()+` WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY `+assetWorkbenchSubmissionOrderBy(filter.OrderBy, filter.OrderDir)+`
 		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list asset workbench submissions: %w", err)
@@ -1789,13 +1953,129 @@ func (r *assetWorkbenchRepo) ListSubmissions(ctx context.Context, filter repo.As
 	defer rows.Close()
 	items := []*domain.AssetWorkbenchSubmission{}
 	for rows.Next() {
-		item, err := scanAssetWorkbenchSubmission(rows)
+		item, err := scanAssetWorkbenchSubmissionList(rows)
 		if err != nil {
 			return nil, 0, err
 		}
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) SearchOverviewRows(ctx context.Context, filter repo.AssetWorkbenchOverviewSearchFilter) ([]*domain.AssetWorkbenchOverviewRow, int64, error) {
+	query, args := buildAssetWorkbenchOverviewQuery(filter)
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+query+`) aw_overview_count`, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench overview rows: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	rows, err := r.db.db.QueryContext(ctx, `SELECT source, id, title, primary_code, secondary_code, order_no,
+		creator_user_id, creator_name, business_month, status, page_count, amount,
+		created_at, updated_at, route_path, meta_json
+		FROM (`+query+`) aw_overview
+		ORDER BY created_at DESC, id DESC
+		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search asset workbench overview rows: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchOverviewRow{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchOverviewRow(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func buildAssetWorkbenchOverviewQuery(filter repo.AssetWorkbenchOverviewSearchFilter) (string, []interface{}) {
+	submissionWhere, submissionArgs := buildAssetWorkbenchOverviewSubmissionWhere(filter)
+	itemWhere, itemArgs := buildAssetWorkbenchOverviewItemWhere(filter)
+	query := assetWorkbenchOverviewSubmissionSelect() + ` WHERE ` + strings.Join(submissionWhere, " AND ") + `
+		UNION ALL
+		` + assetWorkbenchOverviewItemSelect() + ` WHERE ` + strings.Join(itemWhere, " AND ")
+	args := append([]interface{}{}, submissionArgs...)
+	args = append(args, itemArgs...)
+	return query, args
+}
+
+func buildAssetWorkbenchOverviewSubmissionWhere(filter repo.AssetWorkbenchOverviewSearchFilter) ([]string, []interface{}) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		where = append(where, `(s.submission_no LIKE ? OR s.notes LIKE ? OR COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ? OR EXISTS (
+			SELECT 1 FROM asset_workbench_submission_items i WHERE i.submission_id = s.id AND i.order_no LIKE ?
+		) OR EXISTS (
+			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_id = s.id AND (f.original_filename LIKE ? OR f.file_type LIKE ?)
+		))`)
+		args = append(args, like, like, like, like, like, like)
+	}
+	if creator := strings.TrimSpace(filter.Creator); creator != "" {
+		like := "%" + creator + "%"
+		where = append(where, `COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ?`)
+		args = append(args, like)
+	}
+	if filter.CreatedFrom != nil {
+		where = append(where, "s.submitted_at >= ?")
+		args = append(args, *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		where = append(where, "s.submitted_at <= ?")
+		args = append(args, *filter.CreatedTo)
+	}
+	return where, args
+}
+
+func buildAssetWorkbenchOverviewItemWhere(filter repo.AssetWorkbenchOverviewSearchFilter) ([]string, []interface{}) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		where = append(where, `(i.order_no LIKE ? OR i.template_name_snapshot LIKE ? OR i.category_snapshot LIKE ? OR i.difficulty_class LIKE ? OR s.submission_no LIKE ? OR COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ? OR EXISTS (
+			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_item_id = i.id AND (f.original_filename LIKE ? OR f.file_type LIKE ?)
+		))`)
+		args = append(args, like, like, like, like, like, like, like, like)
+	}
+	if creator := strings.TrimSpace(filter.Creator); creator != "" {
+		like := "%" + creator + "%"
+		where = append(where, `COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), '') LIKE ?`)
+		args = append(args, like)
+	}
+	if filter.CreatedFrom != nil {
+		where = append(where, "i.submitted_at >= ?")
+		args = append(args, *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		where = append(where, "i.submitted_at <= ?")
+		args = append(args, *filter.CreatedTo)
+	}
+	return where, args
+}
+
+func assetWorkbenchSubmissionOrderBy(orderBy, orderDir string) string {
+	dir := "DESC"
+	if strings.EqualFold(strings.TrimSpace(orderDir), "asc") {
+		dir = "ASC"
+	}
+	idDir := dir
+	if dir == "ASC" {
+		idDir = "ASC"
+	}
+	switch strings.ToLower(strings.TrimSpace(orderBy)) {
+	case "created_at":
+		return "s.created_at " + dir + ", s.id " + idDir
+	case "submitted_at", "time":
+		return "s.submitted_at " + dir + ", s.id " + idDir
+	case "file_type":
+		return "(SELECT MIN(LOWER(f.file_type)) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id) " + dir + ", s.submitted_at DESC, s.id DESC"
+	case "file_name", "filename":
+		return "(SELECT MIN(LOWER(f.original_filename)) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id) " + dir + ", s.submitted_at DESC, s.id DESC"
+	default:
+		return "s.submitted_at DESC, s.id DESC"
+	}
 }
 
 func (r *assetWorkbenchRepo) ListSubmissionItems(ctx context.Context, submissionID int64) ([]*domain.AssetWorkbenchSubmissionItem, error) {
@@ -1854,6 +2134,88 @@ func (r *assetWorkbenchRepo) ListSubmissionFiles(ctx context.Context, submission
 func (r *assetWorkbenchRepo) GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error) {
 	row := r.db.db.QueryRowContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE id = ?`, fileID)
 	return scanAssetWorkbenchSubmissionFile(row)
+}
+
+func (r *assetWorkbenchRepo) ListSubmissionFilesByIDs(ctx context.Context, fileIDs []int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
+	if len(fileIDs) == 0 {
+		return []*domain.AssetWorkbenchSubmissionFile{}, nil
+	}
+	query, args := simpleInClause(assetWorkbenchSubmissionFileSelect()+` WHERE id IN (`, `) ORDER BY id ASC`, int64SliceToInterfaces(fileIDs)...)
+	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench submission files by ids: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchSubmissionFile{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchSubmissionFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, tx repo.Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error) {
+	if file == nil {
+		return nil, sql.ErrNoRows
+	}
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_submission_files f
+		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id
+		SET f.upload_directory_id = ?, f.upload_directory_name = ?, f.upload_directory_prefix = ?,
+		    f.object_key = ?, f.preview_key = ?, f.updated_at = CURRENT_TIMESTAMP
+		WHERE f.id = ?
+		  AND i.settlement_status = ?
+		  AND i.current_settlement_batch_id IS NULL
+		  AND i.qc_status <> ?`,
+		toNullInt64(file.UploadDirectoryID),
+		file.UploadDirectoryName,
+		file.UploadDirectoryPrefix,
+		file.ObjectKey,
+		file.PreviewKey,
+		file.ID,
+		domain.AssetWorkbenchSettlementStatusUnsettled,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench submission file location: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench file location rows affected: %w", err)
+	}
+	if affected != 1 {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission file cannot be moved after settlement or void.", map[string]interface{}{"file_id": file.ID})
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE id = ?`, file.ID)
+	return scanAssetWorkbenchSubmissionFile(row)
+}
+
+func (r *assetWorkbenchRepo) DeleteSubmissionFile(ctx context.Context, tx repo.Tx, fileID int64) error {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		DELETE f FROM asset_workbench_submission_files f
+		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id
+		WHERE f.id = ?
+		  AND i.settlement_status = ?
+		  AND i.current_settlement_batch_id IS NULL
+		  AND i.qc_status <> ?`,
+		fileID,
+		domain.AssetWorkbenchSettlementStatusUnsettled,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+	)
+	if err != nil {
+		return fmt.Errorf("delete asset workbench submission file: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("asset workbench delete file rows affected: %w", err)
+	}
+	if affected != 1 {
+		return domain.NewAppError(domain.ErrCodeConflict, "Submission file cannot be deleted after settlement or void.", map[string]interface{}{"file_id": fileID})
+	}
+	return nil
 }
 
 func (r *assetWorkbenchRepo) ClaimPendingPreviewFiles(ctx context.Context, claim repo.AssetWorkbenchPreviewClaim) ([]*domain.AssetWorkbenchSubmissionFile, error) {
@@ -2561,6 +2923,22 @@ func (r *assetWorkbenchRepo) CreateSettlementSupplement(ctx context.Context, tx 
 	id, err := res.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("asset workbench settlement supplement last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSettlementSupplementSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchSettlementSupplement(row)
+}
+
+func (r *assetWorkbenchRepo) GetSettlementSupplementForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSettlementSupplementSelect()+` WHERE id = ? FOR UPDATE`, id)
+	return scanAssetWorkbenchSettlementSupplement(row)
+}
+
+func (r *assetWorkbenchRepo) VoidSettlementSupplement(ctx context.Context, tx repo.Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error) {
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_settlement_supplements
+		SET status = ?, updated_at = NOW()
+		WHERE id = ?`, domain.AssetWorkbenchSupplementStatusVoided, id); err != nil {
+		return nil, fmt.Errorf("void asset workbench settlement supplement: %w", err)
 	}
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSettlementSupplementSelect()+` WHERE id = ?`, id)
 	return scanAssetWorkbenchSettlementSupplement(row)
@@ -3284,6 +3662,62 @@ func assetWorkbenchSubmissionSelect() string {
 		FROM asset_workbench_submissions`
 }
 
+func assetWorkbenchSubmissionListSelect() string {
+	return `SELECT s.id, s.submission_no, s.submitter_user_id,
+		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', s.submitter_user_id)) AS submitter_name,
+		COALESCE(u.username, '') AS submitter_username,
+		s.business_month, s.submitted_at, s.status, s.item_count,
+		s.file_count, s.page_count, s.gross_total, s.notes, s.created_at, s.updated_at
+		FROM asset_workbench_submissions s
+		LEFT JOIN users u ON u.id = s.submitter_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = s.submitter_user_id`
+}
+
+func assetWorkbenchOverviewSubmissionSelect() string {
+	return `SELECT 'submission' AS source,
+		s.id AS id,
+		s.submission_no AS title,
+		s.submission_no AS primary_code,
+		'' AS secondary_code,
+		'' AS order_no,
+		s.submitter_user_id AS creator_user_id,
+		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', s.submitter_user_id)) AS creator_name,
+		s.business_month AS business_month,
+		s.status AS status,
+		s.page_count AS page_count,
+		s.gross_total AS amount,
+		s.submitted_at AS created_at,
+		s.updated_at AS updated_at,
+		CONCAT('/submissions?submission_id=', s.id) AS route_path,
+		JSON_OBJECT('item_count', s.item_count, 'file_count', s.file_count, 'notes', s.notes) AS meta_json
+		FROM asset_workbench_submissions s
+		LEFT JOIN users u ON u.id = s.submitter_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = s.submitter_user_id`
+}
+
+func assetWorkbenchOverviewItemSelect() string {
+	return `SELECT 'piecework_item' AS source,
+		i.id AS id,
+		COALESCE(NULLIF(i.order_no, ''), CONCAT('计件明细 ', i.id)) AS title,
+		i.order_no AS primary_code,
+		COALESCE(NULLIF(i.template_name_snapshot, ''), NULLIF(i.category_snapshot, ''), i.difficulty_class) AS secondary_code,
+		i.order_no AS order_no,
+		i.payee_user_id AS creator_user_id,
+		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', i.payee_user_id)) AS creator_name,
+		i.business_month AS business_month,
+		CONCAT(i.qc_status, '/', i.settlement_status) AS status,
+		i.page_count AS page_count,
+		i.gross_amount AS amount,
+		i.submitted_at AS created_at,
+		i.updated_at AS updated_at,
+		CONCAT('/submissions?submission_id=', i.submission_id, '&item_id=', i.id) AS route_path,
+		JSON_OBJECT('submission_id', i.submission_id, 'difficulty_class', i.difficulty_class, 'finalized', i.finalized, 'pricing_status', i.pricing_status, 'template_id', i.template_id) AS meta_json
+		FROM asset_workbench_submission_items i
+		JOIN asset_workbench_submissions s ON s.id = i.submission_id
+		LEFT JOIN users u ON u.id = i.payee_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = i.payee_user_id`
+}
+
 func assetWorkbenchSubmissionItemSelect() string {
 	return `SELECT id, submission_id, payee_user_id, order_no, template_id, template_name_snapshot, category_snapshot,
 		difficulty_class, finalized, page_count, item_count, business_month, submitted_at, worker_type_snapshot,
@@ -3644,6 +4078,18 @@ func scanAssetWorkbenchSubmission(scanner interface{ Scan(...interface{}) error 
 	return &item, nil
 }
 
+func scanAssetWorkbenchSubmissionList(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSubmission, error) {
+	var item domain.AssetWorkbenchSubmission
+	if err := scanner.Scan(
+		&item.ID, &item.SubmissionNo, &item.SubmitterUserID, &item.SubmitterName, &item.SubmitterUsername,
+		&item.BusinessMonth, &item.SubmittedAt, &item.Status, &item.ItemCount, &item.FileCount,
+		&item.PageCount, &item.GrossTotal, &item.Notes, &item.CreatedAt, &item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
 func scanAssetWorkbenchSubmissionItem(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSubmissionItem, error) {
 	var item domain.AssetWorkbenchSubmissionItem
 	var templateID, basePriceRuleID, promoCouponID, currentBatchID, voidedBy sql.NullInt64
@@ -3823,6 +4269,33 @@ func scanAssetWorkbenchTemplateAssignmentDetail(scanner interface{ Scan(...inter
 	return &item, nil
 }
 
+func scanAssetWorkbenchOverviewRow(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchOverviewRow, error) {
+	var item domain.AssetWorkbenchOverviewRow
+	var meta sql.NullString
+	if err := scanner.Scan(
+		&item.Source,
+		&item.ID,
+		&item.Title,
+		&item.PrimaryCode,
+		&item.SecondaryCode,
+		&item.OrderNo,
+		&item.CreatorUserID,
+		&item.CreatorName,
+		&item.BusinessMonth,
+		&item.Status,
+		&item.PageCount,
+		&item.Amount,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+		&item.RoutePath,
+		&meta,
+	); err != nil {
+		return nil, err
+	}
+	item.Meta = cloneValidJSON(meta)
+	return &item, nil
+}
+
 func scanAssetWorkbenchErrorImportBatch(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchErrorImportBatch, error) {
 	var item domain.AssetWorkbenchErrorImportBatch
 	if err := scanner.Scan(
@@ -3992,6 +4465,17 @@ func inClause(prefix, suffix string, args ...interface{}) (string, []interface{}
 	}
 	placeholders := make([]string, 0, len(args)-3)
 	for range args[3:] {
+		placeholders = append(placeholders, "?")
+	}
+	return prefix + strings.Join(placeholders, ",") + suffix, args
+}
+
+func simpleInClause(prefix, suffix string, args ...interface{}) (string, []interface{}) {
+	if len(args) == 0 {
+		return prefix + "NULL" + suffix, args
+	}
+	placeholders := make([]string, 0, len(args))
+	for range args {
 		placeholders = append(placeholders, "?")
 	}
 	return prefix + strings.Join(placeholders, ",") + suffix, args

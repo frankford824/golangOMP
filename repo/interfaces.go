@@ -377,8 +377,19 @@ type AssetWorkbenchSubmissionFilter struct {
 	BusinessMonth    string
 	Status           string
 	SettlementStatus string
+	OrderBy          string
+	OrderDir         string
 	Page             int
 	PageSize         int
+}
+
+type AssetWorkbenchOverviewSearchFilter struct {
+	Keyword     string
+	Creator     string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+	Page        int
+	PageSize    int
 }
 
 type AssetWorkbenchPreviewClaim struct {
@@ -454,20 +465,28 @@ type AssetWorkbenchRepo interface {
 	GetAccountLinkByCanonical(ctx context.Context, canonicalUserID int64) (*domain.AssetWorkbenchAccountLink, error)
 
 	ListPriceMatrix(ctx context.Context, filter AssetWorkbenchPriceMatrixFilter) ([]*domain.AssetWorkbenchPriceMatrix, int64, error)
+	GetPriceMatrixForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchPriceMatrix, error)
 	LockPriceMatrixDimension(ctx context.Context, tx Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchPriceMatrix, error)
 	CreatePriceMatrix(ctx context.Context, tx Tx, item *domain.AssetWorkbenchPriceMatrix) (*domain.AssetWorkbenchPriceMatrix, error)
+	SetPriceMatrixEnabled(ctx context.Context, tx Tx, id int64, enabled bool) (*domain.AssetWorkbenchPriceMatrix, error)
 	FindActivePrice(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchPriceMatrix, error)
 
 	ListDeductionRules(ctx context.Context, filter AssetWorkbenchDeductionRuleFilter) ([]*domain.AssetWorkbenchDeductionRule, int64, error)
+	GetDeductionRuleForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchDeductionRule, error)
 	LockDeductionRuleDimension(ctx context.Context, tx Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchDeductionRule, error)
 	CreateDeductionRule(ctx context.Context, tx Tx, item *domain.AssetWorkbenchDeductionRule) (*domain.AssetWorkbenchDeductionRule, error)
+	SetDeductionRuleEnabled(ctx context.Context, tx Tx, id int64, enabled bool) (*domain.AssetWorkbenchDeductionRule, error)
 
 	ListWelfareRules(ctx context.Context, filter AssetWorkbenchWelfareRuleFilter) ([]*domain.AssetWorkbenchWelfareRule, int64, error)
+	GetWelfareRuleForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchWelfareRule, error)
 	CreateWelfareRule(ctx context.Context, tx Tx, item *domain.AssetWorkbenchWelfareRule) (*domain.AssetWorkbenchWelfareRule, error)
+	SetWelfareRuleEnabled(ctx context.Context, tx Tx, id int64, enabled bool) (*domain.AssetWorkbenchWelfareRule, error)
 	FindActiveWelfareRules(ctx context.Context, workerType, jobGrade string, asOf time.Time) ([]*domain.AssetWorkbenchWelfareRule, error)
 
 	ListPromoCoupons(ctx context.Context, filter AssetWorkbenchPromoCouponFilter) ([]*domain.AssetWorkbenchPromoCoupon, int64, error)
+	GetPromoCouponForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchPromoCoupon, error)
 	CreatePromoCoupon(ctx context.Context, tx Tx, item *domain.AssetWorkbenchPromoCoupon) (*domain.AssetWorkbenchPromoCoupon, error)
+	SetPromoCouponEnabled(ctx context.Context, tx Tx, id int64, enabled bool) (*domain.AssetWorkbenchPromoCoupon, error)
 	ListActivePromoCoupons(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) ([]*domain.AssetWorkbenchPromoCoupon, error)
 
 	ListGroups(ctx context.Context, filter AssetWorkbenchGroupFilter) ([]*domain.AssetWorkbenchGroup, int64, error)
@@ -508,18 +527,25 @@ type AssetWorkbenchRepo interface {
 
 	CreateSubmission(ctx context.Context, tx Tx, submission *domain.AssetWorkbenchSubmission) (*domain.AssetWorkbenchSubmission, error)
 	GetSubmission(ctx context.Context, submissionID int64) (*domain.AssetWorkbenchSubmission, error)
+	GetSubmissionForUpdate(ctx context.Context, tx Tx, submissionID int64) (*domain.AssetWorkbenchSubmission, error)
+	VoidSubmission(ctx context.Context, tx Tx, submissionID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmission, error)
 	CreateSubmissionItem(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error)
 	GetSubmissionItem(ctx context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error)
+	UpdateSubmissionItemEditableFields(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error)
 	UpdateSubmissionItemQCStatus(ctx context.Context, tx Tx, itemID int64, qcStatus string) (*domain.AssetWorkbenchSubmissionItem, error)
 	VoidSubmissionItem(ctx context.Context, tx Tx, itemID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmissionItem, error)
 	UpdateSubmissionItemPricing(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error)
 	CreateSubmissionFile(ctx context.Context, tx Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error)
 	RefreshSubmissionTotals(ctx context.Context, tx Tx, submissionID int64) error
+	SearchOverviewRows(ctx context.Context, filter AssetWorkbenchOverviewSearchFilter) ([]*domain.AssetWorkbenchOverviewRow, int64, error)
 	ListSubmissions(ctx context.Context, filter AssetWorkbenchSubmissionFilter) ([]*domain.AssetWorkbenchSubmission, int64, error)
 	ListSubmissionItems(ctx context.Context, submissionID int64) ([]*domain.AssetWorkbenchSubmissionItem, error)
 	ListSubmissionItemsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)
 	ListSubmissionFiles(ctx context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error)
+	ListSubmissionFilesByIDs(ctx context.Context, fileIDs []int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
+	UpdateSubmissionFileLocation(ctx context.Context, tx Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error)
+	DeleteSubmissionFile(ctx context.Context, tx Tx, fileID int64) error
 
 	ClaimPendingPreviewFiles(ctx context.Context, claim AssetWorkbenchPreviewClaim) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	MarkPreviewReady(ctx context.Context, tx Tx, fileID int64, previewKey string) error
@@ -550,6 +576,8 @@ type AssetWorkbenchRepo interface {
 	ApplySettlementBatchAdjustment(ctx context.Context, tx Tx, batchID int64, signedAmount float64) error
 	ListSettlementSupplements(ctx context.Context, filter AssetWorkbenchSettlementSupplementFilter) ([]*domain.AssetWorkbenchSettlementSupplement, int64, error)
 	CreateSettlementSupplement(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementSupplement) (*domain.AssetWorkbenchSettlementSupplement, error)
+	GetSettlementSupplementForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error)
+	VoidSettlementSupplement(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error)
 	GetSupplementPermission(ctx context.Context, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error)
 	ListSupplementPermissions(ctx context.Context, filter AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, error)
 	UpsertSupplementPermission(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSupplementPermission) (*domain.AssetWorkbenchSupplementPermission, error)

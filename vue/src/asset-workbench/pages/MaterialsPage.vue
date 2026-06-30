@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Download, Grid3X3, List, Search, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Download, Grid3X3, List, Search, X } from 'lucide-vue-next'
 
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
@@ -35,15 +35,19 @@ type ViewMode = 'gallery' | 'table'
 
 type MaterialGridRow = SystemAssetRow & {
   display_no: string | number
+  display_style_code: string
   display_name: string
   display_type: string
   preview_label: string
   task_label: string
+  created_label: string
 }
 
 const keyword = ref('')
 const rows = ref<SystemAssetRow[]>([])
 const total = ref(0)
+const page = ref(1)
+const pageSize = ref(30)
 const selectedAssetIds = ref<Set<number>>(new Set())
 const activeAsset = ref<SystemAssetRow | null>(null)
 const previewAsset = ref<SystemAssetRow | null>(null)
@@ -69,7 +73,7 @@ const directoryName = ref('')
 const directoryPrefix = ref('')
 const directoryDescription = ref('')
 const materialsRequest = usePageRequest(
-  (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, limit: 100 }, signal),
+  (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, page: page.value, page_size: pageSize.value }, signal),
   { items: [], total: 0, page: 1, size: 0 },
   '素材库搜索失败',
 )
@@ -98,19 +102,23 @@ const materialRowsWithLabels = computed<MaterialGridRow[]>(() =>
   filteredRows.value.map((row) => ({
     ...row,
     display_no: codeOf(row),
+    display_style_code: styleCodeOf(row) || '—',
     display_name: titleOf(row),
     display_type: typeLabel(row),
     preview_label: systemPreviewMeta(canPreviewMaterial(row)).label,
     task_label: row.task_no || '无任务号',
+    created_label: formatDateTime(row.created_at),
   })),
 )
 const materialGridRows = computed(() => materialRowsWithLabels.value as unknown as Record<string, unknown>[])
 const materialGridColumns = computed<GridColumn[]>(() => [
   { key: 'select', label: '选择', width: 84, align: 'center' },
   { key: 'display_no', label: '编码', width: 160 },
+  { key: 'display_style_code', label: '款式编码', width: 150 },
   { key: 'display_name', label: '素材名称', width: 260 },
   { key: 'display_type', label: '类型', width: 120 },
   { key: 'task_label', label: '任务', width: 150 },
+  { key: 'created_label', label: '创建时间', width: 170 },
   { key: 'preview_label', label: '预览', width: 120 },
   { key: 'actions', label: '动作', width: 140, align: 'center' },
 ])
@@ -118,15 +126,19 @@ const selectedCount = computed(() => selectedAssetIds.value.size)
 const selectedLabel = computed(() => (selectedCount.value > 0 ? `已选 ${formatInt(selectedCount.value)} 个素材` : '未选择素材'))
 const selectedClientCount = computed(() => selectedClientMaterialIds.value.size)
 const selectedClientLabel = computed(() => (selectedClientCount.value > 0 ? `已选 ${formatInt(selectedClientCount.value)} 个素材` : '未选择素材'))
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const activeDetailRows = computed(() => {
   const asset = activeAsset.value
   if (!asset) return []
   return [
     ['编码', codeOf(asset)],
+    ['款式编码', styleCodeOf(asset) || '—'],
     ['名称', titleOf(asset)],
     ['文件类型', typeLabel(asset)],
     ['任务号', asset.task_no || '—'],
     ['产品名', asset.product_name || '—'],
+    ['创建人', creatorOf(asset) || '—'],
+    ['创建时间', formatDateTime(asset.created_at)],
     ['原文件', asset.original_filename || asset.file_name || '—'],
     ['资源编号', asset.resource_id || '—'],
   ]
@@ -145,7 +157,8 @@ const relatedAssets = computed(() => {
     .slice(0, 8)
 })
 
-async function searchMaterials() {
+async function searchMaterials(resetPage = true) {
+  if (resetPage) page.value = 1
   notice.value = ''
   const result = await materialsRequest.run()
   if (!result) return
@@ -157,12 +170,39 @@ async function searchMaterials() {
   lastSelectedIndex = -1
 }
 
+async function goMaterialsPage(nextPage: number) {
+  page.value = Math.min(totalPages.value, Math.max(1, nextPage))
+  await searchMaterials(false)
+}
+
 function titleOf(asset: SystemAssetRow) {
   return asset.product_name || asset.original_filename || asset.file_name || asset.task_no || `素材 ${asset.id}`
 }
 
 function codeOf(asset: SystemAssetRow) {
   return asset.asset_no || asset.resource_id || asset.id
+}
+
+function styleCodeOf(asset: SystemAssetRow) {
+  return asset.scope_sku_code || asset.sku_code || asset.primary_sku_code || ''
+}
+
+function creatorOf(asset: SystemAssetRow) {
+  return asset.created_by_name || asset.created_by_username || asset.task_creator_name || asset.task_creator_username || ''
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }
 
 function typeBucket(asset: SystemAssetRow) {
@@ -507,7 +547,7 @@ function initializeMaterialsMode(isAdmin: boolean | undefined) {
   if (mode === 'client') {
     void loadClientMaterials(false)
   } else {
-    void searchMaterials()
+    void searchMaterials(false)
     void loadClientMaterials(true)
     void loadUploadDirectoriesAdmin()
   }
@@ -588,8 +628,8 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
 
     <div class="aw-data-surface">
       <div class="aw-material-search">
-        <input v-model="keyword" type="search" placeholder="搜索编码、款式编码、产品名或趋势" @keydown.enter="searchMaterials" />
-        <button class="aw-primary-button" type="button" @click="searchMaterials">
+        <input v-model="keyword" type="search" placeholder="搜索编码、款式编码、产品名或文件名" @keydown.enter="searchMaterials()" />
+        <button class="aw-primary-button" type="button" @click="searchMaterials()">
           <Search :size="16" aria-hidden="true" />
           搜索
         </button>
@@ -615,6 +655,17 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
           <option value="download_only">只下载</option>
         </select>
         <span class="aw-chip aw-chip--neutral">{{ formatInt(filteredRows.length) }} / {{ formatInt(total) }} 条</span>
+        <div class="aw-inline-actions" aria-label="素材分页">
+          <button class="aw-secondary-button" type="button" :disabled="page <= 1 || loading" @click="goMaterialsPage(page - 1)">
+            <ChevronLeft :size="15" aria-hidden="true" />
+            上一页
+          </button>
+          <span class="aw-chip aw-chip--neutral">第 {{ formatInt(page) }} / {{ formatInt(totalPages) }} 页</span>
+          <button class="aw-secondary-button" type="button" :disabled="page >= totalPages || loading" @click="goMaterialsPage(page + 1)">
+            下一页
+            <ChevronRight :size="15" aria-hidden="true" />
+          </button>
+        </div>
         <label class="aw-inline-check">
           <input
             type="checkbox"

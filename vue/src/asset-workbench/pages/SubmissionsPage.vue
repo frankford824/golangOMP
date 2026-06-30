@@ -3,21 +3,27 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   assetWorkbenchApi,
+  type AssetWorkbenchEventRow,
   type AssetWorkbenchSavedView,
   type SubmissionDetail,
   type SubmissionFileRow,
   type SubmissionItemRow,
   type SubmissionRow,
+  type UploadDirectoryRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
+import { exportQCImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { chipClass, previewStatusMeta, pricingStatusMeta, qcStatusMeta, submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 type ItemActionKind = 'needs_fix' | 'void' | 'reprice'
+type SubmissionOrderBy = 'submitted_at' | 'file_type' | 'file_name'
+type SubmissionOrderDir = 'desc' | 'asc'
 
 interface GridColumn {
   key: string
@@ -27,8 +33,9 @@ interface GridColumn {
 }
 
 type DetailItemGridRow = SubmissionItemRow & { file_count: number; action: string }
-type DetailFileGridRow = SubmissionFileRow & { selected: boolean; action: string }
-type SubmissionGridRow = SubmissionRow & { status_label: string }
+type DetailFileGridRow = SubmissionFileRow & { selected: boolean; action: string; page_count: number; preview_tile: string }
+type SubmissionGridRow = SubmissionRow & { status_label: string; submitter_label: string; submitted_label: string }
+type QCRejectionMessage = { item_id: number; order_no: string; reason: string; created_at: string; actor_label: string }
 
 interface PendingItemAction {
   kind: ItemActionKind
@@ -36,20 +43,44 @@ interface PendingItemAction {
   reason: string
 }
 
+interface PendingSubmissionVoid {
+  submission: SubmissionRow
+  reason: string
+}
+
 const rows = ref<SubmissionRow[]>([])
 const total = ref(0)
 const savedViews = ref<AssetWorkbenchSavedView[]>([])
+const uploadDirectories = ref<UploadDirectoryRow[]>([])
 const selectedDetail = ref<SubmissionDetail | null>(null)
 const selectedFileIds = ref<Set<number>>(new Set())
+const qcRejectionMessages = ref<QCRejectionMessage[]>([])
 const pendingAction = ref<PendingItemAction | null>(null)
+const pendingSubmissionVoid = ref<PendingSubmissionVoid | null>(null)
+const editingItem = ref<SubmissionItemRow | null>(null)
+const qcInputRef = ref<HTMLInputElement | null>(null)
 const detailLoading = ref(false)
+const qcRejectionLoading = ref(false)
+const fileActionSaving = ref(false)
 const notice = ref('')
 const viewName = ref('默认维护视图')
 const groupBy = ref('business_month')
 const density = ref('compact')
+const orderBy = ref<SubmissionOrderBy>('submitted_at')
+const orderDir = ref<SubmissionOrderDir>('desc')
+const moveDirectoryId = ref(0)
+const deleteReason = ref('')
+const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
+const editForm = ref({
+  order_no: '',
+  difficulty_class: 'A',
+  finalized: true,
+  page_count: 1,
+  reason: '',
+})
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
 const submissionsRequest = usePageRequest(
-  () => assetWorkbenchApi.listSubmissions({ page: 1, page_size: 50 }),
+  () => assetWorkbenchApi.listSubmissions({ page: 1, page_size: 50, order_by: orderBy.value, order_dir: orderDir.value }),
   { items: [], total: 0 },
   '提交列表加载失败',
 )
@@ -66,6 +97,8 @@ const submissionRowsWithLabels = computed<SubmissionGridRow[]>(() =>
   rows.value.map((row) => ({
     ...row,
     status_label: submissionStatusMeta(row.status).label,
+    submitter_label: row.submitter_name || row.submitter_username || `用户 ${row.submitter_user_id}`,
+    submitted_label: formatDateTime(row.submitted_at),
   })),
 )
 const submissionGridRows = computed(() => submissionRowsWithLabels.value as unknown as Record<string, unknown>[])
@@ -81,13 +114,17 @@ const detailFileRows = computed<DetailFileGridRow[]>(() =>
   selectedFiles.value.map((file) => ({
     ...file,
     selected: selectedFileIds.value.has(file.id),
+    page_count: pageCountForFile(file),
+    preview_tile: 'preview',
     action: 'actions',
   })),
 )
 const detailFileGridRows = computed(() => detailFileRows.value as unknown as Record<string, unknown>[])
 const submissionGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
   { key: 'submission_no', label: '提交批次', width: 180 },
+  { key: 'submitter_label', label: '创建人', width: 132 },
   { key: 'business_month', label: '结算月', width: 108 },
+  { key: 'submitted_label', label: '创建时间', width: 168 },
   { key: 'status_label', label: '状态', width: 96 },
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
   { key: 'page_count', label: '页数', width: 88, align: 'right' },
@@ -101,24 +138,58 @@ const detailItemGridColumns = computed<GridColumn[]>(() => [
   { key: 'qc_status', label: '质检', width: 96 },
   { key: 'gross_amount', label: '毛额', width: 108, align: 'right' },
   { key: 'file_count', label: '文件', width: 84, align: 'right' },
-  { key: 'action', label: '动作', width: 230, align: 'center' },
+  { key: 'action', label: '动作', width: 280, align: 'center' },
 ])
 const detailFileGridColumns = computed<GridColumn[]>(() => [
   { key: 'selected', label: '选择', width: 84, align: 'center' },
+  { key: 'preview_tile', label: '缩略图', width: 112, align: 'center' },
   { key: 'original_filename', label: '文件名', width: 240 },
   { key: 'file_type', label: '类型', width: 108 },
+  { key: 'page_count', label: '页数', width: 84, align: 'right' },
   { key: 'preview_status', label: '预览', width: 108 },
   { key: 'action', label: '动作', width: 96, align: 'center' },
 ])
 
 const downloadableFileIDs = computed(() => selectedFiles.value.map((file) => file.id))
+const selectedPageCount = computed(() => {
+  const selectedItemIds = new Set<number>()
+  for (const file of selectedFiles.value) {
+    if (selectedFileIds.value.has(file.id)) selectedItemIds.add(file.submission_item_id)
+  }
+  let total = 0
+  const detail = selectedDetail.value
+  if (!detail) return 0
+  for (const entry of detail.items) {
+    if (selectedItemIds.has(entry.item.id)) total += entry.item.page_count || 0
+  }
+  return total
+})
+const needsFixItems = computed(() =>
+  (selectedDetail.value?.items ?? [])
+    .map((entry) => entry.item)
+    .filter((item) => item.qc_status === 'needs_fix'),
+)
+const qcRejectionRows = computed(() => {
+  const byID = new Map(qcRejectionMessages.value.map((item) => [item.item_id, item]))
+  return needsFixItems.value.map((item) => byID.get(item.id) ?? {
+    item_id: item.id,
+    order_no: item.order_no || `明细 ${item.id}`,
+    reason: qcRejectionLoading.value ? '正在读取驳回原因' : '未记录驳回原因',
+    created_at: '',
+    actor_label: '',
+  })
+})
 const pendingActionTitle = computed(() => {
   if (!pendingAction.value) return ''
   if (pendingAction.value.kind === 'needs_fix') return '标记需修'
   if (pendingAction.value.kind === 'void') return '作废明细'
   return '重新计价'
 })
-const canManageItems = computed(() => bootstrap.value?.capabilities.includes('asset.workbench.manage') === true)
+const canManageItems = computed(() => {
+  const capabilities = bootstrap.value?.capabilities ?? []
+  return capabilities.includes('asset.workbench.manage') || capabilities.includes('asset.workbench.settlement')
+})
+const canManageFiles = computed(() => bootstrap.value?.capabilities.includes('asset.workbench.manage') === true)
 
 async function loadSubmissions() {
   const result = await submissionsRequest.run()
@@ -126,11 +197,40 @@ async function loadSubmissions() {
   total.value = result?.total ?? 0
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function pageCountForFile(file: SubmissionFileRow) {
+  const detail = selectedDetail.value
+  if (!detail) return 0
+  return detail.items.find((entry) => entry.item.id === file.submission_item_id)?.item.page_count ?? 0
+}
+
 async function loadSavedViews() {
   try {
     savedViews.value = await assetWorkbenchApi.listSavedViews('submissions')
   } catch {
     savedViews.value = []
+  }
+}
+
+async function loadUploadDirectories() {
+  try {
+    uploadDirectories.value = await assetWorkbenchApi.listUploadDirectoriesAdmin()
+    if (!moveDirectoryId.value && uploadDirectories.value[0]) moveDirectoryId.value = uploadDirectories.value[0].id
+  } catch {
+    uploadDirectories.value = []
   }
 }
 
@@ -171,12 +271,58 @@ async function loadSubmissionDetail(submissionId: number) {
   error.value = ''
   notice.value = ''
   selectedFileIds.value = new Set()
+  qcRejectionMessages.value = []
   try {
     selectedDetail.value = await assetWorkbenchApi.getSubmissionDetail(submissionId)
+    await loadQCRejectionMessages()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '提交详情加载失败'
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function loadQCRejectionMessages() {
+  const items = needsFixItems.value
+  if (!items.length) {
+    qcRejectionMessages.value = []
+    return
+  }
+  qcRejectionLoading.value = true
+  const messages = await Promise.all(items.map(loadQCRejectionMessage))
+  qcRejectionMessages.value = messages
+  qcRejectionLoading.value = false
+}
+
+async function loadQCRejectionMessage(item: SubmissionItemRow): Promise<QCRejectionMessage> {
+  try {
+    const events = await assetWorkbenchApi.listEvents({
+      event_type: 'item.qc_updated',
+      entity_type: 'submission_item',
+      entity_id: item.id,
+      page: 1,
+      page_size: 5,
+    })
+    const event = events.items.find((entry) => entry.reason?.trim()) ?? events.items[0]
+    return rejectionMessageFromEvent(item, event)
+  } catch {
+    return {
+      item_id: item.id,
+      order_no: item.order_no || `明细 ${item.id}`,
+      reason: '驳回原因读取失败',
+      created_at: '',
+      actor_label: '',
+    }
+  }
+}
+
+function rejectionMessageFromEvent(item: SubmissionItemRow, event?: AssetWorkbenchEventRow): QCRejectionMessage {
+  return {
+    item_id: item.id,
+    order_no: item.order_no || `明细 ${item.id}`,
+    reason: event?.reason?.trim() || '未记录驳回原因',
+    created_at: event?.created_at ?? '',
+    actor_label: event?.actor_display_name || event?.actor_username || (event?.actor_user_id ? `用户 ${event.actor_user_id}` : ''),
   }
 }
 
@@ -262,8 +408,105 @@ async function updateItemQC(item: SubmissionItemRow, qcStatus: string) {
   }
 }
 
+function openQCImport() {
+  qcInputRef.value?.click()
+}
+
+async function downloadQCTemplate() {
+  notice.value = ''
+  error.value = ''
+  try {
+    await exportQCImportTemplateWorkbook()
+    notice.value = '质检导入模板已生成'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '质检模板生成失败'
+  }
+}
+
+async function handleQCImport(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  target.value = ''
+  if (!file) return
+  notice.value = ''
+  error.value = ''
+  try {
+    const result = await assetWorkbenchApi.importSubmissionItemQCExcel(selectedDetail.value?.submission.business_month ?? '', file)
+    const updated = result.updated?.length ?? 0
+    const failed = result.failures?.length ?? 0
+    notice.value = `质检 Excel 已导入：成功 ${formatInt(updated)} 行，失败 ${formatInt(failed)} 行`
+    if (failed > 0) {
+      error.value = result.failures.slice(0, 5).map((item) => `第 ${item.row} 行：${item.reason}`).join('；')
+    }
+    await refreshSelectedDetail()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '质检 Excel 导入失败'
+  }
+}
+
 function startItemAction(item: SubmissionItemRow, kind: ItemActionKind) {
   pendingAction.value = { item, kind, reason: '' }
+}
+
+function startSubmissionVoid(submission: SubmissionRow) {
+  pendingSubmissionVoid.value = { submission, reason: '' }
+}
+
+async function executeSubmissionVoid() {
+  const action = pendingSubmissionVoid.value
+  if (!action) return
+  const reason = action.reason.trim()
+  if (!reason) {
+    error.value = '请填写作废原因'
+    return
+  }
+  notice.value = ''
+  error.value = ''
+  try {
+    const updated = await assetWorkbenchApi.voidSubmission(action.submission.id, reason)
+    notice.value = `已作废提交批次：${updated.submission_no}`
+    if (selectedDetail.value?.submission.id === updated.id) {
+      selectedDetail.value = null
+      selectedFileIds.value = new Set()
+      qcRejectionMessages.value = []
+    }
+    pendingSubmissionVoid.value = null
+    await loadSubmissions()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '提交批次作废失败'
+  }
+}
+
+function startEditItem(item: SubmissionItemRow) {
+  editingItem.value = item
+  editForm.value = {
+    order_no: item.order_no,
+    difficulty_class: item.difficulty_class || 'A',
+    finalized: item.finalized,
+    page_count: item.page_count || 1,
+    reason: '',
+  }
+}
+
+async function saveItemEdit() {
+  const item = editingItem.value
+  if (!item) return
+  notice.value = ''
+  error.value = ''
+  try {
+    const updated = await assetWorkbenchApi.updateSubmissionItem(item.id, {
+      order_no: editForm.value.order_no,
+      difficulty_class: editForm.value.difficulty_class,
+      finalized: editForm.value.finalized,
+      page_count: editForm.value.page_count,
+      reason: editForm.value.reason || '维护区行内编辑',
+    })
+    notice.value = `已更新 ${updated.order_no}`
+    editingItem.value = null
+    await refreshSelectedDetail()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '明细保存失败'
+  }
 }
 
 async function executePendingAction() {
@@ -293,8 +536,59 @@ async function executePendingAction() {
   }
 }
 
+async function moveSelectedFiles() {
+  const ids = Array.from(selectedFileIds.value)
+  if (!ids.length) {
+    notice.value = '请选择要移动的文件'
+    return
+  }
+  if (!moveDirectoryId.value) {
+    error.value = '请选择目标上传目录'
+    return
+  }
+  fileActionSaving.value = true
+  notice.value = ''
+  error.value = ''
+  try {
+    const result = await assetWorkbenchApi.batchMoveFiles(ids, moveDirectoryId.value, '维护区批量移动文件')
+    notice.value = `已移动 ${formatInt(result.files?.length ?? 0)} 个文件，失败 ${formatInt(result.failures?.length ?? 0)} 个`
+    selectedFileIds.value = new Set()
+    await refreshSelectedDetail()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '批量移动失败'
+  } finally {
+    fileActionSaving.value = false
+  }
+}
+
+async function deleteSelectedFiles() {
+  const ids = Array.from(selectedFileIds.value)
+  if (!ids.length) {
+    notice.value = '请选择要删除的文件'
+    return
+  }
+  if (!deleteReason.value.trim()) {
+    error.value = '删除文件必须填写原因'
+    return
+  }
+  fileActionSaving.value = true
+  notice.value = ''
+  error.value = ''
+  try {
+    const result = await assetWorkbenchApi.batchDeleteFiles(ids, deleteReason.value.trim())
+    notice.value = `已删除 ${formatInt(result.deleted?.length ?? 0)} 个文件，失败 ${formatInt(result.failures?.length ?? 0)} 个`
+    selectedFileIds.value = new Set()
+    deleteReason.value = ''
+    await refreshSelectedDetail()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '批量删除失败'
+  } finally {
+    fileActionSaving.value = false
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([refreshBootstrap(), loadSubmissions(), loadSavedViews()])
+  await Promise.all([refreshBootstrap(), loadSubmissions(), loadSavedViews(), loadUploadDirectories()])
 })
 </script>
 
@@ -307,10 +601,20 @@ onMounted(async () => {
         <p>批量检查提交、文件预览、质检状态和结算前重计价。视图会记住分组、密度和列设置。</p>
       </div>
       <div class="aw-page-bar__actions">
+        <button class="aw-secondary-button" type="button" @click="downloadQCTemplate">质检模板</button>
+        <button class="aw-secondary-button" type="button" @click="openQCImport">导入质检</button>
         <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">批量下载</button>
         <button class="aw-primary-button" type="button" @click="saveView">保存视图</button>
       </div>
     </div>
+    <input
+      ref="qcInputRef"
+      class="aw-visually-hidden"
+      type="file"
+      accept=".xlsx,.xls"
+      aria-label="导入质检 Excel"
+      @change="handleQCImport"
+    />
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
         <input v-model="viewName" aria-label="视图名称" />
@@ -322,6 +626,15 @@ onMounted(async () => {
         <select v-model="density" aria-label="表格密度">
           <option value="compact">紧凑</option>
           <option value="comfortable">舒展</option>
+        </select>
+        <select v-model="orderBy" aria-label="排序字段" @change="loadSubmissions()">
+          <option value="submitted_at">按创建时间</option>
+          <option value="file_type">按文件类型</option>
+          <option value="file_name">按文件名</option>
+        </select>
+        <select v-model="orderDir" aria-label="排序方向" @change="loadSubmissions()">
+          <option value="desc">倒序</option>
+          <option value="asc">正序</option>
         </select>
         <span>{{ formatInt(total) }} 个批次</span>
       </div>
@@ -354,13 +667,23 @@ onMounted(async () => {
           :row-height="gridRowHeight"
         >
           <template #cell="{ row, column, value }">
-            <button v-if="column.key === 'action'" type="button" @click="openSubmission(gridRowAsSubmission(row))">文件</button>
+            <div v-if="column.key === 'action'" class="aw-inline-actions">
+              <button type="button" @click="openSubmission(gridRowAsSubmission(row))">文件</button>
+              <button
+                v-if="canManageItems && gridRowAsSubmission(row).status !== 'voided'"
+                type="button"
+                @click="startSubmissionVoid(gridRowAsSubmission(row))"
+              >
+                作废
+              </button>
+            </div>
             <span
               v-else-if="column.key === 'status_label'"
               :class="chipClass(submissionStatusMeta(gridRowAsSubmission(row).status).tone)"
             >
               {{ value }}
             </span>
+            <span v-else-if="column.key === 'submitter_label'" class="aw-cell-text">{{ value }}</span>
             <span v-else-if="column.key === 'gross_total'" class="aw-cell-money">{{ formatMoney(value) }}</span>
             <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ formatInt(value) }}</span>
             <span v-else>{{ value || '—' }}</span>
@@ -371,6 +694,25 @@ onMounted(async () => {
           <p>当前没有可维护的提交。上传成品后，可以在这里质检、修正、下载和保存常用视图。</p>
         </div>
       </AsyncBoundary>
+      <div v-if="pendingSubmissionVoid" class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>作废提交批次</h3>
+            <p class="aw-copy">{{ pendingSubmissionVoid.submission.submission_no }}</p>
+          </div>
+          <span :class="chipClass(submissionStatusMeta(pendingSubmissionVoid.submission.status).tone)">
+            {{ submissionStatusMeta(pendingSubmissionVoid.submission.status).label }}
+          </span>
+        </div>
+        <label class="aw-field">
+          <span>作废原因</span>
+          <input v-model.trim="pendingSubmissionVoid.reason" />
+        </label>
+        <div class="aw-inline-actions">
+          <button class="aw-primary-button" type="button" @click="executeSubmissionVoid">确认作废</button>
+          <button class="aw-secondary-button" type="button" @click="pendingSubmissionVoid = null">取消</button>
+        </div>
+      </div>
     </div>
 
     <div v-if="selectedDetail || detailLoading" class="aw-data-surface">
@@ -381,6 +723,7 @@ onMounted(async () => {
           <p>按明细处理质检、重计价、作废和文件批量下载。</p>
         </div>
         <div class="aw-page-bar__actions">
+          <span class="aw-chip aw-chip--neutral">已选页数 {{ formatInt(selectedPageCount) }}</span>
           <label class="aw-inline-check">
             <input
               type="checkbox"
@@ -405,6 +748,7 @@ onMounted(async () => {
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'action'" class="aw-inline-actions">
             <template v-if="canManageItems">
+              <button type="button" @click="startEditItem(gridRowAsItem(row))">编辑</button>
               <button type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
               <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
               <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
@@ -448,6 +792,107 @@ onMounted(async () => {
           <button class="aw-secondary-button" type="button" @click="pendingAction = null">取消</button>
         </div>
       </div>
+      <div v-if="needsFixItems.length" class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>质检驳回列表</h3>
+            <p class="aw-copy">当前批次中标记为需修的明细和最近驳回原因。</p>
+          </div>
+          <span class="aw-chip aw-chip--warn">{{ formatInt(needsFixItems.length) }} 条</span>
+        </div>
+        <div class="aw-compact-list">
+          <div v-for="item in qcRejectionRows" :key="item.item_id" class="aw-compact-list__item">
+            <div>
+              <strong>{{ item.order_no }}</strong>
+              <p class="aw-copy">{{ item.reason }}</p>
+            </div>
+            <span class="aw-chip aw-chip--warn">
+              {{ item.actor_label || '质检' }}{{ item.created_at ? ` · ${formatDateTime(item.created_at)}` : '' }}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div v-if="editingItem" class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>编辑明细</h3>
+            <p class="aw-copy">{{ editingItem.order_no }}</p>
+          </div>
+          <span :class="chipClass(pricingStatusMeta(editingItem.pricing_status).tone)">
+            {{ pricingStatusMeta(editingItem.pricing_status).label }}
+          </span>
+        </div>
+        <div class="aw-grid-toolbar">
+          <label class="aw-field">
+            <span>订单号</span>
+            <input v-model.trim="editForm.order_no" />
+          </label>
+          <label class="aw-field">
+            <span>难度</span>
+            <select v-model="editForm.difficulty_class">
+              <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">
+                {{ difficulty }}
+              </option>
+            </select>
+          </label>
+          <label class="aw-field">
+            <span>页数</span>
+            <input v-model.number="editForm.page_count" min="1" type="number" />
+          </label>
+          <label class="aw-inline-check">
+            <input v-model="editForm.finalized" type="checkbox" />
+            <span>已定稿</span>
+          </label>
+          <label class="aw-field">
+            <span>原因</span>
+            <input v-model.trim="editForm.reason" placeholder="默认记录为维护区行内编辑" />
+          </label>
+        </div>
+        <div class="aw-inline-actions">
+          <button class="aw-primary-button" type="button" @click="saveItemEdit">保存明细</button>
+          <button class="aw-secondary-button" type="button" @click="editingItem = null">取消</button>
+        </div>
+      </div>
+      <div v-if="canManageFiles && selectedFiles.length" class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>文件批量维护</h3>
+            <p class="aw-copy">移动会重写对象前缀并保留目录快照；删除会从当前提交中移除文件并重算批次汇总。</p>
+          </div>
+          <span class="aw-chip aw-chip--neutral">已选 {{ formatInt(selectedFileIds.size) }}</span>
+        </div>
+        <div class="aw-grid-toolbar">
+          <label class="aw-field">
+            <span>移动到</span>
+            <select v-model.number="moveDirectoryId" :disabled="!uploadDirectories.length">
+              <option :value="0">选择上传目录</option>
+              <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
+                {{ directory.name }}
+              </option>
+            </select>
+          </label>
+          <button
+            class="aw-secondary-button"
+            type="button"
+            :disabled="fileActionSaving || selectedFileIds.size === 0 || !moveDirectoryId"
+            @click="moveSelectedFiles"
+          >
+            移动所选
+          </button>
+          <label class="aw-field">
+            <span>删除原因</span>
+            <input v-model.trim="deleteReason" placeholder="删除文件必须填写原因" />
+          </label>
+          <button
+            class="aw-secondary-button"
+            type="button"
+            :disabled="fileActionSaving || selectedFileIds.size === 0 || !deleteReason.trim()"
+            @click="deleteSelectedFiles"
+          >
+            删除所选
+          </button>
+        </div>
+      </div>
       <WorkbenchDataGrid
         v-if="selectedFiles.length"
         :columns="detailFileGridColumns"
@@ -456,7 +901,7 @@ onMounted(async () => {
         storage-key="submission-detail-files"
         group-by="preview_status"
         :height="300"
-        :row-height="gridRowHeight"
+        :row-height="72"
       >
         <template #cell="{ row, column, value }">
           <label v-if="column.key === 'selected'" class="aw-inline-check">
@@ -468,7 +913,14 @@ onMounted(async () => {
             <span>{{ gridRowAsFile(row).id }}</span>
           </label>
           <button v-else-if="column.key === 'action'" type="button" @click="downloadFile(gridRowAsFile(row))">下载</button>
+          <WorkbenchFilePreview
+            v-else-if="column.key === 'preview_tile'"
+            class="aw-preview-tile--table"
+            :file-id="gridRowAsFile(row).id"
+            :alt="gridRowAsFile(row).original_filename"
+          />
           <span v-else-if="column.key === 'file_type'">{{ gridRowAsFile(row).file_type || gridRowAsFile(row).mime_type }}</span>
+          <span v-else-if="column.key === 'page_count'" class="aw-cell-num">{{ formatInt(value) }}</span>
           <span
             v-else-if="column.key === 'preview_status'"
             :class="chipClass(previewStatusMeta(gridRowAsFile(row).preview_status).tone)"

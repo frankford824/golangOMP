@@ -21,7 +21,9 @@ body {
   font-family: var(--aw-font-sans);
   font-size: var(--aw-font-size-md);
   line-height: 1.55;
-  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .aw-root h1,
@@ -30,6 +32,7 @@ body {
   font-weight: var(--aw-weight-display);
   letter-spacing: var(--aw-tracking-tight);
   line-height: 1.2;
+  text-wrap: balance;
 }
 
 .aw-root h3,

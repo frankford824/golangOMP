@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
+  BarChart3,
+  Bell,
   Boxes,
   Calculator,
   Command,
@@ -36,9 +38,12 @@ const navItems = [
   { group: '工作台', to: '/upload', label: '交作品', icon: FileUp, requires: assetWorkbenchRouteAccess['/upload'].requiresAnyCapability ?? [] },
   { group: '工作台', to: '/submissions', label: '维护区', icon: Boxes, requires: assetWorkbenchRouteAccess['/submissions'].requiresAnyCapability ?? [] },
   { group: '工作台', to: '/materials', label: '素材库', icon: Library, requires: assetWorkbenchRouteAccess['/materials'].requiresAnyCapability ?? [] },
+  { group: '工作台', to: '/overview', label: '总盘查询', icon: Search, requires: assetWorkbenchRouteAccess['/overview'].requiresAnyCapability ?? [] },
+  { group: '工作台', to: '/notifications', label: '通知', icon: Bell, requires: [] },
   { group: '管理', to: '/template-assignments', label: '作品下发', icon: Send, requires: assetWorkbenchRouteAccess['/template-assignments'].requiresAnyCapability ?? [] },
   { group: '管理', to: '/cost-center', label: '成本中心', icon: Calculator, requires: assetWorkbenchRouteAccess['/cost-center'].requiresAnyCapability ?? [] },
   { group: '管理', to: '/settlement', label: '结算工资', icon: ReceiptText, requires: assetWorkbenchRouteAccess['/settlement'].requiresAnyCapability ?? [] },
+  { group: '管理', to: '/reports', label: '计件报表', icon: BarChart3, requires: assetWorkbenchRouteAccess['/reports'].requiresAnyCapability ?? [] },
   { group: '管理', to: '/people', label: '人员资料', icon: UsersRound, requires: assetWorkbenchRouteAccess['/people'].requiresAnyCapability ?? [] },
   { group: '管理', to: '/members', label: '成员管理', icon: UserRound, requires: assetWorkbenchRouteAccess['/members'].requiresAnyCapability ?? [] },
   { group: '管理', to: '/events', label: '操作日志', icon: ScrollText, requires: assetWorkbenchRouteAccess['/events'].requiresAnyCapability ?? [] },

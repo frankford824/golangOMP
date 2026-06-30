@@ -64,6 +64,12 @@ const routes: RouteRecordRaw[] = [
     meta: accessMeta('/account'),
   },
   {
+    path: '/notifications',
+    name: 'asset-notifications',
+    component: () => import('./pages/NotificationsPage.vue'),
+    meta: accessMeta('/notifications'),
+  },
+  {
     path: '/submissions',
     name: 'asset-submissions',
     component: () => import('./pages/SubmissionsPage.vue'),
@@ -74,6 +80,12 @@ const routes: RouteRecordRaw[] = [
     name: 'asset-materials',
     component: () => import('./pages/MaterialsPage.vue'),
     meta: accessMeta('/materials'),
+  },
+  {
+    path: '/overview',
+    name: 'asset-overview',
+    component: () => import('./pages/OverviewPage.vue'),
+    meta: accessMeta('/overview'),
   },
   {
     path: '/cost-center',
@@ -92,6 +104,12 @@ const routes: RouteRecordRaw[] = [
     name: 'asset-settlement',
     component: () => import('./pages/SettlementPage.vue'),
     meta: accessMeta('/settlement'),
+  },
+  {
+    path: '/reports',
+    name: 'asset-reports',
+    component: () => import('./pages/ReportsPage.vue'),
+    meta: accessMeta('/reports'),
   },
   {
     path: '/people',

@@ -23,6 +23,8 @@ const registerForm = reactive({
   phone: '',
   email: '',
   password: '',
+  worker_type: 'parttime',
+  gender: '',
   province: '',
   city: '',
   id_card: '',
@@ -83,10 +85,11 @@ async function submitRegister() {
       phone: registerForm.phone,
       email: registerForm.email,
       password: registerForm.password,
-      worker_type: 'parttime',
+      worker_type: registerForm.worker_type,
       province: registerForm.province,
       city: registerForm.city,
       id_card: registerForm.id_card,
+      gender: registerForm.gender,
       alipay_account: registerForm.alipay_account,
     })
     await activateSession(pickAuthToken(response))
@@ -153,6 +156,21 @@ async function submitRegister() {
           <label class="aw-field">
             <span>邮箱</span>
             <input v-model.trim="registerForm.email" type="email" autocomplete="email" />
+          </label>
+          <label class="aw-field">
+            <span>所属类型</span>
+            <select v-model="registerForm.worker_type" required>
+              <option value="parttime">兼职</option>
+              <option value="fulltime">全职</option>
+            </select>
+          </label>
+          <label class="aw-field">
+            <span>性别</span>
+            <select v-model="registerForm.gender">
+              <option value="">不填写</option>
+              <option value="female">女</option>
+              <option value="male">男</option>
+            </select>
           </label>
           <label class="aw-field">
             <span>省份</span>

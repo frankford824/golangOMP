@@ -493,6 +493,7 @@ func main() {
 		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
 		assetworkbench.WithUserRepository(userRepo),
 		assetworkbench.WithIdentityRegistrar(identitySvc),
+		assetworkbench.WithNotificationCreator(notificationSvc),
 		assetworkbench.WithOSSDirect(ossDirectSvc),
 		assetworkbench.WithPreviewRenderer(service.NewExternalAssetPreviewRenderer()),
 		assetworkbench.WithSystemAssetSearcher(globalAssetCenterSvc),
