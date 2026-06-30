@@ -222,6 +222,161 @@
   opacity: 1;
 }
 
+.aw-nav-item__stack {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aw-nav-item__stack small {
+  font-size: var(--aw-font-size-xs);
+  color: var(--aw-on-console-muted);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aw-hub-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--aw-space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  border-bottom: 1px solid var(--aw-hairline);
+  margin-bottom: var(--aw-space-4);
+}
+
+.aw-hub-tabs__tab {
+  display: grid;
+  gap: 2px;
+  min-height: var(--aw-row-sm);
+  padding: var(--aw-space-2) var(--aw-space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--aw-radius-sm) var(--aw-radius-sm) 0 0;
+  background: transparent;
+  color: var(--aw-ink-2);
+  text-align: left;
+  scroll-snap-align: start;
+  cursor: pointer;
+}
+
+.aw-hub-tabs__tab small {
+  font-size: var(--aw-font-size-xs);
+  color: var(--aw-ink-muted);
+}
+
+.aw-hub-tabs__tab:hover,
+.aw-hub-tabs__tab:focus-visible {
+  background: var(--aw-surface-muted);
+  color: var(--aw-ink);
+}
+
+.aw-hub-tabs__tab--active {
+  color: var(--aw-ink);
+  background: var(--aw-surface-muted);
+  border-bottom-color: var(--aw-accent);
+}
+
+.aw-settings-tabs {
+  flex-wrap: wrap;
+}
+
+.aw-settings-tabs__group {
+  display: inline-flex;
+  align-items: stretch;
+  gap: var(--aw-space-2);
+  padding-inline: var(--aw-space-2);
+}
+
+.aw-settings-tabs__group-label {
+  align-self: center;
+  font-size: var(--aw-font-size-xs);
+  letter-spacing: var(--aw-tracking-label);
+  text-transform: uppercase;
+  color: var(--aw-ink-muted);
+}
+
+.aw-icon-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface);
+  color: var(--aw-ink-2);
+  text-decoration: none;
+}
+
+.aw-icon-action:hover,
+.aw-icon-action:focus-visible {
+  border-color: var(--aw-hairline-strong);
+  color: var(--aw-ink);
+  background: var(--aw-surface-muted);
+}
+
+.aw-icon-action--active {
+  border-color: var(--aw-accent-glow);
+  box-shadow: var(--aw-glow-accent);
+  color: var(--aw-ink);
+}
+
+.aw-icon-action__badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-warn);
+  color: var(--aw-surface);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: center;
+}
+
+.aw-setup-checklist__list {
+  list-style: none;
+  display: grid;
+  gap: var(--aw-space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.aw-setup-checklist__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-4);
+  padding: var(--aw-space-4);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-muted);
+}
+
+.aw-setup-checklist__item[data-done='true'] {
+  border-color: color-mix(in srgb, var(--aw-success) 24%, var(--aw-hairline));
+}
+
+.aw-setup-checklist__item strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.aw-setup-checklist__item span {
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+}
+
 .aw-shell__workspace {
   min-width: 0;
   overflow-x: hidden;
@@ -2509,6 +2664,33 @@ body.aw-ledger-locked {
   margin: 0;
   color: var(--aw-ink-muted);
   padding: var(--aw-space-4);
+}
+
+.aw-command__group {
+  margin: var(--aw-space-2) var(--aw-space-3) var(--aw-space-1);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-xs);
+  letter-spacing: var(--aw-tracking-label);
+  text-transform: uppercase;
+  color: var(--aw-ink-muted);
+}
+
+.aw-command__item-copy {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.aw-command__item-copy small {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-command__notice {
+  margin: 0;
+  padding: var(--aw-space-3) var(--aw-space-4);
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
 }
 
 @media (max-width: 860px) {

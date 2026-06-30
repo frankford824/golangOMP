@@ -4,6 +4,8 @@ import { CheckCheck, MailOpen, RefreshCw } from 'lucide-vue-next'
 
 import { assetWorkbenchApi, type NotificationRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
+import { useWorkbenchUnreadRefresh } from '@aw/app/useWorkbenchUnread'
 import { chipClass } from '@aw/shared/format/status'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
@@ -13,6 +15,8 @@ const filter = ref<NotificationFilter>('unread')
 const rows = ref<NotificationRow[]>([])
 const nextCursor = ref('')
 const notice = ref('')
+const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/notifications')
+const refreshUnreadCount = useWorkbenchUnreadRefresh()
 
 const notificationsRequest = usePageRequest(
   () => assetWorkbenchApi.listNotifications({ limit: 30, is_read: filterValue(filter.value) }),
@@ -47,12 +51,14 @@ async function markRead(row: NotificationRow) {
   await assetWorkbenchApi.markNotificationRead(row.id)
   row.is_read = true
   row.read_at = new Date().toISOString()
+  await refreshUnreadCount?.()
 }
 
 async function markAllRead() {
   await assetWorkbenchApi.markAllNotificationsRead()
   rows.value = rows.value.map((row) => ({ ...row, is_read: true, read_at: row.read_at || new Date().toISOString() }))
   notice.value = '已标记全部通知为已读'
+  await refreshUnreadCount?.()
 }
 
 function filterValue(value: NotificationFilter) {
@@ -106,9 +112,9 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">通知</p>
-        <h2>通知与待办</h2>
-        <p>资产工作台相关提醒、资料补录和系统通知集中在这里处理。</p>
+        <p class="aw-eyebrow">消息中心</p>
+        <h2>{{ pageLabel }}</h2>
+        <p>{{ pageSubtitle }}。审核、分配与系统提醒集中在这里处理。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="loadNotifications">

@@ -1,28 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
-import {
-  BarChart3,
-  Bell,
-  Boxes,
-  Calculator,
-  Command,
-  FileUp,
-  LayoutDashboard,
-  Library,
-  LogOut,
-  ReceiptText,
-  ScrollText,
-  Search,
-  Send,
-  UserRound,
-  UsersRound,
-} from 'lucide-vue-next'
+import { Bell, Command, LogOut, Search, Settings, UserRound } from 'lucide-vue-next'
 
+import {
+  appendSearchCommand,
+  buildCommandItems,
+  filterCommandItems,
+  visibleDailyNavItems,
+  type WorkbenchCommandItem,
+} from '@aw/app/navigation'
+import { firstAccessibleSettingsPath, hasSettingsAccess, isSettlementHubPath } from '@aw/app/access'
+import { refreshUnreadCountKey } from '@aw/app/useWorkbenchUnread'
 import { useAssetWorkbenchBootstrap } from '../app/useAssetWorkbenchBootstrap'
 import { useWorkbenchSession } from '../app/useWorkbenchSession'
-import { assetWorkbenchRouteAccess } from '../app/access'
+import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
+import { notificationsApi } from '@/services/api/notificationsApi'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
+
+const SETTLEMENT_HUB_TAB_KEY = 'aw-settlement-hub-tab'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,44 +26,73 @@ const commandOpen = ref(false)
 const commandQuery = ref('')
 const commandIndex = ref(0)
 const commandInputRef = ref<HTMLInputElement | null>(null)
+const commandNotice = ref('')
+const unreadCount = ref(0)
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
 const { logout } = useWorkbenchSession()
 
-const navItems = [
-  { group: '工作台', to: '/', label: '总览', icon: LayoutDashboard, requires: [] },
-  { group: '工作台', to: '/upload', label: '交作品', icon: FileUp, requires: assetWorkbenchRouteAccess['/upload'].requiresAnyCapability ?? [] },
-  { group: '工作台', to: '/submissions', label: '维护区', icon: Boxes, requires: assetWorkbenchRouteAccess['/submissions'].requiresAnyCapability ?? [] },
-  { group: '工作台', to: '/materials', label: '素材库', icon: Library, requires: assetWorkbenchRouteAccess['/materials'].requiresAnyCapability ?? [] },
-  { group: '工作台', to: '/overview', label: '总盘查询', icon: Search, requires: assetWorkbenchRouteAccess['/overview'].requiresAnyCapability ?? [] },
-  { group: '工作台', to: '/notifications', label: '通知', icon: Bell, requires: [] },
-  { group: '管理', to: '/template-assignments', label: '作品下发', icon: Send, requires: assetWorkbenchRouteAccess['/template-assignments'].requiresAnyCapability ?? [] },
-  { group: '管理', to: '/cost-center', label: '成本中心', icon: Calculator, requires: assetWorkbenchRouteAccess['/cost-center'].requiresAnyCapability ?? [] },
-  { group: '管理', to: '/settlement', label: '结算工资', icon: ReceiptText, requires: assetWorkbenchRouteAccess['/settlement'].requiresAnyCapability ?? [] },
-  { group: '管理', to: '/reports', label: '计件报表', icon: BarChart3, requires: assetWorkbenchRouteAccess['/reports'].requiresAnyCapability ?? [] },
-  { group: '管理', to: '/people', label: '人员资料', icon: UsersRound, requires: assetWorkbenchRouteAccess['/people'].requiresAnyCapability ?? [] },
-  { group: '管理', to: '/members', label: '成员管理', icon: UserRound, requires: assetWorkbenchRouteAccess['/members'].requiresAnyCapability ?? [] },
-  { group: '管理', to: '/events', label: '操作日志', icon: ScrollText, requires: assetWorkbenchRouteAccess['/events'].requiresAnyCapability ?? [] },
-]
-
+const dailyNavItems = computed(() => visibleDailyNavItems(bootstrap.value))
+const showSettingsGear = computed(() => hasSettingsAccess(bootstrap.value))
+const settingsTarget = computed(() => firstAccessibleSettingsPath(bootstrap.value) ?? '/settings')
 const activeLabel = computed(() => String(route.meta.label || '资产工作台'))
-const visibleNavItems = computed(() => navItems.filter((item) => hasAnyCapability(item.requires)))
-const visibleNavGroups = computed(() => {
-  const groups: Array<{ label: string; items: typeof navItems }> = []
-  for (const label of ['工作台', '管理']) {
-    const items = visibleNavItems.value.filter((item) => item.group === label)
-    if (items.length) groups.push({ label, items })
-  }
-  return groups
+const settingsActive = computed(() => route.path.startsWith('/settings'))
+const bellLabel = computed(() => (unreadCount.value > 0 ? `消息，未读 ${unreadCount.value} 条` : '消息'))
+const bellBadge = computed(() => {
+  if (unreadCount.value <= 0) return ''
+  if (unreadCount.value >= 100) return '99+'
+  return String(unreadCount.value)
 })
+
+const commandHandlers = {
+  navigate: async (to: string) => {
+    await router.push(to)
+    closeCommand()
+  },
+  markAllRead: async () => {
+    await assetWorkbenchApi.markAllNotificationsRead()
+    unreadCount.value = 0
+    closeCommand()
+  },
+  searchOverview: async (query: string) => {
+    await router.push({ path: '/overview', query: { q: query } })
+    closeCommand()
+  },
+  generateSettlement: async () => {
+    commandNotice.value = '请在本页确认业务月后再生成结算批次'
+    await router.push('/settlement')
+    closeCommand()
+  },
+  exportSettlement: async () => {
+    commandNotice.value = '请在本页选择批次后导出工资'
+    await router.push('/settlement')
+    closeCommand()
+  },
+  exportReport: async () => {
+    commandNotice.value = '请在本页确认业务月后导出计件统计'
+    await router.push('/reports')
+    closeCommand()
+  },
+}
+
+const baseCommandItems = computed(() => buildCommandItems(bootstrap.value, commandHandlers))
+
 const filteredCommandItems = computed(() => {
-  const query = commandQuery.value.trim().toLowerCase()
-  const source = visibleNavItems.value
-  if (!query) return source
-  return source.filter((item) => {
-    const haystack = `${item.label} ${item.to}`.toLowerCase()
-    return haystack.includes(query)
-  })
+  const filtered = filterCommandItems(baseCommandItems.value, commandQuery.value)
+  return appendSearchCommand(filtered, commandQuery.value, bootstrap.value, commandHandlers.searchOverview)
 })
+
+const groupedCommandItems = computed(() => {
+  const groups = new Map<string, WorkbenchCommandItem[]>()
+  for (const item of filteredCommandItems.value) {
+    const bucket = groups.get(item.group) ?? []
+    bucket.push(item)
+    groups.set(item.group, bucket)
+  }
+  return [...groups.entries()].map(([label, items]) => ({ label, items }))
+})
+
+const flatCommandItems = computed(() => groupedCommandItems.value.flatMap((group) => group.items))
+
 const profileStatusLabel = computed(() => {
   const status = bootstrap.value?.profile?.status
   if (!status) return '资料待完善，请补全资料'
@@ -78,30 +103,59 @@ const profileStatusLabel = computed(() => {
   }
   return labels[status] ?? '资料状态待确认'
 })
+
 const permissionSummary = computed(() => {
   const count = bootstrap.value?.capabilities.length ?? 0
   return count > 0 ? '可用功能已就绪' : '暂无可用功能，请联系管理员'
 })
+
 const profileState = computed(() => {
   const status = bootstrap.value?.profile?.status
   if (status === 'active') return 'active'
   if (status === 'pending') return 'pending'
   return 'idle'
 })
+
 const businessMonth = computed(() =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date()),
 )
-const displayName = computed(() => bootstrap.value?.profile?.real_name || bootstrap.value?.user?.name || bootstrap.value?.user?.username || '我的账号')
 
-function hasAnyCapability(required: readonly string[]) {
-  if (required.length === 0) return true
-  const capabilities = new Set(bootstrap.value?.capabilities ?? [])
-  return required.some((item) => capabilities.has(item))
+const displayName = computed(
+  () => bootstrap.value?.profile?.real_name || bootstrap.value?.user?.name || bootstrap.value?.user?.username || '我的账号',
+)
+
+function settlementHubTarget() {
+  if (typeof window === 'undefined') return '/settlement'
+  const remembered = window.localStorage.getItem(SETTLEMENT_HUB_TAB_KEY)
+  if (remembered === '/settlement' || remembered === '/reports') return remembered
+  return '/settlement'
+}
+
+function navActive(item: { to: string; hub?: 'settlement' }) {
+  if (item.hub === 'settlement') return isSettlementHubPath(route.path)
+  return route.path === item.to
+}
+
+function navAriaLabel(item: { label: string; subtitle?: string }) {
+  return item.subtitle ? `${item.label}，${item.subtitle}` : item.label
+}
+
+async function refreshUnreadCount() {
+  try {
+    const res = await notificationsApi.unreadCount()
+    const root = res.data && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : {}
+    const body = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : root
+    const count = body.unread_count ?? body.count ?? 0
+    unreadCount.value = Number.isFinite(Number(count)) ? Number(count) : 0
+  } catch {
+    unreadCount.value = 0
+  }
 }
 
 async function openCommand() {
   commandOpen.value = true
   commandIndex.value = 0
+  commandNotice.value = ''
   await nextTick()
   commandInputRef.value?.focus()
 }
@@ -120,20 +174,23 @@ function closeCommand() {
   commandIndex.value = 0
 }
 
-async function jump(to: string) {
-  await router.push(to)
-  closeCommand()
+async function runCommand(item: WorkbenchCommandItem) {
+  if (item.run) await item.run()
 }
 
 function moveCommandSelection(delta: number) {
-  const total = filteredCommandItems.value.length
+  const total = flatCommandItems.value.length
   if (!total) return
   commandIndex.value = (commandIndex.value + delta + total) % total
 }
 
 function runSelectedCommand() {
-  const item = filteredCommandItems.value[commandIndex.value]
-  if (item) void jump(item.to)
+  const item = flatCommandItems.value[commandIndex.value]
+  if (item) void runCommand(item)
+}
+
+function flatIndex(item: WorkbenchCommandItem) {
+  return flatCommandItems.value.findIndex((entry) => entry.id === item.id)
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -165,11 +222,22 @@ function handleCommandKeydown(event: KeyboardEvent) {
   }
 }
 
+provide(refreshUnreadCountKey, refreshUnreadCount)
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   void refresh()
+  void refreshUnreadCount()
 })
+
 onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
+
+watch(
+  () => route.path,
+  (path, previousPath) => {
+    if (path === '/notifications' || previousPath === '/notifications') void refreshUnreadCount()
+  },
+)
 
 watch(commandQuery, () => {
   commandIndex.value = 0
@@ -186,19 +254,21 @@ watch(commandQuery, () => {
         </div>
 
         <nav class="aw-shell__nav">
-          <section v-for="group in visibleNavGroups" :key="group.label" class="aw-nav-group">
-            <p>{{ group.label }}</p>
-            <RouterLink
-              v-for="item in group.items"
-              :key="item.to"
-              :to="item.to"
-              class="aw-nav-item"
-              active-class="aw-nav-item--active"
-            >
-              <component :is="item.icon" :size="18" stroke-width="2" aria-hidden="true" />
+          <RouterLink
+            v-for="item in dailyNavItems"
+            :key="item.to"
+            :to="item.hub === 'settlement' ? settlementHubTarget() : item.to"
+            class="aw-nav-item"
+            :class="{ 'aw-nav-item--active': navActive(item) }"
+            :aria-label="navAriaLabel(item)"
+            :aria-current="navActive(item) ? 'page' : undefined"
+          >
+            <component :is="item.icon" :size="18" stroke-width="2" aria-hidden="true" />
+            <span class="aw-nav-item__stack">
               <span>{{ item.label }}</span>
-            </RouterLink>
-          </section>
+              <small v-if="navActive(item) && item.subtitle">{{ item.subtitle }}</small>
+            </span>
+          </RouterLink>
         </nav>
       </div>
     </aside>
@@ -206,7 +276,7 @@ watch(commandQuery, () => {
     <section class="aw-shell__workspace">
       <header class="aw-topbar">
         <div>
-          <p class="aw-eyebrow">资产交付与计件结算</p>
+          <p class="aw-eyebrow">{{ settingsActive ? '设置' : '资产交付与计件结算' }}</p>
           <h1>{{ activeLabel }}</h1>
         </div>
         <div class="aw-page-bar__actions">
@@ -215,6 +285,19 @@ watch(commandQuery, () => {
             <span>搜索或执行动作</span>
             <kbd>⌘K</kbd>
           </button>
+          <RouterLink class="aw-icon-action aw-icon-action--bell" to="/notifications" :aria-label="bellLabel" @click="refreshUnreadCount">
+            <Bell :size="18" aria-hidden="true" />
+            <span v-if="bellBadge" class="aw-icon-action__badge" aria-hidden="true">{{ bellBadge }}</span>
+          </RouterLink>
+          <RouterLink
+            v-if="showSettingsGear"
+            class="aw-icon-action"
+            :class="{ 'aw-icon-action--active': settingsActive }"
+            :to="settingsTarget"
+            aria-label="设置"
+          >
+            <Settings :size="18" aria-hidden="true" />
+          </RouterLink>
           <RouterLink class="aw-secondary-button" to="/account">
             <UserRound :size="16" aria-hidden="true" />
             {{ displayName }}
@@ -249,22 +332,38 @@ watch(commandQuery, () => {
       <div class="aw-command__panel">
         <div class="aw-command__input">
           <Command :size="18" aria-hidden="true" />
-          <input ref="commandInputRef" v-model="commandQuery" type="search" placeholder="跳转页面或执行常用动作" />
+          <input
+            ref="commandInputRef"
+            v-model="commandQuery"
+            type="search"
+            placeholder="跳转页面、搜索旧菜单名或执行动作"
+            aria-controls="aw-command-list"
+          />
         </div>
-        <div class="aw-command__list">
-          <button
-            v-for="(item, index) in filteredCommandItems"
-            :key="item.to"
-            class="aw-command__item"
-            :class="{ 'aw-command__item--active': index === commandIndex }"
-            type="button"
-            @mouseenter="commandIndex = index"
-            @click="jump(item.to)"
-          >
-            <component :is="item.icon" :size="16" aria-hidden="true" />
-            <span>{{ item.label }}</span>
-          </button>
-          <p v-if="filteredCommandItems.length === 0" class="aw-command__empty">没有匹配动作</p>
+        <div id="aw-command-list" class="aw-command__list">
+          <template v-for="group in groupedCommandItems" :key="group.label">
+            <p class="aw-command__group">{{ group.label }}</p>
+            <button
+              v-for="item in group.items"
+              :key="item.id"
+              class="aw-command__item"
+              :class="{ 'aw-command__item--active': flatIndex(item) === commandIndex }"
+              type="button"
+              :aria-selected="flatIndex(item) === commandIndex"
+              @mouseenter="commandIndex = flatIndex(item)"
+              @click="runCommand(item)"
+            >
+              <component :is="item.icon" v-if="item.icon" :size="16" aria-hidden="true" />
+              <span class="aw-command__item-copy">
+                <strong>{{ item.label }}</strong>
+                <small v-if="item.subtitle">{{ item.subtitle }}</small>
+              </span>
+            </button>
+          </template>
+          <p v-if="flatCommandItems.length === 0" class="aw-command__empty">
+            没有匹配的页面或动作，试试：总盘、成本中心、交作品
+          </p>
+          <p v-if="commandNotice" class="aw-command__notice">{{ commandNotice }}</p>
         </div>
       </div>
       <button class="aw-command__scrim" type="button" aria-label="关闭命令面板" @click="closeCommand" />

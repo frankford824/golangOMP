@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { assetWorkbenchApi, type AssetWorkbenchEventRow } from '@aw/shared/api/assetWorkbenchApi'
+import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt } from '@aw/shared/format/number'
 import { chipClass, entityTypeMeta, eventReasonText, eventTypeMeta } from '@aw/shared/format/status'
@@ -12,6 +13,7 @@ const filters = ref({
   event_type: 'all',
   entity_type: 'all',
 })
+const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/events')
 type EventGridRow = AssetWorkbenchEventRow & { event_label: string; entity_label: string; actor_label: string; reason_label: string; created_at_label: string }
 
 const eventFilterOptions = [
@@ -101,9 +103,9 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">操作留痕</p>
-        <h2>操作日志</h2>
-        <p>上传、质检、结算、资料维护等关键操作都会留下事件记录。</p>
+        <p class="aw-eyebrow">设置</p>
+        <h2>{{ pageLabel }}</h2>
+        <p>{{ pageSubtitle }}。上传、质检、结算、资料维护等关键操作都会留下事件记录。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="loadEvents">刷新</button>

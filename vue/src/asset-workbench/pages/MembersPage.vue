@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { RefreshCw, Search, ShieldCheck, UserRound } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
+import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { assetWorkbenchApi, type AccountMergePreview, type WorkbenchMemberRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
@@ -26,6 +27,7 @@ const mergeCanonicalId = ref('')
 const mergeReason = ref('合并资产工作台账号')
 const mergePreview = ref<AccountMergePreview | null>(null)
 const mergeChoices = ref<Record<string, string>>({})
+const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/members')
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
 const membersRequest = usePageRequest<WorkbenchMemberRow[]>(
   async () => {
@@ -259,9 +261,9 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">成员</p>
-        <h2>成员管理</h2>
-        <p>{{ canChangeRoles ? '开通、停用、恢复和配置成员可用功能。' : '你可以查看成员，开通和调整仅超级管理员可用。' }}</p>
+        <p class="aw-eyebrow">设置 · 人事</p>
+        <h2>{{ pageLabel }}</h2>
+        <p>{{ pageSubtitle }}。{{ canChangeRoles ? '开通、停用、恢复和配置成员可用功能。' : '你可以查看成员，开通和调整仅超级管理员可用。' }}</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadMembers">

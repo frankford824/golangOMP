@@ -302,7 +302,7 @@ function canPreviewMaterial(asset: SystemAssetRow) {
   return canAttemptSystemAssetPreview(asset)
 }
 
-async function ensurePreview(asset: SystemAssetRow, silent = false) {
+async function ensurePreview(asset: SystemAssetRow, silent = false, signal?: AbortSignal) {
   const directUrl = resolvedSystemAssetPreviewUrl(asset)
   if (directUrl) {
     previewUrls.value = { ...previewUrls.value, [asset.id]: directUrl }
@@ -333,7 +333,7 @@ async function ensurePreview(asset: SystemAssetRow, silent = false) {
   next.add(asset.id)
   previewLoadingIds.value = next
   try {
-    const meta = await assetWorkbenchApi.previewSystemAsset(asset.id)
+    const meta = await assetWorkbenchApi.previewSystemAsset(asset.id, signal)
     const previewUrl = resolvedSystemAssetPreviewUrl(meta)
     if (previewUrl && isSystemAssetImagePreviewable(meta)) {
       previewUrls.value = { ...previewUrls.value, [asset.id]: previewUrl }
@@ -344,6 +344,7 @@ async function ensurePreview(asset: SystemAssetRow, silent = false) {
       preview_available: meta.preview_available || Boolean(previewUrl),
     }
   } catch (err) {
+    if (signal?.aborted) return null
     if (!silent) error.value = err instanceof Error ? err.message : '素材预览加载失败'
     return null
   } finally {
@@ -390,20 +391,22 @@ async function preloadClientMaterialPreviews(materials: ClientMaterialRow[]) {
 async function openAssetPreview(asset: SystemAssetRow) {
   activeAsset.value = asset
   previewController?.abort()
-  previewController = new AbortController()
+  const controller = new AbortController()
+  previewController = controller
   previewLoading.value = true
   error.value = ''
   notice.value = ''
   try {
-    const meta = await ensurePreview(asset)
+    const meta = await ensurePreview(asset, false, controller.signal)
+    if (controller.signal.aborted) return
     previewMeta.value = meta
-    if (resolvedSystemAssetPreviewUrl(meta)) {
+    if (meta && resolvedSystemAssetPreviewUrl(meta)) {
       previewAsset.value = asset
     } else if (canPreviewMaterial(asset)) {
       notice.value = '这个素材暂时没有可展示的预览图'
     }
   } finally {
-    previewLoading.value = false
+    if (previewController === controller) previewLoading.value = false
   }
 }
 

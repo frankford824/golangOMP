@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { assetWorkbenchApi, type AssetWorkbenchProfile } from '@aw/shared/api/assetWorkbenchApi'
+import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
@@ -27,6 +28,7 @@ const saving = ref(false)
 const hrSaving = ref(false)
 const notice = ref('')
 const selectedProfile = ref<AssetWorkbenchProfile | null>(null)
+const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/people')
 const peopleRequest = usePageRequest(
   async () => {
     const bootstrap = await assetWorkbenchApi.bootstrap()
@@ -193,9 +195,9 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">人员资料</p>
-        <h2>人员账户维护</h2>
-        <p>工作台资料只服务资产交付和计件结算。岗级变化只影响新的提交快照。</p>
+        <p class="aw-eyebrow">设置 · 人事</p>
+        <h2>{{ pageLabel }}</h2>
+        <p>{{ pageSubtitle }}。工作台资料只服务资产交付和计件结算。岗级变化只影响新的提交快照。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="loadPeople">刷新</button>

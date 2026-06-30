@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Boxes, Library, RefreshCw, Search } from 'lucide-vue-next'
 
 import { assetWorkbenchApi, type OverviewSearchRow } from '@aw/shared/api/assetWorkbenchApi'
@@ -19,6 +19,7 @@ type OverviewGridRow = OverviewSearchRow & {
 }
 
 const router = useRouter()
+const route = useRoute()
 const keyword = ref('')
 const creator = ref('')
 const dateFrom = ref('')
@@ -37,7 +38,7 @@ const overviewRequest = usePageRequest(
       page_size: pageSize.value,
     }, signal),
   { items: [], total: 0, page: 1, size: pageSize.value },
-  '总盘查询失败',
+  '全站搜索失败',
 )
 const loading = overviewRequest.loading
 const error = overviewRequest.error
@@ -59,7 +60,7 @@ const gridRows = computed<OverviewGridRow[]>(
 const dataRows = computed(() => gridRows.value as unknown as Record<string, unknown>[])
 const columns = [
   { key: 'source_label', label: '类型', width: 112 },
-  { key: 'primary_code', label: '编码 / 批次', width: 170 },
+  { key: 'primary_code', label: 'SKU / 批次', width: 170 },
   { key: 'order_no', label: '订单号', width: 150 },
   { key: 'title', label: '名称', width: 260 },
   { key: 'secondary_code', label: '款式 / 类型', width: 150 },
@@ -99,6 +100,11 @@ function formatDateTime(value?: string) {
 
 async function loadOverview(resetPage = false) {
   if (resetPage) page.value = 1
+  const nextQuery = keyword.value.trim()
+  const currentQuery = typeof route.query.q === 'string' ? route.query.q : ''
+  if (nextQuery !== currentQuery) {
+    await router.replace({ path: '/overview', query: nextQuery ? { q: nextQuery } : {} })
+  }
   await overviewRequest.run()
 }
 
@@ -114,17 +120,28 @@ function openRow(row: OverviewSearchRow) {
 }
 
 onMounted(() => {
-  void loadOverview()
+  keyword.value = typeof route.query.q === 'string' ? route.query.q : ''
+  void loadOverview(true)
 })
+
+watch(
+  () => route.query.q,
+  (value) => {
+    const next = typeof value === 'string' ? value : ''
+    if (next === keyword.value) return
+    keyword.value = next
+    void loadOverview(true)
+  },
+)
 </script>
 
 <template>
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">总盘查询</p>
+        <p class="aw-eyebrow">全站搜索</p>
         <h2>素材、成品与计件统一检索</h2>
-        <p>按编码、订单号、创建人和日期快速定位资产工作台记录。</p>
+        <p>按 SKU、订单号、创建人和日期快速定位资产工作台记录。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadOverview(false)">
@@ -137,8 +154,8 @@ onMounted(() => {
     <div class="aw-panel">
       <div class="aw-form-grid">
         <label>
-          编码 / 订单号
-          <input v-model="keyword" placeholder="素材编码、订单号、文件名" @keyup.enter="loadOverview(true)" />
+          SKU / 订单号
+          <input v-model="keyword" placeholder="素材 SKU、订单号、文件名" @keyup.enter="loadOverview(true)" />
         </label>
         <label>
           创建人
@@ -168,7 +185,7 @@ onMounted(() => {
         <button type="button" :disabled="page <= 1 || loading" @click="goPage(page - 1)">上一页</button>
         <button type="button" :disabled="page >= totalPages || loading" @click="goPage(page + 1)">下一页</button>
       </div>
-      <AsyncBoundary :loading="loading" :error="error" loading-label="正在查询总盘" @retry="loadOverview(false)">
+      <AsyncBoundary :loading="loading" :error="error" loading-label="正在搜索" @retry="loadOverview(false)">
         <WorkbenchDataGrid
           v-if="rows.length"
           :columns="columns"
@@ -194,7 +211,7 @@ onMounted(() => {
         </WorkbenchDataGrid>
         <div v-else class="aw-empty-state">
           <h3>没有匹配记录</h3>
-          <p>调整编码、订单号、创建人或日期后再查。</p>
+          <p>调整 SKU、订单号、创建人或日期后再查。</p>
         </div>
       </AsyncBoundary>
     </div>

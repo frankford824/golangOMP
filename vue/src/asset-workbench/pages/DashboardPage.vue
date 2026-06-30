@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
+import { useSetupChecklist } from '@aw/app/useSetupChecklist'
 import { assetWorkbenchApi, type SettlementPreview, type SubmissionRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
@@ -16,6 +18,15 @@ interface DashboardData {
 }
 
 const month = ref(new Date().toISOString().slice(0, 7))
+const { bootstrap } = useAssetWorkbenchBootstrap()
+const {
+  steps: setupSteps,
+  completedCount: setupCompletedCount,
+  collapsed: setupCollapsed,
+  loading: setupLoading,
+  refresh: refreshSetup,
+  toggleCollapsed: toggleSetupCollapsed,
+} = useSetupChecklist(() => bootstrap.value)
 const dashboardRequest = usePageRequest<DashboardData>(
   async () => {
     const [submissionResult, settlementResult] = await Promise.allSettled([
@@ -31,7 +42,7 @@ const dashboardRequest = usePageRequest<DashboardData>(
     }
   },
   { submissions: [], settlement: null },
-  '总览数据加载失败',
+  '今日待办数据加载失败',
 )
 const dashboardData = computed(() => dashboardRequest.data.value ?? { submissions: [], settlement: null })
 const submissions = computed(() => dashboardData.value.submissions)
@@ -86,11 +97,37 @@ const loadDashboard = dashboardRequest.run
 
 onMounted(() => {
   void loadDashboard()
+  void refreshSetup()
 })
 </script>
 
 <template>
   <section class="aw-page-stack aw-dashboard-page">
+    <section v-if="setupSteps.length" class="aw-panel aw-setup-checklist">
+      <div class="aw-panel__head">
+        <div>
+          <h3>开站清单</h3>
+          <p class="aw-copy">先完成配置，再接收第一件作品。旧菜单名仍可在 ⌘K 中搜索。</p>
+        </div>
+        <div class="aw-inline-actions">
+          <span class="aw-chip aw-chip--neutral">{{ setupCompletedCount }}/{{ setupSteps.length }} 已完成</span>
+          <button class="aw-secondary-button" type="button" :disabled="setupLoading" @click="refreshSetup()">刷新进度</button>
+          <button class="aw-secondary-button" type="button" @click="toggleSetupCollapsed()">
+            {{ setupCollapsed ? '展开清单' : '折叠清单' }}
+          </button>
+        </div>
+      </div>
+      <ol v-if="!setupCollapsed" class="aw-setup-checklist__list">
+        <li v-for="step in setupSteps" :key="step.id" class="aw-setup-checklist__item" :data-done="step.done">
+          <div>
+            <strong>{{ step.label }}</strong>
+            <span>{{ step.hint }}</span>
+          </div>
+          <RouterLink class="aw-secondary-button" :to="step.to">{{ step.done ? '查看' : '去完成' }}</RouterLink>
+        </li>
+      </ol>
+    </section>
+
     <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日先处理这些事" :segments="ledgerSegments">
       <template #actions>
         <button class="aw-console-button" type="button" :disabled="loading" @click="loadDashboard">刷新</button>
@@ -141,7 +178,7 @@ onMounted(() => {
     <AsyncBoundary
       :loading="loading"
       :error="error"
-      loading-label="正在加载总览数据"
+      loading-label="正在加载今日待办"
       @retry="loadDashboard"
     >
       <div class="aw-two-column">
@@ -149,8 +186,8 @@ onMounted(() => {
           <div class="aw-panel__head"><h3>常用入口</h3></div>
           <div class="aw-inline-actions">
             <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
-            <RouterLink class="aw-secondary-button" to="/submissions">查看维护区</RouterLink>
-            <RouterLink class="aw-secondary-button" to="/settlement">生成结算预览</RouterLink>
+            <RouterLink class="aw-secondary-button" to="/submissions">查改作品</RouterLink>
+            <RouterLink class="aw-secondary-button" to="/settlement">本月结算</RouterLink>
           </div>
         </section>
         <section class="aw-panel">

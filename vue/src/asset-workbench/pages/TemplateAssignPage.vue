@@ -10,6 +10,7 @@ import {
   type WorkbenchTemplateAssignmentRow,
   type WorkbenchTemplateRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
@@ -39,6 +40,7 @@ const activeGroup = ref<WorkbenchGroupRow | null>(null)
 const selectedPeople = ref<WorkbenchMemberRow[]>([])
 const selectedGroups = ref<WorkbenchGroupRow[]>([])
 const selectedGroupPeople = ref<WorkbenchMemberRow[]>([])
+const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/dispatch')
 const templateRequest = usePageRequest(
   async () => {
     const [groupRes, templateRes, assignmentRes] = await Promise.all([
@@ -265,9 +267,9 @@ onMounted(() => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">类型与分组</p>
-        <h2>模板下发</h2>
-        <p>管理员维护作品类型和人员分组，再按姓名或分组下发给员工。</p>
+        <p class="aw-eyebrow">设置</p>
+        <h2>{{ pageLabel }}</h2>
+        <p>{{ pageSubtitle }}。管理员维护作品类型和人员分组，再按姓名或分组下发给员工。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadAll">

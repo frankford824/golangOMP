@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { canAccessAssetWorkbenchRoute, hasAnyCapability, routeAccessForPath } from './access'
+import {
+  accessibleSettingsPaths,
+  canAccessAssetWorkbenchRoute,
+  canAccessPath,
+  firstAccessibleSettingsPath,
+  hasAnyCapability,
+  hasSettingsAccess,
+  isConfigOnlyAdmin,
+  routeAccessForPath,
+} from './access'
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 
 function bootstrap(overrides: Partial<AssetWorkbenchBootstrap>): AssetWorkbenchBootstrap {
@@ -52,5 +61,48 @@ describe('asset workbench access rules', () => {
     expect(hasAnyCapability(admin, ['asset.workbench.manage', 'asset.workbench.settlement'])).toBe(true)
     expect(canAccessAssetWorkbenchRoute(admin, routeAccessForPath('/settlement'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(admin, routeAccessForPath('/materials'))).toBe(false)
+  })
+
+  it('registers settings child routes with explicit capabilities', () => {
+    const pricingOnly = bootstrap({ is_admin: true, capabilities: ['asset.workbench.cost_center.manage'] })
+
+    expect(canAccessPath(pricingOnly, '/settings/pricing')).toBe(true)
+    expect(canAccessPath(pricingOnly, '/settings/members')).toBe(false)
+    expect(canAccessPath(pricingOnly, '/settings/events')).toBe(true)
+    expect(hasSettingsAccess(pricingOnly)).toBe(true)
+    expect(firstAccessibleSettingsPath(pricingOnly)).toBe('/settings/pricing')
+    expect(accessibleSettingsPaths(pricingOnly)).toEqual(['/settings/pricing', '/settings/events'])
+  })
+
+  it('does not resolve a default settings route before bootstrap is known', () => {
+    expect(accessibleSettingsPaths(null)).toEqual([])
+    expect(firstAccessibleSettingsPath(null)).toBeNull()
+    expect(hasSettingsAccess(null)).toBe(false)
+  })
+
+  it('blocks settings routes when capability is missing', () => {
+    const settlementOnly = bootstrap({ is_admin: true, capabilities: ['asset.workbench.settlement'] })
+
+    expect(canAccessPath(settlementOnly, '/settings/pricing')).toBe(false)
+    expect(canAccessPath(settlementOnly, '/settings/events')).toBe(true)
+    expect(hasSettingsAccess(settlementOnly)).toBe(true)
+  })
+
+  it('detects config-only admins without daily operation access', () => {
+    const hrAdmin = bootstrap({
+      is_admin: true,
+      capabilities: ['asset.workbench.profile.manage', 'asset.workbench.member.identity'],
+    })
+
+    expect(isConfigOnlyAdmin(hrAdmin)).toBe(true)
+    expect(canAccessPath(hrAdmin, '/upload')).toBe(false)
+    expect(firstAccessibleSettingsPath(hrAdmin)).toBe('/settings/people')
+  })
+
+  it('uses renamed labels for daily routes', () => {
+    expect(routeAccessForPath('/')?.label).toBe('今日待办')
+    expect(routeAccessForPath('/submissions')?.aliases).toContain('维护区')
+    expect(routeAccessForPath('/settings/pricing')?.label).toBe('计价设置')
+    expect(routeAccessForPath('/overview')?.aliases).toContain('总盘查询')
   })
 })

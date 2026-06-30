@@ -14,6 +14,7 @@ import {
 import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
+import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import {
   batchStatusMeta,
@@ -614,10 +615,11 @@ onMounted(() => {
 
 <template>
   <section class="aw-page-stack">
+    <SettlementHubTabs />
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">工资结算</p>
-        <h2>结算统计</h2>
+        <p class="aw-eyebrow">本月结算</p>
+        <h2>工资结算</h2>
         <p>先导入出错表，再生成预览。每个员工固定两条工资行：正常计件工资一条，补录计件工资一条。</p>
       </div>
       <div class="aw-page-bar__actions">

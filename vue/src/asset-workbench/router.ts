@@ -1,16 +1,23 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 import { getToken } from '@/services/http'
-import { canAccessAssetWorkbenchRoute, routeAccessForPath } from './app/access'
+import {
+  canAccessAssetWorkbenchRoute,
+  firstAccessibleSettingsPath,
+  isConfigOnlyAdmin,
+  routeAccessForPath,
+} from './app/access'
 import { useAssetWorkbenchSessionStore } from './app/session.store'
 
 declare module 'vue-router' {
   interface RouteMeta {
     label?: string
+    subtitle?: string
     public?: boolean
     anyAuthenticated?: boolean
     simple?: boolean
     requiresAnyCapability?: readonly string[]
+    settings?: boolean
   }
 }
 
@@ -19,6 +26,7 @@ function accessMeta(path: string) {
   return access
     ? {
         label: access.label,
+        subtitle: access.subtitle,
         anyAuthenticated: access.anyAuthenticated,
         simple: access.simple,
         requiresAnyCapability: access.requiresAnyCapability,
@@ -88,18 +96,6 @@ const routes: RouteRecordRaw[] = [
     meta: accessMeta('/overview'),
   },
   {
-    path: '/cost-center',
-    name: 'asset-cost-center',
-    component: () => import('./pages/CostCenterPage.vue'),
-    meta: accessMeta('/cost-center'),
-  },
-  {
-    path: '/template-assignments',
-    name: 'asset-template-assignments',
-    component: () => import('./pages/TemplateAssignPage.vue'),
-    meta: accessMeta('/template-assignments'),
-  },
-  {
     path: '/settlement',
     name: 'asset-settlement',
     component: () => import('./pages/SettlementPage.vue'),
@@ -112,22 +108,61 @@ const routes: RouteRecordRaw[] = [
     meta: accessMeta('/reports'),
   },
   {
+    path: '/settings',
+    component: () => import('./shell/SettingsShell.vue'),
+    meta: { ...accessMeta('/settings'), settings: true },
+    children: [
+      {
+        path: 'pricing',
+        name: 'asset-settings-pricing',
+        component: () => import('./pages/CostCenterPage.vue'),
+        meta: accessMeta('/settings/pricing'),
+      },
+      {
+        path: 'dispatch',
+        name: 'asset-settings-dispatch',
+        component: () => import('./pages/TemplateAssignPage.vue'),
+        meta: accessMeta('/settings/dispatch'),
+      },
+      {
+        path: 'people',
+        name: 'asset-settings-people',
+        component: () => import('./pages/PeoplePage.vue'),
+        meta: accessMeta('/settings/people'),
+      },
+      {
+        path: 'members',
+        name: 'asset-settings-members',
+        component: () => import('./pages/MembersPage.vue'),
+        meta: accessMeta('/settings/members'),
+      },
+      {
+        path: 'events',
+        name: 'asset-settings-events',
+        component: () => import('./pages/EventsPage.vue'),
+        meta: accessMeta('/settings/events'),
+      },
+    ],
+  },
+  {
+    path: '/cost-center',
+    redirect: '/settings/pricing',
+  },
+  {
+    path: '/template-assignments',
+    redirect: '/settings/dispatch',
+  },
+  {
     path: '/people',
-    name: 'asset-people',
-    component: () => import('./pages/PeoplePage.vue'),
-    meta: accessMeta('/people'),
+    redirect: '/settings/people',
   },
   {
     path: '/members',
-    name: 'asset-members',
-    component: () => import('./pages/MembersPage.vue'),
-    meta: accessMeta('/members'),
+    redirect: '/settings/members',
   },
   {
     path: '/events',
-    name: 'asset-events',
-    component: () => import('./pages/EventsPage.vue'),
-    meta: accessMeta('/events'),
+    redirect: '/settings/events',
   },
   {
     path: '/403',
@@ -167,7 +202,20 @@ router.beforeEach(async (to) => {
   const session = useAssetWorkbenchSessionStore()
   const entry = await session.loadEntry()
   if (entry && entry.state !== 'ready') return true
-  const allowed = canAccessAssetWorkbenchRoute(session.bootstrap, routeAccessForPath(to.path))
+  const bootstrap = session.bootstrap ?? (await session.refresh())
+
+  if (to.path === '/settings') {
+    const settingsPath = firstAccessibleSettingsPath(bootstrap)
+    if (settingsPath) return { path: settingsPath, query: to.query, hash: to.hash }
+    return { path: '/403', query: { from: to.fullPath } }
+  }
+
+  if (to.path === '/' && isConfigOnlyAdmin(bootstrap)) {
+    const settingsPath = firstAccessibleSettingsPath(bootstrap)
+    if (settingsPath) return settingsPath
+  }
+
+  const allowed = canAccessAssetWorkbenchRoute(bootstrap, routeAccessForPath(to.path))
   if (!allowed && to.path !== '/403') {
     return { path: '/403', query: { from: to.fullPath } }
   }

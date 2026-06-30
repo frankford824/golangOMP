@@ -9,6 +9,7 @@ import {
   type WelfareRuleRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { formatMoney, formatPercent } from '@aw/shared/format/number'
 import { chipClass, enabledMeta, promoModeMeta, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
@@ -48,6 +49,7 @@ const totals = ref({
   promo: 0,
 })
 const notice = ref('')
+const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/pricing')
 const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, '成本中心加载失败')
 const loading = costCenterRequest.loading
 const error = costCenterRequest.error
@@ -449,9 +451,9 @@ onMounted(async () => {
   <section class="aw-page-stack">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">计价规则</p>
-        <h2>成本中心</h2>
-        <p>集中维护价目矩阵、出错扣减、福利补贴与大促价格券。提交只冻结毛额，扣减和福利在结算时计算。</p>
+        <p class="aw-eyebrow">设置</p>
+        <h2>{{ pageLabel }}</h2>
+        <p>{{ pageSubtitle }}。集中维护价目矩阵、出错扣减、福利补贴与大促价格券。提交只冻结毛额，扣减和福利在结算时计算。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-primary-button" type="button" @click="createPriceRule">{{ priceSupersedeId ? '保存替代价目' : '新增价目' }}</button>

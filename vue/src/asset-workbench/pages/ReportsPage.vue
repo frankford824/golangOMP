@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { Download, RefreshCw } from 'lucide-vue-next'
 
+import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
 import { exportSettlementReportWorkbook } from '@aw/features/export/settlementExport'
 import { assetWorkbenchApi, type SettlementReport, type SettlementReportDifficultyMetric, type SettlementReportRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
@@ -171,9 +172,10 @@ onMounted(loadReport)
 
 <template>
   <section class="aw-page-stack aw-reports-page">
+    <SettlementHubTabs />
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">Piecework report</p>
+        <p class="aw-eyebrow">计件统计</p>
         <h2>计件报表</h2>
         <p>订单数按非空订单号去重，金额按当前待结算成品和已批准补录计算。</p>
       </div>
