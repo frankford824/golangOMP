@@ -2070,6 +2070,24 @@ func (h *AssetWorkbenchHandler) DownloadClientMaterial(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) PreviewClientMaterial(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	materialID, err := strconv.ParseInt(c.Param("material_id"), 10, 64)
+	if err != nil || materialID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid material_id", nil))
+		return
+	}
+	result, appErr := h.svc.ClientMaterialPreview(c.Request.Context(), actor, materialID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) BatchDownloadClientMaterials(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

@@ -66,6 +66,10 @@ type SystemAssetSearcher interface {
 	Search(ctx context.Context, query domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError)
 }
 
+type SystemAssetDetailer interface {
+	GetDetail(ctx context.Context, assetID int64) (*assetcenter.AssetDetail, *domain.AppError)
+}
+
 type SystemAssetDownloader interface {
 	DownloadLatest(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 	BuildBatchDownloadManifest(ctx context.Context, assetIDs []int64, opts ...assetcenter.BatchDownloadOption) (*assetcenter.BatchDownloadManifest, *domain.AppError)
@@ -4617,6 +4621,10 @@ func (s *Service) SystemAssetPreview(ctx context.Context, actor domain.RequestAc
 	if assetID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
 	}
+	return s.systemAssetPreviewMeta(ctx, assetID)
+}
+
+func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64) (*SystemAssetPreviewMeta, *domain.AppError) {
 	if s.systemDownloads == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
 	}
@@ -4685,6 +4693,7 @@ func (s *Service) ListClientMaterials(ctx context.Context, actor domain.RequestA
 		if err != nil {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench client materials.", err.Error())
 		}
+		s.hydrateClientMaterialRows(ctx, items)
 		return items, nil
 	}
 	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
@@ -4695,6 +4704,7 @@ func (s *Service) ListClientMaterials(ctx context.Context, actor domain.RequestA
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench client materials.", err.Error())
 	}
+	s.hydrateClientMaterialRows(ctx, items)
 	return items, nil
 }
 
@@ -4739,6 +4749,7 @@ func (s *Service) CreateClientMaterial(ctx context.Context, actor domain.Request
 		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to publish asset workbench client material.", err.Error())
 	}
+	s.hydrateClientMaterialRows(ctx, []*domain.AssetWorkbenchClientMaterial{created})
 	return created, nil
 }
 
@@ -4800,6 +4811,7 @@ func (s *Service) UpdateClientMaterial(ctx context.Context, actor domain.Request
 		}
 		return nil, mapRepoReadError(err, "Client material not found.", "Failed to update asset workbench client material.")
 	}
+	s.hydrateClientMaterialRows(ctx, []*domain.AssetWorkbenchClientMaterial{updated})
 	return updated, nil
 }
 
@@ -4853,6 +4865,20 @@ func (s *Service) ClientMaterialDownload(ctx context.Context, actor domain.Reque
 		"mode":        info.DownloadMode,
 	})
 	return info, nil
+}
+
+func (s *Service) ClientMaterialPreview(ctx context.Context, actor domain.RequestActor, materialID int64) (*SystemAssetPreviewMeta, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can preview client materials.", nil)
+	}
+	material, appErr := s.resolveDownloadableClientMaterial(ctx, actor, materialID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return s.systemAssetPreviewMeta(ctx, material.AssetID)
 }
 
 func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor domain.RequestActor, params ClientMaterialBatchDownloadParams) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
@@ -6468,6 +6494,32 @@ func (s *Service) resolveDownloadableClientMaterial(ctx context.Context, actor d
 		return nil, domain.NewAppError(domain.ErrCodeNotFound, "Client material not found.", nil)
 	}
 	return material, nil
+}
+
+func (s *Service) hydrateClientMaterialRows(ctx context.Context, items []*domain.AssetWorkbenchClientMaterial) {
+	if len(items) == 0 {
+		return
+	}
+	detailer, _ := s.systemAssets.(SystemAssetDetailer)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		item.PreviewAvailable = isWorkbenchSystemAssetDirectPreviewable(item.MimeTypeSnapshot, item.FilenameSnapshot)
+		if detailer == nil || item.AssetID <= 0 {
+			continue
+		}
+		detail, appErr := detailer.GetDetail(ctx, item.AssetID)
+		if appErr != nil || detail == nil {
+			continue
+		}
+		item.ScopeSKUCode = strings.TrimSpace(detail.ScopeSKUCode)
+		item.SKUCode = strings.TrimSpace(detail.SKUCode)
+		item.PrimarySKUCode = strings.TrimSpace(detail.PrimarySKUCode)
+		filename := firstNonEmpty(detail.OriginalFilename, detail.FileName, item.FilenameSnapshot)
+		mimeType := firstNonEmpty(detail.MimeType, item.MimeTypeSnapshot)
+		item.PreviewAvailable = detail.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(mimeType, filename)
+	}
 }
 
 func clientMaterialTitle(raw string, assetID int64, info *domain.AssetDownloadInfo) string {

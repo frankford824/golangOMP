@@ -70,7 +70,8 @@ function titleOf(asset: SystemAssetRow) {
 }
 
 function codeOf(asset: SystemAssetRow) {
-  return asset.asset_no || asset.resource_id || `编号 ${asset.id}`
+  const sku = asset.scope_sku_code || asset.sku_code || asset.primary_sku_code
+  return sku ? `SKU ${sku}` : `素材 ${asset.id}`
 }
 
 function typeLabel(asset: SystemAssetRow) {

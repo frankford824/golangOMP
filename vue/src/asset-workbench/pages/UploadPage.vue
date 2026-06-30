@@ -283,6 +283,10 @@ function selectUploadDirectory(directory: UploadDirectoryRow) {
   }
 }
 
+function uploadDirectoryLocation(directory: UploadDirectoryRow) {
+  return directory.oss_prefix ? `目录位置：${directory.oss_prefix}` : '目录位置：默认'
+}
+
 function removeItem(id: string) {
   queue.value = queue.value.filter((item) => item.id !== id)
   const next = new Set(expandedItemIds.value)
@@ -392,7 +396,7 @@ onMounted(() => {
             @click="selectUploadDirectory(directory)"
           >
             <strong>{{ directory.name }}</strong>
-            <span>{{ directory.description || directory.oss_prefix }}</span>
+            <span>{{ uploadDirectoryLocation(directory) }}</span>
           </button>
         </div>
         <div v-else class="aw-empty-state">

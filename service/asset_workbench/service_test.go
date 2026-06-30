@@ -1680,6 +1680,46 @@ func TestClientMaterialDownloadRequiresEnabledPublishedMaterial(t *testing.T) {
 	}
 }
 
+func TestClientMaterialPreviewRequiresEnabledPublishedMaterial(t *testing.T) {
+	url := "https://assets.example.com/system/1001.png"
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
+		1: {ID: 1, AssetID: 1001, Title: "素材 A", Enabled: true},
+		2: {ID: 2, AssetID: 1002, Title: "素材 B", Enabled: false},
+	}}
+	downloader := &systemAssetDownloaderStub{
+		info: &domain.AssetDownloadInfo{
+			DownloadMode: domain.AssetDownloadModeDirect,
+			DownloadURL:  &url,
+			Filename:     "system-asset.png",
+			FileSize:     2048,
+			MimeType:     "image/png",
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetDownloader(downloader),
+	)
+	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	meta, appErr := svc.ClientMaterialPreview(context.Background(), actor, 1)
+	if appErr != nil {
+		t.Fatalf("ClientMaterialPreview(enabled) error = %+v", appErr)
+	}
+	if meta == nil || meta.AssetID != 1001 || meta.PreviewURL != url || !meta.PreviewAvailable {
+		t.Fatalf("preview meta = %+v, want ready preview for asset 1001", meta)
+	}
+	if len(workbenchRepo.events) != 0 {
+		t.Fatalf("preview wrote %d events, want 0", len(workbenchRepo.events))
+	}
+	_, appErr = svc.ClientMaterialPreview(context.Background(), actor, 2)
+	if appErr == nil || appErr.Code != domain.ErrCodeNotFound {
+		t.Fatalf("ClientMaterialPreview(disabled) appErr = %+v", appErr)
+	}
+	if downloader.downloadCalls != 1 {
+		t.Fatalf("downloadCalls = %d, want 1", downloader.downloadCalls)
+	}
+}
+
 func TestSystemAssetPreviewUsesPreviewableDownloadURL(t *testing.T) {
 	url := "https://assets.example.com/system/1001.png"
 	downloader := &systemAssetDownloaderStub{

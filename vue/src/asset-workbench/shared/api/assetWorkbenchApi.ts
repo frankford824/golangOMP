@@ -693,6 +693,10 @@ export interface ClientMaterialRow {
   filename_snapshot: string
   mime_type_snapshot: string
   file_size_snapshot: number
+  scope_sku_code?: string
+  sku_code?: string
+  primary_sku_code?: string
+  preview_available?: boolean
   enabled: boolean
   sort_order: number
   published_by: number
@@ -1424,6 +1428,11 @@ export const assetWorkbenchApi = {
 
   async downloadClientMaterial(materialId: number, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
     const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/asset-workbench/client-materials/${materialId}/download`, { signal })
+    return unwrap(res.data)
+  },
+
+  async previewClientMaterial(materialId: number, signal?: AbortSignal): Promise<SystemAssetPreviewMeta> {
+    const res = await http.get<ApiEnvelope<SystemAssetPreviewMeta>>(`/v1/asset-workbench/client-materials/${materialId}/preview`, { signal })
     return unwrap(res.data)
   },
 

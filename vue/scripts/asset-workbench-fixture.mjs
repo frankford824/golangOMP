@@ -143,6 +143,7 @@ const systemAssets = [
     id: 501,
     resource_id: 'res_darkroom_501',
     asset_no: 'MAT-501',
+    scope_sku_code: 'CGP000071',
     file_name: 'poster-key-visual.png',
     original_filename: 'poster-key-visual.png',
     mime_type: 'image/png',
@@ -155,6 +156,7 @@ const systemAssets = [
     id: 502,
     resource_id: 'res_darkroom_502',
     asset_no: 'MAT-502',
+    scope_sku_code: 'CGK000602',
     file_name: 'lamp-render.psd',
     original_filename: 'lamp-render.psd',
     mime_type: 'application/vnd.adobe.photoshop',
@@ -165,10 +167,52 @@ const systemAssets = [
   },
 ]
 
+const clientMaterials = [
+  {
+    id: 1,
+    asset_id: 501,
+    title: '陈管常规海报 / 寿宴 / 红底黑字福如东海',
+    description: '客户端可直接下载的已发布素材',
+    filename_snapshot: 'poster-key-visual.png',
+    mime_type_snapshot: 'image/png',
+    file_size_snapshot: 245760,
+    scope_sku_code: 'CGP000071',
+    preview_available: true,
+    enabled: true,
+    sort_order: 1,
+    published_by: 1001,
+    published_at: '2026-06-24T10:00:00+08:00',
+  },
+  {
+    id: 2,
+    asset_id: 502,
+    title: '菲瑶常规 KT 板 / 毕业典礼迎宾牌',
+    description: 'PSD 源文件',
+    filename_snapshot: 'lamp-render.psd',
+    mime_type_snapshot: 'application/vnd.adobe.photoshop',
+    file_size_snapshot: 10485760,
+    scope_sku_code: 'CGK000602',
+    preview_available: false,
+    enabled: true,
+    sort_order: 2,
+    published_by: 1001,
+    published_at: '2026-06-24T10:05:00+08:00',
+  },
+]
+
+const uploadDirectories = [
+  { id: 1, name: 'A类定稿', oss_prefix: 'a/final', description: 'A类定稿', enabled: true, sort_order: 1, created_by: 1001 },
+  { id: 2, name: 'A类未定稿', oss_prefix: 'a/draft', description: 'A类未定稿', enabled: true, sort_order: 2, created_by: 1001 },
+  { id: 3, name: 'B类定稿', oss_prefix: 'b/final', description: 'B类定稿', enabled: true, sort_order: 3, created_by: 1001 },
+  { id: 4, name: 'B类未定稿', oss_prefix: 'b/draft', description: 'B类未定稿', enabled: true, sort_order: 4, created_by: 1001 },
+  { id: 5, name: 'C类定稿', oss_prefix: 'c/final', description: '文字', enabled: true, sort_order: 5, created_by: 1001 },
+  { id: 6, name: 'C类未定稿', oss_prefix: 'c/draft', description: '文字', enabled: true, sort_order: 6, created_by: 1001 },
+]
+
 function bootstrapFor(role) {
   const simple = role === 'simple'
   const profile = simple ? simpleProfile : adminProfile
-  const capabilities = simple ? ['asset.workbench.submit'] : adminCapabilities
+  const capabilities = simple ? ['asset.workbench.submit', 'asset.workbench.material.download'] : adminCapabilities
   return {
     app: 'asset-workbench',
     version: 'fixture',
@@ -216,6 +260,7 @@ export const assetAuditPages = [
   { name: 'admin-materials', path: '/materials', ready: '.aw-material-browser', role: 'admin' },
   { name: 'simple-home', path: '/', ready: '.aw-simple-home', role: 'simple' },
   { name: 'simple-upload', path: '/upload', ready: '.aw-dropzone', role: 'simple' },
+  { name: 'simple-materials', path: '/materials', ready: '.aw-material-client-list', role: 'simple' },
   { name: 'simple-income', path: '/my-settlement', ready: '.aw-simple-income', role: 'simple' },
 ]
 
@@ -325,6 +370,30 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     if (path.endsWith('/settlement/supplements')) return paginated(route, [])
     if (path.endsWith('/settlement/supplement-permissions')) return paginated(route, [])
     if (path.endsWith('/system-search')) return json(route, { items: systemAssets, total: systemAssets.length, page: 1, size: systemAssets.length })
+    if (path.endsWith('/upload-directories') || path.endsWith('/upload-directories/admin')) return json(route, uploadDirectories)
+    if (path.endsWith('/client-materials')) return json(route, clientMaterials)
+    if (path.endsWith('/client-materials/1/preview')) {
+      return json(route, {
+        asset_id: 501,
+        status: 'ready',
+        preparing: false,
+        preview_url: previewImageUrl,
+        download_url: previewImageUrl,
+        mime_type: 'image/png',
+        filename: 'poster-key-visual.png',
+        preview_available: true,
+      })
+    }
+    if (path.endsWith('/client-materials/2/preview')) {
+      return json(route, {
+        asset_id: 502,
+        status: 'not_applicable',
+        preparing: false,
+        mime_type: 'application/vnd.adobe.photoshop',
+        filename: 'lamp-render.psd',
+        preview_available: false,
+      })
+    }
     if (path.endsWith('/saved-views')) return json(route, [])
     return json(route, {})
   })

@@ -366,6 +366,10 @@ type AssetWorkbenchClientMaterial struct {
 	FilenameSnapshot string    `json:"filename_snapshot" db:"filename_snapshot"`
 	MimeTypeSnapshot string    `json:"mime_type_snapshot" db:"mime_type_snapshot"`
 	FileSizeSnapshot int64     `json:"file_size_snapshot" db:"file_size_snapshot"`
+	ScopeSKUCode     string    `json:"scope_sku_code,omitempty"`
+	SKUCode          string    `json:"sku_code,omitempty"`
+	PrimarySKUCode   string    `json:"primary_sku_code,omitempty"`
+	PreviewAvailable bool      `json:"preview_available"`
 	Enabled          bool      `json:"enabled" db:"enabled"`
 	SortOrder        int       `json:"sort_order" db:"sort_order"`
 	PublishedBy      int64     `json:"published_by" db:"published_by"`

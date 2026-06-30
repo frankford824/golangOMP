@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Download, Grid3X3, List, Search, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Download, FileImage, Grid3X3, List, Search, X } from 'lucide-vue-next'
 
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
@@ -34,7 +34,6 @@ interface GridColumn {
 type ViewMode = 'gallery' | 'table'
 
 type MaterialGridRow = SystemAssetRow & {
-  display_no: string | number
   display_style_code: string
   display_name: string
   display_type: string
@@ -66,6 +65,9 @@ const adminClientMaterials = ref<ClientMaterialRow[]>([])
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
 const selectedClientMaterialIds = ref<Set<number>>(new Set())
 const clientMaterialsLoading = ref(false)
+const clientMaterialKeyword = ref('')
+const clientPreviewUrls = ref<Record<number, string>>({})
+const clientPreviewLoadingIds = ref<Set<number>>(new Set())
 const clientMaterialAssetId = ref<number | null>(null)
 const clientMaterialTitle = ref('')
 const clientMaterialDescription = ref('')
@@ -101,7 +103,6 @@ const filteredRows = computed(() =>
 const materialRowsWithLabels = computed<MaterialGridRow[]>(() =>
   filteredRows.value.map((row) => ({
     ...row,
-    display_no: codeOf(row),
     display_style_code: styleCodeOf(row) || '—',
     display_name: titleOf(row),
     display_type: typeLabel(row),
@@ -113,8 +114,7 @@ const materialRowsWithLabels = computed<MaterialGridRow[]>(() =>
 const materialGridRows = computed(() => materialRowsWithLabels.value as unknown as Record<string, unknown>[])
 const materialGridColumns = computed<GridColumn[]>(() => [
   { key: 'select', label: '选择', width: 84, align: 'center' },
-  { key: 'display_no', label: '编码', width: 160 },
-  { key: 'display_style_code', label: '款式编码', width: 150 },
+  { key: 'display_style_code', label: 'SKU', width: 170 },
   { key: 'display_name', label: '素材名称', width: 260 },
   { key: 'display_type', label: '类型', width: 120 },
   { key: 'task_label', label: '任务', width: 150 },
@@ -126,13 +126,22 @@ const selectedCount = computed(() => selectedAssetIds.value.size)
 const selectedLabel = computed(() => (selectedCount.value > 0 ? `已选 ${formatInt(selectedCount.value)} 个素材` : '未选择素材'))
 const selectedClientCount = computed(() => selectedClientMaterialIds.value.size)
 const selectedClientLabel = computed(() => (selectedClientCount.value > 0 ? `已选 ${formatInt(selectedClientCount.value)} 个素材` : '未选择素材'))
+const filteredClientMaterials = computed(() => {
+  const query = clientMaterialKeyword.value.trim().toLowerCase()
+  if (!query) return clientMaterials.value
+  return clientMaterials.value.filter((material) => clientMaterialSearchText(material).includes(query))
+})
+const filteredClientMaterialIds = computed(() => filteredClientMaterials.value.map((item) => item.id))
+const allFilteredClientMaterialsSelected = computed(() => {
+  const ids = filteredClientMaterialIds.value
+  return ids.length > 0 && ids.every((id) => selectedClientMaterialIds.value.has(id))
+})
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const activeDetailRows = computed(() => {
   const asset = activeAsset.value
   if (!asset) return []
   return [
-    ['编码', codeOf(asset)],
-    ['款式编码', styleCodeOf(asset) || '—'],
+    ['SKU', styleCodeOf(asset) || '—'],
     ['名称', titleOf(asset)],
     ['文件类型', typeLabel(asset)],
     ['任务号', asset.task_no || '—'],
@@ -140,7 +149,6 @@ const activeDetailRows = computed(() => {
     ['创建人', creatorOf(asset) || '—'],
     ['创建时间', formatDateTime(asset.created_at)],
     ['原文件', asset.original_filename || asset.file_name || '—'],
-    ['资源编号', asset.resource_id || '—'],
   ]
 })
 const relatedAssets = computed(() => {
@@ -179,12 +187,51 @@ function titleOf(asset: SystemAssetRow) {
   return asset.product_name || asset.original_filename || asset.file_name || asset.task_no || `素材 ${asset.id}`
 }
 
-function codeOf(asset: SystemAssetRow) {
-  return asset.asset_no || asset.resource_id || asset.id
-}
-
 function styleCodeOf(asset: SystemAssetRow) {
   return asset.scope_sku_code || asset.sku_code || asset.primary_sku_code || ''
+}
+
+function clientMaterialTitleOf(material: ClientMaterialRow) {
+  return material.title || material.filename_snapshot || `素材 ${material.asset_id}`
+}
+
+function clientMaterialSkuOf(material: ClientMaterialRow) {
+  return material.scope_sku_code || material.sku_code || material.primary_sku_code || ''
+}
+
+function clientMaterialFilenameOf(material: ClientMaterialRow) {
+  return material.filename_snapshot || `asset_id=${material.asset_id}`
+}
+
+function clientMaterialPreviewProbe(material: ClientMaterialRow): SystemAssetPreviewMeta {
+  return {
+    asset_id: material.asset_id,
+    status: material.preview_available ? 'ready' : 'not_applicable',
+    preparing: false,
+    filename: material.filename_snapshot,
+    mime_type: material.mime_type_snapshot,
+    preview_available: Boolean(material.preview_available),
+  }
+}
+
+function canPreviewClientMaterial(material: ClientMaterialRow) {
+  return canAttemptSystemAssetPreview(clientMaterialPreviewProbe(material))
+}
+
+function clientMaterialPreviewUrl(material: ClientMaterialRow) {
+  return clientPreviewUrls.value[material.id] || ''
+}
+
+function clientMaterialSearchText(material: ClientMaterialRow) {
+  return [
+    clientMaterialTitleOf(material),
+    clientMaterialSkuOf(material),
+    clientMaterialFilenameOf(material),
+    material.description,
+    String(material.asset_id),
+  ]
+    .join(' ')
+    .toLowerCase()
 }
 
 function creatorOf(asset: SystemAssetRow) {
@@ -313,6 +360,33 @@ async function preloadVisiblePreviews(assets: SystemAssetRow[]) {
   await Promise.allSettled(candidates.map((asset) => ensurePreview(asset, true)))
 }
 
+async function ensureClientMaterialPreview(material: ClientMaterialRow) {
+  if (!canPreviewClientMaterial(material) || clientPreviewUrls.value[material.id] || clientPreviewLoadingIds.value.has(material.id)) return
+  const next = new Set(clientPreviewLoadingIds.value)
+  next.add(material.id)
+  clientPreviewLoadingIds.value = next
+  try {
+    const meta = await assetWorkbenchApi.previewClientMaterial(material.id)
+    const previewUrl = resolvedSystemAssetPreviewUrl(meta)
+    if (previewUrl && isSystemAssetImagePreviewable(meta)) {
+      clientPreviewUrls.value = { ...clientPreviewUrls.value, [material.id]: previewUrl }
+    }
+  } catch {
+    // 缩略图失败不阻断下载列表。
+  } finally {
+    const done = new Set(clientPreviewLoadingIds.value)
+    done.delete(material.id)
+    clientPreviewLoadingIds.value = done
+  }
+}
+
+async function preloadClientMaterialPreviews(materials: ClientMaterialRow[]) {
+  const candidates = materials
+    .filter((material) => canPreviewClientMaterial(material) && !clientPreviewUrls.value[material.id])
+    .slice(0, 12)
+  await Promise.allSettled(candidates.map((material) => ensureClientMaterialPreview(material)))
+}
+
 async function openAssetPreview(asset: SystemAssetRow) {
   activeAsset.value = asset
   previewController?.abort()
@@ -388,7 +462,10 @@ async function loadClientMaterials(admin = false) {
   try {
     const rows = await assetWorkbenchApi.listClientMaterials(admin)
     if (admin) adminClientMaterials.value = rows
-    else clientMaterials.value = rows
+    else {
+      clientMaterials.value = rows
+      clientPreviewUrls.value = {}
+    }
     selectedClientMaterialIds.value = new Set()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '客户端素材加载失败'
@@ -413,7 +490,7 @@ function toggleClientMaterial(row: ClientMaterialRow, checked: boolean) {
 }
 
 function toggleAllClientMaterials(checked: boolean) {
-  selectedClientMaterialIds.value = checked ? new Set(clientMaterials.value.map((item) => item.id)) : new Set()
+  selectedClientMaterialIds.value = checked ? new Set(filteredClientMaterialIds.value) : new Set()
 }
 
 async function downloadClientMaterial(row: ClientMaterialRow) {
@@ -554,6 +631,14 @@ function initializeMaterialsMode(isAdmin: boolean | undefined) {
 }
 
 watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: true })
+
+watch(
+  filteredClientMaterials,
+  (materials) => {
+    void preloadClientMaterialPreviews(materials)
+  },
+  { immediate: false },
+)
 </script>
 
 <template>
@@ -574,38 +659,54 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
       </div>
 
       <div class="aw-data-surface">
-        <div class="aw-grid-toolbar">
-          <span>{{ formatInt(clientMaterials.length) }} 个素材</span>
+        <div class="aw-material-search aw-material-search--client">
+          <input v-model="clientMaterialKeyword" type="search" placeholder="搜索 SKU、素材名称或文件名" />
+          <span class="aw-chip aw-chip--neutral">{{ formatInt(filteredClientMaterials.length) }} / {{ formatInt(clientMaterials.length) }} 个素材</span>
+        </div>
+        <div class="aw-material-client-toolbar">
+          <span>{{ formatInt(filteredClientMaterials.length) }} 个可见素材</span>
           <span>{{ selectedClientLabel }}</span>
           <label class="aw-inline-check">
             <input
               type="checkbox"
-              :checked="clientMaterials.length > 0 && selectedClientMaterialIds.size === clientMaterials.length"
+              :checked="allFilteredClientMaterialsSelected"
               @change="toggleAllClientMaterials(($event.target as HTMLInputElement).checked)"
             />
-            <span>全选</span>
+            <span>全选当前结果</span>
           </label>
         </div>
         <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
         <p v-if="error" class="aw-inline-alert">{{ error }}</p>
         <AsyncBoundary :loading="clientMaterialsLoading" :error="error" loading-label="正在加载素材" @retry="loadClientMaterials(false)">
-          <div v-if="clientMaterials.length" class="aw-material-client-list">
-            <article v-for="material in clientMaterials" :key="material.id" class="aw-material-client-item">
-              <label class="aw-inline-check">
+          <div v-if="filteredClientMaterials.length" class="aw-material-client-list">
+            <article v-for="material in filteredClientMaterials" :key="material.id" class="aw-material-client-item">
+              <label class="aw-inline-check aw-material-client-item__check">
                 <input
                   type="checkbox"
+                  :aria-label="`${selectedClientMaterialIds.has(material.id) ? '取消选择' : '选择'}素材 ${clientMaterialTitleOf(material)}`"
                   :checked="selectedClientMaterialIds.has(material.id)"
                   @change="toggleClientMaterial(material, ($event.target as HTMLInputElement).checked)"
                 />
-                <span>{{ material.title || material.filename_snapshot || `素材 ${material.asset_id}` }}</span>
               </label>
-              <span class="aw-cell-text">{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
+              <div class="aw-material-client-thumb" :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }">
+                <img v-if="clientMaterialPreviewUrl(material)" :src="clientMaterialPreviewUrl(material)" :alt="clientMaterialTitleOf(material)" loading="lazy" decoding="async" />
+                <FileImage v-else :size="22" aria-hidden="true" />
+              </div>
+              <div class="aw-material-client-copy">
+                <strong>{{ clientMaterialTitleOf(material) }}</strong>
+                <span>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</span>
+                <span>{{ clientMaterialFilenameOf(material) }}</span>
+                <small v-if="material.description">{{ material.description }}</small>
+              </div>
+              <span :class="chipClass(systemPreviewMeta(canPreviewClientMaterial(material)).tone)">
+                {{ systemPreviewMeta(canPreviewClientMaterial(material)).label }}
+              </span>
               <button class="aw-secondary-button" type="button" @click="downloadClientMaterial(material)">下载</button>
             </article>
           </div>
           <div v-else class="aw-empty-state">
-            <h3>暂无可下载素材</h3>
-            <p>管理端发布素材后，会显示在这里。</p>
+            <h3>{{ clientMaterials.length ? '没有匹配素材' : '暂无可下载素材' }}</h3>
+            <p>{{ clientMaterials.length ? '换一个 SKU、名称或文件名再试。' : '管理端发布素材后，会显示在这里。' }}</p>
           </div>
         </AsyncBoundary>
       </div>
@@ -628,7 +729,7 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
 
     <div class="aw-data-surface">
       <div class="aw-material-search">
-        <input v-model="keyword" type="search" placeholder="搜索编码、款式编码、产品名或文件名" @keydown.enter="searchMaterials()" />
+        <input v-model="keyword" type="search" placeholder="搜索 SKU、产品名或文件名" @keydown.enter="searchMaterials()" />
         <button class="aw-primary-button" type="button" @click="searchMaterials()">
           <Search :size="16" aria-hidden="true" />
           搜索
@@ -694,7 +795,11 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
       </div>
       <div v-if="adminClientMaterials.length" class="aw-material-admin-list">
         <article v-for="material in adminClientMaterials" :key="material.id" class="aw-material-admin-item">
-          <strong>{{ material.title || material.filename_snapshot || `素材 ${material.asset_id}` }}</strong>
+          <div class="aw-material-admin-copy">
+            <strong>{{ clientMaterialTitleOf(material) }}</strong>
+            <small>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</small>
+            <small v-if="material.description">{{ material.description }}</small>
+          </div>
           <span>{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
           <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ material.enabled ? '已发布' : '已停用' }}</span>
           <button type="button" @click="toggleClientMaterialEnabled(material)">{{ material.enabled ? '停用' : '启用' }}</button>
@@ -784,7 +889,7 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
             </WorkbenchDataGrid>
             <div v-else class="aw-empty-state">
               <h3>还没有搜索结果</h3>
-              <p>输入编码、产品名、款式或关键词后搜索。只有已开通素材库的账号可以查看和下载。</p>
+              <p>输入 SKU、产品名或文件名后搜索。只有已开通素材库的账号可以查看和下载。</p>
             </div>
           </AsyncBoundary>
         </div>
@@ -802,7 +907,7 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
           <div class="aw-material-detail__hero">
             <p class="aw-eyebrow">当前素材</p>
             <h3>{{ titleOf(activeAsset) }}</h3>
-            <span>{{ codeOf(activeAsset) }}</span>
+            <span>SKU {{ styleCodeOf(activeAsset) || '未标注' }}</span>
           </div>
           <dl class="aw-material-detail__list">
             <div v-for="[label, value] in activeDetailRows" :key="label">
@@ -833,7 +938,7 @@ watch(() => bootstrap.value?.is_admin, initializeMaterialsMode, { immediate: tru
               type="button"
               @click="selectAsset(asset)"
             >
-              {{ codeOf(asset) }}
+              {{ styleCodeOf(asset) || titleOf(asset) }}
             </button>
           </div>
           <p v-else class="aw-copy">选择一个素材后，这里会按产品名、任务号和文件类型提示相关素材。</p>

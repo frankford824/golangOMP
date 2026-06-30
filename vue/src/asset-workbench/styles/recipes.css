@@ -1666,6 +1666,20 @@ body.aw-ledger-locked {
   list-style: none;
 }
 
+.aw-material-client-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aw-space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--aw-space-3);
+}
+
+.aw-material-client-toolbar .aw-inline-check {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .aw-material-client-item,
 .aw-material-admin-item,
 .aw-upload-result-list li {
@@ -1681,7 +1695,62 @@ body.aw-ledger-locked {
 }
 
 .aw-material-client-item {
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) auto;
+  grid-template-columns: auto 84px minmax(220px, 1fr) auto auto;
+}
+
+.aw-material-search--client {
+  grid-template-columns: minmax(220px, 1fr) auto;
+}
+
+.aw-material-client-item__check {
+  justify-content: center;
+}
+
+.aw-material-client-thumb {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 58px;
+  overflow: hidden;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-stage);
+  color: var(--aw-ink-muted);
+}
+
+.aw-material-client-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.aw-material-client-thumb--empty {
+  background: var(--aw-surface-muted);
+}
+
+.aw-material-client-copy,
+.aw-material-admin-copy {
+  display: grid;
+  gap: var(--aw-space-1);
+  min-width: 0;
+}
+
+.aw-material-client-copy strong,
+.aw-material-admin-copy strong,
+.aw-material-client-copy span,
+.aw-material-admin-copy small,
+.aw-material-client-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-material-client-copy span,
+.aw-material-admin-copy small,
+.aw-material-client-copy small {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
 }
 
 .aw-material-admin-form {
@@ -1752,7 +1821,8 @@ body.aw-ledger-locked {
 .aw-material-card {
   position: relative;
   display: grid;
-  grid-template-rows: 180px auto;
+  grid-template-rows: 180px 1fr;
+  height: 294px;
   min-width: 0;
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
