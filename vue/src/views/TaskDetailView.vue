@@ -210,18 +210,19 @@
             </button>
           </div>
           <div class="detail-prediction-list">
-            <button
+            <article
               v-for="item in taskPredictionSuggestions"
               :key="item.id"
-              type="button"
               class="detail-prediction-item"
-              @click="handleTaskPrediction(item)"
             >
-              <span>{{ item.source || '流程状态' }}</span>
-              <strong>{{ item.title }}</strong>
-              <small v-if="item.detail">{{ item.detail }}</small>
-              <em>{{ item.action_label || '查看' }}</em>
-            </button>
+              <button type="button" class="detail-prediction-action" @click="handleTaskPrediction(item)">
+                <span>{{ item.source || '流程状态' }}</span>
+                <strong>{{ item.title }}</strong>
+                <small v-if="item.detail">{{ item.detail }}</small>
+                <em>{{ item.action_label || '查看' }}</em>
+              </button>
+              <PredictionFeedbackControl :suggestion="item" surface="task_detail" />
+            </article>
           </div>
         </section>
 
@@ -1157,6 +1158,7 @@ import { usePermission } from '@/composables/usePermission'
 import { usePermissionsStore } from '@/stores/permissions'
 import { useAuth } from '@/composables/useAuth'
 import { useTaskCancel } from '@/composables/useTaskCancel'
+import PredictionFeedbackControl from '@/components/experience/PredictionFeedbackControl.vue'
 import {
   getFilesFromClipboardEvent,
   getFilesFromDataTransfer,
@@ -6293,7 +6295,7 @@ watch(taskId, (id) => {
 .detail-prediction-item {
   position: relative;
   display: grid;
-  gap: 0.25rem;
+  gap: 0.55rem;
   min-height: 6rem;
   padding: 0.7rem;
   overflow: hidden;
@@ -6303,6 +6305,19 @@ watch(taskId, (id) => {
   text-align: left;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
   animation: detail-card-enter 420ms ease both;
+}
+
+.detail-prediction-action {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
 }
 
 .detail-prediction-item:hover {
@@ -6325,25 +6340,25 @@ watch(taskId, (id) => {
   transform: translateX(120%);
 }
 
-.detail-prediction-item span {
+.detail-prediction-action span {
   color: var(--td-blue);
   font-size: 0.6875rem;
   font-weight: 700;
 }
 
-.detail-prediction-item strong {
+.detail-prediction-action strong {
   color: var(--td-text);
   font-size: 0.8125rem;
   line-height: 1.35;
 }
 
-.detail-prediction-item small {
+.detail-prediction-action small {
   color: rgb(var(--yb-text-soft));
   font-size: 0.75rem;
   line-height: 1.35;
 }
 
-.detail-prediction-item em {
+.detail-prediction-action em {
   width: max-content;
   padding: 0.12rem 0.45rem;
   border-radius: 999px;

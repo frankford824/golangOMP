@@ -71,18 +71,32 @@ func (r *experienceRepo) ListExperienceEvents(ctx context.Context, filter repo.E
 		return []*domain.ExperienceEvent{}, 0, nil
 	}
 
+	evidenceRank := experienceEvidenceRank(filter.MinEvidenceLevel)
+	outerWhere := ""
+	countArgs := append([]interface{}{}, args...)
+	if evidenceRank > 0 {
+		outerWhere = " WHERE evidence_rank >= ?"
+		countArgs = append(countArgs, evidenceRank)
+	}
+
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+querySQL+`) experience_sample_count`, args...).Scan(&total); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+querySQL+`) experience_sample_count`+outerWhere, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count experience events: %w", err)
 	}
 
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	offset := (page - 1) * pageSize
-	listArgs := append(append([]interface{}{}, args...), pageSize, offset)
+	listArgs := append([]interface{}{}, args...)
+	if evidenceRank > 0 {
+		listArgs = append(listArgs, evidenceRank)
+	}
+	listArgs = append(listArgs, pageSize, offset)
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT id, event_key, schema_version, event_time, source_type, source_id, task_id, action, outcome,
-		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status, created_at
+		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status,
+		       feedback_value, feedback_reason_code, feedback_created_at, evidence_rank, created_at
 		FROM (`+querySQL+`) experience_samples
+		`+outerWhere+`
 		ORDER BY event_time DESC, id DESC
 		LIMIT ? OFFSET ?`, listArgs...)
 	if err != nil {
@@ -111,9 +125,25 @@ func buildExperienceSampleUnion(filter repo.ExperienceEventListFilter) (string, 
 	if shouldIncludeBusinessExperienceSamples(filter) {
 		whereSQL, whereArgs := buildBusinessExperienceSampleWhere(filter)
 		queries = append(queries, `
-		SELECT id, event_key, schema_version, event_time, source_type, source_id, task_id, action, outcome,
-		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status, created_at
-		FROM experience_events
+		SELECT e.id, e.event_key, e.schema_version, e.event_time, e.source_type, e.source_id, e.task_id, e.action, e.outcome,
+		       e.actor_snapshot_json, e.business_snapshot_json, e.payload_json, e.data_classification, e.ground_truth_status,
+		       NULL AS feedback_value,
+		       NULL AS feedback_reason_code,
+		       NULL AS feedback_created_at,
+		       CASE
+		         WHEN e.task_id IS NOT NULL AND EXISTS (
+		           SELECT 1 FROM task_experience_profiles p WHERE p.task_id = e.task_id
+		         ) THEN 4
+		         WHEN e.payload_json IS NOT NULL AND (
+		           JSON_EXTRACT(e.payload_json, '$.reason_code') IS NOT NULL
+		           OR JSON_EXTRACT(e.payload_json, '$.reason_codes') IS NOT NULL
+		           OR JSON_EXTRACT(e.payload_json, '$.reason_tags') IS NOT NULL
+		         ) THEN 3
+		         WHEN e.task_id IS NOT NULL OR e.source_id <> '' THEN 1
+		         ELSE 0
+		       END AS evidence_rank,
+		       e.created_at
+		FROM experience_events e
 		WHERE `+whereSQL)
 		args = append(args, whereArgs...)
 	}
@@ -121,34 +151,50 @@ func buildExperienceSampleUnion(filter repo.ExperienceEventListFilter) (string, 
 	if shouldIncludeAISuggestionSamples(filter) {
 		whereSQL, whereArgs := buildAISuggestionSampleWhere(filter)
 		queries = append(queries, `
-		SELECT -id AS id,
-		       suggestion_event_id AS event_key,
+		SELECT -a.id AS id,
+		       a.suggestion_event_id AS event_key,
 		       1 AS schema_version,
-		       displayed_at AS event_time,
+		       a.displayed_at AS event_time,
 		       'ai_suggestion' AS source_type,
-		       source AS source_id,
-		       CASE WHEN target_type = 'task' AND target_id REGEXP '^[0-9]+$' THEN CAST(target_id AS SIGNED) ELSE NULL END AS task_id,
-		       suggestion_type AS action,
+		       a.source AS source_id,
+		       CASE WHEN a.target_type = 'task' AND a.target_id REGEXP '^[0-9]+$' THEN CAST(a.target_id AS SIGNED) ELSE NULL END AS task_id,
+		       a.suggestion_type AS action,
 		       'displayed' AS outcome,
 		       CASE
-		         WHEN actor_id IS NULL THEN NULL
-		         ELSE JSON_OBJECT('actor_id', actor_id, 'actor_type', 'user', 'surface', 'ai_suggestion')
+		         WHEN a.actor_id IS NULL THEN NULL
+		         ELSE JSON_OBJECT('actor_id', a.actor_id, 'actor_type', 'user', 'surface', 'ai_suggestion')
 		       END AS actor_snapshot_json,
-		       JSON_OBJECT('target_type', target_type, 'target_id', target_id) AS business_snapshot_json,
+		       JSON_OBJECT('target_type', a.target_type, 'target_id', a.target_id) AS business_snapshot_json,
 		       JSON_OBJECT(
-		         'suggestion_id', suggestion_id,
-		         'source', source,
-		         'confidence', confidence,
-		         'model', model,
-		         'provider', provider,
-		         'model_version', model_version,
-		         'target_type', target_type,
-		         'target_id', target_id
+		         'suggestion_id', a.suggestion_id,
+		         'source', a.source,
+		         'confidence', a.confidence,
+		         'model', a.model,
+		         'provider', a.provider,
+		         'model_version', a.model_version,
+		         'target_type', a.target_type,
+		         'target_id', a.target_id
 		       ) AS payload_json,
 		       'ai_suggestion' AS data_classification,
 		       'displayed' AS ground_truth_status,
-		       created_at
-		FROM ai_suggestion_events
+		       lf.feedback_value AS feedback_value,
+		       lf.reason_code AS feedback_reason_code,
+		       lf.created_at AS feedback_created_at,
+		       CASE
+		         WHEN a.target_type = 'task' AND a.target_id REGEXP '^[0-9]+$' AND EXISTS (
+		           SELECT 1 FROM task_experience_profiles p WHERE p.task_id = CAST(a.target_id AS SIGNED)
+		         ) THEN 4
+		         WHEN a.target_type = 'asset' AND a.target_id REGEXP '^[0-9]+$' AND EXISTS (
+		           SELECT 1 FROM asset_quality_labels q WHERE q.asset_id = CAST(a.target_id AS SIGNED)
+		         ) THEN 4
+		         WHEN lf.reason_code <> '' THEN 3
+		         WHEN lf.feedback_value <> '' THEN 2
+		         WHEN a.target_type <> '' AND a.target_id <> '' THEN 1
+		         ELSE 0
+		       END AS evidence_rank,
+		       a.created_at
+		FROM ai_suggestion_events a
+		LEFT JOIN (`+latestAISuggestionFeedbackSQL()+`) lf ON lf.suggestion_event_id = a.suggestion_event_id
 		WHERE `+whereSQL)
 		args = append(args, whereArgs...)
 	}
@@ -174,35 +220,61 @@ func shouldIncludeAISuggestionSamples(filter repo.ExperienceEventListFilter) boo
 	return true
 }
 
+func latestAISuggestionFeedbackSQL() string {
+	return `
+		SELECT f.suggestion_event_id, f.feedback_value, f.reason_code, f.created_at
+		FROM ai_suggestion_feedback f
+		INNER JOIN (
+		  SELECT suggestion_event_id, MAX(id) AS id
+		  FROM ai_suggestion_feedback
+		  GROUP BY suggestion_event_id
+		) latest ON latest.id = f.id`
+}
+
+func experienceEvidenceRank(level string) int {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case domain.ExperienceEvidenceLocatable:
+		return 1
+	case domain.ExperienceEvidenceFeedback:
+		return 2
+	case domain.ExperienceEvidenceTagged:
+		return 3
+	case domain.ExperienceEvidenceReusable:
+		return 4
+	default:
+		return 0
+	}
+}
+
 func buildBusinessExperienceSampleWhere(filter repo.ExperienceEventListFilter) (string, []interface{}) {
 	where := []string{"1=1"}
 	args := make([]interface{}, 0, 8)
 	if value := strings.TrimSpace(filter.SourceType); value != "" {
-		where = append(where, "source_type = ?")
+		where = append(where, "e.source_type = ?")
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.SourceID); value != "" {
-		where = append(where, "source_id = ?")
+		where = append(where, "e.source_id = ?")
 		args = append(args, value)
 	}
 	if filter.TaskID != nil {
-		where = append(where, "task_id = ?")
+		where = append(where, "e.task_id = ?")
 		args = append(args, *filter.TaskID)
 	}
 	if value := strings.TrimSpace(filter.Action); value != "" {
-		where = append(where, "action = ?")
+		where = append(where, "e.action = ?")
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.Outcome); value != "" {
-		where = append(where, "outcome = ?")
+		where = append(where, "e.outcome = ?")
 		args = append(args, value)
 	}
 	if filter.From != nil {
-		where = append(where, "event_time >= ?")
+		where = append(where, "e.event_time >= ?")
 		args = append(args, *filter.From)
 	}
 	if filter.To != nil {
-		where = append(where, "event_time <= ?")
+		where = append(where, "e.event_time <= ?")
 		args = append(args, *filter.To)
 	}
 	return strings.Join(where, " AND "), args
@@ -212,24 +284,24 @@ func buildAISuggestionSampleWhere(filter repo.ExperienceEventListFilter) (string
 	where := []string{"1=1"}
 	args := make([]interface{}, 0, 8)
 	if value := strings.TrimSpace(filter.SourceID); value != "" {
-		where = append(where, "source = ?")
+		where = append(where, "a.source = ?")
 		args = append(args, value)
 	}
 	if filter.TaskID != nil {
-		where = append(where, "target_type = 'task'")
-		where = append(where, "target_id = ?")
+		where = append(where, "a.target_type = 'task'")
+		where = append(where, "a.target_id = ?")
 		args = append(args, strconv.FormatInt(*filter.TaskID, 10))
 	}
 	if value := strings.TrimSpace(filter.Action); value != "" {
-		where = append(where, "suggestion_type = ?")
+		where = append(where, "a.suggestion_type = ?")
 		args = append(args, value)
 	}
 	if filter.From != nil {
-		where = append(where, "displayed_at >= ?")
+		where = append(where, "a.displayed_at >= ?")
 		args = append(args, *filter.From)
 	}
 	if filter.To != nil {
-		where = append(where, "displayed_at <= ?")
+		where = append(where, "a.displayed_at <= ?")
 		args = append(args, *filter.To)
 	}
 	return strings.Join(where, " AND "), args
@@ -270,7 +342,22 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 	if stats.AISuggestionEvents, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM ai_suggestion_events`); err != nil {
 		return nil, err
 	}
-	if stats.AIFeedbackEvents, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM ai_suggestion_feedback`); err != nil {
+	stats.DisplayedEvents = stats.AISuggestionEvents
+	stats.SampleTotal = stats.TotalEvents + stats.AISuggestionEvents
+	if stats.AIFeedbackEvents, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback`); err != nil {
+		return nil, err
+	}
+	stats.FeedbackSamples = stats.AIFeedbackEvents
+	if stats.FeedbackAccepted, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE feedback_value = ?`, domain.ExperienceFeedbackAccepted); err != nil {
+		return nil, err
+	}
+	if stats.FeedbackPartiallyAccepted, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE feedback_value = ?`, domain.ExperienceFeedbackPartiallyAccepted); err != nil {
+		return nil, err
+	}
+	if stats.FeedbackRejected, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE feedback_value = ?`, domain.ExperienceFeedbackRejected); err != nil {
+		return nil, err
+	}
+	if stats.ReasonedFeedbackSamples, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE reason_code <> ''`); err != nil {
 		return nil, err
 	}
 	if stats.TaskProfiles, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM task_experience_profiles`); err != nil {
@@ -279,6 +366,16 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 	if stats.AssetQualityLabels, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM asset_quality_labels`); err != nil {
 		return nil, err
 	}
+	stats.ReusableSamples = stats.TaskProfiles + stats.AssetQualityLabels
+	businessLocatable, err := r.scalarCount(ctx, `SELECT COUNT(*) FROM experience_events WHERE task_id IS NOT NULL OR source_id <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	aiLocatable, err := r.scalarCount(ctx, `SELECT COUNT(*) FROM ai_suggestion_events WHERE target_type <> '' AND target_id <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	stats.LocatableSamples = businessLocatable + aiLocatable
 	taggedEvents, err := r.scalarCount(ctx, `
 		SELECT COUNT(*) FROM experience_events
 		WHERE payload_json IS NOT NULL
@@ -300,6 +397,12 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 	}
 	if stats.AISuggestionEvents > 0 {
 		stats.AIFeedbackRate = float64(stats.AIFeedbackEvents) / float64(stats.AISuggestionEvents)
+	}
+	if stats.FeedbackSamples > 0 {
+		stats.ReasonCoverageRate = float64(stats.ReasonedFeedbackSamples) / float64(stats.FeedbackSamples)
+	}
+	if stats.SampleTotal > 0 {
+		stats.ReusableRate = float64(stats.ReusableSamples) / float64(stats.SampleTotal)
 	}
 	var rebuiltAt sql.NullTime
 	if err := r.db.db.QueryRowContext(ctx, `SELECT MAX(rebuilt_at) FROM task_experience_profiles`).Scan(&rebuiltAt); err != nil {
@@ -547,6 +650,9 @@ func scanExperienceEvent(scanner interface {
 	var event domain.ExperienceEvent
 	var taskID sql.NullInt64
 	var actorSnapshot, businessSnapshot, payload sql.NullString
+	var feedbackValue, feedbackReasonCode sql.NullString
+	var feedbackCreatedAt sql.NullTime
+	var evidenceRank int
 	if err := scanner.Scan(
 		&event.ID,
 		&event.EventKey,
@@ -562,6 +668,10 @@ func scanExperienceEvent(scanner interface {
 		&payload,
 		&event.DataClassification,
 		&event.GroundTruthStatus,
+		&feedbackValue,
+		&feedbackReasonCode,
+		&feedbackCreatedAt,
+		&evidenceRank,
 		&event.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("scan experience event: %w", err)
@@ -570,7 +680,114 @@ func scanExperienceEvent(scanner interface {
 	event.ActorSnapshot = rawJSONFromNull(actorSnapshot)
 	event.BusinessSnapshot = rawJSONFromNull(businessSnapshot)
 	event.Payload = rawJSONFromNull(payload)
+	if feedbackValue.Valid {
+		event.FeedbackValue = feedbackValue.String
+	}
+	if feedbackReasonCode.Valid {
+		event.FeedbackReasonCode = feedbackReasonCode.String
+	}
+	event.FeedbackCreatedAt = fromNullTime(feedbackCreatedAt)
+	decorateExperienceEvent(&event, evidenceRank)
 	return &event, nil
+}
+
+func decorateExperienceEvent(event *domain.ExperienceEvent, evidenceRank int) {
+	if event == nil {
+		return
+	}
+	event.EvidenceLevel = experienceEvidenceLevel(evidenceRank)
+	missing := make([]string, 0, 4)
+	targetType, targetID := experienceEventTarget(event)
+	if targetType == "" || targetID == "" {
+		missing = append(missing, "target")
+	}
+	if event.SourceType == "ai_suggestion" {
+		if strings.TrimSpace(event.FeedbackValue) == "" {
+			missing = append(missing, "feedback")
+		}
+		if requiresExperienceReason(event.FeedbackValue) && strings.TrimSpace(event.FeedbackReasonCode) == "" {
+			missing = append(missing, "reason")
+		}
+		switch targetType {
+		case "task":
+			if evidenceRank < 4 {
+				missing = append(missing, "profile")
+			}
+		case "asset":
+			if evidenceRank < 4 {
+				missing = append(missing, "asset_quality")
+			}
+		}
+	} else {
+		if !experiencePayloadHasReason(event.Payload) {
+			missing = append(missing, "reason")
+		}
+		if evidenceRank < 4 {
+			missing = append(missing, "profile")
+		}
+	}
+	event.MissingSignals = missing
+}
+
+func experienceEvidenceLevel(rank int) string {
+	switch {
+	case rank >= 4:
+		return domain.ExperienceEvidenceReusable
+	case rank == 3:
+		return domain.ExperienceEvidenceTagged
+	case rank == 2:
+		return domain.ExperienceEvidenceFeedback
+	case rank == 1:
+		return domain.ExperienceEvidenceLocatable
+	default:
+		return domain.ExperienceEvidenceDisplayed
+	}
+}
+
+func requiresExperienceReason(feedbackValue string) bool {
+	switch strings.TrimSpace(feedbackValue) {
+	case domain.ExperienceFeedbackRejected, domain.ExperienceFeedbackPartiallyAccepted:
+		return true
+	default:
+		return false
+	}
+}
+
+func experienceEventTarget(event *domain.ExperienceEvent) (string, string) {
+	if event == nil {
+		return "", ""
+	}
+	var business map[string]interface{}
+	if len(event.BusinessSnapshot) > 0 && json.Unmarshal(event.BusinessSnapshot, &business) == nil {
+		targetType, _ := business["target_type"].(string)
+		targetID, _ := business["target_id"].(string)
+		if strings.TrimSpace(targetType) != "" || strings.TrimSpace(targetID) != "" {
+			return strings.TrimSpace(targetType), strings.TrimSpace(targetID)
+		}
+	}
+	if event.TaskID != nil {
+		return "task", strconv.FormatInt(*event.TaskID, 10)
+	}
+	if sourceID := strings.TrimSpace(event.SourceID); sourceID != "" {
+		return event.SourceType, sourceID
+	}
+	return "", ""
+}
+
+func experiencePayloadHasReason(payload json.RawMessage) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return false
+	}
+	for _, key := range []string{"reason_code", "reason_codes", "reason_tags"} {
+		if raw, ok := value[key]; ok && raw != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func scanExperienceOutboxEvent(scanner interface {

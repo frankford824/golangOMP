@@ -104,10 +104,7 @@ func (h *PredictionHandler) Management(c *gin.Context) {
 }
 
 func (h *PredictionHandler) recordSuggestionDisplay(c *gin.Context, actor domain.RequestActor, surface string, bundle *domain.PredictionBundle) {
-	if h == nil || h.experienceSvc == nil || bundle == nil || len(bundle.Suggestions) == 0 {
-		return
-	}
-	if !h.experienceSvc.RuntimeFlags().CaptureEnabled {
+	if bundle == nil || len(bundle.Suggestions) == 0 {
 		return
 	}
 	route := c.FullPath()
@@ -122,14 +119,16 @@ func (h *PredictionHandler) recordSuggestionDisplay(c *gin.Context, actor domain
 		displayedAt = time.Now().UTC()
 	}
 	events := make([]domain.AISuggestionEvent, 0, len(bundle.Suggestions))
-	for i, suggestion := range bundle.Suggestions {
+	for i := range bundle.Suggestions {
+		bundle.Suggestions[i].SuggestionEventID = predictionSuggestionEventID(surface, bundle.Suggestions[i], displayedAt, i)
+		suggestion := bundle.Suggestions[i]
 		suggestionJSON, err := json.Marshal(suggestion)
 		if err != nil {
 			continue
 		}
 		confidence := predictionConfidenceScore(suggestion.Confidence)
 		event := &domain.AISuggestionEvent{
-			SuggestionEventID: predictionSuggestionEventID(surface, suggestion, displayedAt, i),
+			SuggestionEventID: suggestion.SuggestionEventID,
 			SuggestionType:    strings.TrimSpace(suggestion.Type),
 			SuggestionID:      strings.TrimSpace(suggestion.ID),
 			Source:            strings.TrimSpace(suggestion.Source),
@@ -147,6 +146,9 @@ func (h *PredictionHandler) recordSuggestionDisplay(c *gin.Context, actor domain
 			event.ActorID = &actor.ID
 		}
 		events = append(events, *event)
+	}
+	if h == nil || h.experienceSvc == nil || !h.experienceSvc.RuntimeFlags().CaptureEnabled {
+		return
 	}
 	if len(events) == 0 {
 		return

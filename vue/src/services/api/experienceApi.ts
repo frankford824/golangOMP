@@ -7,9 +7,24 @@ export interface ExperienceRuntimeFlags {
   worker_enabled: boolean
 }
 
+export type ExperienceEvidenceLevel = 'L0' | 'L1' | 'L2' | 'L3' | 'L4'
+
+export type AISuggestionFeedbackValue = 'accepted' | 'partially_accepted' | 'rejected'
+
 export interface ExperienceStats {
   flags: ExperienceRuntimeFlags
   total_events: number
+  sample_total?: number
+  displayed_events?: number
+  locatable_samples?: number
+  feedback_samples?: number
+  reasoned_feedback_samples?: number
+  reusable_samples?: number
+  feedback_accepted?: number
+  feedback_partially_accepted?: number
+  feedback_rejected?: number
+  reason_coverage_rate?: number
+  reusable_rate?: number
   outbox_queued: number
   outbox_processing: number
   outbox_processed_24h: number
@@ -44,6 +59,11 @@ export interface ExperienceEvent {
   payload?: Record<string, unknown> | unknown
   data_classification?: string
   ground_truth_status?: string
+  evidence_level?: ExperienceEvidenceLevel
+  feedback_value?: AISuggestionFeedbackValue
+  feedback_reason_code?: string
+  feedback_created_at?: string
+  missing_signals?: string[]
   created_at: string
 }
 
@@ -65,6 +85,7 @@ export interface ExperienceReasonTag {
 export interface ExperienceSamplesParams {
   page?: number
   page_size?: number
+  min_evidence_level?: ExperienceEvidenceLevel
   source_type?: string
   source_id?: string
   task_id?: number
@@ -85,6 +106,41 @@ export interface PaginatedEnvelope<T> {
   pagination?: PaginationMeta
 }
 
+export interface AISuggestionFeedbackPayload {
+  surface: string
+  target_type?: string
+  target_id?: string
+  suggestion_id?: string
+  suggestion_type?: string
+  source?: string
+  action_type?: string
+  action_label?: string
+  route?: string
+}
+
+export interface AISuggestionFeedbackRequest {
+  suggestion_event_id?: string
+  feedback_value: AISuggestionFeedbackValue
+  reason_code?: string
+  reason_note?: string
+  outcome_source_type?: string
+  outcome_source_id?: string
+  payload?: AISuggestionFeedbackPayload
+}
+
+export interface AISuggestionFeedback {
+  id: number
+  suggestion_event_id: string
+  feedback_value: AISuggestionFeedbackValue
+  reason_code?: string
+  reason_note?: string
+  outcome_source_type?: string
+  outcome_source_id?: string
+  actor_id?: number | null
+  payload?: AISuggestionFeedbackPayload
+  created_at: string
+}
+
 export const experienceApi = {
   /** GET /v1/experience/config */
   config: (signal?: AbortSignal) =>
@@ -101,4 +157,12 @@ export const experienceApi = {
   /** GET /v1/reports/experience/samples */
   samples: (params?: ExperienceSamplesParams, signal?: AbortSignal) =>
     http.get<PaginatedEnvelope<ExperienceEvent>>('/v1/reports/experience/samples', { params, signal }),
+
+  /** POST /v1/ai-suggestions/{suggestion_event_id}/feedback */
+  feedback: (suggestionEventId: string, payload: AISuggestionFeedbackRequest, signal?: AbortSignal) =>
+    http.post<{ data?: AISuggestionFeedback }>(
+      `/v1/ai-suggestions/${encodeURIComponent(suggestionEventId)}/feedback`,
+      payload,
+      { signal },
+    ),
 }

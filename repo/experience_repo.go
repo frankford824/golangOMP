@@ -21,13 +21,14 @@ type ExperienceRepo interface {
 }
 
 type ExperienceEventListFilter struct {
-	SourceType string
-	SourceID   string
-	TaskID     *int64
-	Action     string
-	Outcome    string
-	From       *time.Time
-	To         *time.Time
-	Page       int
-	PageSize   int
+	SourceType       string
+	SourceID         string
+	TaskID           *int64
+	Action           string
+	Outcome          string
+	MinEvidenceLevel string
+	From             *time.Time
+	To               *time.Time
+	Page             int
+	PageSize         int
 }

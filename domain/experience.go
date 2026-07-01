@@ -14,6 +14,12 @@ const (
 	ExperienceFeedbackAccepted          = "accepted"
 	ExperienceFeedbackRejected          = "rejected"
 	ExperienceFeedbackPartiallyAccepted = "partially_accepted"
+
+	ExperienceEvidenceDisplayed = "L0"
+	ExperienceEvidenceLocatable = "L1"
+	ExperienceEvidenceFeedback  = "L2"
+	ExperienceEvidenceTagged    = "L3"
+	ExperienceEvidenceReusable  = "L4"
 )
 
 type ExperienceRuntimeFlags struct {
@@ -79,6 +85,11 @@ type ExperienceEvent struct {
 	Payload            json.RawMessage `json:"payload,omitempty"`
 	DataClassification string          `json:"data_classification,omitempty"`
 	GroundTruthStatus  string          `json:"ground_truth_status,omitempty"`
+	EvidenceLevel      string          `json:"evidence_level,omitempty"`
+	FeedbackValue      string          `json:"feedback_value,omitempty"`
+	FeedbackReasonCode string          `json:"feedback_reason_code,omitempty"`
+	FeedbackCreatedAt  *time.Time      `json:"feedback_created_at,omitempty"`
+	MissingSignals     []string        `json:"missing_signals,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
 }
 
@@ -145,25 +156,36 @@ type AssetQualityLabel struct {
 }
 
 type ExperienceStats struct {
-	Flags                  ExperienceRuntimeFlags `json:"flags"`
-	TotalEvents            int64                  `json:"total_events"`
-	OutboxQueued           int64                  `json:"outbox_queued"`
-	OutboxProcessing       int64                  `json:"outbox_processing"`
-	OutboxProcessed24h     int64                  `json:"outbox_processed_24h"`
-	OutboxFailed24h        int64                  `json:"outbox_failed_24h"`
-	OutboxDeadLetter       int64                  `json:"outbox_dead_letter"`
-	CaptureSuccessRate24h  float64                `json:"capture_success_rate_24h"`
-	CaptureFailureRate24h  float64                `json:"capture_failure_rate_24h"`
-	TagTotal               int64                  `json:"tag_total"`
-	TagEnabled             int64                  `json:"tag_enabled"`
-	TagCoverageRate        float64                `json:"tag_coverage_rate"`
-	AISuggestionEvents     int64                  `json:"ai_suggestion_events"`
-	AIFeedbackEvents       int64                  `json:"ai_feedback_events"`
-	AIFeedbackRate         float64                `json:"ai_feedback_rate"`
-	TaskProfiles           int64                  `json:"task_profiles"`
-	AssetQualityLabels     int64                  `json:"asset_quality_labels"`
-	LatestProfileRebuiltAt *time.Time             `json:"latest_profile_rebuilt_at,omitempty"`
-	GeneratedAt            time.Time              `json:"generated_at"`
+	Flags                     ExperienceRuntimeFlags `json:"flags"`
+	TotalEvents               int64                  `json:"total_events"`
+	SampleTotal               int64                  `json:"sample_total"`
+	DisplayedEvents           int64                  `json:"displayed_events"`
+	LocatableSamples          int64                  `json:"locatable_samples"`
+	FeedbackSamples           int64                  `json:"feedback_samples"`
+	ReasonedFeedbackSamples   int64                  `json:"reasoned_feedback_samples"`
+	ReusableSamples           int64                  `json:"reusable_samples"`
+	FeedbackAccepted          int64                  `json:"feedback_accepted"`
+	FeedbackPartiallyAccepted int64                  `json:"feedback_partially_accepted"`
+	FeedbackRejected          int64                  `json:"feedback_rejected"`
+	OutboxQueued              int64                  `json:"outbox_queued"`
+	OutboxProcessing          int64                  `json:"outbox_processing"`
+	OutboxProcessed24h        int64                  `json:"outbox_processed_24h"`
+	OutboxFailed24h           int64                  `json:"outbox_failed_24h"`
+	OutboxDeadLetter          int64                  `json:"outbox_dead_letter"`
+	CaptureSuccessRate24h     float64                `json:"capture_success_rate_24h"`
+	CaptureFailureRate24h     float64                `json:"capture_failure_rate_24h"`
+	TagTotal                  int64                  `json:"tag_total"`
+	TagEnabled                int64                  `json:"tag_enabled"`
+	TagCoverageRate           float64                `json:"tag_coverage_rate"`
+	AISuggestionEvents        int64                  `json:"ai_suggestion_events"`
+	AIFeedbackEvents          int64                  `json:"ai_feedback_events"`
+	AIFeedbackRate            float64                `json:"ai_feedback_rate"`
+	ReasonCoverageRate        float64                `json:"reason_coverage_rate"`
+	ReusableRate              float64                `json:"reusable_rate"`
+	TaskProfiles              int64                  `json:"task_profiles"`
+	AssetQualityLabels        int64                  `json:"asset_quality_labels"`
+	LatestProfileRebuiltAt    *time.Time             `json:"latest_profile_rebuilt_at,omitempty"`
+	GeneratedAt               time.Time              `json:"generated_at"`
 }
 
 type ExperienceWorkerRun struct {

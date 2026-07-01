@@ -47,15 +47,16 @@ type ExperienceServiceConfig struct {
 }
 
 type ExperienceEventFilter struct {
-	SourceType string
-	SourceID   string
-	TaskID     *int64
-	Action     string
-	Outcome    string
-	From       *time.Time
-	To         *time.Time
-	Page       int
-	PageSize   int
+	SourceType       string
+	SourceID         string
+	TaskID           *int64
+	Action           string
+	Outcome          string
+	MinEvidenceLevel string
+	From             *time.Time
+	To               *time.Time
+	Page             int
+	PageSize         int
 }
 
 type AISuggestionFeedbackRequest struct {
@@ -123,15 +124,16 @@ func (s *experienceService) ListSamples(ctx context.Context, filter ExperienceEv
 		return []*domain.ExperienceEvent{}, domain.PaginationMeta{Total: 0, Page: page, PageSize: pageSize}, nil
 	}
 	rows, total, err := s.repo.ListExperienceEvents(ctx, repo.ExperienceEventListFilter{
-		SourceType: strings.TrimSpace(filter.SourceType),
-		SourceID:   strings.TrimSpace(filter.SourceID),
-		TaskID:     filter.TaskID,
-		Action:     strings.TrimSpace(filter.Action),
-		Outcome:    strings.TrimSpace(filter.Outcome),
-		From:       filter.From,
-		To:         filter.To,
-		Page:       page,
-		PageSize:   pageSize,
+		SourceType:       strings.TrimSpace(filter.SourceType),
+		SourceID:         strings.TrimSpace(filter.SourceID),
+		TaskID:           filter.TaskID,
+		Action:           strings.TrimSpace(filter.Action),
+		Outcome:          strings.TrimSpace(filter.Outcome),
+		MinEvidenceLevel: strings.TrimSpace(filter.MinEvidenceLevel),
+		From:             filter.From,
+		To:               filter.To,
+		Page:             page,
+		PageSize:         pageSize,
 	})
 	if err != nil {
 		return nil, domain.PaginationMeta{}, infraError("list experience samples", err)

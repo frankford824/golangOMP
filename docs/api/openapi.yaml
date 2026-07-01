@@ -92,6 +92,9 @@ components:
       required: [id, type, title]
       properties:
         id: { type: string }
+        suggestion_event_id:
+          type: string
+          description: Stable display event id used by `/v1/ai-suggestions/{suggestion_event_id}/feedback`.
         type:
           type: string
           description: Suggestion category such as `recent`, `search`, `asset`, `task_create`, `task_next_action`, or `management`.
@@ -168,6 +171,19 @@ components:
         payload: { type: object, additionalProperties: true, nullable: true }
         data_classification: { type: string }
         ground_truth_status: { type: string }
+        evidence_level:
+          type: string
+          enum: [L0, L1, L2, L3, L4]
+          description: L0 displayed, L1 locatable, L2 feedback, L3 tagged, L4 reusable.
+        feedback_value:
+          type: string
+          enum: [accepted, rejected, partially_accepted]
+        feedback_reason_code: { type: string }
+        feedback_created_at: { type: string, format: date-time, nullable: true }
+        missing_signals:
+          type: array
+          items:
+            type: string
         created_at: { type: string, format: date-time }
     ExperienceStats:
       type: object
@@ -176,6 +192,17 @@ components:
         flags:
           $ref: '#/components/schemas/ExperienceRuntimeFlags'
         total_events: { type: integer, format: int64 }
+        sample_total: { type: integer, format: int64 }
+        displayed_events: { type: integer, format: int64 }
+        locatable_samples: { type: integer, format: int64 }
+        feedback_samples: { type: integer, format: int64 }
+        reasoned_feedback_samples: { type: integer, format: int64 }
+        reusable_samples: { type: integer, format: int64 }
+        feedback_accepted: { type: integer, format: int64 }
+        feedback_partially_accepted: { type: integer, format: int64 }
+        feedback_rejected: { type: integer, format: int64 }
+        reason_coverage_rate: { type: number, format: double }
+        reusable_rate: { type: number, format: double }
         outbox_queued: { type: integer, format: int64 }
         outbox_processing: { type: integer, format: int64 }
         outbox_processed_24h: { type: integer, format: int64 }
@@ -17019,7 +17046,7 @@ paths:
   /v1/reports/experience/samples:
     get:
       summary: List experience event samples
-      description: SuperAdmin-only sample pool. The query reads `experience_events` plus side-channel `ai_suggestion_events`, and never joins core task or asset tables.
+      description: SuperAdmin-only sample pool. The query reads `experience_events`, side-channel `ai_suggestion_events`, latest append-only feedback, and experience profile/quality side tables to derive L0-L4 evidence.
       tags: [ExperienceLearning, Reports, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -17041,6 +17068,12 @@ paths:
         - in: query
           name: outcome
           schema: { type: string }
+        - in: query
+          name: min_evidence_level
+          schema:
+            type: string
+            enum: [L0, L1, L2, L3, L4]
+          description: Minimum evidence level to return. L2+ is the default frontend view for reusable feedback candidates.
         - in: query
           name: from
           schema: { type: string }

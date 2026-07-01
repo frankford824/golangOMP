@@ -59,6 +59,10 @@ func TestExperienceRepoListExperienceEventsIncludesAISuggestionSamples(t *testin
 				`{"source":"workflow-module"}`,
 				"ai_suggestion",
 				"displayed",
+				"rejected",
+				"missing_context",
+				displayedAt,
+				3,
 				displayedAt,
 			))
 
@@ -79,6 +83,9 @@ func TestExperienceRepoListExperienceEventsIncludesAISuggestionSamples(t *testin
 	}
 	if got.TaskID == nil || *got.TaskID != 1867 {
 		t.Fatalf("task_id = %v, want 1867", got.TaskID)
+	}
+	if got.EvidenceLevel != "L3" || got.FeedbackValue != "rejected" || got.FeedbackReasonCode != "missing_context" {
+		t.Fatalf("feedback evidence = level:%s value:%s reason:%s", got.EvidenceLevel, got.FeedbackValue, got.FeedbackReasonCode)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -101,6 +108,10 @@ func experienceEventColumns() []string {
 		"payload_json",
 		"data_classification",
 		"ground_truth_status",
+		"feedback_value",
+		"feedback_reason_code",
+		"feedback_created_at",
+		"evidence_rank",
 		"created_at",
 	}
 }

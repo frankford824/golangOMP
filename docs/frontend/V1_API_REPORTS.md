@@ -80,7 +80,7 @@ curl -X GET https://api.example.com/v1/reports/experience/stats \
 ### 简介
 支持方法: GET。
 
-- `GET`: SuperAdmin-only sample pool. The query reads `experience_events` plus side-channel `ai_suggestion_events`, and never joins core task or asset tables.
+- `GET`: SuperAdmin-only sample pool. The query reads `experience_events`, side-channel `ai_suggestion_events`, latest append-only feedback, and experience profile/quality side tables to derive L0-L4 evidence.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -97,6 +97,7 @@ curl -X GET https://api.example.com/v1/reports/experience/stats \
 | `task_id` | query | integer | 否 | - |
 | `action` | query | string | 否 | - |
 | `outcome` | query | string | 否 | - |
+| `min_evidence_level` | query | enum(L0/L1/L2/L3/L4) | 否 | Minimum evidence level to return. L2+ is the default frontend view for reusable feedback candidates. |
 | `from` | query | string | 否 | ISO date or RFC3339 timestamp, inclusive. |
 | `to` | query | string | 否 | ISO date or RFC3339 timestamp, inclusive. |
 | `page` | query | integer | 否 | - |

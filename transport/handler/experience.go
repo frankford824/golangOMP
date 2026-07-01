@@ -79,6 +79,7 @@ func parseExperienceSamplesFilter(c *gin.Context) (service.ExperienceEventFilter
 	filter.SourceID = c.Query("source_id")
 	filter.Action = c.Query("action")
 	filter.Outcome = c.Query("outcome")
+	filter.MinEvidenceLevel = c.Query("min_evidence_level")
 	filter.Page = queryInt(c, "page")
 	filter.PageSize = queryInt(c, "page_size")
 	if raw := strings.TrimSpace(c.Query("task_id")); raw != "" {

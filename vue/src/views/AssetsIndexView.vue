@@ -121,18 +121,19 @@
         <small>按可用状态和最近匹配排序</small>
       </div>
       <div class="ac-prediction-list">
-        <button
+        <article
           v-for="item in assetPredictionSuggestions"
           :key="item.id"
-          type="button"
           class="ac-prediction-item"
-          @click="openPredictionAsset(item)"
         >
-          <span>{{ item.source || '资产中心' }}</span>
-          <strong>{{ item.title }}</strong>
-          <small v-if="item.detail">{{ item.detail }}</small>
-          <em>{{ item.action_label || '打开资产' }}</em>
-        </button>
+          <button type="button" class="ac-prediction-action" @click="openPredictionAsset(item)">
+            <span>{{ item.source || '资产中心' }}</span>
+            <strong>{{ item.title }}</strong>
+            <small v-if="item.detail">{{ item.detail }}</small>
+            <em>{{ item.action_label || '打开资产' }}</em>
+          </button>
+          <PredictionFeedbackControl :suggestion="item" surface="asset_center" />
+        </article>
       </div>
     </section>
     <div v-if="selectedCount > 0" class="ac-batch-bar">
@@ -711,6 +712,7 @@ import {
   assetKindLabelCn,
   assetUploadStatusLabelCn,
 } from '@/domain/mappers/read-model-labels-cn'
+import PredictionFeedbackControl from '@/components/experience/PredictionFeedbackControl.vue'
 import {
   assetsApi,
   type AssetBatchDownloadFailure,
@@ -2545,7 +2547,7 @@ onBeforeUnmount(() => {
 .ac-prediction-item {
   position: relative;
   display: grid;
-  gap: 0.25rem;
+  gap: 0.55rem;
   min-height: 6.25rem;
   padding: 0.75rem;
   overflow: hidden;
@@ -2555,6 +2557,19 @@ onBeforeUnmount(() => {
   text-align: left;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
   animation: ac-card-enter 420ms ease both;
+}
+
+.ac-prediction-action {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
 }
 
 .ac-prediction-item:hover {
@@ -2577,25 +2592,25 @@ onBeforeUnmount(() => {
   transform: translateX(120%);
 }
 
-.ac-prediction-item span {
+.ac-prediction-action span {
   color: rgb(var(--yb-brand));
   font-size: 0.7rem;
   font-weight: 800;
 }
 
-.ac-prediction-item strong {
+.ac-prediction-action strong {
   color: rgb(var(--yb-text));
   font-size: 0.875rem;
   line-height: 1.3;
 }
 
-.ac-prediction-item small {
+.ac-prediction-action small {
   color: rgb(var(--yb-text-soft));
   font-size: 0.75rem;
   line-height: 1.35;
 }
 
-.ac-prediction-item em {
+.ac-prediction-action em {
   width: max-content;
   padding: 0.12rem 0.45rem;
   border-radius: 999px;
