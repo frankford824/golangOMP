@@ -44,6 +44,10 @@ func (r *assetWorkbenchRepo) ListProfiles(ctx context.Context, filter repo.Asset
 		where = append(where, "status = ?")
 		args = append(args, v)
 	}
+	if filter.UserID > 0 {
+		where = append(where, "user_id = ?")
+		args = append(args, filter.UserID)
+	}
 	var total int64
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_profiles WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count asset workbench profiles: %w", err)
@@ -65,6 +69,82 @@ func (r *assetWorkbenchRepo) ListProfiles(ctx context.Context, filter repo.Asset
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) ListDifficultyClasses(ctx context.Context, filter repo.AssetWorkbenchDifficultyClassFilter) ([]*domain.AssetWorkbenchDifficultyClass, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if filter.Enabled != nil {
+		where = append(where, "enabled = ?")
+		args = append(args, *filter.Enabled)
+	}
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchDifficultyClassSelect()+` WHERE `+strings.Join(where, " AND ")+` ORDER BY sort_order ASC, id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench difficulty classes: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchDifficultyClass{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchDifficultyClass(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) GetDifficultyClass(ctx context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchDifficultyClassSelect()+` WHERE code = ?`, strings.TrimSpace(code))
+	return scanAssetWorkbenchDifficultyClass(row)
+}
+
+func (r *assetWorkbenchRepo) CreateDifficultyClass(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchDifficultyClass) (*domain.AssetWorkbenchDifficultyClass, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_difficulty_classes (
+			code, name, description, enabled, sort_order, created_by, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		item.Code,
+		item.Name,
+		item.Description,
+		item.Enabled,
+		item.SortOrder,
+		toNullInt64(item.CreatedBy),
+		toNullInt64(item.UpdatedBy),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench difficulty class: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench difficulty class last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchDifficultyClassSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchDifficultyClass(row)
+}
+
+func (r *assetWorkbenchRepo) UpdateDifficultyClass(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchDifficultyClass) (*domain.AssetWorkbenchDifficultyClass, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_difficulty_classes
+		SET name = ?, description = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE code = ?`,
+		item.Name,
+		item.Description,
+		item.Enabled,
+		item.SortOrder,
+		toNullInt64(item.UpdatedBy),
+		item.Code,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench difficulty class: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("asset workbench difficulty class rows affected: %w", err)
+	} else if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchDifficultyClassSelect()+` WHERE code = ?`, item.Code)
+	return scanAssetWorkbenchDifficultyClass(row)
 }
 
 func (r *assetWorkbenchRepo) ListMembers(ctx context.Context, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error) {
@@ -1750,6 +1830,7 @@ func (r *assetWorkbenchRepo) UpdateSubmissionItemEditableFields(ctx context.Cont
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_submission_items
 		SET order_no = ?, difficulty_class = ?, finalized = ?, page_count = ?, item_count = ?,
+		    worker_type_snapshot = ?, job_grade_snapshot = ?,
 		    base_price_rule_id = ?, base_unit_price = ?, promo_coupon_id = ?,
 		    promo_snapshot_json = ?, pricing_snapshot_json = ?, gross_amount = ?,
 		    pricing_status = ?, updated_at = CURRENT_TIMESTAMP
@@ -1762,6 +1843,8 @@ func (r *assetWorkbenchRepo) UpdateSubmissionItemEditableFields(ctx context.Cont
 		item.Finalized,
 		item.PageCount,
 		item.ItemCount,
+		item.WorkerTypeSnapshot,
+		item.JobGradeSnapshot,
 		toNullInt64(item.BasePriceRuleID),
 		toNullFloat64(item.BaseUnitPrice),
 		toNullInt64(item.PromoCouponID),
@@ -1840,13 +1923,16 @@ func (r *assetWorkbenchRepo) UpdateSubmissionItemPricing(ctx context.Context, tx
 	}
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_submission_items
-		SET base_price_rule_id = ?, base_unit_price = ?, promo_coupon_id = ?,
+		SET worker_type_snapshot = ?, job_grade_snapshot = ?,
+		    base_price_rule_id = ?, base_unit_price = ?, promo_coupon_id = ?,
 		    promo_snapshot_json = ?, pricing_snapshot_json = ?, gross_amount = ?,
 		    pricing_status = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 		  AND settlement_status = ?
 		  AND current_settlement_batch_id IS NULL
 		  AND qc_status <> ?`,
+		item.WorkerTypeSnapshot,
+		item.JobGradeSnapshot,
 		toNullInt64(item.BasePriceRuleID),
 		toNullFloat64(item.BaseUnitPrice),
 		toNullInt64(item.PromoCouponID),
@@ -3773,6 +3859,11 @@ func assetWorkbenchUploadDirectorySelect() string {
 		FROM asset_workbench_upload_directories`
 }
 
+func assetWorkbenchDifficultyClassSelect() string {
+	return `SELECT id, code, name, description, enabled, sort_order, created_by, updated_by, created_at, updated_at
+		FROM asset_workbench_difficulty_classes`
+}
+
 func assetWorkbenchClientMaterialSelect() string {
 	return `SELECT id, asset_id, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
 		enabled, sort_order, published_by, updated_by, published_at, created_at, updated_at
@@ -4071,6 +4162,29 @@ func scanAssetWorkbenchUploadDirectory(scanner interface{ Scan(...interface{}) e
 	); err != nil {
 		return nil, err
 	}
+	item.UpdatedBy = fromNullInt64(updatedBy)
+	return &item, nil
+}
+
+func scanAssetWorkbenchDifficultyClass(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchDifficultyClass, error) {
+	var item domain.AssetWorkbenchDifficultyClass
+	var createdBy sql.NullInt64
+	var updatedBy sql.NullInt64
+	if err := scanner.Scan(
+		&item.ID,
+		&item.Code,
+		&item.Name,
+		&item.Description,
+		&item.Enabled,
+		&item.SortOrder,
+		&createdBy,
+		&updatedBy,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.CreatedBy = fromNullInt64(createdBy)
 	item.UpdatedBy = fromNullInt64(updatedBy)
 	return &item, nil
 }

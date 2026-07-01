@@ -119,12 +119,6 @@ const routes: RouteRecordRaw[] = [
         meta: accessMeta('/settings/pricing'),
       },
       {
-        path: 'dispatch',
-        name: 'asset-settings-dispatch',
-        component: () => import('./pages/TemplateAssignPage.vue'),
-        meta: accessMeta('/settings/dispatch'),
-      },
-      {
         path: 'people',
         name: 'asset-settings-people',
         component: () => import('./pages/PeoplePage.vue'),
@@ -147,10 +141,6 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/cost-center',
     redirect: '/settings/pricing',
-  },
-  {
-    path: '/template-assignments',
-    redirect: '/settings/dispatch',
   },
   {
     path: '/people',

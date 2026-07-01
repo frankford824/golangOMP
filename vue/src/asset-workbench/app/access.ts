@@ -11,7 +11,6 @@ export interface AssetWorkbenchRouteAccess {
 
 const SETTINGS_CHILD_PATHS = [
   '/settings/pricing',
-  '/settings/dispatch',
   '/settings/people',
   '/settings/members',
   '/settings/events',
@@ -29,7 +28,6 @@ const DAILY_OPERATION_CAPABILITIES = [
 
 const SETTINGS_CAPABILITIES = [
   'asset.workbench.cost_center.manage',
-  'asset.workbench.template.assign',
   'asset.workbench.profile',
   'asset.workbench.profile.manage',
   'asset.workbench.member.identity',
@@ -101,7 +99,7 @@ export const assetWorkbenchRouteAccess = {
   },
   '/settings': {
     label: '设置',
-    subtitle: '计价、分配与人事配置',
+    subtitle: '计价、人事与审计配置',
     requiresAnyCapability: [...SETTINGS_CAPABILITIES],
   },
   '/settings/pricing': {
@@ -110,16 +108,10 @@ export const assetWorkbenchRouteAccess = {
     aliases: ['成本中心', '价格规则'],
     requiresAnyCapability: ['asset.workbench.cost_center.manage'],
   },
-  '/settings/dispatch': {
-    label: '兼容模板',
-    subtitle: '旧模板下发留档',
-    aliases: ['旧作品下发', '模板下发'],
-    requiresAnyCapability: ['asset.workbench.template.assign'],
-  },
   '/settings/people': {
-    label: '员工档案',
-    subtitle: '建档：姓名岗位收款',
-    aliases: ['人员资料', '人员'],
+    label: '人员定级',
+    subtitle: '建档、定级、收款资料',
+    aliases: ['员工档案', '人员资料', '人员', '定级', '待定级'],
     requiresAnyCapability: ['asset.workbench.profile', 'asset.workbench.profile.manage'],
   },
   '/settings/members': {
@@ -140,16 +132,10 @@ export const assetWorkbenchRouteAccess = {
     aliases: ['成本中心'],
     requiresAnyCapability: ['asset.workbench.cost_center.manage'],
   },
-  '/template-assignments': {
-    label: '兼容模板',
-    subtitle: '旧模板下发留档',
-    aliases: ['旧作品下发'],
-    requiresAnyCapability: ['asset.workbench.template.assign'],
-  },
   '/people': {
-    label: '员工档案',
-    subtitle: '建档：姓名岗位收款',
-    aliases: ['人员资料'],
+    label: '人员定级',
+    subtitle: '建档、定级、收款资料',
+    aliases: ['员工档案', '人员资料', '定级', '待定级'],
     requiresAnyCapability: ['asset.workbench.profile', 'asset.workbench.profile.manage'],
   },
   '/members': {

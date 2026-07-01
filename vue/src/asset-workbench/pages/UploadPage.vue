@@ -4,10 +4,12 @@ import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, XCircle } f
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { assetWorkbenchApi, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
+import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
@@ -29,6 +31,7 @@ interface QueueItem {
 
 interface UploadContext {
   directories: UploadDirectoryRow[]
+  difficulties: DifficultyClassRow[]
 }
 
 interface UploadBatchResult {
@@ -45,20 +48,36 @@ const error = ref('')
 const notice = ref('')
 const submittedFiles = ref<SubmissionFileRow[]>([])
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
+const difficultyRows = ref<DifficultyClassRow[]>([])
 const selectedUploadDirectoryId = ref(0)
 const lastUploadResult = ref<UploadBatchResult | null>(null)
 const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
 const draggingFiles = ref(false)
-const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
+const previewDialog = ref<{
+  open: boolean
+  title: string
+  previewUrl: string
+  emptyLabel: string
+  metaRows: Array<[string, string]>
+}>({
+  open: false,
+  title: '',
+  previewUrl: '',
+  emptyLabel: '',
+  metaRows: [],
+})
 const { bootstrap, refresh } = useAssetWorkbenchBootstrap()
 const contextRequest = usePageRequest<UploadContext>(
   async () => {
     await refresh()
-    const nextDirectories = await assetWorkbenchApi.listUploadDirectories()
-    return { directories: nextDirectories }
+    const [nextDirectories, nextDifficulties] = await Promise.all([
+      assetWorkbenchApi.listUploadDirectories(),
+      assetWorkbenchApi.listDifficultyClasses(),
+    ])
+    return { directories: nextDirectories, difficulties: nextDifficulties }
   },
-  { directories: [] },
+  { directories: [], difficulties: [] },
   '上传目录加载失败',
 )
 const contextLoading = contextRequest.loading
@@ -80,6 +99,7 @@ const canSimpleSubmit = computed(() => {
   return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading')
 })
 const totalPages = computed(() => queue.value.reduce((sum, item) => sum + item.pageCount, 0))
+const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const uploadStats = computed(() => {
   const total = queue.value.length
   const uploaded = queue.value.filter((item) => item.status === 'uploaded').length
@@ -185,7 +205,7 @@ function enqueueFiles(files: FileList | null | undefined) {
       id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
       file,
       orderNo: filenameWithoutExt(file.name),
-      difficultyClass: selectedUploadDirectory.value?.difficulty_class ?? 'A',
+      difficultyClass: selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value),
       finalized: true,
       pageCount: 1,
       progress: 0,
@@ -205,7 +225,7 @@ async function uploadQueuedItems() {
   lastUploadResult.value = null
   const uploadDirectoryId = selectedUploadDirectoryId.value || undefined
   const uploadDirectoryName = selectedUploadDirectory.value?.name ?? ''
-  const uploadDirectoryDifficulty = selectedUploadDirectory.value?.difficulty_class ?? 'A'
+  const uploadDirectoryDifficulty = selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value)
   for (const item of queue.value) {
     if (item.status !== 'queued' && item.status !== 'failed') continue
     item.status = 'uploading'
@@ -307,7 +327,7 @@ function selectUploadDirectory(directory: UploadDirectoryRow) {
     if (item.status === 'queued' || item.status === 'failed') {
       item.uploadDirectoryId = directory.id
       item.uploadDirectoryName = directory.name
-      item.difficultyClass = directory.difficulty_class || 'A'
+      item.difficultyClass = directory.difficulty_class || firstDifficultyCode(difficultyRows.value)
     }
   }
 }
@@ -317,7 +337,7 @@ function uploadDirectoryLocation(directory: UploadDirectoryRow) {
 }
 
 function uploadDirectoryDifficulty(directory?: UploadDirectoryRow) {
-  return directory?.difficulty_class || 'A'
+  return directory?.difficulty_class || firstDifficultyCode(difficultyRows.value)
 }
 
 function removeItem(id: string) {
@@ -361,6 +381,23 @@ function statusIcon(status: QueueStatus) {
   return FileUp
 }
 
+function openFilePreview(payload: { title: string; previewUrl: string; meta: FilePreviewMeta | null; statusText: string }) {
+  previewDialog.value = {
+    open: true,
+    title: payload.title,
+    previewUrl: payload.previewUrl,
+    emptyLabel: payload.statusText,
+    metaRows: [
+      ['预览状态', payload.meta?.status || '等待生成'],
+      ['过期时间', payload.meta?.expires_at || '—'],
+    ],
+  }
+}
+
+function closeFilePreview() {
+  previewDialog.value.open = false
+}
+
 function filenameWithoutExt(filename: string) {
   const dot = filename.lastIndexOf('.')
   return dot > 0 ? filename.slice(0, dot) : filename
@@ -369,6 +406,7 @@ function filenameWithoutExt(filename: string) {
 async function loadContext() {
   const next = await contextRequest.run()
   uploadDirectories.value = next?.directories ?? []
+  difficultyRows.value = next?.difficulties ?? []
   if (!selectedUploadDirectoryId.value && uploadDirectories.value[0]) {
     selectedUploadDirectoryId.value = uploadDirectories.value[0].id
   }
@@ -572,8 +610,19 @@ onMounted(() => {
           :key="file.id"
           :file-id="file.id"
           :alt="file.original_filename"
+          @preview="openFilePreview"
         />
       </div>
     </div>
+
+    <WorkbenchPreviewDialog
+      :open="previewDialog.open"
+      :title="previewDialog.title"
+      :preview-url="previewDialog.previewUrl"
+      :empty-label="previewDialog.emptyLabel"
+      :meta-rows="previewDialog.metaRows"
+      eyebrow="文件预览"
+      @close="closeFilePreview"
+    />
   </section>
 </template>

@@ -10,6 +10,10 @@ const props = defineProps<{
   alt?: string
 }>()
 
+const emit = defineEmits<{
+  preview: [payload: { fileId: number; title: string; previewUrl: string; meta: FilePreviewMeta | null; statusText: string }]
+}>()
+
 const meta = ref<FilePreviewMeta | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -37,6 +41,19 @@ async function loadPreview() {
   }
 }
 
+async function openPreview() {
+  if (!meta.value && !loading.value) {
+    await loadPreview()
+  }
+  emit('preview', {
+    fileId: props.fileId,
+    title: props.alt || `文件 ${props.fileId}`,
+    previewUrl: previewUrl.value,
+    meta: meta.value,
+    statusText: statusText.value || '暂无可展示预览',
+  })
+}
+
 onMounted(() => {
   void loadPreview()
 })
@@ -50,7 +67,7 @@ watch(
 </script>
 
 <template>
-  <div class="aw-preview-tile">
+  <button class="aw-preview-tile aw-preview-tile--button" type="button" @click="openPreview">
     <AssetPreviewMedia
       v-if="previewUrl"
       :resolved-preview-url="previewUrl"
@@ -58,5 +75,5 @@ watch(
       defer-until-visible
     />
     <span v-else>{{ statusText || '等待预览' }}</span>
-  </div>
+  </button>
 </template>

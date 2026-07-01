@@ -192,11 +192,13 @@ func (h *AssetWorkbenchHandler) ListProfiles(c *gin.Context) {
 	}
 	page, _ := strconv.Atoi(c.Query("page"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	userID, _ := strconv.ParseInt(c.Query("user_id"), 10, 64)
 	items, total, appErr := h.svc.ListProfiles(c.Request.Context(), actor, repo.AssetWorkbenchProfileFilter{
 		Keyword:    c.Query("q"),
 		WorkerType: c.Query("worker_type"),
 		JobGrade:   c.Query("job_grade"),
 		Status:     c.Query("status"),
+		UserID:     userID,
 		Page:       page,
 		PageSize:   pageSize,
 	})
@@ -356,19 +358,6 @@ func (h *AssetWorkbenchHandler) MergeAccounts(c *gin.Context) {
 	respondOK(c, result)
 }
 
-func (h *AssetWorkbenchHandler) ListMyTemplates(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	result, appErr := h.svc.ListMyTemplates(c.Request.Context(), actor)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, result)
-}
-
 func (h *AssetWorkbenchHandler) ListGroups(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -510,160 +499,6 @@ func (h *AssetWorkbenchHandler) ListGroupMembers(c *gin.Context) {
 	respondOK(c, result)
 }
 
-func (h *AssetWorkbenchHandler) ListTemplates(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	page, _ := strconv.Atoi(c.Query("page"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-	items, total, appErr := h.svc.ListTemplates(c.Request.Context(), actor, repo.AssetWorkbenchTemplateFilter{
-		Keyword:         c.Query("q"),
-		Category:        c.Query("category"),
-		DifficultyClass: c.Query("difficulty_class"),
-		WorkerType:      c.Query("worker_type"),
-		Enabled:         parseOptionalBool(c.Query("enabled")),
-		Page:            page,
-		PageSize:        pageSize,
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
-}
-
-func (h *AssetWorkbenchHandler) CreateTemplate(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	var req assetworkbench.UpsertTemplateParams
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	result, appErr := h.svc.CreateTemplate(c.Request.Context(), actor, req)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondCreated(c, result)
-}
-
-func (h *AssetWorkbenchHandler) UpdateTemplate(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	templateID, err := strconv.ParseInt(c.Param("template_id"), 10, 64)
-	if err != nil || templateID <= 0 {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid template_id", nil))
-		return
-	}
-	var req assetworkbench.UpsertTemplateParams
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	result, appErr := h.svc.UpdateTemplate(c.Request.Context(), actor, templateID, req)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, result)
-}
-
-func (h *AssetWorkbenchHandler) DeleteTemplate(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	templateID, err := strconv.ParseInt(c.Param("template_id"), 10, 64)
-	if err != nil || templateID <= 0 {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid template_id", nil))
-		return
-	}
-	result, appErr := h.svc.DeleteTemplate(c.Request.Context(), actor, templateID)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, result)
-}
-
-func (h *AssetWorkbenchHandler) ListTemplateAssignments(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	page, _ := strconv.Atoi(c.Query("page"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-	var templateID *int64
-	if raw := strings.TrimSpace(c.Query("template_id")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err == nil && parsed > 0 {
-			templateID = &parsed
-		}
-	}
-	var targetID *int64
-	if raw := strings.TrimSpace(c.Query("target_id")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err == nil && parsed > 0 {
-			targetID = &parsed
-		}
-	}
-	items, total, appErr := h.svc.ListTemplateAssignments(c.Request.Context(), actor, repo.AssetWorkbenchTemplateAssignmentFilter{
-		TemplateID: templateID,
-		TargetType: c.Query("target_type"),
-		TargetID:   targetID,
-		Enabled:    parseOptionalBool(c.Query("enabled")),
-		Page:       page,
-		PageSize:   pageSize,
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
-}
-
-func (h *AssetWorkbenchHandler) AssignTemplate(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	var req assetworkbench.AssignTemplateParams
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	result, appErr := h.svc.AssignTemplate(c.Request.Context(), actor, req)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondCreated(c, result)
-}
-
-func (h *AssetWorkbenchHandler) DeleteTemplateAssignment(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	assignmentID, err := strconv.ParseInt(c.Param("assignment_id"), 10, 64)
-	if err != nil || assignmentID <= 0 {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid assignment_id", nil))
-		return
-	}
-	result, appErr := h.svc.DeleteTemplateAssignment(c.Request.Context(), actor, assignmentID)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, result)
-}
-
 func (h *AssetWorkbenchHandler) ListUploadDirectories(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -724,6 +559,69 @@ func (h *AssetWorkbenchHandler) UpdateUploadDirectory(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.UpdateUploadDirectory(c.Request.Context(), actor, directoryID, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) ListDifficultyClasses(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.ListDifficultyClasses(c.Request.Context(), actor, false)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) ListDifficultyClassesAdmin(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.ListDifficultyClasses(c.Request.Context(), actor, true)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) CreateDifficultyClass(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.CreateDifficultyClassParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.CreateDifficultyClass(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateDifficultyClass(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	code := c.Param("difficulty_code")
+	var req assetworkbench.UpdateDifficultyClassParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateDifficultyClass(c.Request.Context(), actor, code, req)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

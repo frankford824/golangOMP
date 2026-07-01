@@ -9,7 +9,6 @@ import {
   ReceiptText,
   ScrollText,
   Search,
-  Send,
   UserRound,
   UsersRound,
 } from 'lucide-vue-next'
@@ -57,7 +56,6 @@ const DAILY_NAV_DEFS: Array<{ path: string; icon: Component; requires?: readonly
 
 const SETTINGS_NAV_DEFS: Array<{ path: AssetWorkbenchSettingsPath; icon: Component }> = [
   { path: '/settings/pricing', icon: Calculator },
-  { path: '/settings/dispatch', icon: Send },
   { path: '/settings/people', icon: UsersRound },
   { path: '/settings/members', icon: UserRound },
   { path: '/settings/events', icon: ScrollText },

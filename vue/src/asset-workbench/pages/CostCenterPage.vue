@@ -4,12 +4,14 @@ import { computed, onMounted, ref } from 'vue'
 import {
   assetWorkbenchApi,
   type DeductionRuleRow,
+  type DifficultyClassRow,
   type PriceMatrixRow,
   type PromoCouponRow,
   type WelfareRuleRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
+import { difficultyCodes, difficultyOptionsWithAll, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatMoney, formatPercent } from '@aw/shared/format/number'
 import { chipClass, enabledMeta, promoModeMeta, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
@@ -26,14 +28,14 @@ type PriceGridRow = PriceMatrixRow & { worker_type_label: string; unit_price_lab
 type DeductionGridRow = DeductionRuleRow & { worker_type_label: string; deduction_amount_label: string; enabled_label: string; action: string }
 type WelfareGridRow = WelfareRuleRow & { worker_type_label: string; amount_label: string; enabled_label: string; action: string }
 type PromoGridRow = PromoCouponRow & { worker_type_label: string; mode_label: string; value_label: string; enabled_label: string; action: string }
+type DifficultyGridRow = DifficultyClassRow & { enabled_label: string; action: string }
 type CostCenterData = Awaited<ReturnType<typeof fetchCostCenter>>
 
-const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
-const difficultyOptionsWithAll = ['all', ...difficultyOptions]
 const parttimeGrades = ['J1', 'J2', 'J3']
 const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
 const allGradeOptions = ['all']
 
+const difficultyRows = ref<DifficultyClassRow[]>([])
 const priceRows = ref<PriceMatrixRow[]>([])
 const deductionRows = ref<DeductionRuleRow[]>([])
 const welfareRows = ref<WelfareRuleRow[]>([])
@@ -44,6 +46,7 @@ const pendingPriceToggle = ref<PriceGridRow | null>(null)
 const deductionSupersedeId = ref(0)
 const welfareSupersedeId = ref(0)
 const promoSupersedeId = ref(0)
+const difficultyEditingCode = ref('')
 const totals = ref({
   price: 0,
   deduction: 0,
@@ -56,10 +59,17 @@ const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, 
 const loading = costCenterRequest.loading
 const error = costCenterRequest.error
 const today = shanghaiDateInput()
+const difficultyForm = ref({
+  code: '',
+  name: '',
+  description: '',
+  enabled: true,
+  sort_order: 50,
+})
 const priceForm = ref({
   worker_type: 'fulltime',
   job_grade: 'P1',
-  difficulty_class: 'A',
+  difficulty_class: '',
   unit_price: 0,
   effective_from: today,
   effective_to: '',
@@ -68,7 +78,7 @@ const priceForm = ref({
 const deductionForm = ref({
   worker_type: 'all',
   job_grade: 'all',
-  difficulty_class: 'A',
+  difficulty_class: '',
   deduction_amount: 0,
   effective_from: today,
   effective_to: '',
@@ -101,6 +111,16 @@ const priceGradeOptions = computed(() => gradeOptionsFor(priceForm.value.worker_
 const deductionGradeOptions = computed(() => gradeOptionsFor(deductionForm.value.worker_type, true))
 const welfareGradeOptions = computed(() => gradeOptionsFor(welfareForm.value.worker_type, true))
 const promoGradeOptions = computed(() => gradeOptionsFor(promoForm.value.worker_type, true))
+const difficultyOptionCodes = computed(() => difficultyCodes(difficultyRows.value))
+const difficultyOptionCodesWithAll = computed(() => difficultyOptionsWithAll(difficultyRows.value))
+const difficultyRowsWithLabels = computed<DifficultyGridRow[]>(() =>
+  difficultyRows.value.map((row) => ({
+    ...row,
+    enabled_label: enabledMeta(row.enabled).label,
+    action: 'actions',
+  })),
+)
+const difficultyGridRows = computed(() => difficultyRowsWithLabels.value as unknown as Record<string, unknown>[])
 const priceRowsWithLabels = computed<PriceGridRow[]>(() =>
   priceRows.value.map((row) => ({
     ...row,
@@ -152,6 +172,14 @@ const promoRowsWithLabels = computed<PromoGridRow[]>(() =>
   })),
 )
 const promoGridRows = computed(() => promoRowsWithLabels.value as unknown as Record<string, unknown>[])
+const difficultyGridColumns = computed<GridColumn[]>(() => [
+  { key: 'code', label: '代码', width: 120 },
+  { key: 'name', label: '名称', width: 120 },
+  { key: 'description', label: '说明', width: 220 },
+  { key: 'sort_order', label: '排序', width: 80, align: 'right' },
+  { key: 'enabled_label', label: '状态', width: 88 },
+  { key: 'action', label: '动作', width: 156, align: 'center' },
+])
 const priceGridColumns = computed<GridColumn[]>(() => [
   { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'job_grade', label: '岗级', width: 96 },
@@ -202,19 +230,25 @@ function gridRowAsPromo(row: Record<string, unknown>): PromoGridRow {
   return row as unknown as PromoGridRow
 }
 
+function gridRowAsDifficulty(row: Record<string, unknown>): DifficultyGridRow {
+  return row as unknown as DifficultyGridRow
+}
+
 async function fetchCostCenter() {
-  const [prices, deductions, welfare, promos] = await Promise.all([
+  const [difficulties, prices, deductions, welfare, promos] = await Promise.all([
+    assetWorkbenchApi.listDifficultyClassesAdmin(),
     assetWorkbenchApi.listPriceMatrix({ page: 1, page_size: 20 }),
     assetWorkbenchApi.listDeductionRules({ page: 1, page_size: 20 }),
     assetWorkbenchApi.listWelfareRules({ page: 1, page_size: 20 }),
     assetWorkbenchApi.listPromoCoupons({ page: 1, page_size: 20 }),
   ])
-  return { prices, deductions, welfare, promos }
+  return { difficulties, prices, deductions, welfare, promos }
 }
 
 async function loadCostCenter() {
   const data = await costCenterRequest.run()
   if (!data) return
+  difficultyRows.value = data.difficulties
   priceRows.value = data.prices.items
   deductionRows.value = data.deductions.items
   welfareRows.value = data.welfare.items
@@ -225,6 +259,7 @@ async function loadCostCenter() {
     welfare: data.welfare.total,
     promo: data.promos.total,
   }
+  syncDifficultyDefaults()
 }
 
 function startOfShanghaiDay(date: string) {
@@ -278,6 +313,77 @@ function normalizeGradeForWorker(form: { worker_type: string; job_grade: string 
   const options = gradeOptionsFor(form.worker_type, allowAll)
   if (!options.includes(form.job_grade)) {
     form.job_grade = options[0] ?? ''
+  }
+}
+
+function normalizeDifficultySelection(value: string, allowAll: boolean) {
+  if (allowAll && value === 'all') return value
+  const options = difficultyOptionCodes.value
+  return options.includes(value) ? value : firstDifficultyCode(difficultyRows.value)
+}
+
+function syncDifficultyDefaults() {
+  priceForm.value.difficulty_class = normalizeDifficultySelection(priceForm.value.difficulty_class, false)
+  deductionForm.value.difficulty_class = normalizeDifficultySelection(deductionForm.value.difficulty_class, true)
+  promoForm.value.difficulty_class = normalizeDifficultySelection(promoForm.value.difficulty_class, true)
+}
+
+function resetDifficultyForm() {
+  difficultyEditingCode.value = ''
+  difficultyForm.value = {
+    code: '',
+    name: '',
+    description: '',
+    enabled: true,
+    sort_order: (difficultyRows.value.length + 1) * 10,
+  }
+}
+
+function startDifficultyEdit(row: DifficultyGridRow) {
+  difficultyEditingCode.value = row.code
+  difficultyForm.value = {
+    code: row.code,
+    name: row.name,
+    description: row.description,
+    enabled: row.enabled,
+    sort_order: row.sort_order,
+  }
+}
+
+async function saveDifficultyClass() {
+  error.value = ''
+  notice.value = ''
+  try {
+    const payload = {
+      code: difficultyForm.value.code.trim(),
+      name: difficultyForm.value.name.trim(),
+      description: difficultyForm.value.description.trim(),
+      enabled: difficultyForm.value.enabled,
+      sort_order: difficultyForm.value.sort_order,
+    }
+    if (difficultyEditingCode.value) {
+      await assetWorkbenchApi.updateDifficultyClass(difficultyEditingCode.value, payload)
+      notice.value = '难度档案已更新'
+    } else {
+      await assetWorkbenchApi.createDifficultyClass(payload)
+      notice.value = '难度档案已创建'
+    }
+    resetDifficultyForm()
+    await loadCostCenter()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '难度档案保存失败'
+  }
+}
+
+async function toggleDifficultyClass(row: DifficultyGridRow) {
+  error.value = ''
+  notice.value = ''
+  try {
+    await assetWorkbenchApi.updateDifficultyClass(row.code, { enabled: !row.enabled })
+    notice.value = '难度状态已更新'
+    await loadCostCenter()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '难度状态更新失败'
   }
 }
 
@@ -559,6 +665,62 @@ onMounted(async () => {
     <div class="aw-panel">
       <div class="aw-panel__head">
         <div>
+          <h3>难度档案</h3>
+          <p class="aw-copy">配置上传目录、价目规则和补录共用的难度代码。代码用于历史快照和计价匹配，创建后不再修改。</p>
+        </div>
+        <span class="aw-chip aw-chip--neutral">{{ difficultyRows.length }} 项</span>
+      </div>
+      <div class="aw-form-grid">
+        <label>
+          代码
+          <input v-model.trim="difficultyForm.code" :disabled="Boolean(difficultyEditingCode)" placeholder="例如 D 或 A+专项" />
+        </label>
+        <label>
+          名称
+          <input v-model.trim="difficultyForm.name" placeholder="例如 D类" />
+        </label>
+        <label>
+          排序
+          <input v-model.number="difficultyForm.sort_order" type="number" />
+        </label>
+        <label class="aw-inline-check">
+          <input v-model="difficultyForm.enabled" type="checkbox" />
+          启用
+        </label>
+        <label class="aw-form-grid__full">
+          说明
+          <input v-model.trim="difficultyForm.description" placeholder="给管理员看的计价说明" />
+        </label>
+      </div>
+      <div class="aw-inline-actions aw-form-action">
+        <span v-if="difficultyEditingCode" class="aw-chip aw-chip--info">编辑 {{ difficultyEditingCode }}</span>
+        <button v-if="difficultyEditingCode" class="aw-secondary-button" type="button" @click="resetDifficultyForm">取消编辑</button>
+        <button class="aw-secondary-button" type="button" @click="saveDifficultyClass">{{ difficultyEditingCode ? '保存难度' : '新增难度' }}</button>
+      </div>
+      <WorkbenchDataGrid
+        v-if="difficultyRows.length"
+        :columns="difficultyGridColumns"
+        :rows="difficultyGridRows"
+        row-key="code"
+        storage-key="cost-center-difficulties"
+        :height="220"
+        :row-height="34"
+      >
+        <template #cell="{ row, column, value }">
+          <div v-if="column.key === 'action'" class="aw-grid-actions">
+            <button type="button" @click="startDifficultyEdit(gridRowAsDifficulty(row))">编辑</button>
+            <button type="button" @click="toggleDifficultyClass(gridRowAsDifficulty(row))">
+              {{ gridRowAsDifficulty(row).enabled ? '停用' : '启用' }}
+            </button>
+          </div>
+          <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsDifficulty(row).enabled).tone)">{{ value }}</span>
+          <span v-else>{{ value || '—' }}</span>
+        </template>
+      </WorkbenchDataGrid>
+    </div>
+    <div class="aw-panel">
+      <div class="aw-panel__head">
+        <div>
           <h3>价目矩阵时间带</h3>
           <p class="aw-copy">按人员类型、岗级和难度命中单价；新版从生效日开始接班，旧版自动截止到前一天。</p>
         </div>
@@ -613,7 +775,7 @@ onMounted(async () => {
           难度
           <input v-if="priceSupersedeId" :value="priceForm.difficulty_class" disabled />
           <select v-else v-model="priceForm.difficulty_class">
-            <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+            <option v-for="difficulty in difficultyOptionCodes" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
           </select>
         </label>
         <label>
@@ -743,7 +905,7 @@ onMounted(async () => {
           <label>
             难度
             <select v-model="deductionForm.difficulty_class">
-              <option v-for="difficulty in difficultyOptionsWithAll" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+              <option v-for="difficulty in difficultyOptionCodesWithAll" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
             </select>
           </label>
           <label>
@@ -909,7 +1071,7 @@ onMounted(async () => {
           <label>
             难度
             <select v-model="promoForm.difficulty_class">
-              <option v-for="difficulty in difficultyOptionsWithAll" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+              <option v-for="difficulty in difficultyOptionCodesWithAll" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
             </select>
           </label>
           <label>

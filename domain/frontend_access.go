@@ -523,8 +523,8 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Roles:   []string{"asset_template_admin"},
 			Scopes:  []string{"asset_workbench", "asset_workbench.cost_center"},
 			Menus:   []string{"asset_workbench"},
-			Pages:   []string{"asset_workbench_cost_center", "asset_workbench_templates"},
-			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.cost_center.manage", "asset.workbench.template.manage"},
+			Pages:   []string{"asset_workbench_cost_center"},
+			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.cost_center.manage"},
 		}
 	case RoleAssetSettlement:
 		return FrontendAccessSpec{

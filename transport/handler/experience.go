@@ -74,17 +74,83 @@ func (h *ExperienceHandler) Samples(c *gin.Context) {
 	respondOKWithPagination(c, items, pagination)
 }
 
+func (h *ExperienceHandler) ReviewItems(c *gin.Context) {
+	filter := service.ExperienceReviewItemFilter{
+		Status:   c.Query("status"),
+		ItemType: c.Query("item_type"),
+		Page:     queryInt(c, "page"),
+		PageSize: queryInt(c, "page_size"),
+	}
+	items, pagination, appErr := h.svc.ListReviewItems(c.Request.Context(), filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, pagination)
+}
+
 func (h *ExperienceHandler) AISuggestionFeedback(c *gin.Context) {
 	var req service.AISuggestionFeedbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid request body", nil))
 		return
 	}
+	pathSuggestionEventID := strings.TrimSpace(c.Param("suggestion_event_id"))
 	if strings.TrimSpace(req.SuggestionEventID) == "" {
-		req.SuggestionEventID = c.Param("suggestion_event_id")
+		req.SuggestionEventID = pathSuggestionEventID
+	} else if pathSuggestionEventID != "" && strings.TrimSpace(req.SuggestionEventID) != pathSuggestionEventID {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion_event_id does not match request path", nil))
+		return
 	}
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
 	data, appErr := h.svc.RecordAISuggestionFeedback(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, data)
+}
+
+func (h *ExperienceHandler) MicroQuestionEligibility(c *gin.Context) {
+	req := service.ExperienceMicroQuestionEligibilityRequest{
+		SuggestionEventID:   c.Query("suggestion_event_id"),
+		SuggestionStableKey: c.Query("suggestion_stable_key"),
+		Surface:             c.Query("surface"),
+		TargetType:          c.Query("target_type"),
+		TargetID:            c.Query("target_id"),
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.MicroQuestionEligibility(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, data)
+}
+
+func (h *ExperienceHandler) MicroQuestionAnswer(c *gin.Context) {
+	var req service.ExperienceMicroQuestionAnswerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid request body", nil))
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.RecordMicroQuestionAnswer(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, data)
+}
+
+func (h *ExperienceHandler) ReviewDecision(c *gin.Context) {
+	var req service.ExperienceReviewDecisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid request body", nil))
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.RecordReviewDecision(c.Request.Context(), actor, c.Param("item_key"), req)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

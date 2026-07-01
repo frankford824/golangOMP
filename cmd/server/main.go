@@ -863,24 +863,32 @@ func startExperienceWorker(ctx context.Context, svc service.ExperienceService, c
 			if !svc.RuntimeFlags().WorkerEnabled {
 				return
 			}
-			runCtx, cancel := context.WithTimeout(ctx, interval)
-			defer cancel()
-			observerResult, appErr := svc.ProcessOutcomeObservers(runCtx, batchSize)
+			observerCtx, observerCancel := context.WithTimeout(ctx, interval)
+			observerResult, appErr := svc.ProcessOutcomeObservers(observerCtx, batchSize)
+			observerCancel()
 			if appErr != nil {
 				logger.Warn("experience outcome observer run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
-				return
 			}
-			result, appErr := svc.ProcessOutbox(runCtx, batchSize)
+			outboxCtx, outboxCancel := context.WithTimeout(ctx, interval)
+			result, appErr := svc.ProcessOutbox(outboxCtx, batchSize)
+			outboxCancel()
 			if appErr != nil {
 				logger.Warn("experience outbox worker run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
-				return
 			}
-			retentionResult, appErr := svc.ProcessRetention(runCtx, time.Now().UTC(), batchSize)
+			attributionCtx, attributionCancel := context.WithTimeout(ctx, interval)
+			attributionResult, appErr := svc.ProcessAttributions(attributionCtx, batchSize)
+			attributionCancel()
+			if appErr != nil {
+				logger.Warn("experience attribution worker run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+			}
+			retentionCtx, retentionCancel := context.WithTimeout(ctx, interval)
+			retentionResult, appErr := svc.ProcessRetention(retentionCtx, time.Now().UTC(), batchSize)
+			retentionCancel()
 			if appErr != nil {
 				logger.Warn("experience retention run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
-				return
 			}
 			if observerResult.Scanned > 0 || observerResult.Failed > 0 || result.Claimed > 0 || result.Failed > 0 || result.DeadLetter > 0 ||
+				attributionResult.Scanned > 0 || attributionResult.Failed > 0 ||
 				retentionResult.BehaviorDeleted > 0 || retentionResult.RateLimitDeleted > 0 || retentionResult.ObservedTombstoned > 0 {
 				logger.Info("experience worker run finished",
 					zap.Int("observer_scanned", observerResult.Scanned),
@@ -890,6 +898,9 @@ func startExperienceWorker(ctx context.Context, svc service.ExperienceService, c
 					zap.Int("processed", result.Processed),
 					zap.Int("failed", result.Failed),
 					zap.Int("dead_letter", result.DeadLetter),
+					zap.Int("attribution_scanned", attributionResult.Scanned),
+					zap.Int("attribution_created", attributionResult.Created),
+					zap.Int("attribution_failed", attributionResult.Failed),
 					zap.Int64("behavior_deleted", retentionResult.BehaviorDeleted),
 					zap.Int64("rate_limit_deleted", retentionResult.RateLimitDeleted),
 					zap.Int64("observed_tombstoned", retentionResult.ObservedTombstoned))

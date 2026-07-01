@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -318,21 +319,597 @@ func TestExperienceServiceFilingObserverUsesFieldSpecificOutcome(t *testing.T) {
 	}
 }
 
+func TestExperienceServiceObserverContinuesAfterSourceFailureAndRecordsRuns(t *testing.T) {
+	taskID := int64(42)
+	sourceUpdatedAt := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		auditErr: errors.New("audit source unavailable"),
+		taskSnapshots: []*domain.ExperienceOutcomeSnapshotRow{{
+			SourceName:      experienceSourceTaskStatusSnapshot,
+			EntityType:      "task",
+			EntityID:        "42",
+			TaskID:          &taskID,
+			TargetType:      "task",
+			TargetID:        "42",
+			SourceUpdatedAt: sourceUpdatedAt,
+			ObservedValue:   json.RawMessage(`{"task_status":"InProgress"}`),
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessOutcomeObservers(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessOutcomeObservers returned app error: %v", appErr)
+	}
+	if result.Failed != 1 || result.Baselines != 1 {
+		t.Fatalf("observer result = %+v, want failed source plus later baseline", result)
+	}
+	if got := stub.observedState(experienceSourceTaskStatusSnapshot, "task", "42"); got == nil {
+		t.Fatal("task snapshot source did not continue after audit source failure")
+	}
+	if len(stub.workerRuns) < 2 {
+		t.Fatalf("worker runs = %d, want failed and success source runs", len(stub.workerRuns))
+	}
+	if stub.workerRuns[0].Status != "failed" || stub.workerRuns[0].SourceName != experienceSourceAuditRecords {
+		t.Fatalf("first worker run = %+v, want failed audit source", stub.workerRuns[0])
+	}
+}
+
+func TestExperienceServiceProcessAttributionsCreatesWeightedCandidate(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	displayedAt := outcomeAt.Add(-2 * time.Hour)
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{{
+			ID:         9,
+			EventKey:   "outcome:tasks:42:completed",
+			EventTime:  outcomeAt,
+			SourceType: experienceSourceTaskStatusSnapshot,
+			Action:     "task_status_changed",
+			Outcome:    "Completed",
+			TaskID:     experienceInt64Ptr(42),
+			TargetType: "task",
+			TargetID:   "42",
+			Payload:    json.RawMessage(`{"changed_fields":[{"field":"task_status","from":"InProgress","to":"Completed"}]}`),
+		}},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{{
+			SuggestionEventID:   "suggestion-display-1",
+			SuggestionStableKey: "task_next|asset_ready|workflow|task|42",
+			SuggestionType:      "task_next_action",
+			SuggestionID:        "asset_ready",
+			TargetType:          "task",
+			TargetID:            "42",
+			DisplayedAt:         displayedAt,
+			BehaviorCount:       1,
+			BehaviorScore:       5,
+			FeedbackValue:       domain.ExperienceFeedbackAccepted,
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessAttributions(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if result.Scanned != 1 || result.Created != 1 || result.Failed != 0 {
+		t.Fatalf("attribution result = %+v, want one created", result)
+	}
+	if len(stub.attributions) != 1 {
+		t.Fatalf("attributions = %d, want 1", len(stub.attributions))
+	}
+	attribution := stub.attributions[0]
+	if attribution.Status != domain.ExperienceAttributionStatusPositive || attribution.Confidence != "high" {
+		t.Fatalf("attribution status/confidence = %s/%s", attribution.Status, attribution.Confidence)
+	}
+	if attribution.Score < 0.75 {
+		t.Fatalf("attribution score = %f, want high confidence score", attribution.Score)
+	}
+	if len(stub.reviewItems) != 1 || stub.reviewItems[0].Status != domain.ExperienceReviewItemStatusOpen {
+		t.Fatalf("review items = %+v, want one open attribution candidate", stub.reviewItems)
+	}
+	watermark := stub.watermarks[domain.ExperienceWorkerAttribution+":experience_events"]
+	if watermark == nil || watermark.LastSeenID != 9 {
+		t.Fatalf("attribution watermark = %+v, want outcome id 9", watermark)
+	}
+}
+
+func TestExperienceServiceProcessAttributionsSkipsCandidateWithoutBehaviorOrFeedback(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{{
+			ID:         9,
+			EventKey:   "outcome:tasks:42:completed",
+			EventTime:  outcomeAt,
+			SourceType: experienceSourceTaskStatusSnapshot,
+			Action:     "task_status_changed",
+			Outcome:    "Completed",
+			TaskID:     experienceInt64Ptr(42),
+			TargetType: "task",
+			TargetID:   "42",
+		}},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{{
+			SuggestionEventID:   "suggestion-display-1",
+			SuggestionStableKey: "task_next|asset_ready|workflow|task|42",
+			SuggestionType:      "task_next_action",
+			SuggestionID:        "asset_ready",
+			TargetType:          "task",
+			TargetID:            "42",
+			DisplayedAt:         outcomeAt.Add(-2 * time.Hour),
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessAttributions(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if result.Created != 0 || len(stub.attributions) != 0 || len(stub.reviewItems) != 0 {
+		t.Fatalf("result=%+v attributions=%d review_items=%d, want no attribution without behavior or feedback", result, len(stub.attributions), len(stub.reviewItems))
+	}
+}
+
+func TestExperienceServiceRecordAISuggestionFeedbackRequiresOwnedSuggestion(t *testing.T) {
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID: "display-1",
+				TargetType:        "task",
+				TargetID:          "42",
+				ActorID:           experienceInt64Ptr(291),
+			},
+			"display-2": {
+				SuggestionEventID: "display-2",
+				TargetType:        "task",
+				TargetID:          "43",
+				ActorID:           experienceInt64Ptr(999),
+			},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{AIFeedbackEnabled: true}, zap.NewNop())
+
+	feedback, appErr := svc.RecordAISuggestionFeedback(context.Background(), domain.RequestActor{ID: 291}, AISuggestionFeedbackRequest{
+		SuggestionEventID: "display-1",
+		FeedbackValue:     domain.ExperienceFeedbackAccepted,
+	})
+	if appErr != nil {
+		t.Fatalf("RecordAISuggestionFeedback owned suggestion returned app error: %v", appErr)
+	}
+	if feedback == nil || feedback.ID != 1 {
+		t.Fatalf("feedback = %+v, want created", feedback)
+	}
+
+	feedback, appErr = svc.RecordAISuggestionFeedback(context.Background(), domain.RequestActor{ID: 291}, AISuggestionFeedbackRequest{
+		SuggestionEventID: "display-2",
+		FeedbackValue:     domain.ExperienceFeedbackAccepted,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("RecordAISuggestionFeedback cross-actor appErr = %+v, want invalid request", appErr)
+	}
+	if feedback != nil {
+		t.Fatalf("feedback = %+v, want nil for cross-actor suggestion", feedback)
+	}
+	if len(stub.feedbacks) != 1 {
+		t.Fatalf("feedback writes = %d, want only owned write", len(stub.feedbacks))
+	}
+}
+
+func TestExperienceServiceReserveRateLimitUsesUpdatedCount(t *testing.T) {
+	periodStart := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	stub := &experienceRepoStub{}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{UIEnabled: true}, zap.NewNop())
+
+	first, appErr := svc.ReserveRateLimit(context.Background(), domain.RequestActor{ID: 291}, "micro_question_daily", periodStart, periodEnd, 2)
+	if appErr != nil {
+		t.Fatalf("ReserveRateLimit first returned app error: %v", appErr)
+	}
+	second, appErr := svc.ReserveRateLimit(context.Background(), domain.RequestActor{ID: 291}, "micro_question_daily", periodStart, periodEnd, 2)
+	if appErr != nil {
+		t.Fatalf("ReserveRateLimit second returned app error: %v", appErr)
+	}
+	third, appErr := svc.ReserveRateLimit(context.Background(), domain.RequestActor{ID: 291}, "micro_question_daily", periodStart, periodEnd, 2)
+	if appErr != nil {
+		t.Fatalf("ReserveRateLimit third returned app error: %v", appErr)
+	}
+	if !first.Allowed || !second.Allowed || third.Allowed {
+		t.Fatalf("allowed sequence = %v/%v/%v, want true/true/false", first.Allowed, second.Allowed, third.Allowed)
+	}
+	if third.Count != 3 || third.HardCap != 20 {
+		t.Fatalf("third reservation = %+v, want count=3 hard_cap=20", third)
+	}
+}
+
+func TestExperienceServiceProcessRetentionIncludesWorkerRunRetention(t *testing.T) {
+	now := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		retentionRun: &domain.ExperienceRetentionRun{
+			BehaviorDeleted:    2,
+			RateLimitDeleted:   3,
+			ObservedTombstoned: 4,
+			WorkerRunDeleted:   5,
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessRetention(context.Background(), now, 50)
+	if appErr != nil {
+		t.Fatalf("ProcessRetention returned app error: %v", appErr)
+	}
+	if result.WorkerRunDeleted != 5 {
+		t.Fatalf("retention result = %+v, want worker run deletions", result)
+	}
+	if !stub.retentionPolicy.WorkerRunBefore.Equal(now.AddDate(0, 0, -30)) {
+		t.Fatalf("worker run retention cutoff = %s, want %s", stub.retentionPolicy.WorkerRunBefore, now.AddDate(0, 0, -30))
+	}
+	if len(stub.workerRuns) != 1 || stub.workerRuns[0].SkippedCount != 10 {
+		t.Fatalf("worker run record = %+v, want deleted rows counted as skipped", stub.workerRuns)
+	}
+}
+
+func TestExperienceServiceMicroQuestionEligibilityDoesNotConsumeRateLimit(t *testing.T) {
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID:   "display-1",
+				SuggestionStableKey: "stable-1",
+				AttributionEligible: true,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(291),
+			},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	result, appErr := svc.MicroQuestionEligibility(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionEligibilityRequest{
+		SuggestionEventID: "display-1",
+		Surface:           "task_detail",
+	})
+	if appErr != nil {
+		t.Fatalf("MicroQuestionEligibility returned app error: %v", appErr)
+	}
+	if !result.Eligible || result.AnswerEventKey == "" {
+		t.Fatalf("eligibility = %+v, want eligible with answer key", result)
+	}
+	if stub.reserveCalls != 0 {
+		t.Fatalf("reserve calls = %d, want 0 for non-consuming eligibility", stub.reserveCalls)
+	}
+}
+
+func TestExperienceServiceMicroQuestionEligibilityRejectsActorMismatch(t *testing.T) {
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID:   "display-1",
+				SuggestionStableKey: "stable-1",
+				AttributionEligible: true,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(999),
+			},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	result, appErr := svc.MicroQuestionEligibility(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionEligibilityRequest{
+		SuggestionEventID: "display-1",
+		Surface:           "task_detail",
+	})
+	if appErr != nil {
+		t.Fatalf("MicroQuestionEligibility returned app error: %v", appErr)
+	}
+	if result.Eligible || result.Reason != "suggestion_not_found" {
+		t.Fatalf("eligibility = %+v, want non-eligible suggestion_not_found", result)
+	}
+	if stub.reserveCalls != 0 {
+		t.Fatalf("reserve calls = %d, want 0 for actor mismatch", stub.reserveCalls)
+	}
+}
+
+func TestExperienceServiceRecordMicroQuestionAnswerIdempotentDoesNotReserveTwice(t *testing.T) {
+	answerKey := buildExperienceMicroQuestionAnswerEventKey(291, "display-1", "stable-1", "task_detail", "task", "42")
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID:   "display-1",
+				SuggestionStableKey: "stable-1",
+				AttributionEligible: true,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(291),
+			},
+		},
+		microAnswers: map[string]*domain.ExperienceMicroQuestionAnswer{
+			answerKey: {AnswerEventKey: answerKey},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	answer, appErr := svc.RecordMicroQuestionAnswer(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionAnswerRequest{
+		AnswerEventKey:      answerKey,
+		SuggestionEventID:   "display-1",
+		SuggestionStableKey: "stable-1",
+		Surface:             "task_detail",
+		TargetType:          "task",
+		TargetID:            "42",
+		AnswerValue:         domain.ExperienceMicroQuestionAnswerAnswered,
+		ReasonCode:          "missing_context",
+	})
+	if appErr != nil {
+		t.Fatalf("RecordMicroQuestionAnswer returned app error: %v", appErr)
+	}
+	if answer.AnswerEventKey != answerKey {
+		t.Fatalf("answer key = %s, want %s", answer.AnswerEventKey, answerKey)
+	}
+	if stub.reserveCalls != 0 {
+		t.Fatalf("reserve calls = %d, want 0 for idempotent already-answered request", stub.reserveCalls)
+	}
+}
+
+func TestExperienceServiceRecordMicroQuestionAnswerRejectsActorMismatchWithoutReserving(t *testing.T) {
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID:   "display-1",
+				SuggestionStableKey: "stable-1",
+				AttributionEligible: true,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(999),
+			},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	_, appErr := svc.RecordMicroQuestionAnswer(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionAnswerRequest{
+		SuggestionEventID: "display-1",
+		Surface:           "task_detail",
+		TargetType:        "task",
+		TargetID:          "42",
+		AnswerValue:       domain.ExperienceMicroQuestionAnswerAnswered,
+		ReasonCode:        "missing_context",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("RecordMicroQuestionAnswer appErr = %+v, want invalid request", appErr)
+	}
+	if stub.reserveCalls != 0 {
+		t.Fatalf("reserve calls = %d, want 0 for actor mismatch", stub.reserveCalls)
+	}
+	if len(stub.microAnswers) != 0 {
+		t.Fatalf("micro answers = %+v, want no write", stub.microAnswers)
+	}
+}
+
+func TestExperienceServiceRecordMicroQuestionAnswerRejectsUnknownSuggestionWithoutReserving(t *testing.T) {
+	stub := &experienceRepoStub{}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	answer, appErr := svc.RecordMicroQuestionAnswer(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionAnswerRequest{
+		SuggestionEventID:   "missing-display",
+		SuggestionStableKey: "stable-1",
+		Surface:             "task_detail",
+		TargetType:          "task",
+		TargetID:            "42",
+		AnswerValue:         domain.ExperienceMicroQuestionAnswerAnswered,
+		ReasonCode:          "missing_context",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("RecordMicroQuestionAnswer appErr = %+v, want invalid request", appErr)
+	}
+	if answer != nil {
+		t.Fatalf("answer = %+v, want nil", answer)
+	}
+	if stub.reserveCalls != 0 {
+		t.Fatalf("reserve calls = %d, want 0 when suggestion is invalid", stub.reserveCalls)
+	}
+	if len(stub.microAnswers) != 0 {
+		t.Fatalf("micro answers = %+v, want no write", stub.microAnswers)
+	}
+}
+
+func TestExperienceServiceRecordMicroQuestionAnswerRejectsIneligibleSuggestionWithoutReserving(t *testing.T) {
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID:   "display-1",
+				SuggestionStableKey: "stable-1",
+				AttributionEligible: false,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(291),
+			},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	_, appErr := svc.RecordMicroQuestionAnswer(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionAnswerRequest{
+		SuggestionEventID:   "display-1",
+		SuggestionStableKey: "stable-1",
+		Surface:             "task_detail",
+		TargetType:          "task",
+		TargetID:            "42",
+		AnswerValue:         domain.ExperienceMicroQuestionAnswerAnswered,
+		ReasonCode:          "missing_context",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("RecordMicroQuestionAnswer appErr = %+v, want invalid request", appErr)
+	}
+	if stub.reserveCalls != 0 {
+		t.Fatalf("reserve calls = %d, want 0 when suggestion is ineligible", stub.reserveCalls)
+	}
+	if len(stub.microAnswers) != 0 {
+		t.Fatalf("micro answers = %+v, want no write", stub.microAnswers)
+	}
+}
+
+func TestExperienceServiceRecordMicroQuestionAnswerValidatesScopeAndCreatesAnswer(t *testing.T) {
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID:   "display-1",
+				SuggestionStableKey: "stable-from-backend",
+				AttributionEligible: true,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(291),
+			},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	answer, appErr := svc.RecordMicroQuestionAnswer(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionAnswerRequest{
+		SuggestionEventID: "display-1",
+		Surface:           "task_detail",
+		TargetType:        "task",
+		TargetID:          "42",
+		AnswerValue:       domain.ExperienceMicroQuestionAnswerAnswered,
+		ReasonCode:        "missing_context",
+	})
+	if appErr != nil {
+		t.Fatalf("RecordMicroQuestionAnswer returned app error: %v", appErr)
+	}
+	expectedKey := buildExperienceMicroQuestionAnswerEventKey(291, "display-1", "stable-from-backend", "task_detail", "task", "42")
+	if answer.AnswerEventKey != expectedKey || answer.SuggestionStableKey != "stable-from-backend" {
+		t.Fatalf("answer = %+v, want backend stable key and deterministic answer key", answer)
+	}
+	if stub.reserveCalls != 1 {
+		t.Fatalf("reserve calls = %d, want 1", stub.reserveCalls)
+	}
+	if got := stub.microAnswers[expectedKey]; got == nil || got.ReasonCode != "missing_context" {
+		t.Fatalf("stored answer = %+v, want created answer", got)
+	}
+}
+
+func TestExperienceServiceRecordMicroQuestionAnswerRefundsQuotaOnDuplicateInsert(t *testing.T) {
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-1": {
+				SuggestionEventID:   "display-1",
+				SuggestionStableKey: "stable-from-backend",
+				AttributionEligible: true,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(291),
+			},
+		},
+		forceDuplicateAnswer: true,
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	answer, appErr := svc.RecordMicroQuestionAnswer(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionAnswerRequest{
+		SuggestionEventID: "display-1",
+		Surface:           "task_detail",
+		TargetType:        "task",
+		TargetID:          "42",
+		AnswerValue:       domain.ExperienceMicroQuestionAnswerAnswered,
+		ReasonCode:        "missing_context",
+	})
+	if appErr != nil {
+		t.Fatalf("RecordMicroQuestionAnswer returned app error: %v", appErr)
+	}
+	if answer == nil || answer.AnswerEventKey == "" {
+		t.Fatalf("answer = %+v, want idempotent answer", answer)
+	}
+	if stub.reserveCalls != 1 || stub.refundCalls != 1 {
+		t.Fatalf("reserve/refund calls = %d/%d, want 1/1", stub.reserveCalls, stub.refundCalls)
+	}
+	periodStart, _ := experienceBeijingDayWindow(time.Now())
+	limitKey := buildExperienceRateLimitKey(291, "micro_question_daily", periodStart)
+	if got := stub.rateLimits[limitKey]; got == nil || got.Count != 0 {
+		t.Fatalf("rate limit = %+v, want refunded to 0", got)
+	}
+}
+
+func TestExperienceServiceRecordReviewDecisionUpdatesCandidateStatus(t *testing.T) {
+	stub := &experienceRepoStub{
+		reviewItems: []*domain.ExperienceReviewItem{{
+			ItemKey:  "review-1",
+			ItemType: "attribution_candidate",
+			Status:   domain.ExperienceReviewItemStatusOpen,
+			Priority: "medium",
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{UIEnabled: true}, zap.NewNop())
+
+	decision, appErr := svc.RecordReviewDecision(context.Background(), domain.RequestActor{ID: 291}, "review-1", ExperienceReviewDecisionRequest{
+		Decision:   domain.ExperienceReviewDecisionApprove,
+		ReasonCode: "verified",
+	})
+	if appErr != nil {
+		t.Fatalf("RecordReviewDecision returned app error: %v", appErr)
+	}
+	if decision.Decision != domain.ExperienceReviewDecisionApprove {
+		t.Fatalf("decision = %+v, want approve", decision)
+	}
+	if len(stub.reviewDecisions) != 1 {
+		t.Fatalf("review decisions = %d, want 1", len(stub.reviewDecisions))
+	}
+	if stub.reviewItems[0].Status != domain.ExperienceReviewItemStatusApproved {
+		t.Fatalf("review item status = %s, want approved", stub.reviewItems[0].Status)
+	}
+}
+
 type experienceRepoStub struct {
-	calls            int
-	enqueued         *domain.ExperienceOutboxEvent
-	enqueuedEvents   []*domain.ExperienceOutboxEvent
-	aiEvent          *domain.AISuggestionEvent
-	behaviorEvents   []*domain.ExperienceBehaviorEvent
-	watermarks       map[string]*domain.ExperienceWorkerWatermark
-	auditRows        []*domain.ExperienceOutcomeEventRow
-	moduleRows       []*domain.ExperienceOutcomeEventRow
-	taskSnapshots    []*domain.ExperienceOutcomeSnapshotRow
-	assetSnapshots   []*domain.ExperienceOutcomeSnapshotRow
-	detailSnapshots  []*domain.ExperienceOutcomeSnapshotRow
-	skuItemSnapshots []*domain.ExperienceOutcomeSnapshotRow
-	observed         map[string]*domain.ExperienceObservedEntityState
-	retentionRun     *domain.ExperienceRetentionRun
+	calls                 int
+	enqueued              *domain.ExperienceOutboxEvent
+	enqueuedEvents        []*domain.ExperienceOutboxEvent
+	aiEvent               *domain.AISuggestionEvent
+	aiEventsByID          map[string]*domain.AISuggestionEvent
+	feedbacks             []*domain.AISuggestionFeedback
+	behaviorEvents        []*domain.ExperienceBehaviorEvent
+	watermarks            map[string]*domain.ExperienceWorkerWatermark
+	auditRows             []*domain.ExperienceOutcomeEventRow
+	moduleRows            []*domain.ExperienceOutcomeEventRow
+	auditErr              error
+	taskSnapshots         []*domain.ExperienceOutcomeSnapshotRow
+	assetSnapshots        []*domain.ExperienceOutcomeSnapshotRow
+	detailSnapshots       []*domain.ExperienceOutcomeSnapshotRow
+	skuItemSnapshots      []*domain.ExperienceOutcomeSnapshotRow
+	observed              map[string]*domain.ExperienceObservedEntityState
+	retentionRun          *domain.ExperienceRetentionRun
+	retentionPolicy       repo.ExperienceRetentionPolicy
+	workerRuns            []*domain.ExperienceWorkerRunRecord
+	attributionOutcomes   []*domain.ExperienceAttributionOutcome
+	attributionCandidates []*domain.ExperienceAttributionCandidate
+	attributions          []*domain.ExperienceAttribution
+	rateLimits            map[string]*domain.ExperienceRateLimitReservation
+	reserveCalls          int
+	refundCalls           int
+	microAnswers          map[string]*domain.ExperienceMicroQuestionAnswer
+	forceDuplicateAnswer  bool
+	reviewItems           []*domain.ExperienceReviewItem
+	reviewDecisions       []*domain.ExperienceReviewDecision
 }
 
 func (s *experienceRepoStub) ListReasonTags(context.Context, string) ([]*domain.ExperienceReasonTag, error) {
@@ -388,7 +965,29 @@ func (s *experienceRepoStub) MarkExperienceOutboxFailed(context.Context, int64, 
 func (s *experienceRepoStub) CreateAISuggestionEvent(_ context.Context, event *domain.AISuggestionEvent) error {
 	s.calls++
 	s.aiEvent = event
+	if event != nil && strings.TrimSpace(event.SuggestionEventID) != "" {
+		if s.aiEventsByID == nil {
+			s.aiEventsByID = make(map[string]*domain.AISuggestionEvent)
+		}
+		copied := *event
+		s.aiEventsByID[event.SuggestionEventID] = &copied
+	}
 	return nil
+}
+
+func (s *experienceRepoStub) GetAISuggestionEventByEventID(_ context.Context, suggestionEventID string) (*domain.AISuggestionEvent, error) {
+	s.calls++
+	if s.aiEventsByID != nil {
+		if event := s.aiEventsByID[strings.TrimSpace(suggestionEventID)]; event != nil {
+			copied := *event
+			return &copied, nil
+		}
+	}
+	if s.aiEvent != nil && s.aiEvent.SuggestionEventID == strings.TrimSpace(suggestionEventID) {
+		copied := *s.aiEvent
+		return &copied, nil
+	}
+	return nil, nil
 }
 
 func (s *experienceRepoStub) CreateExperienceBehaviorEvents(_ context.Context, events []*domain.ExperienceBehaviorEvent) (int, error) {
@@ -397,9 +996,12 @@ func (s *experienceRepoStub) CreateExperienceBehaviorEvents(_ context.Context, e
 	return len(events), nil
 }
 
-func (s *experienceRepoStub) CreateAISuggestionFeedback(context.Context, *domain.AISuggestionFeedback) (int64, error) {
+func (s *experienceRepoStub) CreateAISuggestionFeedback(_ context.Context, feedback *domain.AISuggestionFeedback) (int64, error) {
 	s.calls++
-	return 1, nil
+	copied := *feedback
+	copied.ID = int64(len(s.feedbacks) + 1)
+	s.feedbacks = append(s.feedbacks, &copied)
+	return copied.ID, nil
 }
 
 func (s *experienceRepoStub) GetExperienceWorkerWatermark(_ context.Context, workerName, sourceName string) (*domain.ExperienceWorkerWatermark, error) {
@@ -426,6 +1028,9 @@ func (s *experienceRepoStub) SaveExperienceWorkerWatermark(_ context.Context, wa
 
 func (s *experienceRepoStub) ListExperienceAuditOutcomeRows(context.Context, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceOutcomeEventRow, error) {
 	s.calls++
+	if s.auditErr != nil {
+		return nil, s.auditErr
+	}
 	return s.auditRows, nil
 }
 
@@ -474,12 +1079,182 @@ func (s *experienceRepoStub) UpsertExperienceObservedEntityState(_ context.Conte
 	return nil
 }
 
-func (s *experienceRepoStub) RunExperienceRetention(context.Context, repo.ExperienceRetentionPolicy) (*domain.ExperienceRetentionRun, error) {
+func (s *experienceRepoStub) RunExperienceRetention(_ context.Context, policy repo.ExperienceRetentionPolicy) (*domain.ExperienceRetentionRun, error) {
 	s.calls++
+	s.retentionPolicy = policy
 	if s.retentionRun != nil {
 		return s.retentionRun, nil
 	}
 	return &domain.ExperienceRetentionRun{}, nil
+}
+
+func (s *experienceRepoStub) CreateExperienceWorkerRun(_ context.Context, run *domain.ExperienceWorkerRunRecord) error {
+	s.calls++
+	if run != nil {
+		copied := *run
+		s.workerRuns = append(s.workerRuns, &copied)
+	}
+	return nil
+}
+
+func (s *experienceRepoStub) ListRecentExperienceWorkerRuns(context.Context, int) ([]*domain.ExperienceWorkerRunRecord, error) {
+	s.calls++
+	return s.workerRuns, nil
+}
+
+func (s *experienceRepoStub) ListExperienceAttributionOutcomes(context.Context, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceAttributionOutcome, error) {
+	s.calls++
+	return s.attributionOutcomes, nil
+}
+
+func (s *experienceRepoStub) ListExperienceAttributionCandidates(context.Context, *domain.ExperienceAttributionOutcome, time.Duration, int) ([]*domain.ExperienceAttributionCandidate, error) {
+	s.calls++
+	return s.attributionCandidates, nil
+}
+
+func (s *experienceRepoStub) CreateExperienceAttribution(_ context.Context, attribution *domain.ExperienceAttribution) error {
+	s.calls++
+	if attribution != nil {
+		copied := *attribution
+		s.attributions = append(s.attributions, &copied)
+	}
+	return nil
+}
+
+func (s *experienceRepoStub) ReserveExperienceRateLimit(_ context.Context, req repo.ExperienceRateLimitRequest) (*domain.ExperienceRateLimitReservation, error) {
+	s.calls++
+	s.reserveCalls++
+	if s.rateLimits == nil {
+		s.rateLimits = make(map[string]*domain.ExperienceRateLimitReservation)
+	}
+	item := s.rateLimits[req.LimitKey]
+	if item == nil {
+		item = &domain.ExperienceRateLimitReservation{
+			LimitKey:    req.LimitKey,
+			ActorID:     req.ActorID,
+			BucketName:  req.BucketName,
+			PeriodStart: req.PeriodStart,
+			PeriodEnd:   req.PeriodEnd,
+			Limit:       req.Limit,
+			HardCap:     req.HardCap,
+		}
+		s.rateLimits[req.LimitKey] = item
+	}
+	if item.Count < item.HardCap {
+		item.Count++
+	}
+	item.Allowed = item.Count <= req.Limit
+	copied := *item
+	return &copied, nil
+}
+
+func (s *experienceRepoStub) RefundExperienceRateLimit(_ context.Context, limitKey string) error {
+	s.calls++
+	s.refundCalls++
+	if s.rateLimits == nil {
+		return nil
+	}
+	item := s.rateLimits[strings.TrimSpace(limitKey)]
+	if item != nil && item.Count > 0 {
+		item.Count--
+		item.Allowed = item.Limit <= 0 || item.Count <= item.Limit
+	}
+	return nil
+}
+
+func (s *experienceRepoStub) GetExperienceRateLimit(_ context.Context, limitKey string, limit int) (*domain.ExperienceRateLimitReservation, error) {
+	s.calls++
+	if s.rateLimits == nil {
+		return nil, nil
+	}
+	item := s.rateLimits[strings.TrimSpace(limitKey)]
+	if item == nil {
+		return nil, nil
+	}
+	copied := *item
+	copied.Limit = limit
+	copied.Allowed = limit <= 0 || copied.Count < limit
+	return &copied, nil
+}
+
+func (s *experienceRepoStub) CreateExperienceMicroQuestionAnswer(_ context.Context, answer *domain.ExperienceMicroQuestionAnswer) (bool, error) {
+	s.calls++
+	if s.microAnswers == nil {
+		s.microAnswers = make(map[string]*domain.ExperienceMicroQuestionAnswer)
+	}
+	if answer != nil {
+		if s.forceDuplicateAnswer {
+			return false, nil
+		}
+		if s.microAnswers[strings.TrimSpace(answer.AnswerEventKey)] != nil {
+			return false, nil
+		}
+		copied := *answer
+		s.microAnswers[answer.AnswerEventKey] = &copied
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *experienceRepoStub) HasExperienceMicroQuestionAnswer(_ context.Context, answerEventKey string) (bool, error) {
+	s.calls++
+	if s.microAnswers == nil {
+		return false, nil
+	}
+	return s.microAnswers[strings.TrimSpace(answerEventKey)] != nil, nil
+}
+
+func (s *experienceRepoStub) CreateExperienceReviewItem(_ context.Context, item *domain.ExperienceReviewItem) error {
+	s.calls++
+	if item == nil {
+		return nil
+	}
+	for _, existing := range s.reviewItems {
+		if existing.ItemKey == item.ItemKey {
+			if existing.Status == "" || existing.Status == domain.ExperienceReviewItemStatusOpen {
+				existing.Priority = item.Priority
+				existing.EvidenceSummary = item.EvidenceSummary
+			}
+			return nil
+		}
+	}
+	copied := *item
+	s.reviewItems = append(s.reviewItems, &copied)
+	return nil
+}
+
+func (s *experienceRepoStub) ListExperienceReviewItems(_ context.Context, filter repo.ExperienceReviewItemFilter) ([]*domain.ExperienceReviewItem, int64, error) {
+	s.calls++
+	items := make([]*domain.ExperienceReviewItem, 0, len(s.reviewItems))
+	for _, item := range s.reviewItems {
+		if item == nil {
+			continue
+		}
+		if filter.Status != "" && item.Status != filter.Status {
+			continue
+		}
+		if filter.ItemType != "" && item.ItemType != filter.ItemType {
+			continue
+		}
+		copied := *item
+		items = append(items, &copied)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (s *experienceRepoStub) CreateExperienceReviewDecision(_ context.Context, decision *domain.ExperienceReviewDecision, nextStatus string) error {
+	s.calls++
+	if decision != nil {
+		copied := *decision
+		s.reviewDecisions = append(s.reviewDecisions, &copied)
+		for _, item := range s.reviewItems {
+			if item != nil && item.ItemKey == decision.ReviewItemKey {
+				item.Status = nextStatus
+				return nil
+			}
+		}
+	}
+	return nil
 }
 
 func (s *experienceRepoStub) observedState(sourceName, entityType, entityID string) *domain.ExperienceObservedEntityState {

@@ -8,7 +8,6 @@ const adminCapabilities = [
   'asset.workbench.settlement',
   'asset.workbench.system_search',
   'asset.workbench.cost_center.manage',
-  'asset.workbench.template.assign',
   'asset.workbench.profile.manage',
   'asset.workbench.member.identity',
 ]
@@ -129,11 +128,6 @@ const settlementPreview = {
   },
   payroll_rows: payrollRows,
 }
-
-const templates = [
-  { id: 1, name: '海报精修', category: '图片', difficulty_class: 'A', worker_type: 'parttime', enabled: true, sort_order: 1, created_by: 1001 },
-  { id: 2, name: '小夜灯渲染', category: '产品', difficulty_class: 'A+小夜灯', worker_type: 'all', enabled: true, sort_order: 2, created_by: 1001 },
-]
 
 const previewImageUrl =
   'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20320%20200%22%3E%3Crect%20width%3D%22320%22%20height%3D%22200%22%20fill%3D%22%23f4efe8%22/%3E%3Cpath%20d%3D%22M48%20148L124%2072l48%2044%2032-30%2068%2062z%22%20fill%3D%22%234b6f5d%22/%3E%3Ccircle%20cx%3D%22242%22%20cy%3D%2258%22%20r%3D%2224%22%20fill%3D%22%23d99a48%22/%3E%3C/svg%3E'
@@ -327,7 +321,6 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     const path = url.pathname
     if (path.endsWith('/entry')) return json(route, { state: 'ready', message: '', bootstrap })
     if (path.endsWith('/bootstrap')) return json(route, bootstrap)
-    if (path.endsWith('/my-templates')) return json(route, templates)
     if (path.endsWith('/submissions')) return paginated(route, submissions)
     if (path.endsWith('/settlement/preview')) return json(route, settlementPreview)
     if (path.endsWith('/settlement/my')) {

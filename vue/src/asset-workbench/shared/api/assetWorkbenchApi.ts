@@ -155,6 +155,19 @@ export interface PromoCouponRow {
   enabled: boolean
 }
 
+export interface DifficultyClassRow {
+  id: number
+  code: string
+  name: string
+  description: string
+  enabled: boolean
+  sort_order: number
+  created_by?: number
+  updated_by?: number
+  created_at?: string
+  updated_at?: string
+}
+
 export interface WorkbenchGroupRow {
   id: number
   name: string
@@ -199,28 +212,6 @@ export interface AccountMergePreview {
   counts: Record<string, number>
   affected_months?: string[]
   settlement_note: string
-}
-
-export interface WorkbenchTemplateRow {
-  id: number
-  name: string
-  category: string
-  difficulty_class: string
-  worker_type: string
-  enabled: boolean
-  sort_order: number
-  created_by: number
-}
-
-export interface WorkbenchTemplateAssignmentRow {
-  id: number
-  template_id: number
-  template_name?: string
-  target_type: 'user' | 'group'
-  target_id: number
-  target_name?: string
-  enabled: boolean
-  assigned_by: number
 }
 
 export interface SubmissionRow {
@@ -769,7 +760,6 @@ export interface CreateSubmissionPayload {
   notes?: string
   items: Array<{
     order_no: string
-    template_id?: number
     difficulty_class?: string
     finalized: boolean
     page_count: number
@@ -861,6 +851,14 @@ export interface CreatePromoCouponPayload {
   remark?: string
 }
 
+export interface UpsertDifficultyClassPayload {
+  code?: string
+  name?: string
+  description?: string
+  enabled?: boolean
+  sort_order?: number
+}
+
 export interface SetCostRuleEnabledPayload {
   enabled: boolean
   reason?: string
@@ -870,21 +868,6 @@ export interface UpsertGroupPayload {
   name: string
   description?: string
   enabled?: boolean
-}
-
-export interface UpsertTemplatePayload {
-  name: string
-  category?: string
-  difficulty_class: string
-  worker_type?: string
-  enabled?: boolean
-  sort_order?: number
-}
-
-export interface AssignTemplatePayload {
-  template_id: number
-  user_ids?: number[]
-  group_ids?: number[]
 }
 
 export interface UpsertUploadDirectoryPayload {
@@ -940,8 +923,23 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async listMyTemplates(signal?: AbortSignal): Promise<WorkbenchTemplateRow[]> {
-    const res = await http.get<ApiEnvelope<WorkbenchTemplateRow[]>>('/v1/asset-workbench/my-templates', { signal })
+  async listDifficultyClasses(signal?: AbortSignal): Promise<DifficultyClassRow[]> {
+    const res = await http.get<ApiEnvelope<DifficultyClassRow[]>>('/v1/asset-workbench/difficulty-classes', { signal })
+    return unwrap(res.data)
+  },
+
+  async listDifficultyClassesAdmin(signal?: AbortSignal): Promise<DifficultyClassRow[]> {
+    const res = await http.get<ApiEnvelope<DifficultyClassRow[]>>('/v1/asset-workbench/difficulty-classes/admin', { signal })
+    return unwrap(res.data)
+  },
+
+  async createDifficultyClass(payload: UpsertDifficultyClassPayload, signal?: AbortSignal): Promise<DifficultyClassRow> {
+    const res = await http.post<ApiEnvelope<DifficultyClassRow>>('/v1/asset-workbench/difficulty-classes', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async updateDifficultyClass(code: string, payload: UpsertDifficultyClassPayload, signal?: AbortSignal): Promise<DifficultyClassRow> {
+    const res = await http.patch<ApiEnvelope<DifficultyClassRow>>(`/v1/asset-workbench/difficulty-classes/${encodeURIComponent(code)}`, payload, { signal })
     return unwrap(res.data)
   },
 
@@ -1123,41 +1121,6 @@ export const assetWorkbenchApi = {
 
   async deleteGroup(groupId: number, signal?: AbortSignal): Promise<WorkbenchGroupRow> {
     const res = await http.delete<ApiEnvelope<WorkbenchGroupRow>>(`/v1/asset-workbench/groups/${groupId}`, { signal })
-    return unwrap(res.data)
-  },
-
-  async listTemplates(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchTemplateRow>> {
-    const res = await http.get<ApiEnvelope<WorkbenchTemplateRow[]>>('/v1/asset-workbench/templates', { params, signal })
-    return unwrapPaginated(res.data)
-  },
-
-  async createTemplate(payload: UpsertTemplatePayload, signal?: AbortSignal): Promise<WorkbenchTemplateRow> {
-    const res = await http.post<ApiEnvelope<WorkbenchTemplateRow>>('/v1/asset-workbench/templates', payload, { signal })
-    return unwrap(res.data)
-  },
-
-  async updateTemplate(templateId: number, payload: UpsertTemplatePayload, signal?: AbortSignal): Promise<WorkbenchTemplateRow> {
-    const res = await http.patch<ApiEnvelope<WorkbenchTemplateRow>>(`/v1/asset-workbench/templates/${templateId}`, payload, { signal })
-    return unwrap(res.data)
-  },
-
-  async deleteTemplate(templateId: number, signal?: AbortSignal): Promise<WorkbenchTemplateRow> {
-    const res = await http.delete<ApiEnvelope<WorkbenchTemplateRow>>(`/v1/asset-workbench/templates/${templateId}`, { signal })
-    return unwrap(res.data)
-  },
-
-  async listTemplateAssignments(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchTemplateAssignmentRow>> {
-    const res = await http.get<ApiEnvelope<WorkbenchTemplateAssignmentRow[]>>('/v1/asset-workbench/template-assignments', { params, signal })
-    return unwrapPaginated(res.data)
-  },
-
-  async assignTemplate(payload: AssignTemplatePayload, signal?: AbortSignal): Promise<WorkbenchTemplateAssignmentRow[]> {
-    const res = await http.post<ApiEnvelope<WorkbenchTemplateAssignmentRow[]>>('/v1/asset-workbench/template-assignments', payload, { signal })
-    return unwrap(res.data)
-  },
-
-  async deleteTemplateAssignment(assignmentId: number, signal?: AbortSignal): Promise<WorkbenchTemplateAssignmentRow> {
-    const res = await http.delete<ApiEnvelope<WorkbenchTemplateAssignmentRow>>(`/v1/asset-workbench/template-assignments/${assignmentId}`, { signal })
     return unwrap(res.data)
   },
 

@@ -477,6 +477,10 @@ func (s *auditExperienceServiceStub) ListSamples(context.Context, ExperienceEven
 	return nil, domain.PaginationMeta{}, nil
 }
 
+func (s *auditExperienceServiceStub) ListReviewItems(context.Context, ExperienceReviewItemFilter) ([]*domain.ExperienceReviewItem, domain.PaginationMeta, *domain.AppError) {
+	return nil, domain.PaginationMeta{}, nil
+}
+
 func (s *auditExperienceServiceStub) Stats(context.Context) (*domain.ExperienceStats, *domain.AppError) {
 	return &domain.ExperienceStats{}, nil
 }
@@ -505,6 +509,18 @@ func (s *auditExperienceServiceStub) RecordAISuggestionFeedback(context.Context,
 	return nil, nil
 }
 
+func (s *auditExperienceServiceStub) MicroQuestionEligibility(context.Context, domain.RequestActor, ExperienceMicroQuestionEligibilityRequest) (*domain.ExperienceMicroQuestionEligibility, *domain.AppError) {
+	return &domain.ExperienceMicroQuestionEligibility{}, nil
+}
+
+func (s *auditExperienceServiceStub) RecordMicroQuestionAnswer(context.Context, domain.RequestActor, ExperienceMicroQuestionAnswerRequest) (*domain.ExperienceMicroQuestionAnswer, *domain.AppError) {
+	return &domain.ExperienceMicroQuestionAnswer{}, nil
+}
+
+func (s *auditExperienceServiceStub) RecordReviewDecision(context.Context, domain.RequestActor, string, ExperienceReviewDecisionRequest) (*domain.ExperienceReviewDecision, *domain.AppError) {
+	return &domain.ExperienceReviewDecision{}, nil
+}
+
 func (s *auditExperienceServiceStub) ProcessOutcomeObservers(context.Context, int) (domain.ExperienceObserverRun, *domain.AppError) {
 	return domain.ExperienceObserverRun{}, nil
 }
@@ -513,8 +529,16 @@ func (s *auditExperienceServiceStub) ProcessOutbox(context.Context, int) (domain
 	return domain.ExperienceWorkerRun{}, nil
 }
 
+func (s *auditExperienceServiceStub) ProcessAttributions(context.Context, int) (domain.ExperienceAttributionRun, *domain.AppError) {
+	return domain.ExperienceAttributionRun{}, nil
+}
+
 func (s *auditExperienceServiceStub) ProcessRetention(context.Context, time.Time, int) (domain.ExperienceRetentionRun, *domain.AppError) {
 	return domain.ExperienceRetentionRun{}, nil
+}
+
+func (s *auditExperienceServiceStub) ReserveRateLimit(context.Context, domain.RequestActor, string, time.Time, time.Time, int) (*domain.ExperienceRateLimitReservation, *domain.AppError) {
+	return nil, nil
 }
 
 func (r *auditV7RepoStub) CreateRecord(_ context.Context, _ repo.Tx, record *domain.AuditRecord) (int64, error) {

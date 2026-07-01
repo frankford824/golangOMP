@@ -1,22 +1,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Download, FileImage, Grid3X3, List, Search, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Download, FileImage, Grid3X3, List, Search } from 'lucide-vue-next'
 
-import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import {
   assetWorkbenchApi,
   type ClientMaterialRow,
+  type DifficultyClassRow,
   type SystemAssetPreviewMeta,
   type SystemAssetRow,
   type UploadDirectoryRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatInt } from '@aw/shared/format/number'
 import { chipClass, systemPreviewMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import MaterialGallery from '@aw/shared/materials/MaterialGallery.vue'
+import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 import {
   canAttemptSystemAssetPreview,
@@ -51,6 +53,8 @@ const selectedAssetIds = ref<Set<number>>(new Set())
 const activeAsset = ref<SystemAssetRow | null>(null)
 const previewAsset = ref<SystemAssetRow | null>(null)
 const previewMeta = ref<SystemAssetPreviewMeta | null>(null)
+const clientPreviewMaterial = ref<ClientMaterialRow | null>(null)
+const clientPreviewMeta = ref<SystemAssetPreviewMeta | null>(null)
 const previewUrls = ref<Record<number, string>>({})
 const previewLoadingIds = ref<Set<number>>(new Set())
 const viewMode = ref<ViewMode>('gallery')
@@ -63,6 +67,7 @@ const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
 const clientMaterials = ref<ClientMaterialRow[]>([])
 const adminClientMaterials = ref<ClientMaterialRow[]>([])
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
+const difficultyRows = ref<DifficultyClassRow[]>([])
 const selectedClientMaterialIds = ref<Set<number>>(new Set())
 const clientMaterialsLoading = ref(false)
 const clientMaterialKeyword = ref('')
@@ -75,7 +80,7 @@ const directoryName = ref('')
 const directoryPrefix = ref('')
 const directoryDescription = ref('')
 const directoryDifficulty = ref('A')
-const directoryDifficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
+const directoryDifficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const materialsRequest = usePageRequest(
   (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, page: page.value, page_size: pageSize.value }, signal),
   { items: [], total: 0, page: 1, size: 0 },
@@ -165,6 +170,34 @@ const relatedAssets = computed(() => {
       return sameProduct || sameTask || sameType
     })
     .slice(0, 8)
+})
+const previewDialogOpen = computed(() => Boolean(previewAsset.value || clientPreviewMaterial.value))
+const previewDialogTitle = computed(() => {
+  if (previewAsset.value) return titleOf(previewAsset.value)
+  if (clientPreviewMaterial.value) return clientMaterialTitleOf(clientPreviewMaterial.value)
+  return '素材预览'
+})
+const previewDialogUrl = computed(() => {
+  if (previewAsset.value) return resolvedSystemAssetPreviewUrl(previewMeta.value)
+  return resolvedSystemAssetPreviewUrl(clientPreviewMeta.value)
+})
+const previewDialogFallback = computed(() => {
+  if (previewAsset.value) return previewMeta.value?.download_url || ''
+  return clientPreviewMeta.value?.download_url || ''
+})
+const previewDialogRows = computed<Array<[string, string]>>(() => {
+  if (previewAsset.value) {
+    return activeDetailRows.value.map(([label, value]) => [label, String(value || '—')])
+  }
+  const material = clientPreviewMaterial.value
+  if (!material) return []
+  return [
+    ['SKU', clientMaterialSkuOf(material) || '未标注'],
+    ['名称', clientMaterialTitleOf(material)],
+    ['文件名', clientMaterialFilenameOf(material)],
+    ['类型', material.mime_type_snapshot || '文件'],
+    ['说明', material.description || '—'],
+  ]
 })
 
 async function searchMaterials(resetPage = true) {
@@ -383,6 +416,31 @@ async function ensureClientMaterialPreview(material: ClientMaterialRow) {
   }
 }
 
+async function loadClientMaterialPreviewMeta(material: ClientMaterialRow) {
+  if (!canPreviewClientMaterial(material)) return clientMaterialPreviewProbe(material)
+  if (clientPreviewUrls.value[material.id]) {
+    return {
+      asset_id: material.asset_id,
+      status: 'ready',
+      preparing: false,
+      filename: material.filename_snapshot,
+      mime_type: material.mime_type_snapshot,
+      preview_url: clientPreviewUrls.value[material.id],
+      preview_available: true,
+    } as SystemAssetPreviewMeta
+  }
+  const meta = await assetWorkbenchApi.previewClientMaterial(material.id)
+  const previewUrl = resolvedSystemAssetPreviewUrl(meta)
+  if (previewUrl && isSystemAssetImagePreviewable(meta)) {
+    clientPreviewUrls.value = { ...clientPreviewUrls.value, [material.id]: previewUrl }
+  }
+  return {
+    ...meta,
+    preview_url: previewUrl || meta.preview_url,
+    preview_available: meta.preview_available || Boolean(previewUrl),
+  }
+}
+
 async function preloadClientMaterialPreviews(materials: ClientMaterialRow[]) {
   const candidates = materials
     .filter((material) => canPreviewClientMaterial(material) && !clientPreviewUrls.value[material.id])
@@ -392,6 +450,8 @@ async function preloadClientMaterialPreviews(materials: ClientMaterialRow[]) {
 
 async function openAssetPreview(asset: SystemAssetRow) {
   activeAsset.value = asset
+  clientPreviewMaterial.value = null
+  clientPreviewMeta.value = null
   previewController?.abort()
   const controller = new AbortController()
   previewController = controller
@@ -402,19 +462,48 @@ async function openAssetPreview(asset: SystemAssetRow) {
     const meta = await ensurePreview(asset, false, controller.signal)
     if (controller.signal.aborted) return
     previewMeta.value = meta
-    if (meta && resolvedSystemAssetPreviewUrl(meta)) {
+    if (meta) {
       previewAsset.value = asset
     } else if (canPreviewMaterial(asset)) {
-      notice.value = '这个素材暂时没有可展示的预览图'
+      previewAsset.value = asset
     }
   } finally {
     if (previewController === controller) previewLoading.value = false
   }
 }
 
+async function openClientMaterialPreview(material: ClientMaterialRow) {
+  previewController?.abort()
+  previewAsset.value = null
+  previewMeta.value = null
+  clientPreviewMaterial.value = material
+  clientPreviewMeta.value = clientMaterialPreviewProbe(material)
+  previewLoading.value = true
+  error.value = ''
+  try {
+    clientPreviewMeta.value = await loadClientMaterialPreviewMeta(material)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '素材预览加载失败'
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 function closePreview() {
   previewAsset.value = null
   previewMeta.value = null
+  clientPreviewMaterial.value = null
+  clientPreviewMeta.value = null
+}
+
+function downloadPreviewAsset() {
+  if (previewAsset.value) {
+    void downloadAsset(previewAsset.value)
+    return
+  }
+  if (clientPreviewMaterial.value) {
+    void downloadClientMaterial(clientPreviewMaterial.value)
+  }
 }
 
 async function downloadAsset(row: SystemAssetRow) {
@@ -483,7 +572,15 @@ async function loadClientMaterials(admin = false) {
 
 async function loadUploadDirectoriesAdmin() {
   try {
-    uploadDirectories.value = await assetWorkbenchApi.listUploadDirectoriesAdmin()
+    const [directories, difficulties] = await Promise.all([
+      assetWorkbenchApi.listUploadDirectoriesAdmin(),
+      assetWorkbenchApi.listDifficultyClasses(),
+    ])
+    uploadDirectories.value = directories
+    difficultyRows.value = difficulties
+    if (!directoryDifficultyOptions.value.includes(directoryDifficulty.value)) {
+      directoryDifficulty.value = firstDifficultyCode(difficultyRows.value)
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '上传目录加载失败'
   }
@@ -604,7 +701,7 @@ async function createUploadDirectory() {
     directoryName.value = ''
     directoryPrefix.value = ''
     directoryDescription.value = ''
-    directoryDifficulty.value = 'A'
+    directoryDifficulty.value = firstDifficultyCode(difficultyRows.value)
     notice.value = '上传目录已创建'
     await loadUploadDirectoriesAdmin()
   } catch (err) {
@@ -697,10 +794,16 @@ watch(
                   @change="toggleClientMaterial(material, ($event.target as HTMLInputElement).checked)"
                 />
               </label>
-              <div class="aw-material-client-thumb" :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }">
+              <button
+                class="aw-material-client-thumb"
+                :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }"
+                type="button"
+                :aria-label="`预览 ${clientMaterialTitleOf(material)}`"
+                @click="openClientMaterialPreview(material)"
+              >
                 <img v-if="clientMaterialPreviewUrl(material)" :src="clientMaterialPreviewUrl(material)" :alt="clientMaterialTitleOf(material)" loading="lazy" decoding="async" />
                 <FileImage v-else :size="22" aria-hidden="true" />
-              </div>
+              </button>
               <div class="aw-material-client-copy">
                 <strong>{{ clientMaterialTitleOf(material) }}</strong>
                 <span>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</span>
@@ -725,7 +828,7 @@ watch(
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">只读素材</p>
-        <h2>模板素材库</h2>
+        <h2>素材库</h2>
         <p>用缩略图墙快速查阅素材库文件，进入视区后按需加载预览，明细模式用于批量核对。</p>
       </div>
       <div class="aw-page-bar__actions">
@@ -804,10 +907,16 @@ watch(
       </div>
       <div v-if="adminClientMaterials.length" class="aw-material-admin-list">
         <article v-for="material in adminClientMaterials" :key="material.id" class="aw-material-admin-item aw-material-admin-item--client">
-          <div class="aw-material-client-thumb aw-material-admin-thumb" :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }">
+          <button
+            class="aw-material-client-thumb aw-material-admin-thumb"
+            :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }"
+            type="button"
+            :aria-label="`预览 ${clientMaterialTitleOf(material)}`"
+            @click="openClientMaterialPreview(material)"
+          >
             <img v-if="clientMaterialPreviewUrl(material)" :src="clientMaterialPreviewUrl(material)" :alt="clientMaterialTitleOf(material)" loading="lazy" decoding="async" />
             <FileImage v-else :size="28" aria-hidden="true" />
-          </div>
+          </button>
           <div class="aw-material-admin-copy">
             <strong>{{ clientMaterialTitleOf(material) }}</strong>
             <small>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</small>
@@ -843,7 +952,7 @@ watch(
         <article v-for="directory in uploadDirectories" :key="directory.id" class="aw-material-admin-item">
           <strong>{{ directory.name }}</strong>
           <span>{{ directory.oss_prefix }}</span>
-          <span class="aw-chip aw-chip--info">计价 {{ directory.difficulty_class || 'A' }}</span>
+          <span class="aw-chip aw-chip--info">计价 {{ directory.difficulty_class || '未设置' }}</span>
           <span class="aw-chip" :class="directory.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ directory.enabled ? '已启用' : '已停用' }}</span>
           <button type="button" @click="toggleUploadDirectory(directory)">{{ directory.enabled ? '停用' : '启用' }}</button>
         </article>
@@ -966,35 +1075,18 @@ watch(
       </aside>
     </div>
 
-    <section v-if="previewAsset" class="aw-material-preview" role="dialog" aria-modal="true" aria-label="素材预览">
-      <div class="aw-material-preview__stage" @click.self="closePreview">
-        <AssetPreviewMedia
-          class="aw-material-preview__media"
-          :resolved-preview-url="resolvedSystemAssetPreviewUrl(previewMeta)"
-          :fallback-src="previewMeta?.download_url"
-          :alt="titleOf(previewAsset)"
-        />
-      </div>
-      <aside class="aw-material-preview__side">
-        <div class="aw-panel__head">
-          <div>
-            <p class="aw-eyebrow">暗场预览</p>
-            <h3>{{ titleOf(previewAsset) }}</h3>
-          </div>
-          <button class="aw-secondary-button" type="button" @click="closePreview">
-            <X :size="16" aria-hidden="true" />
-            关闭
-          </button>
-        </div>
-        <dl class="aw-material-detail__list">
-          <div v-for="[label, value] in activeDetailRows" :key="`preview-${label}`">
-            <dt>{{ label }}</dt>
-            <dd>{{ value }}</dd>
-          </div>
-        </dl>
-        <button class="aw-primary-button" type="button" @click="downloadAsset(previewAsset)">下载这个素材</button>
-      </aside>
-    </section>
+    <WorkbenchPreviewDialog
+      :open="previewDialogOpen"
+      :title="previewDialogTitle"
+      :preview-url="previewDialogUrl"
+      :fallback-src="previewDialogFallback"
+      :meta-rows="previewDialogRows"
+      :empty-label="previewLoading ? '正在加载预览' : '暂无可展示预览'"
+      eyebrow="暗场预览"
+      download-label="下载这个素材"
+      @close="closePreview"
+      @download="downloadPreviewAsset"
+    />
     </template>
   </section>
 </template>

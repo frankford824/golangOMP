@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `166` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `171` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -8375,6 +8375,141 @@ curl -X POST https://api.example.com/v1/experience/behavior-events:batch \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## GET /v1/experience/micro-question-eligibility
+
+### 简介
+支持方法: GET。
+
+- `GET`: Non-consuming eligibility check for low-interruption experience micro-questions. This side-channel never mutates task, asset, ERP, audit, cost, or permission state.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `suggestion_event_id` | query | string | 否 | Single-display suggestion id. Required for server-side suggestion lookup. |
+| `suggestion_stable_key` | query | string | 否 | - |
+| `surface` | query | string | 否 | - |
+| `target_type` | query | string | 否 | - |
+| `target_id` | query | string | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "eligible": true,
+    "remaining_daily": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | ExperienceMicroQuestionEligibility | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/experience/micro-question-eligibility \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/experience/micro-question-answers
+
+### 简介
+支持方法: POST。
+
+- `POST`: Records a side-channel answer for a low-interruption micro-question. Answers are separate from formal AI suggestion feedback and do not affect adoption-rate metrics directly.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `answer_event_key` | string | 否 | Optional idempotency key returned by eligibility. If omitted, the backend derives one. |
+| `suggestion_event_id` | string | 是 | - |
+| `suggestion_stable_key` | string | 否 | - |
+| `surface` | string | 是 | - |
+| `target_type` | string | 是 | - |
+| `target_id` | string | 是 | - |
+| `answer_value` | enum(answered/dismissed) | 是 | - |
+| `reason_code` | enum(temporarily_not_needed/will_handle_later/already_handled/not_relevant/missing_context/stage_not_applicable/customer_special_case/suggestion_outdated) | 否 | Required when `answer_value` is `answered`; optional when dismissed. |
+| `payload` | object | 否 | - |
+
+### 响应体 schema
+成功响应: `201 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "answer_event_key": "string",
+    "suggestion_event_id": "string",
+    "suggestion_stable_key": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | ExperienceMicroQuestionAnswer | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request or daily micro-question quota exhausted |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/experience/micro-question-answers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## POST /v1/ai-suggestions/{suggestion_event_id}/feedback
 
 ### 简介
@@ -9102,7 +9237,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/accounts/merge \
 ### 简介
 支持方法: GET。
 
-- `GET`: Name-based lookup for assignment and group member selectors. Returns masked, non-PII workbench member summaries.
+- `GET`: Name-based lookup for opening workbench access and member selectors. Returns masked, non-PII workbench member summaries.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -9222,6 +9357,249 @@ curl -X GET https://api.example.com/v1/asset-workbench/groups/<group_id>/members
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## GET /v1/asset-workbench/difficulty-classes
+
+### 简介
+支持方法: GET, POST。
+
+- `GET`: List enabled asset workbench difficulty classes
+- `POST`: Create asset workbench difficulty class
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### GET 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "code": "...",
+      "name": "...",
+      "description": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<object> | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+##### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/difficulty-classes \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### POST 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `code` | string | 是 | Stable pricing code used by rules and historical snapshots. |
+| `name` | string | 是 | - |
+| `description` | string | 否 | - |
+| `enabled` | boolean | 否 | - |
+| `sort_order` | integer | 否 | - |
+
+##### 响应体 schema
+成功响应: `201 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "code": "string",
+    "name": "string",
+    "description": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+##### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/asset-workbench/difficulty-classes \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/difficulty-classes/admin
+
+### 简介
+支持方法: GET。
+
+- `GET`: List all asset workbench difficulty classes for administration
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "code": "...",
+      "name": "...",
+      "description": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<object> | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/difficulty-classes/admin \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## PATCH /v1/asset-workbench/difficulty-classes/{difficulty_code}
+
+### 简介
+支持方法: PATCH。
+
+- `PATCH`: The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, or sort order.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `PATCH` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `difficulty_code` | path | string | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | 否 | - |
+| `description` | string | 否 | - |
+| `enabled` | boolean | 否 | - |
+| `sort_order` | integer | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "code": "string",
+    "name": "string",
+    "description": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | Difficulty class not found |
+
+### curl 示例
+```bash
+curl -X PATCH https://api.example.com/v1/asset-workbench/difficulty-classes/<difficulty_code> \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## GET /v1/asset-workbench/price-matrix
 
 ### 简介
@@ -9303,7 +9681,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `worker_type` | enum(fulltime/parttime) | 是 | - |
 | `job_grade` | string | 是 | - |
-| `difficulty_class` | enum(A/B/C/A+小夜灯) | 是 | - |
+| `difficulty_class` | string | 是 | Must match an enabled difficulty class code. |
 | `unit_price` | number | 是 | - |
 | `effective_from` | string | 是 | - |
 | `effective_to` | string | 否 | - |
@@ -9445,7 +9823,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `worker_type` | enum(fulltime/parttime) | 是 | - |
 | `job_grade` | string | 是 | - |
-| `difficulty_class` | enum(A/B/C/A+小夜灯) | 是 | - |
+| `difficulty_class` | string | 是 | Must match an enabled difficulty class code. |
 | `unit_price` | number | 是 | - |
 | `effective_from` | string | 是 | - |
 | `effective_to` | string | 否 | - |
@@ -9575,7 +9953,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `worker_type` | enum(all/fulltime/parttime) | 是 | - |
 | `job_grade` | string | 是 | - |
-| `difficulty_class` | enum(all/A/B/C/A+小夜灯) | 是 | - |
+| `difficulty_class` | string | 是 | Use all for wildcard |
 | `deduction_amount` | number | 是 | - |
 | `effective_from` | string | 是 | - |
 | `effective_to` | string | 否 | - |
@@ -9716,7 +10094,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `worker_type` | enum(all/fulltime/parttime) | 是 | - |
 | `job_grade` | string | 是 | - |
-| `difficulty_class` | enum(all/A/B/C/A+小夜灯) | 是 | - |
+| `difficulty_class` | string | 是 | Use all for wildcard |
 | `deduction_amount` | number | 是 | - |
 | `effective_from` | string | 是 | - |
 | `effective_to` | string | 否 | - |
@@ -10111,7 +10489,7 @@ Content-Type: `application/json`
 | `priority` | integer | 否 | - |
 | `worker_type` | enum(all/fulltime/parttime) | 否 | - |
 | `job_grade` | string | 否 | - |
-| `difficulty_class` | enum(all/A/B/C/A+小夜灯) | 否 | - |
+| `difficulty_class` | string | 否 | Use all for wildcard |
 | `eligible_user_ids_json` | array<integer> | 否 | - |
 | `eligible_codes_json` | array<string> | 否 | - |
 | `effective_from` | string | 是 | - |
@@ -10258,7 +10636,7 @@ Content-Type: `application/json`
 | `priority` | integer | 否 | - |
 | `worker_type` | enum(all/fulltime/parttime) | 否 | - |
 | `job_grade` | string | 否 | - |
-| `difficulty_class` | enum(all/A/B/C/A+小夜灯) | 否 | - |
+| `difficulty_class` | string | 否 | Use all for wildcard |
 | `eligible_user_ids_json` | array<integer> | 否 | - |
 | `eligible_codes_json` | array<string> | 否 | - |
 | `effective_from` | string | 是 | - |
@@ -10381,7 +10759,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/overview-search \
 支持方法: GET, POST。
 
 - `GET`: Lists submitted asset workbench batches. Managers can sort by creation time, first file type, or first filename; submitters are scoped to their own submissions.
-- `POST`: Creates uploaded work records. Client uploads no longer need a frontend "template/type" selection: when an item omits `difficulty_class`, the backend derives it from the uploaded session's upload-directory difficulty snapshot. `template_id` remains supported for compatibility.
+- `POST`: Creates uploaded work records. Client uploads no longer need a frontend "template/type" selection: when an item omits `difficulty_class`, the backend derives it from the uploaded session's upload-directory difficulty snapshot. New integrations should submit by upload directory and difficulty snapshot, not by legacy template assignment.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -10600,7 +10978,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `order_no` | string | 否 | - |
-| `difficulty_class` | enum(A/B/C/A+小夜灯) | 否 | - |
+| `difficulty_class` | string | 否 | Must match an enabled difficulty class code. |
 | `finalized` | boolean | 否 | - |
 | `page_count` | integer | 否 | - |
 | `reason` | string | 否 | - |
@@ -11339,7 +11717,7 @@ Content-Type: `application/json`
 | `name` | string | 是 | - |
 | `oss_prefix` | string | 是 | Relative OSS prefix under asset-workbench/uploads. |
 | `description` | string | 否 | - |
-| `difficulty_class` | enum(A/B/C/A+小夜灯) | 否 | - |
+| `difficulty_class` | string | 是 | Must match an enabled difficulty class code. |
 | `enabled` | boolean | 否 | - |
 | `sort_order` | integer | 否 | - |
 
@@ -11471,7 +11849,7 @@ Content-Type: `application/json`
 | `name` | string | 否 | - |
 | `oss_prefix` | string | 否 | - |
 | `description` | string | 否 | - |
-| `difficulty_class` | enum(A/B/C/A+小夜灯) | 否 | - |
+| `difficulty_class` | string | 否 | Must match an enabled difficulty class code. |
 | `enabled` | boolean | 否 | - |
 | `sort_order` | integer | 否 | - |
 

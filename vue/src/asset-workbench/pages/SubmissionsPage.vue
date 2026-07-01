@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import {
   assetWorkbenchApi,
   type AssetWorkbenchEventRow,
   type AssetWorkbenchSavedView,
+  type DifficultyClassRow,
+  type FilePreviewMeta,
   type SubmissionDetail,
   type SubmissionFileRow,
   type SubmissionItemRow,
@@ -15,10 +18,12 @@ import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { exportQCImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { chipClass, previewStatusMeta, pricingStatusMeta, qcStatusMeta, submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
+import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 type ItemActionKind = 'needs_fix' | 'void' | 'reprice'
@@ -52,6 +57,7 @@ const rows = ref<SubmissionRow[]>([])
 const total = ref(0)
 const savedViews = ref<AssetWorkbenchSavedView[]>([])
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
+const difficultyRows = ref<DifficultyClassRow[]>([])
 const selectedDetail = ref<SubmissionDetail | null>(null)
 const selectedFileIds = ref<Set<number>>(new Set())
 const qcRejectionMessages = ref<QCRejectionMessage[]>([])
@@ -70,15 +76,28 @@ const orderBy = ref<SubmissionOrderBy>('submitted_at')
 const orderDir = ref<SubmissionOrderDir>('desc')
 const moveDirectoryId = ref(0)
 const deleteReason = ref('')
-const difficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
+const previewDialog = ref<{
+  open: boolean
+  title: string
+  previewUrl: string
+  emptyLabel: string
+  metaRows: Array<[string, string]>
+}>({
+  open: false,
+  title: '',
+  previewUrl: '',
+  emptyLabel: '',
+  metaRows: [],
+})
 const editForm = ref({
   order_no: '',
-  difficulty_class: 'A',
+  difficulty_class: '',
   finalized: true,
   page_count: 1,
   reason: '',
 })
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
+const router = useRouter()
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
 const submissionsRequest = usePageRequest(
   () => assetWorkbenchApi.listSubmissions({ page: 1, page_size: 50, order_by: orderBy.value, order_dir: orderDir.value }),
@@ -87,6 +106,7 @@ const submissionsRequest = usePageRequest(
 )
 const loading = submissionsRequest.loading
 const error = submissionsRequest.error
+const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 
 const selectedFiles = computed(() => {
   const detail = selectedDetail.value
@@ -142,7 +162,7 @@ const detailItemGridColumns = computed<GridColumn[]>(() => [
   { key: 'qc_status', label: '质检', width: 96 },
   { key: 'gross_amount', label: '毛额', width: 108, align: 'right' },
   { key: 'file_count', label: '文件', width: 84, align: 'right' },
-  { key: 'action', label: '动作', width: 280, align: 'center' },
+  { key: 'action', label: '动作', width: 360, align: 'center' },
 ])
 const detailFileGridColumns = computed<GridColumn[]>(() => [
   { key: 'selected', label: '选择', width: 84, align: 'center' },
@@ -261,6 +281,14 @@ async function loadUploadDirectories() {
     if (!moveDirectoryId.value && uploadDirectories.value[0]) moveDirectoryId.value = uploadDirectories.value[0].id
   } catch {
     uploadDirectories.value = []
+  }
+}
+
+async function loadDifficultyClasses() {
+  try {
+    difficultyRows.value = await assetWorkbenchApi.listDifficultyClasses()
+  } catch {
+    difficultyRows.value = []
   }
 }
 
@@ -383,6 +411,15 @@ function gridRowAsSubmission(row: Record<string, unknown>): SubmissionGridRow {
 
 function gridRowAsFile(row: Record<string, unknown>): DetailFileGridRow {
   return row as unknown as DetailFileGridRow
+}
+
+function itemNeedsGrade(item: SubmissionItemRow) {
+  return item.pricing_status === 'pending_grade'
+}
+
+async function goToProfileGrading(item: SubmissionItemRow) {
+  if (!item.payee_user_id) return
+  await router.push({ path: '/settings/people', query: { user_id: String(item.payee_user_id) } })
 }
 
 async function downloadFile(file: SubmissionFileRow) {
@@ -511,11 +548,28 @@ function startEditItem(item: SubmissionItemRow) {
   editingItem.value = item
   editForm.value = {
     order_no: item.order_no,
-    difficulty_class: item.difficulty_class || 'A',
+    difficulty_class: item.difficulty_class || firstDifficultyCode(difficultyRows.value),
     finalized: item.finalized,
     page_count: item.page_count || 1,
     reason: '',
   }
+}
+
+function openFilePreview(payload: { title: string; previewUrl: string; meta: FilePreviewMeta | null; statusText: string }) {
+  previewDialog.value = {
+    open: true,
+    title: payload.title,
+    previewUrl: payload.previewUrl,
+    emptyLabel: payload.statusText,
+    metaRows: [
+      ['预览状态', payload.meta?.status || '等待生成'],
+      ['过期时间', payload.meta?.expires_at || '—'],
+    ],
+  }
+}
+
+function closeFilePreview() {
+  previewDialog.value.open = false
 }
 
 async function saveItemEdit() {
@@ -557,7 +611,7 @@ async function executePendingAction() {
       notice.value = `已作废 ${action.item.order_no}`
     } else {
       const updated = await assetWorkbenchApi.repriceSubmissionItem(action.item.id, action.reason.trim())
-      notice.value = `已重计价 ${action.item.order_no}：${updated.pricing_status}`
+      notice.value = `已重计价 ${action.item.order_no}：${pricingStatusMeta(updated.pricing_status).label}`
     }
     pendingAction.value = null
     await refreshSelectedDetail()
@@ -619,7 +673,7 @@ async function deleteSelectedFiles() {
 
 onMounted(async () => {
   await refreshBootstrap()
-  await Promise.all([loadSubmissions(), loadSavedViews(), loadUploadDirectories()])
+  await Promise.all([loadSubmissions(), loadSavedViews(), loadUploadDirectories(), loadDifficultyClasses()])
 })
 </script>
 
@@ -700,10 +754,13 @@ onMounted(async () => {
           :row-height="gridRowHeight"
         >
           <template #cell="{ row, column, value }">
-            <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="openSubmission(gridRowAsSubmission(row))">{{ isSimpleUser ? '查看' : '文件' }}</button>
+            <div v-if="column.key === 'action'" class="aw-inline-actions aw-inline-actions--compact">
+              <button class="aw-grid-button" type="button" @click="openSubmission(gridRowAsSubmission(row))">
+                {{ isSimpleUser ? '查看' : '文件' }}
+              </button>
               <button
                 v-if="canManageItems && gridRowAsSubmission(row).status !== 'voided'"
+                class="aw-grid-button"
                 type="button"
                 @click="startSubmissionVoid(gridRowAsSubmission(row))"
               >
@@ -779,13 +836,21 @@ onMounted(async () => {
         :row-height="gridRowHeight"
       >
         <template #cell="{ row, column, value }">
-          <div v-if="column.key === 'action'" class="aw-inline-actions">
+          <div v-if="column.key === 'action'" class="aw-inline-actions aw-inline-actions--compact">
             <template v-if="canManageItems">
-              <button type="button" @click="startEditItem(gridRowAsItem(row))">编辑</button>
-              <button type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
-              <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
-              <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
-              <button type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
+              <button
+                v-if="itemNeedsGrade(gridRowAsItem(row))"
+                class="aw-grid-button aw-grid-button--strong"
+                type="button"
+                @click="goToProfileGrading(gridRowAsItem(row))"
+              >
+                去定级
+              </button>
+              <button class="aw-grid-button" type="button" @click="startEditItem(gridRowAsItem(row))">编辑</button>
+              <button class="aw-grid-button" type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
+              <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
+              <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
+              <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
             </template>
             <span v-else class="aw-chip aw-chip--neutral">只读</span>
           </div>
@@ -894,7 +959,7 @@ onMounted(async () => {
           </div>
           <span class="aw-chip aw-chip--neutral">已选 {{ formatInt(selectedFileIds.size) }}</span>
         </div>
-        <div class="aw-grid-toolbar">
+        <div class="aw-batch-maintenance-form">
           <label class="aw-field">
             <span>移动到</span>
             <select v-model.number="moveDirectoryId" :disabled="!uploadDirectories.length">
@@ -904,26 +969,32 @@ onMounted(async () => {
               </option>
             </select>
           </label>
-          <button
-            class="aw-secondary-button"
-            type="button"
-            :disabled="fileActionSaving || selectedFileIds.size === 0 || !moveDirectoryId"
-            @click="moveSelectedFiles"
-          >
-            移动所选
-          </button>
+          <div class="aw-field aw-field--action">
+            <span aria-hidden="true">&nbsp;</span>
+            <button
+              class="aw-secondary-button"
+              type="button"
+              :disabled="fileActionSaving || selectedFileIds.size === 0 || !moveDirectoryId"
+              @click="moveSelectedFiles"
+            >
+              移动所选
+            </button>
+          </div>
           <label class="aw-field">
             <span>删除原因</span>
             <input v-model.trim="deleteReason" placeholder="删除文件必须填写原因" />
           </label>
-          <button
-            class="aw-secondary-button"
-            type="button"
-            :disabled="fileActionSaving || selectedFileIds.size === 0 || !deleteReason.trim()"
-            @click="deleteSelectedFiles"
-          >
-            删除所选
-          </button>
+          <div class="aw-field aw-field--action">
+            <span aria-hidden="true">&nbsp;</span>
+            <button
+              class="aw-secondary-button"
+              type="button"
+              :disabled="fileActionSaving || selectedFileIds.size === 0 || !deleteReason.trim()"
+              @click="deleteSelectedFiles"
+            >
+              删除所选
+            </button>
+          </div>
         </div>
       </div>
       <WorkbenchDataGrid
@@ -945,12 +1016,20 @@ onMounted(async () => {
             />
             <span>{{ gridRowAsFile(row).id }}</span>
           </label>
-          <button v-else-if="column.key === 'action'" type="button" @click="downloadFile(gridRowAsFile(row))">下载</button>
+          <button
+            v-else-if="column.key === 'action'"
+            class="aw-grid-button"
+            type="button"
+            @click="downloadFile(gridRowAsFile(row))"
+          >
+            下载
+          </button>
           <WorkbenchFilePreview
             v-else-if="column.key === 'preview_tile'"
             class="aw-preview-tile--table"
             :file-id="gridRowAsFile(row).id"
             :alt="gridRowAsFile(row).original_filename"
+            @preview="openFilePreview"
           />
           <span v-else-if="column.key === 'file_type'">{{ gridRowAsFile(row).file_type || gridRowAsFile(row).mime_type }}</span>
           <span v-else-if="column.key === 'page_count'" class="aw-cell-num">{{ formatInt(value) }}</span>
@@ -966,6 +1045,15 @@ onMounted(async () => {
       <div v-else class="aw-empty-state">
         <h3>没有文件</h3>
       </div>
+      <WorkbenchPreviewDialog
+        :open="previewDialog.open"
+        :title="previewDialog.title"
+        :preview-url="previewDialog.previewUrl"
+        :empty-label="previewDialog.emptyLabel"
+        :meta-rows="previewDialog.metaRows"
+        eyebrow="文件预览"
+        @close="closeFilePreview"
+      />
     </div>
   </section>
 </template>

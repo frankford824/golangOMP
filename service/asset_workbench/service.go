@@ -296,6 +296,21 @@ type MergeConflict struct {
 	CanonicalValue string `json:"canonical_value"`
 }
 
+type CreateDifficultyClassParams struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     *bool  `json:"enabled"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+type UpdateDifficultyClassParams struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Enabled     *bool   `json:"enabled"`
+	SortOrder   *int    `json:"sort_order"`
+}
+
 type CreatePriceMatrixParams struct {
 	WorkerType      string     `json:"worker_type"`
 	JobGrade        string     `json:"job_grade"`
@@ -358,21 +373,6 @@ type UpsertGroupParams struct {
 
 type GroupMembersParams struct {
 	UserIDs []int64 `json:"user_ids"`
-}
-
-type UpsertTemplateParams struct {
-	Name            string `json:"name"`
-	Category        string `json:"category"`
-	DifficultyClass string `json:"difficulty_class"`
-	WorkerType      string `json:"worker_type"`
-	Enabled         bool   `json:"enabled"`
-	SortOrder       int    `json:"sort_order"`
-}
-
-type AssignTemplateParams struct {
-	TemplateID int64   `json:"template_id"`
-	UserIDs    []int64 `json:"user_ids"`
-	GroupIDs   []int64 `json:"group_ids"`
 }
 
 type CreateUploadDirectoryParams struct {
@@ -1496,7 +1496,6 @@ func mergeRewriteCountsMap(counts repo.AssetWorkbenchMergeRewriteCounts, revoked
 		"settlement_items":         counts.SettlementItems,
 		"settlement_items_deduped": counts.SettlementItemsDeduped,
 		"group_members":            counts.GroupMembers,
-		"template_assignments":     counts.TemplateAssignments,
 		"saved_views":              counts.SavedViews,
 		"grade_periods":            counts.GradePeriods,
 		"supplement_permissions":   counts.SupplementPermissions,
@@ -1609,6 +1608,121 @@ func maskSensitiveValue(value string, prefix, suffix int) string {
 	return string(runes[:prefix]) + strings.Repeat("*", len(runes)-prefix-suffix) + string(runes[len(runes)-suffix:])
 }
 
+func (s *Service) ListDifficultyClasses(ctx context.Context, actor domain.RequestActor, admin bool) ([]*domain.AssetWorkbenchDifficultyClass, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if admin {
+		if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench admins can list difficulty classes for administration.", nil)
+		}
+		items, err := s.repo.ListDifficultyClasses(ctx, repo.AssetWorkbenchDifficultyClassFilter{})
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench difficulty classes.", err.Error())
+		}
+		return items, nil
+	}
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement, domain.RoleHRAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can list difficulty classes.", nil)
+	}
+	enabled := true
+	items, err := s.repo.ListDifficultyClasses(ctx, repo.AssetWorkbenchDifficultyClassFilter{Enabled: &enabled})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench difficulty classes.", err.Error())
+	}
+	return items, nil
+}
+
+func (s *Service) CreateDifficultyClass(ctx context.Context, actor domain.RequestActor, params CreateDifficultyClassParams) (*domain.AssetWorkbenchDifficultyClass, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only pricing admins can create difficulty classes.", nil)
+	}
+	code, appErr := normalizeWorkbenchDifficultyCode(params.Code, false)
+	if appErr != nil {
+		return nil, appErr
+	}
+	name := strings.TrimSpace(params.Name)
+	if name == "" {
+		name = code
+	}
+	item := &domain.AssetWorkbenchDifficultyClass{
+		Code:        code,
+		Name:        name,
+		Description: strings.TrimSpace(params.Description),
+		Enabled:     boolValueDefault(params.Enabled, true),
+		SortOrder:   params.SortOrder,
+		CreatedBy:   &actor.ID,
+		UpdatedBy:   &actor.ID,
+	}
+	var created *domain.AssetWorkbenchDifficultyClass
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		created, err = s.repo.CreateDifficultyClass(ctx, tx, item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventDifficultyUpserted, domain.AssetWorkbenchEntityDifficultyClass, &created.ID, nil, created, "create difficulty class")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench difficulty class.", err.Error())
+	}
+	return created, nil
+}
+
+func (s *Service) UpdateDifficultyClass(ctx context.Context, actor domain.RequestActor, code string, params UpdateDifficultyClassParams) (*domain.AssetWorkbenchDifficultyClass, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only pricing admins can update difficulty classes.", nil)
+	}
+	normalizedCode, appErr := normalizeWorkbenchDifficultyCode(code, false)
+	if appErr != nil {
+		return nil, appErr
+	}
+	existing, err := s.repo.GetDifficultyClass(ctx, normalizedCode)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Difficulty class not found.", "Failed to load difficulty class.")
+	}
+	item := *existing
+	if params.Name != nil {
+		item.Name = strings.TrimSpace(*params.Name)
+	}
+	if item.Name == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name is required.", nil)
+	}
+	if params.Description != nil {
+		item.Description = strings.TrimSpace(*params.Description)
+	}
+	if params.Enabled != nil {
+		item.Enabled = *params.Enabled
+	}
+	if params.SortOrder != nil {
+		item.SortOrder = *params.SortOrder
+	}
+	item.UpdatedBy = &actor.ID
+	var updated *domain.AssetWorkbenchDifficultyClass
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateDifficultyClass(ctx, tx, &item)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventDifficultyUpserted, domain.AssetWorkbenchEntityDifficultyClass, &updated.ID, existing, updated, "update difficulty class")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, mapRepoReadError(err, "Difficulty class not found.", "Failed to update difficulty class.")
+	}
+	return updated, nil
+}
+
 func (s *Service) ListPriceMatrix(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchPriceMatrixFilter) ([]*domain.AssetWorkbenchPriceMatrix, int64, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, 0, err
@@ -1632,6 +1746,9 @@ func (s *Service) CreatePriceMatrix(ctx context.Context, actor domain.RequestAct
 	}
 	item, appErr := normalizePriceMatrix(actor.ID, params)
 	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.ensureDifficultyClass(ctx, item.DifficultyClass, false); appErr != nil {
 		return nil, appErr
 	}
 	var created *domain.AssetWorkbenchPriceMatrix
@@ -1710,6 +1827,9 @@ func (s *Service) SupersedePriceMatrix(ctx context.Context, actor domain.Request
 	}
 	next, appErr := normalizePriceMatrix(actor.ID, params)
 	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.ensureDifficultyClass(ctx, next.DifficultyClass, false); appErr != nil {
 		return nil, appErr
 	}
 	var created *domain.AssetWorkbenchPriceMatrix
@@ -1797,6 +1917,9 @@ func (s *Service) CreateDeductionRule(ctx context.Context, actor domain.RequestA
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr := s.ensureDifficultyClass(ctx, item.DifficultyClass, true); appErr != nil {
+		return nil, appErr
+	}
 	var created *domain.AssetWorkbenchDeductionRule
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		existing, err := s.repo.LockDeductionRuleDimension(ctx, tx, item.WorkerType, item.JobGrade, item.DifficultyClass)
@@ -1873,6 +1996,9 @@ func (s *Service) SupersedeDeductionRule(ctx context.Context, actor domain.Reque
 	}
 	next, appErr := normalizeDeductionRule(actor.ID, params)
 	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.ensureDifficultyClass(ctx, next.DifficultyClass, true); appErr != nil {
 		return nil, appErr
 	}
 	var created *domain.AssetWorkbenchDeductionRule
@@ -2047,6 +2173,9 @@ func (s *Service) CreatePromoCoupon(ctx context.Context, actor domain.RequestAct
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr := s.ensureDifficultyClass(ctx, item.DifficultyClass, true); appErr != nil {
+		return nil, appErr
+	}
 	var created *domain.AssetWorkbenchPromoCoupon
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		var err error
@@ -2100,6 +2229,9 @@ func (s *Service) SupersedePromoCoupon(ctx context.Context, actor domain.Request
 	}
 	next, appErr := normalizePromoCoupon(actor.ID, params)
 	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.ensureDifficultyClass(ctx, next.DifficultyClass, true); appErr != nil {
 		return nil, appErr
 	}
 	var created *domain.AssetWorkbenchPromoCoupon
@@ -2306,213 +2438,6 @@ func (s *Service) ListGroupMembers(ctx context.Context, actor domain.RequestActo
 	return items, nil
 }
 
-func (s *Service) ListTemplates(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchTemplateFilter) ([]*domain.AssetWorkbenchTemplate, int64, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, 0, err
-	}
-	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
-		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can list templates.", nil)
-	}
-	items, total, err := s.repo.ListTemplates(ctx, filter)
-	if err != nil {
-		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench templates.", err.Error())
-	}
-	return items, total, nil
-}
-
-func (s *Service) ListMyTemplates(ctx context.Context, actor domain.RequestActor) ([]*domain.AssetWorkbenchTemplate, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if !actorHasAny(actor, assetWorkbenchRolesForService()...) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Authentication required.", nil)
-	}
-	if isAssetWorkbenchAdmin(actor) {
-		enabled := true
-		items, _, err := s.repo.ListTemplates(ctx, repo.AssetWorkbenchTemplateFilter{Enabled: &enabled, PageSize: 500})
-		if err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench templates.", err.Error())
-		}
-		return items, nil
-	}
-	items, err := s.repo.ListTemplatesForUser(ctx, actor.ID)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list assigned asset workbench templates.", err.Error())
-	}
-	return items, nil
-}
-
-func (s *Service) CreateTemplate(ctx context.Context, actor domain.RequestActor, params UpsertTemplateParams) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can create templates.", nil)
-	}
-	item, appErr := normalizeWorkbenchTemplate(actor.ID, 0, params, true)
-	if appErr != nil {
-		return nil, appErr
-	}
-	var created *domain.AssetWorkbenchTemplate
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		var err error
-		created, err = s.repo.CreateTemplate(ctx, tx, item)
-		if err != nil {
-			return err
-		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateUpserted, domain.AssetWorkbenchEntityTemplate, &created.ID, nil, created, "create template")
-	}); err != nil {
-		if appErr := asAppError(err); appErr != nil {
-			return nil, appErr
-		}
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench template.", err.Error())
-	}
-	return created, nil
-}
-
-func (s *Service) UpdateTemplate(ctx context.Context, actor domain.RequestActor, templateID int64, params UpsertTemplateParams) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can update templates.", nil)
-	}
-	item, appErr := normalizeWorkbenchTemplate(actor.ID, templateID, params, params.Enabled)
-	if appErr != nil {
-		return nil, appErr
-	}
-	var updated *domain.AssetWorkbenchTemplate
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		var err error
-		updated, err = s.repo.UpdateTemplate(ctx, tx, item)
-		if err != nil {
-			return err
-		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateUpserted, domain.AssetWorkbenchEntityTemplate, &updated.ID, nil, updated, "update template")
-	}); err != nil {
-		if appErr := asAppError(err); appErr != nil {
-			return nil, appErr
-		}
-		return nil, mapRepoReadError(err, "Template not found.", "Failed to update asset workbench template.")
-	}
-	return updated, nil
-}
-
-func (s *Service) DeleteTemplate(ctx context.Context, actor domain.RequestActor, templateID int64) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if !actorHasAny(actor, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only template admins can disable templates.", nil)
-	}
-	var updated *domain.AssetWorkbenchTemplate
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		var err error
-		updated, err = s.repo.SetTemplateEnabled(ctx, tx, templateID, false)
-		if err != nil {
-			return err
-		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateUpserted, domain.AssetWorkbenchEntityTemplate, &updated.ID, nil, updated, "disable template")
-	}); err != nil {
-		if appErr := asAppError(err); appErr != nil {
-			return nil, appErr
-		}
-		return nil, mapRepoReadError(err, "Template not found.", "Failed to disable asset workbench template.")
-	}
-	return updated, nil
-}
-
-func (s *Service) ListTemplateAssignments(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchTemplateAssignmentFilter) ([]*domain.AssetWorkbenchTemplateAssignment, int64, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, 0, err
-	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
-		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list template assignments.", nil)
-	}
-	items, total, err := s.repo.ListTemplateAssignments(ctx, filter)
-	if err != nil {
-		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench template assignments.", err.Error())
-	}
-	return items, total, nil
-}
-
-func (s *Service) AssignTemplate(ctx context.Context, actor domain.RequestActor, params AssignTemplateParams) ([]*domain.AssetWorkbenchTemplateAssignment, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can assign templates.", nil)
-	}
-	if params.TemplateID <= 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "template_id is required.", nil)
-	}
-	userIDs := positiveUniqueInt64s(params.UserIDs)
-	groupIDs := positiveUniqueInt64s(params.GroupIDs)
-	if len(userIDs) == 0 && len(groupIDs) == 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_ids or group_ids are required.", nil)
-	}
-	assignments := []*domain.AssetWorkbenchTemplateAssignment{}
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		for _, userID := range userIDs {
-			created, err := s.repo.CreateTemplateAssignment(ctx, tx, &domain.AssetWorkbenchTemplateAssignment{
-				TemplateID: params.TemplateID,
-				TargetType: domain.AssetWorkbenchAssignmentTargetUser,
-				TargetID:   userID,
-				Enabled:    true,
-				AssignedBy: actor.ID,
-			})
-			if err != nil {
-				return err
-			}
-			assignments = append(assignments, created)
-		}
-		for _, groupID := range groupIDs {
-			created, err := s.repo.CreateTemplateAssignment(ctx, tx, &domain.AssetWorkbenchTemplateAssignment{
-				TemplateID: params.TemplateID,
-				TargetType: domain.AssetWorkbenchAssignmentTargetGroup,
-				TargetID:   groupID,
-				Enabled:    true,
-				AssignedBy: actor.ID,
-			})
-			if err != nil {
-				return err
-			}
-			assignments = append(assignments, created)
-		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateAssigned, domain.AssetWorkbenchEntityTemplate, &params.TemplateID, nil, assignments, "assign template")
-	}); err != nil {
-		if appErr := asAppError(err); appErr != nil {
-			return nil, appErr
-		}
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to assign asset workbench template.", err.Error())
-	}
-	return assignments, nil
-}
-
-func (s *Service) DeleteTemplateAssignment(ctx context.Context, actor domain.RequestActor, assignmentID int64) (*domain.AssetWorkbenchTemplateAssignment, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can remove template assignments.", nil)
-	}
-	var updated *domain.AssetWorkbenchTemplateAssignment
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		var err error
-		updated, err = s.repo.SetTemplateAssignmentEnabled(ctx, tx, assignmentID, false)
-		if err != nil {
-			return err
-		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventTemplateAssignmentRemoved, domain.AssetWorkbenchEntityTemplateAssignment, &updated.ID, nil, updated, "remove assignment")
-	}); err != nil {
-		if appErr := asAppError(err); appErr != nil {
-			return nil, appErr
-		}
-		return nil, mapRepoReadError(err, "Template assignment not found.", "Failed to remove asset workbench template assignment.")
-	}
-	return updated, nil
-}
-
 func (s *Service) ListUploadDirectories(ctx context.Context, actor domain.RequestActor, admin bool) ([]*domain.AssetWorkbenchUploadDirectory, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
@@ -2555,6 +2480,9 @@ func (s *Service) CreateUploadDirectory(ctx context.Context, actor domain.Reques
 	}
 	difficulty, appErr := normalizeUploadDirectoryDifficulty(params.DifficultyClass)
 	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.ensureDifficultyClass(ctx, difficulty, false); appErr != nil {
 		return nil, appErr
 	}
 	item := &domain.AssetWorkbenchUploadDirectory{
@@ -2617,6 +2545,9 @@ func (s *Service) UpdateUploadDirectory(ctx context.Context, actor domain.Reques
 	if params.DifficultyClass != nil {
 		difficulty, appErr := normalizeUploadDirectoryDifficulty(*params.DifficultyClass)
 		if appErr != nil {
+			return nil, appErr
+		}
+		if appErr := s.ensureDifficultyClass(ctx, difficulty, false); appErr != nil {
 			return nil, appErr
 		}
 		item.DifficultyClass = difficulty
@@ -2884,6 +2815,13 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 					"upload_directory_difficulty_class": inferredDifficulty,
 				})
 			}
+			effectiveDifficulty := strings.TrimSpace(reqItem.DifficultyClass)
+			if template != nil {
+				effectiveDifficulty = strings.TrimSpace(template.DifficultyClass)
+			}
+			if appErr := s.ensureDifficultyClass(ctx, effectiveDifficulty, false); appErr != nil {
+				return appErr
+			}
 			item, appErr := s.buildSubmissionItem(ctx, actor.ID, createdSubmission.ID, now, businessMonth, profile, reqItem, template)
 			if appErr != nil {
 				return appErr
@@ -2960,12 +2898,11 @@ func (s *Service) loadSubmissionUploadSessions(ctx context.Context, actor domain
 		}
 		sessionDifficulty := strings.TrimSpace(session.UploadDirectoryDifficultyClass)
 		if sessionDifficulty != "" {
-			if !validWorkbenchDifficulty(sessionDifficulty, false) {
-				return nil, "", domain.NewAppError(domain.ErrCodeInvalidRequest, "Upload directory difficulty_class is not supported.", map[string]string{
-					"session_id":       session.SessionID,
-					"difficulty_class": sessionDifficulty,
-				})
+			normalizedDifficulty, appErr := normalizeWorkbenchDifficultyCode(sessionDifficulty, false)
+			if appErr != nil {
+				return nil, "", appErr
 			}
+			sessionDifficulty = normalizedDifficulty
 			if difficulty == "" {
 				difficulty = sessionDifficulty
 			} else if difficulty != sessionDifficulty {
@@ -3212,11 +3149,11 @@ func (s *Service) RepriceSubmissionItem(ctx context.Context, actor domain.Reques
 	if appErr != nil {
 		return nil, appErr
 	}
-	repriced, appErr := s.buildSubmissionItem(ctx, before.PayeeUserID, before.SubmissionID, before.SubmittedAt, before.BusinessMonth, &domain.AssetWorkbenchProfile{
-		UserID:     before.PayeeUserID,
-		WorkerType: before.WorkerTypeSnapshot,
-		JobGrade:   before.JobGradeSnapshot,
-	}, CreateSubmissionItemParams{
+	pricingProfile, appErr := s.pricingProfileForItem(ctx, before)
+	if appErr != nil {
+		return nil, appErr
+	}
+	repriced, appErr := s.buildSubmissionItem(ctx, before.PayeeUserID, before.SubmissionID, before.SubmittedAt, before.BusinessMonth, pricingProfile, CreateSubmissionItemParams{
 		OrderNo:         before.OrderNo,
 		DifficultyClass: before.DifficultyClass,
 		Finalized:       before.Finalized,
@@ -3284,14 +3221,19 @@ func (s *Service) UpdateSubmissionItem(ctx context.Context, actor domain.Request
 	if req.PageCount <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_count must be greater than zero.", nil)
 	}
-	if !validWorkbenchDifficulty(req.DifficultyClass, false) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": req.DifficultyClass})
+	normalizedDifficulty, appErr := normalizeWorkbenchDifficultyCode(req.DifficultyClass, false)
+	if appErr != nil {
+		return nil, appErr
 	}
-	next, appErr := s.buildSubmissionItem(ctx, before.PayeeUserID, before.SubmissionID, before.SubmittedAt, before.BusinessMonth, &domain.AssetWorkbenchProfile{
-		UserID:     before.PayeeUserID,
-		WorkerType: before.WorkerTypeSnapshot,
-		JobGrade:   before.JobGradeSnapshot,
-	}, req, nil)
+	req.DifficultyClass = normalizedDifficulty
+	if appErr := s.ensureDifficultyClass(ctx, req.DifficultyClass, false); appErr != nil {
+		return nil, appErr
+	}
+	pricingProfile, appErr := s.pricingProfileForItem(ctx, before)
+	if appErr != nil {
+		return nil, appErr
+	}
+	next, appErr := s.buildSubmissionItem(ctx, before.PayeeUserID, before.SubmissionID, before.SubmittedAt, before.BusinessMonth, pricingProfile, req, nil)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -3324,6 +3266,31 @@ func (s *Service) UpdateSubmissionItem(ctx context.Context, actor domain.Request
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to edit submission item.", err.Error())
 	}
 	return updated, nil
+}
+
+func (s *Service) pricingProfileForItem(ctx context.Context, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchProfile, *domain.AppError) {
+	profile := &domain.AssetWorkbenchProfile{
+		UserID:     item.PayeeUserID,
+		WorkerType: strings.TrimSpace(item.WorkerTypeSnapshot),
+		JobGrade:   strings.TrimSpace(item.JobGradeSnapshot),
+	}
+	if profile.WorkerType != "" && profile.JobGrade != "" {
+		return profile, nil
+	}
+	current, err := s.repo.GetProfileByUserID(ctx, item.PayeeUserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return profile, nil
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current asset workbench profile for pricing.", err.Error())
+	}
+	if profile.WorkerType == "" {
+		profile.WorkerType = strings.TrimSpace(current.WorkerType)
+	}
+	if profile.JobGrade == "" {
+		profile.JobGrade = strings.TrimSpace(current.JobGrade)
+	}
+	return profile, nil
 }
 
 func (s *Service) BatchMoveFiles(ctx context.Context, actor domain.RequestActor, params BatchMoveFilesParams) (*BatchFileMutationResult, *domain.AppError) {
@@ -4401,6 +4368,9 @@ func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.R
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr := s.ensureDifficultyClass(ctx, item.DifficultyClass, false); appErr != nil {
+		return nil, appErr
+	}
 	if appErr := s.ensureSupplementPermissionOpen(ctx, item.PayeeUserID, item.BusinessMonth); appErr != nil {
 		return nil, appErr
 	}
@@ -5131,6 +5101,11 @@ func (s *Service) buildSubmissionItem(ctx context.Context, payeeUserID, submissi
 	if orderNo == "" || difficulty == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no and difficulty_class are required.", nil)
 	}
+	normalizedDifficulty, appErr := normalizeWorkbenchDifficultyCode(difficulty, false)
+	if appErr != nil {
+		return nil, appErr
+	}
+	difficulty = normalizedDifficulty
 	if req.PageCount <= 0 {
 		req.PageCount = 1
 	}
@@ -5855,7 +5830,11 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 		addOrderNoByDifficulty(key, difficultyClass, supplement.OrderNo)
 	}
 
-	difficultyClasses := settlementReportDifficultyClasses(allDifficulties)
+	difficultyRanks, appErr := s.settlementReportDifficultyRanks(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
+	difficultyClasses := settlementReportDifficultyClasses(allDifficulties, difficultyRanks)
 	rows := make([]SettlementReportRow, 0, len(rowsByKey))
 	total := SettlementReportRow{
 		BusinessMonth: businessMonth,
@@ -6052,14 +6031,39 @@ func settlementReportDifficultyClass(value string) string {
 	return value
 }
 
-func settlementReportDifficultyClasses(values map[string]struct{}) []string {
+func (s *Service) settlementReportDifficultyRanks(ctx context.Context) (map[string]int, *domain.AppError) {
+	items, err := s.repo.ListDifficultyClasses(ctx, repo.AssetWorkbenchDifficultyClassFilter{})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench difficulty classes.", err.Error())
+	}
+	ranks := map[string]int{
+		"unclassified": 1_000_000,
+	}
+	for index, item := range items {
+		if item == nil {
+			continue
+		}
+		code := strings.TrimSpace(item.Code)
+		if code == "" {
+			continue
+		}
+		rank := item.SortOrder
+		if rank <= 0 {
+			rank = (index + 1) * 100
+		}
+		ranks[code] = rank
+	}
+	return ranks, nil
+}
+
+func settlementReportDifficultyClasses(values map[string]struct{}, ranks map[string]int) []string {
 	classes := make([]string, 0, len(values))
 	for value := range values {
 		classes = append(classes, value)
 	}
 	sort.Slice(classes, func(i, j int) bool {
-		leftRank := settlementReportDifficultyRank(classes[i])
-		rightRank := settlementReportDifficultyRank(classes[j])
+		leftRank := settlementReportDifficultyRank(classes[i], ranks)
+		rightRank := settlementReportDifficultyRank(classes[j], ranks)
 		if leftRank != rightRank {
 			return leftRank < rightRank
 		}
@@ -6068,21 +6072,15 @@ func settlementReportDifficultyClasses(values map[string]struct{}) []string {
 	return classes
 }
 
-func settlementReportDifficultyRank(value string) int {
-	switch strings.TrimSpace(value) {
-	case "A":
-		return 10
-	case "A+小夜灯":
-		return 20
-	case "B":
-		return 30
-	case "C":
-		return 40
-	case "unclassified":
-		return 10000
-	default:
-		return 1000
+func settlementReportDifficultyRank(value string, ranks map[string]int) int {
+	value = strings.TrimSpace(value)
+	if rank, ok := ranks[value]; ok {
+		return rank
 	}
+	if value == "unclassified" {
+		return 1_000_000
+	}
+	return 100_000
 }
 
 func settlementReportRowRank(rowType string) int {
@@ -6481,14 +6479,7 @@ func normalizeUploadDirectoryPrefix(raw string) (string, *domain.AppError) {
 }
 
 func normalizeUploadDirectoryDifficulty(raw string) (string, *domain.AppError) {
-	difficulty := strings.TrimSpace(raw)
-	if difficulty == "" {
-		difficulty = "A"
-	}
-	if !validWorkbenchDifficulty(difficulty, false) {
-		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
-	}
-	return difficulty, nil
+	return normalizeWorkbenchDifficultyCode(raw, false)
 }
 
 func boolValueDefault(value *bool, fallback bool) bool {
@@ -6640,18 +6631,39 @@ func (s *Service) requireRepo() *domain.AppError {
 	return nil
 }
 
+func (s *Service) ensureDifficultyClass(ctx context.Context, difficulty string, allowAll bool) *domain.AppError {
+	code, appErr := normalizeWorkbenchDifficultyCode(difficulty, allowAll)
+	if appErr != nil {
+		return appErr
+	}
+	if allowAll && code == domain.AssetWorkbenchWorkerTypeAll {
+		return nil
+	}
+	item, err := s.repo.GetDifficultyClass(ctx, code)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not configured.", map[string]string{"difficulty_class": code})
+		}
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to load difficulty class.", err.Error())
+	}
+	if !item.Enabled {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is disabled.", map[string]string{"difficulty_class": code})
+	}
+	return nil
+}
+
 func normalizePriceMatrix(actorID int64, params CreatePriceMatrixParams) (*domain.AssetWorkbenchPriceMatrix, *domain.AppError) {
 	workerType := normalizeWorkerType(params.WorkerType)
 	jobGrade := strings.TrimSpace(params.JobGrade)
-	difficulty := strings.TrimSpace(params.DifficultyClass)
-	if workerType == "" || jobGrade == "" || difficulty == "" {
+	difficulty, appErr := normalizeWorkbenchDifficultyCode(params.DifficultyClass, false)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if workerType == "" || jobGrade == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type, job_grade and difficulty_class are required.", nil)
 	}
 	if !validWorkbenchJobGrade(workerType, jobGrade, true) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
-	}
-	if !validWorkbenchDifficulty(difficulty, false) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
 	}
 	if params.UnitPrice < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "unit_price must be non-negative.", nil)
@@ -6679,15 +6691,15 @@ func normalizePriceMatrix(actorID int64, params CreatePriceMatrixParams) (*domai
 func normalizeDeductionRule(actorID int64, params CreateDeductionRuleParams) (*domain.AssetWorkbenchDeductionRule, *domain.AppError) {
 	workerType := normalizeWorkerType(defaultAll(params.WorkerType))
 	jobGrade := strings.TrimSpace(defaultAll(params.JobGrade))
-	difficulty := strings.TrimSpace(params.DifficultyClass)
-	if workerType == "" || jobGrade == "" || difficulty == "" {
+	difficulty, appErr := normalizeWorkbenchDifficultyCode(params.DifficultyClass, true)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if workerType == "" || jobGrade == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type, job_grade and difficulty_class are required.", nil)
 	}
 	if !validWorkbenchJobGrade(workerType, jobGrade, true) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
-	}
-	if !validWorkbenchDifficulty(difficulty, true) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
 	}
 	if params.DeductionAmount < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "deduction_amount must be non-negative.", nil)
@@ -6780,12 +6792,12 @@ func normalizePromoCoupon(actorID int64, params CreatePromoCouponParams) (*domai
 	}
 	workerType := normalizeWorkerType(defaultAll(params.WorkerType))
 	jobGrade := strings.TrimSpace(defaultAll(params.JobGrade))
-	difficulty := strings.TrimSpace(defaultAll(params.DifficultyClass))
+	difficulty, appErr := normalizeWorkbenchDifficultyCode(defaultAll(params.DifficultyClass), true)
+	if appErr != nil {
+		return nil, appErr
+	}
 	if !validWorkbenchJobGrade(workerType, jobGrade, true) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
-	}
-	if !validWorkbenchDifficulty(difficulty, true) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
 	}
 	return &domain.AssetWorkbenchPromoCoupon{
 		CouponCode:      code,
@@ -6814,8 +6826,11 @@ func normalizeSettlementSupplement(actorID int64, params CreateSettlementSupplem
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month must use YYYY-MM.", nil)
 	}
 	orderNo := strings.TrimSpace(params.OrderNo)
-	difficulty := strings.TrimSpace(params.DifficultyClass)
-	if params.PayeeUserID <= 0 || orderNo == "" || difficulty == "" {
+	difficulty, appErr := normalizeWorkbenchDifficultyCode(params.DifficultyClass, false)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if params.PayeeUserID <= 0 || orderNo == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "payee_user_id, order_no and difficulty_class are required.", nil)
 	}
 	if params.PageCount <= 0 {
@@ -7035,41 +7050,28 @@ func validWorkbenchJobGrade(workerType, jobGrade string, allowAll bool) bool {
 }
 
 func validWorkbenchDifficulty(value string, allowAll bool) bool {
-	value = strings.TrimSpace(value)
-	if allowAll && strings.EqualFold(value, domain.AssetWorkbenchWorkerTypeAll) {
-		return true
-	}
-	switch value {
-	case "A", "B", "C", "A+小夜灯":
-		return true
-	default:
-		return false
-	}
+	_, err := normalizeWorkbenchDifficultyCode(value, allowAll)
+	return err == nil
 }
 
-func normalizeWorkbenchTemplate(actorID, templateID int64, params UpsertTemplateParams, enabled bool) (*domain.AssetWorkbenchTemplate, *domain.AppError) {
-	name := strings.TrimSpace(params.Name)
-	difficulty := strings.TrimSpace(params.DifficultyClass)
-	if name == "" || difficulty == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name and difficulty_class are required.", nil)
+func normalizeWorkbenchDifficultyCode(value string, allowAll bool) (string, *domain.AppError) {
+	code := strings.TrimSpace(value)
+	if allowAll && strings.EqualFold(code, domain.AssetWorkbenchWorkerTypeAll) {
+		return domain.AssetWorkbenchWorkerTypeAll, nil
 	}
-	workerType := normalizeWorkerType(params.WorkerType)
-	if workerType == domain.AssetWorkbenchWorkerTypeAll {
-		workerType = ""
+	if code == "" {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is required.", nil)
 	}
-	if workerType != "" && workerType != domain.AssetWorkbenchWorkerTypeFulltime && workerType != domain.AssetWorkbenchWorkerTypeParttime {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type must be fulltime, parttime or empty.", nil)
+	if strings.EqualFold(code, domain.AssetWorkbenchWorkerTypeAll) {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class cannot use reserved all value.", map[string]string{"difficulty_class": code})
 	}
-	return &domain.AssetWorkbenchTemplate{
-		ID:              templateID,
-		Name:            name,
-		Category:        strings.TrimSpace(params.Category),
-		DifficultyClass: difficulty,
-		WorkerType:      workerType,
-		Enabled:         enabled,
-		SortOrder:       params.SortOrder,
-		CreatedBy:       actorID,
-	}, nil
+	if len([]rune(code)) > 64 {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class cannot exceed 64 characters.", map[string]string{"difficulty_class": code})
+	}
+	if strings.ContainsAny(code, "\x00\r\n\t") {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class cannot contain control characters.", map[string]string{"difficulty_class": code})
+	}
+	return code, nil
 }
 
 func normalizePromoMode(value string) string {
@@ -7632,7 +7634,6 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.manage",
 			"asset.workbench.group.manage",
 			"asset.workbench.member.manage",
-			"asset.workbench.template.assign",
 			"asset.workbench.system_search",
 			"asset.workbench.download",
 		)
@@ -7641,8 +7642,6 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 		actions = append(actions,
 			"asset.workbench.bootstrap",
 			"asset.workbench.cost_center.manage",
-			"asset.workbench.template.manage",
-			"asset.workbench.template.assign",
 		)
 	}
 	if actorHasAny(actor, domain.RoleAssetSettlement) {
@@ -7674,8 +7673,6 @@ func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
 			"asset.workbench.system_search",
 			"asset.workbench.download",
 			"asset.workbench.cost_center.manage",
-			"asset.workbench.template.manage",
-			"asset.workbench.template.assign",
 			"asset.workbench.settlement",
 			"asset.workbench.export",
 		)
@@ -7809,7 +7806,7 @@ func assetWorkbenchRoleLabel(role domain.Role) string {
 	case domain.RoleAssetManager:
 		return "作品管理"
 	case domain.RoleAssetTemplateAdmin:
-		return "类型与计价"
+		return "计价配置"
 	case domain.RoleAssetSettlement:
 		return "结算财务"
 	case domain.RoleSuperAdmin:

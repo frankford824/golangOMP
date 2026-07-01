@@ -36,6 +36,24 @@ const (
 
 	ExperienceWorkerOutcomeObserver = "outcome_observer"
 	ExperienceWorkerRetention       = "retention"
+	ExperienceWorkerOutbox          = "outbox"
+	ExperienceWorkerAttribution     = "attribution"
+
+	ExperienceAttributionStatusPositive = "positive_candidate"
+	ExperienceAttributionStatusWeak     = "weak_candidate"
+	ExperienceAttributionStatusRejected = "rejected_candidate"
+
+	ExperienceReviewItemStatusOpen          = "open"
+	ExperienceReviewItemStatusApproved      = "approved"
+	ExperienceReviewItemStatusRejected      = "rejected"
+	ExperienceReviewItemStatusNeedsMoreData = "needs_more_data"
+
+	ExperienceReviewDecisionApprove       = "approve"
+	ExperienceReviewDecisionReject        = "reject"
+	ExperienceReviewDecisionNeedsMoreData = "needs_more_data"
+
+	ExperienceMicroQuestionAnswerAnswered  = "answered"
+	ExperienceMicroQuestionAnswerDismissed = "dismissed"
 )
 
 type ExperienceRuntimeFlags struct {
@@ -286,36 +304,37 @@ type AssetQualityLabel struct {
 }
 
 type ExperienceStats struct {
-	Flags                     ExperienceRuntimeFlags `json:"flags"`
-	TotalEvents               int64                  `json:"total_events"`
-	SampleTotal               int64                  `json:"sample_total"`
-	DisplayedEvents           int64                  `json:"displayed_events"`
-	LocatableSamples          int64                  `json:"locatable_samples"`
-	FeedbackSamples           int64                  `json:"feedback_samples"`
-	ReasonedFeedbackSamples   int64                  `json:"reasoned_feedback_samples"`
-	ReusableSamples           int64                  `json:"reusable_samples"`
-	FeedbackAccepted          int64                  `json:"feedback_accepted"`
-	FeedbackPartiallyAccepted int64                  `json:"feedback_partially_accepted"`
-	FeedbackRejected          int64                  `json:"feedback_rejected"`
-	OutboxQueued              int64                  `json:"outbox_queued"`
-	OutboxProcessing          int64                  `json:"outbox_processing"`
-	OutboxProcessed24h        int64                  `json:"outbox_processed_24h"`
-	OutboxFailed24h           int64                  `json:"outbox_failed_24h"`
-	OutboxDeadLetter          int64                  `json:"outbox_dead_letter"`
-	CaptureSuccessRate24h     float64                `json:"capture_success_rate_24h"`
-	CaptureFailureRate24h     float64                `json:"capture_failure_rate_24h"`
-	TagTotal                  int64                  `json:"tag_total"`
-	TagEnabled                int64                  `json:"tag_enabled"`
-	TagCoverageRate           float64                `json:"tag_coverage_rate"`
-	AISuggestionEvents        int64                  `json:"ai_suggestion_events"`
-	AIFeedbackEvents          int64                  `json:"ai_feedback_events"`
-	AIFeedbackRate            float64                `json:"ai_feedback_rate"`
-	ReasonCoverageRate        float64                `json:"reason_coverage_rate"`
-	ReusableRate              float64                `json:"reusable_rate"`
-	TaskProfiles              int64                  `json:"task_profiles"`
-	AssetQualityLabels        int64                  `json:"asset_quality_labels"`
-	LatestProfileRebuiltAt    *time.Time             `json:"latest_profile_rebuilt_at,omitempty"`
-	GeneratedAt               time.Time              `json:"generated_at"`
+	Flags                     ExperienceRuntimeFlags       `json:"flags"`
+	TotalEvents               int64                        `json:"total_events"`
+	SampleTotal               int64                        `json:"sample_total"`
+	DisplayedEvents           int64                        `json:"displayed_events"`
+	LocatableSamples          int64                        `json:"locatable_samples"`
+	FeedbackSamples           int64                        `json:"feedback_samples"`
+	ReasonedFeedbackSamples   int64                        `json:"reasoned_feedback_samples"`
+	ReusableSamples           int64                        `json:"reusable_samples"`
+	FeedbackAccepted          int64                        `json:"feedback_accepted"`
+	FeedbackPartiallyAccepted int64                        `json:"feedback_partially_accepted"`
+	FeedbackRejected          int64                        `json:"feedback_rejected"`
+	OutboxQueued              int64                        `json:"outbox_queued"`
+	OutboxProcessing          int64                        `json:"outbox_processing"`
+	OutboxProcessed24h        int64                        `json:"outbox_processed_24h"`
+	OutboxFailed24h           int64                        `json:"outbox_failed_24h"`
+	OutboxDeadLetter          int64                        `json:"outbox_dead_letter"`
+	CaptureSuccessRate24h     float64                      `json:"capture_success_rate_24h"`
+	CaptureFailureRate24h     float64                      `json:"capture_failure_rate_24h"`
+	TagTotal                  int64                        `json:"tag_total"`
+	TagEnabled                int64                        `json:"tag_enabled"`
+	TagCoverageRate           float64                      `json:"tag_coverage_rate"`
+	AISuggestionEvents        int64                        `json:"ai_suggestion_events"`
+	AIFeedbackEvents          int64                        `json:"ai_feedback_events"`
+	AIFeedbackRate            float64                      `json:"ai_feedback_rate"`
+	ReasonCoverageRate        float64                      `json:"reason_coverage_rate"`
+	ReusableRate              float64                      `json:"reusable_rate"`
+	TaskProfiles              int64                        `json:"task_profiles"`
+	AssetQualityLabels        int64                        `json:"asset_quality_labels"`
+	WorkerLastRuns            []*ExperienceWorkerRunRecord `json:"worker_last_runs,omitempty"`
+	LatestProfileRebuiltAt    *time.Time                   `json:"latest_profile_rebuilt_at,omitempty"`
+	GeneratedAt               time.Time                    `json:"generated_at"`
 }
 
 type ExperienceWorkerRun struct {
@@ -338,4 +357,129 @@ type ExperienceRetentionRun struct {
 	BehaviorDeleted    int64 `json:"behavior_deleted"`
 	RateLimitDeleted   int64 `json:"rate_limit_deleted"`
 	ObservedTombstoned int64 `json:"observed_tombstoned"`
+	WorkerRunDeleted   int64 `json:"worker_run_deleted"`
+}
+
+type ExperienceAttributionRun struct {
+	Scanned int `json:"scanned"`
+	Created int `json:"created"`
+	Skipped int `json:"skipped"`
+	Failed  int `json:"failed"`
+}
+
+type ExperienceWorkerRunRecord struct {
+	ID            int64           `json:"id,omitempty"`
+	WorkerName    string          `json:"worker_name"`
+	SourceName    string          `json:"source_name,omitempty"`
+	StartedAt     time.Time       `json:"started_at"`
+	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
+	Status        string          `json:"status"`
+	ScannedCount  int             `json:"scanned_count"`
+	EnqueuedCount int             `json:"enqueued_count"`
+	SkippedCount  int             `json:"skipped_count"`
+	FailedCount   int             `json:"failed_count"`
+	LastError     string          `json:"last_error,omitempty"`
+	Metadata      json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt     time.Time       `json:"created_at,omitempty"`
+}
+
+type ExperienceAttributionOutcome struct {
+	ID         int64           `json:"id"`
+	EventKey   string          `json:"event_key"`
+	EventTime  time.Time       `json:"event_time"`
+	SourceType string          `json:"source_type"`
+	Action     string          `json:"action"`
+	Outcome    string          `json:"outcome"`
+	TaskID     *int64          `json:"task_id,omitempty"`
+	TargetType string          `json:"target_type,omitempty"`
+	TargetID   string          `json:"target_id,omitempty"`
+	Payload    json.RawMessage `json:"payload,omitempty"`
+}
+
+type ExperienceAttributionCandidate struct {
+	SuggestionEventID   string     `json:"suggestion_event_id"`
+	SuggestionStableKey string     `json:"suggestion_stable_key"`
+	SuggestionType      string     `json:"suggestion_type"`
+	SuggestionID        string     `json:"suggestion_id,omitempty"`
+	Source              string     `json:"source,omitempty"`
+	TargetType          string     `json:"target_type,omitempty"`
+	TargetID            string     `json:"target_id,omitempty"`
+	DisplayedAt         time.Time  `json:"displayed_at"`
+	BehaviorCount       int        `json:"behavior_count"`
+	BehaviorScore       int        `json:"behavior_score"`
+	LatestBehaviorAt    *time.Time `json:"latest_behavior_at,omitempty"`
+	FeedbackValue       string     `json:"feedback_value,omitempty"`
+	FeedbackReasonCode  string     `json:"feedback_reason_code,omitempty"`
+	FeedbackCreatedAt   *time.Time `json:"feedback_created_at,omitempty"`
+}
+
+type ExperienceAttribution struct {
+	ID                  int64           `json:"id,omitempty"`
+	SuggestionEventID   string          `json:"suggestion_event_id"`
+	SuggestionStableKey string          `json:"suggestion_stable_key"`
+	CandidateEventKey   string          `json:"candidate_event_key"`
+	OutcomeEventKey     string          `json:"outcome_event_key"`
+	Status              string          `json:"status"`
+	Confidence          string          `json:"confidence"`
+	Score               float64         `json:"score"`
+	ComputedAt          time.Time       `json:"computed_at"`
+	EvidenceSummary     json.RawMessage `json:"evidence_summary,omitempty"`
+	CreatedAt           time.Time       `json:"created_at,omitempty"`
+	UpdatedAt           time.Time       `json:"updated_at,omitempty"`
+}
+
+type ExperienceRateLimitReservation struct {
+	LimitKey    string    `json:"limit_key"`
+	ActorID     *int64    `json:"actor_id,omitempty"`
+	BucketName  string    `json:"bucket_name"`
+	PeriodStart time.Time `json:"period_start"`
+	PeriodEnd   time.Time `json:"period_end"`
+	Limit       int       `json:"limit"`
+	HardCap     int       `json:"hard_cap"`
+	Count       int       `json:"count"`
+	Allowed     bool      `json:"allowed"`
+}
+
+type ExperienceMicroQuestionAnswer struct {
+	ID                  int64           `json:"id,omitempty"`
+	AnswerEventKey      string          `json:"answer_event_key"`
+	SuggestionEventID   string          `json:"suggestion_event_id,omitempty"`
+	SuggestionStableKey string          `json:"suggestion_stable_key,omitempty"`
+	ActorID             *int64          `json:"actor_id,omitempty"`
+	Surface             string          `json:"surface,omitempty"`
+	TargetType          string          `json:"target_type,omitempty"`
+	TargetID            string          `json:"target_id,omitempty"`
+	AnswerValue         string          `json:"answer_value"`
+	ReasonCode          string          `json:"reason_code,omitempty"`
+	Payload             json.RawMessage `json:"payload,omitempty"`
+	CreatedAt           time.Time       `json:"created_at,omitempty"`
+}
+
+type ExperienceMicroQuestionEligibility struct {
+	Eligible       bool                         `json:"eligible"`
+	Reason         string                       `json:"reason,omitempty"`
+	AnswerEventKey string                       `json:"answer_event_key,omitempty"`
+	RemainingDaily int                          `json:"remaining_daily"`
+	ReasonTags     []*ExperienceClientReasonTag `json:"reason_tags,omitempty"`
+}
+
+type ExperienceReviewItem struct {
+	ID              int64           `json:"id,omitempty"`
+	ItemKey         string          `json:"item_key"`
+	ItemType        string          `json:"item_type"`
+	Status          string          `json:"status"`
+	Priority        string          `json:"priority,omitempty"`
+	EvidenceSummary json.RawMessage `json:"evidence_summary,omitempty"`
+	CreatedAt       time.Time       `json:"created_at,omitempty"`
+	UpdatedAt       time.Time       `json:"updated_at,omitempty"`
+}
+
+type ExperienceReviewDecision struct {
+	ID            int64           `json:"id,omitempty"`
+	ReviewItemKey string          `json:"review_item_key"`
+	Decision      string          `json:"decision"`
+	ReasonCode    string          `json:"reason_code,omitempty"`
+	ActorID       *int64          `json:"actor_id,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitempty"`
+	CreatedAt     time.Time       `json:"created_at,omitempty"`
 }

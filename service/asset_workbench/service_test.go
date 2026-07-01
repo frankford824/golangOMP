@@ -39,6 +39,20 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
+func testDifficultyClass(code string) (*domain.AssetWorkbenchDifficultyClass, error) {
+	code = strings.TrimSpace(code)
+	if code == "" || code == domain.AssetWorkbenchWorkerTypeAll {
+		return nil, sql.ErrNoRows
+	}
+	return &domain.AssetWorkbenchDifficultyClass{
+		ID:        1,
+		Code:      code,
+		Name:      code,
+		Enabled:   true,
+		SortOrder: 10,
+	}, nil
+}
+
 type priceOnlyRepo struct {
 	repo.AssetWorkbenchRepo
 	price   *domain.AssetWorkbenchPriceMatrix
@@ -72,6 +86,7 @@ type settlementReportRepo struct {
 	rule           *domain.AssetWorkbenchDeductionRule
 	deductionCalls int
 	profiles       map[int64]*domain.AssetWorkbenchProfile
+	difficulties   []*domain.AssetWorkbenchDifficultyClass
 }
 
 func (r *settlementReportRepo) FindActiveDeductionRule(context.Context, string, string, string, time.Time) (*domain.AssetWorkbenchDeductionRule, error) {
@@ -89,6 +104,17 @@ func (r *settlementReportRepo) GetProfileByUserID(_ context.Context, userID int6
 		return nil, sql.ErrNoRows
 	}
 	return profile, nil
+}
+
+func (r *settlementReportRepo) ListDifficultyClasses(context.Context, repo.AssetWorkbenchDifficultyClassFilter) ([]*domain.AssetWorkbenchDifficultyClass, error) {
+	if r.difficulties != nil {
+		return r.difficulties, nil
+	}
+	return []*domain.AssetWorkbenchDifficultyClass{
+		{Code: "A", Name: "A", Enabled: true, SortOrder: 10},
+		{Code: "B", Name: "B", Enabled: true, SortOrder: 20},
+		{Code: "C", Name: "C", Enabled: true, SortOrder: 30},
+	}, nil
 }
 
 type errorImportRepo struct {
@@ -132,6 +158,10 @@ type supplementRepo struct {
 	confirmedMonths map[int64][]string
 	created         *domain.AssetWorkbenchSettlementSupplement
 	events          []*domain.AssetWorkbenchEvent
+}
+
+func (r *supplementRepo) GetDifficultyClass(_ context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error) {
+	return testDifficultyClass(code)
 }
 
 func (r *supplementRepo) ListSubmissionItemsByMonth(context.Context, string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
@@ -565,6 +595,10 @@ func (r *priceMatrixVersionRepo) GetPriceMatrixForUpdate(_ context.Context, _ re
 	return &copyItem, nil
 }
 
+func (r *priceMatrixVersionRepo) GetDifficultyClass(_ context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error) {
+	return testDifficultyClass(code)
+}
+
 func (r *priceMatrixVersionRepo) LockPriceMatrixDimension(_ context.Context, _ repo.Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchPriceMatrix, error) {
 	items := []*domain.AssetWorkbenchPriceMatrix{}
 	for _, item := range r.existing {
@@ -737,6 +771,10 @@ type uploadDirectorySessionRepo struct {
 	events      []*domain.AssetWorkbenchEvent
 }
 
+func (r *uploadDirectorySessionRepo) GetDifficultyClass(_ context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error) {
+	return testDifficultyClass(code)
+}
+
 func (r *uploadDirectorySessionRepo) ListUploadDirectories(_ context.Context, filter repo.AssetWorkbenchUploadDirectoryFilter) ([]*domain.AssetWorkbenchUploadDirectory, error) {
 	items := make([]*domain.AssetWorkbenchUploadDirectory, 0, len(r.directories))
 	for _, item := range r.directories {
@@ -786,6 +824,10 @@ type submissionDirectoryDifficultyRepo struct {
 	files         []*domain.AssetWorkbenchSubmissionFile
 	sessionStatus string
 	events        []*domain.AssetWorkbenchEvent
+}
+
+func (r *submissionDirectoryDifficultyRepo) GetDifficultyClass(_ context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error) {
+	return testDifficultyClass(code)
 }
 
 func (r *submissionDirectoryDifficultyRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
@@ -902,8 +944,13 @@ type itemActionRepo struct {
 	repo.AssetWorkbenchRepo
 	items        map[int64]*domain.AssetWorkbenchSubmissionItem
 	price        *domain.AssetWorkbenchPriceMatrix
+	profile      *domain.AssetWorkbenchProfile
 	events       []*domain.AssetWorkbenchEvent
 	refreshCalls int
+}
+
+func (r *itemActionRepo) GetDifficultyClass(_ context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error) {
+	return testDifficultyClass(code)
 }
 
 func (r *itemActionRepo) GetSubmissionItem(_ context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error) {
@@ -913,6 +960,14 @@ func (r *itemActionRepo) GetSubmissionItem(_ context.Context, itemID int64) (*do
 	}
 	copyItem := *item
 	return &copyItem, nil
+}
+
+func (r *itemActionRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
+	if r.profile == nil || r.profile.UserID != userID {
+		return nil, sql.ErrNoRows
+	}
+	copyProfile := *r.profile
+	return &copyProfile, nil
 }
 
 func (r *itemActionRepo) UpdateSubmissionItemQCStatus(_ context.Context, _ repo.Tx, itemID int64, qcStatus string) (*domain.AssetWorkbenchSubmissionItem, error) {
@@ -954,6 +1009,8 @@ func (r *itemActionRepo) UpdateSubmissionItemPricing(_ context.Context, _ repo.T
 	}
 	item.BasePriceRuleID = next.BasePriceRuleID
 	item.BaseUnitPrice = next.BaseUnitPrice
+	item.WorkerTypeSnapshot = next.WorkerTypeSnapshot
+	item.JobGradeSnapshot = next.JobGradeSnapshot
 	item.PromoCouponID = next.PromoCouponID
 	item.PromoSnapshot = next.PromoSnapshot
 	item.PricingSnapshot = next.PricingSnapshot
@@ -968,8 +1025,11 @@ func (r *itemActionRepo) RefreshSubmissionTotals(_ context.Context, _ repo.Tx, _
 	return nil
 }
 
-func (r *itemActionRepo) FindActivePrice(context.Context, string, string, string, time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
+func (r *itemActionRepo) FindActivePrice(_ context.Context, workerType, jobGrade, difficulty string, _ time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
 	if r.price == nil {
+		return nil, sql.ErrNoRows
+	}
+	if r.price.WorkerType != workerType || r.price.JobGrade != jobGrade || r.price.DifficultyClass != difficulty {
 		return nil, sql.ErrNoRows
 	}
 	return r.price, nil
@@ -2309,6 +2369,58 @@ func TestRepriceSubmissionItemUsesFrozenWorkerSnapshot(t *testing.T) {
 	}
 	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventItemRepriced {
 		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestRepriceSubmissionItemUsesCurrentProfileWhenGradeSnapshotMissing(t *testing.T) {
+	submittedAt := time.Date(2026, 7, 1, 14, 56, 13, 0, time.UTC)
+	workbenchRepo := &itemActionRepo{
+		items: map[int64]*domain.AssetWorkbenchSubmissionItem{
+			501: {
+				ID:               501,
+				SubmissionID:     9001,
+				PayeeUserID:      77,
+				OrderNo:          "6954064249637049871",
+				DifficultyClass:  "A",
+				Finalized:        true,
+				PageCount:        3,
+				ItemCount:        1,
+				BusinessMonth:    "2026-07",
+				SubmittedAt:      submittedAt,
+				PricingStatus:    domain.AssetWorkbenchPricingStatusPendingGrade,
+				QCStatus:         domain.AssetWorkbenchSubmissionStatusSubmitted,
+				SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled,
+			},
+		},
+		profile: &domain.AssetWorkbenchProfile{
+			UserID:     77,
+			WorkerType: domain.AssetWorkbenchWorkerTypeParttime,
+			JobGrade:   "J1",
+		},
+		price: &domain.AssetWorkbenchPriceMatrix{
+			ID:              99,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeParttime,
+			JobGrade:        "J1",
+			DifficultyClass: "A",
+			UnitPrice:       1.5,
+			EffectiveFrom:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	updated, appErr := svc.RepriceSubmissionItem(context.Background(), actor, 501, RepriceSubmissionItemParams{Reason: "定级后重计价"})
+	if appErr != nil {
+		t.Fatalf("RepriceSubmissionItem() error = %+v", appErr)
+	}
+	if updated.WorkerTypeSnapshot != domain.AssetWorkbenchWorkerTypeParttime || updated.JobGradeSnapshot != "J1" {
+		t.Fatalf("snapshots = %q/%q, want parttime/J1", updated.WorkerTypeSnapshot, updated.JobGradeSnapshot)
+	}
+	if updated.PricingStatus != domain.AssetWorkbenchPricingStatusPriced || updated.GrossAmount != 4.5 {
+		t.Fatalf("pricing = %s gross=%v, want priced 4.5", updated.PricingStatus, updated.GrossAmount)
+	}
+	if updated.BasePriceRuleID == nil || *updated.BasePriceRuleID != 99 {
+		t.Fatalf("base price rule = %v, want 99", updated.BasePriceRuleID)
 	}
 }
 

@@ -119,7 +119,7 @@ export async function exportSupplementImportTemplateWorkbook(): Promise<void> {
   sheet.addRow({
     payee_user_id: 1001,
     order_no: '示例订单号',
-    difficulty_class: 'A',
+    difficulty_class: '填写已启用难度代码',
     page_count: 1,
     gross_amount: 20,
     finalized: '是',

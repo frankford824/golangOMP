@@ -410,9 +410,9 @@ func DefaultRoleCatalog() []RoleCatalogEntry {
 		},
 		{
 			Role:         RoleAssetTemplateAdmin,
-			Name:         "Asset Template Admin",
+			Name:         "Asset Pricing Admin",
 			Description:  "Maintain workbench cost-center configuration including price matrix, deduction rules, welfare rules, and promo coupons.",
-			Capabilities: []string{"asset.workbench.cost_center.manage", "asset.workbench.template.manage"},
+			Capabilities: []string{"asset.workbench.cost_center.manage"},
 		},
 		{
 			Role:         RoleAssetSettlement,

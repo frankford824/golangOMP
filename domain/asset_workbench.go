@@ -130,6 +130,7 @@ const (
 	AssetWorkbenchEventPromoCreated                = "promo.created"
 	AssetWorkbenchEventPromoUpdated                = "promo.updated"
 	AssetWorkbenchEventPromoSuperseded             = "promo.superseded"
+	AssetWorkbenchEventDifficultyUpserted          = "difficulty.upserted"
 	AssetWorkbenchEventUploadSessionCreated        = "upload_session.created"
 	AssetWorkbenchEventUploadSessionUpdated        = "upload_session.updated"
 	AssetWorkbenchEventSubmissionCreated           = "submission.created"
@@ -170,6 +171,7 @@ const (
 	AssetWorkbenchEntityDeductionRule        = "deduction_rule"
 	AssetWorkbenchEntityWelfareRule          = "welfare_rule"
 	AssetWorkbenchEntityPromoCoupon          = "promo_coupon"
+	AssetWorkbenchEntityDifficultyClass      = "difficulty_class"
 	AssetWorkbenchEntityUploadSession        = "upload_session"
 	AssetWorkbenchEntitySubmission           = "submission"
 	AssetWorkbenchEntitySubmissionItem       = "submission_item"
@@ -222,6 +224,19 @@ type AssetWorkbenchGradePeriod struct {
 	ChangedBy     *int64     `json:"changed_by,omitempty" db:"changed_by"`
 	Reason        string     `json:"reason" db:"reason"`
 	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+}
+
+type AssetWorkbenchDifficultyClass struct {
+	ID          int64     `json:"id" db:"id"`
+	Code        string    `json:"code" db:"code"`
+	Name        string    `json:"name" db:"name"`
+	Description string    `json:"description" db:"description"`
+	Enabled     bool      `json:"enabled" db:"enabled"`
+	SortOrder   int       `json:"sort_order" db:"sort_order"`
+	CreatedBy   *int64    `json:"created_by,omitempty" db:"created_by"`
+	UpdatedBy   *int64    `json:"updated_by,omitempty" db:"updated_by"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchPriceMatrix struct {

@@ -40,7 +40,7 @@ import {
   type ExperienceClientConfig,
   type ExperienceReasonTag,
 } from '@/services/api/experienceApi'
-import { recordExperienceBehavior } from '@/services/experienceBehavior'
+import { recordExperienceBehavior, setExperienceBehaviorSampleRate } from '@/services/experienceBehavior'
 import type { PredictionSuggestion } from '@/services/api/predictionsApi'
 
 const feedbackOptions: Array<{ value: AISuggestionFeedbackValue; label: string }> = [
@@ -90,6 +90,7 @@ onMounted(async () => {
   void loadReasonOptions()
   const config = await getExperienceClientConfig()
   behaviorEnabled.value = Boolean(config?.behavior_capture_enabled)
+  setExperienceBehaviorSampleRate(config?.behavior_sample_rate)
   maybeRecordImpression()
   if (props.enabled !== undefined) return
   const surfaces = config?.enabled_surfaces ?? []

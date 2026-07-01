@@ -23,7 +23,6 @@ const eventFilterOptions = [
   { value: 'system_asset.batch_downloaded', label: '批量下载素材' },
   { value: 'item.qc_updated', label: '更新质检' },
   { value: 'settlement.confirmed', label: '确认结算' },
-  { value: 'template.assigned', label: '下发作品类型' },
   { value: 'member.identity_changed', label: '调整成员功能' },
   { value: 'account.merged', label: '合并账号' },
 ]

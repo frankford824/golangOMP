@@ -28,7 +28,7 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
   const collapsed = ref(typeof window !== 'undefined' && window.localStorage.getItem(SETUP_COLLAPSED_KEY) === '1')
   const pricingReady = ref(false)
   const membersReady = ref(false)
-  const assignmentsReady = ref(false)
+  const uploadDirectoriesReady = ref(false)
   const acceptanceReady = ref(false)
   const settlementReady = ref(false)
 
@@ -52,12 +52,12 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
         visible: canAccessPath(current, '/settings/members'),
       },
       {
-        id: 'dispatch',
-        label: '分配任务',
-        hint: '指定谁能交哪类稿',
-        to: '/settings/dispatch',
-        done: assignmentsReady.value,
-        visible: canAccessPath(current, '/settings/dispatch'),
+        id: 'upload-directories',
+        label: '上传目录',
+        hint: '配置客户端上传前选择的目录',
+        to: '/materials',
+        done: uploadDirectoriesReady.value,
+        visible: canManageUploadDirectories(current),
       },
       {
         id: 'acceptance',
@@ -107,14 +107,14 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
         membersReady.value = false
       }
 
-      if (canAccessPath(bootstrap(), '/settings/dispatch')) {
+      if (canManageUploadDirectories(bootstrap())) {
         tasks.push(
-          assetWorkbenchApi.listTemplateAssignments({ page: 1, page_size: 1 }).then((result) => {
-            assignmentsReady.value = result.total > 0
+          assetWorkbenchApi.listUploadDirectoriesAdmin().then((result) => {
+            uploadDirectoriesReady.value = result.length > 0
           }),
         )
       } else {
-        assignmentsReady.value = false
+        uploadDirectoriesReady.value = false
       }
 
       if (canAccessPath(bootstrap(), '/submissions')) {
@@ -169,4 +169,10 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
     refresh,
     toggleCollapsed,
   }
+}
+
+function canManageUploadDirectories(current: AssetWorkbenchBootstrap | null) {
+  if (!canAccessPath(current, '/materials')) return false
+  const capabilities = new Set(current?.capabilities ?? [])
+  return capabilities.has('asset.workbench.manage') || capabilities.has('asset.workbench.system_search')
 }

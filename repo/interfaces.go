@@ -272,6 +272,7 @@ type AssetWorkbenchProfileFilter struct {
 	WorkerType string
 	JobGrade   string
 	Status     string
+	UserID     int64
 	Page       int
 	PageSize   int
 }
@@ -310,6 +311,10 @@ type AssetWorkbenchPromoCouponFilter struct {
 	Enabled         *bool
 	Page            int
 	PageSize        int
+}
+
+type AssetWorkbenchDifficultyClassFilter struct {
+	Enabled *bool
 }
 
 type AssetWorkbenchGroupFilter struct {
@@ -463,6 +468,11 @@ type AssetWorkbenchRepo interface {
 	CreateAccountLink(ctx context.Context, tx Tx, link *domain.AssetWorkbenchAccountLink) (*domain.AssetWorkbenchAccountLink, error)
 	GetAccountLinkBySource(ctx context.Context, sourceUserID int64) (*domain.AssetWorkbenchAccountLink, error)
 	GetAccountLinkByCanonical(ctx context.Context, canonicalUserID int64) (*domain.AssetWorkbenchAccountLink, error)
+
+	ListDifficultyClasses(ctx context.Context, filter AssetWorkbenchDifficultyClassFilter) ([]*domain.AssetWorkbenchDifficultyClass, error)
+	GetDifficultyClass(ctx context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error)
+	CreateDifficultyClass(ctx context.Context, tx Tx, item *domain.AssetWorkbenchDifficultyClass) (*domain.AssetWorkbenchDifficultyClass, error)
+	UpdateDifficultyClass(ctx context.Context, tx Tx, item *domain.AssetWorkbenchDifficultyClass) (*domain.AssetWorkbenchDifficultyClass, error)
 
 	ListPriceMatrix(ctx context.Context, filter AssetWorkbenchPriceMatrixFilter) ([]*domain.AssetWorkbenchPriceMatrix, int64, error)
 	GetPriceMatrixForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchPriceMatrix, error)

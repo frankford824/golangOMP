@@ -4,6 +4,7 @@ import { Download } from 'lucide-vue-next'
 
 import {
   assetWorkbenchApi,
+  type DifficultyClassRow,
   type SettlementBatchDetail,
   type SettlementBatchRow,
   type SettlementPayrollRow,
@@ -15,6 +16,7 @@ import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupp
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
+import { difficultyCodes } from '@aw/shared/format/difficulty'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import {
   batchStatusMeta,
@@ -55,6 +57,7 @@ const preview = ref<SettlementPreview | null>(null)
 const batches = ref<SettlementBatchRow[]>([])
 const supplements = ref<SettlementSupplementRow[]>([])
 const supplementPermissions = ref<SupplementPermissionRow[]>([])
+const difficultyRows = ref<DifficultyClassRow[]>([])
 const eligibleSupplementMonths = ref<string[]>([])
 const entryEligibleSupplementMonths = ref<string[]>([])
 const entryEligiblePayeeUserId = ref(0)
@@ -72,17 +75,19 @@ const errorInputRef = ref<HTMLInputElement | null>(null)
 const supplementInputRef = ref<HTMLInputElement | null>(null)
 const settlementRequest = usePageRequest(
   async () => {
-    const [previewResult, batchResult, supplementResult, permissionResult] = await Promise.all([
+    const [previewResult, batchResult, supplementResult, permissionResult, difficultyResult] = await Promise.all([
       assetWorkbenchApi.previewSettlement(month.value),
       assetWorkbenchApi.listSettlementBatches({ business_month: month.value, page: 1, page_size: 20 }),
       assetWorkbenchApi.listSettlementSupplements({ business_month: month.value, page: 1, page_size: 20 }),
       assetWorkbenchApi.listSupplementPermissions({ business_month: month.value, page: 1, page_size: 50 }),
+      assetWorkbenchApi.listDifficultyClasses(),
     ])
     return {
       preview: previewResult,
       batches: batchResult.items,
       supplements: supplementResult.items,
       supplementPermissions: permissionResult.items,
+      difficulties: difficultyResult,
     }
   },
   null,
@@ -93,7 +98,7 @@ const error = settlementRequest.error
 const supplementForm = ref({
   payee_user_id: 0,
   order_no: '',
-  difficulty_class: 'A',
+  difficulty_class: '',
   page_count: 1,
   gross_amount: 0,
   finalized: true,
@@ -112,6 +117,7 @@ const adjustmentForm = ref({
 })
 const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'amount'])
 const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity'])
+const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 
 const totals = computed(() => preview.value?.totals)
 const payrollRows = computed(() => preview.value?.payroll_rows ?? [])
@@ -273,6 +279,10 @@ async function loadSettlement(options: { keepNotice?: boolean } = {}) {
   batches.value = data.batches
   supplements.value = data.supplements
   supplementPermissions.value = data.supplementPermissions
+  difficultyRows.value = data.difficulties
+  if (!difficultyOptions.value.includes(supplementForm.value.difficulty_class)) {
+    supplementForm.value.difficulty_class = difficultyOptions.value[0] || ''
+  }
   selectedBatch.value = null
 }
 
@@ -927,10 +937,7 @@ onMounted(() => {
           <label>
             难度
             <select v-model="supplementForm.difficulty_class">
-              <option value="A">A</option>
-              <option value="B">B</option>
-              <option value="C">C</option>
-              <option value="A+小夜灯">A+小夜灯</option>
+              <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
             </select>
           </label>
           <label>

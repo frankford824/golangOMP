@@ -254,8 +254,31 @@ components:
         ai_feedback_rate: { type: number, format: double }
         task_profiles: { type: integer, format: int64 }
         asset_quality_labels: { type: integer, format: int64 }
+        worker_last_runs:
+          type: array
+          description: Recent durable experience worker runs, newest first, used to distinguish no data from worker failure or lag.
+          items:
+            $ref: '#/components/schemas/ExperienceWorkerRunRecord'
         latest_profile_rebuilt_at: { type: string, format: date-time, nullable: true }
         generated_at: { type: string, format: date-time }
+    ExperienceWorkerRunRecord:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        worker_name: { type: string }
+        source_name: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        status:
+          type: string
+          enum: [success, partial, failed]
+        scanned_count: { type: integer }
+        enqueued_count: { type: integer }
+        skipped_count: { type: integer }
+        failed_count: { type: integer }
+        last_error: { type: string }
+        metadata: { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
     AISuggestionFeedbackRequest:
       type: object
       required: [feedback_value]
@@ -306,6 +329,113 @@ components:
       properties:
         received: { type: integer }
         inserted: { type: integer }
+    ExperienceMicroQuestionEligibility:
+      type: object
+      required: [eligible, remaining_daily]
+      properties:
+        eligible: { type: boolean }
+        reason:
+          type: string
+          description: Machine-readable non-eligible reason such as disabled, surface_disabled, already_answered, or rate_limited.
+        answer_event_key:
+          type: string
+          description: Stable idempotency key to send back when answering the micro-question.
+        remaining_daily:
+          type: integer
+          description: Remaining Beijing-day quota for this actor. Eligibility reads do not consume quota.
+        reason_tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExperienceClientReasonTag'
+    ExperienceMicroQuestionAnswerRequest:
+      type: object
+      description: Micro-question answers are side-channel diagnostics, separate from formal suggestion feedback. When `answer_value` is `answered`, clients must send a `reason_code`; dismissed answers may omit it.
+      required: [suggestion_event_id, surface, target_type, target_id, answer_value]
+      properties:
+        answer_event_key:
+          type: string
+          description: Optional idempotency key returned by eligibility. If omitted, the backend derives one.
+        suggestion_event_id: { type: string }
+        suggestion_stable_key: { type: string }
+        surface: { type: string }
+        target_type: { type: string }
+        target_id: { type: string }
+        answer_value:
+          type: string
+          enum: [answered, dismissed]
+        reason_code:
+          type: string
+          description: Required when `answer_value` is `answered`; optional when dismissed.
+          enum: [temporarily_not_needed, will_handle_later, already_handled, not_relevant, missing_context, stage_not_applicable, customer_special_case, suggestion_outdated]
+        payload:
+          type: object
+          additionalProperties: true
+    ExperienceMicroQuestionAnswer:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        answer_event_key: { type: string }
+        suggestion_event_id: { type: string }
+        suggestion_stable_key: { type: string }
+        actor_id: { type: integer, format: int64, nullable: true }
+        surface: { type: string }
+        target_type: { type: string }
+        target_id: { type: string }
+        answer_value:
+          type: string
+          enum: [answered, dismissed]
+        reason_code: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        created_at: { type: string, format: date-time }
+    ExperienceReviewItem:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        item_key: { type: string }
+        item_type:
+          type: string
+          enum: [attribution_candidate]
+        status:
+          type: string
+          enum: [open, approved, rejected, needs_more_data]
+        priority:
+          type: string
+          enum: [high, medium, low]
+        evidence_summary:
+          type: object
+          additionalProperties: true
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ExperienceReviewDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject, needs_more_data]
+        reason_code: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+    ExperienceReviewDecision:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        review_item_key: { type: string }
+        decision:
+          type: string
+          enum: [approve, reject, needs_more_data]
+        reason_code: { type: string }
+        actor_id: { type: integer, format: int64, nullable: true }
+        payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        created_at: { type: string, format: date-time }
     AISuggestionFeedback:
       type: object
       properties:
@@ -17154,6 +17284,99 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/experience/micro-question-eligibility:
+    get:
+      summary: Check whether a micro-question can be shown
+      description: Non-consuming eligibility check for low-interruption experience micro-questions. This side-channel never mutates task, asset, ERP, audit, cost, or permission state.
+      tags: [ExperienceLearning, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: query
+          name: suggestion_event_id
+          schema: { type: string }
+          description: Single-display suggestion id. Required for server-side suggestion lookup.
+        - in: query
+          name: suggestion_stable_key
+          schema: { type: string }
+        - in: query
+          name: surface
+          schema: { type: string }
+        - in: query
+          name: target_type
+          schema: { type: string }
+        - in: query
+          name: target_id
+          schema: { type: string }
+      responses:
+        '200':
+          description: Eligibility result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExperienceMicroQuestionEligibility'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/experience/micro-question-answers:
+    post:
+      summary: Record a micro-question answer
+      description: Records a side-channel answer for a low-interruption micro-question. Answers are separate from formal AI suggestion feedback and do not affect adoption-rate metrics directly.
+      tags: [ExperienceLearning, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperienceMicroQuestionAnswerRequest'
+      responses:
+        '201':
+          description: Answer recorded or already idempotently present
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExperienceMicroQuestionAnswer'
+        '400':
+          description: Invalid request or daily micro-question quota exhausted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/reports/experience/stats:
     get:
       summary: Get experience learning observation metrics
@@ -17260,6 +17483,114 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/reports/experience/review-items:
+    get:
+      summary: List experience attribution review items
+      description: SuperAdmin-only review queue for side-channel attribution candidates. The queue is for diagnostic approval, rejection, or needs-more-data decisions only and never mutates core business state.
+      tags: [ExperienceLearning, Reports, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [SuperAdmin]
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [open, approved, rejected, needs_more_data]
+        - in: query
+          name: item_type
+          schema:
+            type: string
+            enum: [attribution_candidate]
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Review queue items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExperienceReviewItem'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/reports/experience/review-items/{item_key}/decision:
+    post:
+      summary: Record an experience attribution review decision
+      description: SuperAdmin-only side-channel decision for an attribution candidate. Decisions update experience review status; approved task/asset candidates may materialize side-channel reusable experience profiles or quality labels, but never mutate task, asset, ERP, audit, cost, or permission state.
+      tags: [ExperienceLearning, Reports, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [SuperAdmin]
+      parameters:
+        - in: path
+          name: item_key
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperienceReviewDecisionRequest'
+      responses:
+        '201':
+          description: Review decision recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExperienceReviewDecision'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Review item not found
           content:
             application/json:
               schema:
@@ -18783,8 +19114,8 @@ paths:
         '409': { description: Merge conflict }
   /v1/asset-workbench/people-lookup:
     get:
-      summary: Search people for template assignment
-      description: Name-based lookup for assignment and group member selectors. Returns masked, non-PII workbench member summaries.
+      summary: Search people for workbench access
+      description: Name-based lookup for opening workbench access and member selectors. Returns masked, non-PII workbench member summaries.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -18855,6 +19186,128 @@ paths:
                         identity: { type: string, enum: [admin, normal] }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/difficulty-classes:
+    get:
+      summary: List enabled asset workbench difficulty classes
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, HRAdmin, SuperAdmin]
+      responses:
+        '200':
+          description: Enabled difficulty classes for forms and filters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchDifficultyClass
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        code: { type: string, maxLength: 64 }
+                        name: { type: string, maxLength: 128 }
+                        description: { type: string }
+                        enabled: { type: boolean }
+                        sort_order: { type: integer }
+                        created_by: { type: integer, nullable: true }
+                        updated_by: { type: integer, nullable: true }
+                        created_at: { type: string, format: date-time }
+                        updated_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+    post:
+      summary: Create asset workbench difficulty class
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetTemplateAdmin, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: &AssetWorkbenchDifficultyClassCreatePayload
+              type: object
+              required: [code, name]
+              properties:
+                code: { type: string, maxLength: 64, description: Stable pricing code used by rules and historical snapshots. }
+                name: { type: string, maxLength: 128 }
+                description: { type: string }
+                enabled: { type: boolean }
+                sort_order: { type: integer }
+      responses:
+        '201':
+          description: Created difficulty class
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchDifficultyClass
+        '400': { description: Invalid request }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/difficulty-classes/admin:
+    get:
+      summary: List all asset workbench difficulty classes for administration
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin]
+      responses:
+        '200':
+          description: All difficulty classes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: *AssetWorkbenchDifficultyClass
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/difficulty-classes/{difficulty_code}:
+    patch:
+      summary: Update asset workbench difficulty class
+      description: The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, or sort order.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetTemplateAdmin, SuperAdmin]
+      parameters:
+        - in: path
+          name: difficulty_code
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 128 }
+                description: { type: string }
+                enabled: { type: boolean }
+                sort_order: { type: integer }
+      responses:
+        '200':
+          description: Updated difficulty class
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchDifficultyClass
+        '400': { description: Invalid request }
+        '403': { description: Forbidden }
+        '404': { description: Difficulty class not found }
   /v1/asset-workbench/price-matrix:
     get:
       summary: List asset workbench price matrix rules
@@ -18933,7 +19386,7 @@ paths:
               properties:
                 worker_type: { type: string, enum: [fulltime, parttime] }
                 job_grade: { type: string }
-                difficulty_class: { type: string, enum: [A, B, C, A+小夜灯] }
+                difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
                 unit_price: { type: number, minimum: 0 }
                 effective_from: { type: string, format: date-time }
                 effective_to: { type: string, format: date-time }
@@ -19087,7 +19540,7 @@ paths:
               properties:
                 worker_type: { type: string, enum: [all, fulltime, parttime] }
                 job_grade: { type: string }
-                difficulty_class: { type: string, enum: [all, A, B, C, A+小夜灯] }
+                difficulty_class: { type: string, description: Use all for wildcard, otherwise an enabled difficulty class code. }
                 deduction_amount: { type: number, minimum: 0 }
                 effective_from: { type: string, format: date-time }
                 effective_to: { type: string, format: date-time }
@@ -19357,7 +19810,7 @@ paths:
                 priority: { type: integer }
                 worker_type: { type: string, enum: [all, fulltime, parttime] }
                 job_grade: { type: string }
-                difficulty_class: { type: string, enum: [all, A, B, C, A+小夜灯] }
+                difficulty_class: { type: string, description: Use all for wildcard, otherwise an enabled difficulty class code. }
                 eligible_user_ids_json:
                   type: array
                   items: { type: integer }
@@ -19583,7 +20036,8 @@ paths:
       description: |
         Creates uploaded work records. Client uploads no longer need a frontend "template/type" selection:
         when an item omits `difficulty_class`, the backend derives it from the uploaded session's
-        upload-directory difficulty snapshot. `template_id` remains supported for compatibility.
+        upload-directory difficulty snapshot. New integrations should submit by upload directory and
+        difficulty snapshot, not by legacy template assignment.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -19606,10 +20060,8 @@ paths:
                     required: [order_no, finalized, page_count, upload_session_ids]
                     properties:
                       order_no: { type: string }
-                      template_id: { type: integer }
                       difficulty_class:
                         type: string
-                        enum: [A, B, C, A+小夜灯]
                         description: Optional when all uploaded sessions carry an upload-directory difficulty snapshot.
                       finalized: { type: boolean }
                       page_count: { type: integer, minimum: 1 }
@@ -19735,7 +20187,7 @@ paths:
               type: object
               properties:
                 order_no: { type: string }
-                difficulty_class: { type: string, enum: [A, B, C, A+小夜灯] }
+                difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
                 finalized: { type: boolean }
                 page_count: { type: integer, minimum: 1 }
                 reason: { type: string }
@@ -20283,7 +20735,7 @@ paths:
                         name: { type: string }
                         oss_prefix: { type: string }
                         description: { type: string }
-                        difficulty_class: { type: string, enum: [A, B, C, A+小夜灯] }
+                        difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
                         enabled: { type: boolean }
                         sort_order: { type: integer }
                         created_by: { type: integer }
@@ -20305,12 +20757,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, oss_prefix]
+              required: [name, oss_prefix, difficulty_class]
               properties:
                 name: { type: string }
                 oss_prefix: { type: string, description: Relative OSS prefix under asset-workbench/uploads. }
                 description: { type: string }
-                difficulty_class: { type: string, enum: [A, B, C, A+小夜灯], default: A }
+                difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
       responses:
@@ -20369,7 +20821,7 @@ paths:
                 name: { type: string }
                 oss_prefix: { type: string }
                 description: { type: string }
-                difficulty_class: { type: string, enum: [A, B, C, A+小夜灯] }
+                difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
       responses:

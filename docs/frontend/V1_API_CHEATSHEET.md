@@ -1,10 +1,10 @@
-# V1 API 速查表(288 path · 一行一条)
+# V1 API 速查表(295 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 288 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 295 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -166,6 +166,8 @@
 | GET | `/v1/experience/client-config` | Get client-safe experience learning flags | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/experience/reason-tags` | List client-safe experience reason tags | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/experience/behavior-events:batch` | Record client experience behavior events | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/experience/micro-question-eligibility` | Check whether a micro-question can be shown | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/experience/micro-question-answers` | Record a micro-question answer | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/ai-suggestions/{suggestion_event_id}/feedback` | Record AI suggestion feedback | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/notifications/broadcast` | Broadcast a notification to one, many, or all users | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/entry` | Resolve asset workbench entry state | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -177,8 +179,11 @@
 | PATCH | `/v1/asset-workbench/members/{user_id}/roles` | Update asset workbench member roles | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/accounts/merge/preview` | Preview asset workbench account merge | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/accounts/merge` | Confirm asset workbench account merge | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/asset-workbench/people-lookup` | Search people for template assignment | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/people-lookup` | Search people for workbench access | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/groups/{group_id}/members` | List asset workbench group members | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/difficulty-classes` | List enabled asset workbench difficulty classes；Create asset workbench difficulty class | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/difficulty-classes/admin` | List all asset workbench difficulty classes for administration | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/asset-workbench/difficulty-classes/{difficulty_code}` | Update asset workbench difficulty class | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/price-matrix` | List asset workbench price matrix rules；Create asset workbench price matrix rule | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/asset-workbench/price-matrix/{rule_id}` | Enable or disable a price matrix rule | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/price-matrix/{rule_id}/supersede` | Supersede a price matrix rule with a new revision | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -293,6 +298,8 @@
 | GET | `/v1/search` | Perform a global search | GET:已登录 / scope-aware | [V1_API_SEARCH.md](V1_API_SEARCH.md) |
 | GET | `/v1/reports/experience/stats` | Get experience learning observation metrics | GET:已登录 / scope-aware | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/experience/samples` | List experience event samples | GET:已登录 / scope-aware | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
+| GET | `/v1/reports/experience/review-items` | List experience attribution review items | GET:已登录 / scope-aware | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
+| POST | `/v1/reports/experience/review-items/{item_key}/decision` | Record an experience attribution review decision | POST:已登录 / scope-aware | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/cards` | Get L1 report cards | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/throughput` | Get L1 throughput report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |
 | GET | `/v1/reports/l1/module-dwell` | Get L1 module dwell report | GET:super_admin | [V1_API_REPORTS.md](V1_API_REPORTS.md) |

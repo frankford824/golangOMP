@@ -478,6 +478,11 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 		return nil, fmt.Errorf("query latest experience profile rebuild: %w", err)
 	}
 	stats.LatestProfileRebuiltAt = fromNullTime(rebuiltAt)
+	if runs, err := r.ListRecentExperienceWorkerRuns(ctx, 12); err != nil {
+		return nil, err
+	} else {
+		stats.WorkerLastRuns = runs
+	}
 	return stats, nil
 }
 
@@ -696,6 +701,51 @@ func (r *experienceRepo) CreateAISuggestionEvent(ctx context.Context, event *dom
 		return fmt.Errorf("create ai suggestion event: %w", err)
 	}
 	return nil
+}
+
+func (r *experienceRepo) GetAISuggestionEventByEventID(ctx context.Context, suggestionEventID string) (*domain.AISuggestionEvent, error) {
+	var event domain.AISuggestionEvent
+	var confidence sql.NullFloat64
+	var inputSummary, suggestion sql.NullString
+	var actorID sql.NullInt64
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT id, suggestion_event_id, suggestion_stable_key, attribution_eligible,
+		       suggestion_type, suggestion_id, source, confidence, model, provider, model_version,
+		       input_summary_json, suggestion_json, target_type, target_id, actor_id, displayed_at, created_at
+		FROM ai_suggestion_events
+		WHERE suggestion_event_id = ?`,
+		strings.TrimSpace(suggestionEventID),
+	).Scan(
+		&event.ID,
+		&event.SuggestionEventID,
+		&event.SuggestionStableKey,
+		&event.AttributionEligible,
+		&event.SuggestionType,
+		&event.SuggestionID,
+		&event.Source,
+		&confidence,
+		&event.Model,
+		&event.Provider,
+		&event.ModelVersion,
+		&inputSummary,
+		&suggestion,
+		&event.TargetType,
+		&event.TargetID,
+		&actorID,
+		&event.DisplayedAt,
+		&event.CreatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get ai suggestion event by event id: %w", err)
+	}
+	event.Confidence = fromNullFloat64(confidence)
+	event.InputSummary = rawJSONFromNull(inputSummary)
+	event.Suggestion = rawJSONFromNull(suggestion)
+	event.ActorID = fromNullInt64(actorID)
+	return &event, nil
 }
 
 func (r *experienceRepo) CreateExperienceBehaviorEvents(ctx context.Context, events []*domain.ExperienceBehaviorEvent) (int, error) {
@@ -1344,6 +1394,15 @@ func (r *experienceRepo) RunExperienceRetention(ctx context.Context, policy repo
 	}
 	result.RateLimitDeleted = minuteDeleted + dailyDeleted
 
+	workerRunDeleted, err := r.execRowsAffected(ctx, `
+		DELETE FROM experience_worker_runs
+		WHERE created_at < ?
+		LIMIT ?`, policy.WorkerRunBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("delete expired experience worker runs: %w", err)
+	}
+	result.WorkerRunDeleted = workerRunDeleted
+
 	tombstoned, err := r.execRowsAffected(ctx, `
 		UPDATE experience_observed_entity_states
 		SET tombstoned = 1,
@@ -1365,6 +1424,663 @@ func (r *experienceRepo) RunExperienceRetention(ctx context.Context, policy repo
 	}
 	result.ObservedTombstoned = tombstoned
 	return result, nil
+}
+
+func (r *experienceRepo) CreateExperienceWorkerRun(ctx context.Context, run *domain.ExperienceWorkerRunRecord) error {
+	if run == nil {
+		return fmt.Errorf("experience worker run is nil")
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO experience_worker_runs (
+			worker_name, source_name, started_at, finished_at, status,
+			scanned_count, enqueued_count, skipped_count, failed_count, last_error, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(run.WorkerName),
+		strings.TrimSpace(run.SourceName),
+		run.StartedAt.UTC(),
+		toNullTime(run.FinishedAt),
+		strings.TrimSpace(run.Status),
+		run.ScannedCount,
+		run.EnqueuedCount,
+		run.SkippedCount,
+		run.FailedCount,
+		trimExperienceWorkerError(run.LastError),
+		toNullJSONString(run.Metadata),
+	)
+	if err != nil {
+		return fmt.Errorf("create experience worker run: %w", err)
+	}
+	return nil
+}
+
+func (r *experienceRepo) ListRecentExperienceWorkerRuns(ctx context.Context, limit int) ([]*domain.ExperienceWorkerRunRecord, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 12
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, worker_name, source_name, started_at, finished_at, status,
+		       scanned_count, enqueued_count, skipped_count, failed_count, last_error, metadata_json, created_at
+		FROM experience_worker_runs
+		ORDER BY started_at DESC, id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent experience worker runs: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*domain.ExperienceWorkerRunRecord, 0)
+	for rows.Next() {
+		run, err := scanExperienceWorkerRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recent experience worker runs: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) ListExperienceAttributionOutcomes(ctx context.Context, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceAttributionOutcome, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, event_key, event_time, source_type, action, outcome, task_id,
+		       target_type, target_id, payload_json
+		FROM experience_events
+		WHERE ((event_time > ?) OR (event_time = ? AND id > ?))
+		  AND (target_type <> '' OR task_id IS NOT NULL)
+		ORDER BY event_time ASC, id ASC
+		LIMIT ?`,
+		lastSeenAt,
+		lastSeenAt,
+		cursor.LastSeenID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience attribution outcomes: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*domain.ExperienceAttributionOutcome, 0)
+	for rows.Next() {
+		var item domain.ExperienceAttributionOutcome
+		var taskID sql.NullInt64
+		var targetType, targetID, payload sql.NullString
+		if err := rows.Scan(
+			&item.ID,
+			&item.EventKey,
+			&item.EventTime,
+			&item.SourceType,
+			&item.Action,
+			&item.Outcome,
+			&taskID,
+			&targetType,
+			&targetID,
+			&payload,
+		); err != nil {
+			return nil, fmt.Errorf("scan experience attribution outcome: %w", err)
+		}
+		item.TaskID = fromNullInt64(taskID)
+		item.TargetType = stringFromNull(targetType)
+		item.TargetID = stringFromNull(targetID)
+		item.Payload = rawJSONFromNull(payload)
+		out = append(out, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience attribution outcomes: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context, outcome *domain.ExperienceAttributionOutcome, lookback time.Duration, limit int) ([]*domain.ExperienceAttributionCandidate, error) {
+	if outcome == nil {
+		return []*domain.ExperienceAttributionCandidate{}, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if lookback <= 0 {
+		lookback = 7 * 24 * time.Hour
+	}
+	outcomeAt := outcome.EventTime.UTC()
+	from := outcomeAt.Add(-lookback)
+	targetType := strings.TrimSpace(outcome.TargetType)
+	targetID := strings.TrimSpace(outcome.TargetID)
+	taskTargetID := ""
+	if outcome.TaskID != nil {
+		taskTargetID = strconv.FormatInt(*outcome.TaskID, 10)
+	}
+	if targetType == "" && taskTargetID == "" {
+		return []*domain.ExperienceAttributionCandidate{}, nil
+	}
+
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT a.suggestion_event_id, a.suggestion_stable_key, a.suggestion_type, a.suggestion_id,
+		       a.source, a.target_type, a.target_id, a.displayed_at,
+		       COUNT(b.id) AS behavior_count,
+		       COALESCE(MAX(CASE b.action
+		         WHEN 'related_action_done' THEN 5
+		         WHEN 'jump' THEN 5
+		         WHEN 'click' THEN 4
+		         WHEN 'copy' THEN 3
+		         WHEN 'expand' THEN 2
+		         WHEN 'visible' THEN 1
+		         WHEN 'dismiss' THEN -2
+		         WHEN 'ignored_after_timeout' THEN -2
+		         ELSE 0
+		       END), 0) AS behavior_score,
+		       MAX(b.occurred_at) AS latest_behavior_at,
+		       lf.feedback_value, lf.reason_code, lf.created_at
+		FROM ai_suggestion_events a
+		LEFT JOIN experience_behavior_events b
+		  ON (b.suggestion_event_id = a.suggestion_event_id
+		      OR (b.suggestion_event_id = '' AND b.suggestion_stable_key = a.suggestion_stable_key))
+		 AND a.actor_id IS NOT NULL
+		 AND b.actor_id = a.actor_id
+		 AND b.occurred_at >= a.displayed_at
+		 AND b.occurred_at <= ?
+		LEFT JOIN (`+latestAISuggestionFeedbackSQL()+`) lf ON lf.suggestion_event_id = a.suggestion_event_id
+		WHERE a.attribution_eligible = 1
+		  AND a.displayed_at >= ?
+		  AND a.displayed_at <= ?
+		  AND (
+		    (a.target_type = ? AND a.target_id = ?)
+		    OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)
+		  )
+		GROUP BY a.suggestion_event_id, a.suggestion_stable_key, a.suggestion_type, a.suggestion_id,
+		         a.source, a.target_type, a.target_id, a.displayed_at,
+		         lf.feedback_value, lf.reason_code, lf.created_at
+		HAVING behavior_count > 0 OR COALESCE(lf.feedback_value, '') <> ''
+		ORDER BY a.displayed_at DESC
+		LIMIT ?`,
+		outcomeAt,
+		from,
+		outcomeAt,
+		targetType,
+		targetID,
+		taskTargetID,
+		taskTargetID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience attribution candidates: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*domain.ExperienceAttributionCandidate, 0)
+	for rows.Next() {
+		var item domain.ExperienceAttributionCandidate
+		var latestBehaviorAt, feedbackCreatedAt sql.NullTime
+		var feedbackValue, feedbackReasonCode sql.NullString
+		if err := rows.Scan(
+			&item.SuggestionEventID,
+			&item.SuggestionStableKey,
+			&item.SuggestionType,
+			&item.SuggestionID,
+			&item.Source,
+			&item.TargetType,
+			&item.TargetID,
+			&item.DisplayedAt,
+			&item.BehaviorCount,
+			&item.BehaviorScore,
+			&latestBehaviorAt,
+			&feedbackValue,
+			&feedbackReasonCode,
+			&feedbackCreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan experience attribution candidate: %w", err)
+		}
+		item.LatestBehaviorAt = fromNullTime(latestBehaviorAt)
+		item.FeedbackCreatedAt = fromNullTime(feedbackCreatedAt)
+		item.FeedbackValue = stringFromNull(feedbackValue)
+		item.FeedbackReasonCode = stringFromNull(feedbackReasonCode)
+		out = append(out, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience attribution candidates: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) CreateExperienceAttribution(ctx context.Context, attribution *domain.ExperienceAttribution) error {
+	if attribution == nil {
+		return fmt.Errorf("experience attribution is nil")
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO experience_attributions (
+			suggestion_event_id, suggestion_stable_key, candidate_event_key, outcome_event_key,
+			status, confidence, score, computed_at, evidence_summary_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			status = VALUES(status),
+			confidence = VALUES(confidence),
+			score = VALUES(score),
+			computed_at = VALUES(computed_at),
+			evidence_summary_json = VALUES(evidence_summary_json),
+			updated_at = CURRENT_TIMESTAMP`,
+		strings.TrimSpace(attribution.SuggestionEventID),
+		strings.TrimSpace(attribution.SuggestionStableKey),
+		strings.TrimSpace(attribution.CandidateEventKey),
+		strings.TrimSpace(attribution.OutcomeEventKey),
+		strings.TrimSpace(attribution.Status),
+		strings.TrimSpace(attribution.Confidence),
+		attribution.Score,
+		attribution.ComputedAt.UTC(),
+		toNullJSONString(attribution.EvidenceSummary),
+	)
+	if err != nil {
+		return fmt.Errorf("create experience attribution: %w", err)
+	}
+	return nil
+}
+
+func (r *experienceRepo) ReserveExperienceRateLimit(ctx context.Context, req repo.ExperienceRateLimitRequest) (*domain.ExperienceRateLimitReservation, error) {
+	limitKey := strings.TrimSpace(req.LimitKey)
+	bucketName := strings.TrimSpace(req.BucketName)
+	if limitKey == "" || bucketName == "" {
+		return nil, fmt.Errorf("experience rate limit key and bucket are required")
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 1
+	}
+	hardCap := req.HardCap
+	if hardCap < limit {
+		hardCap = limit * 10
+	}
+	if hardCap < limit {
+		hardCap = limit
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO experience_rate_limits (
+			limit_key, actor_id, bucket_name, period_start, period_end, count, hard_cap
+		) VALUES (?, ?, ?, ?, ?, 1, ?)
+		ON DUPLICATE KEY UPDATE
+			count = LEAST(count + 1, GREATEST(hard_cap, VALUES(hard_cap))),
+			hard_cap = GREATEST(hard_cap, VALUES(hard_cap)),
+			period_end = VALUES(period_end),
+			updated_at = CURRENT_TIMESTAMP`,
+		limitKey,
+		toNullInt64(req.ActorID),
+		bucketName,
+		req.PeriodStart.UTC(),
+		req.PeriodEnd.UTC(),
+		hardCap,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("reserve experience rate limit: %w", err)
+	}
+
+	var reservation domain.ExperienceRateLimitReservation
+	var actorID sql.NullInt64
+	if err := r.db.db.QueryRowContext(ctx, `
+		SELECT limit_key, actor_id, bucket_name, period_start, period_end, count, hard_cap
+		FROM experience_rate_limits
+		WHERE limit_key = ?`, limitKey).Scan(
+		&reservation.LimitKey,
+		&actorID,
+		&reservation.BucketName,
+		&reservation.PeriodStart,
+		&reservation.PeriodEnd,
+		&reservation.Count,
+		&reservation.HardCap,
+	); err != nil {
+		return nil, fmt.Errorf("load experience rate limit reservation: %w", err)
+	}
+	reservation.ActorID = fromNullInt64(actorID)
+	reservation.Limit = limit
+	reservation.Allowed = reservation.Count <= limit
+	return &reservation, nil
+}
+
+func (r *experienceRepo) RefundExperienceRateLimit(ctx context.Context, limitKey string) error {
+	key := strings.TrimSpace(limitKey)
+	if key == "" {
+		return nil
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		UPDATE experience_rate_limits
+		SET count = GREATEST(count - 1, 0),
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE limit_key = ?`, key)
+	if err != nil {
+		return fmt.Errorf("refund experience rate limit: %w", err)
+	}
+	return nil
+}
+
+func (r *experienceRepo) GetExperienceRateLimit(ctx context.Context, limitKey string, limit int) (*domain.ExperienceRateLimitReservation, error) {
+	var reservation domain.ExperienceRateLimitReservation
+	var actorID sql.NullInt64
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT limit_key, actor_id, bucket_name, period_start, period_end, count, hard_cap
+		FROM experience_rate_limits
+		WHERE limit_key = ?`,
+		strings.TrimSpace(limitKey),
+	).Scan(
+		&reservation.LimitKey,
+		&actorID,
+		&reservation.BucketName,
+		&reservation.PeriodStart,
+		&reservation.PeriodEnd,
+		&reservation.Count,
+		&reservation.HardCap,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get experience rate limit: %w", err)
+	}
+	reservation.ActorID = fromNullInt64(actorID)
+	reservation.Limit = limit
+	reservation.Allowed = limit <= 0 || reservation.Count < limit
+	return &reservation, nil
+}
+
+func (r *experienceRepo) CreateExperienceMicroQuestionAnswer(ctx context.Context, answer *domain.ExperienceMicroQuestionAnswer) (bool, error) {
+	if answer == nil {
+		return false, fmt.Errorf("experience micro question answer is nil")
+	}
+	result, err := r.db.db.ExecContext(ctx, `
+		INSERT IGNORE INTO experience_micro_question_answers (
+			answer_event_key, suggestion_event_id, suggestion_stable_key, actor_id,
+			surface, target_type, target_id, answer_value, reason_code, payload_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(answer.AnswerEventKey),
+		strings.TrimSpace(answer.SuggestionEventID),
+		strings.TrimSpace(answer.SuggestionStableKey),
+		toNullInt64(answer.ActorID),
+		strings.TrimSpace(answer.Surface),
+		strings.TrimSpace(answer.TargetType),
+		strings.TrimSpace(answer.TargetID),
+		strings.TrimSpace(answer.AnswerValue),
+		strings.TrimSpace(answer.ReasonCode),
+		toNullJSONString(answer.Payload),
+	)
+	if err != nil {
+		return false, fmt.Errorf("create experience micro question answer: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read experience micro question insert result: %w", err)
+	}
+	return rows > 0, nil
+}
+
+func (r *experienceRepo) HasExperienceMicroQuestionAnswer(ctx context.Context, answerEventKey string) (bool, error) {
+	var exists int
+	if err := r.db.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM experience_micro_question_answers
+		WHERE answer_event_key = ?
+		LIMIT 1`,
+		strings.TrimSpace(answerEventKey),
+	).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("check experience micro question answer: %w", err)
+	}
+	return exists == 1, nil
+}
+
+func (r *experienceRepo) CreateExperienceReviewItem(ctx context.Context, item *domain.ExperienceReviewItem) error {
+	if item == nil {
+		return fmt.Errorf("experience review item is nil")
+	}
+	status := strings.TrimSpace(item.Status)
+	if status == "" {
+		status = domain.ExperienceReviewItemStatusOpen
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO experience_review_items (
+			item_key, item_type, status, priority, evidence_summary_json
+		) VALUES (?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			priority = IF(status = 'open', VALUES(priority), priority),
+			evidence_summary_json = IF(status = 'open', VALUES(evidence_summary_json), evidence_summary_json),
+			updated_at = CURRENT_TIMESTAMP`,
+		strings.TrimSpace(item.ItemKey),
+		strings.TrimSpace(item.ItemType),
+		status,
+		strings.TrimSpace(item.Priority),
+		toNullJSONString(item.EvidenceSummary),
+	)
+	if err != nil {
+		return fmt.Errorf("create experience review item: %w", err)
+	}
+	return nil
+}
+
+func (r *experienceRepo) ListExperienceReviewItems(ctx context.Context, filter repo.ExperienceReviewItemFilter) ([]*domain.ExperienceReviewItem, int64, error) {
+	where := []string{"1=1"}
+	args := make([]interface{}, 0, 4)
+	if value := strings.TrimSpace(filter.Status); value != "" {
+		where = append(where, "status = ?")
+		args = append(args, value)
+	}
+	if value := strings.TrimSpace(filter.ItemType); value != "" {
+		where = append(where, "item_type = ?")
+		args = append(args, value)
+	}
+	whereSQL := strings.Join(where, " AND ")
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM experience_review_items WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count experience review items: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	listArgs := append([]interface{}{}, args...)
+	listArgs = append(listArgs, pageSize, (page-1)*pageSize)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, item_key, item_type, status, priority, evidence_summary_json, created_at, updated_at
+		FROM experience_review_items
+		WHERE `+whereSQL+`
+		ORDER BY
+		  CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+		  updated_at DESC,
+		  id DESC
+		LIMIT ? OFFSET ?`, listArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list experience review items: %w", err)
+	}
+	defer rows.Close()
+	items := make([]*domain.ExperienceReviewItem, 0)
+	for rows.Next() {
+		item, err := scanExperienceReviewItem(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate experience review items: %w", err)
+	}
+	return items, total, nil
+}
+
+func (r *experienceRepo) CreateExperienceReviewDecision(ctx context.Context, decision *domain.ExperienceReviewDecision, nextStatus string) error {
+	if decision == nil {
+		return fmt.Errorf("experience review decision is nil")
+	}
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin experience review decision: %w", err)
+	}
+	var itemType, currentStatus string
+	var evidenceSummary sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT item_type, status, evidence_summary_json
+		FROM experience_review_items
+		WHERE item_key = ?
+		FOR UPDATE`,
+		strings.TrimSpace(decision.ReviewItemKey),
+	).Scan(&itemType, &currentStatus, &evidenceSummary); err != nil {
+		_ = tx.Rollback()
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("experience review item not found")
+		}
+		return fmt.Errorf("load experience review item: %w", err)
+	}
+	if strings.TrimSpace(currentStatus) != domain.ExperienceReviewItemStatusOpen {
+		_ = tx.Rollback()
+		return fmt.Errorf("experience review item is not open")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE experience_review_items
+		SET status = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE item_key = ?`,
+		strings.TrimSpace(nextStatus),
+		strings.TrimSpace(decision.ReviewItemKey),
+	); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("update experience review item status: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO experience_review_decisions (
+			review_item_key, decision, reason_code, actor_id, payload_json
+		) VALUES (?, ?, ?, ?, ?)`,
+		strings.TrimSpace(decision.ReviewItemKey),
+		strings.TrimSpace(decision.Decision),
+		strings.TrimSpace(decision.ReasonCode),
+		toNullInt64(decision.ActorID),
+		toNullJSONString(decision.Payload),
+	); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("create experience review decision: %w", err)
+	}
+	if strings.TrimSpace(decision.Decision) == domain.ExperienceReviewDecisionApprove {
+		if err := materializeExperienceApprovedReview(ctx, tx, decision, itemType, rawJSONFromNull(evidenceSummary)); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit experience review decision: %w", err)
+	}
+	return nil
+}
+
+func materializeExperienceApprovedReview(ctx context.Context, tx *sql.Tx, decision *domain.ExperienceReviewDecision, itemType string, evidence json.RawMessage) error {
+	if tx == nil || decision == nil || len(evidence) == 0 {
+		return fmt.Errorf("experience review item evidence is required for approval")
+	}
+	var summary map[string]interface{}
+	if err := json.Unmarshal(evidence, &summary); err != nil {
+		return fmt.Errorf("decode experience review evidence: %w", err)
+	}
+	suggestion := experienceMapValue(summary, "suggestion")
+	outcome := experienceMapValue(summary, "outcome")
+	targetType := firstNonEmptyString(
+		experienceStringValue(suggestion, "target_type"),
+		experienceStringValue(outcome, "target_type"),
+	)
+	targetID := firstNonEmptyString(
+		experienceStringValue(suggestion, "target_id"),
+		experienceStringValue(outcome, "target_id"),
+	)
+	payload := mustJSONRaw(map[string]interface{}{
+		"source":           "experience_review",
+		"review_item_key":  decision.ReviewItemKey,
+		"item_type":        itemType,
+		"decision":         decision.Decision,
+		"reason_code":      decision.ReasonCode,
+		"evidence_summary": summary,
+	})
+	switch strings.TrimSpace(targetType) {
+	case "task":
+		taskID, err := strconv.ParseInt(strings.TrimSpace(targetID), 10, 64)
+		if err != nil || taskID <= 0 {
+			return fmt.Errorf("experience review task target is invalid")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_experience_profiles (
+				task_id, profile_version, source_event_watermark, task_type, category_code,
+				category_name, task_status, outcome, profile_json, rebuilt_at
+			) VALUES (?, 1, 0, ?, '', '', ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE
+				profile_version = VALUES(profile_version),
+				task_type = VALUES(task_type),
+				task_status = VALUES(task_status),
+				outcome = VALUES(outcome),
+				profile_json = VALUES(profile_json),
+				rebuilt_at = VALUES(rebuilt_at),
+				updated_at = CURRENT_TIMESTAMP`,
+			taskID,
+			truncateSQLString(experienceStringValue(suggestion, "type"), 64),
+			truncateSQLString(firstNonEmptyString(experienceStringValue(outcome, "outcome"), experienceStringValue(outcome, "action")), 64),
+			truncateSQLString(experienceStringValue(outcome, "action"), 64),
+			toNullJSONString(payload),
+			time.Now().UTC(),
+		); err != nil {
+			return fmt.Errorf("materialize task experience profile: %w", err)
+		}
+	case "asset":
+		assetID, err := strconv.ParseInt(strings.TrimSpace(targetID), 10, 64)
+		if err != nil || assetID <= 0 {
+			return fmt.Errorf("experience review asset target is invalid")
+		}
+		reasonCode := truncateSQLString(firstNonEmptyString(decision.ReasonCode, experienceStringValue(experienceMapValue(summary, "feedback"), "reason_code")), 96)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO asset_quality_labels (
+				asset_id, quality_label, reason_code, source_type, source_id, actor_id, payload_json
+			)
+			SELECT ?, 'reusable_candidate', ?, 'experience_review', ?, ?, ?
+			FROM DUAL
+			WHERE NOT EXISTS (
+				SELECT 1 FROM asset_quality_labels
+				WHERE source_type = 'experience_review' AND source_id = ?
+			)`,
+			assetID,
+			reasonCode,
+			strings.TrimSpace(decision.ReviewItemKey),
+			toNullInt64(decision.ActorID),
+			toNullJSONString(payload),
+			strings.TrimSpace(decision.ReviewItemKey),
+		); err != nil {
+			return fmt.Errorf("materialize asset quality label: %w", err)
+		}
+	default:
+		return fmt.Errorf("experience review target is not materializable")
+	}
+	return nil
+}
+
+func experienceMapValue(values map[string]interface{}, key string) map[string]interface{} {
+	if values == nil {
+		return map[string]interface{}{}
+	}
+	if nested, ok := values[key].(map[string]interface{}); ok {
+		return nested
+	}
+	return map[string]interface{}{}
+}
+
+func experienceStringValue(values map[string]interface{}, key string) string {
+	if values == nil {
+		return ""
+	}
+	switch value := values[key].(type) {
+	case string:
+		return value
+	case fmt.Stringer:
+		return value.String()
+	case float64:
+		if value == float64(int64(value)) {
+			return strconv.FormatInt(int64(value), 10)
+		}
+	}
+	return ""
+}
+
+func mustJSONRaw(value interface{}) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func (r *experienceRepo) scalarCount(ctx context.Context, query string, args ...interface{}) (int64, error) {
@@ -1588,6 +2304,63 @@ func scanExperienceOutboxEvent(scanner interface {
 	event.ClaimedAt = fromNullTime(claimedAt)
 	event.ProcessedAt = fromNullTime(processedAt)
 	return &event, nil
+}
+
+func scanExperienceWorkerRun(scanner interface {
+	Scan(...interface{}) error
+}) (*domain.ExperienceWorkerRunRecord, error) {
+	var run domain.ExperienceWorkerRunRecord
+	var finishedAt sql.NullTime
+	var metadata sql.NullString
+	if err := scanner.Scan(
+		&run.ID,
+		&run.WorkerName,
+		&run.SourceName,
+		&run.StartedAt,
+		&finishedAt,
+		&run.Status,
+		&run.ScannedCount,
+		&run.EnqueuedCount,
+		&run.SkippedCount,
+		&run.FailedCount,
+		&run.LastError,
+		&metadata,
+		&run.CreatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("scan experience worker run: %w", err)
+	}
+	run.FinishedAt = fromNullTime(finishedAt)
+	run.Metadata = rawJSONFromNull(metadata)
+	return &run, nil
+}
+
+func scanExperienceReviewItem(scanner interface {
+	Scan(...interface{}) error
+}) (*domain.ExperienceReviewItem, error) {
+	var item domain.ExperienceReviewItem
+	var evidence sql.NullString
+	if err := scanner.Scan(
+		&item.ID,
+		&item.ItemKey,
+		&item.ItemType,
+		&item.Status,
+		&item.Priority,
+		&evidence,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("scan experience review item: %w", err)
+	}
+	item.EvidenceSummary = rawJSONFromNull(evidence)
+	return &item, nil
+}
+
+func trimExperienceWorkerError(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 1024 {
+		return value[:1024]
+	}
+	return value
 }
 
 func rawJSONFromNull(value sql.NullString) json.RawMessage {

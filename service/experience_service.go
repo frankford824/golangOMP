@@ -21,11 +21,14 @@ import (
 )
 
 const (
-	experienceSchemaVersion       = 1
-	experiencePayloadMaxBytes     = 8192
-	experienceReasonNoteMaxLength = 512
-	experienceBehaviorBatchMax    = 50
-	experienceRetentionBatchMax   = 1000
+	experienceSchemaVersion                   = 1
+	experiencePayloadMaxBytes                 = 8192
+	experienceReasonNoteMaxLength             = 512
+	experienceBehaviorBatchMax                = 50
+	experienceRetentionBatchMax               = 1000
+	experienceAttributionLookback             = 7 * 24 * time.Hour
+	experienceAttributionCandidatesPerOutcome = 20
+	experienceMicroQuestionDailyLimit         = 3
 )
 
 const (
@@ -44,13 +47,19 @@ type ExperienceService interface {
 	ListClientReasonTags(ctx context.Context, scene string) ([]*domain.ExperienceClientReasonTag, *domain.AppError)
 	ListSamples(ctx context.Context, filter ExperienceEventFilter) ([]*domain.ExperienceEvent, domain.PaginationMeta, *domain.AppError)
 	Stats(ctx context.Context) (*domain.ExperienceStats, *domain.AppError)
+	ListReviewItems(ctx context.Context, filter ExperienceReviewItemFilter) ([]*domain.ExperienceReviewItem, domain.PaginationMeta, *domain.AppError)
 	EnqueueEvent(ctx context.Context, event *domain.ExperienceOutboxEvent) *domain.AppError
 	RecordAISuggestionEvent(ctx context.Context, event *domain.AISuggestionEvent) *domain.AppError
 	RecordBehaviorEvents(ctx context.Context, actor domain.RequestActor, req ExperienceBehaviorBatchRequest) (ExperienceBehaviorBatchResult, *domain.AppError)
 	RecordAISuggestionFeedback(ctx context.Context, actor domain.RequestActor, req AISuggestionFeedbackRequest) (*domain.AISuggestionFeedback, *domain.AppError)
+	MicroQuestionEligibility(ctx context.Context, actor domain.RequestActor, req ExperienceMicroQuestionEligibilityRequest) (*domain.ExperienceMicroQuestionEligibility, *domain.AppError)
+	RecordMicroQuestionAnswer(ctx context.Context, actor domain.RequestActor, req ExperienceMicroQuestionAnswerRequest) (*domain.ExperienceMicroQuestionAnswer, *domain.AppError)
+	RecordReviewDecision(ctx context.Context, actor domain.RequestActor, itemKey string, req ExperienceReviewDecisionRequest) (*domain.ExperienceReviewDecision, *domain.AppError)
 	ProcessOutcomeObservers(ctx context.Context, limit int) (domain.ExperienceObserverRun, *domain.AppError)
 	ProcessOutbox(ctx context.Context, limit int) (domain.ExperienceWorkerRun, *domain.AppError)
+	ProcessAttributions(ctx context.Context, limit int) (domain.ExperienceAttributionRun, *domain.AppError)
 	ProcessRetention(ctx context.Context, now time.Time, limit int) (domain.ExperienceRetentionRun, *domain.AppError)
+	ReserveRateLimit(ctx context.Context, actor domain.RequestActor, bucketName string, periodStart time.Time, periodEnd time.Time, limit int) (*domain.ExperienceRateLimitReservation, *domain.AppError)
 }
 
 type ExperienceServiceConfig struct {
@@ -81,6 +90,13 @@ type ExperienceEventFilter struct {
 	PageSize         int
 }
 
+type ExperienceReviewItemFilter struct {
+	Status   string
+	ItemType string
+	Page     int
+	PageSize int
+}
+
 type AISuggestionFeedbackRequest struct {
 	SuggestionEventID string          `json:"suggestion_event_id"`
 	FeedbackValue     string          `json:"feedback_value"`
@@ -89,6 +105,32 @@ type AISuggestionFeedbackRequest struct {
 	OutcomeSourceType string          `json:"outcome_source_type"`
 	OutcomeSourceID   string          `json:"outcome_source_id"`
 	Payload           json.RawMessage `json:"payload"`
+}
+
+type ExperienceMicroQuestionEligibilityRequest struct {
+	SuggestionEventID   string `json:"suggestion_event_id"`
+	SuggestionStableKey string `json:"suggestion_stable_key"`
+	Surface             string `json:"surface"`
+	TargetType          string `json:"target_type"`
+	TargetID            string `json:"target_id"`
+}
+
+type ExperienceMicroQuestionAnswerRequest struct {
+	AnswerEventKey      string          `json:"answer_event_key"`
+	SuggestionEventID   string          `json:"suggestion_event_id"`
+	SuggestionStableKey string          `json:"suggestion_stable_key"`
+	Surface             string          `json:"surface"`
+	TargetType          string          `json:"target_type"`
+	TargetID            string          `json:"target_id"`
+	AnswerValue         string          `json:"answer_value"`
+	ReasonCode          string          `json:"reason_code"`
+	Payload             json.RawMessage `json:"payload"`
+}
+
+type ExperienceReviewDecisionRequest struct {
+	Decision   string          `json:"decision"`
+	ReasonCode string          `json:"reason_code"`
+	Payload    json.RawMessage `json:"payload"`
 }
 
 type ExperienceBehaviorBatchRequest struct {
@@ -242,6 +284,26 @@ func (s *experienceService) Stats(ctx context.Context) (*domain.ExperienceStats,
 	return stats, nil
 }
 
+func (s *experienceService) ListReviewItems(ctx context.Context, filter ExperienceReviewItemFilter) ([]*domain.ExperienceReviewItem, domain.PaginationMeta, *domain.AppError) {
+	page, pageSize := normalizeExperiencePage(filter.Page, filter.PageSize)
+	if s == nil || s.repo == nil || !s.RuntimeFlags().UIEnabled {
+		return []*domain.ExperienceReviewItem{}, domain.PaginationMeta{Total: 0, Page: page, PageSize: pageSize}, nil
+	}
+	items, total, err := s.repo.ListExperienceReviewItems(ctx, repo.ExperienceReviewItemFilter{
+		Status:   trimMax(strings.TrimSpace(filter.Status), 48),
+		ItemType: trimMax(strings.TrimSpace(filter.ItemType), 64),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if err != nil {
+		return nil, domain.PaginationMeta{}, infraError("list experience review items", err)
+	}
+	if items == nil {
+		items = []*domain.ExperienceReviewItem{}
+	}
+	return items, domain.PaginationMeta{Total: total, Page: page, PageSize: pageSize}, nil
+}
+
 func (s *experienceService) EnqueueEvent(ctx context.Context, event *domain.ExperienceOutboxEvent) *domain.AppError {
 	if s == nil || s.repo == nil || !s.RuntimeFlags().CaptureEnabled {
 		return nil
@@ -313,12 +375,221 @@ func (s *experienceService) RecordAISuggestionFeedback(ctx context.Context, acto
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr := s.validateAISuggestionFeedbackScope(ctx, actor, feedback); appErr != nil {
+		return nil, appErr
+	}
 	id, err := s.repo.CreateAISuggestionFeedback(ctx, feedback)
 	if err != nil {
 		return nil, infraError("create ai suggestion feedback", err)
 	}
 	feedback.ID = id
 	return feedback, nil
+}
+
+func (s *experienceService) validateAISuggestionFeedbackScope(ctx context.Context, actor domain.RequestActor, feedback *domain.AISuggestionFeedback) *domain.AppError {
+	if feedback == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "ai suggestion feedback is required", nil)
+	}
+	suggestion, err := s.repo.GetAISuggestionEventByEventID(ctx, feedback.SuggestionEventID)
+	if err != nil {
+		return infraError("load ai suggestion event for feedback", err)
+	}
+	if suggestion == nil || !experienceSuggestionOwnedByActor(actor, suggestion) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion_event_id is invalid", map[string]interface{}{"deny_code": "experience_feedback_suggestion_not_found"})
+	}
+	return nil
+}
+
+func (s *experienceService) MicroQuestionEligibility(ctx context.Context, actor domain.RequestActor, req ExperienceMicroQuestionEligibilityRequest) (*domain.ExperienceMicroQuestionEligibility, *domain.AppError) {
+	result := &domain.ExperienceMicroQuestionEligibility{Eligible: false, Reason: "disabled"}
+	flags := s.RuntimeFlags()
+	if s == nil || s.repo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
+	}
+	if !flags.UIEnabled || !flags.MicroQuestionEnabled {
+		return result, nil
+	}
+	surface := trimMax(strings.TrimSpace(req.Surface), 64)
+	if !experienceSurfaceEnabled(surface, s.cfg.EnabledSurfaces) {
+		result.Reason = "surface_disabled"
+		return result, nil
+	}
+	suggestionEventID := trimMax(strings.TrimSpace(req.SuggestionEventID), 191)
+	if suggestionEventID == "" {
+		result.Reason = "missing_suggestion_event"
+		return result, nil
+	}
+	suggestion, err := s.repo.GetAISuggestionEventByEventID(ctx, suggestionEventID)
+	if err != nil {
+		return nil, infraError("load ai suggestion event for micro question", err)
+	}
+	if suggestion == nil {
+		result.Reason = "suggestion_not_found"
+		return result, nil
+	}
+	if !experienceSuggestionOwnedByActor(actor, suggestion) {
+		result.Reason = "suggestion_not_found"
+		return result, nil
+	}
+	if !suggestion.AttributionEligible {
+		result.Reason = "not_attribution_eligible"
+		return result, nil
+	}
+	targetType := firstNonEmptyExperience(req.TargetType, suggestion.TargetType)
+	targetID := firstNonEmptyExperience(req.TargetID, suggestion.TargetID)
+	if strings.TrimSpace(targetType) == "" || strings.TrimSpace(targetID) == "" {
+		result.Reason = "missing_target"
+		return result, nil
+	}
+	answerEventKey := buildExperienceMicroQuestionAnswerEventKey(actor.ID, suggestionEventID, firstNonEmptyExperience(req.SuggestionStableKey, suggestion.SuggestionStableKey), surface, targetType, targetID)
+	result.AnswerEventKey = answerEventKey
+	answered, err := s.repo.HasExperienceMicroQuestionAnswer(ctx, answerEventKey)
+	if err != nil {
+		return nil, infraError("check experience micro question answer", err)
+	}
+	if answered {
+		result.Reason = "already_answered"
+		return result, nil
+	}
+	periodStart, _ := experienceBeijingDayWindow(time.Now())
+	limitKey := buildExperienceRateLimitKey(actor.ID, "micro_question_daily", periodStart)
+	rate, err := s.repo.GetExperienceRateLimit(ctx, limitKey, experienceMicroQuestionDailyLimit)
+	if err != nil {
+		return nil, infraError("load experience micro question rate limit", err)
+	}
+	used := 0
+	if rate != nil {
+		used = rate.Count
+	}
+	result.RemainingDaily = experienceMicroQuestionDailyLimit - used
+	if result.RemainingDaily < 0 {
+		result.RemainingDaily = 0
+	}
+	if used >= experienceMicroQuestionDailyLimit {
+		result.Reason = "rate_limited"
+		return result, nil
+	}
+	tags, appErr := s.ListClientReasonTags(ctx, domain.ExperienceReasonSceneMicroQuestion)
+	if appErr != nil {
+		return nil, appErr
+	}
+	result.ReasonTags = tags
+	result.Eligible = true
+	result.Reason = ""
+	return result, nil
+}
+
+func (s *experienceService) RecordMicroQuestionAnswer(ctx context.Context, actor domain.RequestActor, req ExperienceMicroQuestionAnswerRequest) (*domain.ExperienceMicroQuestionAnswer, *domain.AppError) {
+	flags := s.RuntimeFlags()
+	if s == nil || s.repo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
+	}
+	if !flags.UIEnabled || !flags.MicroQuestionEnabled {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "experience micro question is disabled", nil)
+	}
+	answer, appErr := normalizeExperienceMicroQuestionAnswer(actor, req)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.validateMicroQuestionAnswerScope(ctx, actor, answer, req); appErr != nil {
+		return nil, appErr
+	}
+	answered, err := s.repo.HasExperienceMicroQuestionAnswer(ctx, answer.AnswerEventKey)
+	if err != nil {
+		return nil, infraError("check experience micro question answer", err)
+	}
+	if answered {
+		return answer, nil
+	}
+	periodStart, periodEnd := experienceBeijingDayWindow(time.Now())
+	reservation, appErr := s.ReserveRateLimit(ctx, actor, "micro_question_daily", periodStart, periodEnd, experienceMicroQuestionDailyLimit)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if reservation != nil && !reservation.Allowed {
+		if answered, err := s.repo.HasExperienceMicroQuestionAnswer(ctx, answer.AnswerEventKey); err != nil {
+			return nil, infraError("recheck experience micro question answer after rate limit", err)
+		} else if answered {
+			if err := s.repo.RefundExperienceRateLimit(ctx, reservation.LimitKey); err != nil {
+				return nil, infraError("refund duplicate experience micro question rate limit", err)
+			}
+			return answer, nil
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "experience micro question is rate limited", map[string]interface{}{"deny_code": "experience_micro_question_rate_limited"})
+	}
+	inserted, err := s.repo.CreateExperienceMicroQuestionAnswer(ctx, answer)
+	if err != nil {
+		return nil, infraError("create experience micro question answer", err)
+	}
+	if !inserted && reservation != nil {
+		if err := s.repo.RefundExperienceRateLimit(ctx, reservation.LimitKey); err != nil {
+			return nil, infraError("refund duplicate experience micro question rate limit", err)
+		}
+	}
+	return answer, nil
+}
+
+func (s *experienceService) validateMicroQuestionAnswerScope(ctx context.Context, actor domain.RequestActor, answer *domain.ExperienceMicroQuestionAnswer, req ExperienceMicroQuestionAnswerRequest) *domain.AppError {
+	if answer == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "experience micro question answer is required", nil)
+	}
+	if !experienceSurfaceEnabled(answer.Surface, s.cfg.EnabledSurfaces) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "experience micro question surface is disabled", map[string]interface{}{"deny_code": "experience_micro_question_surface_disabled"})
+	}
+	if strings.TrimSpace(answer.SuggestionEventID) == "" {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion_event_id is required", nil)
+	}
+	suggestion, err := s.repo.GetAISuggestionEventByEventID(ctx, answer.SuggestionEventID)
+	if err != nil {
+		return infraError("load ai suggestion event for micro question answer", err)
+	}
+	if suggestion == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion_event_id is invalid", map[string]interface{}{"deny_code": "experience_micro_question_suggestion_not_found"})
+	}
+	if !experienceSuggestionOwnedByActor(actor, suggestion) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion_event_id is invalid", map[string]interface{}{"deny_code": "experience_micro_question_suggestion_not_found"})
+	}
+	if !suggestion.AttributionEligible {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion is not eligible for micro question", map[string]interface{}{"deny_code": "experience_micro_question_not_attribution_eligible"})
+	}
+	if value := strings.TrimSpace(suggestion.SuggestionStableKey); value != "" {
+		if answer.SuggestionStableKey != "" && answer.SuggestionStableKey != value {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion_stable_key does not match suggestion_event_id", nil)
+		}
+		answer.SuggestionStableKey = trimMax(value, 191)
+	}
+	if value := strings.TrimSpace(suggestion.TargetType); value != "" && answer.TargetType != value {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target_type does not match suggestion_event_id", nil)
+	}
+	if value := strings.TrimSpace(suggestion.TargetID); value != "" && answer.TargetID != value {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target_id does not match suggestion_event_id", nil)
+	}
+	expectedKey := buildExperienceMicroQuestionAnswerEventKey(actor.ID, answer.SuggestionEventID, answer.SuggestionStableKey, answer.Surface, answer.TargetType, answer.TargetID)
+	if providedKey := strings.TrimSpace(req.AnswerEventKey); providedKey != "" && providedKey != expectedKey {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "answer_event_key does not match micro question context", nil)
+	}
+	answer.AnswerEventKey = expectedKey
+	return nil
+}
+
+func (s *experienceService) RecordReviewDecision(ctx context.Context, actor domain.RequestActor, itemKey string, req ExperienceReviewDecisionRequest) (*domain.ExperienceReviewDecision, *domain.AppError) {
+	if s == nil || s.repo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
+	}
+	if !s.RuntimeFlags().UIEnabled {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "experience review is disabled", nil)
+	}
+	decision, nextStatus, appErr := normalizeExperienceReviewDecision(actor, itemKey, req)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if err := s.repo.CreateExperienceReviewDecision(ctx, decision, nextStatus); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "experience review item not found", nil)
+		}
+		return nil, infraError("create experience review decision", err)
+	}
+	return decision, nil
 }
 
 func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit int) (domain.ExperienceObserverRun, *domain.AppError) {
@@ -334,35 +605,46 @@ func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit i
 		limit = 50
 	}
 
-	run, appErr := s.processOutcomeEventSource(ctx, experienceSourceAuditRecords, limit, s.repo.ListExperienceAuditOutcomeRows)
-	result = addExperienceObserverRun(result, run)
-	if appErr != nil {
-		return result, appErr
+	eventSources := []struct {
+		name string
+		list func(context.Context, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceOutcomeEventRow, error)
+	}{
+		{name: experienceSourceAuditRecords, list: s.repo.ListExperienceAuditOutcomeRows},
+		{name: experienceSourceTaskModuleEvents, list: s.repo.ListExperienceModuleOutcomeRows},
 	}
-	run, appErr = s.processOutcomeEventSource(ctx, experienceSourceTaskModuleEvents, limit, s.repo.ListExperienceModuleOutcomeRows)
-	result = addExperienceObserverRun(result, run)
-	if appErr != nil {
-		return result, appErr
+	for _, source := range eventSources {
+		startedAt := time.Now().UTC()
+		run, appErr := s.processOutcomeEventSource(ctx, source.name, limit, source.list)
+		if appErr != nil && run.Failed == 0 {
+			run.Failed = 1
+		}
+		result = addExperienceObserverRun(result, run)
+		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerOutcomeObserver, source.name, startedAt, run.Scanned, run.Enqueued, run.Skipped, run.Failed, appErr)
+		if appErr != nil {
+			s.logger.Warn("experience outcome event source failed", zap.String("source", source.name), zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+		}
 	}
-	run, appErr = s.processOutcomeSnapshots(ctx, experienceSourceTaskStatusSnapshot, limit, s.repo.ListExperienceTaskStatusSnapshots)
-	result = addExperienceObserverRun(result, run)
-	if appErr != nil {
-		return result, appErr
+
+	snapshotSources := []struct {
+		name string
+		list func(context.Context, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceOutcomeSnapshotRow, error)
+	}{
+		{name: experienceSourceTaskStatusSnapshot, list: s.repo.ListExperienceTaskStatusSnapshots},
+		{name: experienceSourceTaskAssetReviewSnapshot, list: s.repo.ListExperienceTaskAssetReviewSnapshots},
+		{name: experienceSourceTaskDetailFilingSnapshot, list: s.repo.ListExperienceTaskDetailFilingSnapshots},
+		{name: experienceSourceTaskSKUItemFilingSnapshot, list: s.repo.ListExperienceTaskSKUItemFilingSnapshots},
 	}
-	run, appErr = s.processOutcomeSnapshots(ctx, experienceSourceTaskAssetReviewSnapshot, limit, s.repo.ListExperienceTaskAssetReviewSnapshots)
-	result = addExperienceObserverRun(result, run)
-	if appErr != nil {
-		return result, appErr
-	}
-	run, appErr = s.processOutcomeSnapshots(ctx, experienceSourceTaskDetailFilingSnapshot, limit, s.repo.ListExperienceTaskDetailFilingSnapshots)
-	result = addExperienceObserverRun(result, run)
-	if appErr != nil {
-		return result, appErr
-	}
-	run, appErr = s.processOutcomeSnapshots(ctx, experienceSourceTaskSKUItemFilingSnapshot, limit, s.repo.ListExperienceTaskSKUItemFilingSnapshots)
-	result = addExperienceObserverRun(result, run)
-	if appErr != nil {
-		return result, appErr
+	for _, source := range snapshotSources {
+		startedAt := time.Now().UTC()
+		run, appErr := s.processOutcomeSnapshots(ctx, source.name, limit, source.list)
+		if appErr != nil && run.Failed == 0 {
+			run.Failed = 1
+		}
+		result = addExperienceObserverRun(result, run)
+		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerOutcomeObserver, source.name, startedAt, run.Scanned, run.Enqueued, run.Skipped, run.Failed, appErr)
+		if appErr != nil {
+			s.logger.Warn("experience outcome snapshot source failed", zap.String("source", source.name), zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+		}
 	}
 	return result, nil
 }
@@ -540,6 +822,7 @@ func (s *experienceService) ProcessOutbox(ctx context.Context, limit int) (domai
 	if s == nil || s.repo == nil || !s.RuntimeFlags().WorkerEnabled {
 		return result, nil
 	}
+	startedAt := time.Now().UTC()
 	if limit <= 0 {
 		limit = s.cfg.WorkerBatchSize
 	}
@@ -547,7 +830,10 @@ func (s *experienceService) ProcessOutbox(ctx context.Context, limit int) (domai
 	claimToken := fmt.Sprintf("experience-worker-%d-%s", os.Getpid(), uuid.NewString())
 	events, err := s.repo.ClaimExperienceOutbox(ctx, limit, claimToken, now, s.cfg.OutboxLeaseTTL)
 	if err != nil {
-		return result, infraError("claim experience outbox", err)
+		result.Failed++
+		appErr := infraError("claim experience outbox", err)
+		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerOutbox, "", startedAt, result.Claimed, result.Processed, 0, result.Failed, appErr)
+		return result, appErr
 	}
 	result.Claimed = len(events)
 	for _, event := range events {
@@ -570,7 +856,133 @@ func (s *experienceService) ProcessOutbox(ctx context.Context, limit int) (domai
 		}
 		result.Processed++
 	}
+	s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerOutbox, "", startedAt, result.Claimed, result.Processed, 0, result.Failed, nil)
 	return result, nil
+}
+
+func (s *experienceService) ProcessAttributions(ctx context.Context, limit int) (domain.ExperienceAttributionRun, *domain.AppError) {
+	var result domain.ExperienceAttributionRun
+	flags := s.RuntimeFlags()
+	if s == nil || s.repo == nil || !flags.WorkerEnabled || !flags.CaptureEnabled {
+		return result, nil
+	}
+	startedAt := time.Now().UTC()
+	if limit <= 0 {
+		limit = s.cfg.WorkerBatchSize
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	watermark, err := s.repo.GetExperienceWorkerWatermark(ctx, domain.ExperienceWorkerAttribution, "experience_events")
+	if err != nil {
+		result.Failed++
+		appErr := infraError("load experience attribution watermark", err)
+		s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+		return result, appErr
+	}
+	cursor := experienceCursorFromWatermark(watermark)
+	outcomes, err := s.repo.ListExperienceAttributionOutcomes(ctx, cursor, limit)
+	if err != nil {
+		result.Failed++
+		appErr := infraError("list experience attribution outcomes", err)
+		s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+		return result, appErr
+	}
+	var last *domain.ExperienceAttributionOutcome
+	for _, outcome := range outcomes {
+		if outcome == nil {
+			continue
+		}
+		result.Scanned++
+		candidates, err := s.repo.ListExperienceAttributionCandidates(ctx, outcome, experienceAttributionLookback, experienceAttributionCandidatesPerOutcome)
+		if err != nil {
+			result.Failed++
+			appErr := infraError("list experience attribution candidates", err)
+			s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+			return result, appErr
+		}
+		if len(candidates) == 0 {
+			result.Skipped++
+			last = outcome
+			continue
+		}
+		for _, candidate := range candidates {
+			attribution := buildExperienceAttribution(outcome, candidate, time.Now().UTC())
+			if attribution == nil {
+				result.Skipped++
+				continue
+			}
+			if err := s.repo.CreateExperienceAttribution(ctx, attribution); err != nil {
+				result.Failed++
+				appErr := infraError("create experience attribution", err)
+				s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+				return result, appErr
+			}
+			if reviewItem := buildExperienceReviewItem(attribution); reviewItem != nil {
+				if err := s.repo.CreateExperienceReviewItem(ctx, reviewItem); err != nil {
+					result.Failed++
+					appErr := infraError("create experience review item", err)
+					s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+					return result, appErr
+				}
+			}
+			result.Created++
+		}
+		last = outcome
+	}
+	if last != nil {
+		lastSeenAt := last.EventTime.UTC()
+		if err := s.repo.SaveExperienceWorkerWatermark(ctx, &domain.ExperienceWorkerWatermark{
+			WorkerName:      domain.ExperienceWorkerAttribution,
+			SourceName:      "experience_events",
+			LastSeenAt:      &lastSeenAt,
+			LastSeenID:      last.ID,
+			SourceWatermark: experienceSourceWatermark(lastSeenAt, last.ID),
+			Status:          "active",
+		}); err != nil {
+			result.Failed++
+			appErr := infraError("save experience attribution watermark", err)
+			s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+			return result, appErr
+		}
+	}
+	s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, nil)
+	return result, nil
+}
+
+func (s *experienceService) ReserveRateLimit(ctx context.Context, actor domain.RequestActor, bucketName string, periodStart time.Time, periodEnd time.Time, limit int) (*domain.ExperienceRateLimitReservation, *domain.AppError) {
+	if s == nil || s.repo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
+	}
+	bucketName = trimMax(strings.TrimSpace(bucketName), 64)
+	if bucketName == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rate limit bucket is required", nil)
+	}
+	if limit <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rate limit must be positive", nil)
+	}
+	if periodStart.IsZero() || periodEnd.IsZero() || !periodEnd.After(periodStart) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rate limit period is invalid", nil)
+	}
+	var actorID *int64
+	if actor.ID > 0 {
+		actorID = &actor.ID
+	}
+	hardCap := limit * 10
+	limitKey := buildExperienceRateLimitKey(actor.ID, bucketName, periodStart)
+	reservation, err := s.repo.ReserveExperienceRateLimit(ctx, repo.ExperienceRateLimitRequest{
+		LimitKey:    limitKey,
+		ActorID:     actorID,
+		BucketName:  bucketName,
+		PeriodStart: periodStart.UTC(),
+		PeriodEnd:   periodEnd.UTC(),
+		Limit:       limit,
+		HardCap:     hardCap,
+	})
+	if err != nil {
+		return nil, infraError("reserve experience rate limit", err)
+	}
+	return reservation, nil
 }
 
 func (s *experienceService) ProcessRetention(ctx context.Context, now time.Time, limit int) (domain.ExperienceRetentionRun, *domain.AppError) {
@@ -579,6 +991,7 @@ func (s *experienceService) ProcessRetention(ctx context.Context, now time.Time,
 	if s == nil || s.repo == nil || !flags.WorkerEnabled {
 		return result, nil
 	}
+	startedAt := time.Now().UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
 	} else {
@@ -592,15 +1005,269 @@ func (s *experienceService) ProcessRetention(ctx context.Context, now time.Time,
 		MinuteRateLimitBefore:  now.AddDate(0, 0, -7),
 		DailyRateLimitBefore:   now.AddDate(0, 0, -90),
 		ObservedTerminalBefore: now.AddDate(0, 0, -180),
+		WorkerRunBefore:        now.AddDate(0, 0, -30),
 		Limit:                  limit,
 	})
 	if err != nil {
-		return result, infraError("run experience retention", err)
+		appErr := infraError("run experience retention", err)
+		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerRetention, "", startedAt, 0, 0, 0, 1, appErr)
+		return result, appErr
 	}
 	if run != nil {
 		result = *run
 	}
+	scanned := int(result.BehaviorDeleted + result.RateLimitDeleted + result.ObservedTombstoned + result.WorkerRunDeleted)
+	s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerRetention, "", startedAt, scanned, int(result.ObservedTombstoned), int(result.BehaviorDeleted+result.RateLimitDeleted+result.WorkerRunDeleted), 0, nil)
 	return result, nil
+}
+
+func (s *experienceService) recordExperienceAttributionWorkerRun(ctx context.Context, startedAt time.Time, result domain.ExperienceAttributionRun, appErr *domain.AppError) {
+	s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerAttribution, "experience_events", startedAt, result.Scanned, result.Created, result.Skipped, result.Failed, appErr)
+}
+
+func (s *experienceService) recordExperienceWorkerRun(ctx context.Context, workerName string, sourceName string, startedAt time.Time, scanned int, enqueued int, skipped int, failed int, appErr *domain.AppError) {
+	if s == nil || s.repo == nil {
+		return
+	}
+	finishedAt := time.Now().UTC()
+	status := "success"
+	lastError := ""
+	if appErr != nil {
+		status = "failed"
+		lastError = appErr.Message
+	} else if failed > 0 {
+		status = "partial"
+	}
+	run := &domain.ExperienceWorkerRunRecord{
+		WorkerName:    trimMax(strings.TrimSpace(workerName), 96),
+		SourceName:    trimMax(strings.TrimSpace(sourceName), 96),
+		StartedAt:     startedAt.UTC(),
+		FinishedAt:    &finishedAt,
+		Status:        status,
+		ScannedCount:  scanned,
+		EnqueuedCount: enqueued,
+		SkippedCount:  skipped,
+		FailedCount:   failed,
+		LastError:     trimMax(lastError, 1024),
+	}
+	if err := s.repo.CreateExperienceWorkerRun(ctx, run); err != nil {
+		s.logger.Warn("record experience worker run failed", zap.Error(err), zap.String("worker", workerName), zap.String("source", sourceName))
+	}
+}
+
+func buildExperienceAttribution(outcome *domain.ExperienceAttributionOutcome, candidate *domain.ExperienceAttributionCandidate, computedAt time.Time) *domain.ExperienceAttribution {
+	if outcome == nil || candidate == nil {
+		return nil
+	}
+	if !experienceAttributionCandidateHasEvidence(candidate) {
+		return nil
+	}
+	suggestionEventID := strings.TrimSpace(candidate.SuggestionEventID)
+	outcomeEventKey := strings.TrimSpace(outcome.EventKey)
+	if suggestionEventID == "" || outcomeEventKey == "" {
+		return nil
+	}
+	score := experienceAttributionScore(outcome, candidate)
+	status, confidence := experienceAttributionStatus(score)
+	summary := experienceAttributionSummary(outcome, candidate, score, status, confidence)
+	return &domain.ExperienceAttribution{
+		SuggestionEventID:   suggestionEventID,
+		SuggestionStableKey: trimMax(strings.TrimSpace(candidate.SuggestionStableKey), 191),
+		CandidateEventKey:   trimMax("candidate:"+suggestionEventID, 191),
+		OutcomeEventKey:     trimMax(outcomeEventKey, 191),
+		Status:              status,
+		Confidence:          confidence,
+		Score:               score,
+		ComputedAt:          computedAt.UTC(),
+		EvidenceSummary:     summary,
+	}
+}
+
+func experienceAttributionCandidateHasEvidence(candidate *domain.ExperienceAttributionCandidate) bool {
+	if candidate == nil {
+		return false
+	}
+	return candidate.BehaviorCount > 0 || strings.TrimSpace(candidate.FeedbackValue) != ""
+}
+
+func buildExperienceReviewItem(attribution *domain.ExperienceAttribution) *domain.ExperienceReviewItem {
+	if attribution == nil {
+		return nil
+	}
+	switch strings.TrimSpace(attribution.Status) {
+	case domain.ExperienceAttributionStatusPositive, domain.ExperienceAttributionStatusWeak:
+	default:
+		return nil
+	}
+	priority := "medium"
+	if strings.TrimSpace(attribution.Confidence) == "high" || attribution.Score >= 0.75 {
+		priority = "high"
+	}
+	itemKey := trimMax(strings.Join([]string{
+		"attribution",
+		strings.TrimSpace(attribution.OutcomeEventKey),
+		strings.TrimSpace(attribution.SuggestionEventID),
+	}, ":"), 191)
+	if itemKey == "attribution::" {
+		return nil
+	}
+	return &domain.ExperienceReviewItem{
+		ItemKey:         itemKey,
+		ItemType:        "attribution_candidate",
+		Status:          domain.ExperienceReviewItemStatusOpen,
+		Priority:        priority,
+		EvidenceSummary: attribution.EvidenceSummary,
+	}
+}
+
+func experienceAttributionScore(outcome *domain.ExperienceAttributionOutcome, candidate *domain.ExperienceAttributionCandidate) float64 {
+	score := 0.25
+	gap := outcome.EventTime.Sub(candidate.DisplayedAt)
+	switch {
+	case gap < 0:
+		return 0
+	case gap <= 24*time.Hour:
+		score += 0.25
+	case gap <= 72*time.Hour:
+		score += 0.15
+	case gap <= experienceAttributionLookback:
+		score += 0.08
+	}
+	switch {
+	case candidate.BehaviorScore >= 5:
+		score += 0.35
+	case candidate.BehaviorScore >= 4:
+		score += 0.28
+	case candidate.BehaviorScore >= 2:
+		score += 0.16
+	case candidate.BehaviorScore > 0:
+		score += 0.08
+	case candidate.BehaviorScore < 0:
+		score -= 0.18
+	}
+	switch strings.TrimSpace(candidate.FeedbackValue) {
+	case domain.ExperienceFeedbackAccepted:
+		score += 0.22
+	case domain.ExperienceFeedbackPartiallyAccepted:
+		score += 0.1
+	case domain.ExperienceFeedbackRejected:
+		score -= 0.2
+	}
+	return clampExperienceScore(score)
+}
+
+func experienceAttributionStatus(score float64) (string, string) {
+	switch {
+	case score >= 0.75:
+		return domain.ExperienceAttributionStatusPositive, "high"
+	case score >= 0.45:
+		return domain.ExperienceAttributionStatusWeak, "medium"
+	default:
+		return domain.ExperienceAttributionStatusRejected, "low"
+	}
+}
+
+func experienceAttributionSummary(outcome *domain.ExperienceAttributionOutcome, candidate *domain.ExperienceAttributionCandidate, score float64, status string, confidence string) json.RawMessage {
+	gapHours := 0.0
+	if !outcome.EventTime.IsZero() && !candidate.DisplayedAt.IsZero() {
+		gapHours = outcome.EventTime.Sub(candidate.DisplayedAt).Hours()
+	}
+	feedback := map[string]interface{}{
+		"value":       candidate.FeedbackValue,
+		"reason_code": candidate.FeedbackReasonCode,
+	}
+	if candidate.FeedbackCreatedAt != nil {
+		feedback["created_at"] = candidate.FeedbackCreatedAt.UTC().Format(time.RFC3339)
+	}
+	behavior := map[string]interface{}{
+		"count": candidate.BehaviorCount,
+		"score": candidate.BehaviorScore,
+	}
+	if candidate.LatestBehaviorAt != nil {
+		behavior["latest_at"] = candidate.LatestBehaviorAt.UTC().Format(time.RFC3339)
+	}
+	return mustServiceJSON(map[string]interface{}{
+		"status":     status,
+		"confidence": confidence,
+		"score":      score,
+		"suggestion": map[string]interface{}{
+			"event_id":     candidate.SuggestionEventID,
+			"stable_key":   candidate.SuggestionStableKey,
+			"type":         candidate.SuggestionType,
+			"id":           candidate.SuggestionID,
+			"source":       candidate.Source,
+			"target_type":  candidate.TargetType,
+			"target_id":    candidate.TargetID,
+			"displayed_at": candidate.DisplayedAt.UTC().Format(time.RFC3339),
+		},
+		"behavior": behavior,
+		"feedback": feedback,
+		"outcome": map[string]interface{}{
+			"event_key":      outcome.EventKey,
+			"source_type":    outcome.SourceType,
+			"action":         outcome.Action,
+			"outcome":        outcome.Outcome,
+			"target_type":    outcome.TargetType,
+			"target_id":      outcome.TargetID,
+			"event_time":     outcome.EventTime.UTC().Format(time.RFC3339),
+			"changed_fields": experienceOutcomeChangedFields(outcome.Payload),
+		},
+		"time_gap_hours": gapHours,
+		"matched_by":     "target_time_window",
+	})
+}
+
+func experienceOutcomeChangedFields(payload json.RawMessage) interface{} {
+	if len(payload) == 0 {
+		return []interface{}{}
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return []interface{}{}
+	}
+	if changed, ok := value["changed_fields"]; ok && changed != nil {
+		return changed
+	}
+	return []interface{}{}
+}
+
+func clampExperienceScore(score float64) float64 {
+	if score < 0 {
+		return 0
+	}
+	if score > 1 {
+		return 1
+	}
+	return score
+}
+
+func buildExperienceRateLimitKey(actorID int64, bucketName string, periodStart time.Time) string {
+	return trimMax(fmt.Sprintf("%d:%s:%s", actorID, strings.TrimSpace(bucketName), periodStart.UTC().Format("20060102T150405Z")), 191)
+}
+
+func experienceSuggestionOwnedByActor(actor domain.RequestActor, suggestion *domain.AISuggestionEvent) bool {
+	return actor.ID > 0 && suggestion != nil && suggestion.ActorID != nil && *suggestion.ActorID == actor.ID
+}
+
+func buildExperienceMicroQuestionAnswerEventKey(actorID int64, suggestionEventID string, suggestionStableKey string, surface string, targetType string, targetID string) string {
+	identity := strings.Join([]string{
+		strconv.FormatInt(actorID, 10),
+		strings.TrimSpace(suggestionEventID),
+		strings.TrimSpace(suggestionStableKey),
+		strings.TrimSpace(surface),
+		strings.TrimSpace(targetType),
+		strings.TrimSpace(targetID),
+		"v1",
+	}, "|")
+	sum := sha1.Sum([]byte(identity))
+	return trimMax("microq:"+hex.EncodeToString(sum[:]), 191)
+}
+
+func experienceBeijingDayWindow(now time.Time) (time.Time, time.Time) {
+	loc := time.FixedZone("Asia/Shanghai", 8*3600)
+	local := now.In(loc)
+	startLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+	return startLocal.UTC(), startLocal.Add(24 * time.Hour).UTC()
 }
 
 func (s *experienceService) applyRuntimeFile(flags domain.ExperienceRuntimeFlags) domain.ExperienceRuntimeFlags {
@@ -793,6 +1460,85 @@ func normalizeAISuggestionFeedback(actor domain.RequestActor, req AISuggestionFe
 	}
 	feedback.Payload = payload
 	return feedback, nil
+}
+
+func normalizeExperienceMicroQuestionAnswer(actor domain.RequestActor, req ExperienceMicroQuestionAnswerRequest) (*domain.ExperienceMicroQuestionAnswer, *domain.AppError) {
+	answer := &domain.ExperienceMicroQuestionAnswer{
+		AnswerEventKey:      trimMax(strings.TrimSpace(req.AnswerEventKey), 191),
+		SuggestionEventID:   trimMax(strings.TrimSpace(req.SuggestionEventID), 191),
+		SuggestionStableKey: trimMax(strings.TrimSpace(req.SuggestionStableKey), 191),
+		Surface:             trimMax(strings.TrimSpace(req.Surface), 64),
+		TargetType:          trimMax(strings.TrimSpace(req.TargetType), 64),
+		TargetID:            trimMax(strings.TrimSpace(req.TargetID), 128),
+		AnswerValue:         trimMax(strings.TrimSpace(req.AnswerValue), 64),
+		ReasonCode:          trimMax(strings.TrimSpace(req.ReasonCode), 96),
+	}
+	if answer.AnswerValue == "" {
+		answer.AnswerValue = domain.ExperienceMicroQuestionAnswerAnswered
+	}
+	switch answer.AnswerValue {
+	case domain.ExperienceMicroQuestionAnswerAnswered:
+		if answer.ReasonCode == "" {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reason_code is required", nil)
+		}
+		if !isAllowedExperienceMicroQuestionReason(answer.ReasonCode) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reason_code is invalid", nil)
+		}
+	case domain.ExperienceMicroQuestionAnswerDismissed:
+	default:
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "answer_value is invalid", nil)
+	}
+	if answer.SuggestionEventID == "" && answer.SuggestionStableKey == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "suggestion identity is required", nil)
+	}
+	if answer.Surface == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "surface is required", nil)
+	}
+	if answer.TargetType == "" || answer.TargetID == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "target is required", nil)
+	}
+	if actor.ID > 0 {
+		answer.ActorID = &actor.ID
+	}
+	payload, appErr := sanitizeExperienceJSON(req.Payload)
+	if appErr != nil {
+		return nil, appErr
+	}
+	answer.Payload = payload
+	return answer, nil
+}
+
+func normalizeExperienceReviewDecision(actor domain.RequestActor, itemKey string, req ExperienceReviewDecisionRequest) (*domain.ExperienceReviewDecision, string, *domain.AppError) {
+	decisionValue := trimMax(strings.TrimSpace(req.Decision), 64)
+	nextStatus := ""
+	switch decisionValue {
+	case domain.ExperienceReviewDecisionApprove:
+		nextStatus = domain.ExperienceReviewItemStatusApproved
+	case domain.ExperienceReviewDecisionReject:
+		nextStatus = domain.ExperienceReviewItemStatusRejected
+	case domain.ExperienceReviewDecisionNeedsMoreData:
+		nextStatus = domain.ExperienceReviewItemStatusNeedsMoreData
+	default:
+		return nil, "", domain.NewAppError(domain.ErrCodeInvalidRequest, "review decision is invalid", nil)
+	}
+	key := trimMax(strings.TrimSpace(itemKey), 191)
+	if key == "" {
+		return nil, "", domain.NewAppError(domain.ErrCodeInvalidRequest, "review item key is required", nil)
+	}
+	payload, appErr := sanitizeExperienceJSON(req.Payload)
+	if appErr != nil {
+		return nil, "", appErr
+	}
+	decision := &domain.ExperienceReviewDecision{
+		ReviewItemKey: key,
+		Decision:      decisionValue,
+		ReasonCode:    trimMax(strings.TrimSpace(req.ReasonCode), 96),
+		Payload:       payload,
+	}
+	if actor.ID > 0 {
+		decision.ActorID = &actor.ID
+	}
+	return decision, nextStatus, nil
 }
 
 func sanitizeExperienceJSON(raw json.RawMessage) (json.RawMessage, *domain.AppError) {
@@ -1081,6 +1827,44 @@ func isAllowedExperienceBehaviorAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+func isAllowedExperienceMicroQuestionReason(code string) bool {
+	switch strings.TrimSpace(code) {
+	case "temporarily_not_needed",
+		"will_handle_later",
+		"already_handled",
+		"not_relevant",
+		"missing_context",
+		"stage_not_applicable",
+		"customer_special_case",
+		"suggestion_outdated":
+		return true
+	default:
+		return false
+	}
+}
+
+func experienceSurfaceEnabled(surface string, configured []string) bool {
+	surface = strings.TrimSpace(surface)
+	if surface == "" {
+		return false
+	}
+	for _, item := range normalizeEnabledSurfaces(configured) {
+		if item == surface {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmptyExperience(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func experienceClientReasonTagScenes() []string {

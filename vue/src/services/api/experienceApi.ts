@@ -5,9 +5,9 @@ export interface ExperienceRuntimeFlags {
   capture_enabled: boolean
   ai_feedback_enabled: boolean
   worker_enabled: boolean
-  behavior_capture_enabled?: boolean
-  micro_question_enabled?: boolean
-  behavior_sample_rate?: number
+  behavior_capture_enabled: boolean
+  micro_question_enabled: boolean
+  behavior_sample_rate: number
 }
 
 export interface ExperienceClientConfig {
@@ -51,8 +51,25 @@ export interface ExperienceStats {
   ai_feedback_rate: number
   task_profiles: number
   asset_quality_labels: number
+  worker_last_runs?: ExperienceWorkerRunRecord[]
   latest_profile_rebuilt_at?: string
   generated_at: string
+}
+
+export interface ExperienceWorkerRunRecord {
+  id?: number
+  worker_name: string
+  source_name?: string
+  started_at: string
+  finished_at?: string | null
+  status: 'success' | 'partial' | 'failed' | string
+  scanned_count: number
+  enqueued_count: number
+  skipped_count: number
+  failed_count: number
+  last_error?: string
+  metadata?: Record<string, unknown> | unknown
+  created_at?: string
 }
 
 export interface ExperienceEvent {
@@ -63,6 +80,11 @@ export interface ExperienceEvent {
   source_type: string
   source_id?: string
   task_id?: number
+  target_type?: string
+  target_id?: string
+  source_watermark?: string
+  observed_from?: string
+  observed_id?: string
   action: string
   outcome?: string
   actor_snapshot?: Record<string, unknown> | unknown
@@ -91,6 +113,95 @@ export interface ExperienceReasonTag {
   sort_order: number
   created_at?: string
   updated_at?: string
+}
+
+export type ExperienceMicroQuestionAnswerValue = 'answered' | 'dismissed'
+export type ExperienceReviewDecisionValue = 'approve' | 'reject' | 'needs_more_data'
+export type ExperienceReviewItemStatus = 'open' | 'approved' | 'rejected' | 'needs_more_data'
+
+export interface ExperienceMicroQuestionEligibility {
+  eligible: boolean
+  reason?: string
+  answer_event_key?: string
+  remaining_daily: number
+  reason_tags?: ExperienceReasonTag[]
+}
+
+export interface ExperienceMicroQuestionEligibilityParams {
+  suggestion_event_id?: string
+  suggestion_stable_key?: string
+  surface?: string
+  target_type?: string
+  target_id?: string
+}
+
+interface ExperienceMicroQuestionAnswerRequestBase {
+  answer_event_key?: string
+  suggestion_event_id: string
+  suggestion_stable_key?: string
+  surface: string
+  target_type: string
+  target_id: string
+  payload?: Record<string, unknown>
+}
+
+export type ExperienceMicroQuestionAnswerRequest =
+  | (ExperienceMicroQuestionAnswerRequestBase & {
+      answer_value: 'answered'
+      reason_code: string
+    })
+  | (ExperienceMicroQuestionAnswerRequestBase & {
+      answer_value: 'dismissed'
+      reason_code?: string
+    })
+
+export interface ExperienceMicroQuestionAnswer {
+  id?: number
+  answer_event_key: string
+  suggestion_event_id?: string
+  suggestion_stable_key?: string
+  actor_id?: number | null
+  surface?: string
+  target_type?: string
+  target_id?: string
+  answer_value: ExperienceMicroQuestionAnswerValue
+  reason_code?: string
+  payload?: Record<string, unknown> | unknown
+  created_at?: string
+}
+
+export interface ExperienceReviewItem {
+  id?: number
+  item_key: string
+  item_type: 'attribution_candidate' | string
+  status: ExperienceReviewItemStatus | string
+  priority?: 'high' | 'medium' | 'low' | string
+  evidence_summary?: Record<string, unknown> | unknown
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ExperienceReviewItemsParams {
+  status?: ExperienceReviewItemStatus | string
+  item_type?: string
+  page?: number
+  page_size?: number
+}
+
+export interface ExperienceReviewDecisionRequest {
+  decision: ExperienceReviewDecisionValue
+  reason_code?: string
+  payload?: Record<string, unknown>
+}
+
+export interface ExperienceReviewDecision {
+  id?: number
+  review_item_key: string
+  decision: ExperienceReviewDecisionValue
+  reason_code?: string
+  actor_id?: number | null
+  payload?: Record<string, unknown> | unknown
+  created_at?: string
 }
 
 export interface ExperienceSamplesParams {
@@ -222,4 +333,27 @@ export const experienceApi = {
   /** POST /v1/experience/behavior-events:batch */
   behaviorEvents: (payload: ExperienceBehaviorBatchRequest, signal?: AbortSignal) =>
     http.post<{ data?: ExperienceBehaviorBatchResult }>('/v1/experience/behavior-events:batch', payload, { signal }),
+
+  /** GET /v1/experience/micro-question-eligibility */
+  microQuestionEligibility: (params?: ExperienceMicroQuestionEligibilityParams, signal?: AbortSignal) =>
+    http.get<{ data?: ExperienceMicroQuestionEligibility }>('/v1/experience/micro-question-eligibility', {
+      params,
+      signal,
+    }),
+
+  /** POST /v1/experience/micro-question-answers */
+  microQuestionAnswer: (payload: ExperienceMicroQuestionAnswerRequest, signal?: AbortSignal) =>
+    http.post<{ data?: ExperienceMicroQuestionAnswer }>('/v1/experience/micro-question-answers', payload, { signal }),
+
+  /** GET /v1/reports/experience/review-items */
+  reviewItems: (params?: ExperienceReviewItemsParams, signal?: AbortSignal) =>
+    http.get<PaginatedEnvelope<ExperienceReviewItem>>('/v1/reports/experience/review-items', { params, signal }),
+
+  /** POST /v1/reports/experience/review-items/{item_key}/decision */
+  reviewDecision: (itemKey: string, payload: ExperienceReviewDecisionRequest, signal?: AbortSignal) =>
+    http.post<{ data?: ExperienceReviewDecision }>(
+      `/v1/reports/experience/review-items/${encodeURIComponent(itemKey)}/decision`,
+      payload,
+      { signal },
+    ),
 }

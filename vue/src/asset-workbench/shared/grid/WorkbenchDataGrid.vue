@@ -196,7 +196,7 @@ watch(
           aria-sort="none"
           :aria-colindex="columnIndex + 1"
         >
-          <span>{{ column.label }}</span>
+          <span class="aw-data-grid__label">{{ column.label }}</span>
           <span class="aw-data-grid__tools">
             <button type="button" :aria-label="`左移列：${column.label}`" title="左移列" @click="moveColumn(column.key, -1)">
               <ChevronLeft :size="12" aria-hidden="true" />
@@ -244,7 +244,7 @@ watch(
             :aria-colindex="columnIndex + 1"
           >
             <slot name="cell" :row="item.row" :column="column" :value="cellValue(item.row, column)">
-              {{ cellValue(item.row, column) }}
+              <span class="aw-data-grid__value">{{ cellValue(item.row, column) }}</span>
             </slot>
           </div>
         </div>

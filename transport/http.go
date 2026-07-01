@@ -137,11 +137,15 @@ func NewRouter(
 			experienceGroup.GET("/client-config", access(experienceGroup, http.MethodGet, "/client-config", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.ClientConfig)
 			experienceGroup.GET("/reason-tags", access(experienceGroup, http.MethodGet, "/reason-tags", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.ReasonTags)
 			experienceGroup.POST("/behavior-events:batch", access(experienceGroup, http.MethodPost, "/behavior-events:batch", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.BehaviorEvents)
+			experienceGroup.GET("/micro-question-eligibility", access(experienceGroup, http.MethodGet, "/micro-question-eligibility", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.MicroQuestionEligibility)
+			experienceGroup.POST("/micro-question-answers", access(experienceGroup, http.MethodPost, "/micro-question-answers", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.MicroQuestionAnswer)
 		}
 		experienceReportsGroup := v1.Group("/reports/experience")
 		{
 			experienceReportsGroup.GET("/stats", access(experienceReportsGroup, http.MethodGet, "/stats", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.Stats)
 			experienceReportsGroup.GET("/samples", access(experienceReportsGroup, http.MethodGet, "/samples", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.Samples)
+			experienceReportsGroup.GET("/review-items", access(experienceReportsGroup, http.MethodGet, "/review-items", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.ReviewItems)
+			experienceReportsGroup.POST("/review-items/:item_key/decision", access(experienceReportsGroup, http.MethodPost, "/review-items/:item_key/decision", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.ReviewDecision)
 		}
 		aiSuggestionGroup := v1.Group("/ai-suggestions")
 		{
