@@ -112,8 +112,9 @@ func TestExperienceRepoListRecentAttributionOutcomesUsesRecentWindow(t *testing.
 		for _, fragment := range []string{
 			"FROM experience_events",
 			"WHERE event_time >= ?",
+			"AND ((event_time > ?) OR (event_time = ? AND id > ?))",
 			"AND (target_type <> '' OR task_id IS NOT NULL)",
-			"ORDER BY event_time DESC, id DESC",
+			"ORDER BY event_time ASC, id ASC",
 		} {
 			if !strings.Contains(normalized, fragment) {
 				return fmt.Errorf("recent attribution SQL missing %q: %s", fragment, normalized)
@@ -128,8 +129,9 @@ func TestExperienceRepoListRecentAttributionOutcomesUsesRecentWindow(t *testing.
 
 	eventTime := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	since := eventTime.Add(-24 * time.Hour)
+	cursorAt := since.Add(2 * time.Hour)
 	mock.ExpectQuery("recent-attribution-outcomes").
-		WithArgs(since, 20).
+		WithArgs(since, cursorAt, cursorAt, int64(7), 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "event_key", "event_time", "source_type", "action", "outcome", "task_id",
 			"target_type", "target_id", "payload_json",
@@ -147,12 +149,77 @@ func TestExperienceRepoListRecentAttributionOutcomesUsesRecentWindow(t *testing.
 		))
 
 	repo := NewExperienceRepo(New(db))
-	outcomes, err := repo.ListRecentExperienceAttributionOutcomes(context.Background(), since, 20)
+	outcomes, err := repo.ListRecentExperienceAttributionOutcomes(context.Background(), since, corerepo.ExperienceSourceCursor{
+		LastSeenAt: &cursorAt,
+		LastSeenID: 7,
+	}, 20)
 	if err != nil {
 		t.Fatalf("ListRecentExperienceAttributionOutcomes() error = %v", err)
 	}
 	if len(outcomes) != 1 || outcomes[0].ID != 9 || outcomes[0].TargetType != "task" {
 		t.Fatalf("outcomes = %+v, want mapped recent outcome", outcomes)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestExperienceRepoListAttributionCandidatesOnlyFallsBackForTaskOutcomes(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		if expectedSQL != "attribution-candidates" {
+			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
+		}
+		for _, fragment := range []string{
+			"FROM ai_suggestion_events a",
+			"(a.target_type = ? AND a.target_id = ?)",
+			"OR (? = 'task' AND ? <> '' AND a.target_type = 'task' AND a.target_id = ?)",
+			"HAVING behavior_count > 0 OR COALESCE(lf.feedback_value, '') <> ''",
+		} {
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("attribution candidates SQL missing %q: %s", fragment, normalized)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	outcomeAt := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	from := outcomeAt.Add(-7 * 24 * time.Hour)
+	taskID := int64(42)
+	mock.ExpectQuery("attribution-candidates").
+		WithArgs(
+			outcomeAt,
+			from,
+			outcomeAt,
+			"task_asset",
+			"7001",
+			"task_asset",
+			"42",
+			"42",
+			20,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"suggestion_event_id", "suggestion_stable_key", "suggestion_type", "suggestion_id",
+			"source", "target_type", "target_id", "displayed_at", "behavior_count", "behavior_score",
+			"latest_behavior_at", "feedback_value", "reason_code", "created_at",
+		}))
+
+	repo := NewExperienceRepo(New(db))
+	candidates, err := repo.ListExperienceAttributionCandidates(context.Background(), &domain.ExperienceAttributionOutcome{
+		EventTime:  outcomeAt,
+		TaskID:     &taskID,
+		TargetType: "task_asset",
+		TargetID:   "7001",
+	}, 7*24*time.Hour, 20)
+	if err != nil {
+		t.Fatalf("ListExperienceAttributionCandidates() error = %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %+v, want none", candidates)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

@@ -5,44 +5,148 @@
 -- Experience side-channel tables intentionally do not declare foreign keys to
 -- core workflow tables. Core tables remain read-only observer sources.
 
-ALTER TABLE experience_outbox
-  ADD COLUMN target_type VARCHAR(64) NOT NULL DEFAULT '' AFTER task_id,
-  ADD COLUMN target_id VARCHAR(128) NOT NULL DEFAULT '' AFTER target_type,
-  ADD COLUMN source_watermark VARCHAR(191) NOT NULL DEFAULT '' AFTER target_id,
-  ADD COLUMN observed_from VARCHAR(64) NOT NULL DEFAULT '' AFTER source_watermark,
-  ADD COLUMN observed_id VARCHAR(128) NOT NULL DEFAULT '' AFTER observed_from;
+SET @yb_schema := DATABASE();
 
-ALTER TABLE experience_outbox ADD KEY idx_experience_outbox_target_time (target_type, target_id, event_time);
-ALTER TABLE experience_outbox ADD KEY idx_experience_outbox_observed (observed_from, observed_id);
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_outbox ADD COLUMN target_type VARCHAR(64) NOT NULL DEFAULT '''' AFTER task_id', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_outbox' AND COLUMN_NAME = 'target_type'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_outbox ADD COLUMN target_id VARCHAR(128) NOT NULL DEFAULT '''' AFTER target_type', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_outbox' AND COLUMN_NAME = 'target_id'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_outbox ADD COLUMN source_watermark VARCHAR(191) NOT NULL DEFAULT '''' AFTER target_id', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_outbox' AND COLUMN_NAME = 'source_watermark'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_outbox ADD COLUMN observed_from VARCHAR(64) NOT NULL DEFAULT '''' AFTER source_watermark', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_outbox' AND COLUMN_NAME = 'observed_from'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_outbox ADD COLUMN observed_id VARCHAR(128) NOT NULL DEFAULT '''' AFTER observed_from', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_outbox' AND COLUMN_NAME = 'observed_id'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
 
-ALTER TABLE experience_events
-  ADD COLUMN target_type VARCHAR(64) NOT NULL DEFAULT '' AFTER task_id,
-  ADD COLUMN target_id VARCHAR(128) NOT NULL DEFAULT '' AFTER target_type,
-  ADD COLUMN source_watermark VARCHAR(191) NOT NULL DEFAULT '' AFTER target_id,
-  ADD COLUMN observed_from VARCHAR(64) NOT NULL DEFAULT '' AFTER source_watermark,
-  ADD COLUMN observed_id VARCHAR(128) NOT NULL DEFAULT '' AFTER observed_from;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_outbox ADD KEY idx_experience_outbox_target_time (target_type, target_id, event_time)', 'SELECT 1')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_outbox' AND INDEX_NAME = 'idx_experience_outbox_target_time'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_outbox ADD KEY idx_experience_outbox_observed (observed_from, observed_id)', 'SELECT 1')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_outbox' AND INDEX_NAME = 'idx_experience_outbox_observed'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
 
-ALTER TABLE experience_events ADD KEY idx_experience_events_target_time (target_type, target_id, event_time);
-ALTER TABLE experience_events ADD KEY idx_experience_events_source_action_time (source_type, action, event_time);
-ALTER TABLE experience_events ADD KEY idx_experience_events_observed (observed_from, observed_id);
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD COLUMN target_type VARCHAR(64) NOT NULL DEFAULT '''' AFTER task_id', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND COLUMN_NAME = 'target_type'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD COLUMN target_id VARCHAR(128) NOT NULL DEFAULT '''' AFTER target_type', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND COLUMN_NAME = 'target_id'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD COLUMN source_watermark VARCHAR(191) NOT NULL DEFAULT '''' AFTER target_id', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND COLUMN_NAME = 'source_watermark'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD COLUMN observed_from VARCHAR(64) NOT NULL DEFAULT '''' AFTER source_watermark', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND COLUMN_NAME = 'observed_from'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD COLUMN observed_id VARCHAR(128) NOT NULL DEFAULT '''' AFTER observed_from', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND COLUMN_NAME = 'observed_id'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
 
-ALTER TABLE ai_suggestion_events
-  ADD COLUMN suggestion_stable_key VARCHAR(191) NOT NULL DEFAULT '' AFTER suggestion_event_id,
-  ADD COLUMN attribution_eligible TINYINT(1) NOT NULL DEFAULT 1 AFTER suggestion_stable_key;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD KEY idx_experience_events_target_time (target_type, target_id, event_time)', 'SELECT 1')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND INDEX_NAME = 'idx_experience_events_target_time'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD KEY idx_experience_events_source_action_time (source_type, action, event_time)', 'SELECT 1')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND INDEX_NAME = 'idx_experience_events_source_action_time'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE experience_events ADD KEY idx_experience_events_observed (observed_from, observed_id)', 'SELECT 1')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'experience_events' AND INDEX_NAME = 'idx_experience_events_observed'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
 
-ALTER TABLE ai_suggestion_events ADD KEY idx_ai_suggestion_events_stable_time (suggestion_stable_key, displayed_at);
-ALTER TABLE ai_suggestion_events ADD KEY idx_ai_suggestion_events_attribution_time (attribution_eligible, displayed_at);
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE ai_suggestion_events ADD COLUMN suggestion_stable_key VARCHAR(191) NOT NULL DEFAULT '''' AFTER suggestion_event_id', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'ai_suggestion_events' AND COLUMN_NAME = 'suggestion_stable_key'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE ai_suggestion_events ADD COLUMN attribution_eligible TINYINT(1) NOT NULL DEFAULT 1 AFTER suggestion_stable_key', 'SELECT 1')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'ai_suggestion_events' AND COLUMN_NAME = 'attribution_eligible'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
 
-ALTER TABLE tasks ADD KEY idx_tasks_experience_observer_updated (updated_at, id);
-ALTER TABLE audit_records ADD KEY idx_audit_records_experience_observer (created_at, id);
-ALTER TABLE task_module_events ADD KEY idx_task_module_events_experience_observer (created_at, id);
-ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_created (created_at, id);
-ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_approved (approved_at, id);
-ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_rejected (rejected_at, id);
-ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_archived (archived_at, id);
-ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_cleaned (cleaned_at, id);
-ALTER TABLE task_details ADD KEY idx_task_details_experience_observer_updated (updated_at, id);
-ALTER TABLE task_sku_items ADD KEY idx_task_sku_items_experience_observer_updated (updated_at, id);
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE ai_suggestion_events ADD KEY idx_ai_suggestion_events_stable_time (suggestion_stable_key, displayed_at)', 'SELECT 1')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'ai_suggestion_events' AND INDEX_NAME = 'idx_ai_suggestion_events_stable_time'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (
+  SELECT IF(COUNT(*) = 0, 'ALTER TABLE ai_suggestion_events ADD KEY idx_ai_suggestion_events_attribution_time (attribution_eligible, displayed_at)', 'SELECT 1')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'ai_suggestion_events' AND INDEX_NAME = 'idx_ai_suggestion_events_attribution_time'
+);
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE tasks ADD KEY idx_tasks_experience_observer_updated (updated_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'tasks' AND INDEX_NAME = 'idx_tasks_experience_observer_updated');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE audit_records ADD KEY idx_audit_records_experience_observer (created_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'audit_records' AND INDEX_NAME = 'idx_audit_records_experience_observer');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_module_events ADD KEY idx_task_module_events_experience_observer (created_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_module_events' AND INDEX_NAME = 'idx_task_module_events_experience_observer');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_created (created_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_assets' AND INDEX_NAME = 'idx_task_assets_experience_observer_created');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_approved (approved_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_assets' AND INDEX_NAME = 'idx_task_assets_experience_observer_approved');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_rejected (rejected_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_assets' AND INDEX_NAME = 'idx_task_assets_experience_observer_rejected');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_archived (archived_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_assets' AND INDEX_NAME = 'idx_task_assets_experience_observer_archived');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_assets ADD KEY idx_task_assets_experience_observer_cleaned (cleaned_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_assets' AND INDEX_NAME = 'idx_task_assets_experience_observer_cleaned');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_details ADD KEY idx_task_details_experience_observer_updated (updated_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_details' AND INDEX_NAME = 'idx_task_details_experience_observer_updated');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
+SET @yb_ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE task_sku_items ADD KEY idx_task_sku_items_experience_observer_updated (updated_at, id)', 'SELECT 1') FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @yb_schema AND TABLE_NAME = 'task_sku_items' AND INDEX_NAME = 'idx_task_sku_items_experience_observer_updated');
+PREPARE yb_stmt FROM @yb_ddl; EXECUTE yb_stmt; DEALLOCATE PREPARE yb_stmt;
 
 CREATE TABLE IF NOT EXISTS experience_behavior_events (
   id BIGINT NOT NULL AUTO_INCREMENT,
