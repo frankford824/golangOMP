@@ -921,6 +921,15 @@
   background: var(--aw-surface-muted);
 }
 
+.aw-file-name-button {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .aw-inline-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1399,6 +1408,10 @@ body.aw-ledger-locked {
   overflow: hidden;
 }
 
+body.aw-submission-dialog-locked {
+  overflow: hidden;
+}
+
 .aw-ledger-sheet-layer {
   position: fixed;
   inset: 0;
@@ -1406,6 +1419,52 @@ body.aw-ledger-locked {
   display: grid;
   place-items: center;
   padding: var(--aw-space-6);
+}
+
+.aw-submission-dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 82;
+  display: grid;
+  place-items: center;
+  padding: var(--aw-space-5);
+}
+
+.aw-submission-dialog__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: color-mix(in srgb, var(--aw-stage) 54%, transparent);
+  backdrop-filter: blur(5px);
+}
+
+.aw-submission-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1180px, 100%);
+  max-height: min(92vh, 900px);
+  overflow: hidden;
+  border: 1px solid var(--aw-hairline-strong);
+  border-radius: var(--aw-radius-lg);
+  background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-raised);
+}
+
+.aw-submission-dialog > .aw-page-bar {
+  border-bottom: 1px solid var(--aw-hairline);
+  border-radius: 0;
+  background: var(--aw-stage);
+  padding: var(--aw-space-5) var(--aw-space-6);
+}
+
+.aw-submission-dialog__body {
+  display: grid;
+  min-height: 0;
+  overflow: auto;
+  gap: var(--aw-space-4);
+  padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-6);
 }
 
 .aw-ledger-sheet__backdrop {
@@ -1530,11 +1589,28 @@ body.aw-ledger-locked {
     place-items: stretch;
   }
 
+  .aw-submission-dialog-layer {
+    padding: 0;
+    place-items: stretch;
+  }
+
   .aw-ledger-sheet {
     width: 100%;
     max-height: 100vh;
     border: 0;
     border-radius: 0;
+  }
+
+  .aw-submission-dialog {
+    width: 100%;
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .aw-submission-dialog > .aw-page-bar,
+  .aw-submission-dialog__body {
+    padding-inline: var(--aw-space-4);
   }
 }
 

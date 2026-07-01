@@ -4,7 +4,7 @@ import { Download, X } from 'lucide-vue-next'
 
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   title: string
   previewUrl?: string
@@ -22,15 +22,19 @@ const emit = defineEmits<{
 }>()
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') emit('close')
+  if (!props.open || event.key !== 'Escape') return
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+  emit('close')
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keydown', handleKeydown, { capture: true })
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('keydown', handleKeydown, { capture: true })
 })
 </script>
 

@@ -155,21 +155,21 @@ export async function exportQCImportTemplateWorkbook(): Promise<void> {
   workbook.creator = 'asset-workbench'
   workbook.created = new Date()
 
-  const sheet = workbook.addWorksheet('质检导入模板')
+  const sheet = workbook.addWorksheet('质检状态导入模板')
   sheet.columns = [
-    { header: 'item_id', key: 'item_id', width: 14 },
-    { header: 'order_no', key: 'order_no', width: 24 },
-    { header: 'qc_status', key: 'qc_status', width: 16 },
-    { header: 'reason', key: 'reason', width: 32 },
+    { header: '明细ID', key: 'item_id', width: 14 },
+    { header: '订单号', key: 'order_no', width: 24 },
+    { header: '质检状态', key: 'qc_status', width: 16 },
+    { header: '原因', key: 'reason', width: 32 },
   ]
-  sheet.addRow({ item_id: 10001, order_no: '示例订单号', qc_status: 'needs_fix', reason: '示例驳回原因' })
-  sheet.addRow({ item_id: 10002, order_no: '示例订单号2', qc_status: 'checked', reason: '' })
+  sheet.addRow({ item_id: 10001, order_no: '示例订单号', qc_status: '需修', reason: '示例驳回原因' })
+  sheet.addRow({ item_id: 10002, order_no: '示例订单号2', qc_status: '通过', reason: '' })
   formatSheet(sheet)
 
   const buffer = await workbook.xlsx.writeBuffer()
   downloadBlob(
     new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    'asset-workbench-qc-import-template.xlsx',
+    'asset-workbench-qc-status-import-template.xlsx',
   )
 }
 

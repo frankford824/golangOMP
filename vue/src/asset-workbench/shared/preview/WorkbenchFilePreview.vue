@@ -19,6 +19,7 @@ const loading = ref(false)
 const error = ref('')
 
 const previewUrl = computed(() => meta.value?.preview_url ?? '')
+const previewTitle = computed(() => `预览 ${props.alt || `文件 ${props.fileId}`}`)
 const statusText = computed(() => {
   if (loading.value) return '加载预览'
   if (error.value) return error.value
@@ -67,7 +68,7 @@ watch(
 </script>
 
 <template>
-  <button class="aw-preview-tile aw-preview-tile--button" type="button" @click="openPreview">
+  <button class="aw-preview-tile aw-preview-tile--button" type="button" :aria-label="previewTitle" :title="previewTitle" @click="openPreview">
     <AssetPreviewMedia
       v-if="previewUrl"
       :resolved-preview-url="previewUrl"

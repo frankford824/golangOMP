@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 import {
@@ -22,6 +23,7 @@ import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficul
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { chipClass, previewStatusMeta, pricingStatusMeta, qcStatusMeta, submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import { useScrollLock } from '@aw/shared/motion/useScrollLock'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
@@ -98,6 +100,7 @@ const editForm = ref({
 })
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
 const router = useRouter()
+const { lock: lockDetailDialog, unlock: unlockDetailDialog } = useScrollLock('aw-submission-dialog-locked')
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
 const submissionsRequest = usePageRequest(
   () => assetWorkbenchApi.listSubmissions({ page: 1, page_size: 50, order_by: orderBy.value, order_dir: orderDir.value }),
@@ -141,6 +144,8 @@ const detailFileRows = computed<DetailFileGridRow[]>(() =>
   })),
 )
 const detailFileGridRows = computed(() => detailFileRows.value as unknown as Record<string, unknown>[])
+const detailDialogOpen = computed(() => Boolean(selectedDetail.value || detailLoading.value))
+const detailDialogRef = ref<HTMLElement | null>(null)
 const submissionGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => {
   const columns: Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }> = [
     { key: 'submission_no', label: '提交批次', width: 180 },
@@ -232,6 +237,7 @@ const detailDescription = computed(() =>
     ? '查看本次提交的明细、处理状态、文件预览和下载入口。'
     : '按明细处理质检、重计价、作废和文件批量下载。',
 )
+let detailRequestSerial = 0
 
 async function loadSubmissions() {
   const result = await submissionsRequest.run()
@@ -325,19 +331,42 @@ async function openSubmission(row: SubmissionRow) {
 }
 
 async function loadSubmissionDetail(submissionId: number) {
+  const requestSerial = ++detailRequestSerial
   detailLoading.value = true
   error.value = ''
   notice.value = ''
   selectedFileIds.value = new Set()
   qcRejectionMessages.value = []
   try {
-    selectedDetail.value = await assetWorkbenchApi.getSubmissionDetail(submissionId)
+    const detail = await assetWorkbenchApi.getSubmissionDetail(submissionId)
+    if (requestSerial !== detailRequestSerial) return
+    selectedDetail.value = detail
     await loadQCRejectionMessages()
   } catch (err) {
+    if (requestSerial !== detailRequestSerial) return
     error.value = err instanceof Error ? err.message : '提交详情加载失败'
   } finally {
-    detailLoading.value = false
+    if (requestSerial === detailRequestSerial) detailLoading.value = false
   }
+}
+
+function closeSubmissionDetail() {
+  detailRequestSerial += 1
+  detailLoading.value = false
+  selectedDetail.value = null
+  selectedFileIds.value = new Set()
+  qcRejectionMessages.value = []
+  pendingAction.value = null
+  editingItem.value = null
+  previewDialog.value.open = false
+}
+
+function dismissSubmissionDetailDialog() {
+  if (previewDialog.value.open) {
+    closeFilePreview()
+    return
+  }
+  closeSubmissionDetail()
 }
 
 async function loadQCRejectionMessages() {
@@ -476,6 +505,10 @@ async function updateItemQC(item: SubmissionItemRow, qcStatus: string) {
 }
 
 function openQCImport() {
+  if (!selectedDetail.value) {
+    notice.value = '请先打开一个提交批次'
+    return
+  }
   qcInputRef.value?.click()
 }
 
@@ -484,9 +517,9 @@ async function downloadQCTemplate() {
   error.value = ''
   try {
     await exportQCImportTemplateWorkbook()
-    notice.value = '质检导入模板已生成'
+    notice.value = '质检状态导入模板已生成'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '质检模板生成失败'
+    error.value = err instanceof Error ? err.message : '质检状态模板生成失败'
   }
 }
 
@@ -495,13 +528,18 @@ async function handleQCImport(event: Event) {
   const file = target.files?.[0]
   target.value = ''
   if (!file) return
+  const detail = selectedDetail.value
+  if (!detail) {
+    error.value = '请先打开一个提交批次'
+    return
+  }
   notice.value = ''
   error.value = ''
   try {
-    const result = await assetWorkbenchApi.importSubmissionItemQCExcel(selectedDetail.value?.submission.business_month ?? '', file)
+    const result = await assetWorkbenchApi.importSubmissionItemQCExcel(detail.submission.business_month, file)
     const updated = result.updated?.length ?? 0
     const failed = result.failures?.length ?? 0
-    notice.value = `质检 Excel 已导入：成功 ${formatInt(updated)} 行，失败 ${formatInt(failed)} 行`
+    notice.value = `质检状态 Excel 已导入：成功 ${formatInt(updated)} 行，失败 ${formatInt(failed)} 行`
     if (failed > 0) {
       error.value = result.failures.slice(0, 5).map((item) => `第 ${item.row} 行：${item.reason}`).join('；')
     }
@@ -565,6 +603,35 @@ function openFilePreview(payload: { title: string; previewUrl: string; meta: Fil
       ['预览状态', payload.meta?.status || '等待生成'],
       ['过期时间', payload.meta?.expires_at || '—'],
     ],
+  }
+}
+
+function filePreviewStatusText(meta: FilePreviewMeta | null) {
+  if (meta?.preparing) return '预览生成中'
+  if (meta?.status === 'failed') return meta.error || '预览失败'
+  if (meta?.status === 'not_applicable') return '不支持预览'
+  return meta?.preview_url ? '' : '暂无可展示预览'
+}
+
+async function openFilePreviewFromRow(file: SubmissionFileRow) {
+  notice.value = ''
+  error.value = ''
+  try {
+    const meta = await assetWorkbenchApi.getFilePreview(file.id)
+    openFilePreview({
+      title: file.original_filename || `文件 ${file.id}`,
+      previewUrl: meta.preview_url ?? '',
+      meta,
+      statusText: filePreviewStatusText(meta),
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '预览加载失败'
+    openFilePreview({
+      title: file.original_filename || `文件 ${file.id}`,
+      previewUrl: '',
+      meta: null,
+      statusText: message,
+    })
   }
 }
 
@@ -675,6 +742,24 @@ onMounted(async () => {
   await refreshBootstrap()
   await Promise.all([loadSubmissions(), loadSavedViews(), loadUploadDirectories(), loadDifficultyClasses()])
 })
+
+onBeforeUnmount(() => {
+  unlockDetailDialog()
+})
+
+watch(
+  detailDialogOpen,
+  async (open) => {
+    if (open) {
+      lockDetailDialog()
+      await nextTick()
+      detailDialogRef.value?.focus()
+    } else {
+      unlockDetailDialog()
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -686,9 +771,7 @@ onMounted(async () => {
         <p>{{ pageDescription }}</p>
       </div>
       <div v-if="!isSimpleUser" class="aw-page-bar__actions">
-        <button class="aw-secondary-button" type="button" @click="downloadQCTemplate">质检模板</button>
-        <button class="aw-secondary-button" type="button" @click="openQCImport">导入质检</button>
-        <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">批量下载</button>
+        <button class="aw-secondary-button" type="button" @click="downloadQCTemplate">质检状态模板</button>
         <button class="aw-primary-button" type="button" @click="saveView">保存视图</button>
       </div>
     </div>
@@ -697,7 +780,7 @@ onMounted(async () => {
       class="aw-visually-hidden"
       type="file"
       accept=".xlsx,.xls"
-      aria-label="导入质检 Excel"
+      aria-label="导入质检状态 Excel"
       @change="handleQCImport"
     />
     <div class="aw-data-surface">
@@ -784,10 +867,11 @@ onMounted(async () => {
           <p>{{ emptyDescription }}</p>
         </div>
       </AsyncBoundary>
-      <div v-if="pendingSubmissionVoid" class="aw-panel">
+      <div v-if="pendingSubmissionVoid" class="aw-dialog-backdrop" role="presentation" @click.self="pendingSubmissionVoid = null">
+        <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="submission-void-title">
         <div class="aw-panel__head">
           <div>
-            <h3>作废提交批次</h3>
+            <h3 id="submission-void-title">作废提交批次</h3>
             <p class="aw-copy">{{ pendingSubmissionVoid.submission.submission_no }}</p>
           </div>
           <span :class="chipClass(submissionStatusMeta(pendingSubmissionVoid.submission.status).tone)">
@@ -802,28 +886,47 @@ onMounted(async () => {
           <button class="aw-primary-button" type="button" @click="executeSubmissionVoid">确认作废</button>
           <button class="aw-secondary-button" type="button" @click="pendingSubmissionVoid = null">取消</button>
         </div>
+        </section>
       </div>
     </div>
 
-    <div v-if="selectedDetail || detailLoading" class="aw-data-surface">
-      <div class="aw-page-bar">
-        <div class="aw-page-bar__copy">
-          <p class="aw-eyebrow">提交文件</p>
-          <h2>{{ selectedDetail?.submission.submission_no || '提交文件' }}</h2>
-          <p>{{ detailDescription }}</p>
-        </div>
-        <div class="aw-page-bar__actions">
-          <span class="aw-chip aw-chip--neutral">已选页数 {{ formatInt(selectedPageCount) }}</span>
-          <label class="aw-inline-check">
-            <input
-              type="checkbox"
-              :checked="selectedFileIds.size > 0 && selectedFileIds.size === downloadableFileIDs.length"
-              @change="toggleAllFiles(($event.target as HTMLInputElement).checked)"
-            />
-            <span>全选</span>
-          </label>
-        </div>
-      </div>
+    <Teleport to="body">
+      <div v-if="detailDialogOpen" class="aw-token-scope aw-submission-dialog-layer">
+        <div class="aw-submission-dialog__backdrop" role="presentation" @click="dismissSubmissionDetailDialog" />
+        <section
+          ref="detailDialogRef"
+          class="aw-submission-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="submission-detail-title"
+          aria-describedby="submission-detail-description"
+          tabindex="-1"
+        >
+                <div class="aw-page-bar">
+                  <div class="aw-page-bar__copy">
+                    <p class="aw-eyebrow">提交文件</p>
+                    <h2 id="submission-detail-title">{{ selectedDetail?.submission.submission_no || '提交文件' }}</h2>
+                    <p id="submission-detail-description">{{ detailDescription }}</p>
+                  </div>
+                  <div class="aw-page-bar__actions">
+                    <span class="aw-chip aw-chip--neutral">已选页数 {{ formatInt(selectedPageCount) }}</span>
+                    <button class="aw-secondary-button" type="button" :disabled="!selectedFileIds.size" @click="downloadSelectedFiles">批量下载</button>
+                    <button v-if="!isSimpleUser" class="aw-secondary-button" type="button" :disabled="!selectedDetail" @click="openQCImport">导入质检状态</button>
+                    <label class="aw-inline-check">
+                      <input
+                        type="checkbox"
+                        :checked="selectedFileIds.size > 0 && selectedFileIds.size === downloadableFileIDs.length"
+                        @change="toggleAllFiles(($event.target as HTMLInputElement).checked)"
+                      />
+                      <span>全选</span>
+                    </label>
+                    <button class="aw-secondary-button" type="button" @click="closeSubmissionDetail">
+                      <X :size="16" aria-hidden="true" />
+                      关闭
+                    </button>
+                  </div>
+                </div>
+                <div class="aw-submission-dialog__body">
       <p v-if="detailLoading" class="aw-copy">正在加载文件</p>
       <WorkbenchDataGrid
         v-else-if="selectedDetail?.items.length"
@@ -1031,6 +1134,14 @@ onMounted(async () => {
             :alt="gridRowAsFile(row).original_filename"
             @preview="openFilePreview"
           />
+          <button
+            v-else-if="column.key === 'original_filename'"
+            class="aw-link-button aw-file-name-button"
+            type="button"
+            @click="openFilePreviewFromRow(gridRowAsFile(row))"
+          >
+            {{ gridRowAsFile(row).original_filename || `文件 ${gridRowAsFile(row).id}` }}
+          </button>
           <span v-else-if="column.key === 'file_type'">{{ gridRowAsFile(row).file_type || gridRowAsFile(row).mime_type }}</span>
           <span v-else-if="column.key === 'page_count'" class="aw-cell-num">{{ formatInt(value) }}</span>
           <span
@@ -1054,6 +1165,9 @@ onMounted(async () => {
         eyebrow="文件预览"
         @close="closeFilePreview"
       />
-    </div>
+                </div>
+              </section>
+      </div>
+    </Teleport>
   </section>
 </template>
