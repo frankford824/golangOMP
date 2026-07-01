@@ -34,8 +34,16 @@
           <span :class="flagClass(runtimeFlags.capture_enabled)">采集 {{ flagLabel(runtimeFlags.capture_enabled) }}</span>
           <span :class="flagClass(runtimeFlags.worker_enabled)">Worker {{ flagLabel(runtimeFlags.worker_enabled) }}</span>
           <span :class="flagClass(runtimeFlags.ai_feedback_enabled)">AI 反馈 {{ flagLabel(runtimeFlags.ai_feedback_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.behavior_capture_enabled)">行为 {{ flagLabel(runtimeFlags.behavior_capture_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.micro_question_enabled)">微追问 {{ flagLabel(runtimeFlags.micro_question_enabled) }}</span>
+          <span>采样 {{ percentLabel(runtimeFlags.behavior_sample_rate) }}</span>
+          <span v-if="runtimeFlags.runtime_config_loaded" class="status-pill status-pill--on">运行配置 已加载</span>
+          <span v-else-if="runtimeFlags.runtime_config_error" class="status-pill">运行配置 异常</span>
           <span :class="flagClass(runtimeFlags.ui_enabled)">页面 {{ flagLabel(runtimeFlags.ui_enabled) }}</span>
         </div>
+        <p v-if="runtimeFlags.runtime_config_error" class="block-note review-error" role="alert">
+          运行配置未生效：{{ runtimeFlags.runtime_config_error }}
+        </p>
 
         <section class="panel-block worker-block" aria-labelledby="experience-worker-title">
           <div class="block-header">
@@ -47,7 +55,7 @@
           </div>
           <div v-if="workerRuns.length" class="worker-run-list">
             <article v-for="run in workerRuns.slice(0, 6)" :key="`${run.worker_name}-${run.source_name || 'all'}-${run.started_at}`" class="worker-run-item">
-              <div>
+              <div class="worker-run-main">
                 <strong>{{ workerNameLabel(run.worker_name) }}</strong>
                 <small>{{ run.source_name || 'all' }} · {{ shortDateTime(run.started_at) }}</small>
               </div>
@@ -64,7 +72,7 @@
           <div class="block-header">
             <div>
               <h4 id="experience-health-title">闭环健康条</h4>
-              <p>展示 -> 可定位 -> 有反馈 -> 有标签 -> L4 候选</p>
+              <p>展示建议 -> 展示可定位 -> 正式反馈 -> 反馈原因 -> 侧路候选</p>
             </div>
             <span>{{ integerLabel(sampleTotal) }} 条样本</span>
           </div>
@@ -72,7 +80,7 @@
             <article v-for="step in healthSteps" :key="step.key" class="health-step">
               <span>{{ step.level }}</span>
               <strong>{{ step.label }}</strong>
-              <b>{{ integerLabel(step.count) }} / {{ integerLabel(step.total) }}</b>
+              <b>{{ step.value }}</b>
               <small>{{ step.hint }}</small>
             </article>
           </div>
@@ -151,8 +159,14 @@
                 <small>{{ reviewCandidateEvidence(item) }}</small>
               </div>
               <div class="review-actions">
-                <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:approve`" @click="submitReview(item, 'approve')">
-                  通过并写入候选
+                <BaseButton
+                  variant="secondary"
+                  size="sm"
+                  :loading="reviewBusyKey === `${item.item_key}:approve`"
+                  :disabled="!reviewMaterializationEnabled"
+                  @click="submitReview(item, 'approve')"
+                >
+                  {{ reviewMaterializationEnabled ? '确认归因（侧路）' : 'Shadow 观察中' }}
                 </BaseButton>
                 <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:needs_more_data`" @click="submitReview(item, 'needs_more_data')">
                   需更多数据
@@ -253,6 +267,7 @@ interface HealthStep {
   label: string
   count: number
   total: number
+  value: string
   hint: string
 }
 
@@ -271,6 +286,7 @@ const emptyFlags: ExperienceRuntimeFlags = {
   worker_enabled: false,
   behavior_capture_enabled: false,
   micro_question_enabled: false,
+  review_materialization_enabled: false,
   behavior_sample_rate: 0,
 }
 
@@ -304,8 +320,10 @@ const reviewQueueError = ref(false)
 const reviewActionError = ref('')
 
 const runtimeFlags = computed(() => stats.value?.flags ?? configFlags.value)
+const reviewMaterializationEnabled = computed(() => Boolean(runtimeFlags.value.review_materialization_enabled))
 const displayedCount = computed(() => count(stats.value?.displayed_events ?? stats.value?.ai_suggestion_events))
 const locatableCount = computed(() => count(stats.value?.locatable_samples))
+const locatableDisplayedCount = computed(() => count(stats.value?.locatable_displayed_events ?? Math.min(locatableCount.value, displayedCount.value)))
 const feedbackCount = computed(() => count(stats.value?.feedback_samples ?? stats.value?.ai_feedback_events))
 const reasonedCount = computed(() => count(stats.value?.reasoned_feedback_samples))
 const reusableCount = computed(() => count(stats.value?.reusable_samples))
@@ -313,16 +331,16 @@ const reasonTagCount = computed(() => tags.value.length || count(stats.value?.ta
 
 const healthSteps = computed<HealthStep[]>(() => {
   const displayed = displayedCount.value
-  const locatable = locatableCount.value
+  const locatable = locatableDisplayedCount.value
   const feedback = feedbackCount.value
   const reasoned = reasonedCount.value
   const reusable = reusableCount.value
   return [
-    { key: 'displayed', level: 'L0', label: '展示', count: displayed, total: displayed, hint: displayed ? '建议已展示' : '未采集或未配置' },
-    { key: 'locatable', level: 'L1', label: '可定位', count: locatable, total: displayed, hint: locatable ? '能回到任务或资产' : '无匹配数据' },
-    { key: 'feedback', level: 'L2', label: '有反馈', count: feedback, total: displayed, hint: feedback ? '已有人工判断' : '监督信号为 0' },
-    { key: 'tagged', level: 'L3', label: '有标签', count: reasoned, total: feedback, hint: reasoned ? '反馈已有原因' : '缺原因标签' },
-    { key: 'reusable', level: 'L4', label: 'L4 候选', count: reusable, total: displayed, hint: reusable ? '已写入侧路候选' : '暂无候选沉淀' },
+    { key: 'displayed', level: 'L0', label: '建议展示', count: displayed, total: displayed, value: fractionLabel(displayed, displayed), hint: displayed ? '建议已展示' : '未采集或未配置' },
+    { key: 'locatable', level: 'L1', label: '展示可定位', count: locatable, total: displayed, value: fractionLabel(locatable, displayed), hint: locatable ? '展示建议能回到任务或资产' : '无匹配数据' },
+    { key: 'feedback', level: 'L2', label: '正式反馈', count: feedback, total: displayed, value: fractionLabel(feedback, displayed), hint: feedback ? '已有有用/部分/无用判断' : '监督信号为 0' },
+    { key: 'tagged', level: 'L3', label: '反馈原因', count: reasoned, total: feedback, value: fractionLabel(reasoned, feedback), hint: reasoned ? '正式反馈已有原因' : '缺正式反馈原因' },
+    { key: 'reusable', level: 'L4', label: '侧路候选', count: reusable, total: displayed, value: `${integerLabel(reusable)} 条`, hint: reusable ? '侧路候选数；不是展示到成交或自动化的转化率' : '暂无候选沉淀' },
   ]
 })
 
@@ -347,7 +365,7 @@ const metrics = computed<MetricItem[]>(() => {
     },
     {
       key: 'reusable_rate',
-      label: 'L4 侧路候选',
+      label: 'L4 侧路候选数',
       value: integerLabel(reusable),
       hint: '侧路候选沉淀数，不等于转化率或自动化结论',
     },
@@ -358,16 +376,37 @@ const metrics = computed<MetricItem[]>(() => {
       hint: feedback < 10 ? '有用 / 部分 / 无用；低样本，仅观察' : '有用 / 部分 / 无用',
     },
     {
+      key: 'attribution_shadow',
+      label: '归因候选',
+      value: `${integerLabel(data?.attribution_positive)} / ${integerLabel(data?.attribution_weak)} / ${integerLabel(data?.attribution_rejected)}`,
+      hint:
+        count(data?.attribution_total) > 0
+          ? `强 / 弱 / 低可信；待复核 ${integerLabel(data?.review_items_open)}`
+          : '试算归因尚无候选',
+    },
+    {
+      key: 'micro_question',
+      label: '微追问',
+      value: `${integerLabel(data?.micro_question_answered)} / ${integerLabel(data?.micro_question_dismissed)} / ${integerLabel(data?.micro_question_rate_limited)}`,
+      hint:
+        count(data?.micro_question_answers) > 0 || count(data?.micro_question_rate_limited) > 0
+          ? `已答 / 跳过 / 今日限流用户；总 ${integerLabel(data?.micro_question_answers)}`
+          : '未灰度或暂无回答',
+    },
+    {
       key: 'outbox',
-      label: 'Outbox',
+      label: '后台入账',
       value: integerLabel((data?.outbox_queued ?? 0) + (data?.outbox_processing ?? 0)),
-      hint: `${integerLabel(data?.outbox_dead_letter)} dead-letter，24h 失败 ${integerLabel(data?.outbox_failed_24h)}`,
+      hint: `${integerLabel(data?.outbox_dead_letter)} 失败队列，24h 失败 ${integerLabel(data?.outbox_failed_24h)}`,
     },
     {
       key: 'capture',
       label: '采集成功',
       value: outbox24hTotal.value > 0 ? percentLabel(data?.capture_success_rate_24h) : '无样本',
-      hint: outbox24hTotal.value > 0 ? `24h 处理 ${integerLabel(data?.outbox_processed_24h)} 条` : '无 24h 处理样本，不能解读为 0%',
+      hint:
+        outbox24hTotal.value > 0
+          ? `24h 处理 ${integerLabel(data?.outbox_processed_24h)} 条，失败 ${integerLabel(data?.outbox_failed_24h)} 条`
+          : '无 24h 处理样本，不能解读为 0%',
     },
     {
       key: 'profiles',
@@ -582,7 +621,7 @@ function percentFromCounts(numerator: unknown, denominator: unknown): string {
 
 function percentLabel(value: unknown): string {
   const n = Number(value ?? 0)
-  if (!Number.isFinite(n) || n <= 0) return '无样本'
+  if (!Number.isFinite(n) || n < 0) return '无样本'
   return `${Math.round(n * 1000) / 10}%`
 }
 
@@ -613,7 +652,7 @@ function evidenceLabel(level?: string): string {
     L1: 'L1 locatable',
     L2: 'L2 feedback',
     L3: 'L3 tagged',
-    L4: 'L4 candidate',
+    L4: 'L4 侧路候选',
   }
   return labels[normalized]
 }
@@ -653,10 +692,10 @@ function signalLabel(signal: string): string {
 
 function workerNameLabel(name?: string): string {
   const labels: Record<string, string> = {
-    outcome_observer: 'Outcome Observer',
-    outbox: 'Outbox',
-    attribution: 'Attribution',
-    retention: 'Retention',
+    outcome_observer: '结果观察',
+    outbox: '后台入账',
+    attribution: '归因计算',
+    retention: '保留清理',
   }
   return labels[name || ''] ?? (name || 'Worker')
 }
@@ -702,9 +741,27 @@ function reviewCandidateMeta(item: ExperienceReviewItem): string {
   const confidence = stringValue(summary.confidence) || '-'
   const score = Number(summary.score ?? 0)
   const gap = Number(summary.time_gap_hours ?? 0)
-  const scoreLabel = Number.isFinite(score) && score > 0 ? `score ${Math.round(score * 100) / 100}` : 'score -'
+  const scoreLabel = Number.isFinite(score) && score > 0 ? `评分 ${Math.round(score * 100) / 100}` : '评分 -'
   const gapLabel = Number.isFinite(gap) && gap > 0 ? `${Math.round(gap * 10) / 10}h` : '-'
-  return `${status} · ${confidence} · ${scoreLabel} · 间隔 ${gapLabel}`
+  return `${reviewCandidateStatusLabel(status)} · ${reviewConfidenceLabel(confidence)} · ${scoreLabel} · 间隔 ${gapLabel}`
+}
+
+function reviewCandidateStatusLabel(status?: string): string {
+  if (status === 'positive_candidate') return '强候选'
+  if (status === 'weak_candidate') return '弱候选'
+  if (status === 'rejected_candidate') return '低可信候选'
+  if (status === 'open') return '待复核'
+  if (status === 'approved') return '已确认'
+  if (status === 'rejected') return '已驳回'
+  if (status === 'needs_more_data') return '需补信号'
+  return status || '待复核'
+}
+
+function reviewConfidenceLabel(confidence?: string): string {
+  if (confidence === 'high') return '高置信'
+  if (confidence === 'medium') return '中置信'
+  if (confidence === 'low') return '低置信'
+  return '置信未知'
 }
 
 function reviewCandidateEvidence(item: ExperienceReviewItem): string {
@@ -713,7 +770,7 @@ function reviewCandidateEvidence(item: ExperienceReviewItem): string {
   const feedback = asRecord(summary.feedback)
   const outcome = asRecord(summary.outcome)
   const changed = Array.isArray(outcome.changed_fields) ? outcome.changed_fields.length : 0
-  return `行为 ${integerLabel(behavior.count)} / ${integerLabel(behavior.score)}；反馈 ${feedbackLabel(stringValue(feedback.value) as AISuggestionFeedbackValue)}；字段变化 ${integerLabel(changed)}`
+  return `行为次数 ${integerLabel(behavior.count)} / 行为分 ${integerLabel(behavior.score)}；反馈 ${feedbackLabel(stringValue(feedback.value) as AISuggestionFeedbackValue)}；字段变化 ${integerLabel(changed)}`
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -945,6 +1002,36 @@ onMounted(load)
 
 .worker-run-item {
   min-height: 3.2rem;
+}
+
+.worker-run-main {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.worker-run-main strong,
+.worker-run-main small {
+  display: block;
+  min-width: 0;
+}
+
+.worker-run-main strong {
+  overflow: hidden;
+  color: rgb(var(--yb-text-deep));
+  font-size: 0.82rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-run-main small {
+  overflow: hidden;
+  color: rgb(var(--yb-text-muted-strong));
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .review-item {

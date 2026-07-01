@@ -157,15 +157,12 @@ func (h *PredictionHandler) recordSuggestionDisplay(c *gin.Context, actor domain
 	if len(events) == 0 {
 		return
 	}
-	baseCtx := context.WithoutCancel(c.Request.Context())
-	go func(svc coresvc.ExperienceService, events []domain.AISuggestionEvent) {
-		ctx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
-		defer cancel()
-		for i := range events {
-			event := events[i]
-			_ = svc.RecordAISuggestionEvent(ctx, &event)
-		}
-	}(h.experienceSvc, events)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	for i := range events {
+		event := events[i]
+		_ = h.experienceSvc.RecordAISuggestionEvent(ctx, &event)
+	}
 }
 
 func predictionSuggestionStableKey(surface string, suggestion domain.PredictionSuggestion) string {

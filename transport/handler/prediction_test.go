@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
 )
@@ -62,4 +66,81 @@ func TestPredictionSuggestionStableKeyIgnoresManagementRealtimeCounts(t *testing
 	if predictionAttributionEligible("management", first) {
 		t.Fatal("management suggestions should be observation-only in Phase 2")
 	}
+}
+
+func TestPredictionRecordSuggestionDisplayWaitsForExperienceCapture(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest("GET", "/v1/predictions/tasks/42/next-actions?limit=1", nil)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	stub := &predictionExperienceServiceStub{
+		flags:   domain.ExperienceRuntimeFlags{CaptureEnabled: true},
+		entered: entered,
+		release: release,
+	}
+	handler := &PredictionHandler{experienceSvc: stub}
+	bundle := &domain.PredictionBundle{
+		GeneratedAt: time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC),
+		Suggestions: []domain.PredictionSuggestion{{
+			ID:         "task-next-42",
+			Type:       "task_next_action",
+			Source:     "rules",
+			TargetType: "task",
+			TargetID:   "42",
+		}},
+	}
+
+	go func() {
+		handler.recordSuggestionDisplay(c, domain.RequestActor{ID: 291}, "task_next_action", bundle)
+		close(done)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("experience capture was not called")
+	}
+	select {
+	case <-done:
+		t.Fatal("recordSuggestionDisplay returned before experience capture finished")
+	default:
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("recordSuggestionDisplay did not return after experience capture finished")
+	}
+	if len(stub.events) != 1 || stub.events[0].SuggestionEventID == "" {
+		t.Fatalf("captured events = %+v, want one event with suggestion_event_id", stub.events)
+	}
+}
+
+type predictionExperienceServiceStub struct {
+	experienceHandlerServiceStub
+	flags   domain.ExperienceRuntimeFlags
+	entered chan struct{}
+	release chan struct{}
+	events  []domain.AISuggestionEvent
+}
+
+func (s *predictionExperienceServiceStub) RuntimeFlags() domain.ExperienceRuntimeFlags {
+	return s.flags
+}
+
+func (s *predictionExperienceServiceStub) RecordAISuggestionEvent(_ context.Context, event *domain.AISuggestionEvent) *domain.AppError {
+	if s.entered != nil {
+		close(s.entered)
+		s.entered = nil
+	}
+	if s.release != nil {
+		<-s.release
+	}
+	if event != nil {
+		s.events = append(s.events, *event)
+	}
+	return nil
 }

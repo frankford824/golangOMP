@@ -316,19 +316,20 @@ func main() {
 		service.WithTaskDetailDesignAssetReadModel(designAssetRepo))
 	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo)
 	experienceSvc := service.NewExperienceService(experienceRepo, service.ExperienceServiceConfig{
-		UIEnabled:              cfg.Experience.UIEnabled,
-		CaptureEnabled:         cfg.Experience.CaptureEnabled,
-		AIFeedbackEnabled:      cfg.Experience.AIFeedbackEnabled,
-		BehaviorCaptureEnabled: cfg.Experience.BehaviorCaptureEnabled,
-		MicroQuestionEnabled:   cfg.Experience.MicroQuestionEnabled,
-		BehaviorSampleRate:     cfg.Experience.BehaviorSampleRate,
-		EnabledSurfaces:        cfg.Experience.EnabledSurfaces,
-		WorkerEnabled:          cfg.Experience.WorkerEnabled,
-		WorkerBatchSize:        cfg.Experience.WorkerBatchSize,
-		WorkerMaxAttempts:      cfg.Experience.WorkerMaxAttempts,
-		OutboxLeaseTTL:         cfg.Experience.OutboxLeaseTTL,
-		RuntimeConfigFile:      cfg.Experience.RuntimeConfigFile,
-		RetentionDays:          cfg.Experience.RetentionDays,
+		UIEnabled:                    cfg.Experience.UIEnabled,
+		CaptureEnabled:               cfg.Experience.CaptureEnabled,
+		AIFeedbackEnabled:            cfg.Experience.AIFeedbackEnabled,
+		BehaviorCaptureEnabled:       cfg.Experience.BehaviorCaptureEnabled,
+		MicroQuestionEnabled:         cfg.Experience.MicroQuestionEnabled,
+		ReviewMaterializationEnabled: cfg.Experience.ReviewMaterializationEnabled,
+		BehaviorSampleRate:           cfg.Experience.BehaviorSampleRate,
+		EnabledSurfaces:              cfg.Experience.EnabledSurfaces,
+		WorkerEnabled:                cfg.Experience.WorkerEnabled,
+		WorkerBatchSize:              cfg.Experience.WorkerBatchSize,
+		WorkerMaxAttempts:            cfg.Experience.WorkerMaxAttempts,
+		OutboxLeaseTTL:               cfg.Experience.OutboxLeaseTTL,
+		RuntimeConfigFile:            cfg.Experience.RuntimeConfigFile,
+		RetentionDays:                cfg.Experience.RetentionDays,
 	}, logger.Named("experience"))
 	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),

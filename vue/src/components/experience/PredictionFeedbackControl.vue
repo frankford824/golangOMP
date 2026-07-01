@@ -1,5 +1,6 @@
 <template>
   <div v-if="visible" class="prediction-feedback" @click.stop>
+    <span class="prediction-feedback__section-title">建议反馈</span>
     <div class="prediction-feedback__segment" role="group" aria-label="建议反馈">
       <button
         v-for="option in feedbackOptions"
@@ -16,6 +17,7 @@
     </div>
 
     <div v-if="needsReason" class="prediction-feedback__reasons" aria-label="反馈原因">
+      <span class="prediction-feedback__reason-title">反馈原因</span>
       <button
         v-for="reason in reasonOptions"
         :key="reason.code"
@@ -34,15 +36,22 @@
       <button
         type="button"
         class="prediction-feedback__micro-toggle"
-        :aria-pressed="microQuestionOpen"
+        :aria-expanded="microQuestionOpen"
+        :aria-controls="microQuestionReasonsId"
         :disabled="microQuestionLoading || microQuestionSaving || microQuestionSubmitted"
         @click="toggleMicroQuestion"
       >
-        {{ microQuestionSubmitted ? '暂不处理原因已记' : microQuestionOpen ? '收起' : '暂不处理' }}
+        {{ microQuestionSubmitted ? '已记录补充原因，正式反馈未改变' : microQuestionOpen ? '收起补充原因' : '可选：补充暂不处理原因' }}
       </button>
     </div>
 
-    <div v-if="microQuestionOpen" class="prediction-feedback__reasons" aria-label="暂不处理原因">
+    <div
+      v-if="microQuestionOpen"
+      :id="microQuestionReasonsId"
+      class="prediction-feedback__reasons"
+      aria-label="补充原因"
+    >
+      <span class="prediction-feedback__reason-title">补充原因（不改变上方反馈）</span>
       <button
         v-for="reason in microQuestionReasonOptions"
         :key="reason.code"
@@ -63,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, useId, watch } from 'vue'
 import {
   experienceApi,
   type AISuggestionFeedbackValue,
@@ -72,15 +81,14 @@ import {
   type ExperienceReasonTag,
 } from '@/services/api/experienceApi'
 import {
+  configureExperienceBehavior,
   recordExperienceBehavior,
-  setExperienceBehaviorEnabled,
-  setExperienceBehaviorSampleRate,
 } from '@/services/experienceBehavior'
 import type { PredictionSuggestion } from '@/services/api/predictionsApi'
 
 const feedbackOptions: Array<{ value: AISuggestionFeedbackValue; label: string }> = [
   { value: 'accepted', label: '有用' },
-  { value: 'partially_accepted', label: '部分' },
+  { value: 'partially_accepted', label: '部分有用' },
   { value: 'rejected', label: '无用' },
 ]
 
@@ -132,6 +140,7 @@ const errorText = ref('')
 const microQuestionError = ref('')
 const impressionRecorded = ref(false)
 const microQuestionEligibility = ref<ExperienceMicroQuestionEligibility | null>(null)
+const microQuestionReasonsId = `prediction-feedback-micro-reasons-${useId()}`
 
 let clientConfigPromise: Promise<ExperienceClientConfig | null> | null = null
 let reasonTagsPromise: Promise<ExperienceReasonTag[] | null> | null = null
@@ -155,8 +164,7 @@ onMounted(async () => {
   void loadReasonOptions()
   const config = await getExperienceClientConfig()
   behaviorEnabled.value = Boolean(config?.behavior_capture_enabled)
-  setExperienceBehaviorEnabled(behaviorEnabled.value)
-  setExperienceBehaviorSampleRate(config?.behavior_sample_rate)
+  configureExperienceBehavior(config)
   const surfaces = config?.enabled_surfaces ?? []
   const surfaceEnabled = surfaces.includes(props.surface)
   microQuestionEnabled.value = Boolean(config?.micro_question_enabled && surfaceEnabled)
@@ -211,9 +219,10 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
   if (!value || !suggestionEventId.value || saving.value) return
   saving.value = true
   errorText.value = ''
+  const previousValue = selectedValue.value
+  const previousReason = selectedReason.value
   selectedValue.value = value
-  if (reasonCode) selectedReason.value = reasonCode
-  if (value === 'accepted') selectedReason.value = ''
+  selectedReason.value = reasonCode || ''
 
   const suggestion = props.suggestion
   try {
@@ -236,6 +245,8 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
       },
     })
   } catch {
+    selectedValue.value = previousValue
+    selectedReason.value = previousReason
     errorText.value = '反馈未保存'
   } finally {
     saving.value = false
@@ -252,6 +263,10 @@ async function toggleMicroQuestion(): Promise<void> {
   }
   if (!microQuestionEligibility.value) {
     await loadMicroQuestionEligibility()
+  }
+  if (microQuestionEligibility.value && !microQuestionEligibility.value.eligible) {
+    microQuestionError.value = microQuestionEligibilityMessage(microQuestionEligibility.value.reason)
+    return
   }
   if (microQuestionEligibility.value?.eligible) {
     microQuestionOpen.value = true
@@ -294,6 +309,7 @@ async function submitMicroQuestion(reasonCode: string): Promise<void> {
   const eligibility = microQuestionEligibility.value
   microQuestionSaving.value = true
   microQuestionError.value = ''
+  const previousReason = selectedMicroReason.value
   selectedMicroReason.value = reasonCode
   try {
     await experienceApi.microQuestionAnswer({
@@ -317,6 +333,7 @@ async function submitMicroQuestion(reasonCode: string): Promise<void> {
     microQuestionSubmitted.value = true
     microQuestionOpen.value = false
   } catch {
+    selectedMicroReason.value = previousReason
     microQuestionError.value = '暂不处理原因未保存'
   } finally {
     microQuestionSaving.value = false
@@ -326,6 +343,7 @@ async function submitMicroQuestion(reasonCode: string): Promise<void> {
 function microQuestionEligibilityMessage(reason?: string): string {
   if (reason === 'already_answered') return '暂不处理原因已记录'
   if (reason === 'rate_limited') return '今日追问已达上限'
+  if (reason === 'no_supported_attribution') return '已记录反馈，暂不需要补充原因'
   return '暂不可记录原因'
 }
 
@@ -370,6 +388,13 @@ function maybeRecordImpression(): void {
   gap: 0.3rem;
 }
 
+.prediction-feedback__section-title {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .prediction-feedback__segment {
   padding-top: 0.15rem;
 }
@@ -377,12 +402,12 @@ function maybeRecordImpression(): void {
 .prediction-feedback__button,
 .prediction-feedback__chip,
 .prediction-feedback__micro-toggle {
-  min-height: 1.65rem;
+  min-height: 1.9rem;
   border: 1px solid rgb(var(--yb-border));
   background: rgb(var(--yb-surface));
   color: rgb(var(--yb-text-muted));
   font: inherit;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 750;
   line-height: 1;
   cursor: pointer;
@@ -391,18 +416,34 @@ function maybeRecordImpression(): void {
 
 .prediction-feedback__button {
   border-radius: 999px;
-  padding: 0.15rem 0.5rem;
+  padding: 0.22rem 0.55rem;
 }
 
 .prediction-feedback__chip {
   border-radius: 0.45rem;
-  padding: 0.18rem 0.42rem;
+  padding: 0.22rem 0.46rem;
+}
+
+.prediction-feedback__reason-title {
+  align-self: center;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .prediction-feedback__micro-toggle {
   border-radius: 999px;
-  padding: 0.15rem 0.5rem;
+  padding: 0.22rem 0.55rem;
   background: rgb(var(--yb-surface-muted));
+}
+
+@media (max-width: 640px) {
+  .prediction-feedback__button,
+  .prediction-feedback__chip,
+  .prediction-feedback__micro-toggle {
+    min-height: 2.5rem;
+  }
 }
 
 .prediction-feedback__button:hover,

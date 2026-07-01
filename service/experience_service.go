@@ -29,7 +29,7 @@ const (
 	experienceAttributionLookback             = 7 * 24 * time.Hour
 	experienceAttributionRecentReprocessMax   = 500
 	experienceAttributionCandidatesPerOutcome = 20
-	experienceMicroQuestionDailyLimit         = 3
+	experienceMicroQuestionDailyLimit         = domain.ExperienceMicroQuestionDailyLimit
 )
 
 const (
@@ -65,19 +65,20 @@ type ExperienceService interface {
 }
 
 type ExperienceServiceConfig struct {
-	UIEnabled              bool
-	CaptureEnabled         bool
-	AIFeedbackEnabled      bool
-	BehaviorCaptureEnabled bool
-	MicroQuestionEnabled   bool
-	BehaviorSampleRate     float64
-	EnabledSurfaces        []string
-	WorkerEnabled          bool
-	WorkerBatchSize        int
-	WorkerMaxAttempts      int
-	OutboxLeaseTTL         time.Duration
-	RuntimeConfigFile      string
-	RetentionDays          int
+	UIEnabled                    bool
+	CaptureEnabled               bool
+	AIFeedbackEnabled            bool
+	BehaviorCaptureEnabled       bool
+	MicroQuestionEnabled         bool
+	ReviewMaterializationEnabled bool
+	BehaviorSampleRate           float64
+	EnabledSurfaces              []string
+	WorkerEnabled                bool
+	WorkerBatchSize              int
+	WorkerMaxAttempts            int
+	OutboxLeaseTTL               time.Duration
+	RuntimeConfigFile            string
+	RetentionDays                int
 }
 
 type ExperienceEventFilter struct {
@@ -181,7 +182,7 @@ func NewExperienceService(repo repo.ExperienceRepo, cfg ExperienceServiceConfig,
 	if cfg.OutboxLeaseTTL <= 0 {
 		cfg.OutboxLeaseTTL = 5 * time.Minute
 	}
-	if cfg.BehaviorSampleRate <= 0 || cfg.BehaviorSampleRate > 1 {
+	if cfg.BehaviorSampleRate < 0 || cfg.BehaviorSampleRate > 1 {
 		cfg.BehaviorSampleRate = 1
 	}
 	return &experienceService{repo: repo, cfg: cfg, logger: logger}
@@ -192,13 +193,14 @@ func (s *experienceService) RuntimeFlags() domain.ExperienceRuntimeFlags {
 		return domain.ExperienceRuntimeFlags{}
 	}
 	flags := domain.ExperienceRuntimeFlags{
-		UIEnabled:              s.cfg.UIEnabled,
-		CaptureEnabled:         s.cfg.CaptureEnabled,
-		AIFeedbackEnabled:      s.cfg.AIFeedbackEnabled,
-		WorkerEnabled:          s.cfg.WorkerEnabled,
-		BehaviorCaptureEnabled: s.cfg.BehaviorCaptureEnabled,
-		MicroQuestionEnabled:   s.cfg.MicroQuestionEnabled,
-		BehaviorSampleRate:     s.cfg.BehaviorSampleRate,
+		UIEnabled:                    s.cfg.UIEnabled,
+		CaptureEnabled:               s.cfg.CaptureEnabled,
+		AIFeedbackEnabled:            s.cfg.AIFeedbackEnabled,
+		WorkerEnabled:                s.cfg.WorkerEnabled,
+		BehaviorCaptureEnabled:       s.cfg.BehaviorCaptureEnabled,
+		MicroQuestionEnabled:         s.cfg.MicroQuestionEnabled,
+		ReviewMaterializationEnabled: s.cfg.ReviewMaterializationEnabled,
+		BehaviorSampleRate:           s.cfg.BehaviorSampleRate,
 	}
 	return s.applyRuntimeFile(flags)
 }
@@ -206,7 +208,7 @@ func (s *experienceService) RuntimeFlags() domain.ExperienceRuntimeFlags {
 func (s *experienceService) ClientConfig() domain.ExperienceClientConfig {
 	flags := s.RuntimeFlags()
 	return domain.ExperienceClientConfig{
-		AIFeedbackEnabled:      flags.UIEnabled && flags.AIFeedbackEnabled,
+		AIFeedbackEnabled:      flags.UIEnabled && flags.CaptureEnabled && flags.AIFeedbackEnabled,
 		BehaviorCaptureEnabled: flags.UIEnabled && flags.CaptureEnabled && flags.BehaviorCaptureEnabled,
 		MicroQuestionEnabled:   flags.UIEnabled && flags.CaptureEnabled && flags.MicroQuestionEnabled,
 		BehaviorSampleRate:     normalizeBehaviorSampleRate(flags.BehaviorSampleRate),
@@ -349,20 +351,26 @@ func (s *experienceService) RecordBehaviorEvents(ctx context.Context, actor doma
 	if len(req.Events) > experienceBehaviorBatchMax {
 		return result, domain.NewAppError(domain.ErrCodeInvalidRequest, "experience behavior batch is too large", nil)
 	}
+	result.Received = len(req.Events)
 	events := make([]*domain.ExperienceBehaviorEvent, 0, len(req.Events))
 	for _, item := range req.Events {
 		normalized, appErr := normalizeExperienceBehaviorEvent(actor, item)
 		if appErr != nil {
 			return result, appErr
 		}
+		if !experienceSurfaceEnabled(normalized.Surface, s.cfg.EnabledSurfaces) {
+			continue
+		}
 		events = append(events, normalized)
+	}
+	if len(events) == 0 {
+		return result, nil
 	}
 	inserted, err := s.repo.CreateExperienceBehaviorEvents(ctx, events)
 	if err != nil {
 		s.logger.Warn("experience behavior capture failed", zap.Error(err), zap.Int("events", len(events)))
 		return result, infraError("create experience behavior events", err)
 	}
-	result.Received = len(events)
 	result.Inserted = inserted
 	return result, nil
 }
@@ -371,7 +379,8 @@ func (s *experienceService) RecordAISuggestionFeedback(ctx context.Context, acto
 	if s == nil || s.repo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
 	}
-	if !s.RuntimeFlags().AIFeedbackEnabled {
+	flags := s.RuntimeFlags()
+	if !flags.UIEnabled || !flags.CaptureEnabled || !flags.AIFeedbackEnabled {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "experience AI feedback is disabled", nil)
 	}
 	feedback, appErr := normalizeAISuggestionFeedback(actor, req)
@@ -466,6 +475,14 @@ func (s *experienceService) MicroQuestionEligibility(ctx context.Context, actor 
 		result.Reason = "already_answered"
 		return result, nil
 	}
+	supportedAttribution, appErr := s.hasMicroQuestionSupportedAttribution(ctx, suggestionEventID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if !supportedAttribution {
+		result.Reason = "no_supported_attribution"
+		return result, nil
+	}
 	periodStart, _ := experienceBeijingDayWindow(time.Now())
 	limitKey := buildExperienceRateLimitKey(actor.ID, "micro_question_daily", periodStart)
 	rate, err := s.repo.GetExperienceRateLimit(ctx, limitKey, experienceMicroQuestionDailyLimit)
@@ -515,6 +532,13 @@ func (s *experienceService) RecordMicroQuestionAnswer(ctx context.Context, actor
 	}
 	if answered {
 		return answer, nil
+	}
+	supportedAttribution, appErr := s.hasMicroQuestionSupportedAttribution(ctx, answer.SuggestionEventID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if !supportedAttribution {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "experience micro question has no supported attribution", map[string]interface{}{"deny_code": "experience_micro_question_no_supported_attribution"})
 	}
 	periodStart, periodEnd := experienceBeijingDayWindow(time.Now())
 	reservation, appErr := s.ReserveRateLimit(ctx, actor, "micro_question_daily", periodStart, periodEnd, experienceMicroQuestionDailyLimit)
@@ -595,16 +619,31 @@ func (s *experienceService) validateMicroQuestionAnswerScope(ctx context.Context
 	return nil
 }
 
+func (s *experienceService) hasMicroQuestionSupportedAttribution(ctx context.Context, suggestionEventID string) (bool, *domain.AppError) {
+	if s == nil || s.repo == nil {
+		return false, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
+	}
+	attribution, err := s.repo.GetLatestExperienceAttributionForSuggestion(ctx, suggestionEventID)
+	if err != nil {
+		return false, infraError("load experience attribution for micro question", err)
+	}
+	return experienceAttributionSupportsMicroQuestion(attribution), nil
+}
+
 func (s *experienceService) RecordReviewDecision(ctx context.Context, actor domain.RequestActor, itemKey string, req ExperienceReviewDecisionRequest) (*domain.ExperienceReviewDecision, *domain.AppError) {
 	if s == nil || s.repo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
 	}
-	if !s.RuntimeFlags().UIEnabled {
+	flags := s.RuntimeFlags()
+	if !flags.UIEnabled {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "experience review is disabled", nil)
 	}
 	decision, nextStatus, appErr := normalizeExperienceReviewDecision(actor, itemKey, req)
 	if appErr != nil {
 		return nil, appErr
+	}
+	if decision.Decision == domain.ExperienceReviewDecisionApprove && !flags.ReviewMaterializationEnabled {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "experience review materialization is disabled", map[string]interface{}{"deny_code": "experience_review_materialization_disabled"})
 	}
 	if err := s.repo.CreateExperienceReviewDecision(ctx, decision, nextStatus); err != nil {
 		if appErr := experienceReviewDecisionError(err); appErr != nil {
@@ -629,6 +668,7 @@ func experienceReviewDecisionError(err error) *domain.AppError {
 		strings.Contains(message, "evidence is required"),
 		strings.Contains(message, "requires suggestion and outcome evidence"),
 		strings.Contains(message, "target is invalid"),
+		strings.Contains(message, "target not found"),
 		strings.Contains(message, "item type is not materializable"):
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "experience review item cannot be materialized", map[string]interface{}{"deny_code": "experience_review_item_not_materializable"})
 	default:
@@ -648,7 +688,21 @@ func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit i
 	if limit <= 0 {
 		limit = 50
 	}
+	locked, lockErr := s.repo.RunWithExperienceWorkerLock(ctx, domain.ExperienceWorkerOutcomeObserver, 0, func(lockCtx context.Context) {
+		result = s.processOutcomeObserversLocked(lockCtx, limit)
+	})
+	if lockErr != nil {
+		result.Failed++
+		return result, infraError("acquire experience outcome observer lock", lockErr)
+	}
+	if !locked {
+		return result, nil
+	}
+	return result, nil
+}
 
+func (s *experienceService) processOutcomeObserversLocked(ctx context.Context, limit int) domain.ExperienceObserverRun {
+	var result domain.ExperienceObserverRun
 	eventSources := []struct {
 		name string
 		list func(context.Context, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceOutcomeEventRow, error)
@@ -663,7 +717,7 @@ func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit i
 			run.Failed = 1
 		}
 		result = addExperienceObserverRun(result, run)
-		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerOutcomeObserver, source.name, startedAt, run.Scanned, run.Enqueued, run.Skipped, run.Failed, appErr)
+		s.recordExperienceWorkerRunWithDetails(ctx, domain.ExperienceWorkerOutcomeObserver, source.name, startedAt, run.Scanned, run.Enqueued, run.Skipped, run.Failed, appErr, run.LastError, run.Metadata)
 		if appErr != nil {
 			s.logger.Warn("experience outcome event source failed", zap.String("source", source.name), zap.String("code", appErr.Code), zap.String("message", appErr.Message))
 		}
@@ -685,12 +739,12 @@ func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit i
 			run.Failed = 1
 		}
 		result = addExperienceObserverRun(result, run)
-		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerOutcomeObserver, source.name, startedAt, run.Scanned, run.Enqueued, run.Skipped, run.Failed, appErr)
+		s.recordExperienceWorkerRunWithDetails(ctx, domain.ExperienceWorkerOutcomeObserver, source.name, startedAt, run.Scanned, run.Enqueued, run.Skipped, run.Failed, appErr, run.LastError, run.Metadata)
 		if appErr != nil {
 			s.logger.Warn("experience outcome snapshot source failed", zap.String("source", source.name), zap.String("code", appErr.Code), zap.String("message", appErr.Message))
 		}
 	}
-	return result, nil
+	return result
 }
 
 func (s *experienceService) processOutcomeEventSource(
@@ -737,6 +791,12 @@ func (s *experienceService) processOutcomeEventSource(
 		}
 		if appErr := s.EnqueueEvent(ctx, event); appErr != nil {
 			result.Failed++
+			if isExperiencePoisonRowError(appErr) {
+				result.LastError = appErr.Message
+				result.Metadata = experienceOutcomeEventPoisonMetadata(row, appErr)
+				last = row
+				continue
+			}
 			return result, appErr
 		}
 		result.Enqueued++
@@ -834,6 +894,15 @@ func (s *experienceService) processOutcomeSnapshots(
 		event := buildSnapshotOutcomeEvent(row, currentHash, changedFields)
 		if appErr := s.EnqueueEvent(ctx, event); appErr != nil {
 			result.Failed++
+			if isExperiencePoisonRowError(appErr) {
+				result.LastError = appErr.Message
+				result.Metadata = experienceOutcomeSnapshotPoisonMetadata(row, appErr)
+				if err := s.repo.UpsertExperienceObservedEntityState(ctx, state); err != nil {
+					return result, infraError("update observed entity state after invalid outcome", err)
+				}
+				last = row
+				continue
+			}
 			return result, appErr
 		}
 		if err := s.repo.UpsertExperienceObservedEntityState(ctx, state); err != nil {
@@ -859,6 +928,49 @@ func (s *experienceService) processOutcomeSnapshots(
 		}
 	}
 	return result, nil
+}
+
+func isExperiencePoisonRowError(appErr *domain.AppError) bool {
+	return appErr != nil && appErr.Code == domain.ErrCodeInvalidRequest
+}
+
+func experienceOutcomeEventPoisonMetadata(row *domain.ExperienceOutcomeEventRow, appErr *domain.AppError) json.RawMessage {
+	if row == nil {
+		return nil
+	}
+	return mustServiceJSON(map[string]interface{}{
+		"error_code":       appErrCode(appErr),
+		"event_key":        row.EventKey,
+		"source_name":      row.SourceName,
+		"source_id":        row.SourceID,
+		"source_watermark": row.SourceWatermark,
+		"observed_from":    row.ObservedFrom,
+		"observed_id":      row.ObservedID,
+		"action":           row.Action,
+		"outcome":          row.Outcome,
+	})
+}
+
+func experienceOutcomeSnapshotPoisonMetadata(row *domain.ExperienceOutcomeSnapshotRow, appErr *domain.AppError) json.RawMessage {
+	if row == nil {
+		return nil
+	}
+	return mustServiceJSON(map[string]interface{}{
+		"error_code":        appErrCode(appErr),
+		"source_name":       row.SourceName,
+		"entity_type":       row.EntityType,
+		"entity_id":         row.EntityID,
+		"target_type":       row.TargetType,
+		"target_id":         row.TargetID,
+		"source_updated_at": row.SourceUpdatedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func appErrCode(appErr *domain.AppError) string {
+	if appErr == nil {
+		return ""
+	}
+	return appErr.Code
 }
 
 func (s *experienceService) ProcessOutbox(ctx context.Context, limit int) (domain.ExperienceWorkerRun, *domain.AppError) {
@@ -917,6 +1029,27 @@ func (s *experienceService) ProcessAttributions(ctx context.Context, limit int) 
 	if limit <= 0 {
 		limit = 50
 	}
+	var runErr *domain.AppError
+	locked, lockErr := s.repo.RunWithExperienceWorkerLock(ctx, domain.ExperienceWorkerAttribution, 0, func(lockCtx context.Context) {
+		result, runErr = s.processAttributionsLocked(lockCtx, limit, startedAt)
+	})
+	if lockErr != nil {
+		result.Failed++
+		appErr := infraError("acquire experience attribution lock", lockErr)
+		s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+		return result, appErr
+	}
+	if !locked {
+		return result, nil
+	}
+	if runErr != nil {
+		return result, runErr
+	}
+	return result, nil
+}
+
+func (s *experienceService) processAttributionsLocked(ctx context.Context, limit int, startedAt time.Time) (domain.ExperienceAttributionRun, *domain.AppError) {
+	var result domain.ExperienceAttributionRun
 	watermark, err := s.repo.GetExperienceWorkerWatermark(ctx, domain.ExperienceWorkerAttribution, "experience_events")
 	if err != nil {
 		result.Failed++
@@ -1108,10 +1241,11 @@ func (s *experienceService) ReserveRateLimit(ctx context.Context, actor domain.R
 	if periodStart.IsZero() || periodEnd.IsZero() || !periodEnd.After(periodStart) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rate limit period is invalid", nil)
 	}
-	var actorID *int64
-	if actor.ID > 0 {
-		actorID = &actor.ID
+	if actor.ID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rate limit actor is required", nil)
 	}
+	var actorID *int64
+	actorID = &actor.ID
 	hardCap := limit * 10
 	limitKey := buildExperienceRateLimitKey(actor.ID, bucketName, periodStart)
 	reservation, err := s.repo.ReserveExperienceRateLimit(ctx, repo.ExperienceRateLimitRequest{
@@ -1136,6 +1270,26 @@ func (s *experienceService) ProcessRetention(ctx context.Context, now time.Time,
 		return result, nil
 	}
 	startedAt := time.Now().UTC()
+	var runErr *domain.AppError
+	locked, lockErr := s.repo.RunWithExperienceWorkerLock(ctx, domain.ExperienceWorkerRetention, 0, func(lockCtx context.Context) {
+		result, runErr = s.processRetentionLocked(lockCtx, now, limit, startedAt)
+	})
+	if lockErr != nil {
+		appErr := infraError("acquire experience retention lock", lockErr)
+		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerRetention, "", startedAt, 0, 0, 0, 1, appErr)
+		return result, appErr
+	}
+	if !locked {
+		return result, nil
+	}
+	if runErr != nil {
+		return result, runErr
+	}
+	return result, nil
+}
+
+func (s *experienceService) processRetentionLocked(ctx context.Context, now time.Time, limit int, startedAt time.Time) (domain.ExperienceRetentionRun, *domain.AppError) {
+	var result domain.ExperienceRetentionRun
 	if now.IsZero() {
 		now = time.Now().UTC()
 	} else {
@@ -1174,6 +1328,10 @@ func (s *experienceService) recordExperienceAttributionWorkerRun(ctx context.Con
 }
 
 func (s *experienceService) recordExperienceWorkerRun(ctx context.Context, workerName string, sourceName string, startedAt time.Time, scanned int, enqueued int, skipped int, failed int, appErr *domain.AppError) {
+	s.recordExperienceWorkerRunWithDetails(ctx, workerName, sourceName, startedAt, scanned, enqueued, skipped, failed, appErr, "", nil)
+}
+
+func (s *experienceService) recordExperienceWorkerRunWithDetails(ctx context.Context, workerName string, sourceName string, startedAt time.Time, scanned int, enqueued int, skipped int, failed int, appErr *domain.AppError, lastErrorOverride string, metadata json.RawMessage) {
 	if s == nil || s.repo == nil {
 		return
 	}
@@ -1185,6 +1343,7 @@ func (s *experienceService) recordExperienceWorkerRun(ctx context.Context, worke
 		lastError = appErr.Message
 	} else if failed > 0 {
 		status = "partial"
+		lastError = lastErrorOverride
 	}
 	run := &domain.ExperienceWorkerRunRecord{
 		WorkerName:    trimMax(strings.TrimSpace(workerName), 96),
@@ -1197,6 +1356,7 @@ func (s *experienceService) recordExperienceWorkerRun(ctx context.Context, worke
 		SkippedCount:  skipped,
 		FailedCount:   failed,
 		LastError:     trimMax(lastError, 1024),
+		Metadata:      metadata,
 	}
 	if err := s.repo.CreateExperienceWorkerRun(ctx, run); err != nil {
 		s.logger.Warn("record experience worker run failed", zap.Error(err), zap.String("worker", workerName), zap.String("source", sourceName))
@@ -1236,6 +1396,40 @@ func experienceAttributionCandidateHasEvidence(candidate *domain.ExperienceAttri
 		return false
 	}
 	return candidate.BehaviorCount > 0 || strings.TrimSpace(candidate.FeedbackValue) != ""
+}
+
+func experienceAttributionSupportsMicroQuestion(attribution *domain.ExperienceAttribution) bool {
+	if attribution == nil {
+		return false
+	}
+	switch strings.TrimSpace(attribution.Status) {
+	case domain.ExperienceAttributionStatusPositive, domain.ExperienceAttributionStatusWeak, domain.ExperienceAttributionStatusRejected:
+	default:
+		return false
+	}
+	if len(attribution.EvidenceSummary) == 0 {
+		return false
+	}
+	var summary map[string]interface{}
+	if err := json.Unmarshal(attribution.EvidenceSummary, &summary); err != nil {
+		return false
+	}
+	feedback := experienceAttributionMapValue(summary["feedback"])
+	switch strings.TrimSpace(experienceAttributionStringValue(feedback["value"])) {
+	case domain.ExperienceFeedbackPartiallyAccepted, domain.ExperienceFeedbackRejected:
+		return true
+	}
+	behavior := experienceAttributionMapValue(summary["behavior"])
+	if experienceAttributionNumberValue(behavior["score"]) < 0 {
+		return true
+	}
+	for _, action := range experienceAttributionStringSliceValue(behavior["actions"]) {
+		switch strings.TrimSpace(action) {
+		case domain.ExperienceBehaviorActionDismiss, domain.ExperienceBehaviorActionIgnoredAfter:
+			return true
+		}
+	}
+	return false
 }
 
 func buildExperienceReviewItem(attribution *domain.ExperienceAttribution) *domain.ExperienceReviewItem {
@@ -1311,6 +1505,46 @@ func experienceAttributionStringValue(value interface{}) string {
 	}
 }
 
+func experienceAttributionNumberValue(value interface{}) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		out, _ := typed.Float64()
+		return out
+	default:
+		return 0
+	}
+}
+
+func experienceAttributionStringSliceValue(value interface{}) []string {
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []interface{}:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if value := experienceAttributionStringValue(item); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return nil
+		}
+		return []string{typed}
+	default:
+		return nil
+	}
+}
+
 func experienceAttributionScore(outcome *domain.ExperienceAttributionOutcome, candidate *domain.ExperienceAttributionCandidate) float64 {
 	score := 0.25
 	gap := outcome.EventTime.Sub(candidate.DisplayedAt)
@@ -1373,6 +1607,9 @@ func experienceAttributionSummary(outcome *domain.ExperienceAttributionOutcome, 
 	behavior := map[string]interface{}{
 		"count": candidate.BehaviorCount,
 		"score": candidate.BehaviorScore,
+	}
+	if len(candidate.BehaviorActions) > 0 {
+		behavior["actions"] = candidate.BehaviorActions
 	}
 	if candidate.LatestBehaviorAt != nil {
 		behavior["latest_at"] = candidate.LatestBehaviorAt.UTC().Format(time.RFC3339)
@@ -1467,20 +1704,28 @@ func (s *experienceService) applyRuntimeFile(flags domain.ExperienceRuntimeFlags
 		return flags
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 {
+	if err != nil {
+		flags.RuntimeConfigError = err.Error()
+		return flags
+	}
+	if len(raw) == 0 {
+		flags.RuntimeConfigError = "runtime config file is empty"
 		return flags
 	}
 	var values map[string]interface{}
 	if err := json.Unmarshal(raw, &values); err != nil {
 		s.logger.Warn("experience runtime config file is invalid", zap.String("path", path), zap.Error(err))
+		flags.RuntimeConfigError = err.Error()
 		return flags
 	}
+	flags.RuntimeConfigLoaded = true
 	flags.UIEnabled = boolOverride(values, flags.UIEnabled, "experience_ui_enabled", "ui_enabled")
 	flags.CaptureEnabled = boolOverride(values, flags.CaptureEnabled, "experience_capture_enabled", "capture_enabled")
 	flags.AIFeedbackEnabled = boolOverride(values, flags.AIFeedbackEnabled, "experience_ai_feedback_enabled", "ai_feedback_enabled")
 	flags.WorkerEnabled = boolOverride(values, flags.WorkerEnabled, "experience_worker_enabled", "worker_enabled")
 	flags.BehaviorCaptureEnabled = boolOverride(values, flags.BehaviorCaptureEnabled, "experience_behavior_capture_enabled", "behavior_capture_enabled")
 	flags.MicroQuestionEnabled = boolOverride(values, flags.MicroQuestionEnabled, "experience_micro_question_enabled", "micro_question_enabled")
+	flags.ReviewMaterializationEnabled = boolOverride(values, flags.ReviewMaterializationEnabled, "experience_review_materialization_enabled", "review_materialization_enabled")
 	flags.BehaviorSampleRate = floatOverride(values, flags.BehaviorSampleRate, "experience_behavior_sample_rate", "behavior_sample_rate")
 	flags.BehaviorSampleRate = normalizeBehaviorSampleRate(flags.BehaviorSampleRate)
 	return flags
@@ -1863,7 +2108,9 @@ func snapshotOutcomeActionAndValue(row *domain.ExperienceOutcomeSnapshotRow, cha
 		return "task_status_changed", stringFromExperienceJSONField(row.ObservedValue, "task_status")
 	case hasExperienceChangedField(fieldSet, "flow_review_status") ||
 		hasExperienceChangedField(fieldSet, "approved_at") ||
-		hasExperienceChangedField(fieldSet, "rejected_at"):
+		hasExperienceChangedField(fieldSet, "rejected_at") ||
+		hasExperienceChangedField(fieldSet, "superseded_at") ||
+		hasExperienceChangedField(fieldSet, "superseded_by_version_id"):
 		return "asset_review_status_changed", stringFromExperienceJSONField(row.ObservedValue, "flow_review_status")
 	case hasExperienceChangedField(fieldSet, "filing_status") ||
 		hasExperienceChangedField(fieldSet, "erp_sync_status"):

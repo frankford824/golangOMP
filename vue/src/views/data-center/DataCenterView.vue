@@ -3,12 +3,12 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">数据中心</h2>
-        <p class="page-subtitle">导出、业务追踪、绩效与排查</p>
+        <p class="page-subtitle">导出、业务追踪、绩效、经验观测与排查</p>
       </div>
       <div class="page-header-actions">
         <BaseButton v-if="canKpi" variant="secondary" size="sm" @click="businessTrendPilotOpen = true">
           <Sparkles class="button-icon" aria-hidden="true" />
-          业务热点 AI 试验
+          业务热点 AI 分析试验
         </BaseButton>
         <BaseButton variant="secondary" size="sm" @click="refreshToken++">刷新当前页</BaseButton>
       </div>
@@ -116,7 +116,7 @@ const canExperience = computed(() => permissionsStore.isSuperAdmin)
 const visibleTabs = computed<DataCenterTabItem[]>(() => {
   const tabs: DataCenterTabItem[] = []
   if (canKpi.value) tabs.push({ key: 'kpi', label: '绩效看板', hint: '运营 / 设计 / 审核' })
-  if (canExperience.value) tabs.push({ key: 'experience', label: '经验观测', hint: '样本 / 标签 / AI' })
+  if (canExperience.value) tabs.push({ key: 'experience', label: '经验观测', hint: '监督样本 / 侧路治理' })
   if (canExport.value) tabs.push({ key: 'export', label: '导出', hint: '任务与业务记录' })
   if (canTrace.value) tabs.push({ key: 'business', label: '业务追踪', hint: '人员与任务链路' })
   if (canTrace.value) tabs.push({ key: 'operation', label: '操作明细', hint: '任务 / 导出 / 集成' })

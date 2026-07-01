@@ -7,7 +7,10 @@ import (
 	"workflow/domain"
 )
 
+type ExperienceWorkerLockFunc func(context.Context)
+
 type ExperienceRepo interface {
+	RunWithExperienceWorkerLock(ctx context.Context, lockName string, timeout time.Duration, fn ExperienceWorkerLockFunc) (bool, error)
 	ListReasonTags(ctx context.Context, scene string) ([]*domain.ExperienceReasonTag, error)
 	ListClientReasonTags(ctx context.Context, scene string, allowedScenes []string) ([]*domain.ExperienceClientReasonTag, error)
 	ListExperienceEvents(ctx context.Context, filter ExperienceEventListFilter) ([]*domain.ExperienceEvent, int64, error)
@@ -38,6 +41,7 @@ type ExperienceRepo interface {
 	ListRecentExperienceAttributionOutcomes(ctx context.Context, since time.Time, cursor ExperienceSourceCursor, limit int) ([]*domain.ExperienceAttributionOutcome, error)
 	ListExperienceAttributionCandidates(ctx context.Context, outcome *domain.ExperienceAttributionOutcome, lookback time.Duration, limit int) ([]*domain.ExperienceAttributionCandidate, error)
 	CreateExperienceAttribution(ctx context.Context, attribution *domain.ExperienceAttribution) error
+	GetLatestExperienceAttributionForSuggestion(ctx context.Context, suggestionEventID string) (*domain.ExperienceAttribution, error)
 	ReserveExperienceRateLimit(ctx context.Context, req ExperienceRateLimitRequest) (*domain.ExperienceRateLimitReservation, error)
 	RefundExperienceRateLimit(ctx context.Context, limitKey string) error
 	GetExperienceRateLimit(ctx context.Context, limitKey string, limit int) (*domain.ExperienceRateLimitReservation, error)

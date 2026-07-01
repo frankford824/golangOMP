@@ -139,7 +139,7 @@ components:
           $ref: '#/components/schemas/PredictionBundle'
     ExperienceRuntimeFlags:
       type: object
-      required: [ui_enabled, capture_enabled, ai_feedback_enabled, worker_enabled, behavior_capture_enabled, micro_question_enabled, behavior_sample_rate]
+      required: [ui_enabled, capture_enabled, ai_feedback_enabled, worker_enabled, behavior_capture_enabled, micro_question_enabled, review_materialization_enabled, behavior_sample_rate]
       properties:
         ui_enabled: { type: boolean }
         capture_enabled: { type: boolean }
@@ -147,7 +147,16 @@ components:
         worker_enabled: { type: boolean }
         behavior_capture_enabled: { type: boolean }
         micro_question_enabled: { type: boolean }
+        review_materialization_enabled:
+          type: boolean
+          description: Whether SuperAdmin review approvals may materialize side-channel L4 profiles or asset quality labels. Keep false during shadow observation.
         behavior_sample_rate: { type: number, format: double, minimum: 0, maximum: 1 }
+        runtime_config_loaded:
+          type: boolean
+          description: Whether the optional runtime flag override file was loaded successfully for this response.
+        runtime_config_error:
+          type: string
+          description: SuperAdmin-only diagnostic error when the optional runtime flag override file is configured but cannot be read or parsed.
     ExperienceClientConfig:
       type: object
       required: [ai_feedback_enabled, behavior_capture_enabled, micro_question_enabled, behavior_sample_rate, enabled_surfaces]
@@ -231,6 +240,10 @@ components:
         sample_total: { type: integer, format: int64 }
         displayed_events: { type: integer, format: int64 }
         locatable_samples: { type: integer, format: int64 }
+        locatable_displayed_events:
+          type: integer
+          format: int64
+          description: Displayed AI suggestion events that carry a target_type and target_id; use this for the L0 to L1 health funnel.
         feedback_samples: { type: integer, format: int64 }
         reasoned_feedback_samples: { type: integer, format: int64 }
         reusable_samples: { type: integer, format: int64 }
@@ -252,6 +265,30 @@ components:
         ai_suggestion_events: { type: integer, format: int64 }
         ai_feedback_events: { type: integer, format: int64 }
         ai_feedback_rate: { type: number, format: double }
+        attribution_total:
+          type: integer
+          format: int64
+          description: Total shadow attribution candidates computed from suggestions, behavior, feedback, and outcomes.
+        attribution_positive: { type: integer, format: int64 }
+        attribution_weak: { type: integer, format: int64 }
+        attribution_rejected: { type: integer, format: int64 }
+        review_items_open:
+          type: integer
+          format: int64
+          description: Open SuperAdmin review items generated from attribution candidates.
+        review_items_approved: { type: integer, format: int64 }
+        review_items_rejected: { type: integer, format: int64 }
+        review_items_needs_more_data: { type: integer, format: int64 }
+        micro_question_answers:
+          type: integer
+          format: int64
+          description: Total micro-question answers stored separately from explicit feedback.
+        micro_question_answered: { type: integer, format: int64 }
+        micro_question_dismissed: { type: integer, format: int64 }
+        micro_question_rate_limited:
+          type: integer
+          format: int64
+          description: Current daily micro-question rate-limit buckets at or over the configured limit.
         task_profiles: { type: integer, format: int64 }
         asset_quality_labels: { type: integer, format: int64 }
         worker_last_runs:
@@ -336,7 +373,7 @@ components:
         eligible: { type: boolean }
         reason:
           type: string
-          enum: [disabled, surface_disabled, missing_suggestion_event, suggestion_not_found, not_attribution_eligible, suggestion_context_mismatch, target_mismatch, missing_target, already_answered, rate_limited]
+          enum: [disabled, surface_disabled, missing_suggestion_event, suggestion_not_found, not_attribution_eligible, suggestion_context_mismatch, target_mismatch, missing_target, already_answered, no_supported_attribution, rate_limited]
           description: Machine-readable non-eligible reason.
         answer_event_key:
           type: string

@@ -7,7 +7,10 @@ export interface ExperienceRuntimeFlags {
   worker_enabled: boolean
   behavior_capture_enabled: boolean
   micro_question_enabled: boolean
+  review_materialization_enabled: boolean
   behavior_sample_rate: number
+  runtime_config_loaded?: boolean
+  runtime_config_error?: string
 }
 
 export interface ExperienceClientConfig {
@@ -28,6 +31,7 @@ export interface ExperienceStats {
   sample_total?: number
   displayed_events?: number
   locatable_samples?: number
+  locatable_displayed_events?: number
   feedback_samples?: number
   reasoned_feedback_samples?: number
   reusable_samples?: number
@@ -49,6 +53,18 @@ export interface ExperienceStats {
   ai_suggestion_events: number
   ai_feedback_events: number
   ai_feedback_rate: number
+  attribution_total?: number
+  attribution_positive?: number
+  attribution_weak?: number
+  attribution_rejected?: number
+  review_items_open?: number
+  review_items_approved?: number
+  review_items_rejected?: number
+  review_items_needs_more_data?: number
+  micro_question_answers?: number
+  micro_question_answered?: number
+  micro_question_dismissed?: number
+  micro_question_rate_limited?: number
   task_profiles: number
   asset_quality_labels: number
   worker_last_runs?: ExperienceWorkerRunRecord[]
@@ -118,10 +134,22 @@ export interface ExperienceReasonTag {
 export type ExperienceMicroQuestionAnswerValue = 'answered' | 'dismissed'
 export type ExperienceReviewDecisionValue = 'approve' | 'reject' | 'needs_more_data'
 export type ExperienceReviewItemStatus = 'open' | 'approved' | 'rejected' | 'needs_more_data'
+export type ExperienceMicroQuestionEligibilityReason =
+  | 'disabled'
+  | 'surface_disabled'
+  | 'missing_suggestion_event'
+  | 'suggestion_not_found'
+  | 'not_attribution_eligible'
+  | 'suggestion_context_mismatch'
+  | 'target_mismatch'
+  | 'missing_target'
+  | 'already_answered'
+  | 'no_supported_attribution'
+  | 'rate_limited'
 
 export interface ExperienceMicroQuestionEligibility {
   eligible: boolean
-  reason?: string
+  reason?: ExperienceMicroQuestionEligibilityReason
   answer_event_key?: string
   remaining_daily: number
   reason_tags?: ExperienceReasonTag[]

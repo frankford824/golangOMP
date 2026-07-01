@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,6 +18,41 @@ type experienceRepo struct{ db *DB }
 
 func NewExperienceRepo(db *DB) repo.ExperienceRepo {
 	return &experienceRepo{db: db}
+}
+
+func (r *experienceRepo) RunWithExperienceWorkerLock(ctx context.Context, lockName string, timeout time.Duration, fn repo.ExperienceWorkerLockFunc) (bool, error) {
+	name := "yongbo:experience:" + strings.TrimSpace(lockName)
+	if name == "yongbo:experience:" {
+		return false, fmt.Errorf("experience worker lock name is required")
+	}
+	timeoutSeconds := 0
+	if timeout > 0 {
+		timeoutSeconds = int(timeout / time.Second)
+		if timeoutSeconds <= 0 {
+			timeoutSeconds = 1
+		}
+	}
+	conn, err := r.db.db.Conn(ctx)
+	if err != nil {
+		return false, fmt.Errorf("open experience worker lock connection: %w", err)
+	}
+	defer conn.Close()
+
+	var acquired sql.NullInt64
+	if err := conn.QueryRowContext(ctx, `SELECT GET_LOCK(?, ?)`, name, timeoutSeconds).Scan(&acquired); err != nil {
+		return false, fmt.Errorf("acquire experience worker lock: %w", err)
+	}
+	if !acquired.Valid || acquired.Int64 != 1 {
+		return false, nil
+	}
+	defer func() {
+		var released sql.NullInt64
+		_ = conn.QueryRowContext(context.Background(), `SELECT RELEASE_LOCK(?)`, name).Scan(&released)
+	}()
+	if fn != nil {
+		fn(ctx)
+	}
+	return true, nil
 }
 
 func (r *experienceRepo) ListReasonTags(ctx context.Context, scene string) ([]*domain.ExperienceReasonTag, error) {
@@ -413,20 +449,37 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 	}
 	stats.DisplayedEvents = stats.AISuggestionEvents
 	stats.SampleTotal = stats.TotalEvents + stats.AISuggestionEvents
-	if stats.AIFeedbackEvents, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback`); err != nil {
+	if err = r.fillExperienceFeedbackStats(ctx, stats); err != nil {
 		return nil, err
 	}
-	stats.FeedbackSamples = stats.AIFeedbackEvents
-	if stats.FeedbackAccepted, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE feedback_value = ?`, domain.ExperienceFeedbackAccepted); err != nil {
+	attributionCounts, attributionTotal, err := r.groupedExperienceCounts(ctx, `SELECT status, COUNT(*) FROM experience_attributions GROUP BY status`)
+	if err != nil {
 		return nil, err
 	}
-	if stats.FeedbackPartiallyAccepted, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE feedback_value = ?`, domain.ExperienceFeedbackPartiallyAccepted); err != nil {
+	stats.AttributionTotal = attributionTotal
+	stats.AttributionPositive = attributionCounts[domain.ExperienceAttributionStatusPositive]
+	stats.AttributionWeak = attributionCounts[domain.ExperienceAttributionStatusWeak]
+	stats.AttributionRejected = attributionCounts[domain.ExperienceAttributionStatusRejected]
+	reviewCounts, _, err := r.groupedExperienceCounts(ctx, `SELECT status, COUNT(*) FROM experience_review_items GROUP BY status`)
+	if err != nil {
 		return nil, err
 	}
-	if stats.FeedbackRejected, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE feedback_value = ?`, domain.ExperienceFeedbackRejected); err != nil {
+	stats.ReviewItemsOpen = reviewCounts[domain.ExperienceReviewItemStatusOpen]
+	stats.ReviewItemsApproved = reviewCounts[domain.ExperienceReviewItemStatusApproved]
+	stats.ReviewItemsRejected = reviewCounts[domain.ExperienceReviewItemStatusRejected]
+	stats.ReviewItemsNeedsMoreData = reviewCounts[domain.ExperienceReviewItemStatusNeedsMoreData]
+	microQuestionCounts, microQuestionTotal, err := r.groupedExperienceCounts(ctx, `SELECT answer_value, COUNT(*) FROM experience_micro_question_answers GROUP BY answer_value`)
+	if err != nil {
 		return nil, err
 	}
-	if stats.ReasonedFeedbackSamples, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback WHERE reason_code <> ''`); err != nil {
+	stats.MicroQuestionAnswers = microQuestionTotal
+	stats.MicroQuestionAnswered = microQuestionCounts[domain.ExperienceMicroQuestionAnswerAnswered]
+	stats.MicroQuestionDismissed = microQuestionCounts[domain.ExperienceMicroQuestionAnswerDismissed]
+	if stats.MicroQuestionRateLimited, err = r.scalarCount(ctx, `
+		SELECT COUNT(*) FROM experience_rate_limits
+		WHERE bucket_name = 'micro_question_daily'
+		  AND period_end >= ?
+		  AND count >= ?`, now, domain.ExperienceMicroQuestionDailyLimit); err != nil {
 		return nil, err
 	}
 	if stats.TaskProfiles, err = r.scalarCount(ctx, `SELECT COUNT(*) FROM task_experience_profiles`); err != nil {
@@ -444,6 +497,7 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 	if err != nil {
 		return nil, err
 	}
+	stats.LocatableDisplayedEvents = aiLocatable
 	stats.LocatableSamples = businessLocatable + aiLocatable
 	taggedEvents, err := r.scalarCount(ctx, `
 		SELECT COUNT(*) FROM experience_events
@@ -484,6 +538,68 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 		stats.WorkerLastRuns = runs
 	}
 	return stats, nil
+}
+
+func (r *experienceRepo) groupedExperienceCounts(ctx context.Context, query string, args ...interface{}) (map[string]int64, int64, error) {
+	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("load grouped experience counts: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]int64)
+	var total int64
+	for rows.Next() {
+		var key string
+		var count int64
+		if err := rows.Scan(&key, &count); err != nil {
+			return nil, 0, fmt.Errorf("scan grouped experience count: %w", err)
+		}
+		key = strings.TrimSpace(key)
+		out[key] += count
+		total += count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate grouped experience counts: %w", err)
+	}
+	return out, total, nil
+}
+
+func (r *experienceRepo) fillExperienceFeedbackStats(ctx context.Context, stats *domain.ExperienceStats) error {
+	if stats == nil {
+		return nil
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT feedback_value,
+		       COUNT(*) AS total,
+		       COALESCE(SUM(CASE WHEN reason_code <> '' THEN 1 ELSE 0 END), 0) AS reasoned
+		FROM (`+latestAISuggestionFeedbackSQL()+`) latest_feedback
+		GROUP BY feedback_value`)
+	if err != nil {
+		return fmt.Errorf("load experience feedback stats: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var feedbackValue string
+		var total, reasoned int64
+		if err := rows.Scan(&feedbackValue, &total, &reasoned); err != nil {
+			return fmt.Errorf("scan experience feedback stats: %w", err)
+		}
+		stats.AIFeedbackEvents += total
+		stats.ReasonedFeedbackSamples += reasoned
+		switch strings.TrimSpace(feedbackValue) {
+		case domain.ExperienceFeedbackAccepted:
+			stats.FeedbackAccepted += total
+		case domain.ExperienceFeedbackPartiallyAccepted:
+			stats.FeedbackPartiallyAccepted += total
+		case domain.ExperienceFeedbackRejected:
+			stats.FeedbackRejected += total
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate experience feedback stats: %w", err)
+	}
+	stats.FeedbackSamples = stats.AIFeedbackEvents
+	return nil
 }
 
 func (r *experienceRepo) EnqueueExperienceEvent(ctx context.Context, event *domain.ExperienceOutboxEvent) error {
@@ -1112,23 +1228,26 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 	}
 	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, task_id, COALESCE(flow_review_status, ''), approved_at, rejected_at,
-		       COALESCE(is_archived, 0), archived_at,
-		       GREATEST(
-		         created_at,
-		         COALESCE(approved_at, created_at),
-		         COALESCE(rejected_at, created_at),
-		         COALESCE(archived_at, created_at),
-		         COALESCE(cleaned_at, created_at)
-		       ) AS source_updated_at
+			SELECT id, task_id, COALESCE(flow_review_status, ''), approved_at, rejected_at,
+			       superseded_at, superseded_by_version_id, COALESCE(is_archived, 0), archived_at,
+			       GREATEST(
+			         created_at,
+			         COALESCE(approved_at, created_at),
+			         COALESCE(rejected_at, created_at),
+			         COALESCE(superseded_at, created_at),
+			         COALESCE(archived_at, created_at),
+			         COALESCE(cleaned_at, created_at)
+			       ) AS source_updated_at
 		FROM task_assets
 		WHERE (created_at > ?) OR (created_at = ? AND id > ?)
-		   OR (approved_at > ?) OR (approved_at = ? AND id > ?)
-		   OR (rejected_at > ?) OR (rejected_at = ? AND id > ?)
-		   OR (archived_at > ?) OR (archived_at = ? AND id > ?)
-		   OR (cleaned_at > ?) OR (cleaned_at = ? AND id > ?)
+			   OR (approved_at > ?) OR (approved_at = ? AND id > ?)
+			   OR (rejected_at > ?) OR (rejected_at = ? AND id > ?)
+			   OR (superseded_at > ?) OR (superseded_at = ? AND id > ?)
+			   OR (archived_at > ?) OR (archived_at = ? AND id > ?)
+			   OR (cleaned_at > ?) OR (cleaned_at = ? AND id > ?)
 		ORDER BY source_updated_at ASC, id ASC
 		LIMIT ?`,
+		lastSeenAt, lastSeenAt, cursor.LastSeenID,
 		lastSeenAt, lastSeenAt, cursor.LastSeenID,
 		lastSeenAt, lastSeenAt, cursor.LastSeenID,
 		lastSeenAt, lastSeenAt, cursor.LastSeenID,
@@ -1145,10 +1264,11 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 	for rows.Next() {
 		var id, taskID int64
 		var status string
-		var approvedAt, rejectedAt, archivedAt sql.NullTime
+		var approvedAt, rejectedAt, supersededAt, archivedAt sql.NullTime
+		var supersededBy sql.NullInt64
 		var archived bool
 		var sourceUpdatedAt time.Time
-		if err := rows.Scan(&id, &taskID, &status, &approvedAt, &rejectedAt, &archived, &archivedAt, &sourceUpdatedAt); err != nil {
+		if err := rows.Scan(&id, &taskID, &status, &approvedAt, &rejectedAt, &supersededAt, &supersededBy, &archived, &archivedAt, &sourceUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan experience task asset review snapshot: %w", err)
 		}
 		taskIDCopy := taskID
@@ -1161,9 +1281,11 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 			TargetID:        strconv.FormatInt(id, 10),
 			SourceUpdatedAt: sourceUpdatedAt.UTC(),
 			ObservedValue: mustExperienceJSON(map[string]interface{}{
-				"flow_review_status": status,
-				"approved_at":        experienceNullableTimeValue(approvedAt),
-				"rejected_at":        experienceNullableTimeValue(rejectedAt),
+				"flow_review_status":       status,
+				"approved_at":              experienceNullableTimeValue(approvedAt),
+				"rejected_at":              experienceNullableTimeValue(rejectedAt),
+				"superseded_at":            experienceNullableTimeValue(supersededAt),
+				"superseded_by_version_id": experienceNullableInt64Value(supersededBy),
 			}),
 			TerminalState: taskAssetReviewTerminalState(status, archived, archivedAt),
 		})
@@ -1336,14 +1458,14 @@ func (r *experienceRepo) UpsertExperienceObservedEntityState(ctx context.Context
 			terminal_state, terminal_observed_at, source_updated_at, last_seen_at, tombstoned, tombstone_payload_json
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
-			observed_value_json = VALUES(observed_value_json),
-			observed_hash = VALUES(observed_hash),
-			terminal_state = VALUES(terminal_state),
-			terminal_observed_at = VALUES(terminal_observed_at),
-			source_updated_at = VALUES(source_updated_at),
+			observed_value_json = IF(source_updated_at IS NULL OR VALUES(source_updated_at) >= source_updated_at, VALUES(observed_value_json), observed_value_json),
+			observed_hash = IF(source_updated_at IS NULL OR VALUES(source_updated_at) >= source_updated_at, VALUES(observed_hash), observed_hash),
+			terminal_state = IF(source_updated_at IS NULL OR VALUES(source_updated_at) >= source_updated_at, VALUES(terminal_state), terminal_state),
+			terminal_observed_at = IF(source_updated_at IS NULL OR VALUES(source_updated_at) >= source_updated_at, VALUES(terminal_observed_at), terminal_observed_at),
+			source_updated_at = IF(source_updated_at IS NULL OR VALUES(source_updated_at) >= source_updated_at, VALUES(source_updated_at), source_updated_at),
 			last_seen_at = VALUES(last_seen_at),
-			tombstoned = VALUES(tombstoned),
-			tombstone_payload_json = VALUES(tombstone_payload_json),
+			tombstoned = IF(source_updated_at IS NULL OR VALUES(source_updated_at) >= source_updated_at, VALUES(tombstoned), tombstoned),
+			tombstone_payload_json = IF(source_updated_at IS NULL OR VALUES(source_updated_at) >= source_updated_at, VALUES(tombstone_payload_json), tombstone_payload_json),
 			updated_at = CURRENT_TIMESTAMP`,
 		strings.TrimSpace(state.SourceName),
 		strings.TrimSpace(state.EntityType),
@@ -1609,6 +1731,7 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		         ELSE 0
 		       END), 0) AS behavior_score,
 		       MAX(b.occurred_at) AS latest_behavior_at,
+		       COALESCE(GROUP_CONCAT(DISTINCT b.action ORDER BY b.action SEPARATOR ','), '') AS behavior_actions,
 		       lf.feedback_value, lf.reason_code, lf.created_at
 		FROM ai_suggestion_events a
 		LEFT JOIN experience_behavior_events b
@@ -1650,7 +1773,7 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 	for rows.Next() {
 		var item domain.ExperienceAttributionCandidate
 		var latestBehaviorAt, feedbackCreatedAt sql.NullTime
-		var feedbackValue, feedbackReasonCode sql.NullString
+		var behaviorActions, feedbackValue, feedbackReasonCode sql.NullString
 		if err := rows.Scan(
 			&item.SuggestionEventID,
 			&item.SuggestionStableKey,
@@ -1663,6 +1786,7 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 			&item.BehaviorCount,
 			&item.BehaviorScore,
 			&latestBehaviorAt,
+			&behaviorActions,
 			&feedbackValue,
 			&feedbackReasonCode,
 			&feedbackCreatedAt,
@@ -1670,6 +1794,7 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 			return nil, fmt.Errorf("scan experience attribution candidate: %w", err)
 		}
 		item.LatestBehaviorAt = fromNullTime(latestBehaviorAt)
+		item.BehaviorActions = splitExperienceCSV(stringFromNull(behaviorActions))
 		item.FeedbackCreatedAt = fromNullTime(feedbackCreatedAt)
 		item.FeedbackValue = stringFromNull(feedbackValue)
 		item.FeedbackReasonCode = stringFromNull(feedbackReasonCode)
@@ -1711,6 +1836,34 @@ func (r *experienceRepo) CreateExperienceAttribution(ctx context.Context, attrib
 		return fmt.Errorf("create experience attribution: %w", err)
 	}
 	return nil
+}
+
+func (r *experienceRepo) GetLatestExperienceAttributionForSuggestion(ctx context.Context, suggestionEventID string) (*domain.ExperienceAttribution, error) {
+	eventID := strings.TrimSpace(suggestionEventID)
+	if eventID == "" {
+		return nil, nil
+	}
+	row := r.db.db.QueryRowContext(ctx, `
+		SELECT id, suggestion_event_id, suggestion_stable_key, candidate_event_key, outcome_event_key,
+		       status, confidence, score, computed_at, evidence_summary_json, created_at, updated_at
+		FROM experience_attributions
+		WHERE suggestion_event_id = ?
+		  AND status IN (?, ?, ?)
+		ORDER BY computed_at DESC, id DESC
+		LIMIT 1`,
+		eventID,
+		domain.ExperienceAttributionStatusPositive,
+		domain.ExperienceAttributionStatusWeak,
+		domain.ExperienceAttributionStatusRejected,
+	)
+	attribution, err := scanExperienceAttribution(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get latest experience attribution for suggestion: %w", err)
+	}
+	return attribution, nil
 }
 
 func (r *experienceRepo) ReserveExperienceRateLimit(ctx context.Context, req repo.ExperienceRateLimitRequest) (*domain.ExperienceRateLimitReservation, error) {
@@ -2047,8 +2200,13 @@ func materializeExperienceApprovedReview(ctx context.Context, tx *sql.Tx, decisi
 		if err != nil || taskID <= 0 {
 			return fmt.Errorf("experience review task target is invalid")
 		}
+		if ok, err := experienceTargetExists(ctx, tx, "tasks", taskID); err != nil {
+			return fmt.Errorf("check experience review task target: %w", err)
+		} else if !ok {
+			return fmt.Errorf("experience review task target not found")
+		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO task_experience_profiles (
+				INSERT INTO task_experience_profiles (
 				task_id, profile_version, source_event_watermark, task_type, category_code,
 				category_name, task_status, outcome, profile_json, rebuilt_at
 			) VALUES (?, 1, 0, ?, '', '', ?, ?, ?, ?)
@@ -2074,6 +2232,11 @@ func materializeExperienceApprovedReview(ctx context.Context, tx *sql.Tx, decisi
 		if err != nil || assetID <= 0 {
 			return fmt.Errorf("experience review asset target is invalid")
 		}
+		if ok, err := experienceTargetExists(ctx, tx, "design_assets", assetID); err != nil {
+			return fmt.Errorf("check experience review asset target: %w", err)
+		} else if !ok {
+			return fmt.Errorf("experience review asset target not found")
+		}
 		reasonCode := truncateSQLString(firstNonEmptyString(decision.ReasonCode, experienceStringValue(experienceMapValue(summary, "feedback"), "reason_code")), 96)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO asset_quality_labels (
@@ -2098,6 +2261,29 @@ func materializeExperienceApprovedReview(ctx context.Context, tx *sql.Tx, decisi
 		return fmt.Errorf("experience review target is not materializable")
 	}
 	return nil
+}
+
+func experienceTargetExists(ctx context.Context, tx *sql.Tx, table string, id int64) (bool, error) {
+	if tx == nil || id <= 0 {
+		return false, nil
+	}
+	var exists int
+	var query string
+	switch table {
+	case "tasks":
+		query = `SELECT 1 FROM tasks WHERE id = ? LIMIT 1`
+	case "design_assets":
+		query = `SELECT 1 FROM design_assets WHERE id = ? LIMIT 1`
+	default:
+		return false, fmt.Errorf("unsupported experience target table %q", table)
+	}
+	if err := tx.QueryRowContext(ctx, query, id).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return exists == 1, nil
 }
 
 func experienceMapValue(values map[string]interface{}, key string) map[string]interface{} {
@@ -2386,6 +2572,42 @@ func scanExperienceWorkerRun(scanner interface {
 	return &run, nil
 }
 
+func scanExperienceAttribution(scanner interface {
+	Scan(...interface{}) error
+}) (*domain.ExperienceAttribution, error) {
+	var attribution domain.ExperienceAttribution
+	var evidence sql.NullString
+	if err := scanner.Scan(
+		&attribution.ID,
+		&attribution.SuggestionEventID,
+		&attribution.SuggestionStableKey,
+		&attribution.CandidateEventKey,
+		&attribution.OutcomeEventKey,
+		&attribution.Status,
+		&attribution.Confidence,
+		&attribution.Score,
+		&attribution.ComputedAt,
+		&evidence,
+		&attribution.CreatedAt,
+		&attribution.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	attribution.EvidenceSummary = rawJSONFromNull(evidence)
+	return &attribution, nil
+}
+
+func splitExperienceCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if item := strings.TrimSpace(part); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func scanExperienceReviewItem(scanner interface {
 	Scan(...interface{}) error
 }) (*domain.ExperienceReviewItem, error) {
@@ -2460,6 +2682,13 @@ func experienceNullableTimeValue(value sql.NullTime) interface{} {
 		return nil
 	}
 	return value.Time.UTC().Format(time.RFC3339)
+}
+
+func experienceNullableInt64Value(value sql.NullInt64) interface{} {
+	if !value.Valid {
+		return nil
+	}
+	return value.Int64
 }
 
 func auditOutcomeAction(action string) string {

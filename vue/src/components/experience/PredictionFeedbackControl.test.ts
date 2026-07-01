@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import PredictionFeedbackControl from './PredictionFeedbackControl.vue'
@@ -125,6 +126,13 @@ describe('PredictionFeedbackControl', () => {
       'event-1',
       expect.objectContaining({ feedback_value: 'partially_accepted', reason_code: 'missing_context' }),
     )
+
+    await wrapper.findAll('.prediction-feedback__button')[2].trigger('click')
+    expect(feedbackMock).toHaveBeenLastCalledWith(
+      'event-1',
+      expect.objectContaining({ feedback_value: 'rejected', reason_code: undefined }),
+    )
+    expect(wrapper.find('.prediction-feedback__chip--active').exists()).toBe(false)
   })
 
   it('keeps the main flow unblocked when saving fails', async () => {
@@ -136,7 +144,8 @@ describe('PredictionFeedbackControl', () => {
     await wrapper.findAll('button')[2].trigger('click')
 
     expect(wrapper.text()).toContain('反馈未保存')
-    expect(wrapper.findAll('button')).toHaveLength(11)
+    expect(wrapper.find('.prediction-feedback__button--active').exists()).toBe(false)
+    expect(wrapper.findAll('button')).toHaveLength(3)
   })
 
   it('opens a low-interruption micro question only after the user opts out', async () => {
@@ -179,7 +188,7 @@ describe('PredictionFeedbackControl', () => {
 
     await wrapper.findAll('button')[1].trigger('click')
     feedbackMock.mockClear()
-    expect(wrapper.text()).toContain('暂不处理')
+    expect(wrapper.text()).toContain('可选：补充暂不处理原因')
 
     await wrapper.find('.prediction-feedback__micro-toggle').trigger('click')
     await flushPromises()
@@ -214,7 +223,99 @@ describe('PredictionFeedbackControl', () => {
       },
     })
     expect(feedbackMock).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('暂不处理原因已记')
+    expect(wrapper.text()).toContain('已记录补充原因，正式反馈未改变')
+  })
+
+  it('uses unique micro-question region ids across repeated suggestions', async () => {
+    clientConfigMock.mockResolvedValue({
+      data: {
+        data: {
+          ai_feedback_enabled: true,
+          behavior_capture_enabled: false,
+          micro_question_enabled: true,
+          behavior_sample_rate: 1,
+          enabled_surfaces: ['task_detail'],
+        },
+      },
+    } as Awaited<ReturnType<typeof experienceApi.clientConfig>>)
+    const RepeatedFeedback = defineComponent({
+      components: { PredictionFeedbackControl },
+      setup() {
+        return {
+          suggestions: [
+            { ...suggestion, suggestion_event_id: 'event-1', suggestion_stable_key: 'stable-1', attribution_eligible: true },
+            { ...suggestion, suggestion_event_id: 'event-2', suggestion_stable_key: 'stable-2', attribution_eligible: true },
+          ],
+        }
+      },
+      template: `
+        <div>
+          <PredictionFeedbackControl
+            v-for="item in suggestions"
+            :key="item.suggestion_event_id"
+            :suggestion="item"
+            surface="task_detail"
+            :enabled="true"
+          />
+        </div>
+      `,
+    })
+
+    const wrapper = mount(RepeatedFeedback)
+    await flushPromises()
+
+    const controls = wrapper.findAllComponents(PredictionFeedbackControl)
+    expect(controls).toHaveLength(2)
+    await controls[0].findAll('.prediction-feedback__button')[1].trigger('click')
+    await controls[1].findAll('.prediction-feedback__button')[1].trigger('click')
+
+    const ids = wrapper.findAll('.prediction-feedback__micro-toggle').map((button) => button.attributes('aria-controls'))
+    expect(ids).toHaveLength(2)
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it('does not expand or submit a micro question when attribution is unsupported', async () => {
+    clientConfigMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          ai_feedback_enabled: true,
+          behavior_capture_enabled: false,
+          micro_question_enabled: true,
+          behavior_sample_rate: 1,
+          enabled_surfaces: ['task_detail'],
+        },
+      },
+    } as Awaited<ReturnType<typeof experienceApi.clientConfig>>)
+    microQuestionEligibilityMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          eligible: false,
+          reason: 'no_supported_attribution',
+          remaining_daily: 3,
+          reason_tags: [],
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof experienceApi.microQuestionEligibility>>)
+    const wrapper = mount(PredictionFeedbackControl, {
+      props: {
+        suggestion: { ...suggestion, suggestion_stable_key: 'stable-1', attribution_eligible: true },
+        surface: 'task_detail',
+        route: '/tasks/123',
+        enabled: true,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button')[2].trigger('click')
+    await wrapper.find('.prediction-feedback__micro-toggle').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('已记录反馈，暂不需要补充原因')
+    expect(wrapper.find('[aria-label="补充原因"]').exists()).toBe(false)
+    expect(microQuestionAnswerMock).not.toHaveBeenCalled()
+
+    await wrapper.find('.prediction-feedback__micro-toggle').trigger('click')
+    expect(wrapper.text()).toContain('已记录反馈，暂不需要补充原因')
   })
 
   it('resets local feedback state when a refreshed display event arrives', async () => {

@@ -33,6 +33,7 @@ const (
 	ExperienceBehaviorActionCopy         = "copy"
 	ExperienceBehaviorActionRelatedDone  = "related_action_done"
 	ExperienceBehaviorActionIgnoredAfter = "ignored_after_timeout"
+	ExperienceMicroQuestionDailyLimit    = 3
 
 	ExperienceWorkerOutcomeObserver = "outcome_observer"
 	ExperienceWorkerRetention       = "retention"
@@ -57,13 +58,16 @@ const (
 )
 
 type ExperienceRuntimeFlags struct {
-	UIEnabled              bool    `json:"ui_enabled"`
-	CaptureEnabled         bool    `json:"capture_enabled"`
-	AIFeedbackEnabled      bool    `json:"ai_feedback_enabled"`
-	WorkerEnabled          bool    `json:"worker_enabled"`
-	BehaviorCaptureEnabled bool    `json:"behavior_capture_enabled"`
-	MicroQuestionEnabled   bool    `json:"micro_question_enabled"`
-	BehaviorSampleRate     float64 `json:"behavior_sample_rate"`
+	UIEnabled                    bool    `json:"ui_enabled"`
+	CaptureEnabled               bool    `json:"capture_enabled"`
+	AIFeedbackEnabled            bool    `json:"ai_feedback_enabled"`
+	WorkerEnabled                bool    `json:"worker_enabled"`
+	BehaviorCaptureEnabled       bool    `json:"behavior_capture_enabled"`
+	MicroQuestionEnabled         bool    `json:"micro_question_enabled"`
+	ReviewMaterializationEnabled bool    `json:"review_materialization_enabled"`
+	BehaviorSampleRate           float64 `json:"behavior_sample_rate"`
+	RuntimeConfigLoaded          bool    `json:"runtime_config_loaded"`
+	RuntimeConfigError           string  `json:"runtime_config_error,omitempty"`
 }
 
 type ExperienceClientConfig struct {
@@ -309,6 +313,7 @@ type ExperienceStats struct {
 	SampleTotal               int64                        `json:"sample_total"`
 	DisplayedEvents           int64                        `json:"displayed_events"`
 	LocatableSamples          int64                        `json:"locatable_samples"`
+	LocatableDisplayedEvents  int64                        `json:"locatable_displayed_events"`
 	FeedbackSamples           int64                        `json:"feedback_samples"`
 	ReasonedFeedbackSamples   int64                        `json:"reasoned_feedback_samples"`
 	ReusableSamples           int64                        `json:"reusable_samples"`
@@ -328,6 +333,18 @@ type ExperienceStats struct {
 	AISuggestionEvents        int64                        `json:"ai_suggestion_events"`
 	AIFeedbackEvents          int64                        `json:"ai_feedback_events"`
 	AIFeedbackRate            float64                      `json:"ai_feedback_rate"`
+	AttributionTotal          int64                        `json:"attribution_total"`
+	AttributionPositive       int64                        `json:"attribution_positive"`
+	AttributionWeak           int64                        `json:"attribution_weak"`
+	AttributionRejected       int64                        `json:"attribution_rejected"`
+	ReviewItemsOpen           int64                        `json:"review_items_open"`
+	ReviewItemsApproved       int64                        `json:"review_items_approved"`
+	ReviewItemsRejected       int64                        `json:"review_items_rejected"`
+	ReviewItemsNeedsMoreData  int64                        `json:"review_items_needs_more_data"`
+	MicroQuestionAnswers      int64                        `json:"micro_question_answers"`
+	MicroQuestionAnswered     int64                        `json:"micro_question_answered"`
+	MicroQuestionDismissed    int64                        `json:"micro_question_dismissed"`
+	MicroQuestionRateLimited  int64                        `json:"micro_question_rate_limited"`
 	ReasonCoverageRate        float64                      `json:"reason_coverage_rate"`
 	ReusableRate              float64                      `json:"reusable_rate"`
 	TaskProfiles              int64                        `json:"task_profiles"`
@@ -345,12 +362,14 @@ type ExperienceWorkerRun struct {
 }
 
 type ExperienceObserverRun struct {
-	Scanned   int `json:"scanned"`
-	Baselines int `json:"baselines"`
-	Changed   int `json:"changed"`
-	Enqueued  int `json:"enqueued"`
-	Skipped   int `json:"skipped"`
-	Failed    int `json:"failed"`
+	Scanned   int             `json:"scanned"`
+	Baselines int             `json:"baselines"`
+	Changed   int             `json:"changed"`
+	Enqueued  int             `json:"enqueued"`
+	Skipped   int             `json:"skipped"`
+	Failed    int             `json:"failed"`
+	LastError string          `json:"-"`
+	Metadata  json.RawMessage `json:"-"`
 }
 
 type ExperienceRetentionRun struct {
@@ -407,6 +426,7 @@ type ExperienceAttributionCandidate struct {
 	DisplayedAt         time.Time  `json:"displayed_at"`
 	BehaviorCount       int        `json:"behavior_count"`
 	BehaviorScore       int        `json:"behavior_score"`
+	BehaviorActions     []string   `json:"behavior_actions,omitempty"`
 	LatestBehaviorAt    *time.Time `json:"latest_behavior_at,omitempty"`
 	FeedbackValue       string     `json:"feedback_value,omitempty"`
 	FeedbackReasonCode  string     `json:"feedback_reason_code,omitempty"`
