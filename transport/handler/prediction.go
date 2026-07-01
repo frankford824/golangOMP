@@ -120,6 +120,8 @@ func (h *PredictionHandler) recordSuggestionDisplay(c *gin.Context, actor domain
 	}
 	events := make([]domain.AISuggestionEvent, 0, len(bundle.Suggestions))
 	for i := range bundle.Suggestions {
+		bundle.Suggestions[i].SuggestionStableKey = predictionSuggestionStableKey(surface, bundle.Suggestions[i])
+		bundle.Suggestions[i].AttributionEligible = predictionAttributionEligible(surface, bundle.Suggestions[i])
 		bundle.Suggestions[i].SuggestionEventID = predictionSuggestionEventID(surface, bundle.Suggestions[i], displayedAt, i)
 		suggestion := bundle.Suggestions[i]
 		suggestionJSON, err := json.Marshal(suggestion)
@@ -128,19 +130,21 @@ func (h *PredictionHandler) recordSuggestionDisplay(c *gin.Context, actor domain
 		}
 		confidence := predictionConfidenceScore(suggestion.Confidence)
 		event := &domain.AISuggestionEvent{
-			SuggestionEventID: suggestion.SuggestionEventID,
-			SuggestionType:    strings.TrimSpace(suggestion.Type),
-			SuggestionID:      strings.TrimSpace(suggestion.ID),
-			Source:            strings.TrimSpace(suggestion.Source),
-			Confidence:        confidence,
-			Model:             "deterministic_prediction",
-			Provider:          "internal",
-			ModelVersion:      "v1",
-			InputSummary:      inputSummary,
-			Suggestion:        suggestionJSON,
-			TargetType:        strings.TrimSpace(suggestion.TargetType),
-			TargetID:          strings.TrimSpace(suggestion.TargetID),
-			DisplayedAt:       displayedAt,
+			SuggestionEventID:   suggestion.SuggestionEventID,
+			SuggestionStableKey: suggestion.SuggestionStableKey,
+			AttributionEligible: suggestion.AttributionEligible,
+			SuggestionType:      strings.TrimSpace(suggestion.Type),
+			SuggestionID:        strings.TrimSpace(suggestion.ID),
+			Source:              strings.TrimSpace(suggestion.Source),
+			Confidence:          confidence,
+			Model:               "deterministic_prediction",
+			Provider:            "internal",
+			ModelVersion:        "v1",
+			InputSummary:        inputSummary,
+			Suggestion:          suggestionJSON,
+			TargetType:          strings.TrimSpace(suggestion.TargetType),
+			TargetID:            strings.TrimSpace(suggestion.TargetID),
+			DisplayedAt:         displayedAt,
 		}
 		if actor.ID > 0 {
 			event.ActorID = &actor.ID
@@ -164,6 +168,37 @@ func (h *PredictionHandler) recordSuggestionDisplay(c *gin.Context, actor domain
 	}(h.experienceSvc, events)
 }
 
+func predictionSuggestionStableKey(surface string, suggestion domain.PredictionSuggestion) string {
+	if value := strings.TrimSpace(suggestion.SuggestionStableKey); value != "" {
+		return trimPredictionStableKey(value)
+	}
+	if strings.TrimSpace(suggestion.Type) == "management" {
+		identity := strings.Join([]string{
+			strings.TrimSpace(surface),
+			strings.TrimSpace(suggestion.Type),
+			strings.TrimSpace(suggestion.ActionType),
+			strings.TrimSpace(suggestion.TargetType),
+			strings.TrimSpace(suggestion.TargetID),
+			strings.TrimSpace(suggestion.Source),
+		}, "|")
+		return trimPredictionStableKey("pred-stable:" + predictionStableHash(identity))
+	}
+	identity := strings.Join([]string{
+		strings.TrimSpace(surface),
+		strings.TrimSpace(suggestion.Type),
+		strings.TrimSpace(suggestion.ID),
+		strings.TrimSpace(suggestion.Source),
+		strings.TrimSpace(suggestion.TargetType),
+		strings.TrimSpace(suggestion.TargetID),
+	}, "|")
+	return trimPredictionStableKey("pred-stable:" + predictionStableHash(identity))
+}
+
+func predictionAttributionEligible(surface string, suggestion domain.PredictionSuggestion) bool {
+	_ = surface
+	return strings.TrimSpace(suggestion.Type) != "management"
+}
+
 func predictionSuggestionEventID(surface string, suggestion domain.PredictionSuggestion, displayedAt time.Time, ordinal int) string {
 	displayedAt = displayedAt.UTC()
 	identity := strings.Join([]string{
@@ -185,6 +220,19 @@ func predictionSuggestionEventID(surface string, suggestion domain.PredictionSug
 		ordinal,
 		hex.EncodeToString(sum[:8]),
 	)
+}
+
+func predictionStableHash(identity string) string {
+	sum := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(sum[:])
+}
+
+func trimPredictionStableKey(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 191 {
+		return value[:191]
+	}
+	return value
 }
 
 func predictionEventIDToken(value string, max int) string {

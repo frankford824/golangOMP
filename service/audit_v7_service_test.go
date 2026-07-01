@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -452,13 +453,23 @@ type auditExperienceServiceStub struct {
 
 func (s *auditExperienceServiceStub) RuntimeFlags() domain.ExperienceRuntimeFlags {
 	return domain.ExperienceRuntimeFlags{
-		UIEnabled:      true,
-		CaptureEnabled: true,
-		WorkerEnabled:  true,
+		UIEnabled:              true,
+		CaptureEnabled:         true,
+		WorkerEnabled:          true,
+		BehaviorCaptureEnabled: true,
+		BehaviorSampleRate:     1,
 	}
 }
 
+func (s *auditExperienceServiceStub) ClientConfig() domain.ExperienceClientConfig {
+	return domain.ExperienceClientConfig{}
+}
+
 func (s *auditExperienceServiceStub) ListReasonTags(context.Context, string) ([]*domain.ExperienceReasonTag, *domain.AppError) {
+	return nil, nil
+}
+
+func (s *auditExperienceServiceStub) ListClientReasonTags(context.Context, string) ([]*domain.ExperienceClientReasonTag, *domain.AppError) {
 	return nil, nil
 }
 
@@ -486,12 +497,24 @@ func (s *auditExperienceServiceStub) RecordAISuggestionEvent(context.Context, *d
 	return nil
 }
 
+func (s *auditExperienceServiceStub) RecordBehaviorEvents(context.Context, domain.RequestActor, ExperienceBehaviorBatchRequest) (ExperienceBehaviorBatchResult, *domain.AppError) {
+	return ExperienceBehaviorBatchResult{}, nil
+}
+
 func (s *auditExperienceServiceStub) RecordAISuggestionFeedback(context.Context, domain.RequestActor, AISuggestionFeedbackRequest) (*domain.AISuggestionFeedback, *domain.AppError) {
 	return nil, nil
 }
 
+func (s *auditExperienceServiceStub) ProcessOutcomeObservers(context.Context, int) (domain.ExperienceObserverRun, *domain.AppError) {
+	return domain.ExperienceObserverRun{}, nil
+}
+
 func (s *auditExperienceServiceStub) ProcessOutbox(context.Context, int) (domain.ExperienceWorkerRun, *domain.AppError) {
 	return domain.ExperienceWorkerRun{}, nil
+}
+
+func (s *auditExperienceServiceStub) ProcessRetention(context.Context, time.Time, int) (domain.ExperienceRetentionRun, *domain.AppError) {
+	return domain.ExperienceRetentionRun{}, nil
 }
 
 func (r *auditV7RepoStub) CreateRecord(_ context.Context, _ repo.Tx, record *domain.AuditRecord) (int64, error) {

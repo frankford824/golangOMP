@@ -23,13 +23,32 @@ func (h *ExperienceHandler) Config(c *gin.Context) {
 	respondOK(c, h.svc.RuntimeFlags())
 }
 
+func (h *ExperienceHandler) ClientConfig(c *gin.Context) {
+	respondOK(c, h.svc.ClientConfig())
+}
+
 func (h *ExperienceHandler) ReasonTags(c *gin.Context) {
-	items, appErr := h.svc.ListReasonTags(c.Request.Context(), c.Query("scene"))
+	items, appErr := h.svc.ListClientReasonTags(c.Request.Context(), c.Query("scene"))
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	respondOK(c, items)
+}
+
+func (h *ExperienceHandler) BehaviorEvents(c *gin.Context) {
+	var req service.ExperienceBehaviorBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid request body", nil))
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	data, appErr := h.svc.RecordBehaviorEvents(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, data)
 }
 
 func (h *ExperienceHandler) Stats(c *gin.Context) {

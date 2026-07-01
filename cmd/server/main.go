@@ -405,14 +405,18 @@ func main() {
 		service.WithTaskDetailDesignAssetReadModel(designAssetRepo))
 	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo)
 	experienceSvc := service.NewExperienceService(experienceRepo, service.ExperienceServiceConfig{
-		UIEnabled:         cfg.Experience.UIEnabled,
-		CaptureEnabled:    cfg.Experience.CaptureEnabled,
-		AIFeedbackEnabled: cfg.Experience.AIFeedbackEnabled,
-		WorkerEnabled:     cfg.Experience.WorkerEnabled,
-		WorkerBatchSize:   cfg.Experience.WorkerBatchSize,
-		WorkerMaxAttempts: cfg.Experience.WorkerMaxAttempts,
-		OutboxLeaseTTL:    cfg.Experience.OutboxLeaseTTL,
-		RuntimeConfigFile: cfg.Experience.RuntimeConfigFile,
+		UIEnabled:              cfg.Experience.UIEnabled,
+		CaptureEnabled:         cfg.Experience.CaptureEnabled,
+		AIFeedbackEnabled:      cfg.Experience.AIFeedbackEnabled,
+		BehaviorCaptureEnabled: cfg.Experience.BehaviorCaptureEnabled,
+		MicroQuestionEnabled:   cfg.Experience.MicroQuestionEnabled,
+		BehaviorSampleRate:     cfg.Experience.BehaviorSampleRate,
+		EnabledSurfaces:        cfg.Experience.EnabledSurfaces,
+		WorkerEnabled:          cfg.Experience.WorkerEnabled,
+		WorkerBatchSize:        cfg.Experience.WorkerBatchSize,
+		WorkerMaxAttempts:      cfg.Experience.WorkerMaxAttempts,
+		OutboxLeaseTTL:         cfg.Experience.OutboxLeaseTTL,
+		RuntimeConfigFile:      cfg.Experience.RuntimeConfigFile,
 	}, logger.Named("experience"))
 	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
@@ -861,17 +865,34 @@ func startExperienceWorker(ctx context.Context, svc service.ExperienceService, c
 			}
 			runCtx, cancel := context.WithTimeout(ctx, interval)
 			defer cancel()
-			result, appErr := svc.ProcessOutbox(runCtx, batchSize)
+			observerResult, appErr := svc.ProcessOutcomeObservers(runCtx, batchSize)
 			if appErr != nil {
-				logger.Warn("experience worker run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+				logger.Warn("experience outcome observer run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
 				return
 			}
-			if result.Claimed > 0 || result.Failed > 0 || result.DeadLetter > 0 {
+			result, appErr := svc.ProcessOutbox(runCtx, batchSize)
+			if appErr != nil {
+				logger.Warn("experience outbox worker run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+				return
+			}
+			retentionResult, appErr := svc.ProcessRetention(runCtx, time.Now().UTC(), batchSize)
+			if appErr != nil {
+				logger.Warn("experience retention run failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+				return
+			}
+			if observerResult.Scanned > 0 || observerResult.Failed > 0 || result.Claimed > 0 || result.Failed > 0 || result.DeadLetter > 0 ||
+				retentionResult.BehaviorDeleted > 0 || retentionResult.RateLimitDeleted > 0 || retentionResult.ObservedTombstoned > 0 {
 				logger.Info("experience worker run finished",
+					zap.Int("observer_scanned", observerResult.Scanned),
+					zap.Int("observer_baselines", observerResult.Baselines),
+					zap.Int("observer_enqueued", observerResult.Enqueued),
 					zap.Int("claimed", result.Claimed),
 					zap.Int("processed", result.Processed),
 					zap.Int("failed", result.Failed),
-					zap.Int("dead_letter", result.DeadLetter))
+					zap.Int("dead_letter", result.DeadLetter),
+					zap.Int64("behavior_deleted", retentionResult.BehaviorDeleted),
+					zap.Int64("rate_limit_deleted", retentionResult.RateLimitDeleted),
+					zap.Int64("observed_tombstoned", retentionResult.ObservedTombstoned))
 			}
 		}
 		runOnce()

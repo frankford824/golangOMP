@@ -39,3 +39,27 @@ func TestPredictionSuggestionEventIDIsPerDisplayAndStableWithinDisplay(t *testin
 		t.Fatalf("event id = %q, want stable display prefix", first)
 	}
 }
+
+func TestPredictionSuggestionStableKeyIgnoresManagementRealtimeCounts(t *testing.T) {
+	first := domain.PredictionSuggestion{
+		ID:         "management-stale-17",
+		Type:       "management",
+		ActionType: "open_task_center",
+		TargetType: "task_center",
+		Source:     "任务更新",
+	}
+	next := first
+	next.ID = "management-stale-23"
+
+	firstKey := predictionSuggestionStableKey("management", first)
+	nextKey := predictionSuggestionStableKey("management", next)
+	if firstKey == "" {
+		t.Fatal("stable key should not be empty")
+	}
+	if firstKey != nextKey {
+		t.Fatalf("management stable key should ignore realtime counts: %q != %q", firstKey, nextKey)
+	}
+	if predictionAttributionEligible("management", first) {
+		t.Fatal("management suggestions should be observation-only in Phase 2")
+	}
+}

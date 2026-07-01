@@ -65,6 +65,66 @@ func (r *experienceRepo) ListReasonTags(ctx context.Context, scene string) ([]*d
 	return tags, nil
 }
 
+func (r *experienceRepo) ListClientReasonTags(ctx context.Context, scene string, allowedScenes []string) ([]*domain.ExperienceClientReasonTag, error) {
+	allowed := make([]string, 0, len(allowedScenes))
+	seen := make(map[string]struct{}, len(allowedScenes))
+	for _, raw := range allowedScenes {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		allowed = append(allowed, value)
+	}
+	if len(allowed) == 0 {
+		return []*domain.ExperienceClientReasonTag{}, nil
+	}
+
+	where := []string{"enabled = 1", "deleted_at IS NULL"}
+	args := make([]interface{}, 0, len(allowed)+1)
+	requestedScene := strings.TrimSpace(scene)
+	if requestedScene != "" {
+		if _, ok := seen[requestedScene]; !ok {
+			return []*domain.ExperienceClientReasonTag{}, nil
+		}
+		where = append(where, "scene = ?")
+		args = append(args, requestedScene)
+	} else {
+		placeholders := make([]string, 0, len(allowed))
+		for _, value := range allowed {
+			placeholders = append(placeholders, "?")
+			args = append(args, value)
+		}
+		where = append(where, "scene IN ("+strings.Join(placeholders, ", ")+")")
+	}
+
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT scene, code, name, tag_group, sort_order
+		FROM experience_reason_tags
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY scene ASC, sort_order ASC, id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list client experience reason tags: %w", err)
+	}
+	defer rows.Close()
+
+	tags := make([]*domain.ExperienceClientReasonTag, 0)
+	for rows.Next() {
+		var tag domain.ExperienceClientReasonTag
+		if err := rows.Scan(&tag.Scene, &tag.Code, &tag.Name, &tag.Group, &tag.SortOrder); err != nil {
+			return nil, fmt.Errorf("scan client experience reason tag: %w", err)
+		}
+		tags = append(tags, &tag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate client experience reason tags: %w", err)
+	}
+	return tags, nil
+}
+
 func (r *experienceRepo) ListExperienceEvents(ctx context.Context, filter repo.ExperienceEventListFilter) ([]*domain.ExperienceEvent, int64, error) {
 	querySQL, args := buildExperienceSampleUnion(filter)
 	if querySQL == "" {
@@ -92,7 +152,8 @@ func (r *experienceRepo) ListExperienceEvents(ctx context.Context, filter repo.E
 	}
 	listArgs = append(listArgs, pageSize, offset)
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, event_key, schema_version, event_time, source_type, source_id, task_id, action, outcome,
+		SELECT id, event_key, schema_version, event_time, source_type, source_id, task_id,
+		       target_type, target_id, source_watermark, observed_from, observed_id, action, outcome,
 		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status,
 		       feedback_value, feedback_reason_code, feedback_created_at, evidence_rank, created_at
 		FROM (`+querySQL+`) experience_samples
@@ -125,7 +186,8 @@ func buildExperienceSampleUnion(filter repo.ExperienceEventListFilter) (string, 
 	if shouldIncludeBusinessExperienceSamples(filter) {
 		whereSQL, whereArgs := buildBusinessExperienceSampleWhere(filter)
 		queries = append(queries, `
-		SELECT e.id, e.event_key, e.schema_version, e.event_time, e.source_type, e.source_id, e.task_id, e.action, e.outcome,
+		SELECT e.id, e.event_key, e.schema_version, e.event_time, e.source_type, e.source_id, e.task_id,
+		       e.target_type, e.target_id, e.source_watermark, e.observed_from, e.observed_id, e.action, e.outcome,
 		       e.actor_snapshot_json, e.business_snapshot_json, e.payload_json, e.data_classification, e.ground_truth_status,
 		       NULL AS feedback_value,
 		       NULL AS feedback_reason_code,
@@ -158,6 +220,11 @@ func buildExperienceSampleUnion(filter repo.ExperienceEventListFilter) (string, 
 		       'ai_suggestion' AS source_type,
 		       a.source AS source_id,
 		       CASE WHEN a.target_type = 'task' AND a.target_id REGEXP '^[0-9]+$' THEN CAST(a.target_id AS SIGNED) ELSE NULL END AS task_id,
+		       a.target_type AS target_type,
+		       a.target_id AS target_id,
+		       a.suggestion_stable_key AS source_watermark,
+		       'ai_suggestion_events' AS observed_from,
+		       a.suggestion_event_id AS observed_id,
 		       a.suggestion_type AS action,
 		       'displayed' AS outcome,
 		       CASE
@@ -167,6 +234,8 @@ func buildExperienceSampleUnion(filter repo.ExperienceEventListFilter) (string, 
 		       JSON_OBJECT('target_type', a.target_type, 'target_id', a.target_id) AS business_snapshot_json,
 		       JSON_OBJECT(
 		         'suggestion_id', a.suggestion_id,
+		         'suggestion_stable_key', a.suggestion_stable_key,
+		         'attribution_eligible', CAST(a.attribution_eligible AS UNSIGNED),
 		         'source', a.source,
 		         'confidence', a.confidence,
 		         'model', a.model,
@@ -367,7 +436,7 @@ func (r *experienceRepo) ExperienceStats(ctx context.Context) (*domain.Experienc
 		return nil, err
 	}
 	stats.ReusableSamples = stats.TaskProfiles + stats.AssetQualityLabels
-	businessLocatable, err := r.scalarCount(ctx, `SELECT COUNT(*) FROM experience_events WHERE task_id IS NOT NULL OR source_id <> ''`)
+	businessLocatable, err := r.scalarCount(ctx, `SELECT COUNT(*) FROM experience_events WHERE task_id IS NOT NULL OR source_id <> '' OR (target_type <> '' AND target_id <> '')`)
 	if err != nil {
 		return nil, err
 	}
@@ -422,15 +491,21 @@ func (r *experienceRepo) EnqueueExperienceEvent(ctx context.Context, event *doma
 	}
 	_, err := r.db.db.ExecContext(ctx, `
 		INSERT INTO experience_outbox (
-			event_key, schema_version, source_type, source_id, task_id, action, outcome, event_time,
+			event_key, schema_version, source_type, source_id, task_id, target_type, target_id,
+			source_watermark, observed_from, observed_id, action, outcome, event_time,
 			actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE updated_at = updated_at`,
 		event.EventKey,
 		event.SchemaVersion,
 		event.SourceType,
 		event.SourceID,
 		toNullInt64(event.TaskID),
+		event.TargetType,
+		event.TargetID,
+		event.SourceWatermark,
+		event.ObservedFrom,
+		event.ObservedID,
 		event.Action,
 		event.Outcome,
 		event.EventTime,
@@ -485,7 +560,8 @@ func (r *experienceRepo) ClaimExperienceOutbox(ctx context.Context, limit int, c
 		return nil, fmt.Errorf("claim experience outbox: %w", err)
 	}
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, event_key, schema_version, source_type, source_id, task_id, action, outcome, event_time,
+		SELECT id, event_key, schema_version, source_type, source_id, task_id,
+		       target_type, target_id, source_watermark, observed_from, observed_id, action, outcome, event_time,
 		       actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status,
 		       status, attempt_count, last_error, next_retry_at, claimed_by, claimed_at, processed_at, created_at, updated_at
 		FROM experience_outbox
@@ -517,15 +593,21 @@ func (r *experienceRepo) CreateExperienceEventFromOutbox(ctx context.Context, ou
 	}
 	_, err := r.db.db.ExecContext(ctx, `
 		INSERT IGNORE INTO experience_events (
-			event_key, schema_version, event_time, source_type, source_id, task_id, action, outcome,
+			event_key, schema_version, event_time, source_type, source_id, task_id, target_type, target_id,
+			source_watermark, observed_from, observed_id, action, outcome,
 			actor_snapshot_json, business_snapshot_json, payload_json, data_classification, ground_truth_status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		outbox.EventKey,
 		outbox.SchemaVersion,
 		outbox.EventTime,
 		outbox.SourceType,
 		outbox.SourceID,
 		toNullInt64(outbox.TaskID),
+		outbox.TargetType,
+		outbox.TargetID,
+		outbox.SourceWatermark,
+		outbox.ObservedFrom,
+		outbox.ObservedID,
 		outbox.Action,
 		outbox.Outcome,
 		toNullJSONString(outbox.ActorSnapshot),
@@ -589,10 +671,13 @@ func (r *experienceRepo) CreateAISuggestionEvent(ctx context.Context, event *dom
 	}
 	_, err := r.db.db.ExecContext(ctx, `
 		INSERT IGNORE INTO ai_suggestion_events (
-			suggestion_event_id, suggestion_type, suggestion_id, source, confidence, model, provider, model_version,
+			suggestion_event_id, suggestion_stable_key, attribution_eligible,
+			suggestion_type, suggestion_id, source, confidence, model, provider, model_version,
 			input_summary_json, suggestion_json, target_type, target_id, actor_id, displayed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.SuggestionEventID,
+		event.SuggestionStableKey,
+		event.AttributionEligible,
 		event.SuggestionType,
 		event.SuggestionID,
 		event.Source,
@@ -611,6 +696,65 @@ func (r *experienceRepo) CreateAISuggestionEvent(ctx context.Context, event *dom
 		return fmt.Errorf("create ai suggestion event: %w", err)
 	}
 	return nil
+}
+
+func (r *experienceRepo) CreateExperienceBehaviorEvents(ctx context.Context, events []*domain.ExperienceBehaviorEvent) (int, error) {
+	if len(events) == 0 {
+		return 0, nil
+	}
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin experience behavior batch: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT IGNORE INTO experience_behavior_events (
+			event_key, client_event_id, page_instance_id, actor_id, surface, action, target_type, target_id, task_id,
+			suggestion_event_id, suggestion_stable_key, occurred_at, received_at, route_name, component, dwell_ms,
+			payload_json, data_classification
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, fmt.Errorf("prepare experience behavior batch: %w", err)
+	}
+	defer stmt.Close()
+
+	inserted := 0
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		result, err := stmt.ExecContext(ctx,
+			event.EventKey,
+			event.ClientEventID,
+			event.PageInstanceID,
+			toNullInt64(event.ActorID),
+			event.Surface,
+			event.Action,
+			event.TargetType,
+			event.TargetID,
+			toNullInt64(event.TaskID),
+			event.SuggestionEventID,
+			event.SuggestionStableKey,
+			event.OccurredAt,
+			event.ReceivedAt,
+			event.RouteName,
+			event.Component,
+			event.DwellMS,
+			toNullJSONString(event.Payload),
+			event.DataClassification,
+		)
+		if err != nil {
+			_ = tx.Rollback()
+			return 0, fmt.Errorf("insert experience behavior event: %w", err)
+		}
+		if rows, _ := result.RowsAffected(); rows > 0 {
+			inserted += int(rows)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit experience behavior batch: %w", err)
+	}
+	return inserted, nil
 }
 
 func (r *experienceRepo) CreateAISuggestionFeedback(ctx context.Context, feedback *domain.AISuggestionFeedback) (int64, error) {
@@ -636,6 +780,593 @@ func (r *experienceRepo) CreateAISuggestionFeedback(ctx context.Context, feedbac
 	return result.LastInsertId()
 }
 
+func (r *experienceRepo) GetExperienceWorkerWatermark(ctx context.Context, workerName, sourceName string) (*domain.ExperienceWorkerWatermark, error) {
+	var watermark domain.ExperienceWorkerWatermark
+	var lastSeenAt sql.NullTime
+	var metadata sql.NullString
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT worker_name, source_name, last_seen_at, last_seen_id, source_watermark, status, metadata_json, created_at, updated_at
+		FROM experience_worker_watermarks
+		WHERE worker_name = ? AND source_name = ?`,
+		strings.TrimSpace(workerName),
+		strings.TrimSpace(sourceName),
+	).Scan(
+		&watermark.WorkerName,
+		&watermark.SourceName,
+		&lastSeenAt,
+		&watermark.LastSeenID,
+		&watermark.SourceWatermark,
+		&watermark.Status,
+		&metadata,
+		&watermark.CreatedAt,
+		&watermark.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get experience worker watermark: %w", err)
+	}
+	watermark.LastSeenAt = fromNullTime(lastSeenAt)
+	watermark.Metadata = rawJSONFromNull(metadata)
+	return &watermark, nil
+}
+
+func (r *experienceRepo) SaveExperienceWorkerWatermark(ctx context.Context, watermark *domain.ExperienceWorkerWatermark) error {
+	if watermark == nil {
+		return fmt.Errorf("experience worker watermark is nil")
+	}
+	status := strings.TrimSpace(watermark.Status)
+	if status == "" {
+		status = "active"
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO experience_worker_watermarks (
+			worker_name, source_name, last_seen_at, last_seen_id, source_watermark, status, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			last_seen_at = VALUES(last_seen_at),
+			last_seen_id = VALUES(last_seen_id),
+			source_watermark = VALUES(source_watermark),
+			status = VALUES(status),
+			metadata_json = VALUES(metadata_json),
+			updated_at = CURRENT_TIMESTAMP`,
+		strings.TrimSpace(watermark.WorkerName),
+		strings.TrimSpace(watermark.SourceName),
+		toNullTime(watermark.LastSeenAt),
+		watermark.LastSeenID,
+		strings.TrimSpace(watermark.SourceWatermark),
+		status,
+		toNullJSONString(watermark.Metadata),
+	)
+	if err != nil {
+		return fmt.Errorf("save experience worker watermark: %w", err)
+	}
+	return nil
+}
+
+func (r *experienceRepo) ListExperienceAuditOutcomeRows(ctx context.Context, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceOutcomeEventRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT ar.id, ar.task_id, COALESCE(t.task_no, ''), ar.stage, ar.action, ar.auditor_id,
+		       ar.issue_types_json, ar.affects_launch, ar.need_outsource, ar.created_at
+		FROM audit_records ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE (ar.created_at > ?) OR (ar.created_at = ? AND ar.id > ?)
+		ORDER BY ar.created_at ASC, ar.id ASC
+		LIMIT ?`,
+		lastSeenAt,
+		lastSeenAt,
+		cursor.LastSeenID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience audit outcome rows: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*domain.ExperienceOutcomeEventRow, 0)
+	for rows.Next() {
+		var id, taskID, auditorID int64
+		var taskNo, stage, action string
+		var issueTypes sql.NullString
+		var affectsLaunch, needOutsource bool
+		var createdAt time.Time
+		if err := rows.Scan(&id, &taskID, &taskNo, &stage, &action, &auditorID, &issueTypes, &affectsLaunch, &needOutsource, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan experience audit outcome row: %w", err)
+		}
+		taskIDCopy := taskID
+		actorSnapshot := mustExperienceJSON(map[string]interface{}{
+			"actor_type": "user",
+			"actor_id":   auditorID,
+			"source":     "audit_records",
+		})
+		businessSnapshot := mustExperienceJSON(map[string]interface{}{
+			"target_type": "task",
+			"target_id":   strconv.FormatInt(taskID, 10),
+			"task_no":     taskNo,
+			"stage":       stage,
+		})
+		payload := mustExperienceJSON(map[string]interface{}{
+			"stage":          stage,
+			"action":         action,
+			"issue_types":    rawJSONOrNil(issueTypes),
+			"affects_launch": affectsLaunch,
+			"need_outsource": needOutsource,
+			"observer":       "append_only",
+		})
+		out = append(out, &domain.ExperienceOutcomeEventRow{
+			ID:               id,
+			EventKey:         fmt.Sprintf("outcome:audit_records:%d", id),
+			SourceName:       "audit_records",
+			SourceID:         fmt.Sprintf("audit_record:%d", id),
+			TaskID:           &taskIDCopy,
+			TargetType:       "task",
+			TargetID:         strconv.FormatInt(taskID, 10),
+			Action:           auditOutcomeAction(action),
+			Outcome:          strings.TrimSpace(action),
+			EventTime:        createdAt.UTC(),
+			ActorSnapshot:    actorSnapshot,
+			BusinessSnapshot: businessSnapshot,
+			Payload:          payload,
+			SourceWatermark:  experienceSourceWatermark(createdAt, id),
+			ObservedFrom:     "audit_records",
+			ObservedID:       strconv.FormatInt(id, 10),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience audit outcome rows: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) ListExperienceModuleOutcomeRows(ctx context.Context, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceOutcomeEventRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT e.id, e.task_module_id, tm.task_id, tm.module_key, e.event_type,
+		       COALESCE(e.from_state, ''), COALESCE(e.to_state, ''), e.actor_id, e.actor_snapshot, e.payload, e.created_at
+		FROM task_module_events e
+		INNER JOIN task_modules tm ON tm.id = e.task_module_id
+		WHERE (e.created_at > ?) OR (e.created_at = ? AND e.id > ?)
+		ORDER BY e.created_at ASC, e.id ASC
+		LIMIT ?`,
+		lastSeenAt,
+		lastSeenAt,
+		cursor.LastSeenID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience module outcome rows: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*domain.ExperienceOutcomeEventRow, 0)
+	for rows.Next() {
+		var id, taskModuleID, taskID int64
+		var moduleKey, eventType, fromState, toState string
+		var actorID sql.NullInt64
+		var actorSnapshot, payload sql.NullString
+		var createdAt time.Time
+		if err := rows.Scan(&id, &taskModuleID, &taskID, &moduleKey, &eventType, &fromState, &toState, &actorID, &actorSnapshot, &payload, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan experience module outcome row: %w", err)
+		}
+		taskIDCopy := taskID
+		action := "module_event"
+		if strings.TrimSpace(fromState) != "" || strings.TrimSpace(toState) != "" {
+			action = "module_state_changed"
+		}
+		outcome := strings.TrimSpace(toState)
+		if outcome == "" {
+			outcome = strings.TrimSpace(eventType)
+		}
+		businessSnapshot := mustExperienceJSON(map[string]interface{}{
+			"target_type":    "task",
+			"target_id":      strconv.FormatInt(taskID, 10),
+			"task_module_id": taskModuleID,
+			"module_key":     moduleKey,
+		})
+		eventPayload := mustExperienceJSON(map[string]interface{}{
+			"task_module_id": taskModuleID,
+			"module_key":     moduleKey,
+			"event_type":     eventType,
+			"from_state":     fromState,
+			"to_state":       toState,
+			"changed_fields": []map[string]interface{}{
+				{"field": "module_state", "from": fromState, "to": toState},
+			},
+			"source_payload": rawJSONOrNil(payload),
+			"observer":       "append_only",
+		})
+		out = append(out, &domain.ExperienceOutcomeEventRow{
+			ID:               id,
+			EventKey:         fmt.Sprintf("outcome:task_module_events:%d", id),
+			SourceName:       "task_module_events",
+			SourceID:         fmt.Sprintf("task_module_event:%d", id),
+			TaskID:           &taskIDCopy,
+			TargetType:       "task",
+			TargetID:         strconv.FormatInt(taskID, 10),
+			Action:           action,
+			Outcome:          outcome,
+			EventTime:        createdAt.UTC(),
+			ActorSnapshot:    mergeModuleActorSnapshot(actorID, actorSnapshot),
+			BusinessSnapshot: businessSnapshot,
+			Payload:          eventPayload,
+			SourceWatermark:  experienceSourceWatermark(createdAt, id),
+			ObservedFrom:     "task_module_events",
+			ObservedID:       strconv.FormatInt(id, 10),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience module outcome rows: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) ListExperienceTaskStatusSnapshots(ctx context.Context, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceOutcomeSnapshotRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, task_status, updated_at
+		FROM tasks
+		WHERE (updated_at > ?) OR (updated_at = ? AND id > ?)
+		ORDER BY updated_at ASC, id ASC
+		LIMIT ?`,
+		lastSeenAt,
+		lastSeenAt,
+		cursor.LastSeenID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience task status snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*domain.ExperienceOutcomeSnapshotRow, 0)
+	for rows.Next() {
+		var id int64
+		var status string
+		var updatedAt time.Time
+		if err := rows.Scan(&id, &status, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan experience task status snapshot: %w", err)
+		}
+		taskID := id
+		out = append(out, &domain.ExperienceOutcomeSnapshotRow{
+			SourceName:      "tasks_status_snapshot",
+			EntityType:      "task",
+			EntityID:        strconv.FormatInt(id, 10),
+			TaskID:          &taskID,
+			TargetType:      "task",
+			TargetID:        strconv.FormatInt(id, 10),
+			SourceUpdatedAt: updatedAt.UTC(),
+			ObservedValue:   mustExperienceJSON(map[string]interface{}{"task_status": status}),
+			TerminalState:   taskTerminalState(status),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience task status snapshots: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Context, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceOutcomeSnapshotRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, task_id, COALESCE(flow_review_status, ''), approved_at, rejected_at,
+		       COALESCE(is_archived, 0), archived_at,
+		       GREATEST(
+		         created_at,
+		         COALESCE(approved_at, created_at),
+		         COALESCE(rejected_at, created_at),
+		         COALESCE(archived_at, created_at),
+		         COALESCE(cleaned_at, created_at)
+		       ) AS source_updated_at
+		FROM task_assets
+		WHERE (created_at > ?) OR (created_at = ? AND id > ?)
+		   OR (approved_at > ?) OR (approved_at = ? AND id > ?)
+		   OR (rejected_at > ?) OR (rejected_at = ? AND id > ?)
+		   OR (archived_at > ?) OR (archived_at = ? AND id > ?)
+		   OR (cleaned_at > ?) OR (cleaned_at = ? AND id > ?)
+		ORDER BY source_updated_at ASC, id ASC
+		LIMIT ?`,
+		lastSeenAt, lastSeenAt, cursor.LastSeenID,
+		lastSeenAt, lastSeenAt, cursor.LastSeenID,
+		lastSeenAt, lastSeenAt, cursor.LastSeenID,
+		lastSeenAt, lastSeenAt, cursor.LastSeenID,
+		lastSeenAt, lastSeenAt, cursor.LastSeenID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience task asset review snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*domain.ExperienceOutcomeSnapshotRow, 0)
+	for rows.Next() {
+		var id, taskID int64
+		var status string
+		var approvedAt, rejectedAt, archivedAt sql.NullTime
+		var archived bool
+		var sourceUpdatedAt time.Time
+		if err := rows.Scan(&id, &taskID, &status, &approvedAt, &rejectedAt, &archived, &archivedAt, &sourceUpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan experience task asset review snapshot: %w", err)
+		}
+		taskIDCopy := taskID
+		out = append(out, &domain.ExperienceOutcomeSnapshotRow{
+			SourceName:      "task_assets_review_snapshot",
+			EntityType:      "task_asset",
+			EntityID:        strconv.FormatInt(id, 10),
+			TaskID:          &taskIDCopy,
+			TargetType:      "task_asset",
+			TargetID:        strconv.FormatInt(id, 10),
+			SourceUpdatedAt: sourceUpdatedAt.UTC(),
+			ObservedValue: mustExperienceJSON(map[string]interface{}{
+				"flow_review_status": status,
+				"approved_at":        experienceNullableTimeValue(approvedAt),
+				"rejected_at":        experienceNullableTimeValue(rejectedAt),
+			}),
+			TerminalState: taskAssetReviewTerminalState(status, archived, archivedAt),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience task asset review snapshots: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) ListExperienceTaskDetailFilingSnapshots(ctx context.Context, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceOutcomeSnapshotRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, task_id, COALESCE(filing_status, ''), COALESCE(erp_sync_required, 0), last_filed_at, updated_at
+		FROM task_details
+		WHERE (updated_at > ?) OR (updated_at = ? AND id > ?)
+		ORDER BY updated_at ASC, id ASC
+		LIMIT ?`,
+		lastSeenAt,
+		lastSeenAt,
+		cursor.LastSeenID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience task detail filing snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*domain.ExperienceOutcomeSnapshotRow, 0)
+	for rows.Next() {
+		var id, taskID int64
+		var status string
+		var syncRequired bool
+		var lastFiledAt sql.NullTime
+		var updatedAt time.Time
+		if err := rows.Scan(&id, &taskID, &status, &syncRequired, &lastFiledAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan experience task detail filing snapshot: %w", err)
+		}
+		taskIDCopy := taskID
+		out = append(out, &domain.ExperienceOutcomeSnapshotRow{
+			SourceName:      "task_details_filing_snapshot",
+			EntityType:      "task_detail",
+			EntityID:        strconv.FormatInt(id, 10),
+			TaskID:          &taskIDCopy,
+			TargetType:      "task",
+			TargetID:        strconv.FormatInt(taskID, 10),
+			SourceUpdatedAt: updatedAt.UTC(),
+			ObservedValue: mustExperienceJSON(map[string]interface{}{
+				"filing_status":     status,
+				"erp_sync_required": syncRequired,
+				"last_filed_at":     experienceNullableTimeValue(lastFiledAt),
+			}),
+			TerminalState: erpFilingTerminalState(status, syncRequired),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience task detail filing snapshots: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) ListExperienceTaskSKUItemFilingSnapshots(ctx context.Context, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceOutcomeSnapshotRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, task_id, COALESCE(filing_status, ''), COALESCE(erp_sync_status, ''),
+		       COALESCE(erp_sync_required, 0), last_filed_at, updated_at
+		FROM task_sku_items
+		WHERE (updated_at > ?) OR (updated_at = ? AND id > ?)
+		ORDER BY updated_at ASC, id ASC
+		LIMIT ?`,
+		lastSeenAt,
+		lastSeenAt,
+		cursor.LastSeenID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list experience task sku item filing snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*domain.ExperienceOutcomeSnapshotRow, 0)
+	for rows.Next() {
+		var id, taskID int64
+		var filingStatus, syncStatus string
+		var syncRequired bool
+		var lastFiledAt sql.NullTime
+		var updatedAt time.Time
+		if err := rows.Scan(&id, &taskID, &filingStatus, &syncStatus, &syncRequired, &lastFiledAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan experience task sku item filing snapshot: %w", err)
+		}
+		taskIDCopy := taskID
+		out = append(out, &domain.ExperienceOutcomeSnapshotRow{
+			SourceName:      "task_sku_items_filing_snapshot",
+			EntityType:      "task_sku_item",
+			EntityID:        strconv.FormatInt(id, 10),
+			TaskID:          &taskIDCopy,
+			TargetType:      "task_sku_item",
+			TargetID:        strconv.FormatInt(id, 10),
+			SourceUpdatedAt: updatedAt.UTC(),
+			ObservedValue: mustExperienceJSON(map[string]interface{}{
+				"filing_status":     filingStatus,
+				"erp_sync_status":   syncStatus,
+				"erp_sync_required": syncRequired,
+				"last_filed_at":     experienceNullableTimeValue(lastFiledAt),
+			}),
+			TerminalState: erpFilingTerminalState(filingStatus, syncRequired),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience task sku item filing snapshots: %w", err)
+	}
+	return out, nil
+}
+
+func (r *experienceRepo) GetExperienceObservedEntityState(ctx context.Context, sourceName, entityType, entityID string) (*domain.ExperienceObservedEntityState, error) {
+	var state domain.ExperienceObservedEntityState
+	var observedValue, tombstonePayload sql.NullString
+	var terminalObservedAt, sourceUpdatedAt sql.NullTime
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT id, source_name, entity_type, entity_id, observed_value_json, observed_hash,
+		       terminal_state, terminal_observed_at, source_updated_at, last_seen_at, tombstoned,
+		       tombstone_payload_json, created_at, updated_at
+		FROM experience_observed_entity_states
+		WHERE source_name = ? AND entity_type = ? AND entity_id = ?`,
+		strings.TrimSpace(sourceName),
+		strings.TrimSpace(entityType),
+		strings.TrimSpace(entityID),
+	).Scan(
+		&state.ID,
+		&state.SourceName,
+		&state.EntityType,
+		&state.EntityID,
+		&observedValue,
+		&state.ObservedHash,
+		&state.TerminalState,
+		&terminalObservedAt,
+		&sourceUpdatedAt,
+		&state.LastSeenAt,
+		&state.Tombstoned,
+		&tombstonePayload,
+		&state.CreatedAt,
+		&state.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get experience observed entity state: %w", err)
+	}
+	state.ObservedValue = rawJSONFromNull(observedValue)
+	state.TerminalObservedAt = fromNullTime(terminalObservedAt)
+	state.SourceUpdatedAt = fromNullTime(sourceUpdatedAt)
+	state.TombstonePayload = rawJSONFromNull(tombstonePayload)
+	return &state, nil
+}
+
+func (r *experienceRepo) UpsertExperienceObservedEntityState(ctx context.Context, state *domain.ExperienceObservedEntityState) error {
+	if state == nil {
+		return fmt.Errorf("experience observed entity state is nil")
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO experience_observed_entity_states (
+			source_name, entity_type, entity_id, observed_value_json, observed_hash,
+			terminal_state, terminal_observed_at, source_updated_at, last_seen_at, tombstoned, tombstone_payload_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			observed_value_json = VALUES(observed_value_json),
+			observed_hash = VALUES(observed_hash),
+			terminal_state = VALUES(terminal_state),
+			terminal_observed_at = VALUES(terminal_observed_at),
+			source_updated_at = VALUES(source_updated_at),
+			last_seen_at = VALUES(last_seen_at),
+			tombstoned = VALUES(tombstoned),
+			tombstone_payload_json = VALUES(tombstone_payload_json),
+			updated_at = CURRENT_TIMESTAMP`,
+		strings.TrimSpace(state.SourceName),
+		strings.TrimSpace(state.EntityType),
+		strings.TrimSpace(state.EntityID),
+		toNullJSONString(state.ObservedValue),
+		strings.TrimSpace(state.ObservedHash),
+		strings.TrimSpace(state.TerminalState),
+		toNullTime(state.TerminalObservedAt),
+		toNullTime(state.SourceUpdatedAt),
+		state.LastSeenAt,
+		state.Tombstoned,
+		toNullJSONString(state.TombstonePayload),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert experience observed entity state: %w", err)
+	}
+	return nil
+}
+
+func (r *experienceRepo) RunExperienceRetention(ctx context.Context, policy repo.ExperienceRetentionPolicy) (*domain.ExperienceRetentionRun, error) {
+	limit := policy.Limit
+	if limit <= 0 {
+		limit = 1000
+	}
+	result := &domain.ExperienceRetentionRun{}
+	behaviorDeleted, err := r.execRowsAffected(ctx, `
+		DELETE FROM experience_behavior_events
+		WHERE occurred_at < ?
+		LIMIT ?`, policy.BehaviorBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("delete expired experience behavior events: %w", err)
+	}
+	result.BehaviorDeleted = behaviorDeleted
+
+	minuteDeleted, err := r.execRowsAffected(ctx, `
+		DELETE FROM experience_rate_limits
+		WHERE bucket_name LIKE '%minute%' AND period_end < ?
+		LIMIT ?`, policy.MinuteRateLimitBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("delete expired minute experience rate limits: %w", err)
+	}
+	dailyDeleted, err := r.execRowsAffected(ctx, `
+		DELETE FROM experience_rate_limits
+		WHERE bucket_name NOT LIKE '%minute%' AND period_end < ?
+		LIMIT ?`, policy.DailyRateLimitBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("delete expired daily experience rate limits: %w", err)
+	}
+	result.RateLimitDeleted = minuteDeleted + dailyDeleted
+
+	tombstoned, err := r.execRowsAffected(ctx, `
+		UPDATE experience_observed_entity_states
+		SET tombstoned = 1,
+		    tombstone_payload_json = JSON_OBJECT(
+		      'source_name', source_name,
+		      'entity_type', entity_type,
+		      'entity_id', entity_id,
+		      'terminal_state', terminal_state,
+		      'terminal_observed_at', terminal_observed_at
+		    ),
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE tombstoned = 0
+		  AND terminal_state <> ''
+		  AND terminal_observed_at IS NOT NULL
+		  AND terminal_observed_at < ?
+		LIMIT ?`, policy.ObservedTerminalBefore, limit)
+	if err != nil {
+		return nil, fmt.Errorf("tombstone terminal experience observed states: %w", err)
+	}
+	result.ObservedTombstoned = tombstoned
+	return result, nil
+}
+
 func (r *experienceRepo) scalarCount(ctx context.Context, query string, args ...interface{}) (int64, error) {
 	var count int64
 	if err := r.db.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
@@ -650,6 +1381,7 @@ func scanExperienceEvent(scanner interface {
 	var event domain.ExperienceEvent
 	var taskID sql.NullInt64
 	var actorSnapshot, businessSnapshot, payload sql.NullString
+	var targetType, targetID, sourceWatermark, observedFrom, observedID sql.NullString
 	var feedbackValue, feedbackReasonCode sql.NullString
 	var feedbackCreatedAt sql.NullTime
 	var evidenceRank int
@@ -661,6 +1393,11 @@ func scanExperienceEvent(scanner interface {
 		&event.SourceType,
 		&event.SourceID,
 		&taskID,
+		&targetType,
+		&targetID,
+		&sourceWatermark,
+		&observedFrom,
+		&observedID,
 		&event.Action,
 		&event.Outcome,
 		&actorSnapshot,
@@ -677,6 +1414,11 @@ func scanExperienceEvent(scanner interface {
 		return nil, fmt.Errorf("scan experience event: %w", err)
 	}
 	event.TaskID = fromNullInt64(taskID)
+	event.TargetType = stringFromNull(targetType)
+	event.TargetID = stringFromNull(targetID)
+	event.SourceWatermark = stringFromNull(sourceWatermark)
+	event.ObservedFrom = stringFromNull(observedFrom)
+	event.ObservedID = stringFromNull(observedID)
 	event.ActorSnapshot = rawJSONFromNull(actorSnapshot)
 	event.BusinessSnapshot = rawJSONFromNull(businessSnapshot)
 	event.Payload = rawJSONFromNull(payload)
@@ -757,6 +1499,9 @@ func experienceEventTarget(event *domain.ExperienceEvent) (string, string) {
 	if event == nil {
 		return "", ""
 	}
+	if strings.TrimSpace(event.TargetType) != "" || strings.TrimSpace(event.TargetID) != "" {
+		return strings.TrimSpace(event.TargetType), strings.TrimSpace(event.TargetID)
+	}
 	var business map[string]interface{}
 	if len(event.BusinessSnapshot) > 0 && json.Unmarshal(event.BusinessSnapshot, &business) == nil {
 		targetType, _ := business["target_type"].(string)
@@ -796,6 +1541,7 @@ func scanExperienceOutboxEvent(scanner interface {
 	var event domain.ExperienceOutboxEvent
 	var taskID sql.NullInt64
 	var actorSnapshot, businessSnapshot, payload sql.NullString
+	var targetType, targetID, sourceWatermark, observedFrom, observedID sql.NullString
 	var nextRetryAt, claimedAt, processedAt sql.NullTime
 	if err := scanner.Scan(
 		&event.ID,
@@ -804,6 +1550,11 @@ func scanExperienceOutboxEvent(scanner interface {
 		&event.SourceType,
 		&event.SourceID,
 		&taskID,
+		&targetType,
+		&targetID,
+		&sourceWatermark,
+		&observedFrom,
+		&observedID,
 		&event.Action,
 		&event.Outcome,
 		&event.EventTime,
@@ -825,6 +1576,11 @@ func scanExperienceOutboxEvent(scanner interface {
 		return nil, fmt.Errorf("scan experience outbox event: %w", err)
 	}
 	event.TaskID = fromNullInt64(taskID)
+	event.TargetType = stringFromNull(targetType)
+	event.TargetID = stringFromNull(targetID)
+	event.SourceWatermark = stringFromNull(sourceWatermark)
+	event.ObservedFrom = stringFromNull(observedFrom)
+	event.ObservedID = stringFromNull(observedID)
 	event.ActorSnapshot = rawJSONFromNull(actorSnapshot)
 	event.BusinessSnapshot = rawJSONFromNull(businessSnapshot)
 	event.Payload = rawJSONFromNull(payload)
@@ -839,4 +1595,116 @@ func rawJSONFromNull(value sql.NullString) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(value.String)
+}
+
+func stringFromNull(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
+func experienceCursorTime(value *time.Time) time.Time {
+	if value == nil || value.IsZero() {
+		return time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	return value.UTC()
+}
+
+func experienceSourceWatermark(at time.Time, id int64) string {
+	return fmt.Sprintf("%s#%d", at.UTC().Format(time.RFC3339), id)
+}
+
+func mustExperienceJSON(value interface{}) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+func rawJSONOrNil(value sql.NullString) json.RawMessage {
+	if !value.Valid || strings.TrimSpace(value.String) == "" || !json.Valid([]byte(value.String)) {
+		return nil
+	}
+	return json.RawMessage(value.String)
+}
+
+func experienceNullableTimeValue(value sql.NullTime) interface{} {
+	if !value.Valid || value.Time.IsZero() {
+		return nil
+	}
+	return value.Time.UTC().Format(time.RFC3339)
+}
+
+func auditOutcomeAction(action string) string {
+	switch strings.TrimSpace(action) {
+	case "approve":
+		return "audit_approved"
+	case "reject":
+		return "audit_rejected"
+	default:
+		value := strings.TrimSpace(action)
+		if value == "" {
+			return "audit_action"
+		}
+		return "audit_" + value
+	}
+}
+
+func taskTerminalState(status string) string {
+	switch domain.TaskStatus(strings.TrimSpace(status)) {
+	case domain.TaskStatusCompleted, domain.TaskStatusCancelled, domain.TaskStatusArchived:
+		return strings.TrimSpace(status)
+	default:
+		return ""
+	}
+}
+
+func taskAssetReviewTerminalState(status string, archived bool, archivedAt sql.NullTime) string {
+	if archived || archivedAt.Valid {
+		return "archived"
+	}
+	switch domain.TaskAssetFlowReviewStatus(strings.TrimSpace(status)) {
+	case domain.TaskAssetFlowReviewStatusApproved,
+		domain.TaskAssetFlowReviewStatusSuperseded,
+		domain.TaskAssetFlowReviewStatusCleaned,
+		domain.TaskAssetFlowReviewStatusNotApplicable:
+		return strings.TrimSpace(status)
+	default:
+		return ""
+	}
+}
+
+func erpFilingTerminalState(status string, syncRequired bool) string {
+	if domain.FilingStatus(strings.TrimSpace(status)) == domain.FilingStatusFiled && !syncRequired {
+		return string(domain.FilingStatusFiled)
+	}
+	return ""
+}
+
+func mergeModuleActorSnapshot(actorID sql.NullInt64, snapshot sql.NullString) json.RawMessage {
+	if snapshot.Valid && strings.TrimSpace(snapshot.String) != "" && json.Valid([]byte(snapshot.String)) {
+		return json.RawMessage(snapshot.String)
+	}
+	if actorID.Valid {
+		return mustExperienceJSON(map[string]interface{}{
+			"actor_type": "user",
+			"actor_id":   actorID.Int64,
+			"source":     "task_module_events",
+		})
+	}
+	return nil
+}
+
+func (r *experienceRepo) execRowsAffected(ctx context.Context, query string, args ...interface{}) (int64, error) {
+	result, err := r.db.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return rows, nil
 }

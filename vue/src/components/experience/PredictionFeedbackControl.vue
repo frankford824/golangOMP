@@ -33,12 +33,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   experienceApi,
   type AISuggestionFeedbackValue,
-  type ExperienceRuntimeFlags,
+  type ExperienceClientConfig,
+  type ExperienceReasonTag,
 } from '@/services/api/experienceApi'
+import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import type { PredictionSuggestion } from '@/services/api/predictionsApi'
 
 const feedbackOptions: Array<{ value: AISuggestionFeedbackValue; label: string }> = [
@@ -47,7 +49,9 @@ const feedbackOptions: Array<{ value: AISuggestionFeedbackValue; label: string }
   { value: 'rejected', label: '无用' },
 ]
 
-const reasonOptions = [
+type ReasonOption = { code: string; label: string }
+
+const fallbackReasonOptions: ReasonOption[] = [
   { code: 'spec_mismatch', label: '规格不符' },
   { code: 'asset_mismatch', label: '资产不符' },
   { code: 'stage_not_applicable', label: '阶段不适用' },
@@ -66,12 +70,16 @@ const props = defineProps<{
 }>()
 
 const localEnabled = ref(false)
+const behaviorEnabled = ref(false)
+const reasonOptions = ref<ReasonOption[]>(fallbackReasonOptions)
 const selectedValue = ref<AISuggestionFeedbackValue | ''>('')
 const selectedReason = ref('')
 const saving = ref(false)
 const errorText = ref('')
+const impressionRecorded = ref(false)
 
-let runtimeFlagsPromise: Promise<ExperienceRuntimeFlags | null> | null = null
+let clientConfigPromise: Promise<ExperienceClientConfig | null> | null = null
+let reasonTagsPromise: Promise<ExperienceReasonTag[] | null> | null = null
 
 const suggestionEventId = computed(() => props.suggestion.suggestion_event_id || '')
 const effectiveRoute = computed(() => props.route || (typeof window !== 'undefined' ? window.location.pathname : ''))
@@ -79,19 +87,44 @@ const visible = computed(() => Boolean(suggestionEventId.value) && (props.enable
 const needsReason = computed(() => selectedValue.value === 'partially_accepted' || selectedValue.value === 'rejected')
 
 onMounted(async () => {
+  void loadReasonOptions()
+  const config = await getExperienceClientConfig()
+  behaviorEnabled.value = Boolean(config?.behavior_capture_enabled)
+  maybeRecordImpression()
   if (props.enabled !== undefined) return
-  const flags = await getExperienceRuntimeFlags()
-  localEnabled.value = Boolean(flags?.ai_feedback_enabled)
+  const surfaces = config?.enabled_surfaces ?? []
+  const surfaceEnabled = surfaces.length === 0 || surfaces.includes(props.surface)
+  localEnabled.value = Boolean(config?.ai_feedback_enabled && surfaceEnabled)
 })
 
-async function getExperienceRuntimeFlags(): Promise<ExperienceRuntimeFlags | null> {
-  if (!runtimeFlagsPromise) {
-    runtimeFlagsPromise = experienceApi
-      .config()
+watch(
+  visible,
+  (isVisible) => {
+    if (isVisible) maybeRecordImpression()
+  },
+  { immediate: true },
+)
+
+async function getExperienceClientConfig(): Promise<ExperienceClientConfig | null> {
+  if (!clientConfigPromise) {
+    clientConfigPromise = experienceApi
+      .clientConfig()
       .then((res) => res.data?.data ?? null)
       .catch(() => null)
   }
-  return runtimeFlagsPromise
+  return clientConfigPromise
+}
+
+async function loadReasonOptions(): Promise<void> {
+  if (!reasonTagsPromise) {
+    reasonTagsPromise = experienceApi
+      .reasonTags({ scene: 'ai_suggestion_feedback' })
+      .then((res) => res.data?.data ?? null)
+      .catch(() => null)
+  }
+  const tags = await reasonTagsPromise
+  if (!tags?.length) return
+  reasonOptions.value = tags.map((tag) => ({ code: tag.code, label: tag.name }))
 }
 
 async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode = ''): Promise<void> {
@@ -103,6 +136,7 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
   if (value === 'accepted') selectedReason.value = ''
 
   const suggestion = props.suggestion
+  if (behaviorEnabled.value) recordBehavior('click')
   try {
     await experienceApi.feedback(suggestionEventId.value, {
       suggestion_event_id: suggestionEventId.value,
@@ -127,6 +161,30 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
   } finally {
     saving.value = false
   }
+}
+
+function recordBehavior(action: 'impression' | 'click'): void {
+  const suggestion = props.suggestion
+  recordExperienceBehavior({
+    action,
+    surface: props.surface,
+    target_type: suggestion.target_type || '',
+    target_id: suggestion.target_id || '',
+    suggestion_event_id: suggestionEventId.value,
+    suggestion_stable_key: suggestion.suggestion_stable_key || '',
+    component: 'PredictionFeedbackControl',
+    payload: {
+      suggestion_id: suggestion.id,
+      suggestion_type: String(suggestion.type || ''),
+      action_type: suggestion.action_type || '',
+    },
+  })
+}
+
+function maybeRecordImpression(): void {
+  if (!visible.value || !behaviorEnabled.value || impressionRecorded.value) return
+  impressionRecorded.value = true
+  recordBehavior('impression')
 }
 </script>
 

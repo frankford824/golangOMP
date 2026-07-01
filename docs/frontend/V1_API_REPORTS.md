@@ -42,7 +42,9 @@ L1 卡片、吞吐与模块停留报表。
       "ui_enabled": "...",
       "capture_enabled": "...",
       "ai_feedback_enabled": "...",
-      "worker_enabled": "..."
+      "worker_enabled": "...",
+      "behavior_capture_enabled": "...",
+      "micro_question_enabled": "..."
     },
     "total_events": 123,
     "outbox_queued": 123,

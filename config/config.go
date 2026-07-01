@@ -77,16 +77,20 @@ type AIConfig struct {
 }
 
 type ExperienceConfig struct {
-	UIEnabled         bool
-	CaptureEnabled    bool
-	AIFeedbackEnabled bool
-	WorkerEnabled     bool
-	WorkerInterval    time.Duration
-	WorkerBatchSize   int
-	WorkerMaxAttempts int
-	OutboxLeaseTTL    time.Duration
-	RuntimeConfigFile string
-	RetentionDays     int
+	UIEnabled              bool
+	CaptureEnabled         bool
+	AIFeedbackEnabled      bool
+	BehaviorCaptureEnabled bool
+	MicroQuestionEnabled   bool
+	BehaviorSampleRate     float64
+	EnabledSurfaces        []string
+	WorkerEnabled          bool
+	WorkerInterval         time.Duration
+	WorkerBatchSize        int
+	WorkerMaxAttempts      int
+	OutboxLeaseTTL         time.Duration
+	RuntimeConfigFile      string
+	RetentionDays          int
 }
 
 type BusinessTrendConfig struct {
@@ -387,16 +391,20 @@ func Load() (*Config, error) {
 			RateLimitMax:    mustParseInt(getEnv("AI_AGENT_RATE_LIMIT_MAX_CALLS", "800")),
 		},
 		Experience: ExperienceConfig{
-			UIEnabled:         mustParseBool(getEnv("EXPERIENCE_UI_ENABLED", "false")),
-			CaptureEnabled:    mustParseBool(getEnv("EXPERIENCE_CAPTURE_ENABLED", "false")),
-			AIFeedbackEnabled: mustParseBool(getEnv("EXPERIENCE_AI_FEEDBACK_ENABLED", "false")),
-			WorkerEnabled:     mustParseBool(getEnv("EXPERIENCE_WORKER_ENABLED", "false")),
-			WorkerInterval:    mustParseDuration(getEnv("EXPERIENCE_WORKER_INTERVAL", "15s")),
-			WorkerBatchSize:   mustParseInt(getEnv("EXPERIENCE_WORKER_BATCH_SIZE", "50")),
-			WorkerMaxAttempts: mustParseInt(getEnv("EXPERIENCE_WORKER_MAX_ATTEMPTS", "5")),
-			OutboxLeaseTTL:    mustParseDuration(getEnv("EXPERIENCE_OUTBOX_LEASE_TTL", "5m")),
-			RuntimeConfigFile: getEnv("EXPERIENCE_RUNTIME_CONFIG_FILE", ""),
-			RetentionDays:     mustParseInt(getEnv("EXPERIENCE_RETENTION_DAYS", "180")),
+			UIEnabled:              mustParseBool(getEnv("EXPERIENCE_UI_ENABLED", "false")),
+			CaptureEnabled:         mustParseBool(getEnv("EXPERIENCE_CAPTURE_ENABLED", "false")),
+			AIFeedbackEnabled:      mustParseBool(getEnv("EXPERIENCE_AI_FEEDBACK_ENABLED", "false")),
+			BehaviorCaptureEnabled: mustParseBool(getEnv("EXPERIENCE_BEHAVIOR_CAPTURE_ENABLED", "false")),
+			MicroQuestionEnabled:   mustParseBool(getEnv("EXPERIENCE_MICRO_QUESTION_ENABLED", "false")),
+			BehaviorSampleRate:     mustParseFloat(getEnv("EXPERIENCE_BEHAVIOR_SAMPLE_RATE", "1")),
+			EnabledSurfaces:        splitCSV(getEnv("EXPERIENCE_ENABLED_SURFACES", "task_detail,asset_center,data_center")),
+			WorkerEnabled:          mustParseBool(getEnv("EXPERIENCE_WORKER_ENABLED", "false")),
+			WorkerInterval:         mustParseDuration(getEnv("EXPERIENCE_WORKER_INTERVAL", "15s")),
+			WorkerBatchSize:        mustParseInt(getEnv("EXPERIENCE_WORKER_BATCH_SIZE", "50")),
+			WorkerMaxAttempts:      mustParseInt(getEnv("EXPERIENCE_WORKER_MAX_ATTEMPTS", "5")),
+			OutboxLeaseTTL:         mustParseDuration(getEnv("EXPERIENCE_OUTBOX_LEASE_TTL", "5m")),
+			RuntimeConfigFile:      getEnv("EXPERIENCE_RUNTIME_CONFIG_FILE", ""),
+			RetentionDays:          mustParseInt(getEnv("EXPERIENCE_RETENTION_DAYS", "180")),
 		},
 		BusinessTrend: BusinessTrendConfig{
 			ChinaHotURL:         getEnv("BUSINESS_TREND_CHINA_HOT_URL", ""),
@@ -675,6 +683,11 @@ func mustParseInt(s string) int {
 	return n
 }
 
+func mustParseFloat(s string) float64 {
+	n, _ := strconv.ParseFloat(s, 64)
+	return n
+}
+
 func mustParseDuration(s string) time.Duration {
 	d, _ := time.ParseDuration(s)
 	return d
@@ -688,4 +701,16 @@ func mustParseBool(s string) bool {
 func mustParseInt64(s string) int64 {
 	v, _ := strconv.ParseInt(s, 10, 64)
 	return v
+}
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }

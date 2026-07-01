@@ -5,6 +5,17 @@ export interface ExperienceRuntimeFlags {
   capture_enabled: boolean
   ai_feedback_enabled: boolean
   worker_enabled: boolean
+  behavior_capture_enabled?: boolean
+  micro_question_enabled?: boolean
+  behavior_sample_rate?: number
+}
+
+export interface ExperienceClientConfig {
+  ai_feedback_enabled: boolean
+  behavior_capture_enabled: boolean
+  micro_question_enabled: boolean
+  behavior_sample_rate: number
+  enabled_surfaces: string[]
 }
 
 export type ExperienceEvidenceLevel = 'L0' | 'L1' | 'L2' | 'L3' | 'L4'
@@ -68,18 +79,18 @@ export interface ExperienceEvent {
 }
 
 export interface ExperienceReasonTag {
-  id: number
+  id?: number
   scene: string
   code: string
   name: string
   group: string
   severity?: string
-  version: number
-  enabled: boolean
+  version?: number
+  enabled?: boolean
   deleted_at?: string
   sort_order: number
-  created_at: string
-  updated_at: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface ExperienceSamplesParams {
@@ -118,6 +129,44 @@ export interface AISuggestionFeedbackPayload {
   route?: string
 }
 
+export type ExperienceBehaviorAction =
+  | 'impression'
+  | 'visible'
+  | 'expand'
+  | 'click'
+  | 'jump'
+  | 'dismiss'
+  | 'refresh'
+  | 'copy'
+  | 'related_action_done'
+  | 'ignored_after_timeout'
+
+export interface ExperienceBehaviorEventRequest {
+  client_event_id: string
+  page_instance_id?: string
+  surface?: string
+  action: ExperienceBehaviorAction
+  target_type?: string
+  target_id?: string
+  task_id?: number
+  suggestion_event_id?: string
+  suggestion_stable_key?: string
+  occurred_at?: string
+  route_name?: string
+  component?: string
+  dwell_ms?: number
+  payload?: Record<string, unknown>
+}
+
+export interface ExperienceBehaviorBatchRequest {
+  events: ExperienceBehaviorEventRequest[]
+}
+
+export interface ExperienceBehaviorBatchResult {
+  received: number
+  inserted: number
+}
+
 export interface AISuggestionFeedbackRequest {
   suggestion_event_id?: string
   feedback_value: AISuggestionFeedbackValue
@@ -146,6 +195,10 @@ export const experienceApi = {
   config: (signal?: AbortSignal) =>
     http.get<{ data?: ExperienceRuntimeFlags }>('/v1/experience/config', { signal }),
 
+  /** GET /v1/experience/client-config */
+  clientConfig: (signal?: AbortSignal) =>
+    http.get<{ data?: ExperienceClientConfig }>('/v1/experience/client-config', { signal }),
+
   /** GET /v1/experience/reason-tags */
   reasonTags: (params?: { scene?: string }, signal?: AbortSignal) =>
     http.get<{ data?: ExperienceReasonTag[] }>('/v1/experience/reason-tags', { params, signal }),
@@ -165,4 +218,8 @@ export const experienceApi = {
       payload,
       { signal },
     ),
+
+  /** POST /v1/experience/behavior-events:batch */
+  behaviorEvents: (payload: ExperienceBehaviorBatchRequest, signal?: AbortSignal) =>
+    http.post<{ data?: ExperienceBehaviorBatchResult }>('/v1/experience/behavior-events:batch', payload, { signal }),
 }

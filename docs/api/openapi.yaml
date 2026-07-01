@@ -95,6 +95,12 @@ components:
         suggestion_event_id:
           type: string
           description: Stable display event id used by `/v1/ai-suggestions/{suggestion_event_id}/feedback`.
+        suggestion_stable_key:
+          type: string
+          description: Backend-generated stable chain key across refreshed displays. Frontends must not construct this value.
+        attribution_eligible:
+          type: boolean
+          description: Whether this suggestion can enter outcome attribution. Management suggestions are observation-only in Phase 2.
         type:
           type: string
           description: Suggestion category such as `recent`, `search`, `asset`, `task_create`, `task_next_action`, or `management`.
@@ -133,12 +139,26 @@ components:
           $ref: '#/components/schemas/PredictionBundle'
     ExperienceRuntimeFlags:
       type: object
-      required: [ui_enabled, capture_enabled, ai_feedback_enabled, worker_enabled]
+      required: [ui_enabled, capture_enabled, ai_feedback_enabled, worker_enabled, behavior_capture_enabled, micro_question_enabled, behavior_sample_rate]
       properties:
         ui_enabled: { type: boolean }
         capture_enabled: { type: boolean }
         ai_feedback_enabled: { type: boolean }
         worker_enabled: { type: boolean }
+        behavior_capture_enabled: { type: boolean }
+        micro_question_enabled: { type: boolean }
+        behavior_sample_rate: { type: number, format: double, minimum: 0, maximum: 1 }
+    ExperienceClientConfig:
+      type: object
+      required: [ai_feedback_enabled, behavior_capture_enabled, micro_question_enabled, behavior_sample_rate, enabled_surfaces]
+      properties:
+        ai_feedback_enabled: { type: boolean }
+        behavior_capture_enabled: { type: boolean }
+        micro_question_enabled: { type: boolean }
+        behavior_sample_rate: { type: number, format: double, minimum: 0, maximum: 1 }
+        enabled_surfaces:
+          type: array
+          items: { type: string }
     ExperienceReasonTag:
       type: object
       properties:
@@ -154,6 +174,17 @@ components:
         sort_order: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ExperienceClientReasonTag:
+      type: object
+      required: [scene, code, name, group, sort_order]
+      properties:
+        scene:
+          type: string
+          enum: [ai_suggestion_feedback, ai_suggestion_micro_question]
+        code: { type: string }
+        name: { type: string }
+        group: { type: string }
+        sort_order: { type: integer }
     ExperienceEvent:
       type: object
       properties:
@@ -164,6 +195,11 @@ components:
         source_type: { type: string }
         source_id: { type: string }
         task_id: { type: integer, format: int64, nullable: true }
+        target_type: { type: string }
+        target_id: { type: string }
+        source_watermark: { type: string }
+        observed_from: { type: string }
+        observed_id: { type: string }
         action: { type: string }
         outcome: { type: string }
         actor_snapshot: { type: object, additionalProperties: true, nullable: true }
@@ -235,6 +271,41 @@ components:
         outcome_source_type: { type: string }
         outcome_source_id: { type: string }
         payload: { type: object, additionalProperties: true }
+    ExperienceBehaviorEventRequest:
+      type: object
+      required: [client_event_id, action]
+      properties:
+        client_event_id: { type: string }
+        page_instance_id: { type: string }
+        surface: { type: string }
+        action:
+          type: string
+          enum: [impression, visible, expand, click, jump, dismiss, refresh, copy, related_action_done, ignored_after_timeout]
+        target_type: { type: string }
+        target_id: { type: string }
+        task_id: { type: integer, format: int64, nullable: true }
+        suggestion_event_id: { type: string }
+        suggestion_stable_key: { type: string }
+        occurred_at: { type: string, format: date-time }
+        route_name: { type: string }
+        component: { type: string }
+        dwell_ms: { type: integer, minimum: 0 }
+        payload: { type: object, additionalProperties: true }
+    ExperienceBehaviorBatchRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/ExperienceBehaviorEventRequest'
+    ExperienceBehaviorBatchResult:
+      type: object
+      required: [received, inserted]
+      properties:
+        received: { type: integer }
+        inserted: { type: integer }
     AISuggestionFeedback:
       type: object
       properties:
@@ -16972,20 +17043,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /v1/experience/reason-tags:
+  /v1/experience/client-config:
     get:
-      summary: List controlled experience reason tags
-      description: Returns versioned, administrator-maintained reason tags. When the experience UI flag is off, the backend returns an empty list without reading the new tables.
+      summary: Get client-safe experience learning flags
+      description: Login-user-readable configuration for lightweight feedback, behavior capture, and micro-question UI. This response is a separate DTO from the SuperAdmin runtime config.
       tags: [ExperienceLearning, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [SuperAdmin]
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      responses:
+        '200':
+          description: Client-safe experience config
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExperienceClientConfig'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/experience/reason-tags:
+    get:
+      summary: List client-safe experience reason tags
+      description: Returns enabled reason tags for the client whitelist scenes only. The response omits management metadata such as severity, version, enabled, deleted_at, and timestamps.
+      tags: [ExperienceLearning, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: query
           name: scene
-          schema: { type: string }
-          description: Optional tag scene filter.
+          schema:
+            type: string
+            enum: [ai_suggestion_feedback, ai_suggestion_micro_question]
+          description: Optional client tag scene filter. Unknown scenes return an empty list.
       responses:
         '200':
           description: Reason tags
@@ -16998,7 +17097,51 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: '#/components/schemas/ExperienceReasonTag'
+                      $ref: '#/components/schemas/ExperienceClientReasonTag'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/experience/behavior-events:batch:
+    post:
+      summary: Record client experience behavior events
+      description: Best-effort side-channel capture for suggestion impressions, clicks, refreshes, and related actions. Events are idempotent by actor plus client_event_id and never block business workflows.
+      tags: [ExperienceLearning, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperienceBehaviorBatchRequest'
+      responses:
+        '201':
+          description: Behavior batch accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ExperienceBehaviorBatchResult'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthenticated
           content:

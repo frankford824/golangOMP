@@ -20,13 +20,40 @@ const (
 	ExperienceEvidenceFeedback  = "L2"
 	ExperienceEvidenceTagged    = "L3"
 	ExperienceEvidenceReusable  = "L4"
+
+	ExperienceReasonSceneAIFeedback      = "ai_suggestion_feedback"
+	ExperienceReasonSceneMicroQuestion   = "ai_suggestion_micro_question"
+	ExperienceBehaviorActionImpression   = "impression"
+	ExperienceBehaviorActionVisible      = "visible"
+	ExperienceBehaviorActionExpand       = "expand"
+	ExperienceBehaviorActionClick        = "click"
+	ExperienceBehaviorActionJump         = "jump"
+	ExperienceBehaviorActionDismiss      = "dismiss"
+	ExperienceBehaviorActionRefresh      = "refresh"
+	ExperienceBehaviorActionCopy         = "copy"
+	ExperienceBehaviorActionRelatedDone  = "related_action_done"
+	ExperienceBehaviorActionIgnoredAfter = "ignored_after_timeout"
+
+	ExperienceWorkerOutcomeObserver = "outcome_observer"
+	ExperienceWorkerRetention       = "retention"
 )
 
 type ExperienceRuntimeFlags struct {
-	UIEnabled         bool `json:"ui_enabled"`
-	CaptureEnabled    bool `json:"capture_enabled"`
-	AIFeedbackEnabled bool `json:"ai_feedback_enabled"`
-	WorkerEnabled     bool `json:"worker_enabled"`
+	UIEnabled              bool    `json:"ui_enabled"`
+	CaptureEnabled         bool    `json:"capture_enabled"`
+	AIFeedbackEnabled      bool    `json:"ai_feedback_enabled"`
+	WorkerEnabled          bool    `json:"worker_enabled"`
+	BehaviorCaptureEnabled bool    `json:"behavior_capture_enabled"`
+	MicroQuestionEnabled   bool    `json:"micro_question_enabled"`
+	BehaviorSampleRate     float64 `json:"behavior_sample_rate"`
+}
+
+type ExperienceClientConfig struct {
+	AIFeedbackEnabled      bool     `json:"ai_feedback_enabled"`
+	BehaviorCaptureEnabled bool     `json:"behavior_capture_enabled"`
+	MicroQuestionEnabled   bool     `json:"micro_question_enabled"`
+	BehaviorSampleRate     float64  `json:"behavior_sample_rate"`
+	EnabledSurfaces        []string `json:"enabled_surfaces"`
 }
 
 type ExperienceReasonTag struct {
@@ -44,6 +71,14 @@ type ExperienceReasonTag struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
+type ExperienceClientReasonTag struct {
+	Scene     string `json:"scene"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Group     string `json:"group"`
+	SortOrder int    `json:"sort_order"`
+}
+
 type ExperienceOutboxEvent struct {
 	ID                 int64           `json:"id"`
 	EventKey           string          `json:"event_key"`
@@ -51,6 +86,11 @@ type ExperienceOutboxEvent struct {
 	SourceType         string          `json:"source_type"`
 	SourceID           string          `json:"source_id"`
 	TaskID             *int64          `json:"task_id,omitempty"`
+	TargetType         string          `json:"target_type,omitempty"`
+	TargetID           string          `json:"target_id,omitempty"`
+	SourceWatermark    string          `json:"source_watermark,omitempty"`
+	ObservedFrom       string          `json:"observed_from,omitempty"`
+	ObservedID         string          `json:"observed_id,omitempty"`
 	Action             string          `json:"action"`
 	Outcome            string          `json:"outcome"`
 	EventTime          time.Time       `json:"event_time"`
@@ -78,6 +118,11 @@ type ExperienceEvent struct {
 	SourceType         string          `json:"source_type"`
 	SourceID           string          `json:"source_id"`
 	TaskID             *int64          `json:"task_id,omitempty"`
+	TargetType         string          `json:"target_type,omitempty"`
+	TargetID           string          `json:"target_id,omitempty"`
+	SourceWatermark    string          `json:"source_watermark,omitempty"`
+	ObservedFrom       string          `json:"observed_from,omitempty"`
+	ObservedID         string          `json:"observed_id,omitempty"`
 	Action             string          `json:"action"`
 	Outcome            string          `json:"outcome"`
 	ActorSnapshot      json.RawMessage `json:"actor_snapshot,omitempty"`
@@ -94,22 +139,107 @@ type ExperienceEvent struct {
 }
 
 type AISuggestionEvent struct {
-	ID                int64           `json:"id"`
-	SuggestionEventID string          `json:"suggestion_event_id"`
-	SuggestionType    string          `json:"suggestion_type"`
-	SuggestionID      string          `json:"suggestion_id,omitempty"`
-	Source            string          `json:"source,omitempty"`
-	Confidence        *float64        `json:"confidence,omitempty"`
-	Model             string          `json:"model,omitempty"`
-	Provider          string          `json:"provider,omitempty"`
-	ModelVersion      string          `json:"model_version,omitempty"`
-	InputSummary      json.RawMessage `json:"input_summary,omitempty"`
-	Suggestion        json.RawMessage `json:"suggestion,omitempty"`
-	TargetType        string          `json:"target_type,omitempty"`
-	TargetID          string          `json:"target_id,omitempty"`
-	ActorID           *int64          `json:"actor_id,omitempty"`
-	DisplayedAt       time.Time       `json:"displayed_at"`
-	CreatedAt         time.Time       `json:"created_at"`
+	ID                  int64           `json:"id"`
+	SuggestionEventID   string          `json:"suggestion_event_id"`
+	SuggestionStableKey string          `json:"suggestion_stable_key"`
+	AttributionEligible bool            `json:"attribution_eligible"`
+	SuggestionType      string          `json:"suggestion_type"`
+	SuggestionID        string          `json:"suggestion_id,omitempty"`
+	Source              string          `json:"source,omitempty"`
+	Confidence          *float64        `json:"confidence,omitempty"`
+	Model               string          `json:"model,omitempty"`
+	Provider            string          `json:"provider,omitempty"`
+	ModelVersion        string          `json:"model_version,omitempty"`
+	InputSummary        json.RawMessage `json:"input_summary,omitempty"`
+	Suggestion          json.RawMessage `json:"suggestion,omitempty"`
+	TargetType          string          `json:"target_type,omitempty"`
+	TargetID            string          `json:"target_id,omitempty"`
+	ActorID             *int64          `json:"actor_id,omitempty"`
+	DisplayedAt         time.Time       `json:"displayed_at"`
+	CreatedAt           time.Time       `json:"created_at"`
+}
+
+type ExperienceBehaviorEvent struct {
+	ID                  int64           `json:"id"`
+	EventKey            string          `json:"event_key"`
+	ClientEventID       string          `json:"client_event_id"`
+	PageInstanceID      string          `json:"page_instance_id,omitempty"`
+	ActorID             *int64          `json:"actor_id,omitempty"`
+	Surface             string          `json:"surface,omitempty"`
+	Action              string          `json:"action"`
+	TargetType          string          `json:"target_type,omitempty"`
+	TargetID            string          `json:"target_id,omitempty"`
+	TaskID              *int64          `json:"task_id,omitempty"`
+	SuggestionEventID   string          `json:"suggestion_event_id,omitempty"`
+	SuggestionStableKey string          `json:"suggestion_stable_key,omitempty"`
+	OccurredAt          time.Time       `json:"occurred_at"`
+	ReceivedAt          time.Time       `json:"received_at"`
+	RouteName           string          `json:"route_name,omitempty"`
+	Component           string          `json:"component,omitempty"`
+	DwellMS             int             `json:"dwell_ms,omitempty"`
+	Payload             json.RawMessage `json:"payload,omitempty"`
+	DataClassification  string          `json:"data_classification,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
+}
+
+type ExperienceWorkerWatermark struct {
+	WorkerName      string          `json:"worker_name"`
+	SourceName      string          `json:"source_name"`
+	LastSeenAt      *time.Time      `json:"last_seen_at,omitempty"`
+	LastSeenID      int64           `json:"last_seen_id"`
+	SourceWatermark string          `json:"source_watermark,omitempty"`
+	Status          string          `json:"status,omitempty"`
+	Metadata        json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+type ExperienceObservedEntityState struct {
+	ID                 int64           `json:"id"`
+	SourceName         string          `json:"source_name"`
+	EntityType         string          `json:"entity_type"`
+	EntityID           string          `json:"entity_id"`
+	ObservedValue      json.RawMessage `json:"observed_value,omitempty"`
+	ObservedHash       string          `json:"observed_hash,omitempty"`
+	TerminalState      string          `json:"terminal_state,omitempty"`
+	TerminalObservedAt *time.Time      `json:"terminal_observed_at,omitempty"`
+	SourceUpdatedAt    *time.Time      `json:"source_updated_at,omitempty"`
+	LastSeenAt         time.Time       `json:"last_seen_at"`
+	Tombstoned         bool            `json:"tombstoned"`
+	TombstonePayload   json.RawMessage `json:"tombstone_payload,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+}
+
+type ExperienceOutcomeSnapshotRow struct {
+	SourceName      string          `json:"source_name"`
+	EntityType      string          `json:"entity_type"`
+	EntityID        string          `json:"entity_id"`
+	TaskID          *int64          `json:"task_id,omitempty"`
+	TargetType      string          `json:"target_type,omitempty"`
+	TargetID        string          `json:"target_id,omitempty"`
+	SourceUpdatedAt time.Time       `json:"source_updated_at"`
+	ObservedValue   json.RawMessage `json:"observed_value,omitempty"`
+	TerminalState   string          `json:"terminal_state,omitempty"`
+}
+
+type ExperienceOutcomeEventRow struct {
+	ID               int64           `json:"id"`
+	EventKey         string          `json:"event_key"`
+	SourceName       string          `json:"source_name"`
+	SourceID         string          `json:"source_id"`
+	TaskID           *int64          `json:"task_id,omitempty"`
+	TargetType       string          `json:"target_type,omitempty"`
+	TargetID         string          `json:"target_id,omitempty"`
+	Action           string          `json:"action"`
+	Outcome          string          `json:"outcome"`
+	EventTime        time.Time       `json:"event_time"`
+	ActorSnapshot    json.RawMessage `json:"actor_snapshot,omitempty"`
+	BusinessSnapshot json.RawMessage `json:"business_snapshot,omitempty"`
+	Payload          json.RawMessage `json:"payload,omitempty"`
+	SourceWatermark  string          `json:"source_watermark,omitempty"`
+	ObservedFrom     string          `json:"observed_from,omitempty"`
+	ObservedID       string          `json:"observed_id,omitempty"`
 }
 
 type AISuggestionFeedback struct {
@@ -193,4 +323,19 @@ type ExperienceWorkerRun struct {
 	Processed  int `json:"processed"`
 	Failed     int `json:"failed"`
 	DeadLetter int `json:"dead_letter"`
+}
+
+type ExperienceObserverRun struct {
+	Scanned   int `json:"scanned"`
+	Baselines int `json:"baselines"`
+	Changed   int `json:"changed"`
+	Enqueued  int `json:"enqueued"`
+	Skipped   int `json:"skipped"`
+	Failed    int `json:"failed"`
+}
+
+type ExperienceRetentionRun struct {
+	BehaviorDeleted    int64 `json:"behavior_deleted"`
+	RateLimitDeleted   int64 `json:"rate_limit_deleted"`
+	ObservedTombstoned int64 `json:"observed_tombstoned"`
 }

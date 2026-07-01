@@ -134,7 +134,9 @@ func NewRouter(
 		experienceGroup := v1.Group("/experience")
 		{
 			experienceGroup.GET("/config", access(experienceGroup, http.MethodGet, "/config", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.Config)
-			experienceGroup.GET("/reason-tags", access(experienceGroup, http.MethodGet, "/reason-tags", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), experienceH.ReasonTags)
+			experienceGroup.GET("/client-config", access(experienceGroup, http.MethodGet, "/client-config", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.ClientConfig)
+			experienceGroup.GET("/reason-tags", access(experienceGroup, http.MethodGet, "/reason-tags", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.ReasonTags)
+			experienceGroup.POST("/behavior-events:batch", access(experienceGroup, http.MethodPost, "/behavior-events:batch", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), experienceH.BehaviorEvents)
 		}
 		experienceReportsGroup := v1.Group("/reports/experience")
 		{

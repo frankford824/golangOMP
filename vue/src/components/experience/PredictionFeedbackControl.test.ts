@@ -8,7 +8,9 @@ import type { PredictionSuggestion } from '@/services/api/predictionsApi'
 
 vi.mock('@/services/api/experienceApi', () => ({
   experienceApi: {
-    config: vi.fn(),
+    clientConfig: vi.fn(),
+    reasonTags: vi.fn(),
+    behaviorEvents: vi.fn(),
     feedback: vi.fn(),
   },
 }))
@@ -27,11 +29,29 @@ const suggestion: PredictionSuggestion = {
 }
 
 const feedbackMock = vi.mocked(experienceApi.feedback)
+const clientConfigMock = vi.mocked(experienceApi.clientConfig)
+const reasonTagsMock = vi.mocked(experienceApi.reasonTags)
+const behaviorEventsMock = vi.mocked(experienceApi.behaviorEvents)
 const feedbackResponse = { data: { data: undefined } } as Awaited<ReturnType<typeof experienceApi.feedback>>
 
 describe('PredictionFeedbackControl', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clientConfigMock.mockResolvedValue({
+      data: {
+        data: {
+          ai_feedback_enabled: true,
+          behavior_capture_enabled: false,
+          micro_question_enabled: false,
+          behavior_sample_rate: 1,
+          enabled_surfaces: ['task_detail', 'asset_center'],
+        },
+      },
+    } as Awaited<ReturnType<typeof experienceApi.clientConfig>>)
+    reasonTagsMock.mockRejectedValue(new Error('reason tag fallback'))
+    behaviorEventsMock.mockResolvedValue({ data: { data: { received: 1, inserted: 1 } } } as Awaited<
+      ReturnType<typeof experienceApi.behaviorEvents>
+    >)
     feedbackMock.mockResolvedValue(feedbackResponse)
   })
 

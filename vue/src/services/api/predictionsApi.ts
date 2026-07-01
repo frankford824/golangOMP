@@ -15,6 +15,8 @@ export type PredictionType =
 export interface PredictionSuggestion {
   id: string
   suggestion_event_id?: string
+  suggestion_stable_key?: string
+  attribution_eligible?: boolean
   type: PredictionType
   title: string
   detail?: string
