@@ -517,6 +517,50 @@ func TestExperienceServiceProcessAttributionsReprocessesRecentOutcomesForLateFee
 	if watermark := stub.watermarks[domain.ExperienceWorkerAttribution+":experience_events"]; watermark != nil {
 		t.Fatalf("watermark = %+v, want recent reprocess not to advance watermark", watermark)
 	}
+	if watermark := stub.watermarks[domain.ExperienceWorkerAttribution+":"+experienceSourceAttributionRecentReprocess]; watermark == nil || watermark.LastSeenID != 9 {
+		t.Fatalf("recent watermark = %+v, want recent reprocess cursor to advance", watermark)
+	}
+}
+
+func TestExperienceServiceProcessAttributionsSkipsReviewItemForNonMaterializableTarget(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{{
+			ID:         9,
+			EventKey:   "outcome:task_asset:7001:approved",
+			EventTime:  outcomeAt,
+			SourceType: experienceSourceTaskAssetReviewSnapshot,
+			Action:     "asset_review_status_changed",
+			Outcome:    "approved",
+			TaskID:     experienceInt64Ptr(42),
+			TargetType: "task_asset",
+			TargetID:   "7001",
+		}},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{{
+			SuggestionEventID:   "suggestion-display-1",
+			SuggestionStableKey: "asset|review|workflow|task_asset|7001",
+			SuggestionType:      "asset",
+			SuggestionID:        "review-asset",
+			TargetType:          "task_asset",
+			TargetID:            "7001",
+			DisplayedAt:         outcomeAt.Add(-2 * time.Hour),
+			BehaviorCount:       1,
+			BehaviorScore:       5,
+			FeedbackValue:       domain.ExperienceFeedbackAccepted,
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessAttributions(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if result.Created != 1 || len(stub.attributions) != 1 {
+		t.Fatalf("result=%+v attributions=%d, want attribution created", result, len(stub.attributions))
+	}
+	if len(stub.reviewItems) != 0 {
+		t.Fatalf("review items = %+v, want non-materializable target skipped", stub.reviewItems)
+	}
 }
 
 func TestExperienceServiceRecordAISuggestionFeedbackRequiresOwnedSuggestion(t *testing.T) {
@@ -1501,7 +1545,7 @@ func (s *experienceRepoStub) ListExperienceAttributionOutcomes(context.Context, 
 	return s.attributionOutcomes, nil
 }
 
-func (s *experienceRepoStub) ListRecentExperienceAttributionOutcomes(context.Context, time.Time, int) ([]*domain.ExperienceAttributionOutcome, error) {
+func (s *experienceRepoStub) ListRecentExperienceAttributionOutcomes(context.Context, time.Time, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceAttributionOutcome, error) {
 	s.calls++
 	return s.recentAttributionOutcomes, nil
 }

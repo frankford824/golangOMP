@@ -35,7 +35,7 @@ type ExperienceRepo interface {
 	CreateExperienceWorkerRun(ctx context.Context, run *domain.ExperienceWorkerRunRecord) error
 	ListRecentExperienceWorkerRuns(ctx context.Context, limit int) ([]*domain.ExperienceWorkerRunRecord, error)
 	ListExperienceAttributionOutcomes(ctx context.Context, cursor ExperienceSourceCursor, limit int) ([]*domain.ExperienceAttributionOutcome, error)
-	ListRecentExperienceAttributionOutcomes(ctx context.Context, since time.Time, limit int) ([]*domain.ExperienceAttributionOutcome, error)
+	ListRecentExperienceAttributionOutcomes(ctx context.Context, since time.Time, cursor ExperienceSourceCursor, limit int) ([]*domain.ExperienceAttributionOutcome, error)
 	ListExperienceAttributionCandidates(ctx context.Context, outcome *domain.ExperienceAttributionOutcome, lookback time.Duration, limit int) ([]*domain.ExperienceAttributionCandidate, error)
 	CreateExperienceAttribution(ctx context.Context, attribution *domain.ExperienceAttribution) error
 	ReserveExperienceRateLimit(ctx context.Context, req ExperienceRateLimitRequest) (*domain.ExperienceRateLimitReservation, error)

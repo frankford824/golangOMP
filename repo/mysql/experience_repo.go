@@ -1506,22 +1506,30 @@ func (r *experienceRepo) ListExperienceAttributionOutcomes(ctx context.Context, 
 	return scanExperienceAttributionOutcomes(rows)
 }
 
-func (r *experienceRepo) ListRecentExperienceAttributionOutcomes(ctx context.Context, since time.Time, limit int) ([]*domain.ExperienceAttributionOutcome, error) {
+func (r *experienceRepo) ListRecentExperienceAttributionOutcomes(ctx context.Context, since time.Time, cursor repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceAttributionOutcome, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if since.IsZero() {
 		since = time.Now().UTC().Add(-7 * 24 * time.Hour)
 	}
+	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
+	if lastSeenAt.Before(since.UTC()) {
+		lastSeenAt = since.UTC()
+	}
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT id, event_key, event_time, source_type, action, outcome, task_id,
 		       target_type, target_id, payload_json
 		FROM experience_events
 		WHERE event_time >= ?
+		  AND ((event_time > ?) OR (event_time = ? AND id > ?))
 		  AND (target_type <> '' OR task_id IS NOT NULL)
-		ORDER BY event_time DESC, id DESC
+		ORDER BY event_time ASC, id ASC
 		LIMIT ?`,
 		since.UTC(),
+		lastSeenAt,
+		lastSeenAt,
+		cursor.LastSeenID,
 		limit,
 	)
 	if err != nil {
@@ -1627,12 +1635,12 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		outcomeAt,
 		from,
 		outcomeAt,
-			targetType,
-			targetID,
-			targetType,
-			taskTargetID,
-			taskTargetID,
-			limit,
+		targetType,
+		targetID,
+		targetType,
+		taskTargetID,
+		taskTargetID,
+		limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list experience attribution candidates: %w", err)

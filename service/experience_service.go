@@ -27,17 +27,19 @@ const (
 	experienceBehaviorBatchMax                = 50
 	experienceRetentionBatchMax               = 1000
 	experienceAttributionLookback             = 7 * 24 * time.Hour
+	experienceAttributionRecentReprocessMax   = 500
 	experienceAttributionCandidatesPerOutcome = 20
 	experienceMicroQuestionDailyLimit         = 3
 )
 
 const (
-	experienceSourceAuditRecords              = "audit_records"
-	experienceSourceTaskModuleEvents          = "task_module_events"
-	experienceSourceTaskStatusSnapshot        = "tasks_status_snapshot"
-	experienceSourceTaskAssetReviewSnapshot   = "task_assets_review_snapshot"
-	experienceSourceTaskDetailFilingSnapshot  = "task_details_filing_snapshot"
-	experienceSourceTaskSKUItemFilingSnapshot = "task_sku_items_filing_snapshot"
+	experienceSourceAuditRecords               = "audit_records"
+	experienceSourceTaskModuleEvents           = "task_module_events"
+	experienceSourceTaskStatusSnapshot         = "tasks_status_snapshot"
+	experienceSourceTaskAssetReviewSnapshot    = "task_assets_review_snapshot"
+	experienceSourceTaskDetailFilingSnapshot   = "task_details_filing_snapshot"
+	experienceSourceTaskSKUItemFilingSnapshot  = "task_sku_items_filing_snapshot"
+	experienceSourceAttributionRecentReprocess = "experience_events_recent_reprocess"
 )
 
 type ExperienceService interface {
@@ -941,19 +943,9 @@ func (s *experienceService) ProcessAttributions(ctx context.Context, limit int) 
 			last = outcome
 		}
 	}
-	recentSince := time.Now().UTC().Add(-experienceAttributionLookback)
-	recentOutcomes, err := s.repo.ListRecentExperienceAttributionOutcomes(ctx, recentSince, limit)
-	if err != nil {
-		result.Failed++
-		appErr := infraError("list recent experience attribution outcomes", err)
+	if appErr := s.processRecentAttributionOutcomes(ctx, limit, seenOutcomes, &result); appErr != nil {
 		s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
 		return result, appErr
-	}
-	for _, outcome := range recentOutcomes {
-		if _, appErr := s.processAttributionOutcome(ctx, outcome, &result, seenOutcomes); appErr != nil {
-			s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
-			return result, appErr
-		}
 	}
 	if last != nil {
 		lastSeenAt := last.EventTime.UTC()
@@ -973,6 +965,77 @@ func (s *experienceService) ProcessAttributions(ctx context.Context, limit int) 
 	}
 	s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, nil)
 	return result, nil
+}
+
+func (s *experienceService) processRecentAttributionOutcomes(ctx context.Context, limit int, seen map[string]struct{}, result *domain.ExperienceAttributionRun) *domain.AppError {
+	if s == nil || s.repo == nil || result == nil {
+		return nil
+	}
+	recentSince := time.Now().UTC().Add(-experienceAttributionLookback)
+	recentLimit := limit * 10
+	if recentLimit < limit {
+		recentLimit = limit
+	}
+	if recentLimit < 50 {
+		recentLimit = 50
+	}
+	if recentLimit > experienceAttributionRecentReprocessMax {
+		recentLimit = experienceAttributionRecentReprocessMax
+	}
+	watermark, err := s.repo.GetExperienceWorkerWatermark(ctx, domain.ExperienceWorkerAttribution, experienceSourceAttributionRecentReprocess)
+	if err != nil {
+		result.Failed++
+		return infraError("load recent experience attribution watermark", err)
+	}
+	cursor := experienceCursorFromWatermark(watermark)
+	if cursor.LastSeenAt == nil || cursor.LastSeenAt.Before(recentSince) {
+		cursor.LastSeenAt = &recentSince
+		cursor.LastSeenID = 0
+	}
+	outcomes, err := s.repo.ListRecentExperienceAttributionOutcomes(ctx, recentSince, cursor, recentLimit)
+	if err != nil {
+		result.Failed++
+		return infraError("list recent experience attribution outcomes", err)
+	}
+	var last *domain.ExperienceAttributionOutcome
+	for _, outcome := range outcomes {
+		processed, appErr := s.processAttributionOutcome(ctx, outcome, result, seen)
+		if appErr != nil {
+			return appErr
+		}
+		if processed {
+			last = outcome
+		}
+	}
+	if last != nil {
+		lastSeenAt := last.EventTime.UTC()
+		if err := s.repo.SaveExperienceWorkerWatermark(ctx, &domain.ExperienceWorkerWatermark{
+			WorkerName:      domain.ExperienceWorkerAttribution,
+			SourceName:      experienceSourceAttributionRecentReprocess,
+			LastSeenAt:      &lastSeenAt,
+			LastSeenID:      last.ID,
+			SourceWatermark: experienceSourceWatermark(lastSeenAt, last.ID),
+			Status:          "active",
+		}); err != nil {
+			result.Failed++
+			return infraError("save recent experience attribution watermark", err)
+		}
+		return nil
+	}
+	if cursor.LastSeenID != 0 || (cursor.LastSeenAt != nil && cursor.LastSeenAt.After(recentSince)) {
+		if err := s.repo.SaveExperienceWorkerWatermark(ctx, &domain.ExperienceWorkerWatermark{
+			WorkerName:      domain.ExperienceWorkerAttribution,
+			SourceName:      experienceSourceAttributionRecentReprocess,
+			LastSeenAt:      &recentSince,
+			LastSeenID:      0,
+			SourceWatermark: experienceSourceWatermark(recentSince, 0),
+			Status:          "active",
+		}); err != nil {
+			result.Failed++
+			return infraError("reset recent experience attribution watermark", err)
+		}
+	}
+	return nil
 }
 
 func (s *experienceService) processAttributionOutcome(ctx context.Context, outcome *domain.ExperienceAttributionOutcome, result *domain.ExperienceAttributionRun, seen map[string]struct{}) (bool, *domain.AppError) {
