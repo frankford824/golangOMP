@@ -19435,6 +19435,104 @@ paths:
                       page_size: { type: integer }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+    post:
+      summary: Create asset workbench submission
+      description: |
+        Creates uploaded work records. Client uploads no longer need a frontend "template/type" selection:
+        when an item omits `difficulty_class`, the backend derives it from the uploaded session's
+        upload-directory difficulty snapshot. `template_id` remains supported for compatibility.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                notes: { type: string }
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [order_no, finalized, page_count, upload_session_ids]
+                    properties:
+                      order_no: { type: string }
+                      template_id: { type: integer }
+                      difficulty_class:
+                        type: string
+                        enum: [A, B, C, A+小夜灯]
+                        description: Optional when all uploaded sessions carry an upload-directory difficulty snapshot.
+                      finalized: { type: boolean }
+                      page_count: { type: integer, minimum: 1 }
+                      item_count: { type: integer, minimum: 1 }
+                      upload_session_ids:
+                        type: array
+                        items: { type: string }
+      responses:
+        '201':
+          description: Created submission detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      submission: *AssetWorkbenchSubmissionRow
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            item:
+                              type: object
+                              properties:
+                                id: { type: integer }
+                                submission_id: { type: integer }
+                                payee_user_id: { type: integer }
+                                order_no: { type: string }
+                                template_id: { type: integer, nullable: true }
+                                template_name_snapshot: { type: string }
+                                category_snapshot: { type: string }
+                                difficulty_class: { type: string }
+                                finalized: { type: boolean }
+                                page_count: { type: integer }
+                                item_count: { type: integer }
+                                business_month: { type: string }
+                                gross_amount: { type: number }
+                                pricing_status: { type: string }
+                                qc_status: { type: string }
+                                settlement_status: { type: string }
+                            files:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id: { type: integer }
+                                  submission_id: { type: integer }
+                                  submission_item_id: { type: integer }
+                                  upload_directory_id: { type: integer, nullable: true }
+                                  upload_directory_name: { type: string }
+                                  upload_directory_prefix: { type: string }
+                                  upload_directory_difficulty_class: { type: string }
+                                  original_filename: { type: string }
+                                  file_type: { type: string }
+                                  mime_type: { type: string }
+                                  file_size: { type: integer }
+                                  file_hash: { type: string }
+                                  preview_status: { type: string }
+                                  preview_key: { type: string }
+                                  preview_error: { type: string }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
   /v1/asset-workbench/submissions/{submission_id}/void:
     post:
       summary: Void an asset workbench submission
@@ -19621,6 +19719,7 @@ paths:
                             upload_directory_id: { type: integer, nullable: true }
                             upload_directory_name: { type: string }
                             upload_directory_prefix: { type: string }
+                            upload_directory_difficulty_class: { type: string }
                             original_filename: { type: string }
                             file_type: { type: string }
                             mime_type: { type: string }
@@ -19919,10 +20018,106 @@ paths:
         '403': { description: Forbidden }
         '404': { description: Supplement not found }
         '409': { description: Supplement is already in batch or settled }
+  /v1/asset-workbench/upload-sessions:
+    post:
+      summary: Create asset workbench upload session
+      description: Creates a direct-upload session. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [original_filename, file_size, mime_type]
+              properties:
+                original_filename: { type: string }
+                file_size: { type: integer, minimum: 0 }
+                mime_type: { type: string }
+                file_hash: { type: string }
+                upload_directory_id: { type: integer }
+      responses:
+        '201':
+          description: Created upload session and upload plan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      session: &AssetWorkbenchUploadSessionRow
+                        type: object
+                        properties:
+                          id: { type: integer }
+                          session_id: { type: string }
+                          status: { type: string }
+                          object_key: { type: string }
+                          upload_directory_id: { type: integer, nullable: true }
+                          upload_directory_name: { type: string }
+                          upload_directory_prefix: { type: string }
+                          upload_directory_difficulty_class: { type: string }
+                          original_filename: { type: string }
+                          file_size: { type: integer }
+                          mime_type: { type: string }
+                          file_hash: { type: string }
+                          upload_id: { type: string }
+                      plan:
+                        type: object
+                        additionalProperties: true
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/upload-sessions/{session_id}/complete:
+    post:
+      summary: Complete asset workbench upload session
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      part_number: { type: integer }
+                      etag: { type: string }
+      responses:
+        '200':
+          description: Upload session marked uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchUploadSessionRow
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Upload session not found }
+        '409': { description: Upload session cannot be completed from current state }
   /v1/asset-workbench/upload-directories:
     get:
       summary: List enabled asset workbench upload directories
-      description: Client-visible upload destinations. When this list is non-empty, upload session creation requires `upload_directory_id`.
+      description: Client-visible upload destinations. When this list is non-empty, upload session creation requires `upload_directory_id`; each directory also carries the pricing/difficulty class used by client uploads.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -19945,6 +20140,7 @@ paths:
                         name: { type: string }
                         oss_prefix: { type: string }
                         description: { type: string }
+                        difficulty_class: { type: string, enum: [A, B, C, A+小夜灯] }
                         enabled: { type: boolean }
                         sort_order: { type: integer }
                         created_by: { type: integer }
@@ -19971,6 +20167,7 @@ paths:
                 name: { type: string }
                 oss_prefix: { type: string, description: Relative OSS prefix under asset-workbench/uploads. }
                 description: { type: string }
+                difficulty_class: { type: string, enum: [A, B, C, A+小夜灯], default: A }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
       responses:
@@ -20029,6 +20226,7 @@ paths:
                 name: { type: string }
                 oss_prefix: { type: string }
                 description: { type: string }
+                difficulty_class: { type: string, enum: [A, B, C, A+小夜灯] }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
       responses:

@@ -40,7 +40,7 @@ const activeGroup = ref<WorkbenchGroupRow | null>(null)
 const selectedPeople = ref<WorkbenchMemberRow[]>([])
 const selectedGroups = ref<WorkbenchGroupRow[]>([])
 const selectedGroupPeople = ref<WorkbenchMemberRow[]>([])
-const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/dispatch')
+const { label: pageLabel } = useRoutePageCopy('/settings/dispatch')
 const templateRequest = usePageRequest(
   async () => {
     const [groupRes, templateRes, assignmentRes] = await Promise.all([
@@ -169,10 +169,10 @@ async function createTemplate() {
       enabled: true,
     })
     templateForm.value = { name: '', category: '', difficulty_class: 'A', worker_type: '', sort_order: 0 }
-    notice.value = '作品类型已创建'
+    notice.value = '旧模板已创建'
     await loadAll()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '作品类型创建失败'
+    error.value = err instanceof Error ? err.message : '旧模板创建失败'
   } finally {
     saving.value = false
   }
@@ -269,7 +269,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">设置</p>
         <h2>{{ pageLabel }}</h2>
-        <p>{{ pageSubtitle }}。管理员维护作品类型和人员分组，再按姓名或分组下发给员工。</p>
+        <p>新上传按上传目录计价；这里仅保留旧模板和历史下发关系，不作为客户端上传前置条件。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadAll">
@@ -286,14 +286,14 @@ onMounted(() => {
       <section class="aw-panel">
         <div class="aw-panel__head">
           <div>
-            <p class="aw-eyebrow">作品类型</p>
-            <h3>新建类型</h3>
+            <p class="aw-eyebrow">兼容模板</p>
+            <h3>新建旧模板</h3>
           </div>
           <Plus :size="18" aria-hidden="true" />
         </div>
         <div class="aw-form-grid">
           <label>
-            <span>类型名称</span>
+            <span>模板名称</span>
             <input v-model="templateForm.name" placeholder="如：海报 / 视频 / 小夜灯" />
           </label>
           <label>
@@ -312,7 +312,7 @@ onMounted(() => {
               <option value="parttime">兼职</option>
             </select>
           </label>
-          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="createTemplate">新增作品类型</button>
+          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="createTemplate">新增旧模板</button>
         </div>
       </section>
 
@@ -341,15 +341,15 @@ onMounted(() => {
     <section class="aw-data-surface">
       <div class="aw-panel__head">
         <div>
-          <p class="aw-eyebrow">下发</p>
-          <h3>作品类型</h3>
+          <p class="aw-eyebrow">历史下发</p>
+          <h3>旧模板</h3>
         </div>
         <span class="aw-chip aw-chip--neutral">{{ enabledTemplates.length }} 个启用</span>
       </div>
       <AsyncBoundary
         :loading="loading"
         :error="error"
-        loading-label="正在加载作品类型"
+        loading-label="正在加载旧模板"
         @retry="loadAll"
       >
         <div v-if="templates.length" class="aw-compact-list">
@@ -368,8 +368,8 @@ onMounted(() => {
           </article>
         </div>
         <div v-else class="aw-empty-state">
-          <h3>还没有作品类型</h3>
-          <p>先新建作品类型，再按人员或分组下发。</p>
+          <h3>还没有旧模板</h3>
+          <p>旧模板仅用于兼容历史下发；新上传请在素材库里维护上传目录。</p>
         </div>
       </AsyncBoundary>
     </section>
@@ -378,7 +378,7 @@ onMounted(() => {
       <div class="aw-panel__head">
         <div>
           <p class="aw-eyebrow">选择对象</p>
-          <h3>下发「{{ activeTemplate.name }}」</h3>
+          <h3>下发旧模板「{{ activeTemplate.name }}」</h3>
         </div>
         <button class="aw-secondary-button" type="button" @click="activeTemplate = null">
           <X :size="16" aria-hidden="true" />
@@ -447,7 +447,7 @@ onMounted(() => {
           </div>
           <button class="aw-primary-button" type="button" :disabled="saving || selectedReachCount === 0" @click="assignTemplate">
             <Send :size="16" aria-hidden="true" />
-            确认下发
+            确认下发旧模板
           </button>
         </div>
         <div class="aw-compact-list">
@@ -530,13 +530,13 @@ onMounted(() => {
         <div class="aw-panel__head">
           <div>
             <p class="aw-eyebrow">记录</p>
-            <h3>下发记录</h3>
+            <h3>旧模板下发记录</h3>
           </div>
         </div>
         <div class="aw-compact-list">
           <article v-for="item in assignments" :key="item.id" class="aw-compact-list__item">
             <div>
-              <strong>{{ item.template_name || `作品类型 ${item.template_id}` }}</strong>
+              <strong>{{ item.template_name || `旧模板 ${item.template_id}` }}</strong>
               <span>{{ item.target_type === 'group' ? '分组' : '人员' }} · {{ item.target_name || '未命名' }}</span>
             </div>
             <div class="aw-page-bar__actions">

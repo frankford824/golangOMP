@@ -776,6 +776,86 @@ func (r *uploadDirectorySessionRepo) AppendEvent(_ context.Context, _ repo.Tx, e
 	return &copyEvent, nil
 }
 
+type submissionDirectoryDifficultyRepo struct {
+	repo.AssetWorkbenchRepo
+	profile       *domain.AssetWorkbenchProfile
+	price         *domain.AssetWorkbenchPriceMatrix
+	session       *domain.AssetWorkbenchUploadSession
+	submission    *domain.AssetWorkbenchSubmission
+	item          *domain.AssetWorkbenchSubmissionItem
+	files         []*domain.AssetWorkbenchSubmissionFile
+	sessionStatus string
+	events        []*domain.AssetWorkbenchEvent
+}
+
+func (r *submissionDirectoryDifficultyRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
+	if r.profile == nil || r.profile.UserID != userID {
+		return nil, sql.ErrNoRows
+	}
+	copyProfile := *r.profile
+	return &copyProfile, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) GetUploadSession(_ context.Context, sessionID string) (*domain.AssetWorkbenchUploadSession, error) {
+	if r.session == nil || r.session.SessionID != sessionID {
+		return nil, sql.ErrNoRows
+	}
+	copySession := *r.session
+	return &copySession, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) CreateSubmission(_ context.Context, _ repo.Tx, submission *domain.AssetWorkbenchSubmission) (*domain.AssetWorkbenchSubmission, error) {
+	copySubmission := *submission
+	copySubmission.ID = 5001
+	r.submission = &copySubmission
+	return &copySubmission, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) CreateSubmissionItem(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
+	copyItem := *item
+	copyItem.ID = 6001
+	r.item = &copyItem
+	return &copyItem, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) CreateSubmissionFile(_ context.Context, _ repo.Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error) {
+	copyFile := *file
+	copyFile.ID = int64(7000 + len(r.files) + 1)
+	r.files = append(r.files, &copyFile)
+	return &copyFile, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) UpdateUploadSessionStatus(_ context.Context, _ repo.Tx, sessionID, status string, _ *time.Time, _ *time.Time, _ *int64) error {
+	if r.session == nil || r.session.SessionID != sessionID {
+		return sql.ErrNoRows
+	}
+	r.sessionStatus = status
+	return nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) RefreshSubmissionTotals(_ context.Context, _ repo.Tx, _ int64) error {
+	return nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) FindActivePrice(_ context.Context, workerType, jobGrade, difficulty string, _ time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
+	if r.price == nil || r.price.WorkerType != workerType || r.price.JobGrade != jobGrade || r.price.DifficultyClass != difficulty {
+		return nil, sql.ErrNoRows
+	}
+	copyPrice := *r.price
+	return &copyPrice, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) ListActivePromoCoupons(context.Context, string, string, string, time.Time) ([]*domain.AssetWorkbenchPromoCoupon, error) {
+	return nil, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
 type clientMaterialRepo struct {
 	repo.AssetWorkbenchRepo
 	materials map[int64]*domain.AssetWorkbenchClientMaterial
@@ -1768,7 +1848,7 @@ func TestCreateUploadSessionRequiresDirectoryWhenConfigured(t *testing.T) {
 
 func TestUploadDirectorySnapshotObjectKeyUsesDirectoryPrefix(t *testing.T) {
 	workbenchRepo := &uploadDirectorySessionRepo{directories: []*domain.AssetWorkbenchUploadDirectory{
-		{ID: 11, Name: "客户端 A", OSSPrefix: "client-a", Enabled: true},
+		{ID: 11, Name: "客户端 A", OSSPrefix: "client-a", DifficultyClass: "C", Enabled: true},
 	}}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"},
 		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
@@ -1781,9 +1861,78 @@ func TestUploadDirectorySnapshotObjectKeyUsesDirectoryPrefix(t *testing.T) {
 	if directory.ID != 11 || directory.Name != "客户端 A" || directory.OSSPrefix != "client-a" {
 		t.Fatalf("directory = %+v", directory)
 	}
+	if directory.DifficultyClass != "C" {
+		t.Fatalf("directory difficulty = %q, want C", directory.DifficultyClass)
+	}
 	key := svc.buildObjectKey(time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), "session-1", "../final.psd", directory)
 	if !strings.Contains(key, "/uploads/client-a/2026/06/session-1/final.psd") || strings.Contains(key, "..") {
 		t.Fatalf("object key = %q", key)
+	}
+}
+
+func TestCreateSubmissionInfersDifficultyFromUploadDirectorySnapshot(t *testing.T) {
+	sessionID := "session-c"
+	directoryID := int64(11)
+	workbenchRepo := &submissionDirectoryDifficultyRepo{
+		profile: &domain.AssetWorkbenchProfile{
+			UserID:     77,
+			WorkerType: domain.AssetWorkbenchWorkerTypeParttime,
+			JobGrade:   "J1",
+			Status:     domain.AssetWorkbenchProfileStatusActive,
+		},
+		price: &domain.AssetWorkbenchPriceMatrix{
+			ID:              101,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeParttime,
+			JobGrade:        "J1",
+			DifficultyClass: "C",
+			UnitPrice:       12.5,
+		},
+		session: &domain.AssetWorkbenchUploadSession{
+			ID:                             9001,
+			SessionID:                      sessionID,
+			OwnerUserID:                    77,
+			UploadDirectoryID:              &directoryID,
+			UploadDirectoryName:            "C 类定稿",
+			UploadDirectoryPrefix:          "client-c",
+			UploadDirectoryDifficultyClass: "C",
+			Status:                         domain.AssetWorkbenchUploadStatusUploaded,
+			ObjectKey:                      "asset-workbench/uploads/client-c/2026/06/session-c/final.jpg",
+			OriginalFilename:               "final.jpg",
+			MimeType:                       "image/jpeg",
+			FileSize:                       2048,
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	svc.nowFn = func() time.Time {
+		return time.Date(2026, 7, 3, 2, 0, 0, 0, time.UTC)
+	}
+	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	detail, appErr := svc.CreateSubmission(context.Background(), actor, CreateSubmissionParams{
+		Items: []CreateSubmissionItemParams{{
+			OrderNo:          "RW-20260703-C-001",
+			Finalized:        true,
+			PageCount:        1,
+			UploadSessionIDs: []string{sessionID},
+		}},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateSubmission() appErr = %+v", appErr)
+	}
+	if detail == nil || len(detail.Items) != 1 || len(detail.Items[0].Files) != 1 {
+		t.Fatalf("detail = %+v, want one item and one file", detail)
+	}
+	if workbenchRepo.item == nil || workbenchRepo.item.DifficultyClass != "C" {
+		t.Fatalf("created item difficulty = %+v, want C", workbenchRepo.item)
+	}
+	if workbenchRepo.item.TemplateID != nil {
+		t.Fatalf("template id = %+v, want nil when client uploads through directory", workbenchRepo.item.TemplateID)
+	}
+	if workbenchRepo.files[0].UploadDirectoryDifficultyClass != "C" {
+		t.Fatalf("file directory difficulty = %q, want C", workbenchRepo.files[0].UploadDirectoryDifficultyClass)
+	}
+	if workbenchRepo.sessionStatus != domain.AssetWorkbenchUploadStatusSubmitted {
+		t.Fatalf("session status = %q, want submitted", workbenchRepo.sessionStatus)
 	}
 }
 

@@ -346,16 +346,17 @@ type AssetWorkbenchTemplateAssignment struct {
 }
 
 type AssetWorkbenchUploadDirectory struct {
-	ID          int64     `json:"id" db:"id"`
-	Name        string    `json:"name" db:"name"`
-	OSSPrefix   string    `json:"oss_prefix" db:"oss_prefix"`
-	Description string    `json:"description" db:"description"`
-	Enabled     bool      `json:"enabled" db:"enabled"`
-	SortOrder   int       `json:"sort_order" db:"sort_order"`
-	CreatedBy   int64     `json:"created_by" db:"created_by"`
-	UpdatedBy   *int64    `json:"updated_by,omitempty" db:"updated_by"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	ID              int64     `json:"id" db:"id"`
+	Name            string    `json:"name" db:"name"`
+	OSSPrefix       string    `json:"oss_prefix" db:"oss_prefix"`
+	Description     string    `json:"description" db:"description"`
+	DifficultyClass string    `json:"difficulty_class" db:"difficulty_class"`
+	Enabled         bool      `json:"enabled" db:"enabled"`
+	SortOrder       int       `json:"sort_order" db:"sort_order"`
+	CreatedBy       int64     `json:"created_by" db:"created_by"`
+	UpdatedBy       *int64    `json:"updated_by,omitempty" db:"updated_by"`
+	CreatedAt       time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchClientMaterial struct {
@@ -434,26 +435,27 @@ type AssetWorkbenchAccountLink struct {
 }
 
 type AssetWorkbenchUploadSession struct {
-	ID                    int64           `json:"id" db:"id"`
-	SessionID             string          `json:"session_id" db:"session_id"`
-	OwnerUserID           int64           `json:"owner_user_id" db:"owner_user_id"`
-	UploadDirectoryID     *int64          `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
-	UploadDirectoryName   string          `json:"upload_directory_name" db:"upload_directory_name"`
-	UploadDirectoryPrefix string          `json:"upload_directory_prefix" db:"upload_directory_prefix"`
-	Status                string          `json:"status" db:"status"`
-	ObjectKey             string          `json:"object_key" db:"object_key"`
-	OriginalFilename      string          `json:"original_filename" db:"original_filename"`
-	FileSize              int64           `json:"file_size" db:"file_size"`
-	MimeType              string          `json:"mime_type" db:"mime_type"`
-	FileHash              string          `json:"file_hash" db:"file_hash"`
-	UploadID              string          `json:"upload_id" db:"upload_id"`
-	MultipartPlan         json.RawMessage `json:"multipart_plan_json,omitempty" db:"multipart_plan_json"`
-	ExpiresAt             time.Time       `json:"expires_at" db:"expires_at"`
-	UploadedAt            *time.Time      `json:"uploaded_at,omitempty" db:"uploaded_at"`
-	CancelledAt           *time.Time      `json:"cancelled_at,omitempty" db:"cancelled_at"`
-	SubmittedItemID       *int64          `json:"submitted_item_id,omitempty" db:"submitted_item_id"`
-	CreatedAt             time.Time       `json:"created_at" db:"created_at"`
-	UpdatedAt             time.Time       `json:"updated_at" db:"updated_at"`
+	ID                             int64           `json:"id" db:"id"`
+	SessionID                      string          `json:"session_id" db:"session_id"`
+	OwnerUserID                    int64           `json:"owner_user_id" db:"owner_user_id"`
+	UploadDirectoryID              *int64          `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
+	UploadDirectoryName            string          `json:"upload_directory_name" db:"upload_directory_name"`
+	UploadDirectoryPrefix          string          `json:"upload_directory_prefix" db:"upload_directory_prefix"`
+	UploadDirectoryDifficultyClass string          `json:"upload_directory_difficulty_class" db:"upload_directory_difficulty_class"`
+	Status                         string          `json:"status" db:"status"`
+	ObjectKey                      string          `json:"object_key" db:"object_key"`
+	OriginalFilename               string          `json:"original_filename" db:"original_filename"`
+	FileSize                       int64           `json:"file_size" db:"file_size"`
+	MimeType                       string          `json:"mime_type" db:"mime_type"`
+	FileHash                       string          `json:"file_hash" db:"file_hash"`
+	UploadID                       string          `json:"upload_id" db:"upload_id"`
+	MultipartPlan                  json.RawMessage `json:"multipart_plan_json,omitempty" db:"multipart_plan_json"`
+	ExpiresAt                      time.Time       `json:"expires_at" db:"expires_at"`
+	UploadedAt                     *time.Time      `json:"uploaded_at,omitempty" db:"uploaded_at"`
+	CancelledAt                    *time.Time      `json:"cancelled_at,omitempty" db:"cancelled_at"`
+	SubmittedItemID                *int64          `json:"submitted_item_id,omitempty" db:"submitted_item_id"`
+	CreatedAt                      time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt                      time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchSubmission struct {
@@ -508,31 +510,32 @@ type AssetWorkbenchSubmissionItem struct {
 }
 
 type AssetWorkbenchSubmissionFile struct {
-	ID                    int64      `json:"id" db:"id"`
-	SubmissionID          int64      `json:"submission_id" db:"submission_id"`
-	SubmissionItemID      int64      `json:"submission_item_id" db:"submission_item_id"`
-	UploadSessionID       *int64     `json:"upload_session_id,omitempty" db:"upload_session_id"`
-	OwnerUserID           int64      `json:"owner_user_id" db:"owner_user_id"`
-	UploadDirectoryID     *int64     `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
-	UploadDirectoryName   string     `json:"upload_directory_name" db:"upload_directory_name"`
-	UploadDirectoryPrefix string     `json:"upload_directory_prefix" db:"upload_directory_prefix"`
-	ObjectKey             string     `json:"object_key" db:"object_key"`
-	PreviewKey            string     `json:"preview_key" db:"preview_key"`
-	PreviewStatus         string     `json:"preview_status" db:"preview_status"`
-	PreviewAttempts       int        `json:"preview_attempts" db:"preview_attempts"`
-	PreviewError          string     `json:"preview_error" db:"preview_error"`
-	PreviewNextRetryAt    *time.Time `json:"preview_next_retry_at,omitempty" db:"preview_next_retry_at"`
-	PreviewWorkerID       string     `json:"preview_worker_id" db:"preview_worker_id"`
-	PreviewLeaseExpiresAt *time.Time `json:"preview_lease_expires_at,omitempty" db:"preview_lease_expires_at"`
-	OriginalFilename      string     `json:"original_filename" db:"original_filename"`
-	FileExt               string     `json:"file_ext" db:"file_ext"`
-	FileType              string     `json:"file_type" db:"file_type"`
-	MimeType              string     `json:"mime_type" db:"mime_type"`
-	FileSize              int64      `json:"file_size" db:"file_size"`
-	FileHash              string     `json:"file_hash" db:"file_hash"`
-	SortOrder             int        `json:"sort_order" db:"sort_order"`
-	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+	ID                             int64      `json:"id" db:"id"`
+	SubmissionID                   int64      `json:"submission_id" db:"submission_id"`
+	SubmissionItemID               int64      `json:"submission_item_id" db:"submission_item_id"`
+	UploadSessionID                *int64     `json:"upload_session_id,omitempty" db:"upload_session_id"`
+	OwnerUserID                    int64      `json:"owner_user_id" db:"owner_user_id"`
+	UploadDirectoryID              *int64     `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
+	UploadDirectoryName            string     `json:"upload_directory_name" db:"upload_directory_name"`
+	UploadDirectoryPrefix          string     `json:"upload_directory_prefix" db:"upload_directory_prefix"`
+	UploadDirectoryDifficultyClass string     `json:"upload_directory_difficulty_class" db:"upload_directory_difficulty_class"`
+	ObjectKey                      string     `json:"object_key" db:"object_key"`
+	PreviewKey                     string     `json:"preview_key" db:"preview_key"`
+	PreviewStatus                  string     `json:"preview_status" db:"preview_status"`
+	PreviewAttempts                int        `json:"preview_attempts" db:"preview_attempts"`
+	PreviewError                   string     `json:"preview_error" db:"preview_error"`
+	PreviewNextRetryAt             *time.Time `json:"preview_next_retry_at,omitempty" db:"preview_next_retry_at"`
+	PreviewWorkerID                string     `json:"preview_worker_id" db:"preview_worker_id"`
+	PreviewLeaseExpiresAt          *time.Time `json:"preview_lease_expires_at,omitempty" db:"preview_lease_expires_at"`
+	OriginalFilename               string     `json:"original_filename" db:"original_filename"`
+	FileExt                        string     `json:"file_ext" db:"file_ext"`
+	FileType                       string     `json:"file_type" db:"file_type"`
+	MimeType                       string     `json:"mime_type" db:"mime_type"`
+	FileSize                       int64      `json:"file_size" db:"file_size"`
+	FileHash                       string     `json:"file_hash" db:"file_hash"`
+	SortOrder                      int        `json:"sort_order" db:"sort_order"`
+	CreatedAt                      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt                      time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchOverviewRow struct {

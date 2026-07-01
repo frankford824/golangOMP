@@ -45,7 +45,7 @@ export const assetWorkbenchRouteAccess = {
   },
   '/upload': {
     label: '上传成品',
-    subtitle: '按模板交稿计件',
+    subtitle: '按上传目录交稿计件',
     aliases: ['交作品'],
     simple: true,
     requiresAnyCapability: ['asset.workbench.submit'],
@@ -111,9 +111,9 @@ export const assetWorkbenchRouteAccess = {
     requiresAnyCapability: ['asset.workbench.cost_center.manage'],
   },
   '/settings/dispatch': {
-    label: '分配任务',
-    subtitle: '指定谁能交哪类稿',
-    aliases: ['作品下发', '模板下发'],
+    label: '兼容模板',
+    subtitle: '旧模板下发留档',
+    aliases: ['旧作品下发', '模板下发'],
     requiresAnyCapability: ['asset.workbench.template.assign'],
   },
   '/settings/people': {
@@ -141,9 +141,9 @@ export const assetWorkbenchRouteAccess = {
     requiresAnyCapability: ['asset.workbench.cost_center.manage'],
   },
   '/template-assignments': {
-    label: '分配任务',
-    subtitle: '指定谁能交哪类稿',
-    aliases: ['作品下发'],
+    label: '兼容模板',
+    subtitle: '旧模板下发留档',
+    aliases: ['旧作品下发'],
     requiresAnyCapability: ['asset.workbench.template.assign'],
   },
   '/people': {

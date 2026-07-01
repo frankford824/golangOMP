@@ -74,6 +74,8 @@ const clientMaterialDescription = ref('')
 const directoryName = ref('')
 const directoryPrefix = ref('')
 const directoryDescription = ref('')
+const directoryDifficulty = ref('A')
+const directoryDifficultyOptions = ['A', 'B', 'C', 'A+小夜灯']
 const materialsRequest = usePageRequest(
   (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, page: page.value, page_size: pageSize.value }, signal),
   { items: [], total: 0, page: 1, size: 0 },
@@ -595,12 +597,14 @@ async function createUploadDirectory() {
       name: directoryName.value,
       oss_prefix: directoryPrefix.value,
       description: directoryDescription.value,
+      difficulty_class: directoryDifficulty.value,
       enabled: true,
       sort_order: uploadDirectories.value.length + 1,
     })
     directoryName.value = ''
     directoryPrefix.value = ''
     directoryDescription.value = ''
+    directoryDifficulty.value = 'A'
     notice.value = '上传目录已创建'
     await loadUploadDirectoriesAdmin()
   } catch (err) {
@@ -829,6 +833,9 @@ watch(
       <div class="aw-material-admin-form">
         <input v-model="directoryName" type="text" placeholder="目录名称" aria-label="目录名称" />
         <input v-model="directoryPrefix" type="text" placeholder="OSS 前缀，如 studio-a" aria-label="OSS 前缀" />
+        <select v-model="directoryDifficulty" aria-label="计价分类">
+          <option v-for="option in directoryDifficultyOptions" :key="option" :value="option">{{ option }}</option>
+        </select>
         <input v-model="directoryDescription" type="text" placeholder="说明" aria-label="说明" />
         <button class="aw-secondary-button" type="button" @click="createUploadDirectory">创建目录</button>
       </div>
@@ -836,6 +843,7 @@ watch(
         <article v-for="directory in uploadDirectories" :key="directory.id" class="aw-material-admin-item">
           <strong>{{ directory.name }}</strong>
           <span>{{ directory.oss_prefix }}</span>
+          <span class="aw-chip aw-chip--info">计价 {{ directory.difficulty_class || 'A' }}</span>
           <span class="aw-chip" :class="directory.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ directory.enabled ? '已启用' : '已停用' }}</span>
           <button type="button" @click="toggleUploadDirectory(directory)">{{ directory.enabled ? '停用' : '启用' }}</button>
         </article>

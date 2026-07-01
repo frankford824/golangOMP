@@ -264,6 +264,7 @@ export interface SubmissionFileRow {
   upload_directory_id?: number
   upload_directory_name?: string
   upload_directory_prefix?: string
+  upload_directory_difficulty_class?: string
   original_filename: string
   file_type: string
   mime_type: string
@@ -677,6 +678,7 @@ export interface UploadDirectoryRow {
   name: string
   oss_prefix: string
   description: string
+  difficulty_class: string
   enabled: boolean
   sort_order: number
   created_by: number
@@ -727,6 +729,7 @@ export interface UploadSessionRow {
   upload_directory_id?: number
   upload_directory_name?: string
   upload_directory_prefix?: string
+  upload_directory_difficulty_class?: string
   original_filename: string
   file_size: number
   mime_type: string
@@ -888,6 +891,7 @@ export interface UpsertUploadDirectoryPayload {
   name?: string
   oss_prefix?: string
   description?: string
+  difficulty_class?: string
   enabled?: boolean
   sort_order?: number
 }

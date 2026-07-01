@@ -376,19 +376,21 @@ type AssignTemplateParams struct {
 }
 
 type CreateUploadDirectoryParams struct {
-	Name        string `json:"name"`
-	OSSPrefix   string `json:"oss_prefix"`
-	Description string `json:"description"`
-	Enabled     *bool  `json:"enabled"`
-	SortOrder   int    `json:"sort_order"`
+	Name            string `json:"name"`
+	OSSPrefix       string `json:"oss_prefix"`
+	Description     string `json:"description"`
+	DifficultyClass string `json:"difficulty_class"`
+	Enabled         *bool  `json:"enabled"`
+	SortOrder       int    `json:"sort_order"`
 }
 
 type UpdateUploadDirectoryParams struct {
-	Name        *string `json:"name"`
-	OSSPrefix   *string `json:"oss_prefix"`
-	Description *string `json:"description"`
-	Enabled     *bool   `json:"enabled"`
-	SortOrder   *int    `json:"sort_order"`
+	Name            *string `json:"name"`
+	OSSPrefix       *string `json:"oss_prefix"`
+	Description     *string `json:"description"`
+	DifficultyClass *string `json:"difficulty_class"`
+	Enabled         *bool   `json:"enabled"`
+	SortOrder       *int    `json:"sort_order"`
 }
 
 type CreateClientMaterialParams struct {
@@ -2551,13 +2553,18 @@ func (s *Service) CreateUploadDirectory(ctx context.Context, actor domain.Reques
 	if appErr != nil {
 		return nil, appErr
 	}
+	difficulty, appErr := normalizeUploadDirectoryDifficulty(params.DifficultyClass)
+	if appErr != nil {
+		return nil, appErr
+	}
 	item := &domain.AssetWorkbenchUploadDirectory{
-		Name:        name,
-		OSSPrefix:   prefix,
-		Description: strings.TrimSpace(params.Description),
-		Enabled:     boolValueDefault(params.Enabled, true),
-		SortOrder:   params.SortOrder,
-		CreatedBy:   actor.ID,
+		Name:            name,
+		OSSPrefix:       prefix,
+		Description:     strings.TrimSpace(params.Description),
+		DifficultyClass: difficulty,
+		Enabled:         boolValueDefault(params.Enabled, true),
+		SortOrder:       params.SortOrder,
+		CreatedBy:       actor.ID,
 	}
 	var created *domain.AssetWorkbenchUploadDirectory
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -2606,6 +2613,13 @@ func (s *Service) UpdateUploadDirectory(ctx context.Context, actor domain.Reques
 	}
 	if params.Description != nil {
 		item.Description = strings.TrimSpace(*params.Description)
+	}
+	if params.DifficultyClass != nil {
+		difficulty, appErr := normalizeUploadDirectoryDifficulty(*params.DifficultyClass)
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.DifficultyClass = difficulty
 	}
 	if params.Enabled != nil {
 		item.Enabled = *params.Enabled
@@ -2677,6 +2691,7 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 		session.UploadDirectoryID = &directory.ID
 		session.UploadDirectoryName = directory.Name
 		session.UploadDirectoryPrefix = directory.OSSPrefix
+		session.UploadDirectoryDifficultyClass = directory.DifficultyClass
 	}
 	var created *domain.AssetWorkbenchUploadSession
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -2852,9 +2867,22 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 		}
 		detail.Submission = createdSubmission
 		for _, reqItem := range params.Items {
+			uploadSessions, inferredDifficulty, appErr := s.loadSubmissionUploadSessions(ctx, actor, reqItem)
+			if appErr != nil {
+				return appErr
+			}
+			if strings.TrimSpace(reqItem.DifficultyClass) == "" && inferredDifficulty != "" {
+				reqItem.DifficultyClass = inferredDifficulty
+			}
 			template, appErr := s.resolveSubmissionTemplate(ctx, actor, profile, reqItem)
 			if appErr != nil {
 				return appErr
+			}
+			if template != nil && inferredDifficulty != "" && strings.TrimSpace(template.DifficultyClass) != inferredDifficulty {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "Template difficulty_class does not match the upload directory.", map[string]string{
+					"template_difficulty_class":         template.DifficultyClass,
+					"upload_directory_difficulty_class": inferredDifficulty,
+				})
 			}
 			item, appErr := s.buildSubmissionItem(ctx, actor.ID, createdSubmission.ID, now, businessMonth, profile, reqItem, template)
 			if appErr != nil {
@@ -2865,34 +2893,25 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 				return err
 			}
 			itemDetail := SubmissionItemDetail{Item: createdItem}
-			for index, uploadSessionID := range reqItem.UploadSessionIDs {
-				session, err := s.repo.GetUploadSession(ctx, uploadSessionID)
-				if err != nil {
-					return mapRepoReadError(err, "Upload session not found.", "Failed to load upload session.")
-				}
-				if session.OwnerUserID != actor.ID {
-					return domain.NewAppError(domain.ErrCodePermissionDenied, "Upload session is not owned by current user.", nil)
-				}
-				if session.Status != domain.AssetWorkbenchUploadStatusUploaded {
-					return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session must be uploaded before submission.", map[string]string{"session_id": session.SessionID})
-				}
+			for index, session := range uploadSessions {
 				file := &domain.AssetWorkbenchSubmissionFile{
-					SubmissionID:          createdSubmission.ID,
-					SubmissionItemID:      createdItem.ID,
-					UploadSessionID:       &session.ID,
-					OwnerUserID:           actor.ID,
-					UploadDirectoryID:     session.UploadDirectoryID,
-					UploadDirectoryName:   session.UploadDirectoryName,
-					UploadDirectoryPrefix: session.UploadDirectoryPrefix,
-					ObjectKey:             session.ObjectKey,
-					PreviewStatus:         initialPreviewStatus(session.OriginalFilename, session.MimeType),
-					OriginalFilename:      session.OriginalFilename,
-					FileExt:               strings.TrimPrefix(strings.ToLower(filepath.Ext(session.OriginalFilename)), "."),
-					FileType:              inferFileType(session.OriginalFilename, session.MimeType),
-					MimeType:              session.MimeType,
-					FileSize:              session.FileSize,
-					FileHash:              session.FileHash,
-					SortOrder:             index,
+					SubmissionID:                   createdSubmission.ID,
+					SubmissionItemID:               createdItem.ID,
+					UploadSessionID:                &session.ID,
+					OwnerUserID:                    actor.ID,
+					UploadDirectoryID:              session.UploadDirectoryID,
+					UploadDirectoryName:            session.UploadDirectoryName,
+					UploadDirectoryPrefix:          session.UploadDirectoryPrefix,
+					UploadDirectoryDifficultyClass: session.UploadDirectoryDifficultyClass,
+					ObjectKey:                      session.ObjectKey,
+					PreviewStatus:                  initialPreviewStatus(session.OriginalFilename, session.MimeType),
+					OriginalFilename:               session.OriginalFilename,
+					FileExt:                        strings.TrimPrefix(strings.ToLower(filepath.Ext(session.OriginalFilename)), "."),
+					FileType:                       inferFileType(session.OriginalFilename, session.MimeType),
+					MimeType:                       session.MimeType,
+					FileSize:                       session.FileSize,
+					FileHash:                       session.FileHash,
+					SortOrder:                      index,
 				}
 				createdFile, err := s.repo.CreateSubmissionFile(ctx, tx, file)
 				if err != nil {
@@ -2919,6 +2938,47 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench submission.", err.Error())
 	}
 	return detail, nil
+}
+
+func (s *Service) loadSubmissionUploadSessions(ctx context.Context, actor domain.RequestActor, req CreateSubmissionItemParams) ([]*domain.AssetWorkbenchUploadSession, string, *domain.AppError) {
+	sessions := make([]*domain.AssetWorkbenchUploadSession, 0, len(req.UploadSessionIDs))
+	difficulty := strings.TrimSpace(req.DifficultyClass)
+	for _, rawSessionID := range req.UploadSessionIDs {
+		sessionID := strings.TrimSpace(rawSessionID)
+		if sessionID == "" {
+			return nil, "", domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session_ids cannot contain empty values.", nil)
+		}
+		session, err := s.repo.GetUploadSession(ctx, sessionID)
+		if err != nil {
+			return nil, "", mapRepoReadError(err, "Upload session not found.", "Failed to load upload session.")
+		}
+		if session.OwnerUserID != actor.ID {
+			return nil, "", domain.NewAppError(domain.ErrCodePermissionDenied, "Upload session is not owned by current user.", nil)
+		}
+		if session.Status != domain.AssetWorkbenchUploadStatusUploaded {
+			return nil, "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session must be uploaded before submission.", map[string]string{"session_id": session.SessionID})
+		}
+		sessionDifficulty := strings.TrimSpace(session.UploadDirectoryDifficultyClass)
+		if sessionDifficulty != "" {
+			if !validWorkbenchDifficulty(sessionDifficulty, false) {
+				return nil, "", domain.NewAppError(domain.ErrCodeInvalidRequest, "Upload directory difficulty_class is not supported.", map[string]string{
+					"session_id":       session.SessionID,
+					"difficulty_class": sessionDifficulty,
+				})
+			}
+			if difficulty == "" {
+				difficulty = sessionDifficulty
+			} else if difficulty != sessionDifficulty {
+				return nil, "", domain.NewAppError(domain.ErrCodeInvalidRequest, "Upload sessions in one item must use the same upload directory difficulty_class.", map[string]string{
+					"session_id":       session.SessionID,
+					"difficulty_class": sessionDifficulty,
+					"item_difficulty":  difficulty,
+				})
+			}
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, difficulty, nil
 }
 
 func (s *Service) ListSubmissions(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchSubmissionFilter) ([]*domain.AssetWorkbenchSubmission, int64, *domain.AppError) {
@@ -3367,6 +3427,7 @@ func (s *Service) moveSubmissionFile(ctx context.Context, actor domain.RequestAc
 	next.UploadDirectoryID = &directoryID
 	next.UploadDirectoryName = directory.Name
 	next.UploadDirectoryPrefix = directory.OSSPrefix
+	next.UploadDirectoryDifficultyClass = directory.DifficultyClass
 	next.ObjectKey = s.buildMovedFileObjectKey(s.nowFn().UTC(), file, directory)
 	if strings.TrimSpace(next.PreviewKey) == oldKey {
 		next.PreviewKey = next.ObjectKey
@@ -6417,6 +6478,17 @@ func normalizeUploadDirectoryPrefix(raw string) (string, *domain.AppError) {
 		}
 	}
 	return clean, nil
+}
+
+func normalizeUploadDirectoryDifficulty(raw string) (string, *domain.AppError) {
+	difficulty := strings.TrimSpace(raw)
+	if difficulty == "" {
+		difficulty = "A"
+	}
+	if !validWorkbenchDifficulty(difficulty, false) {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is not supported.", map[string]string{"difficulty_class": difficulty})
+	}
+	return difficulty, nil
 }
 
 func boolValueDefault(value *bool, fallback bool) bool {

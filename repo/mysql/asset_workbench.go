@@ -1366,11 +1366,12 @@ func (r *assetWorkbenchRepo) GetUploadDirectory(ctx context.Context, directoryID
 func (r *assetWorkbenchRepo) CreateUploadDirectory(ctx context.Context, tx repo.Tx, directory *domain.AssetWorkbenchUploadDirectory) (*domain.AssetWorkbenchUploadDirectory, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_upload_directories (
-			name, oss_prefix, description, enabled, sort_order, created_by, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			name, oss_prefix, description, difficulty_class, enabled, sort_order, created_by, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		directory.Name,
 		directory.OSSPrefix,
 		directory.Description,
+		directory.DifficultyClass,
 		directory.Enabled,
 		directory.SortOrder,
 		directory.CreatedBy,
@@ -1390,11 +1391,12 @@ func (r *assetWorkbenchRepo) CreateUploadDirectory(ctx context.Context, tx repo.
 func (r *assetWorkbenchRepo) UpdateUploadDirectory(ctx context.Context, tx repo.Tx, directory *domain.AssetWorkbenchUploadDirectory) (*domain.AssetWorkbenchUploadDirectory, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_upload_directories
-		SET name = ?, oss_prefix = ?, description = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+		SET name = ?, oss_prefix = ?, description = ?, difficulty_class = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
 		directory.Name,
 		directory.OSSPrefix,
 		directory.Description,
+		directory.DifficultyClass,
 		directory.Enabled,
 		directory.SortOrder,
 		toNullInt64(directory.UpdatedBy),
@@ -1514,15 +1516,16 @@ func (r *assetWorkbenchRepo) DeleteClientMaterial(ctx context.Context, tx repo.T
 func (r *assetWorkbenchRepo) CreateUploadSession(ctx context.Context, tx repo.Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_upload_sessions (
-			session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix,
+			session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
 			status, object_key, original_filename, file_size, mime_type,
 			file_hash, upload_id, multipart_plan_json, expires_at, uploaded_at, cancelled_at, submitted_item_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.SessionID,
 		session.OwnerUserID,
 		toNullInt64(session.UploadDirectoryID),
 		session.UploadDirectoryName,
 		session.UploadDirectoryPrefix,
+		session.UploadDirectoryDifficultyClass,
 		session.Status,
 		session.ObjectKey,
 		session.OriginalFilename,
@@ -1873,10 +1876,10 @@ func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.T
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_submission_files (
 			submission_id, submission_item_id, upload_session_id, owner_user_id,
-			upload_directory_id, upload_directory_name, upload_directory_prefix,
+			upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
 			object_key, preview_key,
 			preview_status, original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		file.SubmissionID,
 		file.SubmissionItemID,
 		toNullInt64(file.UploadSessionID),
@@ -1884,6 +1887,7 @@ func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.T
 		toNullInt64(file.UploadDirectoryID),
 		file.UploadDirectoryName,
 		file.UploadDirectoryPrefix,
+		file.UploadDirectoryDifficultyClass,
 		file.ObjectKey,
 		file.PreviewKey,
 		file.PreviewStatus,
@@ -2192,7 +2196,7 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_submission_files f
 		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id
-		SET f.upload_directory_id = ?, f.upload_directory_name = ?, f.upload_directory_prefix = ?,
+		SET f.upload_directory_id = ?, f.upload_directory_name = ?, f.upload_directory_prefix = ?, f.upload_directory_difficulty_class = ?,
 		    f.object_key = ?, f.preview_key = ?, f.updated_at = CURRENT_TIMESTAMP
 		WHERE f.id = ?
 		  AND i.settlement_status = ?
@@ -2201,6 +2205,7 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 		toNullInt64(file.UploadDirectoryID),
 		file.UploadDirectoryName,
 		file.UploadDirectoryPrefix,
+		file.UploadDirectoryDifficultyClass,
 		file.ObjectKey,
 		file.PreviewKey,
 		file.ID,
@@ -3678,7 +3683,7 @@ func assetWorkbenchPriceMatrixSelect() string {
 }
 
 func assetWorkbenchUploadSessionSelect() string {
-	return `SELECT id, session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix,
+	return `SELECT id, session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
 		status, object_key, original_filename, file_size, mime_type,
 		file_hash, upload_id, multipart_plan_json, expires_at, uploaded_at, cancelled_at, submitted_item_id, created_at, updated_at
 		FROM asset_workbench_upload_sessions`
@@ -3757,14 +3762,14 @@ func assetWorkbenchSubmissionItemSelect() string {
 
 func assetWorkbenchSubmissionFileSelect() string {
 	return `SELECT id, submission_id, submission_item_id, upload_session_id, owner_user_id,
-		upload_directory_id, upload_directory_name, upload_directory_prefix, object_key, preview_key,
+		upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class, object_key, preview_key,
 		preview_status, preview_attempts, preview_error, preview_next_retry_at, preview_worker_id, preview_lease_expires_at,
 		original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order, created_at, updated_at
 		FROM asset_workbench_submission_files`
 }
 
 func assetWorkbenchUploadDirectorySelect() string {
-	return `SELECT id, name, oss_prefix, description, enabled, sort_order, created_by, updated_by, created_at, updated_at
+	return `SELECT id, name, oss_prefix, description, difficulty_class, enabled, sort_order, created_by, updated_by, created_at, updated_at
 		FROM asset_workbench_upload_directories`
 }
 
@@ -4034,7 +4039,7 @@ func scanAssetWorkbenchUploadSession(scanner interface{ Scan(...interface{}) err
 	var submittedItemID sql.NullInt64
 	if err := scanner.Scan(
 		&item.ID, &item.SessionID, &item.OwnerUserID, &uploadDirectoryID, &item.UploadDirectoryName,
-		&item.UploadDirectoryPrefix, &item.Status, &item.ObjectKey, &item.OriginalFilename,
+		&item.UploadDirectoryPrefix, &item.UploadDirectoryDifficultyClass, &item.Status, &item.ObjectKey, &item.OriginalFilename,
 		&item.FileSize, &item.MimeType, &item.FileHash, &item.UploadID, &rawPlan, &item.ExpiresAt,
 		&uploadedAt, &cancelledAt, &submittedItemID, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
@@ -4056,6 +4061,7 @@ func scanAssetWorkbenchUploadDirectory(scanner interface{ Scan(...interface{}) e
 		&item.Name,
 		&item.OSSPrefix,
 		&item.Description,
+		&item.DifficultyClass,
 		&item.Enabled,
 		&item.SortOrder,
 		&item.CreatedBy,
@@ -4153,7 +4159,7 @@ func scanAssetWorkbenchSubmissionFile(scanner interface{ Scan(...interface{}) er
 	var previewNextRetryAt, previewLeaseExpiresAt sql.NullTime
 	if err := scanner.Scan(
 		&item.ID, &item.SubmissionID, &item.SubmissionItemID, &uploadSessionID, &item.OwnerUserID,
-		&uploadDirectoryID, &item.UploadDirectoryName, &item.UploadDirectoryPrefix,
+		&uploadDirectoryID, &item.UploadDirectoryName, &item.UploadDirectoryPrefix, &item.UploadDirectoryDifficultyClass,
 		&item.ObjectKey, &item.PreviewKey, &item.PreviewStatus, &item.PreviewAttempts,
 		&item.PreviewError, &previewNextRetryAt, &item.PreviewWorkerID, &previewLeaseExpiresAt,
 		&item.OriginalFilename, &item.FileExt, &item.FileType, &item.MimeType, &item.FileSize,
