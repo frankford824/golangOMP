@@ -644,7 +644,7 @@ func TestExperienceServiceProcessRetentionIncludesWorkerRunRetention(t *testing.
 			WorkerRunDeleted:   5,
 		},
 	}
-	svc := NewExperienceService(stub, ExperienceServiceConfig{WorkerEnabled: true}, zap.NewNop())
+	svc := NewExperienceService(stub, ExperienceServiceConfig{WorkerEnabled: true, RetentionDays: 120}, zap.NewNop())
 
 	result, appErr := svc.ProcessRetention(context.Background(), now, 50)
 	if appErr != nil {
@@ -655,6 +655,9 @@ func TestExperienceServiceProcessRetentionIncludesWorkerRunRetention(t *testing.
 	}
 	if !stub.retentionPolicy.WorkerRunBefore.Equal(now.AddDate(0, 0, -30)) {
 		t.Fatalf("worker run retention cutoff = %s, want %s", stub.retentionPolicy.WorkerRunBefore, now.AddDate(0, 0, -30))
+	}
+	if !stub.retentionPolicy.ObservedTerminalBefore.Equal(now.AddDate(0, 0, -120)) {
+		t.Fatalf("observed retention cutoff = %s, want %s", stub.retentionPolicy.ObservedTerminalBefore, now.AddDate(0, 0, -120))
 	}
 	if len(stub.workerRuns) != 1 || stub.workerRuns[0].SkippedCount != 10 {
 		t.Fatalf("worker run record = %+v, want deleted rows counted as skipped", stub.workerRuns)

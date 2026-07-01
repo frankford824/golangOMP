@@ -417,6 +417,7 @@ func main() {
 		WorkerMaxAttempts:      cfg.Experience.WorkerMaxAttempts,
 		OutboxLeaseTTL:         cfg.Experience.OutboxLeaseTTL,
 		RuntimeConfigFile:      cfg.Experience.RuntimeConfigFile,
+		RetentionDays:          cfg.Experience.RetentionDays,
 	}, logger.Named("experience"))
 	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),

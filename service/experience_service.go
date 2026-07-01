@@ -77,6 +77,7 @@ type ExperienceServiceConfig struct {
 	WorkerMaxAttempts      int
 	OutboxLeaseTTL         time.Duration
 	RuntimeConfigFile      string
+	RetentionDays          int
 }
 
 type ExperienceEventFilter struct {
@@ -1143,11 +1144,15 @@ func (s *experienceService) ProcessRetention(ctx context.Context, now time.Time,
 	if limit <= 0 || limit > experienceRetentionBatchMax {
 		limit = experienceRetentionBatchMax
 	}
+	observedRetentionDays := s.cfg.RetentionDays
+	if observedRetentionDays <= 0 {
+		observedRetentionDays = 180
+	}
 	run, err := s.repo.RunExperienceRetention(ctx, repo.ExperienceRetentionPolicy{
 		BehaviorBefore:         now.AddDate(0, 0, -30),
 		MinuteRateLimitBefore:  now.AddDate(0, 0, -7),
 		DailyRateLimitBefore:   now.AddDate(0, 0, -90),
-		ObservedTerminalBefore: now.AddDate(0, 0, -180),
+		ObservedTerminalBefore: now.AddDate(0, 0, -observedRetentionDays),
 		WorkerRunBefore:        now.AddDate(0, 0, -30),
 		Limit:                  limit,
 	})

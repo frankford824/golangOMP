@@ -66,6 +66,13 @@ def main() -> int:
         failures.append("experience migration must not use ADD COLUMN IF NOT EXISTS; deployment MySQL rejects it")
     if "create index if not exists" in lowered:
         failures.append("experience migration must not use CREATE INDEX IF NOT EXISTS; use ALTER TABLE ADD KEY for deployment")
+    for line in lowered.splitlines():
+        if re.match(r"\s*alter\s+table\s+\S+\s+add\s+(column|key|index)\b", line):
+            failures.append("experience migration direct ALTER TABLE ADD is not resumable; guard it through information_schema")
+            break
+    for snippet in ("information_schema.columns", "information_schema.statistics", "prepare yb_stmt"):
+        if snippet not in lowered:
+            failures.append(f"experience migration must include resumable DDL guard snippet: {snippet}")
 
     for snippet in REQUIRED_SNIPPETS:
         if snippet.lower() not in lowered:
