@@ -168,7 +168,7 @@ describe('ExperienceLearningPanel', () => {
     await flushPromises()
     await flushPromises()
 
-    await wrapper.findAll('button').find((button) => button.text().includes('通过复核'))?.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('通过并写入候选'))?.trigger('click')
     await flushPromises()
 
     expect(reviewDecisionMock).toHaveBeenCalledWith(

@@ -2471,13 +2471,15 @@ func (r *assetWorkbenchRepo) CreateErrorImportBatch(ctx context.Context, tx repo
 func (r *assetWorkbenchRepo) CreateErrorRecord(ctx context.Context, tx repo.Tx, record *domain.AssetWorkbenchErrorRecord) (*domain.AssetWorkbenchErrorRecord, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_error_records (
-			import_batch_id, business_month, payee_user_id, order_no, error_count,
+			import_batch_id, business_month, payee_user_id, order_no, difficulty_class, occurred_date, error_count,
 			raw_payload_json, match_status, submission_item_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ImportBatchID,
 		record.BusinessMonth,
 		toNullInt64(record.PayeeUserID),
 		record.OrderNo,
+		record.DifficultyClass,
+		toNullTime(record.OccurredDate),
 		record.ErrorCount,
 		nullableJSON(record.RawPayload),
 		record.MatchStatus,
@@ -3931,7 +3933,7 @@ func assetWorkbenchErrorImportBatchSelect() string {
 }
 
 func assetWorkbenchErrorRecordSelect() string {
-	return `SELECT id, import_batch_id, business_month, payee_user_id, order_no, error_count,
+	return `SELECT id, import_batch_id, business_month, payee_user_id, order_no, difficulty_class, occurred_date, error_count,
 		raw_payload_json, match_status, submission_item_id, created_at, updated_at
 		FROM asset_workbench_error_records`
 }
@@ -4459,14 +4461,17 @@ func scanAssetWorkbenchErrorImportBatch(scanner interface{ Scan(...interface{}) 
 func scanAssetWorkbenchErrorRecord(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchErrorRecord, error) {
 	var item domain.AssetWorkbenchErrorRecord
 	var payeeUserID, submissionItemID sql.NullInt64
+	var occurredDate sql.NullTime
 	var rawPayload sql.NullString
 	if err := scanner.Scan(
 		&item.ID, &item.ImportBatchID, &item.BusinessMonth, &payeeUserID, &item.OrderNo,
-		&item.ErrorCount, &rawPayload, &item.MatchStatus, &submissionItemID, &item.CreatedAt, &item.UpdatedAt,
+		&item.DifficultyClass, &occurredDate, &item.ErrorCount, &rawPayload, &item.MatchStatus,
+		&submissionItemID, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
 	item.PayeeUserID = fromNullInt64(payeeUserID)
+	item.OccurredDate = fromNullTime(occurredDate)
 	item.RawPayload = cloneValidJSON(rawPayload)
 	item.SubmissionItemID = fromNullInt64(submissionItemID)
 	return &item, nil

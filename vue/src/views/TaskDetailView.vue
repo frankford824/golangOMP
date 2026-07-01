@@ -205,7 +205,7 @@
               <p>预测提示</p>
               <h2>系统建议的下一步</h2>
             </div>
-            <button type="button" :disabled="taskPredictionLoading" @click="loadTaskPredictions">
+            <button type="button" :disabled="taskPredictionLoading" @click="refreshTaskPredictions">
               {{ taskPredictionLoading ? '刷新中' : '刷新提示' }}
             </button>
           </div>
@@ -1168,6 +1168,7 @@ import {
 import { isReferenceUrlExpiringSoon } from '@/utils/referenceUrl'
 import { tasksApi } from '@/services/api/tasksApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
+import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import {
@@ -1317,6 +1318,8 @@ const isTempId = computed(() => taskId.value?.startsWith('t-'))
 const task = computed(() => tasksStore.getById(taskId.value) ?? null)
 const taskPredictionSuggestions = ref<PredictionSuggestion[]>([])
 const taskPredictionLoading = ref(false)
+let taskPredictionAbort: AbortController | null = null
+let taskPredictionRequestSeq = 0
 const basicInfoModuleSummary = computed(() =>
   task.value?.moduleSummaries?.find((module) => module.module_key === 'basic_info'),
 )
@@ -2087,6 +2090,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChangeForRefs)
   if (successClearTimer) clearTimeout(successClearTimer)
   if (postEditRefreshTimer) clearTimeout(postEditRefreshTimer)
+  taskPredictionAbort?.abort()
+  taskPredictionAbort = null
 })
 
 const storeLoading = computed(() => tasksStore.loading)
@@ -3167,23 +3172,34 @@ async function loadTask() {
 }
 
 async function loadTaskPredictions(): Promise<void> {
-  if (!taskId.value || isTempId.value) {
+  taskPredictionAbort?.abort()
+  const currentTaskId = taskId.value
+  const requestSeq = ++taskPredictionRequestSeq
+  if (!currentTaskId || isTempId.value) {
     taskPredictionSuggestions.value = []
+    taskPredictionLoading.value = false
     return
   }
   taskPredictionSuggestions.value = []
   taskPredictionLoading.value = true
+  const abortController = new AbortController()
+  taskPredictionAbort = abortController
   try {
-    const bundle = await predictionsApi.taskNextActions(taskId.value, { limit: 5 })
+    const bundle = await predictionsApi.taskNextActions(currentTaskId, { limit: 5 }, abortController.signal)
+    if (abortController.signal.aborted || requestSeq !== taskPredictionRequestSeq || taskId.value !== currentTaskId) return
     taskPredictionSuggestions.value = bundle.suggestions
   } catch {
-    taskPredictionSuggestions.value = []
+    if (!abortController.signal.aborted && requestSeq === taskPredictionRequestSeq) {
+      taskPredictionSuggestions.value = []
+    }
   } finally {
-    taskPredictionLoading.value = false
+    if (taskPredictionAbort === abortController) taskPredictionAbort = null
+    if (requestSeq === taskPredictionRequestSeq) taskPredictionLoading.value = false
   }
 }
 
 function handleTaskPrediction(item: PredictionSuggestion): void {
+  recordTaskPredictionBehavior(item, 'jump')
   if (item.action_type === 'open_task_assets') {
     openTaskAssetsPage()
     return
@@ -3195,6 +3211,32 @@ function handleTaskPrediction(item: PredictionSuggestion): void {
   if (item.target_type === 'task' && item.target_id && item.target_id !== taskId.value) {
     void router.push({ name: 'TaskDetail', params: { id: item.target_id } })
   }
+}
+
+function refreshTaskPredictions(): void {
+  for (const item of taskPredictionSuggestions.value) {
+    recordTaskPredictionBehavior(item, 'refresh')
+  }
+  void loadTaskPredictions()
+}
+
+function recordTaskPredictionBehavior(item: PredictionSuggestion, action: 'jump' | 'refresh'): void {
+  recordExperienceBehavior({
+    action,
+    surface: 'task_detail',
+    target_type: item.target_type || 'task',
+    target_id: item.target_id || taskId.value || '',
+    suggestion_event_id: item.suggestion_event_id || '',
+    suggestion_stable_key: item.suggestion_stable_key || '',
+    component: 'TaskDetailPredictionCard',
+    payload: {
+      suggestion_id: item.id,
+      suggestion_type: String(item.type || ''),
+      source: item.source || '',
+      action_type: item.action_type || '',
+      action_label: item.action_label || '',
+    },
+  })
 }
 
 async function refreshDetail() {

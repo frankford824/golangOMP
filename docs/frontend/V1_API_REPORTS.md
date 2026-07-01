@@ -22,7 +22,7 @@ L1 卡片、吞吐与模块停留报表。
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -86,7 +86,7 @@ curl -X GET https://api.example.com/v1/reports/experience/stats \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -99,7 +99,7 @@ curl -X GET https://api.example.com/v1/reports/experience/stats \
 | `task_id` | query | integer | 否 | - |
 | `action` | query | string | 否 | - |
 | `outcome` | query | string | 否 | - |
-| `min_evidence_level` | query | enum(L0/L1/L2/L3/L4) | 否 | Minimum evidence level to return. L2+ is the default frontend view for reusable feedback candidates. |
+| `min_evidence_level` | query | enum(L0/L1/L2/L3/L4) | 否 | Minimum evidence level to return. L2+ is the default frontend view for feedback and side-channel candidates. |
 | `from` | query | string | 否 | ISO date or RFC3339 timestamp, inclusive. |
 | `to` | query | string | 否 | ISO date or RFC3339 timestamp, inclusive. |
 | `page` | query | integer | 否 | - |
@@ -161,7 +161,7 @@ curl -X GET https://api.example.com/v1/reports/experience/samples \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -225,11 +225,11 @@ curl -X GET https://api.example.com/v1/reports/experience/review-items \
 ### 简介
 支持方法: POST。
 
-- `POST`: SuperAdmin-only side-channel decision for an attribution candidate. Decisions update experience review status; approved task/asset candidates may materialize side-channel reusable experience profiles or quality labels, but never mutate task, asset, ERP, audit, cost, or permission state.
+- `POST`: SuperAdmin-only side-channel decision for an attribution candidate. Decisions update experience review status; approved task/asset candidates may materialize side-channel L4 candidate profiles or quality labels, but never mutate task, asset, ERP, audit, cost, or permission state.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema

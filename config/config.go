@@ -396,7 +396,7 @@ func Load() (*Config, error) {
 			AIFeedbackEnabled:      mustParseBool(getEnv("EXPERIENCE_AI_FEEDBACK_ENABLED", "false")),
 			BehaviorCaptureEnabled: mustParseBool(getEnv("EXPERIENCE_BEHAVIOR_CAPTURE_ENABLED", "false")),
 			MicroQuestionEnabled:   mustParseBool(getEnv("EXPERIENCE_MICRO_QUESTION_ENABLED", "false")),
-			BehaviorSampleRate:     mustParseFloat(getEnv("EXPERIENCE_BEHAVIOR_SAMPLE_RATE", "1")),
+			BehaviorSampleRate:     mustParseFloat(getEnv("EXPERIENCE_BEHAVIOR_SAMPLE_RATE", "0.2")),
 			EnabledSurfaces:        splitCSV(getEnv("EXPERIENCE_ENABLED_SURFACES", "task_detail,asset_center,data_center")),
 			WorkerEnabled:          mustParseBool(getEnv("EXPERIENCE_WORKER_ENABLED", "false")),
 			WorkerInterval:         mustParseDuration(getEnv("EXPERIENCE_WORKER_INTERVAL", "15s")),

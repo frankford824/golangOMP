@@ -309,7 +309,7 @@ def collect_roles(op):
         if not val:
             continue
         if isinstance(val, dict):
-            allowed = val.get("allowed_roles") or val.get("roles") or val.get("allowed")
+            allowed = val.get("required_roles") or val.get("allowed_roles") or val.get("roles") or val.get("allowed")
             if allowed:
                 parts.extend(str(x) for x in allowed)
         elif isinstance(val, list):

@@ -22,7 +22,7 @@
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, OrgAdmin, RoleAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -80,7 +80,7 @@ curl -X GET https://api.example.com/v1/org/options \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -141,7 +141,7 @@ curl -X POST https://api.example.com/v1/org/departments \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `PUT` 允许角色: 已登录 / scope-aware。
+- `PUT` 允许角色: HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -205,7 +205,7 @@ curl -X PUT https://api.example.com/v1/org/departments/<id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -268,7 +268,7 @@ curl -X POST https://api.example.com/v1/org/teams \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `PUT` 允许角色: 已登录 / scope-aware。
+- `PUT` 允许角色: HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -332,7 +332,7 @@ curl -X PUT https://api.example.com/v1/org/teams/<id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: DepartmentAdmin, HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -398,7 +398,7 @@ curl -X POST https://api.example.com/v1/departments/<id>/org-move-requests \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: SuperAdmin, HRAdmin, DepartmentAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -470,7 +470,7 @@ curl -X GET https://api.example.com/v1/org-move-requests \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -515,7 +515,7 @@ curl -X POST https://api.example.com/v1/org-move-requests/<id>/approve \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema

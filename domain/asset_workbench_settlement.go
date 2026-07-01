@@ -27,6 +27,8 @@ type AssetWorkbenchErrorRecord struct {
 	BusinessMonth    string          `json:"business_month" db:"business_month"`
 	PayeeUserID      *int64          `json:"payee_user_id,omitempty" db:"payee_user_id"`
 	OrderNo          string          `json:"order_no" db:"order_no"`
+	DifficultyClass  string          `json:"difficulty_class" db:"difficulty_class"`
+	OccurredDate     *time.Time      `json:"occurred_date,omitempty" db:"occurred_date"`
 	ErrorCount       int             `json:"error_count" db:"error_count"`
 	RawPayload       json.RawMessage `json:"raw_payload_json,omitempty" db:"raw_payload_json"`
 	MatchStatus      string          `json:"match_status" db:"match_status"`

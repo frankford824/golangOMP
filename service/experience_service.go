@@ -205,7 +205,7 @@ func (s *experienceService) ClientConfig() domain.ExperienceClientConfig {
 	return domain.ExperienceClientConfig{
 		AIFeedbackEnabled:      flags.UIEnabled && flags.AIFeedbackEnabled,
 		BehaviorCaptureEnabled: flags.UIEnabled && flags.CaptureEnabled && flags.BehaviorCaptureEnabled,
-		MicroQuestionEnabled:   flags.UIEnabled && flags.MicroQuestionEnabled,
+		MicroQuestionEnabled:   flags.UIEnabled && flags.CaptureEnabled && flags.MicroQuestionEnabled,
 		BehaviorSampleRate:     normalizeBehaviorSampleRate(flags.BehaviorSampleRate),
 		EnabledSurfaces:        normalizeEnabledSurfaces(s.cfg.EnabledSurfaces),
 	}
@@ -406,7 +406,7 @@ func (s *experienceService) MicroQuestionEligibility(ctx context.Context, actor 
 	if s == nil || s.repo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
 	}
-	if !flags.UIEnabled || !flags.MicroQuestionEnabled {
+	if !flags.UIEnabled || !flags.CaptureEnabled || !flags.MicroQuestionEnabled {
 		return result, nil
 	}
 	surface := trimMax(strings.TrimSpace(req.Surface), 64)
@@ -433,6 +433,18 @@ func (s *experienceService) MicroQuestionEligibility(ctx context.Context, actor 
 	}
 	if !suggestion.AttributionEligible {
 		result.Reason = "not_attribution_eligible"
+		return result, nil
+	}
+	if expected := strings.TrimSpace(suggestion.SuggestionStableKey); expected != "" && strings.TrimSpace(req.SuggestionStableKey) != "" && strings.TrimSpace(req.SuggestionStableKey) != expected {
+		result.Reason = "suggestion_context_mismatch"
+		return result, nil
+	}
+	if expected := strings.TrimSpace(suggestion.TargetType); expected != "" && strings.TrimSpace(req.TargetType) != "" && strings.TrimSpace(req.TargetType) != expected {
+		result.Reason = "target_mismatch"
+		return result, nil
+	}
+	if expected := strings.TrimSpace(suggestion.TargetID); expected != "" && strings.TrimSpace(req.TargetID) != "" && strings.TrimSpace(req.TargetID) != expected {
+		result.Reason = "target_mismatch"
 		return result, nil
 	}
 	targetType := firstNonEmptyExperience(req.TargetType, suggestion.TargetType)
@@ -484,7 +496,7 @@ func (s *experienceService) RecordMicroQuestionAnswer(ctx context.Context, actor
 	if s == nil || s.repo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
 	}
-	if !flags.UIEnabled || !flags.MicroQuestionEnabled {
+	if !flags.UIEnabled || !flags.CaptureEnabled || !flags.MicroQuestionEnabled {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "experience micro question is disabled", nil)
 	}
 	answer, appErr := normalizeExperienceMicroQuestionAnswer(actor, req)
@@ -515,10 +527,18 @@ func (s *experienceService) RecordMicroQuestionAnswer(ctx context.Context, actor
 			}
 			return answer, nil
 		}
+		if err := s.repo.RefundExperienceRateLimit(ctx, reservation.LimitKey); err != nil {
+			return nil, infraError("refund denied experience micro question rate limit", err)
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "experience micro question is rate limited", map[string]interface{}{"deny_code": "experience_micro_question_rate_limited"})
 	}
 	inserted, err := s.repo.CreateExperienceMicroQuestionAnswer(ctx, answer)
 	if err != nil {
+		if reservation != nil {
+			if refundErr := s.repo.RefundExperienceRateLimit(ctx, reservation.LimitKey); refundErr != nil {
+				return nil, infraError("refund failed experience micro question rate limit", refundErr)
+			}
+		}
 		return nil, infraError("create experience micro question answer", err)
 	}
 	if !inserted && reservation != nil {
@@ -584,12 +604,33 @@ func (s *experienceService) RecordReviewDecision(ctx context.Context, actor doma
 		return nil, appErr
 	}
 	if err := s.repo.CreateExperienceReviewDecision(ctx, decision, nextStatus); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "not found") {
-			return nil, domain.NewAppError(domain.ErrCodeNotFound, "experience review item not found", nil)
+		if appErr := experienceReviewDecisionError(err); appErr != nil {
+			return nil, appErr
 		}
 		return nil, infraError("create experience review decision", err)
 	}
 	return decision, nil
+}
+
+func experienceReviewDecisionError(err error) *domain.AppError {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "not found"):
+		return domain.NewAppError(domain.ErrCodeNotFound, "experience review item not found", nil)
+	case strings.Contains(message, "not open"):
+		return domain.NewAppError(domain.ErrCodeConflict, "experience review item is not open", map[string]interface{}{"deny_code": "experience_review_item_not_open"})
+	case strings.Contains(message, "not materializable"),
+		strings.Contains(message, "evidence is required"),
+		strings.Contains(message, "requires suggestion and outcome evidence"),
+		strings.Contains(message, "target is invalid"),
+		strings.Contains(message, "item type is not materializable"):
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "experience review item cannot be materialized", map[string]interface{}{"deny_code": "experience_review_item_not_materializable"})
+	default:
+		return nil
+	}
 }
 
 func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit int) (domain.ExperienceObserverRun, *domain.AppError) {
@@ -888,47 +929,31 @@ func (s *experienceService) ProcessAttributions(ctx context.Context, limit int) 
 		s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
 		return result, appErr
 	}
+	seenOutcomes := make(map[string]struct{}, len(outcomes))
 	var last *domain.ExperienceAttributionOutcome
 	for _, outcome := range outcomes {
-		if outcome == nil {
-			continue
-		}
-		result.Scanned++
-		candidates, err := s.repo.ListExperienceAttributionCandidates(ctx, outcome, experienceAttributionLookback, experienceAttributionCandidatesPerOutcome)
-		if err != nil {
-			result.Failed++
-			appErr := infraError("list experience attribution candidates", err)
+		processed, appErr := s.processAttributionOutcome(ctx, outcome, &result, seenOutcomes)
+		if appErr != nil {
 			s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
 			return result, appErr
 		}
-		if len(candidates) == 0 {
-			result.Skipped++
+		if processed {
 			last = outcome
-			continue
 		}
-		for _, candidate := range candidates {
-			attribution := buildExperienceAttribution(outcome, candidate, time.Now().UTC())
-			if attribution == nil {
-				result.Skipped++
-				continue
-			}
-			if err := s.repo.CreateExperienceAttribution(ctx, attribution); err != nil {
-				result.Failed++
-				appErr := infraError("create experience attribution", err)
-				s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
-				return result, appErr
-			}
-			if reviewItem := buildExperienceReviewItem(attribution); reviewItem != nil {
-				if err := s.repo.CreateExperienceReviewItem(ctx, reviewItem); err != nil {
-					result.Failed++
-					appErr := infraError("create experience review item", err)
-					s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
-					return result, appErr
-				}
-			}
-			result.Created++
+	}
+	recentSince := time.Now().UTC().Add(-experienceAttributionLookback)
+	recentOutcomes, err := s.repo.ListRecentExperienceAttributionOutcomes(ctx, recentSince, limit)
+	if err != nil {
+		result.Failed++
+		appErr := infraError("list recent experience attribution outcomes", err)
+		s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+		return result, appErr
+	}
+	for _, outcome := range recentOutcomes {
+		if _, appErr := s.processAttributionOutcome(ctx, outcome, &result, seenOutcomes); appErr != nil {
+			s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
+			return result, appErr
 		}
-		last = outcome
 	}
 	if last != nil {
 		lastSeenAt := last.EventTime.UTC()
@@ -948,6 +973,61 @@ func (s *experienceService) ProcessAttributions(ctx context.Context, limit int) 
 	}
 	s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, nil)
 	return result, nil
+}
+
+func (s *experienceService) processAttributionOutcome(ctx context.Context, outcome *domain.ExperienceAttributionOutcome, result *domain.ExperienceAttributionRun, seen map[string]struct{}) (bool, *domain.AppError) {
+	if outcome == nil || result == nil {
+		return false, nil
+	}
+	key := experienceAttributionOutcomeKey(outcome)
+	if key != "" {
+		if _, ok := seen[key]; ok {
+			return false, nil
+		}
+		seen[key] = struct{}{}
+	}
+	result.Scanned++
+	candidates, err := s.repo.ListExperienceAttributionCandidates(ctx, outcome, experienceAttributionLookback, experienceAttributionCandidatesPerOutcome)
+	if err != nil {
+		result.Failed++
+		return true, infraError("list experience attribution candidates", err)
+	}
+	if len(candidates) == 0 {
+		result.Skipped++
+		return true, nil
+	}
+	for _, candidate := range candidates {
+		attribution := buildExperienceAttribution(outcome, candidate, time.Now().UTC())
+		if attribution == nil {
+			result.Skipped++
+			continue
+		}
+		if err := s.repo.CreateExperienceAttribution(ctx, attribution); err != nil {
+			result.Failed++
+			return true, infraError("create experience attribution", err)
+		}
+		if reviewItem := buildExperienceReviewItem(attribution); reviewItem != nil {
+			if err := s.repo.CreateExperienceReviewItem(ctx, reviewItem); err != nil {
+				result.Failed++
+				return true, infraError("create experience review item", err)
+			}
+		}
+		result.Created++
+	}
+	return true, nil
+}
+
+func experienceAttributionOutcomeKey(outcome *domain.ExperienceAttributionOutcome) string {
+	if outcome == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(outcome.EventKey); value != "" {
+		return value
+	}
+	if outcome.ID != 0 {
+		return strconv.FormatInt(outcome.ID, 10)
+	}
+	return ""
 }
 
 func (s *experienceService) ReserveRateLimit(ctx context.Context, actor domain.RequestActor, bucketName string, periodStart time.Time, periodEnd time.Time, limit int) (*domain.ExperienceRateLimitReservation, *domain.AppError) {
@@ -1099,6 +1179,9 @@ func buildExperienceReviewItem(attribution *domain.ExperienceAttribution) *domai
 	default:
 		return nil
 	}
+	if !experienceAttributionMaterializable(attribution.EvidenceSummary) {
+		return nil
+	}
 	priority := "medium"
 	if strings.TrimSpace(attribution.Confidence) == "high" || attribution.Score >= 0.75 {
 		priority = "high"
@@ -1117,6 +1200,46 @@ func buildExperienceReviewItem(attribution *domain.ExperienceAttribution) *domai
 		Status:          domain.ExperienceReviewItemStatusOpen,
 		Priority:        priority,
 		EvidenceSummary: attribution.EvidenceSummary,
+	}
+}
+
+func experienceAttributionMaterializable(summary json.RawMessage) bool {
+	if len(summary) == 0 {
+		return false
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal(summary, &value); err != nil {
+		return false
+	}
+	suggestion := experienceAttributionMapValue(value["suggestion"])
+	outcome := experienceAttributionMapValue(value["outcome"])
+	targetType := firstNonEmptyExperience(
+		experienceAttributionStringValue(suggestion["target_type"]),
+		experienceAttributionStringValue(outcome["target_type"]),
+	)
+	switch strings.TrimSpace(targetType) {
+	case "task", "asset":
+		return true
+	default:
+		return false
+	}
+}
+
+func experienceAttributionMapValue(value interface{}) map[string]interface{} {
+	if nested, ok := value.(map[string]interface{}); ok {
+		return nested
+	}
+	return map[string]interface{}{}
+}
+
+func experienceAttributionStringValue(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return ""
 	}
 }
 

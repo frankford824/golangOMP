@@ -3,7 +3,7 @@
     <div class="panel-header">
       <div>
         <h3 class="panel-title">经验观测</h3>
-        <p class="panel-subtitle">闭环健康、有效经验池、缺口队列与可复核样本</p>
+        <p class="panel-subtitle">闭环健康、监督样本池、缺口队列与可复核样本</p>
       </div>
       <div class="panel-actions">
         <span v-if="stats?.generated_at" class="panel-time">统计 {{ shortDateTime(stats.generated_at) }}</span>
@@ -64,7 +64,7 @@
           <div class="block-header">
             <div>
               <h4 id="experience-health-title">闭环健康条</h4>
-              <p>展示 -> 可定位 -> 有反馈 -> 有标签 -> 可复用</p>
+              <p>展示 -> 可定位 -> 有反馈 -> 有标签 -> L4 候选</p>
             </div>
             <span>{{ integerLabel(sampleTotal) }} 条样本</span>
           </div>
@@ -90,7 +90,7 @@
           <section class="panel-block">
             <div class="block-header">
               <div>
-                <h4>有效经验池</h4>
+                <h4>监督样本池（L2+）</h4>
                 <p>默认只看 L2+；复核通过后只沉淀侧路经验，不直接驱动任务、资产、ERP、审单或成本。</p>
               </div>
               <span>{{ integerLabel(effectiveSampleTotal) }} 条</span>
@@ -105,14 +105,14 @@
                 <p>{{ feedbackLabel(item.feedback_value) }}{{ item.feedback_reason_code ? ` · ${reasonLabel(item.feedback_reason_code)}` : '' }}</p>
               </article>
             </div>
-            <BaseEmptyState v-else title="暂无有效经验" :description="effectiveEmptyDescription" />
+            <BaseEmptyState v-else title="暂无 L2+ 候选" :description="effectiveEmptyDescription" />
           </section>
 
           <section class="panel-block">
             <div class="block-header">
               <div>
                 <h4>缺口队列</h4>
-                <p>优先补能把 displayed 变成 reusable 的监督信号。</p>
+                <p>按监督信号缺口排查；缺口可重复计数，不等于线性转化率。</p>
               </div>
               <span>{{ integerLabel(totalGapCount) }} 个缺口</span>
             </div>
@@ -136,7 +136,7 @@
           <div class="block-header">
             <div>
               <h4 id="experience-review-title">候选归因复核</h4>
-              <p>Attribution 只生成候选，SuperAdmin 复核后才进入可复用经验治理。</p>
+              <p>Attribution 只生成候选，SuperAdmin 复核后才进入侧路经验候选治理。</p>
             </div>
             <span>{{ integerLabel(reviewItemTotal) }} 个候选</span>
           </div>
@@ -152,7 +152,7 @@
               </div>
               <div class="review-actions">
                 <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:approve`" @click="submitReview(item, 'approve')">
-                  通过复核
+                  通过并写入候选
                 </BaseButton>
                 <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:needs_more_data`" @click="submitReview(item, 'needs_more_data')">
                   需更多数据
@@ -322,7 +322,7 @@ const healthSteps = computed<HealthStep[]>(() => {
     { key: 'locatable', level: 'L1', label: '可定位', count: locatable, total: displayed, hint: locatable ? '能回到任务或资产' : '无匹配数据' },
     { key: 'feedback', level: 'L2', label: '有反馈', count: feedback, total: displayed, hint: feedback ? '已有人工判断' : '监督信号为 0' },
     { key: 'tagged', level: 'L3', label: '有标签', count: reasoned, total: feedback, hint: reasoned ? '反馈已有原因' : '缺原因标签' },
-    { key: 'reusable', level: 'L4', label: '可复用', count: reusable, total: displayed, hint: reusable ? '已沉淀侧路经验' : '暂不可复用' },
+    { key: 'reusable', level: 'L4', label: 'L4 候选', count: reusable, total: displayed, hint: reusable ? '已写入侧路候选' : '暂无候选沉淀' },
   ]
 })
 
@@ -347,9 +347,9 @@ const metrics = computed<MetricItem[]>(() => {
     },
     {
       key: 'reusable_rate',
-      label: '可复用率',
-      value: fractionLabel(reusable, sampleTotal.value),
-      hint: metricRatioHint(reusable, sampleTotal.value, 'L4 是侧路经验，不等于自动化结论'),
+      label: 'L4 侧路候选',
+      value: integerLabel(reusable),
+      hint: '侧路候选沉淀数，不等于转化率或自动化结论',
     },
     {
       key: 'feedback_distribution',
@@ -613,7 +613,7 @@ function evidenceLabel(level?: string): string {
     L1: 'L1 locatable',
     L2: 'L2 feedback',
     L3: 'L3 tagged',
-    L4: 'L4 reusable',
+    L4: 'L4 candidate',
   }
   return labels[normalized]
 }

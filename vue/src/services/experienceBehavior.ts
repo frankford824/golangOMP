@@ -7,6 +7,7 @@ const maxBatchSize = 50
 let pageInstanceId = ''
 let flushTimer: number | null = null
 let listenersRegistered = false
+let behaviorCaptureEnabled = false
 let behaviorSampleRate = 1
 const queue: ExperienceBehaviorEventRequest[] = []
 
@@ -54,6 +55,10 @@ function scheduleFlush(): void {
   }, 500)
 }
 
+export function setExperienceBehaviorEnabled(enabled: boolean | undefined | null): void {
+  behaviorCaptureEnabled = Boolean(enabled)
+}
+
 export function setExperienceBehaviorSampleRate(rate: number | undefined | null): void {
   const parsed = Number(rate ?? 1)
   if (!Number.isFinite(parsed)) {
@@ -64,6 +69,7 @@ export function setExperienceBehaviorSampleRate(rate: number | undefined | null)
 }
 
 export function recordExperienceBehavior(event: ExperienceBehaviorDraft): void {
+  if (!behaviorCaptureEnabled) return
   if (behaviorSampleRate <= 0) return
   if (behaviorSampleRate < 1 && Math.random() >= behaviorSampleRate) return
   registerFlushListeners()

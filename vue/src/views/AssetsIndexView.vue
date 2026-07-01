@@ -723,6 +723,7 @@ import {
   type AssetKind,
 } from '@/services/api/assetsApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
+import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -2295,10 +2296,30 @@ async function loadAssetPredictions(): Promise<void> {
 }
 
 function openPredictionAsset(item: PredictionSuggestion): void {
+  recordAssetPredictionBehavior(item, 'jump')
   const id = String(item.target_id ?? '').trim()
   if (id) {
     openAssetDetail(id)
   }
+}
+
+function recordAssetPredictionBehavior(item: PredictionSuggestion, action: 'jump'): void {
+  recordExperienceBehavior({
+    action,
+    surface: 'asset_center',
+    target_type: item.target_type || 'asset',
+    target_id: item.target_id || '',
+    suggestion_event_id: item.suggestion_event_id || '',
+    suggestion_stable_key: item.suggestion_stable_key || '',
+    component: 'AssetCenterPredictionCard',
+    payload: {
+      suggestion_id: item.id,
+      suggestion_type: String(item.type || ''),
+      source: item.source || '',
+      action_type: item.action_type || '',
+      action_label: item.action_label || '',
+    },
+  })
 }
 
 onMounted(() => {

@@ -5,6 +5,7 @@ import { experienceApi } from '@/services/api/experienceApi'
 import {
   flushExperienceBehaviorQueue,
   recordExperienceBehavior,
+  setExperienceBehaviorEnabled,
   setExperienceBehaviorSampleRate,
 } from '@/services/experienceBehavior'
 
@@ -23,11 +24,26 @@ const behaviorEventsMock = vi.mocked(experienceApi.behaviorEvents)
 describe('experienceBehavior', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    setExperienceBehaviorEnabled(false)
     setExperienceBehaviorSampleRate(1)
     await flushExperienceBehaviorQueue()
   })
 
+  it('drops behavior events until capture is explicitly enabled', async () => {
+    recordExperienceBehavior({
+      action: 'jump',
+      surface: 'task_detail',
+      target_type: 'task',
+      target_id: '42',
+      suggestion_event_id: 'display-1',
+    })
+    await flushExperienceBehaviorQueue()
+
+    expect(behaviorEventsMock).not.toHaveBeenCalled()
+  })
+
   it('drops behavior events when sample rate is zero', async () => {
+    setExperienceBehaviorEnabled(true)
     setExperienceBehaviorSampleRate(0)
 
     recordExperienceBehavior({
@@ -43,6 +59,7 @@ describe('experienceBehavior', () => {
   })
 
   it('sends behavior events when sample rate is one', async () => {
+    setExperienceBehaviorEnabled(true)
     setExperienceBehaviorSampleRate(1)
 
     recordExperienceBehavior({

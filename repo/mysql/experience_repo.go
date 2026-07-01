@@ -1503,6 +1503,35 @@ func (r *experienceRepo) ListExperienceAttributionOutcomes(ctx context.Context, 
 		return nil, fmt.Errorf("list experience attribution outcomes: %w", err)
 	}
 	defer rows.Close()
+	return scanExperienceAttributionOutcomes(rows)
+}
+
+func (r *experienceRepo) ListRecentExperienceAttributionOutcomes(ctx context.Context, since time.Time, limit int) ([]*domain.ExperienceAttributionOutcome, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if since.IsZero() {
+		since = time.Now().UTC().Add(-7 * 24 * time.Hour)
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, event_key, event_time, source_type, action, outcome, task_id,
+		       target_type, target_id, payload_json
+		FROM experience_events
+		WHERE event_time >= ?
+		  AND (target_type <> '' OR task_id IS NOT NULL)
+		ORDER BY event_time DESC, id DESC
+		LIMIT ?`,
+		since.UTC(),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list recent experience attribution outcomes: %w", err)
+	}
+	defer rows.Close()
+	return scanExperienceAttributionOutcomes(rows)
+}
+
+func scanExperienceAttributionOutcomes(rows *sql.Rows) ([]*domain.ExperienceAttributionOutcome, error) {
 	out := make([]*domain.ExperienceAttributionOutcome, 0)
 	for rows.Next() {
 		var item domain.ExperienceAttributionOutcome
@@ -1585,10 +1614,10 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		WHERE a.attribution_eligible = 1
 		  AND a.displayed_at >= ?
 		  AND a.displayed_at <= ?
-		  AND (
-		    (a.target_type = ? AND a.target_id = ?)
-		    OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)
-		  )
+			  AND (
+			    (a.target_type = ? AND a.target_id = ?)
+			    OR (? = 'task' AND ? <> '' AND a.target_type = 'task' AND a.target_id = ?)
+			  )
 		GROUP BY a.suggestion_event_id, a.suggestion_stable_key, a.suggestion_type, a.suggestion_id,
 		         a.source, a.target_type, a.target_id, a.displayed_at,
 		         lf.feedback_value, lf.reason_code, lf.created_at
@@ -1598,11 +1627,12 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		outcomeAt,
 		from,
 		outcomeAt,
-		targetType,
-		targetID,
-		taskTargetID,
-		taskTargetID,
-		limit,
+			targetType,
+			targetID,
+			targetType,
+			taskTargetID,
+			taskTargetID,
+			limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list experience attribution candidates: %w", err)
@@ -1692,7 +1722,11 @@ func (r *experienceRepo) ReserveExperienceRateLimit(ctx context.Context, req rep
 	if hardCap < limit {
 		hardCap = limit
 	}
-	_, err := r.db.db.ExecContext(ctx, `
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin reserve experience rate limit: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO experience_rate_limits (
 			limit_key, actor_id, bucket_name, period_start, period_end, count, hard_cap
 		) VALUES (?, ?, ?, ?, ?, 1, ?)
@@ -1707,14 +1741,14 @@ func (r *experienceRepo) ReserveExperienceRateLimit(ctx context.Context, req rep
 		req.PeriodStart.UTC(),
 		req.PeriodEnd.UTC(),
 		hardCap,
-	)
-	if err != nil {
+	); err != nil {
+		_ = tx.Rollback()
 		return nil, fmt.Errorf("reserve experience rate limit: %w", err)
 	}
 
 	var reservation domain.ExperienceRateLimitReservation
 	var actorID sql.NullInt64
-	if err := r.db.db.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 		SELECT limit_key, actor_id, bucket_name, period_start, period_end, count, hard_cap
 		FROM experience_rate_limits
 		WHERE limit_key = ?`, limitKey).Scan(
@@ -1726,7 +1760,11 @@ func (r *experienceRepo) ReserveExperienceRateLimit(ctx context.Context, req rep
 		&reservation.Count,
 		&reservation.HardCap,
 	); err != nil {
+		_ = tx.Rollback()
 		return nil, fmt.Errorf("load experience rate limit reservation: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit reserve experience rate limit: %w", err)
 	}
 	reservation.ActorID = fromNullInt64(actorID)
 	reservation.Limit = limit
@@ -1967,12 +2005,18 @@ func materializeExperienceApprovedReview(ctx context.Context, tx *sql.Tx, decisi
 	if tx == nil || decision == nil || len(evidence) == 0 {
 		return fmt.Errorf("experience review item evidence is required for approval")
 	}
+	if strings.TrimSpace(itemType) != "attribution_candidate" {
+		return fmt.Errorf("experience review item type is not materializable")
+	}
 	var summary map[string]interface{}
 	if err := json.Unmarshal(evidence, &summary); err != nil {
 		return fmt.Errorf("decode experience review evidence: %w", err)
 	}
 	suggestion := experienceMapValue(summary, "suggestion")
 	outcome := experienceMapValue(summary, "outcome")
+	if len(suggestion) == 0 || len(outcome) == 0 {
+		return fmt.Errorf("experience review approval requires suggestion and outcome evidence")
+	}
 	targetType := firstNonEmptyString(
 		experienceStringValue(suggestion, "target_type"),
 		experienceStringValue(outcome, "target_type"),

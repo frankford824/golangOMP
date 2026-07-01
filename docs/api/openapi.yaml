@@ -210,7 +210,7 @@ components:
         evidence_level:
           type: string
           enum: [L0, L1, L2, L3, L4]
-          description: L0 displayed, L1 locatable, L2 feedback, L3 tagged, L4 reusable.
+          description: L0 displayed, L1 locatable, L2 feedback, L3 tagged, L4 side-channel candidate.
         feedback_value:
           type: string
           enum: [accepted, rejected, partially_accepted]
@@ -336,7 +336,8 @@ components:
         eligible: { type: boolean }
         reason:
           type: string
-          description: Machine-readable non-eligible reason such as disabled, surface_disabled, already_answered, or rate_limited.
+          enum: [disabled, surface_disabled, missing_suggestion_event, suggestion_not_found, not_attribution_eligible, suggestion_context_mismatch, target_mismatch, missing_target, already_answered, rate_limited]
+          description: Machine-readable non-eligible reason.
         answer_event_key:
           type: string
           description: Stable idempotency key to send back when answering the micro-question.
@@ -17439,7 +17440,7 @@ paths:
           schema:
             type: string
             enum: [L0, L1, L2, L3, L4]
-          description: Minimum evidence level to return. L2+ is the default frontend view for reusable feedback candidates.
+          description: Minimum evidence level to return. L2+ is the default frontend view for feedback and side-channel candidates.
         - in: query
           name: from
           schema: { type: string }
@@ -17543,7 +17544,7 @@ paths:
   /v1/reports/experience/review-items/{item_key}/decision:
     post:
       summary: Record an experience attribution review decision
-      description: SuperAdmin-only side-channel decision for an attribution candidate. Decisions update experience review status; approved task/asset candidates may materialize side-channel reusable experience profiles or quality labels, but never mutate task, asset, ERP, audit, cost, or permission state.
+      description: SuperAdmin-only side-channel decision for an attribution candidate. Decisions update experience review status; approved task/asset candidates may materialize side-channel L4 candidate profiles or quality labels, but never mutate task, asset, ERP, audit, cost, or permission state.
       tags: [ExperienceLearning, Reports, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -20267,6 +20268,103 @@ paths:
                           properties:
                             row: { type: integer }
                             reason: { type: string }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/error-imports:
+    post:
+      summary: Import asset workbench quality error deductions
+      description: Imports quality error deduction records. Deduction amount is not provided by the client; settlement preview and batch generation calculate it from the matched payee profile, difficulty class, error count, and active deduction rules. `order_no` is optional trace data for uploaded file naming and does not drive deduction matching.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, AssetSettlement, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_month, records]
+              properties:
+                business_month:
+                  type: string
+                  pattern: '^[0-9]{4}-[0-9]{2}$'
+                original_filename: { type: string }
+                records:
+                  type: array
+                  items: &AssetWorkbenchErrorImportInput
+                    type: object
+                    properties:
+                      payee_user_id: { type: integer, nullable: true }
+                      payee_name: { type: string, description: Upload/payee display name from the quality error sheet. }
+                      order_no: { type: string, description: Optional uploaded filename/order trace; not required for deduction calculation. }
+                      difficulty_class: { type: string, description: Difficulty class code or name, for example A or A类. }
+                      occurred_date: { type: string, description: Optional YYYY-MM-DD or Excel date serial used for effective-rule matching. }
+                      error_count: { type: integer, minimum: 0, default: 1 }
+                      issue_description: { type: string }
+                      source_type: { type: string }
+                      handling_method: { type: string }
+                      reporter_name: { type: string }
+                      remark: { type: string }
+      responses:
+        '201':
+          description: Quality error import batch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: &AssetWorkbenchErrorImportBatchRow
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      import_no: { type: string }
+                      business_month: { type: string }
+                      uploaded_by: { type: integer }
+                      original_filename: { type: string }
+                      status: { type: string }
+                      total_rows: { type: integer }
+                      matched_rows: { type: integer, description: Rows that matched a payee and enabled difficulty class and will participate in quality deduction calculation. }
+                      unmatched_rows: { type: integer }
+                      ambiguous_rows: { type: integer }
+                      error_message: { type: string }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/error-imports/excel:
+    post:
+      summary: Import asset workbench quality error deductions from Excel
+      description: Accepts the formal quality error template with Chinese headers such as `线上订单号`, `分类`, `出错人`, `问题描述`, `抽查/售后`, `处理方法`, `登记人`, `备注`, and optional hidden `出错数`. Missing `出错数` defaults to 1. `线上订单号` is retained for traceability only; deduction calculation matches by payee and difficulty class.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, AssetSettlement, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [business_month, file]
+              properties:
+                business_month:
+                  type: string
+                  pattern: '^[0-9]{4}-[0-9]{2}$'
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Quality error import batch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchErrorImportBatchRow
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }

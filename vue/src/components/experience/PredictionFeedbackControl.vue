@@ -7,6 +7,7 @@
         type="button"
         class="prediction-feedback__button"
         :class="{ 'prediction-feedback__button--active': selectedValue === option.value }"
+        :aria-pressed="selectedValue === option.value"
         :disabled="saving"
         @click="submitFeedback(option.value)"
       >
@@ -21,6 +22,7 @@
         type="button"
         class="prediction-feedback__chip"
         :class="{ 'prediction-feedback__chip--active': selectedReason === reason.code }"
+        :aria-pressed="selectedReason === reason.code"
         :disabled="saving"
         @click="submitFeedback(selectedValue, reason.code)"
       >
@@ -28,7 +30,35 @@
       </button>
     </div>
 
+    <div v-if="microQuestionVisible" class="prediction-feedback__micro">
+      <button
+        type="button"
+        class="prediction-feedback__micro-toggle"
+        :aria-pressed="microQuestionOpen"
+        :disabled="microQuestionLoading || microQuestionSaving || microQuestionSubmitted"
+        @click="toggleMicroQuestion"
+      >
+        {{ microQuestionSubmitted ? '暂不处理原因已记' : microQuestionOpen ? '收起' : '暂不处理' }}
+      </button>
+    </div>
+
+    <div v-if="microQuestionOpen" class="prediction-feedback__reasons" aria-label="暂不处理原因">
+      <button
+        v-for="reason in microQuestionReasonOptions"
+        :key="reason.code"
+        type="button"
+        class="prediction-feedback__chip"
+        :class="{ 'prediction-feedback__chip--active': selectedMicroReason === reason.code }"
+        :aria-pressed="selectedMicroReason === reason.code"
+        :disabled="microQuestionSaving"
+        @click="submitMicroQuestion(reason.code)"
+      >
+        {{ reason.label }}
+      </button>
+    </div>
+
     <p v-if="errorText" class="prediction-feedback__error" role="status">{{ errorText }}</p>
+    <p v-if="microQuestionError" class="prediction-feedback__error" role="status">{{ microQuestionError }}</p>
   </div>
 </template>
 
@@ -38,9 +68,14 @@ import {
   experienceApi,
   type AISuggestionFeedbackValue,
   type ExperienceClientConfig,
+  type ExperienceMicroQuestionEligibility,
   type ExperienceReasonTag,
 } from '@/services/api/experienceApi'
-import { recordExperienceBehavior, setExperienceBehaviorSampleRate } from '@/services/experienceBehavior'
+import {
+  recordExperienceBehavior,
+  setExperienceBehaviorEnabled,
+  setExperienceBehaviorSampleRate,
+} from '@/services/experienceBehavior'
 import type { PredictionSuggestion } from '@/services/api/predictionsApi'
 
 const feedbackOptions: Array<{ value: AISuggestionFeedbackValue; label: string }> = [
@@ -62,6 +97,17 @@ const fallbackReasonOptions: ReasonOption[] = [
   { code: 'not_relevant', label: '不相关' },
 ]
 
+const fallbackMicroQuestionReasonOptions: ReasonOption[] = [
+  { code: 'temporarily_not_needed', label: '暂时不需要' },
+  { code: 'will_handle_later', label: '稍后处理' },
+  { code: 'already_handled', label: '已处理' },
+  { code: 'not_relevant', label: '不相关' },
+  { code: 'missing_context', label: '缺上下文' },
+  { code: 'stage_not_applicable', label: '阶段不适用' },
+  { code: 'customer_special_case', label: '客户特例' },
+  { code: 'suggestion_outdated', label: '建议已过时' },
+]
+
 const props = defineProps<{
   suggestion: PredictionSuggestion
   surface: string
@@ -71,12 +117,21 @@ const props = defineProps<{
 
 const localEnabled = ref(false)
 const behaviorEnabled = ref(false)
+const microQuestionEnabled = ref(false)
 const reasonOptions = ref<ReasonOption[]>(fallbackReasonOptions)
+const microQuestionReasonOptions = ref<ReasonOption[]>(fallbackMicroQuestionReasonOptions)
 const selectedValue = ref<AISuggestionFeedbackValue | ''>('')
 const selectedReason = ref('')
+const selectedMicroReason = ref('')
 const saving = ref(false)
+const microQuestionLoading = ref(false)
+const microQuestionSaving = ref(false)
+const microQuestionOpen = ref(false)
+const microQuestionSubmitted = ref(false)
 const errorText = ref('')
+const microQuestionError = ref('')
 const impressionRecorded = ref(false)
+const microQuestionEligibility = ref<ExperienceMicroQuestionEligibility | null>(null)
 
 let clientConfigPromise: Promise<ExperienceClientConfig | null> | null = null
 let reasonTagsPromise: Promise<ExperienceReasonTag[] | null> | null = null
@@ -85,16 +140,28 @@ const suggestionEventId = computed(() => props.suggestion.suggestion_event_id ||
 const effectiveRoute = computed(() => props.route || (typeof window !== 'undefined' ? window.location.pathname : ''))
 const visible = computed(() => Boolean(suggestionEventId.value) && (props.enabled ?? localEnabled.value))
 const needsReason = computed(() => selectedValue.value === 'partially_accepted' || selectedValue.value === 'rejected')
+const hasNonPositiveFeedback = computed(() => selectedValue.value === 'partially_accepted' || selectedValue.value === 'rejected')
+const suggestionAttributionEligible = computed(() => props.suggestion.attribution_eligible !== false)
+const microQuestionVisible = computed(
+  () =>
+    visible.value &&
+    microQuestionEnabled.value &&
+    hasNonPositiveFeedback.value &&
+    suggestionAttributionEligible.value &&
+    Boolean(props.suggestion.target_type && props.suggestion.target_id),
+)
 
 onMounted(async () => {
   void loadReasonOptions()
   const config = await getExperienceClientConfig()
   behaviorEnabled.value = Boolean(config?.behavior_capture_enabled)
+  setExperienceBehaviorEnabled(behaviorEnabled.value)
   setExperienceBehaviorSampleRate(config?.behavior_sample_rate)
+  const surfaces = config?.enabled_surfaces ?? []
+  const surfaceEnabled = surfaces.includes(props.surface)
+  microQuestionEnabled.value = Boolean(config?.micro_question_enabled && surfaceEnabled)
   maybeRecordImpression()
   if (props.enabled !== undefined) return
-  const surfaces = config?.enabled_surfaces ?? []
-  const surfaceEnabled = surfaces.length === 0 || surfaces.includes(props.surface)
   localEnabled.value = Boolean(config?.ai_feedback_enabled && surfaceEnabled)
 })
 
@@ -105,6 +172,18 @@ watch(
   },
   { immediate: true },
 )
+
+watch(suggestionEventId, () => {
+  selectedValue.value = ''
+  selectedReason.value = ''
+  selectedMicroReason.value = ''
+  microQuestionOpen.value = false
+  microQuestionSubmitted.value = false
+  microQuestionEligibility.value = null
+  microQuestionError.value = ''
+  impressionRecorded.value = false
+  maybeRecordImpression()
+})
 
 async function getExperienceClientConfig(): Promise<ExperienceClientConfig | null> {
   if (!clientConfigPromise) {
@@ -137,7 +216,6 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
   if (value === 'accepted') selectedReason.value = ''
 
   const suggestion = props.suggestion
-  if (behaviorEnabled.value) recordBehavior('click')
   try {
     await experienceApi.feedback(suggestionEventId.value, {
       suggestion_event_id: suggestionEventId.value,
@@ -164,7 +242,94 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
   }
 }
 
-function recordBehavior(action: 'impression' | 'click'): void {
+async function toggleMicroQuestion(): Promise<void> {
+  if (microQuestionSubmitted.value || microQuestionLoading.value || microQuestionSaving.value) return
+  microQuestionError.value = ''
+  if (microQuestionOpen.value) {
+    microQuestionOpen.value = false
+    if (behaviorEnabled.value) recordBehavior('dismiss')
+    return
+  }
+  if (!microQuestionEligibility.value) {
+    await loadMicroQuestionEligibility()
+  }
+  if (microQuestionEligibility.value?.eligible) {
+    microQuestionOpen.value = true
+  }
+}
+
+async function loadMicroQuestionEligibility(): Promise<void> {
+  if (!suggestionEventId.value || microQuestionLoading.value) return
+  microQuestionLoading.value = true
+  microQuestionError.value = ''
+  if (behaviorEnabled.value) recordBehavior('expand')
+  try {
+    const suggestion = props.suggestion
+    const res = await experienceApi.microQuestionEligibility({
+      suggestion_event_id: suggestionEventId.value,
+      suggestion_stable_key: suggestion.suggestion_stable_key || undefined,
+      surface: props.surface,
+      target_type: suggestion.target_type || undefined,
+      target_id: suggestion.target_id || undefined,
+    })
+    const eligibility = res.data?.data ?? null
+    microQuestionEligibility.value = eligibility
+    const tags = eligibility?.reason_tags ?? []
+    if (tags.length) {
+      microQuestionReasonOptions.value = tags.map((tag) => ({ code: tag.code, label: tag.name }))
+    }
+    if (!eligibility?.eligible) {
+      microQuestionError.value = microQuestionEligibilityMessage(eligibility?.reason)
+    }
+  } catch {
+    microQuestionError.value = '暂不处理原因未加载'
+  } finally {
+    microQuestionLoading.value = false
+  }
+}
+
+async function submitMicroQuestion(reasonCode: string): Promise<void> {
+  if (!reasonCode || !suggestionEventId.value || microQuestionSaving.value) return
+  const suggestion = props.suggestion
+  const eligibility = microQuestionEligibility.value
+  microQuestionSaving.value = true
+  microQuestionError.value = ''
+  selectedMicroReason.value = reasonCode
+  try {
+    await experienceApi.microQuestionAnswer({
+      answer_event_key: eligibility?.answer_event_key,
+      suggestion_event_id: suggestionEventId.value,
+      suggestion_stable_key: suggestion.suggestion_stable_key || undefined,
+      surface: props.surface,
+      target_type: suggestion.target_type || '',
+      target_id: suggestion.target_id || '',
+      answer_value: 'answered',
+      reason_code: reasonCode,
+      payload: {
+        route: effectiveRoute.value,
+        suggestion_id: suggestion.id,
+        suggestion_type: String(suggestion.type || ''),
+        source: suggestion.source || '',
+        action_type: suggestion.action_type || '',
+        action_label: suggestion.action_label || '',
+      },
+    })
+    microQuestionSubmitted.value = true
+    microQuestionOpen.value = false
+  } catch {
+    microQuestionError.value = '暂不处理原因未保存'
+  } finally {
+    microQuestionSaving.value = false
+  }
+}
+
+function microQuestionEligibilityMessage(reason?: string): string {
+  if (reason === 'already_answered') return '暂不处理原因已记录'
+  if (reason === 'rate_limited') return '今日追问已达上限'
+  return '暂不可记录原因'
+}
+
+function recordBehavior(action: 'impression' | 'click' | 'expand' | 'dismiss'): void {
   const suggestion = props.suggestion
   recordExperienceBehavior({
     action,
@@ -198,7 +363,8 @@ function maybeRecordImpression(): void {
 }
 
 .prediction-feedback__segment,
-.prediction-feedback__reasons {
+.prediction-feedback__reasons,
+.prediction-feedback__micro {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
@@ -209,7 +375,8 @@ function maybeRecordImpression(): void {
 }
 
 .prediction-feedback__button,
-.prediction-feedback__chip {
+.prediction-feedback__chip,
+.prediction-feedback__micro-toggle {
   min-height: 1.65rem;
   border: 1px solid rgb(var(--yb-border));
   background: rgb(var(--yb-surface));
@@ -232,8 +399,15 @@ function maybeRecordImpression(): void {
   padding: 0.18rem 0.42rem;
 }
 
+.prediction-feedback__micro-toggle {
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  background: rgb(var(--yb-surface-muted));
+}
+
 .prediction-feedback__button:hover,
-.prediction-feedback__chip:hover {
+.prediction-feedback__chip:hover,
+.prediction-feedback__micro-toggle:hover {
   border-color: rgb(var(--yb-brand-border-strong));
   color: rgb(var(--yb-brand-strong));
 }
@@ -247,7 +421,8 @@ function maybeRecordImpression(): void {
 }
 
 .prediction-feedback__button:disabled,
-.prediction-feedback__chip:disabled {
+.prediction-feedback__chip:disabled,
+.prediction-feedback__micro-toggle:disabled {
   cursor: wait;
   opacity: 0.68;
 }

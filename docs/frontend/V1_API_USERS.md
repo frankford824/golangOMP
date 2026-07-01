@@ -22,7 +22,7 @@
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, OrgAdmin, RoleAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -135,8 +135,8 @@ curl -X GET https://api.example.com/v1/access-rules \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin。
+- `POST` 允许角色: HRAdmin, SuperAdmin, DepartmentAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -273,7 +273,7 @@ curl -X POST https://api.example.com/v1/users \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Designer, CustomizationOperator, Admin, HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -343,8 +343,8 @@ curl -X GET https://api.example.com/v1/users/designers \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `PATCH` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin。
+- `PATCH` 允许角色: HRAdmin, SuperAdmin, DepartmentAdmin。
 - `DELETE` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
@@ -490,7 +490,7 @@ curl -X DELETE https://api.example.com/v1/users/<id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `PUT` 允许角色: 已登录 / scope-aware。
+- `PUT` 允许角色: HRAdmin, SuperAdmin, DepartmentAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -557,8 +557,8 @@ curl -X PUT https://api.example.com/v1/users/<id>/password \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
-- `PUT` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: HRAdmin, SuperAdmin。
+- `PUT` 允许角色: HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### POST 细节
@@ -676,7 +676,7 @@ curl -X PUT https://api.example.com/v1/users/<id>/roles \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `DELETE` 允许角色: 已登录 / scope-aware。
+- `DELETE` 允许角色: HRAdmin, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -814,7 +814,7 @@ curl -X GET https://api.example.com/v1/permission-logs \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Admin, SuperAdmin, HRAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -885,7 +885,7 @@ curl -X GET https://api.example.com/v1/operation-logs \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin, Audit_A, Audit_B, CustomizationReviewer。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1263,7 +1263,7 @@ curl -X POST https://api.example.com/v1/admin/jst-users/import \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1307,7 +1307,7 @@ curl -X POST https://api.example.com/v1/users/<id>/activate \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema

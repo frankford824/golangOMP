@@ -86,18 +86,34 @@ export async function exportErrorImportTemplateWorkbook(): Promise<void> {
   workbook.creator = 'asset-workbench'
   workbook.created = new Date()
 
-  const sheet = workbook.addWorksheet('出错导入模板')
+  const sheet = workbook.addWorksheet('质检出错导入模板')
   sheet.columns = [
-    { header: 'order_no', key: 'order_no', width: 24 },
-    { header: 'error_count', key: 'error_count', width: 16 },
+    { key: 'note', width: 14 },
+    { key: 'occurred_date', width: 14 },
+    { key: 'order_no', width: 24 },
+    { key: 'difficulty_class', width: 14 },
+    { key: 'payee_name', width: 18 },
+    { key: 'issue_description', width: 28 },
+    { key: 'source_type', width: 14 },
+    { key: 'handling_method', width: 18 },
+    { key: 'reporter_name', width: 14 },
+    { key: 'remark', width: 18 },
+    { key: 'error_count', width: 12 },
   ]
-  sheet.addRow({ order_no: '示例订单号', error_count: 1 })
-  formatSheet(sheet)
+  sheet.addRow(['说明：', '格式', '可选留痕，不参与扣减计算', '关联系统难度类，用于计价', '绑定系统人员档案', '文字', '选其一', '文字', '文字', '文字', '隐藏：默认一行一错'])
+  sheet.addRow(['导入模板：', '日期', '线上订单号', '分类', '出错人', '问题描述', '抽查/售后', '处理方法', '登记人', '备注', '出错数'])
+  sheet.addRow(['', new Date(2026, 6, 1), '3310254339917022991', 'C类', '张三', '年龄做错了', '抽查', '重修', '李四', '', 1])
+  sheet.getColumn(11).hidden = true
+  sheet.getRow(1).font = { color: { argb: 'FF6B6258' } }
+  sheet.getRow(2).font = { bold: true }
+  sheet.getRow(2).alignment = { vertical: 'middle', horizontal: 'center' }
+  sheet.getColumn(2).numFmt = 'yyyy-mm-dd'
+  sheet.views = [{ state: 'frozen', ySplit: 2 }]
 
   const buffer = await workbook.xlsx.writeBuffer()
   downloadBlob(
     new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    'asset-workbench-error-import-template.xlsx',
+    'asset-workbench-quality-error-import-template.xlsx',
   )
 }
 
@@ -183,7 +199,7 @@ function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: Settleme
     { header: '页数', key: 'pageCount', width: 10 },
     { header: '毛额', key: 'grossAmount', width: 12 },
     { header: '出错数', key: 'errorCount', width: 10 },
-    { header: '扣减', key: 'deductionAmount', width: 12 },
+    { header: '质检扣减', key: 'deductionAmount', width: 12 },
     { header: '福利', key: 'welfareAmount', width: 12 },
     { header: '补录', key: 'supplementAmount', width: 12 },
     { header: '调整', key: 'adjustmentAmount', width: 12 },
@@ -201,7 +217,7 @@ function appendSummarySheet(workbook: import('exceljs').Workbook, rows: Settleme
     { header: '页数', key: 'page_count', width: 10 },
     { header: '毛额', key: 'gross_amount', width: 12 },
     { header: '出错数', key: 'error_count', width: 10 },
-    { header: '扣减', key: 'deduction_amount', width: 12 },
+    { header: '质检扣减', key: 'deduction_amount', width: 12 },
     { header: '福利', key: 'welfare_amount', width: 12 },
     { header: '补录', key: 'supplement_amount', width: 12 },
     { header: '净额', key: 'net_amount', width: 12 },
@@ -218,7 +234,7 @@ function appendReportSheet(workbook: import('exceljs').Workbook, report: Settlem
     { header: `${difficultyLabel(difficulty)}页数`, key: difficultyKey(difficulty, 'page_count'), width: 12 },
     { header: `${difficultyLabel(difficulty)}金额`, key: difficultyKey(difficulty, 'gross_amount'), width: 12 },
     { header: `${difficultyLabel(difficulty)}出错`, key: difficultyKey(difficulty, 'error_count'), width: 12 },
-    { header: `${difficultyLabel(difficulty)}扣减`, key: difficultyKey(difficulty, 'deduction_amount'), width: 12 },
+    { header: `${difficultyLabel(difficulty)}质检扣减`, key: difficultyKey(difficulty, 'deduction_amount'), width: 12 },
     { header: `${difficultyLabel(difficulty)}作图占比`, key: difficultyKey(difficulty, 'page_count_share'), width: 14 },
     { header: `${difficultyLabel(difficulty)}月占比`, key: difficultyKey(difficulty, 'month_page_count_share'), width: 14 },
   ])
@@ -233,7 +249,7 @@ function appendReportSheet(workbook: import('exceljs').Workbook, report: Settlem
     { header: '作图量', key: 'page_count', width: 10 },
     { header: '毛额', key: 'gross_amount', width: 12 },
     { header: '出错数', key: 'error_count', width: 10 },
-    { header: '扣减', key: 'deduction_amount', width: 12 },
+    { header: '质检扣减', key: 'deduction_amount', width: 12 },
     { header: '福利', key: 'welfare_amount', width: 12 },
     { header: '补录', key: 'supplement_amount', width: 12 },
     { header: '净额', key: 'net_amount', width: 12 },
@@ -260,7 +276,7 @@ function appendReportDifficultySheet(workbook: import('exceljs').Workbook, repor
     { header: '作图量', key: 'page_count', width: 10 },
     { header: '金额', key: 'gross_amount', width: 12 },
     { header: '出错数', key: 'error_count', width: 10 },
-    { header: '扣减', key: 'deduction_amount', width: 12 },
+    { header: '质检扣减', key: 'deduction_amount', width: 12 },
     { header: '出错率', key: 'error_rate', width: 12 },
     { header: '行内作图占比', key: 'page_count_share', width: 14 },
     { header: '行内出错占比', key: 'error_count_share', width: 14 },

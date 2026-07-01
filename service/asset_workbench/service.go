@@ -592,15 +592,29 @@ type ImportErrorRecordsParams struct {
 }
 
 type ImportErrorRecordInput struct {
-	PayeeUserID *int64 `json:"payee_user_id"`
-	OrderNo     string `json:"order_no"`
-	ErrorCount  int    `json:"error_count"`
+	PayeeUserID      *int64          `json:"payee_user_id"`
+	PayeeName        string          `json:"payee_name"`
+	OrderNo          string          `json:"order_no"`
+	DifficultyClass  string          `json:"difficulty_class"`
+	OccurredDate     string          `json:"occurred_date"`
+	ErrorCount       int             `json:"error_count"`
+	IssueDescription string          `json:"issue_description"`
+	SourceType       string          `json:"source_type"`
+	HandlingMethod   string          `json:"handling_method"`
+	ReporterName     string          `json:"reporter_name"`
+	Remark           string          `json:"remark"`
+	RawPayload       json.RawMessage `json:"raw_payload_json,omitempty"`
 }
 
 type errorRecordImportMatch struct {
 	Status           string
 	SubmissionItemID *int64
 	CandidateItemIDs []int64
+	PayeeUserID      *int64
+	DifficultyClass  string
+	OccurredDate     *time.Time
+	Reason           string
+	CandidateUserIDs []int64
 }
 
 type SettlementPreview struct {
@@ -3587,16 +3601,36 @@ func (s *Service) ImportErrorRecords(ctx context.Context, actor domain.RequestAc
 	if len(params.Records) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "records are required.", nil)
 	}
-	submissionItems, err := s.repo.ListSubmissionItemsByMonth(ctx, businessMonth)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission items for error import matching.", err.Error())
-	}
+	var submissionItems []*domain.AssetWorkbenchSubmissionItem
+	var difficultyIndex map[string]string
 	matches := make([]errorRecordImportMatch, len(params.Records))
 	matchedRows := 0
 	unmatchedRows := 0
 	ambiguousRows := 0
 	for idx, input := range params.Records {
-		match := matchImportedErrorRecord(submissionItems, input)
+		var match errorRecordImportMatch
+		var appErr *domain.AppError
+		if isQualityErrorImportInput(input) {
+			if difficultyIndex == nil {
+				difficultyIndex, appErr = s.errorImportDifficultyIndex(ctx)
+				if appErr != nil {
+					return nil, appErr
+				}
+			}
+			match, appErr = s.matchQualityErrorRecord(ctx, input, difficultyIndex)
+			if appErr != nil {
+				return nil, appErr
+			}
+		} else {
+			if submissionItems == nil {
+				var err error
+				submissionItems, err = s.repo.ListSubmissionItemsByMonth(ctx, businessMonth)
+				if err != nil {
+					return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission items for error import matching.", err.Error())
+				}
+			}
+			match = matchImportedErrorRecord(submissionItems, input)
+		}
 		matches[idx] = match
 		switch match.Status {
 		case domain.AssetWorkbenchErrorMatchStatusMatched:
@@ -3626,23 +3660,26 @@ func (s *Service) ImportErrorRecords(ctx context.Context, actor domain.RequestAc
 		}
 		for idx, input := range params.Records {
 			orderNo := strings.TrimSpace(input.OrderNo)
-			if orderNo == "" {
-				return domain.NewAppError(domain.ErrCodeInvalidRequest, "error record order_no is required.", nil)
-			}
 			if input.ErrorCount < 0 {
 				return domain.NewAppError(domain.ErrCodeInvalidRequest, "error_count must be non-negative.", nil)
 			}
 			match := matches[idx]
-			raw := mustJSON(map[string]interface{}{
-				"input":              input,
-				"match_status":       match.Status,
-				"candidate_item_ids": match.CandidateItemIDs,
-			})
+			raw := errorRecordRawPayload(input, match)
+			payeeUserID := input.PayeeUserID
+			if match.PayeeUserID != nil {
+				payeeUserID = match.PayeeUserID
+			}
+			difficultyClass := strings.TrimSpace(match.DifficultyClass)
+			if difficultyClass == "" {
+				difficultyClass = strings.TrimSpace(input.DifficultyClass)
+			}
 			if _, err := s.repo.CreateErrorRecord(ctx, tx, &domain.AssetWorkbenchErrorRecord{
 				ImportBatchID:    batch.ID,
 				BusinessMonth:    businessMonth,
-				PayeeUserID:      input.PayeeUserID,
+				PayeeUserID:      payeeUserID,
 				OrderNo:          orderNo,
+				DifficultyClass:  difficultyClass,
+				OccurredDate:     match.OccurredDate,
 				ErrorCount:       input.ErrorCount,
 				RawPayload:       raw,
 				MatchStatus:      match.Status,
@@ -3899,6 +3936,8 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 		if appErr != nil {
 			return appErr
 		}
+		profiles := map[int64]*domain.AssetWorkbenchProfile{}
+		deductionCache := map[string]deductionRuleCacheEntry{}
 		itemIDs := make([]int64, 0, len(items))
 		for _, item := range items {
 			itemIDs = append(itemIDs, item.ID)
@@ -3946,6 +3985,38 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 						return err
 					}
 				}
+			}
+		}
+		for _, record := range errorRecords {
+			if record == nil || record.PayeeUserID == nil || record.MatchStatus != domain.AssetWorkbenchErrorMatchStatusMatched || strings.TrimSpace(record.DifficultyClass) == "" || record.ErrorCount <= 0 {
+				continue
+			}
+			payeeID := *record.PayeeUserID
+			profile, appErr := s.settlementReportProfile(ctx, payeeID, profiles)
+			if appErr != nil {
+				return appErr
+			}
+			deduction, ruleSnapshot, appErr := s.calculateQualityErrorDeductionCached(ctx, businessMonth, record, profile, deductionCache)
+			if appErr != nil {
+				return appErr
+			}
+			if deduction <= 0 {
+				continue
+			}
+			sourceID := record.ID
+			if _, err := s.repo.CreateSettlementItem(ctx, tx, &domain.AssetWorkbenchSettlementItem{
+				BatchID:       batch.ID,
+				ItemType:      domain.AssetWorkbenchItemTypeErrorDeduction,
+				PayeeUserID:   payeeID,
+				BusinessMonth: businessMonth,
+				Amount:        deduction,
+				Quantity:      float64(record.ErrorCount),
+				Direction:     "debit",
+				SourceRefType: "error_record",
+				SourceRefID:   &sourceID,
+				Snapshot:      ruleSnapshot,
+			}); err != nil {
+				return err
 			}
 		}
 		for _, line := range welfareLines {
@@ -5548,6 +5619,8 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 	rowsByPayee := map[int64]*SettlementPreviewRow{}
 	normalPayrollRowsByPayee := map[int64]*SettlementPayrollRow{}
 	supplementPayrollRowsByPayee := map[int64]*SettlementPayrollRow{}
+	profiles := map[int64]*domain.AssetWorkbenchProfile{}
+	deductionCache := map[string]deductionRuleCacheEntry{}
 	total := SettlementPreviewRow{}
 	ensureNormalPayrollRow := func(payeeID int64) *SettlementPayrollRow {
 		row := normalPayrollRowsByPayee[payeeID]
@@ -5598,6 +5671,32 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 			normalPayrollRow.DeductionAmount += deduction
 		}
 		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount
+		normalPayrollRow.NetAmount = normalPayrollRow.GrossAmount - normalPayrollRow.DeductionAmount + normalPayrollRow.WelfareAmount + normalPayrollRow.AdjustmentAmount
+	}
+	for _, record := range errorRecords {
+		if record == nil || record.PayeeUserID == nil || record.MatchStatus != domain.AssetWorkbenchErrorMatchStatusMatched || strings.TrimSpace(record.DifficultyClass) == "" || record.ErrorCount <= 0 {
+			continue
+		}
+		payeeID := *record.PayeeUserID
+		profile, appErr := s.settlementReportProfile(ctx, payeeID, profiles)
+		if appErr != nil {
+			return nil, appErr
+		}
+		row := rowsByPayee[payeeID]
+		if row == nil {
+			row = &SettlementPreviewRow{PayeeUserID: payeeID}
+			rowsByPayee[payeeID] = row
+		}
+		normalPayrollRow := ensureNormalPayrollRow(payeeID)
+		deduction, _, appErr := s.calculateQualityErrorDeductionCached(ctx, businessMonth, record, profile, deductionCache)
+		if appErr != nil {
+			return nil, appErr
+		}
+		row.ErrorCount += record.ErrorCount
+		row.DeductionAmount += deduction
+		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount
+		normalPayrollRow.ErrorCount += record.ErrorCount
+		normalPayrollRow.DeductionAmount += deduction
 		normalPayrollRow.NetAmount = normalPayrollRow.GrossAmount - normalPayrollRow.DeductionAmount + normalPayrollRow.WelfareAmount + normalPayrollRow.AdjustmentAmount
 	}
 	welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, items)
@@ -5795,6 +5894,38 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 			metric.DeductionAmount += deduction
 			totalMetric.DeductionAmount += deduction
 		}
+	}
+	for _, record := range errorRecords {
+		if record == nil || record.PayeeUserID == nil || record.MatchStatus != domain.AssetWorkbenchErrorMatchStatusMatched || strings.TrimSpace(record.DifficultyClass) == "" || record.ErrorCount <= 0 {
+			continue
+		}
+		payeeID := *record.PayeeUserID
+		rowType := domain.AssetWorkbenchPayrollRowTypeNormalPiecework
+		key := settlementReportRowKey(payeeID, rowType)
+		row := ensureRow(payeeID, rowType)
+		difficultyClass := settlementReportDifficultyClass(record.DifficultyClass)
+		metric := ensureMetric(key, difficultyClass)
+		totalMetric := ensureTotalMetric(difficultyClass)
+		profile, appErr := s.settlementReportProfile(ctx, payeeID, profiles)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if strings.TrimSpace(row.JobGrade) == "" && profile != nil {
+			row.JobGrade = strings.TrimSpace(profile.JobGrade)
+		}
+		setSettlementReportCreatedDate(row, qualityErrorRecordAsOf(record, businessMonth, s.loc), s.loc)
+		row.ErrorCount += record.ErrorCount
+		metric.ErrorCount += record.ErrorCount
+		totalMetric.ErrorCount += record.ErrorCount
+		addOrderNoByKey(key, record.OrderNo)
+		addOrderNoByDifficulty(key, difficultyClass, record.OrderNo)
+		deduction, _, appErr := s.calculateQualityErrorDeductionCached(ctx, businessMonth, record, profile, deductionCache)
+		if appErr != nil {
+			return nil, appErr
+		}
+		row.DeductionAmount += deduction
+		metric.DeductionAmount += deduction
+		totalMetric.DeductionAmount += deduction
 	}
 
 	welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, items)
@@ -6344,6 +6475,9 @@ func deductionRuleCacheKey(item *domain.AssetWorkbenchSubmissionItem, asOf time.
 func matchedErrorCount(records []*domain.AssetWorkbenchErrorRecord, item *domain.AssetWorkbenchSubmissionItem) int {
 	count := 0
 	for _, record := range records {
+		if strings.TrimSpace(record.DifficultyClass) != "" {
+			continue
+		}
 		matchStatus := strings.TrimSpace(record.MatchStatus)
 		if matchStatus != "" && matchStatus != domain.AssetWorkbenchErrorMatchStatusMatched {
 			continue
@@ -6366,6 +6500,70 @@ func matchedErrorCount(records []*domain.AssetWorkbenchErrorRecord, item *domain
 	return count
 }
 
+func (s *Service) calculateQualityErrorDeductionCached(ctx context.Context, businessMonth string, record *domain.AssetWorkbenchErrorRecord, profile *domain.AssetWorkbenchProfile, cache map[string]deductionRuleCacheEntry) (float64, json.RawMessage, *domain.AppError) {
+	if record == nil || profile == nil || record.ErrorCount <= 0 {
+		return 0, nil, nil
+	}
+	asOf := qualityErrorRecordAsOf(record, businessMonth, s.loc)
+	item := &domain.AssetWorkbenchSubmissionItem{
+		PayeeUserID:        derefInt64(record.PayeeUserID),
+		OrderNo:            record.OrderNo,
+		DifficultyClass:    strings.TrimSpace(record.DifficultyClass),
+		SubmittedAt:        asOf,
+		WorkerTypeSnapshot: strings.TrimSpace(profile.WorkerType),
+		JobGradeSnapshot:   strings.TrimSpace(profile.JobGrade),
+		PricingStatus:      domain.AssetWorkbenchPricingStatusPriced,
+		QCStatus:           domain.AssetWorkbenchSubmissionStatusChecked,
+		SettlementStatus:   domain.AssetWorkbenchSettlementStatusUnsettled,
+	}
+	amount, snapshot, appErr := s.calculateDeductionCached(ctx, item, record.ErrorCount, cache)
+	if appErr != nil {
+		return 0, nil, appErr
+	}
+	return amount, enrichQualityErrorDeductionSnapshot(snapshot, record, amount, asOf), nil
+}
+
+func enrichQualityErrorDeductionSnapshot(snapshot json.RawMessage, record *domain.AssetWorkbenchErrorRecord, amount float64, asOf time.Time) json.RawMessage {
+	payload := map[string]interface{}{}
+	if len(snapshot) > 0 && json.Valid(snapshot) {
+		_ = json.Unmarshal(snapshot, &payload)
+	}
+	payload["source"] = "quality_error_import"
+	payload["error_record_id"] = record.ID
+	payload["order_no"] = record.OrderNo
+	payload["difficulty_class"] = record.DifficultyClass
+	payload["error_count"] = record.ErrorCount
+	payload["calculated_amount"] = amount
+	payload["rule_as_of"] = asOf.Format("2006-01-02")
+	if len(record.RawPayload) > 0 && json.Valid(record.RawPayload) {
+		var raw interface{}
+		if err := json.Unmarshal(record.RawPayload, &raw); err == nil {
+			payload["import_payload"] = raw
+		}
+	}
+	return mustJSON(payload)
+}
+
+func qualityErrorRecordAsOf(record *domain.AssetWorkbenchErrorRecord, businessMonth string, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	if record != nil && record.OccurredDate != nil && !record.OccurredDate.IsZero() {
+		return record.OccurredDate.In(loc)
+	}
+	if t, err := time.ParseInLocation("2006-01", strings.TrimSpace(businessMonth), loc); err == nil {
+		return t
+	}
+	return time.Now().In(loc)
+}
+
+func derefInt64(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 func matchImportedErrorRecord(items []*domain.AssetWorkbenchSubmissionItem, input ImportErrorRecordInput) errorRecordImportMatch {
 	orderNo := strings.TrimSpace(input.OrderNo)
 	if orderNo == "" {
@@ -6386,13 +6584,15 @@ func matchImportedErrorRecord(items []*domain.AssetWorkbenchSubmissionItem, inpu
 	}
 	switch len(candidates) {
 	case 0:
-		return errorRecordImportMatch{Status: domain.AssetWorkbenchErrorMatchStatusUnmatched}
+		return errorRecordImportMatch{Status: domain.AssetWorkbenchErrorMatchStatusUnmatched, Reason: "order_no_not_found"}
 	case 1:
 		itemID := candidates[0].ID
+		payeeUserID := candidates[0].PayeeUserID
 		return errorRecordImportMatch{
 			Status:           domain.AssetWorkbenchErrorMatchStatusMatched,
 			SubmissionItemID: &itemID,
 			CandidateItemIDs: []int64{itemID},
+			PayeeUserID:      &payeeUserID,
 		}
 	default:
 		ids := make([]int64, 0, len(candidates))
@@ -6402,8 +6602,157 @@ func matchImportedErrorRecord(items []*domain.AssetWorkbenchSubmissionItem, inpu
 		return errorRecordImportMatch{
 			Status:           domain.AssetWorkbenchErrorMatchStatusAmbiguous,
 			CandidateItemIDs: ids,
+			Reason:           "order_no_ambiguous",
 		}
 	}
+}
+
+func isQualityErrorImportInput(input ImportErrorRecordInput) bool {
+	return strings.TrimSpace(input.DifficultyClass) != "" ||
+		strings.TrimSpace(input.PayeeName) != "" ||
+		strings.TrimSpace(input.IssueDescription) != "" ||
+		strings.TrimSpace(input.SourceType) != "" ||
+		strings.TrimSpace(input.HandlingMethod) != "" ||
+		strings.TrimSpace(input.ReporterName) != "" ||
+		strings.TrimSpace(input.Remark) != "" ||
+		strings.TrimSpace(input.OccurredDate) != "" ||
+		len(input.RawPayload) > 0
+}
+
+func (s *Service) errorImportDifficultyIndex(ctx context.Context) (map[string]string, *domain.AppError) {
+	items, err := s.repo.ListDifficultyClasses(ctx, repo.AssetWorkbenchDifficultyClassFilter{})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench difficulty classes.", err.Error())
+	}
+	index := map[string]string{}
+	for _, item := range items {
+		if item == nil || !item.Enabled || strings.TrimSpace(item.Code) == "" {
+			continue
+		}
+		code := strings.TrimSpace(item.Code)
+		index[normalizeErrorImportLookupKey(code)] = code
+		if name := strings.TrimSpace(item.Name); name != "" {
+			index[normalizeErrorImportLookupKey(name)] = code
+		}
+	}
+	return index, nil
+}
+
+func (s *Service) matchQualityErrorRecord(ctx context.Context, input ImportErrorRecordInput, difficultyIndex map[string]string) (errorRecordImportMatch, *domain.AppError) {
+	match := errorRecordImportMatch{Status: domain.AssetWorkbenchErrorMatchStatusMatched}
+	difficulty := normalizeErrorImportDifficulty(input.DifficultyClass, difficultyIndex)
+	if difficulty == "" {
+		match.Status = domain.AssetWorkbenchErrorMatchStatusUnmatched
+		match.Reason = "difficulty_class_not_found"
+		return match, nil
+	}
+	match.DifficultyClass = difficulty
+	occurredDate, appErr := parseErrorImportDate(input.OccurredDate, s.loc)
+	if appErr != nil {
+		return match, appErr
+	}
+	match.OccurredDate = occurredDate
+	payeeUserID, candidates, reason, appErr := s.matchErrorImportPayee(ctx, input)
+	if appErr != nil {
+		return match, appErr
+	}
+	match.CandidateUserIDs = candidates
+	if payeeUserID == nil {
+		if len(candidates) > 1 {
+			match.Status = domain.AssetWorkbenchErrorMatchStatusAmbiguous
+		} else {
+			match.Status = domain.AssetWorkbenchErrorMatchStatusUnmatched
+		}
+		match.Reason = reason
+		return match, nil
+	}
+	match.PayeeUserID = payeeUserID
+	return match, nil
+}
+
+func (s *Service) matchErrorImportPayee(ctx context.Context, input ImportErrorRecordInput) (*int64, []int64, string, *domain.AppError) {
+	if input.PayeeUserID != nil && *input.PayeeUserID > 0 {
+		profile, err := s.repo.GetProfileByUserID(ctx, *input.PayeeUserID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, nil, "payee_user_id_not_found", nil
+			}
+			return nil, nil, "", domain.NewAppError(domain.ErrCodeInternalError, "Failed to load asset workbench profile.", err.Error())
+		}
+		if strings.TrimSpace(input.PayeeName) != "" && normalizeHumanName(profile.RealName) != normalizeHumanName(input.PayeeName) {
+			return nil, []int64{profile.UserID}, "payee_name_mismatch", nil
+		}
+		value := profile.UserID
+		return &value, []int64{value}, "", nil
+	}
+	payeeName := strings.TrimSpace(input.PayeeName)
+	if payeeName == "" {
+		return nil, nil, "payee_name_required", nil
+	}
+	profiles, _, err := s.repo.ListProfiles(ctx, repo.AssetWorkbenchProfileFilter{Keyword: payeeName, Page: 1, PageSize: 500})
+	if err != nil {
+		return nil, nil, "", domain.NewAppError(domain.ErrCodeInternalError, "Failed to match asset workbench profile.", err.Error())
+	}
+	candidates := make([]int64, 0, 2)
+	needle := normalizeHumanName(payeeName)
+	for _, profile := range profiles {
+		if profile == nil || normalizeHumanName(profile.RealName) != needle {
+			continue
+		}
+		candidates = append(candidates, profile.UserID)
+	}
+	switch len(candidates) {
+	case 0:
+		return nil, nil, "payee_name_not_found", nil
+	case 1:
+		value := candidates[0]
+		return &value, candidates, "", nil
+	default:
+		return nil, candidates, "payee_name_ambiguous", nil
+	}
+}
+
+func normalizeErrorImportDifficulty(raw string, index map[string]string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	if code, ok := index[normalizeErrorImportLookupKey(value)]; ok {
+		return code
+	}
+	return ""
+}
+
+func normalizeErrorImportLookupKey(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, " ", "")
+	value = strings.ReplaceAll(value, "_", "")
+	value = strings.ReplaceAll(value, "-", "")
+	return value
+}
+
+func normalizeHumanName(value string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), " ", ""))
+}
+
+func errorRecordRawPayload(input ImportErrorRecordInput, match errorRecordImportMatch) json.RawMessage {
+	raw := map[string]interface{}{
+		"input":                input,
+		"match_status":         match.Status,
+		"match_reason":         match.Reason,
+		"candidate_item_ids":   match.CandidateItemIDs,
+		"candidate_user_ids":   match.CandidateUserIDs,
+		"resolved_payee_id":    match.PayeeUserID,
+		"resolved_difficulty":  match.DifficultyClass,
+		"resolved_occurred_at": formatOptionalDate(match.OccurredDate),
+	}
+	if len(input.RawPayload) > 0 && json.Valid(input.RawPayload) {
+		var payload interface{}
+		if err := json.Unmarshal(input.RawPayload, &payload); err == nil {
+			raw["source_row"] = payload
+		}
+	}
+	return mustJSON(raw)
 }
 
 func (s *Service) resolveUploadDirectoryForSession(ctx context.Context, directoryID int64) (*domain.AssetWorkbenchUploadDirectory, *domain.AppError) {
@@ -7217,51 +7566,88 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 	if len(rows) < 2 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file must include a header row and at least one data row.", nil)
 	}
-	headers := map[string]int{}
-	for index, cell := range rows[0] {
-		headers[normalizeExcelHeader(cell)] = index
+	headerRow, headers, ok := findErrorImportHeaderRow(rows)
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing quality error import headers.", nil)
 	}
-	orderIndex, ok := firstExcelColumn(headers, "order_no", "orderno", "订单号", "文件名")
+	orderIndex, ok := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号", "文件名")
 	if !ok {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing order_no column.", nil)
 	}
-	errorIndex, ok := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数")
-	if !ok {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing error_count column.", nil)
-	}
+	errorIndex, hasErrorCount := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数")
 	payeeIndex, hasPayee := firstExcelColumn(headers, "payee_user_id", "payeeuserid", "user_id", "userid", "人员id", "用户id")
-	records := make([]ImportErrorRecordInput, 0, len(rows)-1)
-	for rowIndex, row := range rows[1:] {
+	payeeNameIndex, hasPayeeName := firstExcelColumn(headers, "payee_name", "payeename", "出错人", "人员", "姓名", "计件人")
+	difficultyIndex, hasDifficulty := firstExcelColumn(headers, "difficulty_class", "difficultyclass", "分类", "难度", "难度类", "难度类别")
+	dateIndex, hasDate := firstExcelColumn(headers, "occurred_date", "occurreddate", "日期", "出错日期", "发生日期")
+	issueIndex, hasIssue := firstExcelColumn(headers, "issue_description", "issuedescription", "问题描述", "问题", "错误描述")
+	sourceIndex, hasSource := firstExcelColumn(headers, "source_type", "sourcetype", "抽查/售后", "来源", "类型")
+	methodIndex, hasMethod := firstExcelColumn(headers, "handling_method", "handlingmethod", "处理方法", "处理方式")
+	reporterIndex, hasReporter := firstExcelColumn(headers, "reporter_name", "reportername", "登记人", "记录人")
+	remarkIndex, hasRemark := firstExcelColumn(headers, "remark", "remarks", "备注", "说明")
+	records := make([]ImportErrorRecordInput, 0, len(rows)-headerRow-1)
+	for rowIndex := headerRow + 1; rowIndex < len(rows); rowIndex++ {
+		row := rows[rowIndex]
+		currentRow := rowIndex + 1
 		if len(records) >= 50000 {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel rows exceed error import limit.", map[string]int{"limit": 50000})
 		}
 		orderNo := strings.TrimSpace(excelCell(row, orderIndex))
-		errorRaw := strings.TrimSpace(excelCell(row, errorIndex))
-		if orderNo == "" && errorRaw == "" {
+		difficulty := excelOptionalCell(row, difficultyIndex, hasDifficulty)
+		payeeName := excelOptionalCell(row, payeeNameIndex, hasPayeeName)
+		errorRaw := excelOptionalCell(row, errorIndex, hasErrorCount)
+		issue := excelOptionalCell(row, issueIndex, hasIssue)
+		isQualityRow := difficulty != "" || payeeName != "" || issue != ""
+		if orderNo == "" && difficulty == "" && payeeName == "" && errorRaw == "" && issue == "" {
 			continue
 		}
-		if orderNo == "" {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no is required.", map[string]int{"row": rowIndex + 2})
+		if orderNo == "" && !isQualityRow {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no is required.", map[string]int{"row": currentRow})
 		}
-		errorCount, appErr := parseExcelNonNegativeInt(errorRaw, "error_count", rowIndex+2)
-		if appErr != nil {
-			return nil, appErr
+		errorCount := 1
+		if errorRaw != "" {
+			value, appErr := parseExcelNonNegativeInt(errorRaw, "error_count", currentRow)
+			if appErr != nil {
+				return nil, appErr
+			}
+			errorCount = value
 		}
 		var payeeUserID *int64
 		if hasPayee {
 			payeeRaw := strings.TrimSpace(excelCell(row, payeeIndex))
 			if payeeRaw != "" {
-				value, appErr := parseExcelNonNegativeInt64(payeeRaw, "payee_user_id", rowIndex+2)
+				value, appErr := parseExcelNonNegativeInt64(payeeRaw, "payee_user_id", currentRow)
 				if appErr != nil {
 					return nil, appErr
 				}
 				payeeUserID = &value
 			}
 		}
+		rawPayload := map[string]interface{}{
+			"row":   currentRow,
+			"日期":    excelOptionalCell(row, dateIndex, hasDate),
+			"线上订单号": orderNo,
+			"分类":    difficulty,
+			"出错人":   payeeName,
+			"问题描述":  issue,
+			"抽查/售后": excelOptionalCell(row, sourceIndex, hasSource),
+			"处理方法":  excelOptionalCell(row, methodIndex, hasMethod),
+			"登记人":   excelOptionalCell(row, reporterIndex, hasReporter),
+			"备注":    excelOptionalCell(row, remarkIndex, hasRemark),
+			"出错数":   errorCount,
+		}
 		records = append(records, ImportErrorRecordInput{
-			PayeeUserID: payeeUserID,
-			OrderNo:     orderNo,
-			ErrorCount:  errorCount,
+			PayeeUserID:      payeeUserID,
+			PayeeName:        payeeName,
+			OrderNo:          orderNo,
+			DifficultyClass:  difficulty,
+			OccurredDate:     excelOptionalCell(row, dateIndex, hasDate),
+			ErrorCount:       errorCount,
+			IssueDescription: issue,
+			SourceType:       excelOptionalCell(row, sourceIndex, hasSource),
+			HandlingMethod:   excelOptionalCell(row, methodIndex, hasMethod),
+			ReporterName:     excelOptionalCell(row, reporterIndex, hasReporter),
+			Remark:           excelOptionalCell(row, remarkIndex, hasRemark),
+			RawPayload:       mustJSON(rawPayload),
 		})
 	}
 	if len(records) == 0 {
@@ -7463,6 +7849,31 @@ func normalizeQCStatusForImport(raw string) string {
 	}
 }
 
+func findErrorImportHeaderRow(rows [][]string) (int, map[string]int, bool) {
+	limit := len(rows)
+	if limit > 10 {
+		limit = 10
+	}
+	for rowIndex := 0; rowIndex < limit; rowIndex++ {
+		headers := map[string]int{}
+		for index, cell := range rows[rowIndex] {
+			key := normalizeExcelHeader(cell)
+			if key == "" {
+				continue
+			}
+			headers[key] = index
+		}
+		_, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号", "文件名")
+		_, hasError := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数")
+		_, hasPayee := firstExcelColumn(headers, "payee_name", "payeename", "出错人", "人员", "姓名", "计件人")
+		_, hasDifficulty := firstExcelColumn(headers, "difficulty_class", "difficultyclass", "分类", "难度", "难度类", "难度类别")
+		if hasOrder && (hasError || hasPayee || hasDifficulty) {
+			return rowIndex, headers, true
+		}
+	}
+	return 0, nil, false
+}
+
 func normalizeExcelHeader(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, " ", "")
@@ -7485,6 +7896,38 @@ func excelCell(row []string, index int) string {
 		return ""
 	}
 	return row[index]
+}
+
+func excelOptionalCell(row []string, index int, ok bool) string {
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(excelCell(row, index))
+}
+
+func parseErrorImportDate(raw string, loc *time.Location) (*time.Time, *domain.AppError) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if loc == nil {
+		loc = time.UTC
+	}
+	layouts := []string{"2006-01-02", "2006/01/02", "2006.01.02", "2006-1-2", "2006/1/2", "2006.1.2"}
+	for _, layout := range layouts {
+		if t, err := time.ParseInLocation(layout, raw, loc); err == nil {
+			value := truncateDate(t)
+			return &value, nil
+		}
+	}
+	if serial, err := strconv.ParseFloat(raw, 64); err == nil && serial > 0 {
+		days := int(serial)
+		if float64(days) == serial {
+			value := time.Date(1899, 12, 30, 0, 0, 0, 0, loc).AddDate(0, 0, days)
+			return &value, nil
+		}
+	}
+	return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "occurred_date must use YYYY-MM-DD or Excel date serial.", nil)
 }
 
 func parseExcelNonNegativeInt(raw string, field string, row int) (int, *domain.AppError) {

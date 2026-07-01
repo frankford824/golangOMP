@@ -103,6 +103,62 @@ func TestExperienceRepoListExperienceEventsIncludesAISuggestionSamples(t *testin
 	}
 }
 
+func TestExperienceRepoListRecentAttributionOutcomesUsesRecentWindow(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		if expectedSQL != "recent-attribution-outcomes" {
+			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
+		}
+		for _, fragment := range []string{
+			"FROM experience_events",
+			"WHERE event_time >= ?",
+			"AND (target_type <> '' OR task_id IS NOT NULL)",
+			"ORDER BY event_time DESC, id DESC",
+		} {
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("recent attribution SQL missing %q: %s", fragment, normalized)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	eventTime := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	since := eventTime.Add(-24 * time.Hour)
+	mock.ExpectQuery("recent-attribution-outcomes").
+		WithArgs(since, 20).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "event_key", "event_time", "source_type", "action", "outcome", "task_id",
+			"target_type", "target_id", "payload_json",
+		}).AddRow(
+			int64(9),
+			"outcome:tasks:42:completed",
+			eventTime,
+			"task_status_snapshot",
+			"task_status_changed",
+			"Completed",
+			int64(42),
+			"task",
+			"42",
+			`{"changed_fields":[]}`,
+		))
+
+	repo := NewExperienceRepo(New(db))
+	outcomes, err := repo.ListRecentExperienceAttributionOutcomes(context.Background(), since, 20)
+	if err != nil {
+		t.Fatalf("ListRecentExperienceAttributionOutcomes() error = %v", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].ID != 9 || outcomes[0].TargetType != "task" {
+		t.Fatalf("outcomes = %+v, want mapped recent outcome", outcomes)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestExperienceRepoCreateReviewItemDoesNotOverwriteResolvedEvidence(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
 		normalized := strings.Join(strings.Fields(actualSQL), " ")
@@ -152,7 +208,7 @@ func TestExperienceRepoCreateReviewDecisionUpdatesItemBeforeInsert(t *testing.T)
 	actorID := int64(291)
 	evidence := `{"suggestion":{"target_type":"task","target_id":"42","type":"task_next_action"},"outcome":{"action":"task_status_changed","outcome":"Completed"}}`
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT item_type, evidence_summary_json").
+	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
 		WithArgs("review-1").
 		WillReturnRows(sqlmock.NewRows([]string{"item_type", "status", "evidence_summary_json"}).
 			AddRow("attribution_candidate", domain.ExperienceReviewItemStatusOpen, evidence))
@@ -203,7 +259,7 @@ func TestExperienceRepoCreateReviewDecisionMissingItemDoesNotInsertDecision(t *t
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT item_type, evidence_summary_json").
+	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
 		WithArgs("missing-review").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
@@ -229,7 +285,7 @@ func TestExperienceRepoCreateReviewDecisionRejectsResolvedItem(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT item_type, evidence_summary_json").
+	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
 		WithArgs("review-1").
 		WillReturnRows(sqlmock.NewRows([]string{"item_type", "status", "evidence_summary_json"}).
 			AddRow("attribution_candidate", domain.ExperienceReviewItemStatusApproved, `{"suggestion":{"target_type":"task","target_id":"42"}}`))
@@ -256,10 +312,10 @@ func TestExperienceRepoCreateReviewDecisionRequiresMaterializableApprovalEvidenc
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT item_type, evidence_summary_json").
+	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
 		WithArgs("review-1").
 		WillReturnRows(sqlmock.NewRows([]string{"item_type", "status", "evidence_summary_json"}).
-			AddRow("attribution_candidate", domain.ExperienceReviewItemStatusOpen, `{"suggestion":{"target_type":"management","target_id":"dashboard"}}`))
+			AddRow("attribution_candidate", domain.ExperienceReviewItemStatusOpen, `{"suggestion":{"target_type":"management","target_id":"dashboard"},"outcome":{"action":"dashboard_signal_changed","outcome":"observed"}}`))
 	mock.ExpectExec("UPDATE experience_review_items").
 		WithArgs(domain.ExperienceReviewItemStatusApproved, "review-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -281,6 +337,39 @@ func TestExperienceRepoCreateReviewDecisionRequiresMaterializableApprovalEvidenc
 	}
 }
 
+func TestExperienceRepoCreateReviewDecisionRequiresSuggestionAndOutcomeEvidence(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
+		WithArgs("review-1").
+		WillReturnRows(sqlmock.NewRows([]string{"item_type", "status", "evidence_summary_json"}).
+			AddRow("attribution_candidate", domain.ExperienceReviewItemStatusOpen, `{"suggestion":{"target_type":"task","target_id":"42"}}`))
+	mock.ExpectExec("UPDATE experience_review_items").
+		WithArgs(domain.ExperienceReviewItemStatusApproved, "review-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO experience_review_decisions").
+		WithArgs("review-1", domain.ExperienceReviewDecisionApprove, "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectRollback()
+
+	repo := NewExperienceRepo(New(db))
+	err = repo.CreateExperienceReviewDecision(context.Background(), &domain.ExperienceReviewDecision{
+		ReviewItemKey: "review-1",
+		Decision:      domain.ExperienceReviewDecisionApprove,
+	}, domain.ExperienceReviewItemStatusApproved)
+	if err == nil || !strings.Contains(err.Error(), "requires suggestion and outcome evidence") {
+		t.Fatalf("CreateExperienceReviewDecision() error = %v, want missing evidence", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestExperienceRepoCreateReviewDecisionMaterializesAssetQualityLabel(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -291,7 +380,7 @@ func TestExperienceRepoCreateReviewDecisionMaterializesAssetQualityLabel(t *test
 	actorID := int64(291)
 	evidence := `{"suggestion":{"target_type":"asset","target_id":"77","type":"asset_quality"},"feedback":{"reason_code":"asset_mismatch"},"outcome":{"action":"asset_review_status_changed","outcome":"approved"}}`
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT item_type, evidence_summary_json").
+	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
 		WithArgs("review-asset").
 		WillReturnRows(sqlmock.NewRows([]string{"item_type", "status", "evidence_summary_json"}).
 			AddRow("attribution_candidate", domain.ExperienceReviewItemStatusOpen, evidence))
@@ -535,6 +624,7 @@ func TestExperienceRepoReserveRateLimitUsesAtomicUpsertThenReadsCount(t *testing
 	actorID := int64(291)
 	periodStart := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
 	periodEnd := periodStart.Add(24 * time.Hour)
+	mock.ExpectBegin()
 	mock.ExpectExec("rate-limit-upsert").
 		WithArgs("291:micro_question_daily:20260630", sqlmock.AnyArg(), "micro_question_daily", periodStart, periodEnd, 20).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -542,6 +632,7 @@ func TestExperienceRepoReserveRateLimitUsesAtomicUpsertThenReadsCount(t *testing
 		WithArgs("291:micro_question_daily:20260630").
 		WillReturnRows(sqlmock.NewRows([]string{"limit_key", "actor_id", "bucket_name", "period_start", "period_end", "count", "hard_cap"}).
 			AddRow("291:micro_question_daily:20260630", actorID, "micro_question_daily", periodStart, periodEnd, 3, 20))
+	mock.ExpectCommit()
 
 	repo := NewExperienceRepo(New(db))
 	reservation, err := repo.ReserveExperienceRateLimit(context.Background(), corerepo.ExperienceRateLimitRequest{

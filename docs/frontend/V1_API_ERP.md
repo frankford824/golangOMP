@@ -924,7 +924,7 @@ curl -X POST https://api.example.com/v1/erp/inventory/virtual-qty \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Designer, Audit_A, Audit_B, Warehouse。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -995,7 +995,7 @@ curl -X GET https://api.example.com/v1/products/search \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: ERP, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1054,7 +1054,7 @@ curl -X GET https://api.example.com/v1/products/sync/status \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: ERP, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1113,7 +1113,7 @@ curl -X POST https://api.example.com/v1/products/sync/run \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Designer, Audit_A, Audit_B, Warehouse。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1171,8 +1171,8 @@ curl -X GET https://api.example.com/v1/products/<id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -1305,7 +1305,7 @@ curl -X POST https://api.example.com/v1/categories \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1372,8 +1372,8 @@ curl -X GET https://api.example.com/v1/categories/search \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `PATCH` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
+- `PATCH` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -1491,8 +1491,8 @@ curl -X PATCH https://api.example.com/v1/categories/<id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
+- `POST` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -1629,7 +1629,7 @@ curl -X POST https://api.example.com/v1/category-mappings \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1698,8 +1698,8 @@ curl -X GET https://api.example.com/v1/category-mappings/search \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `PATCH` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
+- `PATCH` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -1819,8 +1819,8 @@ curl -X PATCH https://api.example.com/v1/category-mappings/<id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
+- `POST` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -1963,8 +1963,8 @@ curl -X POST https://api.example.com/v1/cost-rules \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- `PATCH` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
+- `PATCH` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -2091,7 +2091,7 @@ curl -X PATCH https://api.example.com/v1/cost-rules/<id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
+- `GET` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -2154,7 +2154,7 @@ curl -X GET https://api.example.com/v1/cost-rules/<id>/history \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: Ops, Warehouse, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema

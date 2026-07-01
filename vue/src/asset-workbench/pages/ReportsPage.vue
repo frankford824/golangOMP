@@ -43,7 +43,7 @@ const summaryCards = computed(() => {
   return [
     { label: '订单数', value: formatInt(row?.order_count), hint: '非空订单号去重' },
     { label: '作图量', value: formatInt(row?.page_count), hint: `${formatInt(row?.item_count)} 单` },
-    { label: '出错扣减', value: formatMoney(row?.deduction_amount), hint: `${formatInt(row?.error_count)} 个出错` },
+    { label: '质检扣减', value: formatMoney(row?.deduction_amount), hint: `${formatInt(row?.error_count)} 个出错` },
     { label: '应结净额', value: formatMoney(row?.net_amount), hint: `正常 ${formatMoney(row?.gross_amount)} · 补录 ${formatMoney(row?.supplement_amount)}`, money: true },
   ]
 })
@@ -59,7 +59,7 @@ const baseColumns: GridColumn[] = [
   { key: 'gross_amount', label: '正常金额', width: 112, align: 'right' },
   { key: 'supplement_amount', label: '补录金额', width: 112, align: 'right' },
   { key: 'error_count', label: '出错数', width: 84, align: 'right' },
-  { key: 'deduction_amount', label: '扣减', width: 104, align: 'right' },
+  { key: 'deduction_amount', label: '质检扣减', width: 112, align: 'right' },
   { key: 'welfare_amount', label: '福利', width: 104, align: 'right' },
   { key: 'net_amount', label: '净额', width: 112, align: 'right' },
   { key: 'error_rate', label: '出错率', width: 92, align: 'right' },
@@ -238,7 +238,7 @@ onMounted(loadReport)
         <div class="aw-panel__head">
           <div>
             <h3>正常计件</h3>
-            <p class="aw-copy">正常计件包含结算时扣减、福利与难度分列。</p>
+            <p class="aw-copy">正常计件包含结算时质检扣减、福利与难度分列。</p>
           </div>
         </div>
         <WorkbenchDataGrid

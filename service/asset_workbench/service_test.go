@@ -119,14 +119,51 @@ func (r *settlementReportRepo) ListDifficultyClasses(context.Context, repo.Asset
 
 type errorImportRepo struct {
 	repo.AssetWorkbenchRepo
-	items   []*domain.AssetWorkbenchSubmissionItem
-	batch   *domain.AssetWorkbenchErrorImportBatch
-	records []*domain.AssetWorkbenchErrorRecord
-	events  []*domain.AssetWorkbenchEvent
+	items        []*domain.AssetWorkbenchSubmissionItem
+	profiles     []*domain.AssetWorkbenchProfile
+	difficulties []*domain.AssetWorkbenchDifficultyClass
+	batch        *domain.AssetWorkbenchErrorImportBatch
+	records      []*domain.AssetWorkbenchErrorRecord
+	events       []*domain.AssetWorkbenchEvent
 }
 
 func (r *errorImportRepo) ListSubmissionItemsByMonth(context.Context, string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
 	return r.items, nil
+}
+
+func (r *errorImportRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
+	for _, item := range r.profiles {
+		if item != nil && item.UserID == userID {
+			return item, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *errorImportRepo) ListProfiles(_ context.Context, filter repo.AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error) {
+	items := make([]*domain.AssetWorkbenchProfile, 0, len(r.profiles))
+	keyword := strings.TrimSpace(filter.Keyword)
+	for _, item := range r.profiles {
+		if item == nil {
+			continue
+		}
+		if keyword != "" && !strings.Contains(item.RealName, keyword) {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (r *errorImportRepo) ListDifficultyClasses(context.Context, repo.AssetWorkbenchDifficultyClassFilter) ([]*domain.AssetWorkbenchDifficultyClass, error) {
+	if r.difficulties != nil {
+		return r.difficulties, nil
+	}
+	return []*domain.AssetWorkbenchDifficultyClass{
+		{Code: "A", Name: "A类", Enabled: true, SortOrder: 10},
+		{Code: "B", Name: "B类", Enabled: true, SortOrder: 20},
+		{Code: "C", Name: "C类", Enabled: true, SortOrder: 30},
+	}, nil
 }
 
 func (r *errorImportRepo) CreateErrorImportBatch(_ context.Context, _ repo.Tx, batch *domain.AssetWorkbenchErrorImportBatch) (*domain.AssetWorkbenchErrorImportBatch, error) {
@@ -1510,6 +1547,42 @@ func TestImportErrorRecordsMatchesUniqueItemsAndCountsAmbiguous(t *testing.T) {
 	}
 }
 
+func TestImportErrorRecordsExcelMatchesQualityTemplateByPayeeAndDifficulty(t *testing.T) {
+	workbenchRepo := &errorImportRepo{
+		profiles: []*domain.AssetWorkbenchProfile{
+			{UserID: 100, RealName: "张三", WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "J1"},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(f.GetActiveSheetIndex())
+	_ = f.SetSheetRow(sheet, "A1", &[]interface{}{"说明：", "格式", "", "关联我们的分类，用于计价的", "绑定系统全职/兼职注册人", "文字", "选其一", "文字", "文字", "文字", "隐藏"})
+	_ = f.SetSheetRow(sheet, "A2", &[]interface{}{"导入模板：", "日期", "线上订单号", "分类", "出错人", "问题描述", "抽查/售后", "处理方法", "登记人", "备注", "出错数"})
+	_ = f.SetSheetRow(sheet, "A3", &[]interface{}{"", 46204, "3310254339917022991", "A类", "张三", "年龄做错了", "抽查", "重修", "李四", "首版", 8})
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	batch, appErr := svc.ImportErrorRecordsExcel(context.Background(), actor, "2026-07", "quality-errors.xlsx", bytes.NewReader(buf.Bytes()))
+	if appErr != nil {
+		t.Fatalf("ImportErrorRecordsExcel() error = %+v", appErr)
+	}
+	if batch.MatchedRows != 1 || batch.UnmatchedRows != 0 || batch.AmbiguousRows != 0 {
+		t.Fatalf("batch = %+v, want one matched row", batch)
+	}
+	if len(workbenchRepo.records) != 1 {
+		t.Fatalf("records = %+v", workbenchRepo.records)
+	}
+	record := workbenchRepo.records[0]
+	if record.PayeeUserID == nil || *record.PayeeUserID != 100 || record.DifficultyClass != "A" || record.ErrorCount != 8 {
+		t.Fatalf("record = %+v, want payee 100 A x8", record)
+	}
+	if record.OccurredDate == nil || record.OccurredDate.Format("2006-01-02") != "2026-07-01" {
+		t.Fatalf("occurred date = %v, want 2026-07-01", record.OccurredDate)
+	}
+}
+
 func TestCreateSettlementSupplementWritesDuplicateHintWithoutBlocking(t *testing.T) {
 	workbenchRepo := &supplementRepo{
 		items: []*domain.AssetWorkbenchSubmissionItem{
@@ -2580,6 +2653,46 @@ func TestBuildSettlementPreviewCalculatesDeductionsAtSettlementTime(t *testing.T
 	}
 }
 
+func TestBuildSettlementPreviewCalculatesQualityErrorDeductionByDifficulty(t *testing.T) {
+	payeeID := int64(1001)
+	occurred := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &settlementReportRepo{
+		rule: &domain.AssetWorkbenchDeductionRule{
+			ID:              9,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeAll,
+			JobGrade:        domain.AssetWorkbenchWorkerTypeAll,
+			DifficultyClass: "A",
+			DeductionAmount: 10,
+			EffectiveFrom:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		},
+		profiles: map[int64]*domain.AssetWorkbenchProfile{
+			payeeID: {UserID: payeeID, RealName: "张三", WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "J1"},
+		},
+	}
+	preview, appErr := svc.buildSettlementPreview(context.Background(), "2026-07", nil, []*domain.AssetWorkbenchErrorRecord{
+		{
+			ID:              801,
+			BusinessMonth:   "2026-07",
+			PayeeUserID:     &payeeID,
+			OrderNo:         "3310254339917022991",
+			DifficultyClass: "A",
+			OccurredDate:    &occurred,
+			ErrorCount:      8,
+			MatchStatus:     domain.AssetWorkbenchErrorMatchStatusMatched,
+		},
+	}, nil)
+	if appErr != nil {
+		t.Fatalf("buildSettlementPreview returned app error: %v", appErr)
+	}
+	if preview.Totals.ErrorCount != 8 || preview.Totals.DeductionAmount != 80 || preview.Totals.NetAmount != -80 {
+		t.Fatalf("totals = %+v, want 8 errors, 80 deduction, -80 net", preview.Totals)
+	}
+	if len(preview.PayrollRows) != 2 || preview.PayrollRows[0].PayeeUserID != payeeID || preview.PayrollRows[0].DeductionAmount != 80 {
+		t.Fatalf("payroll rows = %+v, want quality deduction in normal row", preview.PayrollRows)
+	}
+}
+
 func TestBuildSettlementPreviewKeepsSupplementInSecondPayrollRow(t *testing.T) {
 	svc := NewService(Config{Timezone: "Asia/Shanghai"})
 	preview, appErr := svc.buildSettlementPreview(context.Background(), "2026-06", []*domain.AssetWorkbenchSubmissionItem{
@@ -2970,5 +3083,30 @@ func TestParseErrorRecordsExcelSupportsChineseHeaders(t *testing.T) {
 	}
 	if records[0].PayeeUserID == nil || *records[0].PayeeUserID != 1001 {
 		t.Fatalf("payee = %v, want 1001", records[0].PayeeUserID)
+	}
+}
+
+func TestParseErrorRecordsExcelDefaultsFormalTemplateErrorCountToOne(t *testing.T) {
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(f.GetActiveSheetIndex())
+	if err := f.SetSheetRow(sheet, "A1", &[]interface{}{"说明：", "格式", "", "关联我们的分类，用于计价的", "绑定系统全职/兼职注册人"}); err != nil {
+		t.Fatalf("set description row: %v", err)
+	}
+	if err := f.SetSheetRow(sheet, "A2", &[]interface{}{"导入模板：", "日期", "线上订单号", "分类", "出错人", "问题描述", "抽查/售后", "处理方法", "登记人", "备注"}); err != nil {
+		t.Fatalf("set header row: %v", err)
+	}
+	if err := f.SetSheetRow(sheet, "A3", &[]interface{}{"", "2026-07-01", "", "C类", "张三", "年龄做错了", "", "", "", ""}); err != nil {
+		t.Fatalf("set data row: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	records, appErr := parseErrorRecordsExcel(bytes.NewReader(buf.Bytes()))
+	if appErr != nil {
+		t.Fatalf("parseErrorRecordsExcel appErr = %v", appErr)
+	}
+	if len(records) != 1 || records[0].ErrorCount != 1 || records[0].OrderNo != "" || records[0].DifficultyClass != "C类" || records[0].PayeeName != "张三" {
+		t.Fatalf("records = %+v, want one formal row defaulting to one error", records)
 	}
 }
