@@ -9299,7 +9299,7 @@ curl -X PATCH https://api.example.com/v1/asset-workbench/price-matrix/<rule_id> 
 ### 简介
 支持方法: POST。
 
-- `POST`: Disables the selected rule and creates a new price rule. Historical rows stay auditable through events and revision numbers.
+- `POST`: Closes the selected rule at the day before the new effective_from and creates a new price rule for the same worker type, grade, and difficulty. Historical rows stay auditable through events, revision numbers, and stored pricing snapshots.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

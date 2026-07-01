@@ -18846,7 +18846,7 @@ paths:
   /v1/asset-workbench/price-matrix/{rule_id}/supersede:
     post:
       summary: Supersede a price matrix rule with a new revision
-      description: Disables the selected rule and creates a new price rule. Historical rows stay auditable through events and revision numbers.
+      description: Closes the selected rule at the day before the new effective_from and creates a new price rule for the same worker type, grade, and difficulty. Historical rows stay auditable through events, revision numbers, and stored pricing snapshots.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
