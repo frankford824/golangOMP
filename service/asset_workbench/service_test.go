@@ -548,6 +548,141 @@ func (assetWorkbenchTestTxRunner) RunInTx(ctx context.Context, fn func(tx repo.T
 	return fn(assetWorkbenchTestTx{})
 }
 
+type priceMatrixVersionRepo struct {
+	repo.AssetWorkbenchRepo
+	before          *domain.AssetWorkbenchPriceMatrix
+	existing        []*domain.AssetWorkbenchPriceMatrix
+	closedEffective *time.Time
+	created         *domain.AssetWorkbenchPriceMatrix
+	events          []*domain.AssetWorkbenchEvent
+}
+
+func (r *priceMatrixVersionRepo) GetPriceMatrixForUpdate(_ context.Context, _ repo.Tx, id int64) (*domain.AssetWorkbenchPriceMatrix, error) {
+	if r.before == nil || r.before.ID != id {
+		return nil, sql.ErrNoRows
+	}
+	copyItem := *r.before
+	return &copyItem, nil
+}
+
+func (r *priceMatrixVersionRepo) LockPriceMatrixDimension(_ context.Context, _ repo.Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchPriceMatrix, error) {
+	items := []*domain.AssetWorkbenchPriceMatrix{}
+	for _, item := range r.existing {
+		if item.WorkerType != workerType || item.JobGrade != jobGrade || item.DifficultyClass != difficultyClass {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+	}
+	return items, nil
+}
+
+func (r *priceMatrixVersionRepo) SetPriceMatrixEffectiveTo(_ context.Context, _ repo.Tx, id int64, effectiveTo *time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
+	if r.before == nil || r.before.ID != id {
+		return nil, sql.ErrNoRows
+	}
+	copyItem := *r.before
+	if effectiveTo != nil {
+		value := *effectiveTo
+		r.closedEffective = &value
+		copyItem.EffectiveTo = &value
+	} else {
+		r.closedEffective = nil
+		copyItem.EffectiveTo = nil
+	}
+	return &copyItem, nil
+}
+
+func (r *priceMatrixVersionRepo) CreatePriceMatrix(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchPriceMatrix) (*domain.AssetWorkbenchPriceMatrix, error) {
+	copyItem := *item
+	copyItem.ID = 200
+	r.created = &copyItem
+	return &copyItem, nil
+}
+
+func (r *priceMatrixVersionRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, &copyEvent)
+	return &copyEvent, nil
+}
+
+func TestSupersedePriceMatrixPublishesNewVersionByClosingPriorRule(t *testing.T) {
+	current := &domain.AssetWorkbenchPriceMatrix{
+		ID:              101,
+		WorkerType:      domain.AssetWorkbenchWorkerTypeParttime,
+		JobGrade:        "J1",
+		DifficultyClass: "A",
+		UnitPrice:       12,
+		EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		Enabled:         true,
+		RevisionNo:      1,
+		CreatedBy:       7,
+	}
+	workbenchRepo := &priceMatrixVersionRepo{
+		before:   current,
+		existing: []*domain.AssetWorkbenchPriceMatrix{current},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	created, appErr := svc.SupersedePriceMatrix(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetTemplateAdmin}}, current.ID, CreatePriceMatrixParams{
+		WorkerType:      domain.AssetWorkbenchWorkerTypeParttime,
+		JobGrade:        "J1",
+		DifficultyClass: "A",
+		UnitPrice:       15,
+		EffectiveFrom:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if appErr != nil {
+		t.Fatalf("SupersedePriceMatrix() appErr = %v", appErr)
+	}
+	if created == nil || created.ID != 200 {
+		t.Fatalf("created = %+v, want generated row", created)
+	}
+	if created.RevisionNo != 2 {
+		t.Fatalf("created.RevisionNo = %d, want 2", created.RevisionNo)
+	}
+	if workbenchRepo.closedEffective == nil {
+		t.Fatalf("closedEffective = nil, want previous day")
+	}
+	wantClosed := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	if !workbenchRepo.closedEffective.Equal(wantClosed) {
+		t.Fatalf("closedEffective = %s, want %s", workbenchRepo.closedEffective, wantClosed)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventPriceSuperseded {
+		t.Fatalf("events = %+v, want one price superseded event", workbenchRepo.events)
+	}
+}
+
+func TestSupersedePriceMatrixRejectsDimensionChange(t *testing.T) {
+	current := &domain.AssetWorkbenchPriceMatrix{
+		ID:              101,
+		WorkerType:      domain.AssetWorkbenchWorkerTypeParttime,
+		JobGrade:        "J1",
+		DifficultyClass: "A",
+		UnitPrice:       12,
+		EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		Enabled:         true,
+		RevisionNo:      1,
+	}
+	workbenchRepo := &priceMatrixVersionRepo{
+		before:   current,
+		existing: []*domain.AssetWorkbenchPriceMatrix{current},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	_, appErr := svc.SupersedePriceMatrix(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetTemplateAdmin}}, current.ID, CreatePriceMatrixParams{
+		WorkerType:      domain.AssetWorkbenchWorkerTypeParttime,
+		JobGrade:        "J2",
+		DifficultyClass: "A",
+		UnitPrice:       15,
+		EffectiveFrom:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("appErr = %+v, want invalid request", appErr)
+	}
+	if workbenchRepo.created != nil || workbenchRepo.closedEffective != nil {
+		t.Fatalf("created = %+v closedEffective = %+v, want no mutation", workbenchRepo.created, workbenchRepo.closedEffective)
+	}
+}
+
 type downloadFileRepo struct {
 	repo.AssetWorkbenchRepo
 	files  map[int64]*domain.AssetWorkbenchSubmissionFile

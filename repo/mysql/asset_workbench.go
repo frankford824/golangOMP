@@ -517,6 +517,17 @@ func (r *assetWorkbenchRepo) SetPriceMatrixEnabled(ctx context.Context, tx repo.
 	return scanAssetWorkbenchPriceMatrix(row)
 }
 
+func (r *assetWorkbenchRepo) SetPriceMatrixEffectiveTo(ctx context.Context, tx repo.Tx, id int64, effectiveTo *time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_price_matrix
+		SET effective_to = ?, updated_at = NOW()
+		WHERE id = ?`, toNullTime(effectiveTo), id); err != nil {
+		return nil, fmt.Errorf("set asset workbench price matrix effective_to: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPriceMatrixSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchPriceMatrix(row)
+}
+
 func (r *assetWorkbenchRepo) FindActivePrice(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
 	date := asOf.Format("2006-01-02")
 	row := r.db.db.QueryRowContext(ctx, assetWorkbenchPriceMatrixSelect()+`

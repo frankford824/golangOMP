@@ -469,6 +469,7 @@ type AssetWorkbenchRepo interface {
 	LockPriceMatrixDimension(ctx context.Context, tx Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchPriceMatrix, error)
 	CreatePriceMatrix(ctx context.Context, tx Tx, item *domain.AssetWorkbenchPriceMatrix) (*domain.AssetWorkbenchPriceMatrix, error)
 	SetPriceMatrixEnabled(ctx context.Context, tx Tx, id int64, enabled bool) (*domain.AssetWorkbenchPriceMatrix, error)
+	SetPriceMatrixEffectiveTo(ctx context.Context, tx Tx, id int64, effectiveTo *time.Time) (*domain.AssetWorkbenchPriceMatrix, error)
 	FindActivePrice(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchPriceMatrix, error)
 
 	ListDeductionRules(ctx context.Context, filter AssetWorkbenchDeductionRuleFilter) ([]*domain.AssetWorkbenchDeductionRule, int64, error)

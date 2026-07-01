@@ -2,8 +2,10 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 
@@ -56,6 +58,49 @@ func TestLockPriceMatrixDimensionLocksParentDimensionBeforeExistingRules(t *test
 		return nil
 	}); err != nil {
 		t.Fatalf("LockPriceMatrixDimension() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSetPriceMatrixEffectiveToUpdatesDate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	closed := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE asset_workbench_price_matrix
+		SET effective_to = ?, updated_at = NOW()
+		WHERE id = ?`)).
+		WithArgs(sql.NullTime{Time: closed, Valid: true}, int64(101)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(assetWorkbenchPriceMatrixSelect() + ` WHERE id = ?`)).
+		WithArgs(int64(101)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "worker_type", "job_grade", "difficulty_class", "unit_price", "effective_from", "effective_to", "enabled",
+			"revision_no", "created_by", "remark", "created_at", "updated_at",
+		}).AddRow(int64(101), "parttime", "J1", "A", 12.5, now, closed, true, 1, int64(7), "", now, now))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	workbenchRepo := NewAssetWorkbenchRepo(mysqlDB)
+	if err := mysqlDB.RunInTx(context.Background(), func(tx repo.Tx) error {
+		item, err := workbenchRepo.SetPriceMatrixEffectiveTo(context.Background(), tx, 101, &closed)
+		if err != nil {
+			return err
+		}
+		if item.EffectiveTo == nil || !item.EffectiveTo.Equal(closed) {
+			t.Fatalf("EffectiveTo = %+v, want %s", item.EffectiveTo, closed)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("SetPriceMatrixEffectiveTo() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

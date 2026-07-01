@@ -1716,20 +1716,37 @@ func (s *Service) SupersedePriceMatrix(ctx context.Context, actor domain.Request
 		if err != nil {
 			return err
 		}
+		if !before.Enabled {
+			return domain.NewAppError(domain.ErrCodeConflict, "Only enabled price rules can publish a new version.", nil)
+		}
+		if before.WorkerType != next.WorkerType || before.JobGrade != next.JobGrade || before.DifficultyClass != next.DifficultyClass {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "A new price version must keep the same worker_type, job_grade and difficulty_class.", map[string]string{
+				"worker_type":      next.WorkerType,
+				"job_grade":        next.JobGrade,
+				"difficulty_class": next.DifficultyClass,
+			})
+		}
+		if !next.EffectiveFrom.After(before.EffectiveFrom) {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "New price version effective_from must be after the current rule effective_from.", nil)
+		}
+		closedEffectiveTo := next.EffectiveFrom.AddDate(0, 0, -1)
+		if before.EffectiveTo != nil && before.EffectiveTo.Before(closedEffectiveTo) {
+			return domain.NewAppError(domain.ErrCodeConflict, "Selected price rule already ends before the new effective_from. Create a new price rule instead.", nil)
+		}
 		existing, err := s.repo.LockPriceMatrixDimension(ctx, tx, next.WorkerType, next.JobGrade, next.DifficultyClass)
 		if err != nil {
 			return err
 		}
 		for _, item := range existing {
 			if item.ID == before.ID {
-				item.Enabled = false
+				item.EffectiveTo = &closedEffectiveTo
 			}
 		}
 		if overlapsPricePeriod(existing, next.EffectiveFrom, next.EffectiveTo) {
 			return domain.NewAppError(domain.ErrCodeConflict, "Price effective range overlaps an existing rule.", nil)
 		}
 		next.RevisionNo = nextPriceRevision(existing)
-		disabled, err := s.repo.SetPriceMatrixEnabled(ctx, tx, before.ID, false)
+		closed, err := s.repo.SetPriceMatrixEffectiveTo(ctx, tx, before.ID, &closedEffectiveTo)
 		if err != nil {
 			return err
 		}
@@ -1737,7 +1754,10 @@ func (s *Service) SupersedePriceMatrix(ctx context.Context, actor domain.Request
 		if err != nil {
 			return err
 		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventPriceSuperseded, domain.AssetWorkbenchEntityPriceMatrix, &created.ID, disabled, created, params.Remark)
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventPriceSuperseded, domain.AssetWorkbenchEntityPriceMatrix, &created.ID, before, map[string]interface{}{
+			"closed_rule": closed,
+			"new_rule":    created,
+		}, params.Remark)
 	}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Price matrix rule not found.", nil)

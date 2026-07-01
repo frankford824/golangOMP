@@ -53,7 +53,7 @@ const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings
 const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, '成本中心加载失败')
 const loading = costCenterRequest.loading
 const error = costCenterRequest.error
-const today = new Date().toISOString().slice(0, 10)
+const today = shanghaiDateInput()
 const priceForm = ref({
   worker_type: 'fulltime',
   job_grade: 'P1',
@@ -144,8 +144,8 @@ const priceGridColumns = computed<GridColumn[]>(() => [
   { key: 'job_grade', label: '岗级', width: 96 },
   { key: 'difficulty_class', label: '难度', width: 132 },
   { key: 'unit_price_label', label: '单价', width: 104, align: 'right' },
-  { key: 'enabled_label', label: '启用', width: 88 },
-  { key: 'action', label: '动作', width: 156, align: 'center' },
+  { key: 'enabled_label', label: '状态', width: 88 },
+  { key: 'action', label: '动作', width: 188, align: 'center' },
 ])
 const deductionGridColumns = computed<GridColumn[]>(() => [
   { key: 'worker_type_label', label: '类型', width: 96 },
@@ -230,6 +230,31 @@ function toDateInput(value?: string) {
   return date.toISOString().slice(0, 10)
 }
 
+function shanghaiDateInput(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function addDaysToDateInput(value: string, days: number) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return value
+  const [, year, month, day] = match
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day) + days))
+  return date.toISOString().slice(0, 10)
+}
+
+function nextPriceVersionEffectiveFrom(row: PriceGridRow) {
+  const currentStart = toDateInput(row.effective_from)
+  const earliest = currentStart ? addDaysToDateInput(currentStart, 1) : today
+  return earliest > today ? earliest : today
+}
+
 function gradeOptionsFor(workerType: string, allowAll: boolean) {
   if (workerType === 'fulltime') return fulltimeGrades
   if (workerType === 'parttime') return parttimeGrades
@@ -269,7 +294,7 @@ async function createPriceRule() {
     if (priceSupersedeId.value) {
       await assetWorkbenchApi.supersedePriceMatrix(priceSupersedeId.value, payload)
       priceSupersedeId.value = 0
-      notice.value = '价目规则已创建替代版本'
+      notice.value = '价目新版已发布，旧规则会自动截止到新版生效日前一天'
     } else {
       await assetWorkbenchApi.createPriceMatrix(payload)
       notice.value = '价目规则已创建'
@@ -389,10 +414,10 @@ function startPriceSupersede(row: PriceGridRow) {
     job_grade: row.job_grade,
     difficulty_class: row.difficulty_class,
     unit_price: row.unit_price,
-    effective_from: toDateInput(row.effective_from) || today,
-    effective_to: toDateInput(row.effective_to),
+    effective_from: nextPriceVersionEffectiveFrom(row),
+    effective_to: '',
   }
-  notice.value = `已带入价目规则 ${row.id}，保存后会生成替代版本`
+  notice.value = `已带入价目规则 ${row.id}，保存后会发布同一类型/岗级/难度的新版；旧规则自动截止到新版生效日前一天`
 }
 
 function startDeductionSupersede(row: DeductionGridRow) {
@@ -453,10 +478,10 @@ onMounted(async () => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">设置</p>
         <h2>{{ pageLabel }}</h2>
-        <p>{{ pageSubtitle }}。集中维护价目矩阵、出错扣减、福利补贴与大促价格券。提交只冻结毛额，扣减和福利在结算时计算。</p>
+        <p>{{ pageSubtitle }}。集中维护价目矩阵、出错扣减、福利补贴与大促价格券。价目按生效日接班，提交记录保留当时的计价快照，扣减和福利在结算时计算。</p>
       </div>
       <div class="aw-page-bar__actions">
-        <button class="aw-primary-button" type="button" @click="createPriceRule">{{ priceSupersedeId ? '保存替代价目' : '新增价目' }}</button>
+        <button class="aw-primary-button" type="button" @click="createPriceRule">{{ priceSupersedeId ? '发布新版价目' : '新增价目' }}</button>
       </div>
     </div>
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
@@ -464,14 +489,17 @@ onMounted(async () => {
       <div class="aw-panel__head">
         <div>
           <h3>价目矩阵时间带</h3>
-          <p class="aw-copy">按人员类型、岗级和难度命中单价。</p>
+          <p class="aw-copy">按人员类型、岗级和难度命中单价；新版从生效日开始接班，旧版自动截止到前一天。</p>
         </div>
         <div class="aw-inline-actions">
-          <span v-if="priceSupersedeId" class="aw-chip aw-chip--info">替代 #{{ priceSupersedeId }}</span>
-          <button v-if="priceSupersedeId" class="aw-secondary-button" type="button" @click="priceSupersedeId = 0">取消替代</button>
-          <button class="aw-secondary-button" type="button" @click="createPriceRule">{{ priceSupersedeId ? '保存替代' : '新增' }}</button>
+          <span v-if="priceSupersedeId" class="aw-chip aw-chip--info">新版接棒 #{{ priceSupersedeId }}</span>
+          <button v-if="priceSupersedeId" class="aw-secondary-button" type="button" @click="priceSupersedeId = 0">取消新版</button>
+          <button class="aw-secondary-button" type="button" @click="createPriceRule">{{ priceSupersedeId ? '确认发布新版' : '新增' }}</button>
         </div>
       </div>
+      <p v-if="priceSupersedeId" class="aw-inline-alert">
+        正在发布新版价目：只允许调整同一类型、岗级、难度的单价与日期。旧规则会保留并自动截止到新版生效日前一天，不需要再手动停用；历史提交和已结算记录不会重算。
+      </p>
       <div class="aw-form-grid">
         <label>
           类型
@@ -530,8 +558,8 @@ onMounted(async () => {
       >
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'action'" class="aw-inline-actions">
-            <button type="button" @click="togglePriceRule(gridRowAsPrice(row))">{{ gridRowAsPrice(row).enabled ? '停用' : '启用' }}</button>
-            <button type="button" @click="startPriceSupersede(gridRowAsPrice(row))">替代</button>
+            <button type="button" @click="togglePriceRule(gridRowAsPrice(row))">{{ gridRowAsPrice(row).enabled ? '应急停用' : '启用' }}</button>
+            <button type="button" @click="startPriceSupersede(gridRowAsPrice(row))">发布新版</button>
           </div>
           <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPrice(row).worker_type).tone)">{{ value }}</span>
           <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPrice(row).enabled).tone)">{{ value }}</span>
