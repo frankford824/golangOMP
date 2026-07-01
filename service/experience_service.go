@@ -313,6 +313,13 @@ func (s *experienceService) EnqueueEvent(ctx context.Context, event *domain.Expe
 	if s == nil || s.repo == nil || !s.RuntimeFlags().CaptureEnabled {
 		return nil
 	}
+	return s.enqueueExperienceEvent(ctx, event)
+}
+
+func (s *experienceService) enqueueExperienceEvent(ctx context.Context, event *domain.ExperienceOutboxEvent) *domain.AppError {
+	if s == nil || s.repo == nil {
+		return nil
+	}
 	normalized, appErr := normalizeExperienceOutboxEvent(event)
 	if appErr != nil {
 		return appErr
@@ -645,6 +652,9 @@ func (s *experienceService) RecordReviewDecision(ctx context.Context, actor doma
 	if decision.Decision == domain.ExperienceReviewDecisionApprove && !flags.ReviewMaterializationEnabled {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "experience review materialization is disabled", map[string]interface{}{"deny_code": "experience_review_materialization_disabled"})
 	}
+	if decision.Decision == domain.ExperienceReviewDecisionApprove && !experienceReviewDecisionConfirmed(decision.Payload) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "experience review approval requires confirmation", map[string]interface{}{"deny_code": "experience_review_approval_confirmation_required"})
+	}
 	if err := s.repo.CreateExperienceReviewDecision(ctx, decision, nextStatus); err != nil {
 		if appErr := experienceReviewDecisionError(err); appErr != nil {
 			return nil, appErr
@@ -674,6 +684,18 @@ func experienceReviewDecisionError(err error) *domain.AppError {
 	default:
 		return nil
 	}
+}
+
+func experienceReviewDecisionConfirmed(payload json.RawMessage) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return false
+	}
+	confirmed, ok := value["review_confirmation"].(bool)
+	return ok && confirmed
 }
 
 func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit int) (domain.ExperienceObserverRun, *domain.AppError) {
@@ -789,7 +811,7 @@ func (s *experienceService) processOutcomeEventSource(
 			DataClassification: "business_outcome",
 			GroundTruthStatus:  "observed",
 		}
-		if appErr := s.EnqueueEvent(ctx, event); appErr != nil {
+		if appErr := s.enqueueExperienceEvent(ctx, event); appErr != nil {
 			result.Failed++
 			if isExperiencePoisonRowError(appErr) {
 				result.LastError = appErr.Message
@@ -892,7 +914,7 @@ func (s *experienceService) processOutcomeSnapshots(
 			continue
 		}
 		event := buildSnapshotOutcomeEvent(row, currentHash, changedFields)
-		if appErr := s.EnqueueEvent(ctx, event); appErr != nil {
+		if appErr := s.enqueueExperienceEvent(ctx, event); appErr != nil {
 			result.Failed++
 			if isExperiencePoisonRowError(appErr) {
 				result.LastError = appErr.Message
@@ -2112,6 +2134,17 @@ func snapshotOutcomeActionAndValue(row *domain.ExperienceOutcomeSnapshotRow, cha
 		hasExperienceChangedField(fieldSet, "superseded_at") ||
 		hasExperienceChangedField(fieldSet, "superseded_by_version_id"):
 		return "asset_review_status_changed", stringFromExperienceJSONField(row.ObservedValue, "flow_review_status")
+	case hasExperienceChangedField(fieldSet, "is_archived") ||
+		hasExperienceChangedField(fieldSet, "archived_at"):
+		if strings.EqualFold(stringFromExperienceJSONField(row.ObservedValue, "is_archived"), "true") {
+			return "asset_archive_status_changed", "archived"
+		}
+		return "asset_archive_status_changed", "active"
+	case hasExperienceChangedField(fieldSet, "cleaned_at"):
+		if strings.TrimSpace(stringFromExperienceJSONField(row.ObservedValue, "cleaned_at")) != "" {
+			return "asset_cleaned_at_changed", "cleaned"
+		}
+		return "asset_cleaned_at_changed", "not_cleaned"
 	case hasExperienceChangedField(fieldSet, "filing_status") ||
 		hasExperienceChangedField(fieldSet, "erp_sync_status"):
 		value := stringFromExperienceJSONField(row.ObservedValue, "filing_status")

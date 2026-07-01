@@ -41,7 +41,7 @@
         :disabled="microQuestionLoading || microQuestionSaving || microQuestionSubmitted"
         @click="toggleMicroQuestion"
       >
-        {{ microQuestionSubmitted ? '已记录补充原因，正式反馈未改变' : microQuestionOpen ? '收起补充原因' : '可选：补充暂不处理原因' }}
+        {{ microQuestionSubmitted ? '已记录选择，正式反馈未改变' : microQuestionOpen ? '收起补充原因' : '可选：补充没有采用的原因' }}
       </button>
     </div>
 
@@ -257,8 +257,9 @@ async function toggleMicroQuestion(): Promise<void> {
   if (microQuestionSubmitted.value || microQuestionLoading.value || microQuestionSaving.value) return
   microQuestionError.value = ''
   if (microQuestionOpen.value) {
-    microQuestionOpen.value = false
     if (behaviorEnabled.value) recordBehavior('dismiss')
+    void submitMicroQuestionDismissed()
+    microQuestionOpen.value = false
     return
   }
   if (!microQuestionEligibility.value) {
@@ -270,6 +271,7 @@ async function toggleMicroQuestion(): Promise<void> {
   }
   if (microQuestionEligibility.value?.eligible) {
     microQuestionOpen.value = true
+    if (behaviorEnabled.value) recordBehavior('expand')
   }
 }
 
@@ -277,7 +279,6 @@ async function loadMicroQuestionEligibility(): Promise<void> {
   if (!suggestionEventId.value || microQuestionLoading.value) return
   microQuestionLoading.value = true
   microQuestionError.value = ''
-  if (behaviorEnabled.value) recordBehavior('expand')
   try {
     const suggestion = props.suggestion
     const res = await experienceApi.microQuestionEligibility({
@@ -300,6 +301,38 @@ async function loadMicroQuestionEligibility(): Promise<void> {
     microQuestionError.value = '暂不处理原因未加载'
   } finally {
     microQuestionLoading.value = false
+  }
+}
+
+async function submitMicroQuestionDismissed(): Promise<void> {
+  if (!suggestionEventId.value || microQuestionSaving.value || microQuestionSubmitted.value) return
+  const suggestion = props.suggestion
+  const eligibility = microQuestionEligibility.value
+  microQuestionSaving.value = true
+  microQuestionError.value = ''
+  try {
+    await experienceApi.microQuestionAnswer({
+      answer_event_key: eligibility?.answer_event_key,
+      suggestion_event_id: suggestionEventId.value,
+      suggestion_stable_key: suggestion.suggestion_stable_key || undefined,
+      surface: props.surface,
+      target_type: suggestion.target_type || '',
+      target_id: suggestion.target_id || '',
+      answer_value: 'dismissed',
+      payload: {
+        route: effectiveRoute.value,
+        suggestion_id: suggestion.id,
+        suggestion_type: String(suggestion.type || ''),
+        source: suggestion.source || '',
+        action_type: suggestion.action_type || '',
+        action_label: suggestion.action_label || '',
+      },
+    })
+    microQuestionSubmitted.value = true
+  } catch {
+    microQuestionError.value = ''
+  } finally {
+    microQuestionSaving.value = false
   }
 }
 

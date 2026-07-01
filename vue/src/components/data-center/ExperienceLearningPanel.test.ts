@@ -106,6 +106,7 @@ function setupExperiencePanelMocks() {
 describe('ExperienceLearningPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(window, 'confirm', { value: vi.fn(() => true), writable: true })
     setupExperiencePanelMocks()
   })
 
@@ -322,13 +323,89 @@ describe('ExperienceLearningPanel', () => {
 
     expect(reviewDecisionMock).toHaveBeenCalledWith(
       'review-1',
-      expect.objectContaining({ decision: 'approve', reason_code: 'verified' }),
+      expect.objectContaining({
+        decision: 'approve',
+        reason_code: 'verified',
+        payload: expect.objectContaining({ review_confirmation: true }),
+      }),
     )
     expect(wrapper.text()).toContain('闭环健康条')
     expect(wrapper.text()).toContain('反馈率')
     expect(wrapper.text()).toContain('复核结果未保存，请稍后重试。')
     expect(wrapper.text()).not.toContain('decision failed')
     expect(wrapper.text()).not.toContain('加载经验观测失败')
+  })
+
+  it('does not submit review approval when confirmation is cancelled', async () => {
+    vi.mocked(window.confirm).mockReturnValueOnce(false)
+    statsMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          flags: {
+            ui_enabled: true,
+            capture_enabled: true,
+            ai_feedback_enabled: true,
+            worker_enabled: true,
+            behavior_capture_enabled: true,
+            micro_question_enabled: false,
+            review_materialization_enabled: true,
+            behavior_sample_rate: 1,
+          },
+          total_events: 1,
+          sample_total: 1,
+          displayed_events: 1,
+          outbox_queued: 0,
+          outbox_processing: 0,
+          outbox_processed_24h: 0,
+          outbox_failed_24h: 0,
+          outbox_dead_letter: 0,
+          capture_success_rate_24h: 1,
+          capture_failure_rate_24h: 0,
+          tag_total: 0,
+          tag_enabled: 0,
+          tag_coverage_rate: 0,
+          ai_suggestion_events: 1,
+          ai_feedback_events: 0,
+          ai_feedback_rate: 0,
+          task_profiles: 0,
+          asset_quality_labels: 0,
+          worker_last_runs: [],
+          generated_at: '2026-07-01T08:00:00Z',
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof experienceApi.stats>>)
+    reviewItemsMock.mockResolvedValueOnce({
+      data: {
+        data: [
+          {
+            item_key: 'review-1',
+            item_type: 'attribution_candidate',
+            status: 'open',
+            priority: 'high',
+            evidence_summary: {
+              status: 'positive_candidate',
+              confidence: 'high',
+              score: 0.91,
+              suggestion: { target_type: 'task', target_id: '42' },
+              behavior: { count: 1, score: 5 },
+              feedback: { value: 'accepted' },
+              outcome: { action: 'task_status_changed', changed_fields: [{ field: 'task_status' }] },
+            },
+          },
+        ],
+        pagination: { page: 1, page_size: 8, total: 1 },
+      },
+    } as unknown as Awaited<ReturnType<typeof experienceApi.reviewItems>>)
+
+    const wrapper = mount(ExperienceLearningPanel)
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text().includes('确认归因（侧路）'))?.trigger('click')
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalled()
+    expect(reviewDecisionMock).not.toHaveBeenCalled()
   })
 
   it('keeps review approve disabled during shadow observation', async () => {

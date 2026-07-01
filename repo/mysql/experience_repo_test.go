@@ -265,7 +265,7 @@ func TestExperienceRepoListRecentAttributionOutcomesUsesRecentWindow(t *testing.
 	}
 }
 
-func TestExperienceRepoListAttributionCandidatesOnlyFallsBackForTaskOutcomes(t *testing.T) {
+func TestExperienceRepoListAttributionCandidatesFallsBackToTaskSuggestionWhenOutcomeHasTaskID(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
 		normalized := strings.Join(strings.Fields(actualSQL), " ")
 		if expectedSQL != "attribution-candidates" {
@@ -275,7 +275,7 @@ func TestExperienceRepoListAttributionCandidatesOnlyFallsBackForTaskOutcomes(t *
 			"FROM ai_suggestion_events a",
 			"GROUP_CONCAT(DISTINCT b.action",
 			"(a.target_type = ? AND a.target_id = ?)",
-			"OR (? = 'task' AND ? <> '' AND a.target_type = 'task' AND a.target_id = ?)",
+			"OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)",
 			"HAVING behavior_count > 0 OR COALESCE(lf.feedback_value, '') <> ''",
 		} {
 			if !strings.Contains(normalized, fragment) {
@@ -299,7 +299,6 @@ func TestExperienceRepoListAttributionCandidatesOnlyFallsBackForTaskOutcomes(t *
 			outcomeAt,
 			"task_asset",
 			"7001",
-			"task_asset",
 			"42",
 			"42",
 			20,
@@ -308,7 +307,23 @@ func TestExperienceRepoListAttributionCandidatesOnlyFallsBackForTaskOutcomes(t *
 			"suggestion_event_id", "suggestion_stable_key", "suggestion_type", "suggestion_id",
 			"source", "target_type", "target_id", "displayed_at", "behavior_count", "behavior_score",
 			"latest_behavior_at", "behavior_actions", "feedback_value", "reason_code", "created_at",
-		}))
+		}).AddRow(
+			"display-1",
+			"task_next|asset_ready|workflow|task|42",
+			"task_next_action",
+			"asset_ready",
+			"workflow-module",
+			"task",
+			"42",
+			outcomeAt.Add(-30*time.Minute),
+			1,
+			5,
+			outcomeAt.Add(-5*time.Minute),
+			"jump",
+			"",
+			"",
+			nil,
+		))
 
 	repo := NewExperienceRepo(New(db))
 	candidates, err := repo.ListExperienceAttributionCandidates(context.Background(), &domain.ExperienceAttributionOutcome{
@@ -320,8 +335,8 @@ func TestExperienceRepoListAttributionCandidatesOnlyFallsBackForTaskOutcomes(t *
 	if err != nil {
 		t.Fatalf("ListExperienceAttributionCandidates() error = %v", err)
 	}
-	if len(candidates) != 0 {
-		t.Fatalf("candidates = %+v, want none", candidates)
+	if len(candidates) != 1 || candidates[0].TargetType != "task" || candidates[0].TargetID != "42" {
+		t.Fatalf("candidates = %+v, want task-level suggestion candidate for child outcome", candidates)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -913,6 +928,7 @@ func TestExperienceRepoListTaskAssetReviewSnapshotsUsesBusinessTimestampCursor(t
 
 	cursorAt := time.Date(2026, 6, 30, 8, 0, 0, 0, time.UTC)
 	approvedAt := time.Date(2026, 6, 30, 8, 1, 0, 0, time.UTC)
+	cleanedAt := time.Date(2026, 6, 30, 8, 2, 0, 0, time.UTC)
 	args := []driver.Value{}
 	for i := 0; i < 6; i++ {
 		args = append(args, cursorAt, cursorAt, int64(10))
@@ -921,8 +937,8 @@ func TestExperienceRepoListTaskAssetReviewSnapshotsUsesBusinessTimestampCursor(t
 	mock.ExpectQuery("task-asset-snapshot").
 		WithArgs(args...).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "task_id", "flow_review_status", "approved_at", "rejected_at", "superseded_at", "superseded_by_version_id", "is_archived", "archived_at", "source_updated_at",
-		}).AddRow(int64(11), int64(42), "superseded", nil, nil, approvedAt, int64(12), false, nil, approvedAt))
+			"id", "task_id", "flow_review_status", "approved_at", "rejected_at", "superseded_at", "superseded_by_version_id", "is_archived", "archived_at", "cleaned_at", "source_updated_at",
+		}).AddRow(int64(11), int64(42), "superseded", nil, nil, approvedAt, int64(12), true, approvedAt, cleanedAt, cleanedAt))
 
 	repo := NewExperienceRepo(New(db))
 	rows, err := repo.ListExperienceTaskAssetReviewSnapshots(context.Background(), corerepo.ExperienceSourceCursor{
@@ -932,11 +948,16 @@ func TestExperienceRepoListTaskAssetReviewSnapshotsUsesBusinessTimestampCursor(t
 	if err != nil {
 		t.Fatalf("ListExperienceTaskAssetReviewSnapshots() error = %v", err)
 	}
-	if len(rows) != 1 || rows[0].EntityID != "11" || rows[0].TerminalState != "superseded" {
+	if len(rows) != 1 || rows[0].EntityID != "11" || rows[0].TerminalState != "archived" {
 		t.Fatalf("snapshot rows = %+v", rows)
 	}
 	if !strings.Contains(string(rows[0].ObservedValue), `"superseded_by_version_id":12`) {
 		t.Fatalf("observed value = %s, want superseded version marker", rows[0].ObservedValue)
+	}
+	for _, fragment := range []string{`"is_archived":true`, `"archived_at":"2026-06-30T08:01:00Z"`, `"cleaned_at":"2026-06-30T08:02:00Z"`} {
+		if !strings.Contains(string(rows[0].ObservedValue), fragment) {
+			t.Fatalf("observed value = %s, want %s in hash input", rows[0].ObservedValue, fragment)
+		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

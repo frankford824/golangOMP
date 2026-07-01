@@ -407,6 +407,7 @@ components:
           enum: [temporarily_not_needed, will_handle_later, already_handled, not_relevant, missing_context, stage_not_applicable, customer_special_case, suggestion_outdated]
         payload:
           type: object
+          description: "For approve, clients must include review_confirmation: true; this only materializes side-channel experience candidates and never mutates core business state."
           additionalProperties: true
     ExperienceMicroQuestionAnswer:
       type: object

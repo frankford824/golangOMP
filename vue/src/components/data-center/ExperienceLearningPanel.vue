@@ -325,6 +325,7 @@ const displayedCount = computed(() => count(stats.value?.displayed_events ?? sta
 const locatableCount = computed(() => count(stats.value?.locatable_samples))
 const locatableDisplayedCount = computed(() => count(stats.value?.locatable_displayed_events ?? Math.min(locatableCount.value, displayedCount.value)))
 const feedbackCount = computed(() => count(stats.value?.feedback_samples ?? stats.value?.ai_feedback_events))
+const reasonRequiredFeedbackCount = computed(() => count(stats.value?.feedback_partially_accepted) + count(stats.value?.feedback_rejected))
 const reasonedCount = computed(() => count(stats.value?.reasoned_feedback_samples))
 const reusableCount = computed(() => count(stats.value?.reusable_samples))
 const reasonTagCount = computed(() => tags.value.length || count(stats.value?.tag_enabled))
@@ -333,13 +334,14 @@ const healthSteps = computed<HealthStep[]>(() => {
   const displayed = displayedCount.value
   const locatable = locatableDisplayedCount.value
   const feedback = feedbackCount.value
-  const reasoned = reasonedCount.value
+  const reasonRequired = reasonRequiredFeedbackCount.value
+  const reasoned = Math.min(reasonedCount.value, reasonRequired)
   const reusable = reusableCount.value
   return [
     { key: 'displayed', level: 'L0', label: '建议展示', count: displayed, total: displayed, value: fractionLabel(displayed, displayed), hint: displayed ? '建议已展示' : '未采集或未配置' },
     { key: 'locatable', level: 'L1', label: '展示可定位', count: locatable, total: displayed, value: fractionLabel(locatable, displayed), hint: locatable ? '展示建议能回到任务或资产' : '无匹配数据' },
     { key: 'feedback', level: 'L2', label: '正式反馈', count: feedback, total: displayed, value: fractionLabel(feedback, displayed), hint: feedback ? '已有有用/部分/无用判断' : '监督信号为 0' },
-    { key: 'tagged', level: 'L3', label: '反馈原因', count: reasoned, total: feedback, value: fractionLabel(reasoned, feedback), hint: reasoned ? '正式反馈已有原因' : '缺正式反馈原因' },
+    { key: 'tagged', level: 'L3', label: '反馈原因', count: reasoned, total: reasonRequired, value: fractionLabel(reasoned, reasonRequired), hint: reasoned ? '部分/无用反馈已有原因' : '缺部分/无用反馈原因' },
     { key: 'reusable', level: 'L4', label: '侧路候选', count: reusable, total: displayed, value: `${integerLabel(reusable)} 条`, hint: reusable ? '侧路候选数；不是展示到成交或自动化的转化率' : '暂无候选沉淀' },
   ]
 })
@@ -348,7 +350,8 @@ const metrics = computed<MetricItem[]>(() => {
   const data = stats.value
   const displayed = displayedCount.value
   const feedback = feedbackCount.value
-  const reasoned = reasonedCount.value
+  const reasonRequired = reasonRequiredFeedbackCount.value
+  const reasoned = Math.min(reasonedCount.value, reasonRequired)
   const reusable = reusableCount.value
   return [
     {
@@ -360,8 +363,8 @@ const metrics = computed<MetricItem[]>(() => {
     {
       key: 'reason_coverage',
       label: '原因覆盖',
-      value: fractionLabel(reasoned, feedback),
-      hint: metricRatioHint(reasoned, feedback, '部分/无用优先补齐'),
+      value: fractionLabel(reasoned, reasonRequired),
+      hint: metricRatioHint(reasoned, reasonRequired, '分母仅含部分有用/无用'),
     },
     {
       key: 'reusable_rate',
@@ -427,7 +430,8 @@ const gapQueue = computed<GapItem[]>(() => {
   const displayed = displayedCount.value
   const locatable = locatableCount.value
   const feedback = feedbackCount.value
-  const reasoned = reasonedCount.value
+  const reasonRequired = reasonRequiredFeedbackCount.value
+  const reasoned = Math.min(reasonedCount.value, reasonRequired)
   const profiles = count(stats.value?.task_profiles)
   const assetLabels = count(stats.value?.asset_quality_labels)
   return [
@@ -441,9 +445,9 @@ const gapQueue = computed<GapItem[]>(() => {
     {
       key: 'missing_reason',
       label: '缺标签',
-      count: Math.max(0, feedback - reasoned),
-      total: feedback,
-      hint: feedback ? '负向/部分反馈缺原因 chip' : '没有反馈可打标',
+      count: Math.max(0, reasonRequired - reasoned),
+      total: reasonRequired,
+      hint: reasonRequired ? '负向/部分反馈缺原因 chip' : '没有部分/无用反馈需要打标',
     },
     {
       key: 'missing_profile',
@@ -465,7 +469,7 @@ const gapQueue = computed<GapItem[]>(() => {
 const totalGapCount = computed(() => gapQueue.value.reduce((sum, item) => sum + item.count, 0))
 const workerRuns = computed(() => stats.value?.worker_last_runs ?? [])
 const outbox24hTotal = computed(() => count(stats.value?.outbox_processed_24h) + count(stats.value?.outbox_failed_24h))
-const failedWorkerCount = computed(() => workerRuns.value.filter((run) => run.status === 'failed' || count(run.failed_count) > 0).length)
+const failedWorkerCount = computed(() => workerRuns.value.filter((run) => run.status === 'failed' || run.status === 'partial' || count(run.failed_count) > 0).length)
 
 const workerHealthLabel = computed(() => {
   if (!runtimeFlags.value.worker_enabled) return 'Worker 关闭'
@@ -571,6 +575,11 @@ async function load() {
 
 async function submitReview(item: ExperienceReviewItem, decision: ExperienceReviewDecisionValue) {
   if (!item.item_key || reviewBusyKey.value) return
+  const confirmed =
+    decision !== 'approve' ||
+    (typeof window !== 'undefined' &&
+      window.confirm('确认后会写入侧路经验候选，不会修改任务、资产、ERP 或审核状态。是否继续？'))
+  if (!confirmed) return
   const busyKey = `${item.item_key}:${decision}`
   reviewBusyKey.value = busyKey
   reviewActionError.value = ''
@@ -581,6 +590,7 @@ async function submitReview(item: ExperienceReviewItem, decision: ExperienceRevi
       payload: {
         surface: 'data_center_experience',
         item_type: item.item_type,
+        review_confirmation: decision === 'approve',
       },
     })
     await load()

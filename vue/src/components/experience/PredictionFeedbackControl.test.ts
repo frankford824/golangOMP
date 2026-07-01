@@ -188,7 +188,7 @@ describe('PredictionFeedbackControl', () => {
 
     await wrapper.findAll('button')[1].trigger('click')
     feedbackMock.mockClear()
-    expect(wrapper.text()).toContain('可选：补充暂不处理原因')
+    expect(wrapper.text()).toContain('可选：补充没有采用的原因')
 
     await wrapper.find('.prediction-feedback__micro-toggle').trigger('click')
     await flushPromises()
@@ -223,7 +223,67 @@ describe('PredictionFeedbackControl', () => {
       },
     })
     expect(feedbackMock).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('已记录补充原因，正式反馈未改变')
+    expect(wrapper.text()).toContain('已记录选择，正式反馈未改变')
+  })
+
+  it('records a dismissed micro question when the user closes the reason chooser', async () => {
+    clientConfigMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          ai_feedback_enabled: true,
+          behavior_capture_enabled: false,
+          micro_question_enabled: true,
+          behavior_sample_rate: 1,
+          enabled_surfaces: ['task_detail'],
+        },
+      },
+    } as Awaited<ReturnType<typeof experienceApi.clientConfig>>)
+    microQuestionEligibilityMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          eligible: true,
+          answer_event_key: 'answer-dismiss',
+          remaining_daily: 2,
+          reason_tags: [
+            { scene: 'ai_suggestion_micro_question', code: 'will_handle_later', name: '稍后处理', group: 'micro_question_reason', sort_order: 20 },
+          ],
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof experienceApi.microQuestionEligibility>>)
+    const wrapper = mount(PredictionFeedbackControl, {
+      props: {
+        suggestion: { ...suggestion, suggestion_stable_key: 'stable-1', attribution_eligible: true },
+        surface: 'task_detail',
+        route: '/tasks/123',
+        enabled: true,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button')[2].trigger('click')
+    await wrapper.find('.prediction-feedback__micro-toggle').trigger('click')
+    await flushPromises()
+    await wrapper.find('.prediction-feedback__micro-toggle').trigger('click')
+    await flushPromises()
+
+    expect(microQuestionAnswerMock).toHaveBeenCalledWith({
+      answer_event_key: 'answer-dismiss',
+      suggestion_event_id: 'event-1',
+      suggestion_stable_key: 'stable-1',
+      surface: 'task_detail',
+      target_type: 'task',
+      target_id: '123',
+      answer_value: 'dismissed',
+      payload: {
+        route: '/tasks/123',
+        suggestion_id: 'suggestion-1',
+        suggestion_type: 'task_next_action',
+        source: '流程状态',
+        action_type: 'open_task_assets',
+        action_label: '查看资产',
+      },
+    })
+    expect(wrapper.text()).toContain('已记录选择，正式反馈未改变')
   })
 
   it('uses unique micro-question region ids across repeated suggestions', async () => {

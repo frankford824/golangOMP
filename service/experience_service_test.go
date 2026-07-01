@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -417,6 +418,82 @@ func TestExperienceServiceAssetReviewObserverUsesSemanticOutcome(t *testing.T) {
 	}
 }
 
+func TestExperienceServiceAssetReviewObserverCapturesArchiveAndCleanOnlyChanges(t *testing.T) {
+	tests := []struct {
+		name          string
+		previousValue json.RawMessage
+		currentValue  json.RawMessage
+		wantAction    string
+		wantOutcome   string
+		wantField     string
+	}{
+		{
+			name:          "archive only",
+			previousValue: json.RawMessage(`{"approved_at":"2026-06-30T08:00:00Z","archived_at":null,"cleaned_at":null,"flow_review_status":"approved","is_archived":false,"rejected_at":null,"superseded_at":null,"superseded_by_version_id":null}`),
+			currentValue:  json.RawMessage(`{"approved_at":"2026-06-30T08:00:00Z","archived_at":"2026-06-30T08:04:00Z","cleaned_at":null,"flow_review_status":"approved","is_archived":true,"rejected_at":null,"superseded_at":null,"superseded_by_version_id":null}`),
+			wantAction:    "asset_archive_status_changed",
+			wantOutcome:   "archived",
+			wantField:     "is_archived",
+		},
+		{
+			name:          "clean only",
+			previousValue: json.RawMessage(`{"approved_at":"2026-06-30T08:00:00Z","archived_at":null,"cleaned_at":null,"flow_review_status":"approved","is_archived":false,"rejected_at":null,"superseded_at":null,"superseded_by_version_id":null}`),
+			currentValue:  json.RawMessage(`{"approved_at":"2026-06-30T08:00:00Z","archived_at":null,"cleaned_at":"2026-06-30T08:05:00Z","flow_review_status":"approved","is_archived":false,"rejected_at":null,"superseded_at":null,"superseded_by_version_id":null}`),
+			wantAction:    "asset_cleaned_at_changed",
+			wantOutcome:   "cleaned",
+			wantField:     "cleaned_at",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sourceUpdatedAt := time.Date(2026, 6, 30, 8, 5, 0, 0, time.UTC)
+			taskID := int64(42)
+			previousValue := canonicalExperienceJSON(tt.previousValue)
+			stub := &experienceRepoStub{
+				observed: map[string]*domain.ExperienceObservedEntityState{
+					experienceObservedKey(experienceSourceTaskAssetReviewSnapshot, "task_asset", "7001"): {
+						SourceName:    experienceSourceTaskAssetReviewSnapshot,
+						EntityType:    "task_asset",
+						EntityID:      "7001",
+						ObservedValue: previousValue,
+						ObservedHash:  hashObservedValue(previousValue),
+					},
+				},
+				assetSnapshots: []*domain.ExperienceOutcomeSnapshotRow{{
+					SourceName:      experienceSourceTaskAssetReviewSnapshot,
+					EntityType:      "task_asset",
+					EntityID:        "7001",
+					TaskID:          &taskID,
+					TargetType:      "task_asset",
+					TargetID:        "7001",
+					SourceUpdatedAt: sourceUpdatedAt,
+					ObservedValue:   tt.currentValue,
+					TerminalState:   string(domain.TaskAssetFlowReviewStatusApproved),
+				}},
+			}
+			svc := NewExperienceService(stub, ExperienceServiceConfig{
+				CaptureEnabled: true,
+				WorkerEnabled:  true,
+			}, zap.NewNop())
+
+			result, appErr := svc.ProcessOutcomeObservers(context.Background(), 10)
+			if appErr != nil {
+				t.Fatalf("ProcessOutcomeObservers returned app error: %v", appErr)
+			}
+			if result.Changed != 1 || result.Enqueued != 1 {
+				t.Fatalf("observer result = %+v, want one archive/clean event", result)
+			}
+			event := stub.enqueuedEvents[0]
+			if event.Action != tt.wantAction || event.Outcome != tt.wantOutcome {
+				t.Fatalf("event action/outcome = %s/%s, want %s/%s", event.Action, event.Outcome, tt.wantAction, tt.wantOutcome)
+			}
+			if !strings.Contains(string(event.Payload), `"field":"`+tt.wantField+`"`) {
+				t.Fatalf("event payload = %s, want changed field %s", event.Payload, tt.wantField)
+			}
+		})
+	}
+}
+
 func TestExperienceServiceFilingObserverUsesFieldSpecificOutcome(t *testing.T) {
 	sourceUpdatedAt := time.Date(2026, 6, 30, 8, 3, 0, 0, time.UTC)
 	taskID := int64(42)
@@ -555,6 +632,46 @@ func TestExperienceServiceOutcomeEventObserverSkipsInvalidPayloadAndAdvancesWate
 	}
 	if stub.workerRuns[0].LastError == "" || !strings.Contains(string(stub.workerRuns[0].Metadata), `"event_key":"audit-bad"`) {
 		t.Fatalf("worker run poison details = error %q metadata %s, want event locator", stub.workerRuns[0].LastError, stub.workerRuns[0].Metadata)
+	}
+}
+
+func TestExperienceServiceOutcomeObserverUsesRunStartCaptureSnapshotForEnqueue(t *testing.T) {
+	dir := t.TempDir()
+	runtimePath := filepath.Join(dir, "experience-runtime.json")
+	if err := os.WriteFile(runtimePath, []byte(`{"experience_capture_enabled":true}`), 0o600); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+	eventTime := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		auditRows: []*domain.ExperienceOutcomeEventRow{{
+			ID:              1,
+			EventKey:        "audit-1",
+			SourceName:      experienceSourceAuditRecords,
+			SourceID:        "audit:1",
+			Action:          "audit_approved",
+			Outcome:         "approved",
+			EventTime:       eventTime,
+			Payload:         json.RawMessage(`{"result":"approved"}`),
+			SourceWatermark: "wm-1",
+		}},
+		onGetWatermark: func(workerName, sourceName string) {
+			if workerName == domain.ExperienceWorkerOutcomeObserver && sourceName == experienceSourceAuditRecords {
+				_ = os.WriteFile(runtimePath, []byte(`{"experience_capture_enabled":false}`), 0o600)
+			}
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		CaptureEnabled:    true,
+		WorkerEnabled:     true,
+		RuntimeConfigFile: runtimePath,
+	}, zap.NewNop())
+
+	result, appErr := svc.ProcessOutcomeObservers(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessOutcomeObservers returned app error: %v", appErr)
+	}
+	if result.Enqueued != 1 || len(stub.enqueuedEvents) != 1 {
+		t.Fatalf("observer result=%+v enqueuedEvents=%d, want actual outbox enqueue despite mid-run flag change", result, len(stub.enqueuedEvents))
 	}
 }
 
@@ -1907,6 +2024,7 @@ func TestExperienceServiceRecordReviewDecisionUpdatesCandidateStatus(t *testing.
 	decision, appErr := svc.RecordReviewDecision(context.Background(), domain.RequestActor{ID: 291}, "review-1", ExperienceReviewDecisionRequest{
 		Decision:   domain.ExperienceReviewDecisionApprove,
 		ReasonCode: "verified",
+		Payload:    json.RawMessage(`{"review_confirmation":true}`),
 	})
 	if appErr != nil {
 		t.Fatalf("RecordReviewDecision returned app error: %v", appErr)
@@ -1936,6 +2054,7 @@ func TestExperienceServiceRecordReviewDecisionRequiresMaterializationEnabledForA
 	decision, appErr := svc.RecordReviewDecision(context.Background(), domain.RequestActor{ID: 291}, "review-1", ExperienceReviewDecisionRequest{
 		Decision:   domain.ExperienceReviewDecisionApprove,
 		ReasonCode: "verified",
+		Payload:    json.RawMessage(`{"review_confirmation":true}`),
 	})
 	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("RecordReviewDecision appErr = %+v, want permission denied when materialization is disabled", appErr)
@@ -1968,12 +2087,36 @@ func TestExperienceServiceRecordReviewDecisionMapsValidationErrors(t *testing.T)
 			svc := NewExperienceService(stub, ExperienceServiceConfig{UIEnabled: true, ReviewMaterializationEnabled: true}, zap.NewNop())
 
 			_, appErr := svc.RecordReviewDecision(context.Background(), domain.RequestActor{ID: 291}, "review-1", ExperienceReviewDecisionRequest{
-				Decision: domain.ExperienceReviewDecisionApprove,
+				Decision: domain.ExperienceReviewDecisionReject,
 			})
 			if appErr == nil || appErr.Code != tt.code {
 				t.Fatalf("RecordReviewDecision appErr = %+v, want code %s", appErr, tt.code)
 			}
 		})
+	}
+}
+
+func TestExperienceServiceRecordReviewDecisionApproveRequiresConfirmation(t *testing.T) {
+	stub := &experienceRepoStub{
+		reviewItems: []*domain.ExperienceReviewItem{{
+			ItemKey:  "review-1",
+			ItemType: "attribution_candidate",
+			Status:   domain.ExperienceReviewItemStatusOpen,
+			Priority: "high",
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{UIEnabled: true, ReviewMaterializationEnabled: true}, zap.NewNop())
+
+	decision, appErr := svc.RecordReviewDecision(context.Background(), domain.RequestActor{ID: 291}, "review-1", ExperienceReviewDecisionRequest{
+		Decision:   domain.ExperienceReviewDecisionApprove,
+		ReasonCode: "verified",
+		Payload:    json.RawMessage(`{"surface":"data_center_experience"}`),
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("RecordReviewDecision appErr = %+v, want invalid request without approval confirmation", appErr)
+	}
+	if decision != nil || len(stub.reviewDecisions) != 0 {
+		t.Fatalf("decision=%+v stored=%d, want no approval write", decision, len(stub.reviewDecisions))
 	}
 }
 
@@ -2013,6 +2156,7 @@ type experienceRepoStub struct {
 	createReviewDecisionErr   error
 	workerLockBlocked         bool
 	workerLockNames           []string
+	onGetWatermark            func(workerName, sourceName string)
 }
 
 func (s *experienceRepoStub) RunWithExperienceWorkerLock(ctx context.Context, lockName string, _ time.Duration, fn repo.ExperienceWorkerLockFunc) (bool, error) {
@@ -2120,6 +2264,9 @@ func (s *experienceRepoStub) CreateAISuggestionFeedback(_ context.Context, feedb
 
 func (s *experienceRepoStub) GetExperienceWorkerWatermark(_ context.Context, workerName, sourceName string) (*domain.ExperienceWorkerWatermark, error) {
 	s.calls++
+	if s.onGetWatermark != nil {
+		s.onGetWatermark(workerName, sourceName)
+	}
 	if s.watermarks == nil {
 		return nil, nil
 	}

@@ -8466,7 +8466,7 @@ Content-Type: `application/json`
 | `target_id` | string | 是 | - |
 | `answer_value` | enum(answered/dismissed) | 是 | - |
 | `reason_code` | enum(temporarily_not_needed/will_handle_later/already_handled/not_relevant/missing_context/stage_not_applicable/customer_special_case/suggestion_outdated) | 否 | Required when `answer_value` is `answered`; optional when dismissed. |
-| `payload` | object | 否 | - |
+| `payload` | object | 否 | For approve, clients must include review_confirmation: true; this only materializes side-channel experience candidates and never mutates core business state. |
 
 ### 响应体 schema
 成功响应: `201 application/json`

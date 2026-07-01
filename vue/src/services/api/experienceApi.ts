@@ -219,6 +219,7 @@ export interface ExperienceReviewItemsParams {
 export interface ExperienceReviewDecisionRequest {
   decision: ExperienceReviewDecisionValue
   reason_code?: string
+  // Approve requires review_confirmation: true in payload.
   payload?: Record<string, unknown>
 }
 

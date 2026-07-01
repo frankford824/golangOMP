@@ -1229,7 +1229,7 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
 	rows, err := r.db.db.QueryContext(ctx, `
 			SELECT id, task_id, COALESCE(flow_review_status, ''), approved_at, rejected_at,
-			       superseded_at, superseded_by_version_id, COALESCE(is_archived, 0), archived_at,
+			       superseded_at, superseded_by_version_id, COALESCE(is_archived, 0), archived_at, cleaned_at,
 			       GREATEST(
 			         created_at,
 			         COALESCE(approved_at, created_at),
@@ -1264,11 +1264,11 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 	for rows.Next() {
 		var id, taskID int64
 		var status string
-		var approvedAt, rejectedAt, supersededAt, archivedAt sql.NullTime
+		var approvedAt, rejectedAt, supersededAt, archivedAt, cleanedAt sql.NullTime
 		var supersededBy sql.NullInt64
 		var archived bool
 		var sourceUpdatedAt time.Time
-		if err := rows.Scan(&id, &taskID, &status, &approvedAt, &rejectedAt, &supersededAt, &supersededBy, &archived, &archivedAt, &sourceUpdatedAt); err != nil {
+		if err := rows.Scan(&id, &taskID, &status, &approvedAt, &rejectedAt, &supersededAt, &supersededBy, &archived, &archivedAt, &cleanedAt, &sourceUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan experience task asset review snapshot: %w", err)
 		}
 		taskIDCopy := taskID
@@ -1286,6 +1286,9 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 				"rejected_at":              experienceNullableTimeValue(rejectedAt),
 				"superseded_at":            experienceNullableTimeValue(supersededAt),
 				"superseded_by_version_id": experienceNullableInt64Value(supersededBy),
+				"is_archived":              archived,
+				"archived_at":              experienceNullableTimeValue(archivedAt),
+				"cleaned_at":               experienceNullableTimeValue(cleanedAt),
 			}),
 			TerminalState: taskAssetReviewTerminalState(status, archived, archivedAt),
 		})
@@ -1747,7 +1750,7 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		  AND a.displayed_at <= ?
 			  AND (
 			    (a.target_type = ? AND a.target_id = ?)
-			    OR (? = 'task' AND ? <> '' AND a.target_type = 'task' AND a.target_id = ?)
+			    OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)
 			  )
 		GROUP BY a.suggestion_event_id, a.suggestion_stable_key, a.suggestion_type, a.suggestion_id,
 		         a.source, a.target_type, a.target_id, a.displayed_at,
@@ -1760,7 +1763,6 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		outcomeAt,
 		targetType,
 		targetID,
-		targetType,
 		taskTargetID,
 		taskTargetID,
 		limit,
