@@ -1016,7 +1016,12 @@ onBeforeUnmount(() => {
       <p v-if="!searchLoading && searchResults.length === 0" class="aw-drive-empty">没有匹配内容</p>
       <ul v-else class="aw-drive-hit-list">
         <li v-for="hit in searchResults" :key="`${hit.source}-${hit.id}`" class="aw-drive-hit">
-          <button class="aw-drive-hit__thumb" type="button" @click="locateSearchRow(hit)">
+          <button
+            class="aw-drive-hit__thumb"
+            type="button"
+            :aria-label="`定位 ${hit.title || hit.primary_code || '搜索结果'}`"
+            @click="locateSearchRow(hit)"
+          >
             <ImageDown v-if="hit.scope === 'operational'" :size="24" aria-hidden="true" />
             <FileDown v-else :size="24" aria-hidden="true" />
           </button>
@@ -1071,8 +1076,10 @@ onBeforeUnmount(() => {
                 placeholder="允许格式，留空=全部"
                 aria-label="允许上传格式"
               />
-              <button class="aw-grid-button aw-grid-button--strong" type="submit">创建</button>
-              <button class="aw-grid-button" type="button" @click="creatingDirectory = false">取消</button>
+              <div class="aw-drive-inline-form__actions">
+                <button class="aw-grid-button aw-grid-button--strong" type="submit">创建</button>
+                <button class="aw-grid-button" type="button" @click="creatingDirectory = false">取消</button>
+              </div>
             </form>
             <p v-if="dirLoading" class="aw-drive-empty">加载中…</p>
             <p v-else-if="dirError" class="aw-drive-empty">{{ dirError }}</p>
@@ -1098,8 +1105,10 @@ onBeforeUnmount(() => {
                   <input v-model="directoryEditForm.enabled" type="checkbox" />
                   <span>启用</span>
                 </label>
-                <button class="aw-grid-button aw-grid-button--strong" type="submit">保存</button>
-                <button class="aw-grid-button" type="button" @click="editingDirectoryKey = ''">取消</button>
+                <div class="aw-drive-inline-form__actions">
+                  <button class="aw-grid-button aw-grid-button--strong" type="submit">保存</button>
+                  <button class="aw-grid-button" type="button" @click="editingDirectoryKey = ''">取消</button>
+                </div>
               </form>
               <button
                 v-else
@@ -1112,7 +1121,11 @@ onBeforeUnmount(() => {
               >
                 <Folder :size="16" aria-hidden="true" />
                 <span class="aw-drive-column__name">{{ dir.name }}</span>
-                <span class="aw-chip aw-chip--subtle">{{ allowedFileTypesLabel(dir.allowed_file_types) }}</span>
+                <span
+                  class="aw-chip aw-chip--subtle aw-drive-column__ext"
+                  :class="{ 'aw-drive-column__ext--all': !dir.allowed_file_types?.length }"
+                  :title="allowedFileTypesLabel(dir.allowed_file_types)"
+                >{{ allowedFileTypesLabel(dir.allowed_file_types) }}</span>
                 <span class="aw-chip aw-chip--neutral aw-drive-column__count">{{ dir.file_count }}</span>
                 <MoreHorizontal v-if="canManageDrive && dir.directory_id" :size="14" class="aw-drive-column__chevron" aria-hidden="true" />
               </button>
