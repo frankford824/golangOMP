@@ -32,6 +32,7 @@ const props = withDefaults(
     rowClickable?: boolean
     selectedRowKey?: string | number | null
     ariaLabel?: string
+    columnTools?: boolean
   }>(),
   {
     groupBy: '',
@@ -41,6 +42,7 @@ const props = withDefaults(
     rowClickable: false,
     selectedRowKey: null,
     ariaLabel: '资产工作台数据表格',
+    columnTools: true,
   },
 )
 
@@ -147,6 +149,15 @@ function resizeColumn(key: string, delta: number) {
   persistColumnState()
 }
 
+function columnWidth(column: WorkbenchDataGridColumn) {
+  return Math.max(72, columnState.value.widths[column.key] ?? column.width ?? 120)
+}
+
+function showColumnTools(column: WorkbenchDataGridColumn) {
+  if (!props.columnTools) return false
+  return columnWidth(column) >= 128
+}
+
 function cellValue(row: GridRow, column: WorkbenchDataGridColumn) {
   return row[column.key]
 }
@@ -179,6 +190,7 @@ watch(
 <template>
   <div
     class="aw-data-grid"
+    :class="{ 'aw-data-grid--no-column-tools': !columnTools }"
     role="grid"
     :aria-label="ariaLabel"
     :aria-colcount="orderedColumns.length"
@@ -197,7 +209,7 @@ watch(
           :aria-colindex="columnIndex + 1"
         >
           <span class="aw-data-grid__label">{{ column.label }}</span>
-          <span class="aw-data-grid__tools">
+          <span v-if="showColumnTools(column)" class="aw-data-grid__tools">
             <button type="button" :aria-label="`左移列：${column.label}`" title="左移列" @click="moveColumn(column.key, -1)">
               <ChevronLeft :size="12" aria-hidden="true" />
             </button>

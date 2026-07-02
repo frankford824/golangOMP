@@ -177,22 +177,25 @@ const detailItemGridColumns = computed<GridColumn[]>(() => [
   { key: 'qc_status', label: '质检', width: 96 },
   { key: 'gross_amount', label: '毛额', width: 108, align: 'right' },
   { key: 'file_count', label: '文件', width: 84, align: 'right' },
-  { key: 'action', label: '动作', width: 360, align: 'center' },
+  { key: 'action', label: '动作', width: 220, align: 'center' },
 ])
 const detailFileGridColumns = computed<GridColumn[]>(() => [
   { key: 'selected', label: '选择', width: 84, align: 'center' },
   { key: 'preview_tile', label: '缩略图', width: 112, align: 'center' },
-  { key: 'original_filename', label: '文件名', width: 240 },
+  { key: 'original_filename', label: '文件名', width: 320 },
   { key: 'file_type', label: '类型', width: 108 },
   { key: 'page_count', label: '页数', width: 84, align: 'right' },
   { key: 'preview_status', label: '预览', width: 108 },
-  { key: 'action', label: '动作', width: 96, align: 'center' },
+  { key: 'action', label: '动作', width: 72, align: 'center' },
 ])
 const detailFileRowHeight = 64
-const detailFileGroupHeight = 34
 const detailFileGridHeight = computed(() => {
-  const visibleFileRows = Math.min(Math.max(selectedFiles.value.length, 2), 3)
-  return detailFileGroupHeight + visibleFileRows * (detailFileRowHeight + 1)
+  const files = selectedFiles.value
+  if (!files.length) return detailFileRowHeight * 2
+  const groupCount = new Set(files.map((file) => String(file.preview_status ?? '未分组'))).size
+  const flatRows = groupCount + files.length
+  const visibleRows = Math.min(Math.max(flatRows, 2), 8)
+  return visibleRows * detailFileRowHeight
 })
 
 const downloadableFileIDs = computed(() => selectedFiles.value.map((file) => file.id))
@@ -1026,9 +1029,10 @@ watch(
         group-by="qc_status"
         :height="300"
         :row-height="gridRowHeight"
+        :column-tools="false"
       >
         <template #cell="{ row, column, value }">
-          <div v-if="column.key === 'action'" class="aw-inline-actions aw-inline-actions--compact">
+          <div v-if="column.key === 'action'" class="aw-grid-actions">
             <template v-if="canManageItems">
               <button
                 v-if="itemNeedsGrade(gridRowAsItem(row))"
@@ -1040,9 +1044,14 @@ watch(
               </button>
               <button class="aw-grid-button" type="button" @click="startEditItem(gridRowAsItem(row))">编辑</button>
               <button class="aw-grid-button" type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
-              <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
-              <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
-              <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
+              <details class="aw-row-menu">
+                <summary>更多</summary>
+                <div class="aw-row-menu__panel">
+                  <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
+                  <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
+                  <button type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
+                </div>
+              </details>
             </template>
             <span v-else class="aw-chip aw-chip--neutral">只读</span>
           </div>
@@ -1120,6 +1129,7 @@ watch(
           group-by="preview_status"
           :height="detailFileGridHeight"
           :row-height="detailFileRowHeight"
+          :column-tools="false"
         >
           <template #cell="{ row, column, value }">
             <label v-if="column.key === 'selected'" class="aw-inline-check">
@@ -1221,7 +1231,7 @@ watch(
             {{ pricingStatusMeta(editingItem.pricing_status).label }}
           </span>
         </div>
-        <div class="aw-grid-toolbar">
+        <div class="aw-form-grid aw-submission-edit-form">
           <label class="aw-field">
             <span>订单号</span>
             <input v-model.trim="editForm.order_no" />
@@ -1238,11 +1248,11 @@ watch(
             <span>页数</span>
             <input v-model.number="editForm.page_count" min="1" type="number" />
           </label>
-          <label class="aw-inline-check">
+          <label class="aw-inline-check aw-submission-edit-form__finalized">
             <input v-model="editForm.finalized" type="checkbox" />
             <span>已定稿</span>
           </label>
-          <label class="aw-field">
+          <label class="aw-field aw-submission-edit-form__reason">
             <span>原因</span>
             <input v-model.trim="editForm.reason" placeholder="默认记录为维护区行内编辑" />
           </label>

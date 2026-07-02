@@ -2120,21 +2120,34 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-file-maintenance-panel {
+  display: grid;
   gap: var(--aw-space-3);
+}
+
+.aw-file-maintenance-panel .aw-panel__head {
+  margin-bottom: 0;
+}
+
+.aw-file-maintenance-panel .aw-batch-maintenance-form {
+  margin: 0;
+}
+
+.aw-file-maintenance-panel .aw-data-grid {
+  margin: 0;
 }
 
 .aw-batch-maintenance-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
-  gap: var(--aw-space-3);
+  gap: var(--aw-space-4);
 }
 
 .aw-batch-maintenance-group {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(128px, 0.38fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
-  gap: var(--aw-space-2);
+  gap: var(--aw-space-3);
   min-width: 0;
 }
 
@@ -2149,9 +2162,30 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-batch-maintenance-group .aw-secondary-button {
-  width: 100%;
+  width: auto;
+  min-width: 112px;
   min-height: var(--aw-row-md);
   white-space: nowrap;
+}
+
+.aw-submission-dialog .aw-grid-actions {
+  justify-content: flex-start;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.aw-submission-edit-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 var(--aw-space-4);
+}
+
+.aw-submission-edit-form__finalized {
+  align-self: end;
+  min-height: var(--aw-row-md);
+}
+
+.aw-submission-edit-form__reason {
+  grid-column: 2 / -1;
 }
 
 .aw-empty-state {
@@ -2969,6 +3003,10 @@ body.aw-submission-dialog-locked {
   justify-content: center;
 }
 
+.aw-data-grid__th:has(.aw-data-grid__tools) .aw-data-grid__label {
+  padding-right: 88px;
+}
+
 .aw-data-grid__tools {
   position: absolute;
   top: 50%;
@@ -2987,6 +3025,10 @@ body.aw-submission-dialog-locked {
 .aw-data-grid__th:focus-within .aw-data-grid__tools,
 .aw-data-grid__th:hover .aw-data-grid__tools {
   opacity: 1;
+}
+
+.aw-data-grid--no-column-tools .aw-data-grid__th .aw-data-grid__label {
+  padding-right: 0;
 }
 
 .aw-data-grid__tools button {
@@ -3613,8 +3655,13 @@ body.aw-submission-dialog-locked {
   .aw-member-row,
   .aw-batch-maintenance-form,
   .aw-grade-console__body,
-  .aw-form-grid {
+  .aw-form-grid,
+  .aw-submission-edit-form {
     grid-template-columns: 1fr;
+  }
+
+  .aw-submission-edit-form__reason {
+    grid-column: auto;
   }
 
   .aw-batch-maintenance-group {

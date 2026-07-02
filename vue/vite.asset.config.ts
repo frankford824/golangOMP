@@ -40,8 +40,27 @@ function assetWorkbenchDevFallback(): Plugin {
   }
 }
 
+function stripVueUseInvalidPureAnnotations(): Plugin {
+  const vueUseCoreDist = /[/\\]node_modules[/\\]@vueuse[/\\]core[/\\]dist[/\\]index\.js$/
+
+  return {
+    name: 'asset-workbench-strip-vueuse-invalid-pure-annotations',
+    apply: 'build',
+    enforce: 'pre',
+    load(id) {
+      const filePath = id.split('?')[0]
+      if (!vueUseCoreDist.test(filePath)) return null
+
+      const source = fs.readFileSync(filePath, 'utf8')
+      return source
+        .replace('/* #__PURE__ */\nconst events = /* @__PURE__ */ new Map();', 'const events = /* @__PURE__ */ new Map();')
+        .replace('const defaultState = (/* #__PURE__ */ {', 'const defaultState = ({')
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [assetWorkbenchDevFallback(), ...sharedPlugins()],
+  plugins: [assetWorkbenchDevFallback(), stripVueUseInvalidPureAnnotations(), ...sharedPlugins()],
   resolve: {
     alias: sharedAlias,
   },
