@@ -233,7 +233,9 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 	query = query.Normalized()
 	if query.Keyword != "" && s.searchBackendReady() {
 		s.recordRecentKeyword(query.Keyword)
-		_ = s.refreshSearchCache(ctx, query)
+		if shouldScheduleKeywordRefresh(query.Keyword) {
+			s.scheduleKeywordRefresh(query.Keyword, 50)
+		}
 	}
 	return s.repo.Search(ctx, query)
 }

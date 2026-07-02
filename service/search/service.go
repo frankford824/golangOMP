@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -54,33 +55,59 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 	var err error
 	switch scope {
 	case "all":
-		if result.Tasks, err = s.repo.SearchTasks(ctx, q, limit); err != nil {
+		var externalAssets []domain.SearchAsset
+		if err = runSearchJobs(
+			func() error {
+				rows, err := s.repo.SearchTasks(ctx, q, limit)
+				result.Tasks = rows
+				return err
+			},
+			func() error {
+				rows, err := s.repo.SearchAssets(ctx, q, limit)
+				result.Assets = rows
+				return err
+			},
+			func() error {
+				rows, err := s.searchExternalAssets(ctx, q, limit)
+				externalAssets = rows
+				return err
+			},
+			func() error {
+				rows, err := s.repo.SearchProducts(ctx, q, limit)
+				result.Products = rows
+				return err
+			},
+			func() error {
+				rows, err := s.searchUsers(ctx, actor, q, limit)
+				result.Users = rows
+				return err
+			},
+		); err != nil {
 			return nil, internalErr(err)
 		}
-		if result.Assets, err = s.repo.SearchAssets(ctx, q, limit); err != nil {
-			return nil, internalErr(err)
-		}
-		if err = s.appendExternalAssets(ctx, result, q, limit); err != nil {
-			return nil, internalErr(err)
-		}
-		if result.Products, err = s.repo.SearchProducts(ctx, q, limit); err != nil {
-			return nil, internalErr(err)
-		}
-		result.Users, err = s.searchUsers(ctx, actor, q, limit)
-		if err != nil {
-			return nil, internalErr(err)
-		}
+		result.Assets = append(result.Assets, externalAssets...)
 	case "tasks":
 		if result.Tasks, err = s.repo.SearchTasks(ctx, q, limit); err != nil {
 			return nil, internalErr(err)
 		}
 	case "assets":
-		if result.Assets, err = s.repo.SearchAssets(ctx, q, limit); err != nil {
+		var systemAssets []domain.SearchAsset
+		var externalAssets []domain.SearchAsset
+		if err = runSearchJobs(
+			func() error {
+				rows, err := s.repo.SearchAssets(ctx, q, limit)
+				systemAssets = rows
+				return err
+			},
+			func() error {
+				rows, err := s.searchExternalAssets(ctx, q, limit)
+				externalAssets = rows
+				return err
+			},
+		); err != nil {
 			return nil, internalErr(err)
 		}
-		if err = s.appendExternalAssets(ctx, result, q, limit); err != nil {
-			return nil, internalErr(err)
-		}
+		result.Assets = append(systemAssets, externalAssets...)
 	case "products":
 		if result.Products, err = s.repo.SearchProducts(ctx, q, limit); err != nil {
 			return nil, internalErr(err)
@@ -97,19 +124,37 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 	return result, nil
 }
 
-func (s *Service) appendExternalAssets(ctx context.Context, result *domain.SearchResultGroup, q string, limit int) error {
+func (s *Service) searchExternalAssets(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
 	if s.external == nil {
-		return nil
+		return []domain.SearchAsset{}, nil
 	}
 	items, err := s.external.SearchGlobal(ctx, q, limit)
 	if err != nil {
-		return nil
+		return []domain.SearchAsset{}, nil
 	}
-	if len(items) == 0 {
-		return nil
+	return items, nil
+}
+
+func runSearchJobs(jobs ...func() error) error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for _, job := range jobs {
+		job := job
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := job(); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}()
 	}
-	result.Assets = append(result.Assets, items...)
-	return nil
+	wg.Wait()
+	return firstErr
 }
 
 func (s *Service) searchUsers(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchUser, error) {

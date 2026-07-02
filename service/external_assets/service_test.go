@@ -359,7 +359,7 @@ func TestNASLocalBrowserURLsUseBFFProxyWhenOSSNotReady(t *testing.T) {
 	}
 }
 
-func TestSearchRefreshesCacheInlineFromBFFAndSkipsSystemFiles(t *testing.T) {
+func TestSearchReturnsCacheAndSchedulesKeywordRefresh(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/search" {
 			t.Fatalf("path=%s, want /api/search", r.URL.Path)
@@ -403,6 +403,10 @@ func TestSearchRefreshesCacheInlineFromBFFAndSkipsSystemFiles(t *testing.T) {
 		BFFBaseURL: server.URL,
 		Mounts:     ParseMounts("/p3:nas_local"),
 	}, nil)
+	var jobs []func()
+	svc.keywordRefreshAsyncFn = func(fn func()) {
+		jobs = append(jobs, fn)
+	}
 
 	rows, total, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
 		Keyword: "png",
@@ -412,15 +416,19 @@ func TestSearchRefreshesCacheInlineFromBFFAndSkipsSystemFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
+	if total != 0 || len(rows) != 0 {
+		t.Fatalf("Search() rows=%+v total=%d, want immediate cached empty result", rows, total)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("scheduled jobs=%d, want 1", len(jobs))
+	}
+	jobs[0]()
 	if len(repo.upserts) != 1 || repo.upserts[0].OriginPath != "/p3/designs/fresh.png" {
 		t.Fatalf("upserts=%+v, want only non-system BFF result", repo.upserts)
 	}
-	if total != 1 || len(rows) != 1 || rows[0].ResourceID != "ext-1" || rows[0].FileName != "fresh.png" {
-		t.Fatalf("Search() rows=%+v total=%d, want lazy cached BFF row", rows, total)
-	}
 }
 
-func TestSearchFallsBackToAListWhenBFFOnlyReturnsSystemFiles(t *testing.T) {
+func TestKeywordRefreshFallsBackToAListWhenBFFOnlyReturnsSystemFiles(t *testing.T) {
 	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"items": []map[string]interface{}{
@@ -461,16 +469,14 @@ func TestSearchFallsBackToAListWhenBFFOnlyReturnsSystemFiles(t *testing.T) {
 		Mounts:       ParseMounts("/p3:nas_local"),
 	}, nil)
 
-	rows, total, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
-		Keyword: "png",
-		Page:    1,
-		Size:    20,
-	})
-	if err != nil {
-		t.Fatalf("Search() error = %v", err)
+	if err := svc.SyncKeyword(context.Background(), "png", 20); err != nil {
+		t.Fatalf("SyncKeyword() error = %v", err)
 	}
-	if total != 1 || len(rows) != 1 || rows[0].OriginPath != "/p3/designs/fresh.png" {
-		t.Fatalf("Search() rows=%+v total=%d, want AList fallback row", rows, total)
+	if len(repo.upserts) != 1 || repo.upserts[0].OriginPath != "/p3/designs/fresh.png" {
+		t.Fatalf("SyncKeyword() upserts=%+v, want AList fallback row", repo.upserts)
+	}
+	if len(repo.finishedRuns) != 1 || repo.finishedRuns[0].upserted != 1 {
+		t.Fatalf("finishedRuns=%+v, want one completed fallback run", repo.finishedRuns)
 	}
 }
 
@@ -490,6 +496,10 @@ func TestSearchFallsBackToCachedRowsWhenLiveRefreshFails(t *testing.T) {
 		BFFBaseURL: server.URL,
 		Mounts:     ParseMounts("/p3:nas_local"),
 	}, nil)
+	scheduled := 0
+	svc.keywordRefreshAsyncFn = func(fn func()) {
+		scheduled++
+	}
 
 	rows, total, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
 		Keyword: "cached",
@@ -505,9 +515,12 @@ func TestSearchFallsBackToCachedRowsWhenLiveRefreshFails(t *testing.T) {
 	if len(repo.upserts) != 0 || len(repo.finishedRuns) != 0 {
 		t.Fatalf("unexpected inline writes from failed refresh: upserts=%d finishedRuns=%d", len(repo.upserts), len(repo.finishedRuns))
 	}
+	if scheduled != 1 {
+		t.Fatalf("scheduled refreshes=%d, want 1", scheduled)
+	}
 }
 
-func TestSearchDoesNotScheduleBackgroundKeywordRefresh(t *testing.T) {
+func TestSearchSchedulesBackgroundKeywordRefreshWithCooldown(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"items": []map[string]interface{}{}})
 	}))
@@ -533,8 +546,8 @@ func TestSearchDoesNotScheduleBackgroundKeywordRefresh(t *testing.T) {
 			t.Fatalf("Search() error = %v", err)
 		}
 	}
-	if scheduled != 0 {
-		t.Fatalf("scheduled refreshes=%d, want 0", scheduled)
+	if scheduled != 1 {
+		t.Fatalf("scheduled refreshes=%d, want 1", scheduled)
 	}
 }
 
