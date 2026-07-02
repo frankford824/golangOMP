@@ -655,13 +655,18 @@ onMounted(async () => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">设置</p>
         <h2>{{ pageLabel }}</h2>
-        <p>{{ pageSubtitle }}。集中维护价目矩阵、出错扣减、福利补贴与大促价格券。价目按生效日接班，提交记录保留当时的计价快照，扣减和福利在结算时计算。</p>
+        <p>{{ pageSubtitle }}。常用链路是上传目录绑定难度、价目矩阵按生效日接班、人员定级命中单价；扣减、福利和大促在结算侧按需启用。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-primary-button" type="button" @click="submitPriceRuleAction">{{ priceSupersedeId ? '预览并发布' : '新增价目' }}</button>
       </div>
     </div>
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
+    <div class="aw-cost-flow" aria-label="计价链路">
+      <span>上传目录绑定难度</span>
+      <span>价格日历接班</span>
+      <span>人员定级命中单价</span>
+    </div>
     <div class="aw-panel">
       <div class="aw-panel__head">
         <div>
@@ -879,8 +884,13 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="aw-three-column">
-      <div class="aw-panel">
+    <details class="aw-advanced-settings">
+      <summary>
+        <span>高级设置：扣减 / 福利 / 大促</span>
+        <small>默认在结算阶段计算，日常改价优先维护难度档案和价目矩阵</small>
+      </summary>
+      <div class="aw-three-column">
+        <div class="aw-panel">
         <div class="aw-panel__head">
           <div>
             <h3>出错扣减</h3>
@@ -950,7 +960,7 @@ onMounted(async () => {
         <p v-else class="aw-copy">已配置 {{ totals.deduction }} 条扣减规则</p>
       </div>
 
-      <div class="aw-panel">
+        <div class="aw-panel">
         <div class="aw-panel__head">
           <div>
             <h3>福利补贴</h3>
@@ -1018,7 +1028,7 @@ onMounted(async () => {
         <p v-else class="aw-copy">已配置 {{ totals.welfare }} 条福利规则</p>
       </div>
 
-      <div class="aw-panel">
+        <div class="aw-panel">
         <div class="aw-panel__head">
           <div>
             <h3>大促价格券</h3>
@@ -1119,7 +1129,8 @@ onMounted(async () => {
           </template>
         </WorkbenchDataGrid>
         <p v-else class="aw-copy">已配置 {{ totals.promo }} 条大促规则</p>
+        </div>
       </div>
-    </div>
+    </details>
   </section>
 </template>

@@ -30,13 +30,13 @@ import { Boxes, HandCoins, ImagePlus } from 'lucide-vue-next'
           <small>查看这个月能拿多少</small>
         </span>
       </RouterLink>
-      <RouterLink class="aw-simple-card" to="/submissions">
+      <RouterLink class="aw-simple-card" to="/drive">
         <span class="aw-simple-card__icon">
           <Boxes :size="32" aria-hidden="true" />
         </span>
         <span>
-          <strong>上传记录</strong>
-          <small>查看已提交的文件</small>
+          <strong>我的网盘</strong>
+          <small>查看已上传的文件</small>
         </span>
       </RouterLink>
     </div>

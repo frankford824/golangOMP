@@ -2,12 +2,25 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"workflow/domain"
 	"workflow/repo"
 )
+
+func int64SliceFromJSON(raw string) []int64 {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var values []int64
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil
+	}
+	return values
+}
 
 // driveOwnerClause appends an owner filter used to scope non-admin users to their
 // own uploads. Returns the SQL fragment (may be empty) and the extra args.
@@ -65,6 +78,8 @@ func (r *assetWorkbenchRepo) DriveListOrders(ctx context.Context, filter repo.As
 	args := append([]interface{}{}, ownerArgs...)
 	args = append(args, dirArgs...)
 	query := `SELECT i.order_no AS order_no,
+		MIN(i.id) AS submission_item_id,
+		CONCAT('[', COALESCE(GROUP_CONCAT(DISTINCT i.id ORDER BY i.id), ''), ']') AS submission_item_ids_json,
 		COUNT(f.id) AS file_count,
 		MAX(f.created_at) AS latest_at
 	FROM asset_workbench_submission_files f
@@ -80,9 +95,13 @@ func (r *assetWorkbenchRepo) DriveListOrders(ctx context.Context, filter repo.As
 	items := []*domain.AssetWorkbenchDriveOrder{}
 	for rows.Next() {
 		item := &domain.AssetWorkbenchDriveOrder{}
-		if err := rows.Scan(&item.OrderNo, &item.FileCount, &item.LatestAt); err != nil {
+		var itemID sql.NullInt64
+		var itemIDsJSON sql.NullString
+		if err := rows.Scan(&item.OrderNo, &itemID, &itemIDsJSON, &item.FileCount, &item.LatestAt); err != nil {
 			return nil, fmt.Errorf("scan drive order: %w", err)
 		}
+		item.SubmissionItemID = fromNullInt64(itemID)
+		item.SubmissionItemIDs = int64SliceFromJSON(itemIDsJSON.String)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -92,8 +111,9 @@ func driveFileColumns() string {
 	return `f.id, f.submission_id, f.submission_item_id, s.submission_no, f.owner_user_id,
 		f.upload_directory_id,
 		COALESCE(NULLIF(f.upload_directory_name, ''), '未分类') AS upload_directory_name,
-		i.order_no,
+		i.difficulty_class, i.order_no,
 		f.original_filename, f.file_type, f.mime_type, f.file_size, f.preview_status,
+		i.qc_status, i.pricing_status, i.settlement_status, i.page_count,
 		i.business_month, f.created_at`
 }
 
@@ -101,8 +121,9 @@ func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.Ass
 	item := &domain.AssetWorkbenchDriveFile{}
 	if err := scanner.Scan(
 		&item.ID, &item.SubmissionID, &item.SubmissionItemID, &item.SubmissionNo, &item.OwnerUserID,
-		&item.UploadDirectoryID, &item.UploadDirectoryName, &item.OrderNo,
+		&item.UploadDirectoryID, &item.UploadDirectoryName, &item.DifficultyClass, &item.OrderNo,
 		&item.OriginalFilename, &item.FileType, &item.MimeType, &item.FileSize, &item.PreviewStatus,
+		&item.QCStatus, &item.PricingStatus, &item.SettlementStatus, &item.PageCount,
 		&item.BusinessMonth, &item.CreatedAt,
 	); err != nil {
 		return nil, err

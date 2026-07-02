@@ -361,17 +361,18 @@ type AssetWorkbenchTemplateAssignment struct {
 }
 
 type AssetWorkbenchUploadDirectory struct {
-	ID              int64     `json:"id" db:"id"`
-	Name            string    `json:"name" db:"name"`
-	OSSPrefix       string    `json:"oss_prefix" db:"oss_prefix"`
-	Description     string    `json:"description" db:"description"`
-	DifficultyClass string    `json:"difficulty_class" db:"difficulty_class"`
-	Enabled         bool      `json:"enabled" db:"enabled"`
-	SortOrder       int       `json:"sort_order" db:"sort_order"`
-	CreatedBy       int64     `json:"created_by" db:"created_by"`
-	UpdatedBy       *int64    `json:"updated_by,omitempty" db:"updated_by"`
-	CreatedAt       time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
+	ID               int64     `json:"id" db:"id"`
+	Name             string    `json:"name" db:"name"`
+	OSSPrefix        string    `json:"oss_prefix" db:"oss_prefix"`
+	Description      string    `json:"description" db:"description"`
+	DifficultyClass  string    `json:"difficulty_class" db:"difficulty_class"`
+	AllowedFileTypes []string  `json:"allowed_file_types,omitempty" db:"-"`
+	Enabled          bool      `json:"enabled" db:"enabled"`
+	SortOrder        int       `json:"sort_order" db:"sort_order"`
+	CreatedBy        int64     `json:"created_by" db:"created_by"`
+	UpdatedBy        *int64    `json:"updated_by,omitempty" db:"updated_by"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchClientMaterial struct {
@@ -559,6 +560,8 @@ type AssetWorkbenchSubmissionFile struct {
 
 type AssetWorkbenchOverviewRow struct {
 	Source        string          `json:"source" db:"source"`
+	Scope         string          `json:"scope,omitempty" db:"-"`
+	SourceLabel   string          `json:"source_label,omitempty" db:"-"`
 	ID            int64           `json:"id" db:"id"`
 	Title         string          `json:"title" db:"title"`
 	PrimaryCode   string          `json:"primary_code" db:"primary_code"`
@@ -573,6 +576,7 @@ type AssetWorkbenchOverviewRow struct {
 	CreatedAt     time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at" db:"updated_at"`
 	RoutePath     string          `json:"route_path" db:"route_path"`
+	Locate        json.RawMessage `json:"locate,omitempty" db:"-"`
 	Meta          json.RawMessage `json:"meta_json,omitempty" db:"meta_json"`
 }
 
@@ -589,9 +593,11 @@ type AssetWorkbenchDriveDirectory struct {
 
 // AssetWorkbenchDriveOrder is a virtual second-level folder keyed by order number.
 type AssetWorkbenchDriveOrder struct {
-	OrderNo   string    `json:"order_no" db:"order_no"`
-	FileCount int64     `json:"file_count" db:"file_count"`
-	LatestAt  time.Time `json:"latest_at" db:"latest_at"`
+	OrderNo           string    `json:"order_no" db:"order_no"`
+	SubmissionItemID  *int64    `json:"submission_item_id,omitempty" db:"submission_item_id"`
+	SubmissionItemIDs []int64   `json:"submission_item_ids,omitempty"`
+	FileCount         int64     `json:"file_count" db:"file_count"`
+	LatestAt          time.Time `json:"latest_at" db:"latest_at"`
 }
 
 // AssetWorkbenchDriveFile is a leaf image row carrying its virtual path context so
@@ -604,12 +610,17 @@ type AssetWorkbenchDriveFile struct {
 	OwnerUserID         int64     `json:"owner_user_id" db:"owner_user_id"`
 	UploadDirectoryID   *int64    `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
 	UploadDirectoryName string    `json:"upload_directory_name" db:"upload_directory_name"`
+	DifficultyClass     string    `json:"difficulty_class,omitempty" db:"difficulty_class"`
 	OrderNo             string    `json:"order_no" db:"order_no"`
 	OriginalFilename    string    `json:"original_filename" db:"original_filename"`
 	FileType            string    `json:"file_type" db:"file_type"`
 	MimeType            string    `json:"mime_type" db:"mime_type"`
 	FileSize            int64     `json:"file_size" db:"file_size"`
 	PreviewStatus       string    `json:"preview_status" db:"preview_status"`
+	QCStatus            string    `json:"qc_status,omitempty" db:"qc_status"`
+	PricingStatus       string    `json:"pricing_status,omitempty" db:"pricing_status"`
+	SettlementStatus    string    `json:"settlement_status,omitempty" db:"settlement_status"`
+	PageCount           int       `json:"page_count,omitempty" db:"page_count"`
 	BusinessMonth       string    `json:"business_month" db:"business_month"`
 	CreatedAt           time.Time `json:"created_at" db:"created_at"`
 }

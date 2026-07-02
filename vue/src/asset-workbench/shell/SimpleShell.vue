@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { Boxes, HandCoins, HardDrive, ImagePlus, Library, UserRound } from 'lucide-vue-next'
+import { HandCoins, HardDrive, ImagePlus, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
@@ -20,15 +20,18 @@ const profileHint = computed(() => {
 })
 
 const navItems = [
-  { to: '/upload', label: '交作品', icon: ImagePlus, capability: 'asset.workbench.submit' },
-  { to: '/submissions', label: '上传记录', icon: Boxes, capability: 'asset.workbench.submit' },
-  { to: '/drive', label: '我的网盘', icon: HardDrive, capability: 'asset.workbench.submit' },
-  { to: '/materials', label: '素材下载', icon: Library, capability: 'asset.workbench.material.download' },
+  {
+    to: '/drive',
+    label: '我的网盘',
+    icon: HardDrive,
+    capabilities: ['asset.workbench.submit', 'asset.workbench.material.download', 'asset.workbench.system_search'],
+  },
+  { to: '/upload', label: '上传成品', icon: ImagePlus, capabilities: ['asset.workbench.submit'] },
   { to: '/my-settlement', label: '看收入', icon: HandCoins },
 ]
 const visibleNavItems = computed(() => {
   const capabilities = new Set(props.bootstrap?.capabilities ?? [])
-  return navItems.filter((item) => !item.capability || capabilities.has(item.capability))
+  return navItems.filter((item) => !item.capabilities || item.capabilities.some((capability) => capabilities.has(capability)))
 })
 </script>
 

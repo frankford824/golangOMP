@@ -93,6 +93,16 @@ function gridValue(key: string, value: unknown) {
   return value || '—'
 }
 
+function submissionDriveTarget(submission: SubmissionRow) {
+  return {
+    path: '/drive',
+    query: {
+      scope: 'orders',
+      q: submission.submission_no,
+    },
+  }
+}
+
 const loadDashboard = dashboardRequest.run
 
 onMounted(() => {
@@ -139,7 +149,7 @@ onMounted(() => {
               v-for="submission in pendingSubmissions"
               :key="submission.id"
               class="aw-contact-tile"
-              to="/submissions"
+              :to="submissionDriveTarget(submission)"
             >
               <strong>{{ submission.submission_no }}</strong>
               <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
@@ -186,21 +196,21 @@ onMounted(() => {
           <div class="aw-panel__head"><h3>常用入口</h3></div>
           <div class="aw-inline-actions">
             <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
-            <RouterLink class="aw-secondary-button" to="/submissions">查改作品</RouterLink>
+            <RouterLink class="aw-secondary-button" to="/drive">素材网盘</RouterLink>
             <RouterLink class="aw-secondary-button" to="/settlement">本月结算</RouterLink>
           </div>
         </section>
         <section class="aw-panel">
           <div class="aw-panel__head">
             <h3>最近提交</h3>
-            <RouterLink v-if="recentSubmissions.length" class="aw-link-button" to="/submissions">查看全部</RouterLink>
+            <RouterLink v-if="recentSubmissions.length" class="aw-link-button" :to="{ path: '/drive', query: { scope: 'orders' } }">查看全部</RouterLink>
           </div>
           <div v-if="recentSubmissions.length" class="aw-contact-sheet">
             <RouterLink
               v-for="submission in recentSubmissions"
               :key="submission.id"
               class="aw-contact-tile"
-              to="/submissions"
+              :to="submissionDriveTarget(submission)"
             >
               <strong>{{ submission.submission_no }}</strong>
               <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>

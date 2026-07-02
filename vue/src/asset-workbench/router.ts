@@ -80,13 +80,16 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/submissions',
     name: 'asset-submissions',
-    component: () => import('./pages/SubmissionsPage.vue'),
+    redirect: (to) => {
+      const q = to.query.q ?? to.query.order_no ?? to.query.submission_id
+      return { path: '/drive', query: { ...to.query, scope: 'files', ...(q ? { q } : {}) } }
+    },
     meta: accessMeta('/submissions'),
   },
   {
     path: '/materials',
     name: 'asset-materials',
-    component: () => import('./pages/MaterialsPage.vue'),
+    redirect: (to) => ({ path: '/drive', query: { ...to.query, scope: 'operational' } }),
     meta: accessMeta('/materials'),
   },
   {
@@ -98,7 +101,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/overview',
     name: 'asset-overview',
-    component: () => import('./pages/OverviewPage.vue'),
+    redirect: (to) => ({ path: '/drive', query: { ...to.query, scope: to.query.scope ?? 'all' } }),
     meta: accessMeta('/overview'),
   },
   {

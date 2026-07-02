@@ -180,6 +180,12 @@ const systemAssets = [
   },
 ]
 
+const difficultyClasses = [
+  { id: 1, code: 'A', name: 'A类', description: '标准成品', enabled: true, sort_order: 10, created_by: 1001 },
+  { id: 2, code: 'B', name: 'B类', description: '复杂成品', enabled: true, sort_order: 20, created_by: 1001 },
+  { id: 3, code: 'C', name: 'C类', description: '文字类', enabled: true, sort_order: 30, created_by: 1001 },
+]
+
 const clientMaterials = [
   {
     id: 1,
@@ -240,13 +246,199 @@ const clientMaterials = [
 ]
 
 const uploadDirectories = [
-  { id: 1, name: 'A类定稿', oss_prefix: 'a/final', description: 'A类定稿', enabled: true, sort_order: 1, created_by: 1001 },
-  { id: 2, name: 'A类未定稿', oss_prefix: 'a/draft', description: 'A类未定稿', enabled: true, sort_order: 2, created_by: 1001 },
-  { id: 3, name: 'B类定稿', oss_prefix: 'b/final', description: 'B类定稿', enabled: true, sort_order: 3, created_by: 1001 },
-  { id: 4, name: 'B类未定稿', oss_prefix: 'b/draft', description: 'B类未定稿', enabled: true, sort_order: 4, created_by: 1001 },
-  { id: 5, name: 'C类定稿', oss_prefix: 'c/final', description: '文字', enabled: true, sort_order: 5, created_by: 1001 },
-  { id: 6, name: 'C类未定稿', oss_prefix: 'c/draft', description: '文字', enabled: true, sort_order: 6, created_by: 1001 },
+  { id: 1, name: 'A类定稿', oss_prefix: 'a/final', description: 'A类定稿', difficulty_class: 'A', allowed_file_types: ['png', 'jpg', 'jpeg'], enabled: true, sort_order: 1, created_by: 1001 },
+  { id: 2, name: 'A类未定稿', oss_prefix: 'a/draft', description: 'A类未定稿', difficulty_class: 'A', allowed_file_types: [], enabled: true, sort_order: 2, created_by: 1001 },
+  { id: 3, name: 'B类定稿', oss_prefix: 'b/final', description: 'B类定稿', difficulty_class: 'B', allowed_file_types: ['image/*'], enabled: true, sort_order: 3, created_by: 1001 },
+  { id: 4, name: 'B类未定稿', oss_prefix: 'b/draft', description: 'B类未定稿', difficulty_class: 'B', allowed_file_types: [], enabled: true, sort_order: 4, created_by: 1001 },
+  { id: 5, name: 'C类定稿', oss_prefix: 'c/final', description: '文字', difficulty_class: 'C', allowed_file_types: ['pdf'], enabled: true, sort_order: 5, created_by: 1001 },
+  { id: 6, name: 'C类未定稿', oss_prefix: 'c/draft', description: '文字', difficulty_class: 'C', allowed_file_types: [], enabled: true, sort_order: 6, created_by: 1001 },
 ]
+
+const driveFiles = [
+  {
+    id: 801,
+    submission_id: 11,
+    submission_item_id: 1101,
+    submission_no: 'AW-202606-001',
+    owner_user_id: 2001,
+    upload_directory_id: 1,
+    upload_directory_name: 'A类定稿',
+    difficulty_class: 'A',
+    order_no: 'CGP000071-001',
+    original_filename: 'poster-final-a.png',
+    file_type: 'png',
+    mime_type: 'image/png',
+    file_size: 245760,
+    preview_status: 'ready',
+    qc_status: 'checked',
+    pricing_status: 'priced',
+    settlement_status: 'unsettled',
+    page_count: 1,
+    business_month: '2026-06',
+    created_at: '2026-06-24T10:10:00+08:00',
+  },
+  {
+    id: 802,
+    submission_id: 11,
+    submission_item_id: 1101,
+    submission_no: 'AW-202606-001',
+    owner_user_id: 2001,
+    upload_directory_id: 1,
+    upload_directory_name: 'A类定稿',
+    difficulty_class: 'A',
+    order_no: 'CGP000071-001',
+    original_filename: 'poster-final-b.jpg',
+    file_type: 'jpg',
+    mime_type: 'image/jpeg',
+    file_size: 195072,
+    preview_status: 'ready',
+    qc_status: 'pending',
+    pricing_status: 'priced',
+    settlement_status: 'unsettled',
+    page_count: 1,
+    business_month: '2026-06',
+    created_at: '2026-06-24T10:12:00+08:00',
+  },
+  {
+    id: 803,
+    submission_id: 12,
+    submission_item_id: 1201,
+    submission_no: 'AW-202606-002',
+    owner_user_id: 2002,
+    upload_directory_id: 3,
+    upload_directory_name: 'B类定稿',
+    difficulty_class: 'B',
+    order_no: 'CGK000602-001',
+    original_filename: 'lamp-render-preview.png',
+    file_type: 'png',
+    mime_type: 'image/png',
+    file_size: 188743,
+    preview_status: 'ready',
+    qc_status: 'needs_fix',
+    pricing_status: 'pending_grade',
+    settlement_status: 'unsettled',
+    page_count: 2,
+    business_month: '2026-06',
+    created_at: '2026-06-24T11:15:00+08:00',
+  },
+]
+
+function driveDirectories() {
+  return uploadDirectories.map((directory) => {
+    const files = driveFiles.filter((file) => file.upload_directory_id === directory.id)
+    return {
+      directory_id: directory.id,
+      name: directory.name,
+      prefix: directory.oss_prefix,
+      difficulty_class: directory.difficulty_class,
+      file_count: files.length,
+      order_count: new Set(files.map((file) => file.order_no)).size,
+    }
+  })
+}
+
+function driveOrders(url) {
+  const dirID = Number(url.searchParams.get('dir_id') || 0)
+  const rows = driveFiles.filter((file) => !dirID || file.upload_directory_id === dirID)
+  const grouped = new Map()
+  for (const file of rows) {
+    const existing = grouped.get(file.order_no) ?? {
+      order_no: file.order_no,
+      submission_item_id: file.submission_item_id,
+      submission_item_ids: [],
+      file_count: 0,
+      latest_at: file.created_at,
+    }
+    existing.file_count += 1
+    if (!existing.submission_item_ids.includes(file.submission_item_id)) existing.submission_item_ids.push(file.submission_item_id)
+    if (file.created_at > existing.latest_at) existing.latest_at = file.created_at
+    grouped.set(file.order_no, existing)
+  }
+  return [...grouped.values()]
+}
+
+function driveFilesFor(url) {
+  const dirID = Number(url.searchParams.get('dir_id') || 0)
+  const orderNo = url.searchParams.get('order_no') || ''
+  return driveFiles.filter((file) => (!dirID || file.upload_directory_id === dirID) && (!orderNo || file.order_no === orderNo))
+}
+
+function driveSearchRows(url) {
+  const q = (url.searchParams.get('q') || '').toLowerCase()
+  return driveFiles.filter((file) =>
+    [file.original_filename, file.order_no, file.submission_no, file.upload_directory_name].join(' ').toLowerCase().includes(q),
+  )
+}
+
+function overviewRows(url) {
+  const q = (url.searchParams.get('q') || '').toLowerCase()
+  const scope = url.searchParams.get('scope') || 'all'
+  const rows = []
+  if (scope === 'all' || scope === 'operational') {
+    for (const material of clientMaterials) {
+      if (q && ![material.title, material.filename_snapshot, material.resource_id].join(' ').toLowerCase().includes(q)) continue
+      rows.push({
+        source: 'client_material',
+        scope: 'operational',
+        source_label: material.source_label,
+        id: material.id,
+        title: material.title,
+        primary_code: material.resource_id,
+        created_at: material.published_at,
+        route_path: `/drive?scope=operational&q=${encodeURIComponent(material.title)}`,
+        locate: {
+          source: 'client_material',
+          material_id: material.id,
+          source_type: material.source_type,
+          source_ref: material.source_ref,
+          resource_id: material.resource_id,
+        },
+        meta_json: { filename: material.filename_snapshot },
+      })
+    }
+  }
+  if (scope === 'all' || scope === 'files') {
+    for (const file of driveFiles) {
+      if (q && ![file.original_filename, file.order_no, file.submission_no].join(' ').toLowerCase().includes(q)) continue
+      rows.push({
+        source: 'submission_file',
+        scope: 'files',
+        source_label: '交稿文件',
+        id: file.id,
+        title: file.original_filename,
+        primary_code: file.submission_no,
+        order_no: file.order_no,
+        status: file.qc_status,
+        page_count: file.page_count,
+        created_at: file.created_at,
+        route_path: `/drive?file_id=${file.id}`,
+        locate: { source: 'submission_file', file_id: file.id, submission_id: file.submission_id, item_id: file.submission_item_id },
+        meta_json: { upload_directory_name: file.upload_directory_name },
+      })
+    }
+  }
+  if (scope === 'all' || scope === 'orders') {
+    for (const file of driveFiles) {
+      if (q && ![file.order_no, file.submission_no].join(' ').toLowerCase().includes(q)) continue
+      rows.push({
+        source: 'piecework_item',
+        scope: 'orders',
+        source_label: '订单·计件',
+        id: file.submission_item_id,
+        title: file.order_no,
+        primary_code: file.submission_no,
+        order_no: file.order_no,
+        status: file.pricing_status,
+        page_count: file.page_count,
+        created_at: file.created_at,
+        route_path: `/drive?q=${encodeURIComponent(file.order_no)}&scope=orders`,
+        locate: { source: 'piecework_item', item_id: file.submission_item_id, submission_id: file.submission_id, order_no: file.order_no },
+        meta_json: { upload_directory_name: file.upload_directory_name },
+      })
+    }
+  }
+  return { items: rows, total: rows.length, page: 1, size: rows.length }
+}
 
 function bootstrapFor(role) {
   const simple = role === 'simple'
@@ -294,12 +486,11 @@ export const assetAuditPages = [
       await page.waitForSelector('.aw-ledger-sheet', { state: 'visible' })
     },
   },
-  { name: 'admin-submissions', path: '/submissions', ready: '.aw-data-surface', role: 'admin' },
+  { name: 'admin-drive', path: '/drive?q=poster&scope=all', ready: '.aw-drive', role: 'admin' },
   { name: 'admin-settlement', path: '/settlement', ready: '.aw-console-hero', role: 'admin' },
-  { name: 'admin-materials', path: '/materials', ready: '.aw-material-browser', role: 'admin' },
   { name: 'simple-home', path: '/', ready: '.aw-simple-home', role: 'simple' },
   { name: 'simple-upload', path: '/upload', ready: '.aw-dropzone', role: 'simple' },
-  { name: 'simple-materials', path: '/materials', ready: '.aw-material-client-list', role: 'simple' },
+  { name: 'simple-drive', path: '/drive?scope=operational', ready: '.aw-drive', role: 'simple' },
   { name: 'simple-income', path: '/my-settlement', ready: '.aw-simple-income', role: 'simple' },
 ]
 
@@ -407,6 +598,36 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     }
     if (path.endsWith('/settlement/supplements')) return paginated(route, [])
     if (path.endsWith('/settlement/supplement-permissions')) return paginated(route, [])
+    if (path.endsWith('/difficulty-classes') || path.endsWith('/difficulty-classes/admin')) return json(route, difficultyClasses)
+    if (path.endsWith('/overview-search')) return json(route, overviewRows(url))
+    if (path.endsWith('/drive/directories')) return json(route, driveDirectories())
+    if (path.endsWith('/drive/orders')) return json(route, driveOrders(url))
+    if (path.endsWith('/drive/files')) return paginated(route, driveFilesFor(url))
+    if (path.endsWith('/drive/search')) return paginated(route, driveSearchRows(url))
+    if (path.endsWith('/drive/locate')) {
+      const fileID = Number(url.searchParams.get('file_id') || 0)
+      return json(route, driveFiles.find((file) => file.id === fileID) ?? driveFiles[0])
+    }
+    if (/\/files\/\d+\/preview$/.test(path)) {
+      return json(route, {
+        status: 'ready',
+        preparing: false,
+        preview_url: previewImageUrl,
+        download_url: previewImageUrl,
+        mime_type: 'image/png',
+        filename: 'drive-preview.png',
+        preview_available: true,
+      })
+    }
+    if (/\/files\/\d+\/download$/.test(path)) {
+      return json(route, {
+        download_mode: 'direct',
+        download_url: previewImageUrl,
+        filename: 'drive-download.png',
+        file_size: 245760,
+        mime_type: 'image/png',
+      })
+    }
     if (path.endsWith('/system-search')) return json(route, { items: systemAssets, total: systemAssets.length, page: 1, size: systemAssets.length })
     if (path.endsWith('/upload-directories') || path.endsWith('/upload-directories/admin')) return json(route, uploadDirectories)
     if (path.endsWith('/client-materials')) return json(route, clientMaterials)

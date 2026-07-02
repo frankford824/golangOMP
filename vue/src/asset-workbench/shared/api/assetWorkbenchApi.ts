@@ -590,6 +590,7 @@ export interface SystemAssetPreviewMeta {
 
 export interface SystemAssetRow {
   id: number
+  material_id?: number
   resource_id?: string
   source_type?: string
   source_label?: string
@@ -622,7 +623,9 @@ export interface SystemSearchResult {
 }
 
 export interface OverviewSearchRow {
-  source: 'system_asset' | 'submission' | 'piecework_item' | string
+  source: 'system_asset' | 'client_material' | 'submission_file' | 'submission' | 'piecework_item' | string
+  scope?: 'all' | 'operational' | 'files' | 'orders' | string
+  source_label?: string
   id: number
   title: string
   primary_code: string
@@ -637,6 +640,18 @@ export interface OverviewSearchRow {
   created_at: string
   updated_at?: string
   route_path?: string
+  locate?: {
+    source?: string
+    file_id?: number
+    submission_id?: number
+    item_id?: number
+    order_no?: string
+    material_id?: number
+    source_type?: string
+    source_ref?: string
+    resource_id?: string
+    query?: string
+  }
   meta_json?: Record<string, unknown>
 }
 
@@ -681,6 +696,7 @@ export interface UploadDirectoryRow {
   oss_prefix: string
   description: string
   difficulty_class: string
+  allowed_file_types?: string[]
   enabled: boolean
   sort_order: number
   created_by: number
@@ -719,12 +735,18 @@ export interface DriveDirectoryRow {
   name: string
   prefix: string
   difficulty_class: string
+  allowed_file_types?: string[]
+  description?: string
+  enabled?: boolean
+  sort_order?: number
   file_count: number
   order_count: number
 }
 
 export interface DriveOrderRow {
   order_no: string
+  submission_item_id?: number
+  submission_item_ids?: number[]
   file_count: number
   latest_at: string
 }
@@ -737,12 +759,17 @@ export interface DriveFileRow {
   owner_user_id: number
   upload_directory_id?: number | null
   upload_directory_name: string
+  difficulty_class?: string
   order_no: string
   original_filename: string
   file_type: string
   mime_type: string
   file_size: number
   preview_status: string
+  qc_status?: string
+  pricing_status?: string
+  settlement_status?: string
+  page_count?: number
   business_month: string
   created_at: string
 }
@@ -923,6 +950,7 @@ export interface UpsertUploadDirectoryPayload {
   oss_prefix?: string
   description?: string
   difficulty_class?: string
+  allowed_file_types?: string[]
   enabled?: boolean
   sort_order?: number
 }

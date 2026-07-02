@@ -73,7 +73,7 @@ func registerAssetWorkbenchRoutes(
 		group.POST("/upload-sessions", access(group, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.CreateUploadSession)
 		group.POST("/upload-sessions/:session_id/complete", access(group, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.CompleteUploadSession)
 		group.POST("/upload-sessions/:session_id/cancel", access(group, http.MethodPost, "/upload-sessions/:session_id/cancel", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.CancelUploadSession)
-		group.GET("/overview-search", access(group, http.MethodGet, "/overview-search", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.OverviewSearch)
+		group.GET("/overview-search", access(group, http.MethodGet, "/overview-search", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.OverviewSearch)
 		group.GET("/drive/directories", access(group, http.MethodGet, "/drive/directories", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveListDirectories)
 		group.GET("/drive/orders", access(group, http.MethodGet, "/drive/orders", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveListOrders)
 		group.GET("/drive/files", access(group, http.MethodGet, "/drive/files", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveListFiles)

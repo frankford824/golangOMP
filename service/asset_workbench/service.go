@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -387,21 +388,23 @@ type GroupMembersParams struct {
 }
 
 type CreateUploadDirectoryParams struct {
-	Name            string `json:"name"`
-	OSSPrefix       string `json:"oss_prefix"`
-	Description     string `json:"description"`
-	DifficultyClass string `json:"difficulty_class"`
-	Enabled         *bool  `json:"enabled"`
-	SortOrder       int    `json:"sort_order"`
+	Name             string   `json:"name"`
+	OSSPrefix        string   `json:"oss_prefix"`
+	Description      string   `json:"description"`
+	DifficultyClass  string   `json:"difficulty_class"`
+	AllowedFileTypes []string `json:"allowed_file_types"`
+	Enabled          *bool    `json:"enabled"`
+	SortOrder        int      `json:"sort_order"`
 }
 
 type UpdateUploadDirectoryParams struct {
-	Name            *string `json:"name"`
-	OSSPrefix       *string `json:"oss_prefix"`
-	Description     *string `json:"description"`
-	DifficultyClass *string `json:"difficulty_class"`
-	Enabled         *bool   `json:"enabled"`
-	SortOrder       *int    `json:"sort_order"`
+	Name             *string  `json:"name"`
+	OSSPrefix        *string  `json:"oss_prefix"`
+	Description      *string  `json:"description"`
+	DifficultyClass  *string  `json:"difficulty_class"`
+	AllowedFileTypes []string `json:"allowed_file_types"`
+	Enabled          *bool    `json:"enabled"`
+	SortOrder        *int     `json:"sort_order"`
 }
 
 type CreateClientMaterialParams struct {
@@ -615,6 +618,7 @@ type SystemSearchResult struct {
 
 type OverviewSearchParams struct {
 	Query       string
+	Scope       string
 	Creator     string
 	CreatedFrom *time.Time
 	CreatedTo   *time.Time
@@ -2548,14 +2552,19 @@ func (s *Service) CreateUploadDirectory(ctx context.Context, actor domain.Reques
 	if appErr := s.ensureDifficultyClass(ctx, difficulty, false); appErr != nil {
 		return nil, appErr
 	}
+	allowedFileTypes, appErr := normalizeUploadDirectoryFileTypes(params.AllowedFileTypes)
+	if appErr != nil {
+		return nil, appErr
+	}
 	item := &domain.AssetWorkbenchUploadDirectory{
-		Name:            name,
-		OSSPrefix:       prefix,
-		Description:     strings.TrimSpace(params.Description),
-		DifficultyClass: difficulty,
-		Enabled:         boolValueDefault(params.Enabled, true),
-		SortOrder:       params.SortOrder,
-		CreatedBy:       actor.ID,
+		Name:             name,
+		OSSPrefix:        prefix,
+		Description:      strings.TrimSpace(params.Description),
+		DifficultyClass:  difficulty,
+		AllowedFileTypes: allowedFileTypes,
+		Enabled:          boolValueDefault(params.Enabled, true),
+		SortOrder:        params.SortOrder,
+		CreatedBy:        actor.ID,
 	}
 	var created *domain.AssetWorkbenchUploadDirectory
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -2615,6 +2624,13 @@ func (s *Service) UpdateUploadDirectory(ctx context.Context, actor domain.Reques
 		}
 		item.DifficultyClass = difficulty
 	}
+	if params.AllowedFileTypes != nil {
+		allowedFileTypes, appErr := normalizeUploadDirectoryFileTypes(params.AllowedFileTypes)
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.AllowedFileTypes = allowedFileTypes
+	}
 	if params.Enabled != nil {
 		item.Enabled = *params.Enabled
 	}
@@ -2659,6 +2675,11 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 	directory, appErr := s.resolveUploadDirectoryForSession(ctx, params.UploadDirectoryID)
 	if appErr != nil {
 		return nil, appErr
+	}
+	if !uploadDirectoryAllowsFile(directory, filename, params.MimeType) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file type is not allowed for this upload directory.", map[string]interface{}{
+			"allowed_file_types": directory.AllowedFileTypes,
+		})
 	}
 	now := s.nowFn().UTC()
 	sessionID := uuid.NewString()
@@ -4661,8 +4682,8 @@ func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor,
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers or settlement roles can search the asset workbench overview.", nil)
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can search the asset workbench overview.", nil)
 	}
 	page := params.Page
 	if page <= 0 {
@@ -4675,45 +4696,95 @@ func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor,
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	scope := normalizeOverviewSearchScope(params.Scope)
+	includeSubmissions, includeItems, includeFiles, includeOperational := overviewSearchIncludes(scope)
 	filter := repo.AssetWorkbenchOverviewSearchFilter{
 		Keyword:     strings.TrimSpace(params.Query),
 		Creator:     strings.TrimSpace(params.Creator),
+		OwnerUserID: s.driveOwnerFilter(actor),
+		Submissions: includeSubmissions,
+		Items:       includeItems,
+		Files:       includeFiles,
 		CreatedFrom: params.CreatedFrom,
 		CreatedTo:   params.CreatedTo,
 		Page:        page,
 		PageSize:    pageSize,
 	}
-	rows, total, err := s.repo.SearchOverviewRows(ctx, filter)
-	if err != nil {
+	var (
+		items  []*domain.AssetWorkbenchOverviewRow
+		total  int64
+		appErr *domain.AppError
+		mu     sync.Mutex
+	)
+	jobs := []func() error{}
+	if includeSubmissions || includeItems || includeFiles {
+		jobs = append(jobs, func() error {
+			rows, rowTotal, err := s.repo.SearchOverviewRows(ctx, filter)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				decorateOverviewRow(row)
+			}
+			mu.Lock()
+			items = append(items, rows...)
+			total += rowTotal
+			mu.Unlock()
+			return nil
+		})
+	}
+	if includeOperational && actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) && s.systemAssets != nil {
+		jobs = append(jobs, func() error {
+			systemResult, err := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
+				Keyword:        filter.Keyword,
+				CreatedFrom:    params.CreatedFrom,
+				CreatedTo:      params.CreatedTo,
+				Page:           page,
+				Size:           pageSize,
+				Source:         domain.AssetResourceSourceAll,
+				UsableState:    domain.AssetUsableStateFilterAll,
+				FormatCategory: domain.AssetFormatCategoryAll,
+				IsArchived:     domain.AssetArchiveFilterFalse,
+				TaskStatus:     domain.AssetTaskStatusFilterAll,
+			})
+			if err != nil {
+				mu.Lock()
+				appErr = err
+				mu.Unlock()
+				return nil
+			}
+			if systemResult != nil {
+				mu.Lock()
+				total += systemResult.Total
+				for _, asset := range systemResult.Items {
+					row := overviewRowFromSystemAsset(asset)
+					if row == nil || !overviewSystemAssetMatchesCreator(row, filter.Creator) {
+						continue
+					}
+					items = append(items, row)
+				}
+				mu.Unlock()
+			}
+			return nil
+		})
+	} else if includeOperational && actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		jobs = append(jobs, func() error {
+			rows, rowTotal, err := s.searchClientMaterialsForOverview(ctx, filter.Keyword, filter.Creator, pageSize)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			items = append(items, rows...)
+			total += rowTotal
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := runAssetWorkbenchSearchJobs(jobs...); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to search asset workbench overview.", err.Error())
 	}
-	items := append([]*domain.AssetWorkbenchOverviewRow{}, rows...)
-	if actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) && s.systemAssets != nil {
-		systemResult, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
-			Keyword:        filter.Keyword,
-			CreatedFrom:    params.CreatedFrom,
-			CreatedTo:      params.CreatedTo,
-			Page:           page,
-			Size:           pageSize,
-			Source:         domain.AssetResourceSourceSystem,
-			UsableState:    domain.AssetUsableStateFilterAll,
-			FormatCategory: domain.AssetFormatCategoryAll,
-			IsArchived:     domain.AssetArchiveFilterFalse,
-			TaskStatus:     domain.AssetTaskStatusFilterAll,
-		})
-		if appErr != nil {
-			return nil, appErr
-		}
-		if systemResult != nil {
-			total += systemResult.Total
-			for _, asset := range systemResult.Items {
-				row := overviewRowFromSystemAsset(asset)
-				if row == nil || !overviewSystemAssetMatchesCreator(row, filter.Creator) {
-					continue
-				}
-				items = append(items, row)
-			}
-		}
+	if appErr != nil {
+		return nil, appErr
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
@@ -7060,6 +7131,60 @@ func normalizeUploadDirectoryDifficulty(raw string) (string, *domain.AppError) {
 	return normalizeWorkbenchDifficultyCode(raw, false)
 }
 
+func normalizeUploadDirectoryFileTypes(values []string) ([]string, *domain.AppError) {
+	if values == nil {
+		return nil, nil
+	}
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, raw := range values {
+		value := strings.ToLower(strings.TrimSpace(raw))
+		if value == "" {
+			continue
+		}
+		if strings.Contains(value, "\x00") || strings.Contains(value, "\\") {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "allowed_file_types contains invalid file type.", nil)
+		}
+		if strings.HasPrefix(value, ".") {
+			value = strings.TrimLeft(value, ".")
+		}
+		if strings.Contains(value, " ") || strings.Contains(value, ",") || strings.Count(value, "/") > 1 || value == "*" {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "allowed_file_types contains invalid file type.", nil)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func uploadDirectoryAllowsFile(directory *domain.AssetWorkbenchUploadDirectory, filename string, mimeType string) bool {
+	if directory == nil || len(directory.AllowedFileTypes) == 0 {
+		return true
+	}
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	for _, allowed := range directory.AllowedFileTypes {
+		allowed = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(allowed, ".")))
+		if allowed == "" {
+			continue
+		}
+		if ext != "" && allowed == ext {
+			return true
+		}
+		if mimeType != "" && allowed == mimeType {
+			return true
+		}
+		if strings.HasSuffix(allowed, "/*") && mimeType != "" && strings.HasPrefix(mimeType, strings.TrimSuffix(allowed, "*")) {
+			return true
+		}
+	}
+	return false
+}
+
 func boolValueDefault(value *bool, fallback bool) bool {
 	if value == nil {
 		return fallback
@@ -7322,6 +7447,254 @@ func clientMaterialPreviewMetaFromDownloadInfo(material *domain.AssetWorkbenchCl
 	return meta
 }
 
+func normalizeOverviewSearchScope(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "operational", "materials", "material", "assets":
+		return "operational"
+	case "files", "submission_file", "submission_files":
+		return "files"
+	case "orders", "items", "piecework":
+		return "orders"
+	default:
+		return "all"
+	}
+}
+
+func overviewSearchIncludes(scope string) (submissions bool, items bool, files bool, operational bool) {
+	switch normalizeOverviewSearchScope(scope) {
+	case "operational":
+		return false, false, false, true
+	case "files":
+		return false, false, true, false
+	case "orders":
+		return true, true, false, false
+	default:
+		return true, true, true, true
+	}
+}
+
+func runAssetWorkbenchSearchJobs(jobs ...func() error) error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for _, job := range jobs {
+		job := job
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := job(); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return firstErr
+}
+
+func decorateOverviewRow(row *domain.AssetWorkbenchOverviewRow) {
+	if row == nil {
+		return
+	}
+	row.Scope = overviewScopeForSource(row.Source)
+	row.SourceLabel = overviewSourceLabel(row.Source)
+	row.Locate = overviewLocate(row)
+}
+
+func overviewScopeForSource(source string) string {
+	switch source {
+	case "system_asset", "client_material":
+		return "operational"
+	case "submission_file":
+		return "files"
+	default:
+		return "orders"
+	}
+}
+
+func overviewSourceLabel(source string) string {
+	switch source {
+	case "system_asset":
+		return "运营素材"
+	case "client_material":
+		return "可下载素材"
+	case "submission_file":
+		return "交稿文件"
+	case "piecework_item":
+		return "订单·计件"
+	case "submission":
+		return "提交记录"
+	default:
+		return source
+	}
+}
+
+func overviewMetaMap(row *domain.AssetWorkbenchOverviewRow) map[string]interface{} {
+	if row == nil || len(row.Meta) == 0 {
+		return nil
+	}
+	out := map[string]interface{}{}
+	if err := json.Unmarshal(row.Meta, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func overviewLocate(row *domain.AssetWorkbenchOverviewRow) json.RawMessage {
+	if row == nil {
+		return nil
+	}
+	meta := overviewMetaMap(row)
+	locate := map[string]interface{}{"source": row.Source}
+	switch row.Source {
+	case "system_asset":
+		locate["source_type"] = firstNonEmpty(stringFromMeta(meta, "source_type"), string(domain.AssetResourceSourceSystem))
+		locate["source_ref"] = firstNonEmpty(stringFromMeta(meta, "resource_id"), strconv.FormatInt(row.ID, 10))
+		locate["resource_id"] = firstNonEmpty(stringFromMeta(meta, "resource_id"), strconv.FormatInt(row.ID, 10))
+	case "client_material":
+		locate["material_id"] = row.ID
+		locate["source_type"] = stringFromMeta(meta, "source_type")
+		locate["source_ref"] = stringFromMeta(meta, "source_ref")
+		locate["resource_id"] = stringFromMeta(meta, "resource_id")
+	case "submission_file":
+		locate["file_id"] = row.ID
+		locate["submission_id"] = numberFromMeta(meta, "submission_id")
+		locate["item_id"] = numberFromMeta(meta, "submission_item_id")
+	case "piecework_item":
+		locate["item_id"] = row.ID
+		locate["submission_id"] = numberFromMeta(meta, "submission_id")
+		locate["order_no"] = row.OrderNo
+	case "submission":
+		locate["submission_id"] = row.ID
+		locate["query"] = firstNonEmpty(row.PrimaryCode, row.Title)
+	}
+	return mustJSON(locate)
+}
+
+func stringFromMeta(meta map[string]interface{}, key string) string {
+	if meta == nil {
+		return ""
+	}
+	switch value := meta[key].(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case fmt.Stringer:
+		return strings.TrimSpace(value.String())
+	default:
+		return ""
+	}
+}
+
+func numberFromMeta(meta map[string]interface{}, key string) int64 {
+	if meta == nil {
+		return 0
+	}
+	switch value := meta[key].(type) {
+	case float64:
+		return int64(value)
+	case int64:
+		return value
+	case int:
+		return int64(value)
+	case json.Number:
+		n, _ := value.Int64()
+		return n
+	default:
+		return 0
+	}
+}
+
+func (s *Service) searchClientMaterialsForOverview(ctx context.Context, keyword string, creator string, limit int) ([]*domain.AssetWorkbenchOverviewRow, int64, error) {
+	if strings.TrimSpace(creator) != "" {
+		return []*domain.AssetWorkbenchOverviewRow{}, 0, nil
+	}
+	enabled := true
+	rows, err := s.repo.ListClientMaterials(ctx, repo.AssetWorkbenchClientMaterialFilter{Enabled: &enabled})
+	if err != nil {
+		return nil, 0, err
+	}
+	items := []*domain.AssetWorkbenchOverviewRow{}
+	for _, material := range rows {
+		if !clientMaterialMatchesOverviewKeyword(material, keyword) {
+			continue
+		}
+		row := overviewRowFromClientMaterial(material)
+		if row != nil {
+			items = append(items, row)
+		}
+	}
+	total := int64(len(items))
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, total, nil
+}
+
+func clientMaterialMatchesOverviewKeyword(material *domain.AssetWorkbenchClientMaterial, keyword string) bool {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return true
+	}
+	if material == nil {
+		return false
+	}
+	haystack := strings.ToLower(strings.Join([]string{
+		material.Title,
+		material.Description,
+		material.FilenameSnapshot,
+		material.SourceRef,
+		material.ResourceID,
+		material.ScopeSKUCode,
+		material.SKUCode,
+		material.PrimarySKUCode,
+	}, " "))
+	return strings.Contains(haystack, keyword)
+}
+
+func overviewRowFromClientMaterial(material *domain.AssetWorkbenchClientMaterial) *domain.AssetWorkbenchOverviewRow {
+	if material == nil {
+		return nil
+	}
+	title := firstNonEmpty(material.Title, material.FilenameSnapshot, material.ResourceID, fmt.Sprintf("素材 %d", material.ID))
+	updatedAt := material.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = material.PublishedAt
+	}
+	row := &domain.AssetWorkbenchOverviewRow{
+		Source:        "client_material",
+		Scope:         "operational",
+		SourceLabel:   "可下载素材",
+		ID:            material.ID,
+		Title:         title,
+		PrimaryCode:   firstNonEmpty(material.ResourceID, material.SourceRef, strconv.FormatInt(material.AssetID, 10)),
+		SecondaryCode: firstNonEmpty(material.ScopeSKUCode, material.SKUCode, material.PrimarySKUCode),
+		Status:        map[bool]string{true: "enabled", false: "disabled"}[material.Enabled],
+		CreatedAt:     material.PublishedAt,
+		UpdatedAt:     updatedAt,
+		RoutePath:     fmt.Sprintf("/drive?scope=operational&material_id=%d", material.ID),
+		Meta: mustJSON(map[string]interface{}{
+			"material_id":       material.ID,
+			"asset_id":          material.AssetID,
+			"source_type":       material.SourceType,
+			"source_ref":        material.SourceRef,
+			"resource_id":       material.ResourceID,
+			"source_label":      material.SourceLabel,
+			"filename":          material.FilenameSnapshot,
+			"mime_type":         material.MimeTypeSnapshot,
+			"file_size":         material.FileSizeSnapshot,
+			"preview_available": material.PreviewAvailable,
+			"scope_sku_code":    material.ScopeSKUCode,
+			"sku_code":          material.SKUCode,
+			"primary_sku_code":  material.PrimarySKUCode,
+		}),
+	}
+	row.Locate = overviewLocate(row)
+	return row
+}
+
 func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWorkbenchOverviewRow {
 	if asset == nil {
 		return nil
@@ -7341,8 +7714,10 @@ func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWor
 	if status == "" {
 		status = strings.TrimSpace(string(asset.TaskStatus))
 	}
-	return &domain.AssetWorkbenchOverviewRow{
+	row := &domain.AssetWorkbenchOverviewRow{
 		Source:        "system_asset",
+		Scope:         "operational",
+		SourceLabel:   firstNonEmpty(asset.SourceLabel, "运营素材"),
 		ID:            asset.ID,
 		Title:         title,
 		PrimaryCode:   primaryCode,
@@ -7353,10 +7728,12 @@ func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWor
 		Status:        status,
 		CreatedAt:     asset.CreatedAt,
 		UpdatedAt:     asset.UpdatedAt,
-		RoutePath:     fmt.Sprintf("/materials?asset_id=%d", asset.ID),
+		RoutePath:     fmt.Sprintf("/drive?scope=operational&asset_id=%d", asset.ID),
 		Meta: mustJSON(map[string]interface{}{
 			"asset_no":            asset.AssetNo,
 			"resource_id":         asset.ResourceID,
+			"source_type":         firstNonEmpty(asset.SourceType, string(domain.AssetResourceSourceSystem)),
+			"source_label":        asset.SourceLabel,
 			"task_no":             asset.TaskNo,
 			"product_name":        asset.ProductName,
 			"file_name":           asset.FileName,
@@ -7371,6 +7748,8 @@ func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWor
 			"created_by_username": asset.CreatedByUsername,
 		}),
 	}
+	row.Locate = overviewLocate(row)
+	return row
 }
 
 func overviewSystemAssetMatchesCreator(row *domain.AssetWorkbenchOverviewRow, creator string) bool {

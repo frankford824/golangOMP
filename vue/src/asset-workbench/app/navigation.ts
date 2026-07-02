@@ -1,15 +1,12 @@
 import type { Component } from 'vue'
 import {
   BarChart3,
-  Boxes,
   Calculator,
   FileUp,
   HardDrive,
   LayoutDashboard,
-  Library,
   ReceiptText,
   ScrollText,
-  Search,
   UserRound,
   UsersRound,
 } from 'lucide-vue-next'
@@ -49,11 +46,8 @@ export interface WorkbenchCommandItem {
 const DAILY_NAV_DEFS: Array<{ path: string; icon: Component; requires?: readonly string[]; hub?: 'settlement' }> = [
   { path: '/', icon: LayoutDashboard },
   { path: '/upload', icon: FileUp, requires: assetWorkbenchRouteAccess['/upload'].requiresAnyCapability ?? [] },
-  { path: '/submissions', icon: Boxes, requires: assetWorkbenchRouteAccess['/submissions'].requiresAnyCapability ?? [] },
-  { path: '/materials', icon: Library, requires: assetWorkbenchRouteAccess['/materials'].requiresAnyCapability ?? [] },
   { path: '/drive', icon: HardDrive, requires: assetWorkbenchRouteAccess['/drive'].requiresAnyCapability ?? [] },
   { path: '/settlement', icon: ReceiptText, requires: assetWorkbenchRouteAccess['/settlement'].requiresAnyCapability ?? [], hub: 'settlement' },
-  { path: '/overview', icon: Search, requires: assetWorkbenchRouteAccess['/overview'].requiresAnyCapability ?? [] },
 ]
 
 const SETTINGS_NAV_DEFS: Array<{ path: AssetWorkbenchSettingsPath; icon: Component }> = [
@@ -249,7 +243,7 @@ export function appendSearchCommand(
   handler: (query: string) => void | Promise<void>,
 ): WorkbenchCommandItem[] {
   const trimmed = query.trim()
-  if (trimmed.length < 2 || !canAccessPath(bootstrap, '/overview')) return items
+  if (trimmed.length < 2 || !canAccessPath(bootstrap, '/drive')) return items
   return [
     ...items,
     {
@@ -257,7 +251,7 @@ export function appendSearchCommand(
       kind: 'search',
       group: '搜索',
       label: `全站搜索「${trimmed}」`,
-      subtitle: '素材/交稿/计件一条搜',
+      subtitle: '素材网盘内搜索运营素材、交稿文件与订单',
       aliases: ['总盘查询'],
       run: () => handler(trimmed),
     },

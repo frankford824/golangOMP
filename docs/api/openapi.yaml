@@ -19925,17 +19925,21 @@ paths:
   /v1/asset-workbench/overview-search:
     get:
       summary: Search asset workbench overview
-      description: Unified manager search across system assets, asset workbench submissions, and piecework items. Date filters use Beijing business-day input when YYYY-MM-DD is supplied.
+      description: Unified search across client-visible operational materials, system assets for managers, uploaded files, submissions, and piecework items. Date filters use Beijing business-day input when YYYY-MM-DD is supplied.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetManager, AssetSettlement, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
       parameters:
         - in: query
           name: q
           schema: { type: string }
           description: Search by code, order number, filename, template, submitter, or material keyword.
+        - in: query
+          name: scope
+          schema: { type: string, enum: [all, operational, files, orders] }
+          description: Limits search to operational materials, uploaded files, order/piecework rows, or all sources.
         - in: query
           name: creator
           schema: { type: string }
@@ -19971,7 +19975,11 @@ paths:
                           properties:
                             source:
                               type: string
-                              enum: [system_asset, submission, piecework_item]
+                              enum: [system_asset, client_material, submission_file, submission, piecework_item]
+                            scope:
+                              type: string
+                              enum: [operational, files, orders]
+                            source_label: { type: string }
                             id: { type: integer }
                             title: { type: string }
                             primary_code: { type: string }
@@ -19986,6 +19994,9 @@ paths:
                             created_at: { type: string, format: date-time }
                             updated_at: { type: string, format: date-time }
                             route_path: { type: string }
+                            locate:
+                              type: object
+                              additionalProperties: true
                             meta_json:
                               type: object
                               additionalProperties: true
@@ -19995,6 +20006,205 @@ paths:
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/drive/directories:
+    get:
+      summary: List asset workbench drive directories
+      description: Lists virtual upload folders derived from submitted files. Non-manager users are scoped to their own uploads.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      responses:
+        '200':
+          description: Drive directory rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchDriveDirectory
+                      type: object
+                      properties:
+                        directory_id: { type: integer, nullable: true }
+                        name: { type: string }
+                        prefix: { type: string }
+                        difficulty_class: { type: string }
+                        file_count: { type: integer }
+                        order_count: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/drive/orders:
+    get:
+      summary: List asset workbench drive orders
+      description: Lists virtual order folders within a drive directory. Non-manager users are scoped to their own uploads.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: dir_id
+          schema: { type: integer }
+        - in: query
+          name: unassigned
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Drive order rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchDriveOrder
+                      type: object
+                      properties:
+                        order_no: { type: string }
+                        submission_item_id: { type: integer, nullable: true }
+                        submission_item_ids:
+                          type: array
+                          items: { type: integer }
+                        file_count: { type: integer }
+                        latest_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/drive/files:
+    get:
+      summary: List asset workbench drive files
+      description: Lists files under a drive directory and order folder. Non-manager users are scoped to their own uploads.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: dir_id
+          schema: { type: integer }
+        - in: query
+          name: unassigned
+          schema: { type: boolean }
+        - in: query
+          name: order_no
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Drive file rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchDriveFile
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        submission_id: { type: integer }
+                        submission_item_id: { type: integer }
+                        submission_no: { type: string }
+                        owner_user_id: { type: integer }
+                        upload_directory_id: { type: integer, nullable: true }
+                        upload_directory_name: { type: string }
+                        difficulty_class: { type: string }
+                        order_no: { type: string }
+                        original_filename: { type: string }
+                        file_type: { type: string }
+                        mime_type: { type: string }
+                        file_size: { type: integer }
+                        preview_status: { type: string }
+                        qc_status: { type: string }
+                        pricing_status: { type: string }
+                        settlement_status: { type: string }
+                        page_count: { type: integer }
+                        business_month: { type: string }
+                        created_at: { type: string, format: date-time }
+                  pagination:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      page: { type: integer }
+                      page_size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/drive/search:
+    get:
+      summary: Search asset workbench drive files
+      description: Searches uploaded file names, order numbers, and submission numbers. Non-manager users are scoped to their own uploads.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Drive file search result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: *AssetWorkbenchDriveFile
+                  pagination:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      page: { type: integer }
+                      page_size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/drive/locate:
+    get:
+      summary: Locate one asset workbench drive file
+      description: Returns one drive file row for reveal-in-folder behavior. Non-manager users are scoped to their own uploads.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: file_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Located drive file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchDriveFile
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: File not found }
   /v1/asset-workbench/submissions:
     get:
       summary: List asset workbench submissions
@@ -20882,6 +21092,10 @@ paths:
                         oss_prefix: { type: string }
                         description: { type: string }
                         difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
+                        allowed_file_types:
+                          type: array
+                          description: Empty or omitted means all formats are allowed. Values may be file extensions without dots, MIME types, or wildcard MIME groups such as image/*.
+                          items: { type: string }
                         enabled: { type: boolean }
                         sort_order: { type: integer }
                         created_by: { type: integer }
@@ -20909,6 +21123,10 @@ paths:
                 oss_prefix: { type: string, description: Relative OSS prefix under asset-workbench/uploads. }
                 description: { type: string }
                 difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
+                allowed_file_types:
+                  type: array
+                  description: Empty or omitted means all formats are allowed. Values may be file extensions without dots, MIME types, or wildcard MIME groups such as image/*.
+                  items: { type: string }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
       responses:
@@ -20968,6 +21186,10 @@ paths:
                 oss_prefix: { type: string }
                 description: { type: string }
                 difficulty_class: { type: string, description: Must match an enabled difficulty class code. }
+                allowed_file_types:
+                  type: array
+                  description: Empty or omitted means all formats are allowed. Values may be file extensions without dots, MIME types, or wildcard MIME groups such as image/*.
+                  items: { type: string }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
       responses:

@@ -58,7 +58,7 @@ onMounted(() => {
         }
       }
     },
-    { rootMargin: '200px' },
+    { rootMargin: '25%' },
   )
   observer.observe(rootRef.value)
 })

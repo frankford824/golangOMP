@@ -2,19 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import { CheckCircle2, FileUp, LoaderCircle, Upload, X, XCircle } from 'lucide-vue-next'
 
-import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
-
-type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
-
-interface QueueItem {
-  id: string
-  file: File
-  progress: number
-  status: QueueStatus
-  sessionId?: string
-  error?: string
-}
+import {
+  createDriveUploadQueue,
+  uploadDriveQueue,
+  type DriveUploadQueueItem,
+  type DriveUploadQueueStatus,
+} from '@aw/shared/drive/useDriveUpload'
 
 const props = defineProps<{
   open: boolean
@@ -22,6 +15,8 @@ const props = defineProps<{
   directoryName: string
   difficultyClass?: string
   defaultOrderNo?: string
+  initialFiles?: File[]
+  allowedFileTypes?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -29,21 +24,44 @@ const emit = defineEmits<{
   uploaded: [count: number]
 }>()
 
-const queue = ref<QueueItem[]>([])
+const queue = ref<DriveUploadQueueItem[]>([])
 const orderNo = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const busy = ref(false)
 const error = ref('')
 
+const allowedFileTypes = computed(() =>
+  (props.allowedFileTypes ?? [])
+    .map((value) => value.trim().toLowerCase().replace(/^\.+/, ''))
+    .filter(Boolean),
+)
+
+const acceptString = computed(() => {
+  if (!allowedFileTypes.value.length) return ''
+  return allowedFileTypes.value.map((value) => (value.includes('/') ? value : `.${value}`)).join(',')
+})
+
+const allowedLabel = computed(() => (allowedFileTypes.value.length ? allowedFileTypes.value.join('、') : '全部格式'))
+
 watch(
   () => props.open,
   (open) => {
     if (open) {
-      queue.value = []
+      queue.value = createDriveUploadQueue(filterAllowedFiles(props.initialFiles ?? []))
       orderNo.value = (props.defaultOrderNo ?? '').trim()
       error.value = ''
       busy.value = false
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.defaultOrderNo,
+  (value) => {
+    if (props.open && !orderNo.value.trim()) {
+      orderNo.value = (value ?? '').trim()
     }
   },
 )
@@ -78,14 +96,30 @@ function handleDrop(event: DragEvent) {
 function enqueue(files: FileList | null | undefined) {
   if (!files?.length) return
   error.value = ''
-  for (const file of Array.from(files)) {
-    queue.value.push({
-      id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
-      file,
-      progress: 0,
-      status: 'queued',
-    })
+  queue.value = [...queue.value, ...createDriveUploadQueue(filterAllowedFiles(files))]
+}
+
+function filterAllowedFiles(files: FileList | File[]) {
+  const values = Array.from(files).filter((file) => file.size > 0)
+  const accepted = values.filter(fileAllowed)
+  const rejectedCount = values.length - accepted.length
+  if (rejectedCount > 0) {
+    error.value = `已拦截 ${rejectedCount} 个不符合目录格式限制的文件（允许：${allowedLabel.value}）`
   }
+  return accepted
+}
+
+function fileAllowed(file: File) {
+  const allowed = allowedFileTypes.value
+  if (!allowed.length) return true
+  const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() || '' : ''
+  const mimeType = file.type.trim().toLowerCase()
+  return allowed.some((value) => {
+    if (ext && value === ext) return true
+    if (mimeType && value === mimeType) return true
+    if (mimeType && value.endsWith('/*')) return mimeType.startsWith(value.slice(0, -1))
+    return false
+  })
 }
 
 function removeItem(id: string) {
@@ -97,53 +131,24 @@ async function runUpload() {
   busy.value = true
   error.value = ''
   const order = orderNo.value.trim()
-  for (const item of queue.value) {
-    if (item.status !== 'queued' && item.status !== 'failed') continue
-    item.status = 'uploading'
-    item.progress = 0
-    item.error = ''
-    try {
-      const uploaded = await uploadWorkbenchFile(item.file, {
-        uploadDirectoryId: props.directoryId,
-        onProgress: (progress) => {
-          item.progress = progress.percent
-        },
-      })
-      item.sessionId = uploaded.sessionId
-      item.progress = 100
-      item.status = 'uploaded'
-    } catch (err) {
-      item.status = 'failed'
-      item.error = err instanceof Error ? err.message : '上传失败'
-    }
-  }
-  const uploadedItems = queue.value.filter((item) => item.status === 'uploaded' && item.sessionId)
-  if (uploadedItems.length === 0) {
-    error.value = '没有文件上传成功，请重试'
-    busy.value = false
-    return
-  }
   try {
-    await assetWorkbenchApi.createSubmission({
-      notes: '',
-      items: uploadedItems.map((item) => ({
-        order_no: order,
-        difficulty_class: props.difficultyClass || undefined,
-        finalized: true,
-        page_count: 1,
-        item_count: 1,
-        upload_session_ids: item.sessionId ? [item.sessionId] : [],
-      })),
+    const uploadedCount = await uploadDriveQueue(queue.value, {
+      orderNo: order,
+      directoryId: props.directoryId,
+      difficultyClass: props.difficultyClass,
+      onItemChange: () => {
+        queue.value = [...queue.value]
+      },
     })
-    emit('uploaded', uploadedItems.length)
+    emit('uploaded', uploadedCount)
   } catch (err) {
-    error.value = err instanceof Error ? `上传完成但归档失败：${err.message}` : '上传完成但归档失败'
+    error.value = err instanceof Error ? err.message : '上传完成但归档失败'
   } finally {
     busy.value = false
   }
 }
 
-function statusIcon(status: QueueStatus) {
+function statusIcon(status: DriveUploadQueueStatus) {
   if (status === 'uploaded') return CheckCircle2
   if (status === 'failed') return XCircle
   if (status === 'uploading') return LoaderCircle
@@ -179,13 +184,13 @@ function statusIcon(status: QueueStatus) {
         >
           <FileUp :size="28" aria-hidden="true" />
           <strong>拖拽图片到此处</strong>
-          <span>或点击选择文件，上传后自动归档到该订单</span>
+          <span>或点击选择文件，上传后自动归档到该订单 · 允许：{{ allowedLabel }}</span>
           <div class="aw-dropzone__actions">
             <button class="aw-secondary-button" type="button" @click="openPicker">选择文件</button>
           </div>
         </div>
 
-        <input ref="inputRef" class="aw-visually-hidden" type="file" multiple aria-label="选择上传文件" @change="handleInput" />
+        <input ref="inputRef" class="aw-visually-hidden" type="file" multiple :accept="acceptString" aria-label="选择上传文件" @change="handleInput" />
 
         <label class="aw-field aw-drive-upload__order">
           <span>订单号（默认=当前）</span>

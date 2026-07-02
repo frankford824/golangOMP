@@ -1717,6 +1717,63 @@ body.aw-submission-dialog-locked {
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
 }
 
+.aw-cost-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--aw-space-2);
+}
+
+.aw-cost-flow span {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 var(--aw-space-3);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+  color: var(--aw-ink);
+  font-size: var(--aw-font-size-sm);
+  font-weight: 700;
+}
+
+.aw-advanced-settings {
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-panel);
+}
+
+.aw-advanced-settings > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: var(--aw-space-4);
+  cursor: pointer;
+  list-style: none;
+}
+
+.aw-advanced-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.aw-advanced-settings > summary span {
+  color: var(--aw-ink);
+  font-weight: 800;
+}
+
+.aw-advanced-settings > summary small {
+  color: var(--aw-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-advanced-settings[open] > summary {
+  border-bottom: 1px solid var(--aw-hairline);
+}
+
+.aw-advanced-settings > .aw-three-column {
+  padding: var(--aw-space-4);
+}
+
 .aw-metric-card,
 .aw-panel,
 .aw-data-surface,
@@ -3964,6 +4021,10 @@ body.aw-submission-dialog-locked {
   font: inherit;
   padding: var(--aw-space-1) var(--aw-space-2);
   cursor: pointer;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aw-drive__crumb:hover {
@@ -4418,6 +4479,10 @@ body.aw-submission-dialog-locked {
 }
 
 @media (max-width: 860px) {
+  .aw-cost-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .aw-drive__body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto;
@@ -4447,4 +4512,3 @@ body.aw-submission-dialog-locked {
     justify-content: flex-start;
   }
 }
-

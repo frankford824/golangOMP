@@ -392,6 +392,10 @@ type AssetWorkbenchSubmissionFilter struct {
 type AssetWorkbenchOverviewSearchFilter struct {
 	Keyword     string
 	Creator     string
+	OwnerUserID *int64
+	Submissions bool
+	Items       bool
+	Files       bool
 	CreatedFrom *time.Time
 	CreatedTo   *time.Time
 	Page        int

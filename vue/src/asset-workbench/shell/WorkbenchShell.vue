@@ -54,7 +54,7 @@ const commandHandlers = {
     closeCommand()
   },
   searchOverview: async (query: string) => {
-    await router.push({ path: '/overview', query: { q: query } })
+    await router.push({ path: '/drive', query: { q: query, scope: 'all' } })
     closeCommand()
   },
   generateSettlement: async () => {

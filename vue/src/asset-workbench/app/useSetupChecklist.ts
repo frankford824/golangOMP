@@ -55,7 +55,7 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
         id: 'upload-directories',
         label: '上传目录',
         hint: '配置客户端上传前选择的目录',
-        to: '/materials',
+        to: '/drive',
         done: uploadDirectoriesReady.value,
         visible: canManageUploadDirectories(current),
       },
@@ -63,7 +63,7 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
         id: 'acceptance',
         label: '查改作品',
         hint: '完成质检并处理待修正批次',
-        to: '/submissions',
+        to: '/drive?scope=orders',
         done: acceptanceReady.value,
         visible: canAccessPath(current, '/submissions'),
       },
@@ -172,7 +172,7 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
 }
 
 function canManageUploadDirectories(current: AssetWorkbenchBootstrap | null) {
-  if (!canAccessPath(current, '/materials')) return false
+  if (!canAccessPath(current, '/drive')) return false
   const capabilities = new Set(current?.capabilities ?? [])
-  return capabilities.has('asset.workbench.manage') || capabilities.has('asset.workbench.system_search')
+  return capabilities.has('asset.workbench.manage')
 }

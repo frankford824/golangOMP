@@ -199,7 +199,7 @@ async function clearFocusedProfile() {
 }
 
 async function goToPendingSubmissions() {
-  await router.push('/submissions')
+  await router.push({ path: '/drive', query: { scope: 'orders' } })
 }
 
 async function saveHRProfile() {

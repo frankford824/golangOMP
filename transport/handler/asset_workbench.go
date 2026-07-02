@@ -1103,6 +1103,7 @@ func (h *AssetWorkbenchHandler) OverviewSearch(c *gin.Context) {
 	}
 	result, appErr := h.svc.OverviewSearch(c.Request.Context(), actor, assetworkbench.OverviewSearchParams{
 		Query:       c.Query("q"),
+		Scope:       c.Query("scope"),
 		Creator:     c.Query("creator"),
 		CreatedFrom: createdFrom,
 		CreatedTo:   createdTo,
