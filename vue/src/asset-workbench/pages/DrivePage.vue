@@ -1332,12 +1332,6 @@ onBeforeUnmount(() => {
                 :key="materialAssetKey(asset)"
                 class="aw-material-row"
                 :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
-                role="button"
-                tabindex="0"
-                @click="selectMaterial(asset)"
-                @keydown.enter.prevent="selectMaterial(asset)"
-                @keydown.space.prevent="selectMaterial(asset)"
-                @dblclick="openMaterialPreview(asset)"
                 @contextmenu.prevent.stop
               >
                 <label class="aw-material-row__check" @click.stop>
@@ -1348,14 +1342,16 @@ onBeforeUnmount(() => {
                     @change="toggleMaterial(asset, ($event.target as HTMLInputElement).checked)"
                   />
                 </label>
-                <span class="aw-material-row__thumb">
-                  <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
-                </span>
-                <span class="aw-material-row__body">
-                  <strong :title="titleOf(asset)">{{ titleOf(asset) }}</strong>
-                  <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
-                </span>
-                <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
+                <button class="aw-material-row__button" type="button" @click="selectMaterial(asset)" @dblclick="openMaterialPreview(asset)">
+                  <span class="aw-material-row__thumb">
+                    <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
+                  </span>
+                  <span class="aw-material-row__body">
+                    <strong :title="titleOf(asset)">{{ titleOf(asset) }}</strong>
+                    <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
+                  </span>
+                  <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
+                </button>
               </div>
             </div>
           </template>

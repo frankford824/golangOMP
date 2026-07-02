@@ -4720,7 +4720,7 @@ body.aw-submission-dialog-locked {
 
 .aw-material-row {
   display: grid;
-  grid-template-columns: auto 44px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: var(--aw-space-2);
   width: 100%;
@@ -4733,6 +4733,21 @@ body.aw-submission-dialog-locked {
   text-align: left;
   cursor: pointer;
   transition: background var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-material-row__button {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .aw-material-row:hover {
