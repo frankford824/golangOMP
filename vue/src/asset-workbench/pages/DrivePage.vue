@@ -1367,14 +1367,17 @@ onBeforeUnmount(() => {
             <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
             <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
             <p v-else-if="materialItems.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
-            <button
+            <div
               v-for="asset in materialItems"
               v-else
               :key="materialAssetKey(asset)"
               class="aw-material-row"
               :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
-              type="button"
+              role="button"
+              tabindex="0"
               @click="selectMaterial(asset)"
+              @keydown.enter.prevent="selectMaterial(asset)"
+              @keydown.space.prevent="selectMaterial(asset)"
               @dblclick="openMaterialPreview(asset)"
               @contextmenu.prevent.stop
             >
@@ -1394,7 +1397,7 @@ onBeforeUnmount(() => {
                 <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
               </span>
               <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
-            </button>
+            </div>
           </div>
         </div>
 

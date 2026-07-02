@@ -4502,6 +4502,8 @@ body.aw-submission-dialog-locked {
   border-radius: var(--aw-radius-md);
   background: transparent;
   padding: var(--aw-space-2);
+  color: inherit;
+  font: inherit;
   text-align: left;
   cursor: pointer;
   transition: background var(--aw-motion-fast) var(--aw-ease-standard);

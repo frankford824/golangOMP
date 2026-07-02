@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { FileArchive, FileImage, FileText, ImageOff } from 'lucide-vue-next'
 
 import { assetWorkbenchApi, type SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
@@ -25,6 +25,7 @@ const loading = ref(false)
 const failed = ref(false)
 let observer: IntersectionObserver | null = null
 let requested = false
+let previewKey = materialAssetKey(props.asset)
 
 function iconFor() {
   const mime = String(props.asset.mime_type || '').toLowerCase()
@@ -36,20 +37,22 @@ function iconFor() {
 async function loadPreview() {
   if (requested) return
   requested = true
+  const asset = props.asset
+  const key = materialAssetKey(asset)
   if (previewUrl.value) return
-  if (!canAttemptSystemAssetPreview(props.asset) || !isSystemAssetImagePreviewable(props.asset)) {
+  if (!canAttemptSystemAssetPreview(asset) || !isSystemAssetImagePreviewable(asset)) {
     failed.value = true
     return
   }
   loading.value = true
   try {
-    const meta = props.asset.material_id
-      ? await assetWorkbenchApi.previewClientMaterial(props.asset.material_id)
-      : await assetWorkbenchApi.previewMaterialAsset(props.asset)
+    const meta = asset.material_id
+      ? await assetWorkbenchApi.previewClientMaterial(asset.material_id)
+      : await assetWorkbenchApi.previewMaterialAsset(asset)
     const url = meta.preview_url || ''
     if (url) {
       previewUrl.value = url
-      emit('loaded', materialAssetKey(props.asset), url)
+      emit('loaded', key, url)
     } else {
       failed.value = true
     }
@@ -60,8 +63,30 @@ async function loadPreview() {
   }
 }
 
+function syncResolvedPreview() {
+  const key = materialAssetKey(props.asset)
+  const resolved = resolvedSystemAssetThumbnailUrl(props.asset, props.cachedUrl)
+  if (key !== previewKey) {
+    previewKey = key
+    requested = Boolean(resolved)
+    failed.value = false
+    loading.value = false
+    previewUrl.value = resolved
+    return
+  }
+  if (resolved && resolved !== previewUrl.value) {
+    previewUrl.value = resolved
+    requested = true
+    failed.value = false
+  }
+}
+
 onMounted(() => {
   if (previewUrl.value || !rootRef.value) return
+  if (typeof IntersectionObserver === 'undefined') {
+    void loadPreview()
+    return
+  }
   observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
@@ -76,6 +101,8 @@ onMounted(() => {
   )
   observer.observe(rootRef.value)
 })
+
+watch(() => [props.asset, props.cachedUrl], syncResolvedPreview)
 
 onBeforeUnmount(() => {
   observer?.disconnect()
