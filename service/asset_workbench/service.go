@@ -8348,7 +8348,7 @@ func decorateMemberForActor(member *domain.AssetWorkbenchMember, actor domain.Re
 }
 
 func (s *Service) loadMemberByID(ctx context.Context, actor domain.RequestActor, userID int64) (*domain.AssetWorkbenchMember, *domain.AppError) {
-	items, _, err := s.repo.ListMembers(ctx, repo.AssetWorkbenchMemberFilter{Page: 1, PageSize: 1, Keyword: strconv.FormatInt(userID, 10)})
+	items, _, err := s.repo.ListMembers(ctx, repo.AssetWorkbenchMemberFilter{UserID: userID, Page: 1, PageSize: 1})
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load asset workbench member.", err.Error())
 	}

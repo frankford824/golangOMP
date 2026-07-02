@@ -344,6 +344,7 @@ type AssetWorkbenchTemplateAssignmentFilter struct {
 }
 
 type AssetWorkbenchMemberFilter struct {
+	UserID   int64
 	Keyword  string
 	Identity string
 	Status   string

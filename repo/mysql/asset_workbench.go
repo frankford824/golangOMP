@@ -163,6 +163,10 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 		where = append(where, "am.app_code = ?")
 		args = append(args, domain.AssetWorkbenchAppCode)
 	}
+	if filter.UserID > 0 {
+		where = append(where, "u.id = ?")
+		args = append(args, filter.UserID)
+	}
 	if v := strings.TrimSpace(filter.Keyword); v != "" {
 		like := "%" + v + "%"
 		where = append(where, "(u.username LIKE ? OR u.display_name LIKE ? OR u.mobile LIKE ? OR p.real_name LIKE ? OR p.phone LIKE ?)")

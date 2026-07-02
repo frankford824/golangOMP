@@ -39,6 +39,15 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
+func containsRole(values []domain.Role, target domain.Role) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func testDifficultyClass(code string) (*domain.AssetWorkbenchDifficultyClass, error) {
 	code = strings.TrimSpace(code)
 	if code == "" || code == domain.AssetWorkbenchWorkerTypeAll {
@@ -535,6 +544,75 @@ func (r *bootstrapAccessRepo) GetMembership(_ context.Context, _ string, userID 
 
 func (r *bootstrapAccessRepo) GetProfileByUserID(context.Context, int64) (*domain.AssetWorkbenchProfile, error) {
 	return nil, sql.ErrNoRows
+}
+
+type memberRoleUpdateRepo struct {
+	repo.AssetWorkbenchRepo
+	listFilters []repo.AssetWorkbenchMemberFilter
+	event       *domain.AppIdentityEvent
+}
+
+func (r *memberRoleUpdateRepo) GetMembership(_ context.Context, appCode string, userID int64) (*domain.AppMembership, error) {
+	if appCode != domain.AssetWorkbenchAppCode || userID != 302 {
+		return nil, sql.ErrNoRows
+	}
+	return &domain.AppMembership{
+		ID:           5,
+		AppCode:      domain.AssetWorkbenchAppCode,
+		UserID:       302,
+		Status:       domain.AppMembershipStatusActive,
+		IdentityType: domain.AppMembershipIdentityStaff,
+		CreatedAt:    time.Date(2026, 6, 27, 8, 13, 19, 0, time.UTC),
+		UpdatedAt:    time.Date(2026, 6, 27, 8, 13, 19, 0, time.UTC),
+	}, nil
+}
+
+func (r *memberRoleUpdateRepo) ListMembers(_ context.Context, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error) {
+	r.listFilters = append(r.listFilters, filter)
+	if filter.UserID != 302 {
+		return nil, 0, nil
+	}
+	return []*domain.AssetWorkbenchMember{
+		{
+			UserID:      302,
+			Username:    "定制美工测试管理员",
+			DisplayName: "定制美工测试管理员",
+			RealName:    "张三",
+			Status:      domain.AppMembershipStatusActive,
+			Identity:    domain.AppMembershipIdentityStaff,
+			Roles:       []domain.Role{domain.RoleAssetSubmitter, domain.RoleAssetManager},
+			CreatedAt:   time.Date(2026, 6, 27, 8, 13, 19, 0, time.UTC),
+			UpdatedAt:   time.Date(2026, 6, 27, 8, 13, 19, 0, time.UTC),
+		},
+	}, 1, nil
+}
+
+func (r *memberRoleUpdateRepo) CreateAppIdentityEvent(_ context.Context, _ repo.Tx, event *domain.AppIdentityEvent) (*domain.AppIdentityEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = 1
+	r.event = &copyEvent
+	return &copyEvent, nil
+}
+
+type memberRoleUpdateUserRepo struct {
+	repo.UserRepo
+	roles          []domain.Role
+	replacedUserID int64
+	replacedRoles  []domain.Role
+}
+
+func (r *memberRoleUpdateUserRepo) ListRoles(_ context.Context, userID int64) ([]domain.Role, error) {
+	if userID != 302 {
+		return nil, sql.ErrNoRows
+	}
+	return append([]domain.Role{}, r.roles...), nil
+}
+
+func (r *memberRoleUpdateUserRepo) ReplaceRoles(_ context.Context, _ repo.Tx, userID int64, roles []domain.Role) error {
+	r.replacedUserID = userID
+	r.replacedRoles = append([]domain.Role{}, roles...)
+	r.roles = append([]domain.Role{}, roles...)
+	return nil
 }
 
 type profileListRepo struct {
@@ -1804,6 +1882,42 @@ func TestBootstrapDerivesWorkbenchCapabilitiesForHRAndSuperAdmin(t *testing.T) {
 		if !containsString(superResult.Capabilities, capability) {
 			t.Fatalf("super admin capabilities = %+v, missing %s", superResult.Capabilities, capability)
 		}
+	}
+}
+
+func TestUpdateMemberRolesReloadsMemberByUserID(t *testing.T) {
+	workbenchRepo := &memberRoleUpdateRepo{}
+	userRepo := &memberRoleUpdateUserRepo{roles: []domain.Role{domain.RoleAssetSubmitter}}
+	svc := NewService(
+		Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithUserRepository(userRepo),
+	)
+
+	member, appErr := svc.UpdateMemberRoles(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleSuperAdmin},
+	}, 302, UpdateMemberRolesParams{
+		Roles:  []domain.Role{domain.RoleAssetSubmitter, domain.RoleAssetManager},
+		Reason: "workbench role update",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateMemberRoles() error = %+v", appErr)
+	}
+	if member == nil || member.UserID != 302 {
+		t.Fatalf("member = %+v, want user_id=302", member)
+	}
+	if userRepo.replacedUserID != 302 || !containsRole(userRepo.replacedRoles, domain.RoleAssetManager) {
+		t.Fatalf("replaced roles user=%d roles=%+v, want AssetManager for user 302", userRepo.replacedUserID, userRepo.replacedRoles)
+	}
+	if len(workbenchRepo.listFilters) != 1 {
+		t.Fatalf("ListMembers calls = %d, want 1", len(workbenchRepo.listFilters))
+	}
+	if got := workbenchRepo.listFilters[0]; got.UserID != 302 || got.Keyword != "" {
+		t.Fatalf("reload filter = %+v, want exact UserID without keyword", got)
+	}
+	if workbenchRepo.event == nil || workbenchRepo.event.Action != domain.AppIdentityActionRolesUpdated {
+		t.Fatalf("identity event = %+v", workbenchRepo.event)
 	}
 }
 
