@@ -24,7 +24,7 @@
             v-model="filters.keyword"
             type="search"
             class="ac-search-input"
-            placeholder="搜索系统资产、任务 ID、SKU…"
+            placeholder="搜索系统资产、外部文件名、路径…"
             autocomplete="off"
             enterkeyhint="search"
           />
@@ -959,14 +959,15 @@ const bulkSearchMatchedCount = computed(() => bulkSearchMatchedResults.value.len
 const bulkSearchFailedCount = computed(() => bulkSearchResults.value.filter((item) => item.status !== 'matched').length)
 
 const effectiveSearchKeyword = computed(() => filters.keyword.trim())
+const effectiveUsableStateFilter = computed<AssetUsableFilter>(() =>
+  filters.resourceSource === 'external' ? 'all' : filters.usableState,
+)
 
 const listTotalPages = computed(() =>
   Math.max(1, Math.ceil(listTotal.value / listPageSize.value)),
 )
 
-const pagedAssets = computed(() => {
-  return assets.value.filter((asset) => !isExternalAsset(asset))
-})
+const pagedAssets = computed(() => assets.value)
 
 watch(listTotalPages, (tp) => {
   if (listPage.value > tp) listPage.value = tp
@@ -977,6 +978,15 @@ watch(
   () => {
     listPage.value = 1
     scheduleReload()
+  },
+)
+
+watch(
+  () => filters.resourceSource,
+  (source) => {
+    if (source === 'external' && filters.usableState !== 'all') {
+      filters.usableState = 'all'
+    }
   },
 )
 
@@ -2170,7 +2180,7 @@ function scheduleReload() {
 function syncQuerySelection() {
   const nextQuery: Record<string, string> = {}
   if (filters.resourceSource !== 'all') nextQuery.source = filters.resourceSource
-  if (filters.usableState !== 'all') nextQuery.usable_state = filters.usableState
+  if (effectiveUsableStateFilter.value !== 'all') nextQuery.usable_state = effectiveUsableStateFilter.value
   if (filters.formatCategory !== 'all') nextQuery.format_category = filters.formatCategory
   if (filters.createdFrom) nextQuery.created_from = filters.createdFrom
   if (filters.createdTo) nextQuery.created_to = filters.createdTo
@@ -2182,7 +2192,7 @@ function openAssetDetail(assetId: string) {
   if (!canAccessPage('asset_detail')) return
   const query: Record<string, string> = {}
   if (filters.resourceSource !== 'all') query.source = filters.resourceSource
-  if (filters.usableState !== 'all') query.usable_state = filters.usableState
+  if (effectiveUsableStateFilter.value !== 'all') query.usable_state = effectiveUsableStateFilter.value
   if (filters.formatCategory !== 'all') query.format_category = filters.formatCategory
   if (filters.createdFrom) query.created_from = filters.createdFrom
   if (filters.createdTo) query.created_to = filters.createdTo
@@ -2208,7 +2218,7 @@ async function reload() {
       {
         keyword: effectiveSearchKeyword.value || undefined,
         source: effectiveAssetSearchSource.value,
-        usable_state: filters.usableState === 'all' ? undefined : filters.usableState,
+        usable_state: effectiveUsableStateFilter.value === 'all' ? undefined : effectiveUsableStateFilter.value,
         format_category: filters.formatCategory === 'all' ? undefined : filters.formatCategory,
         created_from: dateFilterToRFC3339(filters.createdFrom, 'start'),
         created_to: dateFilterToRFC3339(filters.createdTo, 'end'),
