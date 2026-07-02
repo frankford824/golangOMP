@@ -61,6 +61,10 @@ const viewMode = ref<ViewMode>('gallery')
 const typeFilter = ref('all')
 const previewFilter = ref('all')
 const previewLoading = ref(false)
+const previewError = ref('')
+const searchError = ref('')
+const pageError = ref('')
+const clientMaterialsError = ref('')
 const notice = ref('')
 const { bootstrap } = useAssetWorkbenchBootstrap()
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
@@ -89,6 +93,7 @@ const materialsRequest = usePageRequest(
 const loading = materialsRequest.loading
 const error = materialsRequest.error
 let previewController: AbortController | null = null
+const previewInflight = new Map<number, Promise<SystemAssetPreviewMeta | null>>()
 let lastSelectedIndex = -1
 let initializedMode: 'admin' | 'client' | '' = ''
 
@@ -130,6 +135,10 @@ const materialGridColumns = computed<GridColumn[]>(() => [
   { key: 'actions', label: '动作', width: 140, align: 'center' },
 ])
 const selectedCount = computed(() => selectedAssetIds.value.size)
+const allFilteredAssetsSelected = computed(() => {
+  const ids = downloadableAssetIds.value
+  return ids.length > 0 && ids.every((id) => selectedAssetIds.value.has(id))
+})
 const selectedLabel = computed(() => (selectedCount.value > 0 ? `已选 ${formatInt(selectedCount.value)} 个素材` : '未选择素材'))
 const selectedClientCount = computed(() => selectedClientMaterialIds.value.size)
 const selectedClientLabel = computed(() => (selectedClientCount.value > 0 ? `已选 ${formatInt(selectedClientCount.value)} 个素材` : '未选择素材'))
@@ -172,6 +181,18 @@ const relatedAssets = computed(() => {
     .slice(0, 8)
 })
 const previewDialogOpen = computed(() => Boolean(previewAsset.value || clientPreviewMaterial.value))
+const previewDialogMimeType = computed(() => {
+  if (previewAsset.value) return previewAsset.value.mime_type || ''
+  if (clientPreviewMaterial.value) return clientPreviewMaterial.value.mime_type_snapshot || ''
+  return ''
+})
+const previewDialogFilename = computed(() => {
+  if (previewAsset.value) {
+    return previewAsset.value.original_filename || previewAsset.value.file_name || ''
+  }
+  if (clientPreviewMaterial.value) return clientPreviewMaterial.value.filename_snapshot || ''
+  return ''
+})
 const previewDialogTitle = computed(() => {
   if (previewAsset.value) return titleOf(previewAsset.value)
   if (clientPreviewMaterial.value) return clientMaterialTitleOf(clientPreviewMaterial.value)
@@ -199,12 +220,19 @@ const previewDialogRows = computed<Array<[string, string]>>(() => {
     ['说明', material.description || '—'],
   ]
 })
+const previewDialogEmptyLabel = computed(() => {
+  if (previewLoading.value) return '正在加载预览'
+  if (previewError.value) return previewError.value
+  return '暂无可展示预览'
+})
 
 async function searchMaterials(resetPage = true) {
   if (resetPage) page.value = 1
   notice.value = ''
   const result = await materialsRequest.run()
+  searchError.value = error.value
   if (!result) return
+  searchError.value = ''
   rows.value = result.items
   total.value = result.total
   selectedAssetIds.value = new Set()
@@ -309,7 +337,9 @@ function toggleAsset(row: SystemAssetRow, checked: boolean, index = -1, range = 
     const end = Math.max(lastSelectedIndex, index)
     for (let i = start; i <= end; i += 1) {
       const asset = filteredRows.value[i]
-      if (asset) next.add(asset.id)
+      if (!asset) continue
+      if (checked) next.add(asset.id)
+      else next.delete(asset.id)
     }
   } else if (checked) {
     next.add(row.id)
@@ -338,14 +368,14 @@ function canPreviewMaterial(asset: SystemAssetRow) {
 }
 
 async function ensurePreview(asset: SystemAssetRow, silent = false, signal?: AbortSignal) {
-  const directUrl = resolvedSystemAssetPreviewUrl(asset)
-  if (directUrl) {
-    previewUrls.value = { ...previewUrls.value, [asset.id]: directUrl }
+  const inlinePreviewUrl = String(('preview_url' in asset && asset.preview_url) || '').trim()
+  if (inlinePreviewUrl) {
+    previewUrls.value = { ...previewUrls.value, [asset.id]: inlinePreviewUrl }
     return {
       asset_id: asset.id,
       status: 'ready',
       preparing: false,
-      preview_url: directUrl,
+      preview_url: inlinePreviewUrl,
       download_url: 'download_url' in asset ? asset.download_url : undefined,
       preview_available: true,
     } as SystemAssetPreviewMeta
@@ -363,30 +393,44 @@ async function ensurePreview(asset: SystemAssetRow, silent = false, signal?: Abo
       preview_available: true,
     } as SystemAssetPreviewMeta
   }
-  if (previewLoadingIds.value.has(asset.id)) return null
-  const next = new Set(previewLoadingIds.value)
-  next.add(asset.id)
-  previewLoadingIds.value = next
-  try {
-    const meta = await assetWorkbenchApi.previewSystemAsset(asset.id, signal)
-    const previewUrl = resolvedSystemAssetPreviewUrl(meta)
-    if (previewUrl && isSystemAssetImagePreviewable(meta)) {
-      previewUrls.value = { ...previewUrls.value, [asset.id]: previewUrl }
+
+  const inflight = previewInflight.get(asset.id)
+  if (inflight) return inflight
+
+  let task!: Promise<SystemAssetPreviewMeta | null>
+  task = (async (): Promise<SystemAssetPreviewMeta | null> => {
+    const next = new Set(previewLoadingIds.value)
+    next.add(asset.id)
+    previewLoadingIds.value = next
+    try {
+      const meta = await assetWorkbenchApi.previewSystemAsset(asset.id, signal)
+      const previewUrl = resolvedSystemAssetPreviewUrl(meta)
+      if (previewUrl && isSystemAssetImagePreviewable(meta)) {
+        previewUrls.value = { ...previewUrls.value, [asset.id]: previewUrl }
+      }
+      return {
+        ...meta,
+        preview_url: previewUrl || meta.preview_url,
+        preview_available: meta.preview_available || Boolean(previewUrl),
+      }
+    } catch (err) {
+      if (signal?.aborted) return null
+      if (!silent) {
+        previewError.value = err instanceof Error ? err.message : '素材预览加载失败'
+      }
+      return null
+    } finally {
+      const done = new Set(previewLoadingIds.value)
+      done.delete(asset.id)
+      previewLoadingIds.value = done
+      if (previewInflight.get(asset.id) === task) {
+        previewInflight.delete(asset.id)
+      }
     }
-    return {
-      ...meta,
-      preview_url: previewUrl || meta.preview_url,
-      preview_available: meta.preview_available || Boolean(previewUrl),
-    }
-  } catch (err) {
-    if (signal?.aborted) return null
-    if (!silent) error.value = err instanceof Error ? err.message : '素材预览加载失败'
-    return null
-  } finally {
-    const done = new Set(previewLoadingIds.value)
-    done.delete(asset.id)
-    previewLoadingIds.value = done
-  }
+  })()
+
+  previewInflight.set(asset.id, task)
+  return task
 }
 
 async function preloadVisiblePreviews(assets: SystemAssetRow[]) {
@@ -456,16 +500,16 @@ async function openAssetPreview(asset: SystemAssetRow) {
   const controller = new AbortController()
   previewController = controller
   previewLoading.value = true
-  error.value = ''
+  previewError.value = ''
   notice.value = ''
+  previewAsset.value = asset
+  previewMeta.value = null
   try {
     const meta = await ensurePreview(asset, false, controller.signal)
     if (controller.signal.aborted) return
     previewMeta.value = meta
-    if (meta) {
-      previewAsset.value = asset
-    } else if (canPreviewMaterial(asset)) {
-      previewAsset.value = asset
+    if (!meta && canPreviewMaterial(asset)) {
+      previewError.value = '素材预览加载失败'
     }
   } finally {
     if (previewController === controller) previewLoading.value = false
@@ -479,11 +523,11 @@ async function openClientMaterialPreview(material: ClientMaterialRow) {
   clientPreviewMaterial.value = material
   clientPreviewMeta.value = clientMaterialPreviewProbe(material)
   previewLoading.value = true
-  error.value = ''
+  previewError.value = ''
   try {
     clientPreviewMeta.value = await loadClientMaterialPreviewMeta(material)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '素材预览加载失败'
+    previewError.value = err instanceof Error ? err.message : '素材预览加载失败'
   } finally {
     previewLoading.value = false
   }
@@ -494,6 +538,7 @@ function closePreview() {
   previewMeta.value = null
   clientPreviewMaterial.value = null
   clientPreviewMeta.value = null
+  previewError.value = ''
 }
 
 function downloadPreviewAsset() {
@@ -508,7 +553,7 @@ function downloadPreviewAsset() {
 
 async function downloadAsset(row: SystemAssetRow) {
   notice.value = ''
-  error.value = ''
+  pageError.value = ''
   try {
     const info = await assetWorkbenchApi.downloadSystemAsset(row.id)
     if (!info.download_url) {
@@ -517,7 +562,7 @@ async function downloadAsset(row: SystemAssetRow) {
     window.open(info.download_url, '_blank', 'noopener,noreferrer')
     notice.value = `已生成下载链接：${info.filename || titleOf(row)}`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '素材下载失败'
+    pageError.value = err instanceof Error ? err.message : '素材下载失败'
   }
 }
 
@@ -528,7 +573,7 @@ async function downloadSelectedAssets() {
     return
   }
   notice.value = '正在生成素材下载包'
-  error.value = ''
+  pageError.value = ''
   try {
     const manifest = await assetWorkbenchApi.batchDownloadSystemAssets(ids)
     const result = await downloadBatchAsZip({
@@ -546,13 +591,13 @@ async function downloadSelectedAssets() {
     })
     notice.value = `已打包 ${result.writtenCount} 个素材，失败 ${result.failureCount} 个`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '素材批量下载失败'
+    pageError.value = err instanceof Error ? err.message : '素材批量下载失败'
   }
 }
 
 async function loadClientMaterials(admin = false) {
   clientMaterialsLoading.value = true
-  error.value = ''
+  clientMaterialsError.value = ''
   try {
     const rows = await assetWorkbenchApi.listClientMaterials(admin)
     if (admin) {
@@ -564,7 +609,7 @@ async function loadClientMaterials(admin = false) {
     void preloadClientMaterialPreviews(rows)
     selectedClientMaterialIds.value = new Set()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '客户端素材加载失败'
+    clientMaterialsError.value = err instanceof Error ? err.message : '客户端素材加载失败'
   } finally {
     clientMaterialsLoading.value = false
   }
@@ -582,7 +627,7 @@ async function loadUploadDirectoriesAdmin() {
       directoryDifficulty.value = firstDifficultyCode(difficultyRows.value)
     }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '上传目录加载失败'
+    pageError.value = err instanceof Error ? err.message : '上传目录加载失败'
   }
 }
 
@@ -599,14 +644,14 @@ function toggleAllClientMaterials(checked: boolean) {
 
 async function downloadClientMaterial(row: ClientMaterialRow) {
   notice.value = ''
-  error.value = ''
+  pageError.value = ''
   try {
     const info = await assetWorkbenchApi.downloadClientMaterial(row.id)
     if (!info.download_url) throw new Error('当前素材没有可用下载链接')
     window.open(info.download_url, '_blank', 'noopener,noreferrer')
     notice.value = `已生成下载链接：${info.filename || row.title}`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '素材下载失败'
+    pageError.value = err instanceof Error ? err.message : '素材下载失败'
   }
 }
 
@@ -617,7 +662,7 @@ async function downloadSelectedClientMaterials() {
     return
   }
   notice.value = '正在生成素材下载包'
-  error.value = ''
+  pageError.value = ''
   try {
     const manifest = await assetWorkbenchApi.batchDownloadClientMaterials(ids)
     const result = await downloadBatchAsZip({
@@ -635,17 +680,17 @@ async function downloadSelectedClientMaterials() {
     })
     notice.value = `已打包 ${result.writtenCount} 个素材，失败 ${result.failureCount} 个`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '素材批量下载失败'
+    pageError.value = err instanceof Error ? err.message : '素材批量下载失败'
   }
 }
 
 async function publishClientMaterial(asset?: SystemAssetRow) {
   const assetId = asset?.id || clientMaterialAssetId.value || 0
   if (!assetId) {
-    error.value = '请输入要发布的素材 ID'
+    pageError.value = '请输入要发布的素材 ID'
     return
   }
-  error.value = ''
+  pageError.value = ''
   try {
     await assetWorkbenchApi.createClientMaterial({
       asset_id: assetId,
@@ -660,7 +705,7 @@ async function publishClientMaterial(asset?: SystemAssetRow) {
     notice.value = '已发布给客户端'
     await loadClientMaterials(true)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '发布客户端素材失败'
+    pageError.value = err instanceof Error ? err.message : '发布客户端素材失败'
   }
 }
 
@@ -669,7 +714,7 @@ async function toggleClientMaterialEnabled(row: ClientMaterialRow) {
     await assetWorkbenchApi.updateClientMaterial(row.id, { enabled: !row.enabled })
     await loadClientMaterials(true)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '更新客户端素材失败'
+    pageError.value = err instanceof Error ? err.message : '更新客户端素材失败'
   }
 }
 
@@ -679,16 +724,16 @@ async function removeClientMaterial(row: ClientMaterialRow) {
     notice.value = '已下架客户端素材'
     await loadClientMaterials(true)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '下架客户端素材失败'
+    pageError.value = err instanceof Error ? err.message : '下架客户端素材失败'
   }
 }
 
 async function createUploadDirectory() {
   if (!directoryName.value.trim() || !directoryPrefix.value.trim()) {
-    error.value = '目录名称和 OSS 前缀必填'
+    pageError.value = '目录名称和 OSS 前缀必填'
     return
   }
-  error.value = ''
+  pageError.value = ''
   try {
     await assetWorkbenchApi.createUploadDirectory({
       name: directoryName.value,
@@ -705,7 +750,7 @@ async function createUploadDirectory() {
     notice.value = '上传目录已创建'
     await loadUploadDirectoriesAdmin()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '创建上传目录失败'
+    pageError.value = err instanceof Error ? err.message : '创建上传目录失败'
   }
 }
 
@@ -714,7 +759,7 @@ async function toggleUploadDirectory(row: UploadDirectoryRow) {
     await assetWorkbenchApi.updateUploadDirectory(row.id, { enabled: !row.enabled })
     await loadUploadDirectoriesAdmin()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '更新上传目录失败'
+    pageError.value = err instanceof Error ? err.message : '更新上传目录失败'
   }
 }
 
@@ -782,8 +827,8 @@ watch(
           </label>
         </div>
         <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-        <p v-if="error" class="aw-inline-alert">{{ error }}</p>
-        <AsyncBoundary :loading="clientMaterialsLoading" :error="error" loading-label="正在加载素材" @retry="loadClientMaterials(false)">
+        <p v-if="pageError" class="aw-inline-alert aw-inline-alert--error">{{ pageError }}</p>
+        <AsyncBoundary :loading="clientMaterialsLoading" :error="clientMaterialsError" loading-label="正在加载素材" @retry="loadClientMaterials(false)">
           <div v-if="filteredClientMaterials.length" class="aw-material-client-list">
             <article v-for="material in filteredClientMaterials" :key="material.id" class="aw-material-client-item">
               <label class="aw-inline-check aw-material-client-item__check">
@@ -882,7 +927,7 @@ watch(
         <label class="aw-inline-check">
           <input
             type="checkbox"
-            :checked="selectedAssetIds.size > 0 && selectedAssetIds.size === downloadableAssetIds.length"
+            :checked="allFilteredAssetsSelected"
             @change="toggleAllAssets(($event.target as HTMLInputElement).checked)"
           />
           <span>全选当前结果</span>
@@ -890,74 +935,7 @@ watch(
       </div>
 
       <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-      <p v-if="error" class="aw-inline-alert">{{ error }}</p>
-    </div>
-
-    <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
-        <span>客户端素材</span>
-        <span>{{ formatInt(adminClientMaterials.length) }} 个已发布</span>
-        <button type="button" :disabled="!activeAsset" @click="activeAsset && publishClientMaterial(activeAsset)">发布当前素材</button>
-      </div>
-      <div class="aw-material-admin-form">
-        <input v-model.number="clientMaterialAssetId" type="number" min="1" placeholder="素材 ID" aria-label="素材 ID" />
-        <input v-model="clientMaterialTitle" type="text" placeholder="展示名称" aria-label="展示名称" />
-        <input v-model="clientMaterialDescription" type="text" placeholder="说明" aria-label="说明" />
-        <button class="aw-secondary-button" type="button" @click="publishClientMaterial()">按 ID 发布</button>
-      </div>
-      <div v-if="adminClientMaterials.length" class="aw-material-admin-list">
-        <article v-for="material in adminClientMaterials" :key="material.id" class="aw-material-admin-item aw-material-admin-item--client">
-          <button
-            class="aw-material-client-thumb aw-material-admin-thumb"
-            :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }"
-            type="button"
-            :aria-label="`预览 ${clientMaterialTitleOf(material)}`"
-            @click="openClientMaterialPreview(material)"
-          >
-            <img v-if="clientMaterialPreviewUrl(material)" :src="clientMaterialPreviewUrl(material)" :alt="clientMaterialTitleOf(material)" loading="lazy" decoding="async" />
-            <FileImage v-else :size="28" aria-hidden="true" />
-          </button>
-          <div class="aw-material-admin-copy">
-            <strong>{{ clientMaterialTitleOf(material) }}</strong>
-            <small>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</small>
-            <small v-if="material.description">{{ material.description }}</small>
-          </div>
-          <span class="aw-material-admin-file">{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
-          <span :class="chipClass(systemPreviewMeta(canPreviewClientMaterial(material)).tone)">
-            {{ systemPreviewMeta(canPreviewClientMaterial(material)).label }}
-          </span>
-          <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ material.enabled ? '已发布' : '已停用' }}</span>
-          <button type="button" @click="toggleClientMaterialEnabled(material)">{{ material.enabled ? '停用' : '启用' }}</button>
-          <button type="button" @click="removeClientMaterial(material)">下架</button>
-        </article>
-      </div>
-      <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
-    </div>
-
-    <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
-        <span>上传目录</span>
-        <span>{{ formatInt(uploadDirectories.length) }} 个目录</span>
-      </div>
-      <div class="aw-material-admin-form">
-        <input v-model="directoryName" type="text" placeholder="目录名称" aria-label="目录名称" />
-        <input v-model="directoryPrefix" type="text" placeholder="OSS 前缀，如 studio-a" aria-label="OSS 前缀" />
-        <select v-model="directoryDifficulty" aria-label="计价分类">
-          <option v-for="option in directoryDifficultyOptions" :key="option" :value="option">{{ option }}</option>
-        </select>
-        <input v-model="directoryDescription" type="text" placeholder="说明" aria-label="说明" />
-        <button class="aw-secondary-button" type="button" @click="createUploadDirectory">创建目录</button>
-      </div>
-      <div v-if="uploadDirectories.length" class="aw-material-admin-list">
-        <article v-for="directory in uploadDirectories" :key="directory.id" class="aw-material-admin-item">
-          <strong>{{ directory.name }}</strong>
-          <span>{{ directory.oss_prefix }}</span>
-          <span class="aw-chip aw-chip--info">计价 {{ directory.difficulty_class || '未设置' }}</span>
-          <span class="aw-chip" :class="directory.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ directory.enabled ? '已启用' : '已停用' }}</span>
-          <button type="button" @click="toggleUploadDirectory(directory)">{{ directory.enabled ? '停用' : '启用' }}</button>
-        </article>
-      </div>
-      <p v-else class="aw-copy">没有上传目录时，客户端会继续使用默认目录。</p>
+      <p v-if="pageError" class="aw-inline-alert aw-inline-alert--error">{{ pageError }}</p>
     </div>
 
     <div class="aw-material-browser" :class="{ 'aw-material-browser--detail': viewMode === 'table' }">
@@ -968,17 +946,20 @@ watch(
           :selected-ids="selectedAssetIds"
           :active-id="activeAsset?.id"
           :preview-urls="previewUrls"
+          :preview-loading-ids="previewLoadingIds"
           :loading="loading"
+          :error="searchError"
           @select="selectAsset"
           @toggle="toggleAsset"
           @preview="openAssetPreview"
           @download="downloadAsset"
           @visible="preloadVisiblePreviews"
+          @retry="searchMaterials()"
         />
         <div v-else class="aw-data-surface">
           <AsyncBoundary
             :loading="loading"
-            :error="error"
+            :error="searchError"
             loading-label="正在搜索素材库"
             @retry="searchMaterials"
           >
@@ -1075,13 +1056,82 @@ watch(
       </aside>
     </div>
 
+    <div class="aw-data-surface">
+      <div class="aw-grid-toolbar">
+        <span>客户端素材</span>
+        <span>{{ formatInt(adminClientMaterials.length) }} 个已发布</span>
+        <button type="button" :disabled="!activeAsset" @click="activeAsset && publishClientMaterial(activeAsset)">发布当前素材</button>
+      </div>
+      <div class="aw-material-admin-form">
+        <input v-model.number="clientMaterialAssetId" type="number" min="1" placeholder="素材 ID" aria-label="素材 ID" />
+        <input v-model="clientMaterialTitle" type="text" placeholder="展示名称" aria-label="展示名称" />
+        <input v-model="clientMaterialDescription" type="text" placeholder="说明" aria-label="说明" />
+        <button class="aw-secondary-button" type="button" @click="publishClientMaterial()">按 ID 发布</button>
+      </div>
+      <div v-if="adminClientMaterials.length" class="aw-material-admin-list">
+        <article v-for="material in adminClientMaterials" :key="material.id" class="aw-material-admin-item aw-material-admin-item--client">
+          <button
+            class="aw-material-client-thumb aw-material-admin-thumb"
+            :class="{ 'aw-material-client-thumb--empty': !clientMaterialPreviewUrl(material) }"
+            type="button"
+            :aria-label="`预览 ${clientMaterialTitleOf(material)}`"
+            @click="openClientMaterialPreview(material)"
+          >
+            <img v-if="clientMaterialPreviewUrl(material)" :src="clientMaterialPreviewUrl(material)" :alt="clientMaterialTitleOf(material)" loading="lazy" decoding="async" />
+            <FileImage v-else :size="28" aria-hidden="true" />
+          </button>
+          <div class="aw-material-admin-copy">
+            <strong>{{ clientMaterialTitleOf(material) }}</strong>
+            <small>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</small>
+            <small v-if="material.description">{{ material.description }}</small>
+          </div>
+          <span class="aw-material-admin-file">{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
+          <span :class="chipClass(systemPreviewMeta(canPreviewClientMaterial(material)).tone)">
+            {{ systemPreviewMeta(canPreviewClientMaterial(material)).label }}
+          </span>
+          <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ material.enabled ? '已发布' : '已停用' }}</span>
+          <button type="button" @click="toggleClientMaterialEnabled(material)">{{ material.enabled ? '停用' : '启用' }}</button>
+          <button type="button" @click="removeClientMaterial(material)">下架</button>
+        </article>
+      </div>
+      <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
+    </div>
+
+    <div class="aw-data-surface">
+      <div class="aw-grid-toolbar">
+        <span>上传目录</span>
+        <span>{{ formatInt(uploadDirectories.length) }} 个目录</span>
+      </div>
+      <div class="aw-material-admin-form">
+        <input v-model="directoryName" type="text" placeholder="目录名称" aria-label="目录名称" />
+        <input v-model="directoryPrefix" type="text" placeholder="OSS 前缀，如 studio-a" aria-label="OSS 前缀" />
+        <select v-model="directoryDifficulty" aria-label="计价分类">
+          <option v-for="option in directoryDifficultyOptions" :key="option" :value="option">{{ option }}</option>
+        </select>
+        <input v-model="directoryDescription" type="text" placeholder="说明" aria-label="说明" />
+        <button class="aw-secondary-button" type="button" @click="createUploadDirectory">创建目录</button>
+      </div>
+      <div v-if="uploadDirectories.length" class="aw-material-admin-list">
+        <article v-for="directory in uploadDirectories" :key="directory.id" class="aw-material-admin-item">
+          <strong>{{ directory.name }}</strong>
+          <span>{{ directory.oss_prefix }}</span>
+          <span class="aw-chip aw-chip--info">计价 {{ directory.difficulty_class || '未设置' }}</span>
+          <span class="aw-chip" :class="directory.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ directory.enabled ? '已启用' : '已停用' }}</span>
+          <button type="button" @click="toggleUploadDirectory(directory)">{{ directory.enabled ? '停用' : '启用' }}</button>
+        </article>
+      </div>
+      <p v-else class="aw-copy">没有上传目录时，客户端会继续使用默认目录。</p>
+    </div>
+
     <WorkbenchPreviewDialog
       :open="previewDialogOpen"
       :title="previewDialogTitle"
       :preview-url="previewDialogUrl"
       :fallback-src="previewDialogFallback"
+      :mime-type="previewDialogMimeType"
+      :filename="previewDialogFilename"
       :meta-rows="previewDialogRows"
-      :empty-label="previewLoading ? '正在加载预览' : '暂无可展示预览'"
+      :empty-label="previewDialogEmptyLabel"
       eyebrow="暗场预览"
       download-label="下载这个素材"
       @close="closePreview"

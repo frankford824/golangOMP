@@ -188,6 +188,12 @@ const detailFileGridColumns = computed<GridColumn[]>(() => [
   { key: 'preview_status', label: '预览', width: 108 },
   { key: 'action', label: '动作', width: 96, align: 'center' },
 ])
+const detailFileRowHeight = 64
+const detailFileGroupHeight = 34
+const detailFileGridHeight = computed(() => {
+  const visibleFileRows = Math.min(Math.max(selectedFiles.value.length, 2), 3)
+  return detailFileGroupHeight + visibleFileRows * (detailFileRowHeight + 1)
+})
 
 const downloadableFileIDs = computed(() => selectedFiles.value.map((file) => file.id))
 const selectedFileCount = computed(() => selectedFileIds.value.size)
@@ -1057,6 +1063,115 @@ watch(
           <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
+      <div v-if="selectedFiles.length" class="aw-panel aw-file-maintenance-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>{{ canManageFiles ? '文件批量维护' : '文件列表' }}</h3>
+            <p class="aw-copy">
+              {{
+                canManageFiles
+                  ? '这里负责移动目录和删除文件；下载按钮未勾选时默认下载本批次全部文件。'
+                  : '这里查看本批次文件、预览状态和下载入口。'
+              }}
+            </p>
+          </div>
+          <span class="aw-chip aw-chip--neutral">{{ detailSelectionLabel }}</span>
+        </div>
+        <div v-if="canManageFiles" class="aw-batch-maintenance-form">
+          <div class="aw-batch-maintenance-group">
+            <label class="aw-field">
+              <span>移动到</span>
+              <select v-model.number="moveDirectoryId" :disabled="!uploadDirectories.length">
+                <option :value="0">选择上传目录</option>
+                <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
+                  {{ directory.name }}
+                </option>
+              </select>
+            </label>
+            <button
+              class="aw-secondary-button"
+              type="button"
+              :disabled="fileActionSaving || selectedFileIds.size === 0 || !moveDirectoryId"
+              @click="moveSelectedFiles"
+            >
+              移动所选
+            </button>
+          </div>
+          <div class="aw-batch-maintenance-group">
+            <label class="aw-field">
+              <span>删除原因</span>
+              <input v-model.trim="deleteReason" placeholder="删除文件必须填写原因" />
+            </label>
+            <button
+              class="aw-secondary-button"
+              type="button"
+              :disabled="fileActionSaving || selectedFileIds.size === 0 || !deleteReason.trim()"
+              @click="deleteSelectedFiles"
+            >
+              删除所选
+            </button>
+          </div>
+        </div>
+        <WorkbenchDataGrid
+          :columns="detailFileGridColumns"
+          :rows="detailFileGridRows"
+          row-key="id"
+          storage-key="submission-detail-files"
+          group-by="preview_status"
+          :height="detailFileGridHeight"
+          :row-height="detailFileRowHeight"
+        >
+          <template #cell="{ row, column, value }">
+            <label v-if="column.key === 'selected'" class="aw-inline-check">
+              <input
+                type="checkbox"
+                :checked="gridRowAsFile(row).selected"
+                @change="toggleFile(gridRowAsFile(row), ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ gridRowAsFile(row).id }}</span>
+            </label>
+            <button
+              v-else-if="column.key === 'action'"
+              class="aw-grid-button"
+              type="button"
+              @click="downloadFile(gridRowAsFile(row))"
+            >
+              下载
+            </button>
+            <WorkbenchFilePreview
+              v-else-if="column.key === 'preview_tile'"
+              class="aw-preview-tile--table"
+              :file-id="gridRowAsFile(row).id"
+              :alt="gridRowAsFile(row).original_filename"
+              :defer-until-visible="false"
+              @preview="openFilePreviewFromTile(gridRowAsFile(row), $event)"
+            />
+            <button
+              v-else-if="column.key === 'original_filename'"
+              class="aw-link-button aw-file-name-button"
+              type="button"
+              @click="openFilePreviewFromRow(gridRowAsFile(row))"
+            >
+              {{ gridRowAsFile(row).original_filename || `文件 ${gridRowAsFile(row).id}` }}
+            </button>
+            <span v-else-if="column.key === 'file_type'">{{ gridRowAsFile(row).file_type || gridRowAsFile(row).mime_type }}</span>
+            <span v-else-if="column.key === 'page_count'" class="aw-cell-num">{{ formatInt(value) }}</span>
+            <button
+              v-else-if="column.key === 'preview_status'"
+              class="aw-preview-status-button"
+              :class="chipClass(previewStatusMeta(gridRowAsFile(row).preview_status).tone)"
+              type="button"
+              @click="openFilePreviewFromRow(gridRowAsFile(row))"
+            >
+              {{ previewStatusMeta(gridRowAsFile(row).preview_status).label }}
+            </button>
+            <span v-else>{{ value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+      </div>
+      <div v-else-if="selectedDetail && !detailLoading" class="aw-empty-state">
+        <h3>没有文件</h3>
+      </div>
       <div v-if="pendingAction" class="aw-panel">
         <div class="aw-panel__head">
           <div>
@@ -1136,112 +1251,6 @@ watch(
           <button class="aw-primary-button" type="button" @click="saveItemEdit">保存明细</button>
           <button class="aw-secondary-button" type="button" @click="editingItem = null">取消</button>
         </div>
-      </div>
-      <div v-if="canManageFiles && selectedFiles.length" class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>文件批量维护</h3>
-            <p class="aw-copy">这里负责移动目录和删除文件；下载按钮未勾选时默认下载本批次全部文件。</p>
-          </div>
-          <span class="aw-chip aw-chip--neutral">{{ detailSelectionLabel }}</span>
-        </div>
-        <div class="aw-batch-maintenance-form">
-          <label class="aw-field">
-            <span>移动到</span>
-            <select v-model.number="moveDirectoryId" :disabled="!uploadDirectories.length">
-              <option :value="0">选择上传目录</option>
-              <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
-                {{ directory.name }}
-              </option>
-            </select>
-          </label>
-          <div class="aw-field aw-field--action">
-            <span aria-hidden="true">&nbsp;</span>
-            <button
-              class="aw-secondary-button"
-              type="button"
-              :disabled="fileActionSaving || selectedFileIds.size === 0 || !moveDirectoryId"
-              @click="moveSelectedFiles"
-            >
-              移动所选
-            </button>
-          </div>
-          <label class="aw-field">
-            <span>删除原因</span>
-            <input v-model.trim="deleteReason" placeholder="删除文件必须填写原因" />
-          </label>
-          <div class="aw-field aw-field--action">
-            <span aria-hidden="true">&nbsp;</span>
-            <button
-              class="aw-secondary-button"
-              type="button"
-              :disabled="fileActionSaving || selectedFileIds.size === 0 || !deleteReason.trim()"
-              @click="deleteSelectedFiles"
-            >
-              删除所选
-            </button>
-          </div>
-        </div>
-      </div>
-      <WorkbenchDataGrid
-        v-if="selectedFiles.length"
-        :columns="detailFileGridColumns"
-        :rows="detailFileGridRows"
-        row-key="id"
-        storage-key="submission-detail-files"
-        group-by="preview_status"
-        :height="300"
-        :row-height="72"
-      >
-        <template #cell="{ row, column, value }">
-          <label v-if="column.key === 'selected'" class="aw-inline-check">
-            <input
-              type="checkbox"
-              :checked="gridRowAsFile(row).selected"
-              @change="toggleFile(gridRowAsFile(row), ($event.target as HTMLInputElement).checked)"
-            />
-            <span>{{ gridRowAsFile(row).id }}</span>
-          </label>
-          <button
-            v-else-if="column.key === 'action'"
-            class="aw-grid-button"
-            type="button"
-            @click="downloadFile(gridRowAsFile(row))"
-          >
-            下载
-          </button>
-          <WorkbenchFilePreview
-            v-else-if="column.key === 'preview_tile'"
-            class="aw-preview-tile--table"
-            :file-id="gridRowAsFile(row).id"
-            :alt="gridRowAsFile(row).original_filename"
-            :defer-until-visible="false"
-            @preview="openFilePreviewFromTile(gridRowAsFile(row), $event)"
-          />
-          <button
-            v-else-if="column.key === 'original_filename'"
-            class="aw-link-button aw-file-name-button"
-            type="button"
-            @click="openFilePreviewFromRow(gridRowAsFile(row))"
-          >
-            {{ gridRowAsFile(row).original_filename || `文件 ${gridRowAsFile(row).id}` }}
-          </button>
-          <span v-else-if="column.key === 'file_type'">{{ gridRowAsFile(row).file_type || gridRowAsFile(row).mime_type }}</span>
-          <span v-else-if="column.key === 'page_count'" class="aw-cell-num">{{ formatInt(value) }}</span>
-          <button
-            v-else-if="column.key === 'preview_status'"
-            class="aw-preview-status-button"
-            :class="chipClass(previewStatusMeta(gridRowAsFile(row).preview_status).tone)"
-            type="button"
-            @click="openFilePreviewFromRow(gridRowAsFile(row))"
-          >
-            {{ previewStatusMeta(gridRowAsFile(row).preview_status).label }}
-          </button>
-          <span v-else>{{ value || '—' }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <div v-else class="aw-empty-state">
-        <h3>没有文件</h3>
       </div>
       <WorkbenchPreviewDialog
         :open="previewDialog.open"

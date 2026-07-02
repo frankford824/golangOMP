@@ -6,20 +6,24 @@ import type { SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
 import { chipClass, systemPreviewMeta } from '@aw/shared/format/status'
 import {
   canAttemptSystemAssetPreview,
-  resolvedSystemAssetPreviewUrl,
+  resolvedSystemAssetThumbnailUrl,
 } from '@aw/shared/materials/systemAssetPreview'
+import { computeGalleryVirtualScroll } from '@aw/shared/materials/materialGalleryVirtualScroll'
 
 const props = withDefaults(
   defineProps<{
     items: SystemAssetRow[]
     selectedIds: Set<number>
     previewUrls?: Record<number, string>
+    previewLoadingIds?: Set<number>
     activeId?: number | null
     loading?: boolean
+    error?: string
   }>(),
   {
     activeId: null,
     loading: false,
+    error: '',
   },
 )
 
@@ -29,6 +33,7 @@ const emit = defineEmits<{
   select: [asset: SystemAssetRow]
   toggle: [asset: SystemAssetRow, checked: boolean, index: number, range: boolean]
   visible: [assets: SystemAssetRow[]]
+  retry: []
 }>()
 
 const galleryRef = ref<HTMLElement | null>(null)
@@ -37,32 +42,32 @@ const viewportHeight = ref(720)
 const containerWidth = ref(960)
 const cardMinWidth = 224
 const rowHeight = 306
+const gridPadding = 12
+const gridGap = 12
 let resizeObserver: ResizeObserver | null = null
 
-const columnCount = computed(() => Math.max(1, Math.floor(containerWidth.value / cardMinWidth)))
-const rowCount = computed(() => Math.ceil(props.items.length / columnCount.value))
-const totalHeight = computed(() => rowCount.value * rowHeight)
-const visibleRange = computed(() => {
-  const overscan = 2
-  const startRow = Math.max(0, Math.floor(scrollTop.value / rowHeight) - overscan)
-  const visibleRows = Math.ceil(viewportHeight.value / rowHeight) + overscan * 2
-  const endRow = Math.min(rowCount.value, startRow + visibleRows)
-  return {
-    startIndex: startRow * columnCount.value,
-    endIndex: Math.min(props.items.length, endRow * columnCount.value),
-    top: startRow * rowHeight,
-  }
-})
+const virtualScroll = computed(() =>
+  computeGalleryVirtualScroll({
+    itemCount: props.items.length,
+    scrollTop: scrollTop.value,
+    viewportHeight: viewportHeight.value,
+    containerWidth: containerWidth.value,
+    cardMinWidth,
+    rowHeight,
+    gridPadding,
+    gridGap,
+  }),
+)
 const visibleItems = computed(() =>
-  props.items.slice(visibleRange.value.startIndex, visibleRange.value.endIndex).map((asset, offset) => ({
+  props.items.slice(virtualScroll.value.startIndex, virtualScroll.value.endIndex).map((asset, offset) => ({
     asset,
-    index: visibleRange.value.startIndex + offset,
+    index: virtualScroll.value.startIndex + offset,
   })),
 )
 const gridStyle = computed(() => ({
-  '--aw-material-gallery-columns': `repeat(${columnCount.value}, minmax(0, 1fr))`,
-  '--aw-material-gallery-offset': `${visibleRange.value.top}px`,
-  '--aw-material-gallery-height': `${totalHeight.value}px`,
+  '--aw-material-gallery-columns': `repeat(${virtualScroll.value.columnCount}, minmax(0, 1fr))`,
+  '--aw-material-gallery-offset': `${virtualScroll.value.top}px`,
+  '--aw-material-gallery-height': `${virtualScroll.value.totalHeight}px`,
 }))
 
 function titleOf(asset: SystemAssetRow) {
@@ -97,7 +102,11 @@ function iconFor(asset: SystemAssetRow) {
 }
 
 function previewUrlFor(asset: SystemAssetRow) {
-  return props.previewUrls?.[asset.id] || resolvedSystemAssetPreviewUrl(asset)
+  return resolvedSystemAssetThumbnailUrl(asset, props.previewUrls?.[asset.id])
+}
+
+function isPreviewLoading(asset: SystemAssetRow) {
+  return canPreview(asset) && !previewUrlFor(asset) && Boolean(props.previewLoadingIds?.has(asset.id))
 }
 
 function canPreview(asset: SystemAssetRow) {
@@ -151,7 +160,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => props.items.length,
+  () => props.items,
   () => {
     scrollTop.value = 0
     updateViewportWindow()
@@ -170,6 +179,11 @@ watch(
 <template>
   <section ref="galleryRef" class="aw-material-gallery" aria-label="素材浏览器">
     <div v-if="loading" class="aw-material-gallery__loading">正在检索素材</div>
+    <div v-else-if="error" class="aw-empty-state">
+      <h3>素材加载失败</h3>
+      <p>{{ error }}</p>
+      <button class="aw-secondary-button" type="button" @click="emit('retry')">重试</button>
+    </div>
     <div v-else-if="items.length === 0" class="aw-empty-state">
       <h3>没有可见素材</h3>
       <p>调整关键词或筛选条件后再试。素材库只展示你已开通查看范围内的素材。</p>
@@ -192,6 +206,7 @@ watch(
         >
           <button
             class="aw-material-card__media"
+            :class="{ 'aw-material-card__media--loading': isPreviewLoading(asset) }"
             type="button"
             :disabled="!canPreview(asset)"
             :title="canPreview(asset) ? '预览素材' : '当前素材只能下载'"
@@ -204,6 +219,9 @@ watch(
               loading="lazy"
               decoding="async"
             />
+            <span v-else-if="isPreviewLoading(asset)" class="aw-material-card__file">
+              <span>加载中</span>
+            </span>
             <span v-else class="aw-material-card__file">
               <component :is="iconFor(asset)" class="aw-material-card__icon" :size="30" aria-hidden="true" />
               <span>{{ typeLabel(asset) }}</span>

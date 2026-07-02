@@ -116,4 +116,20 @@
   --aw-font-sans: 'Geist Sans', var(--aw-font-cjk);
   --aw-font-display: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Geist Sans', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
   --aw-font-mono: 'Geist Mono', 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'SFMono-Regular', ui-monospace, monospace;
+
+  /* Compatibility aliases for shared main-ops preview media (AssetPreviewMedia) */
+  --yb-surface: 32 28 22;
+  --yb-surface-subtle: 26 22 15;
+  --yb-text-disabled: 117 109 95;
+  --yb-text-soft: 170 162 148;
+  --yb-text-slate: 170 162 148;
+  --yb-text-muted-strong: 117 109 95;
+  --yb-text-navy: 241 239 232;
+  --yb-danger-border: 192 69 59;
+  --yb-danger-soft: 44 24 20;
+  --yb-danger-text: 240 160 150;
+  --yb-warning-border-soft: 197 136 42;
+  --yb-warning-soft: 44 34 18;
+  --yb-warning-dark: 217 171 99;
+  --yb-warning-badge-text: 217 171 99;
 }

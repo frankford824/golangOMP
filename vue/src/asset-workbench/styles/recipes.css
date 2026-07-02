@@ -1168,6 +1168,12 @@
   font-size: var(--aw-font-size-sm);
 }
 
+.aw-inline-alert--error {
+  border-left-color: var(--aw-danger);
+  background: color-mix(in srgb, var(--aw-danger) 8%, var(--aw-surface-raised));
+  color: var(--aw-danger);
+}
+
 .aw-page-stack {
   display: grid;
   min-width: 0;
@@ -2113,32 +2119,37 @@ body.aw-submission-dialog-locked {
   width: 180px;
 }
 
+.aw-file-maintenance-panel {
+  gap: var(--aw-space-3);
+}
+
 .aw-batch-maintenance-form {
   display: grid;
-  grid-template-columns: minmax(180px, 220px) auto minmax(240px, 300px) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
   gap: var(--aw-space-3);
 }
 
-.aw-batch-maintenance-form .aw-field {
+.aw-batch-maintenance-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(128px, 0.38fr);
+  align-items: end;
+  gap: var(--aw-space-2);
   min-width: 0;
 }
 
-.aw-root .aw-batch-maintenance-form select,
-.aw-root .aw-batch-maintenance-form input {
+.aw-batch-maintenance-group .aw-field {
+  min-width: 0;
+}
+
+.aw-root .aw-batch-maintenance-group select,
+.aw-root .aw-batch-maintenance-group input {
   width: 100%;
+  min-height: var(--aw-row-md);
 }
 
-.aw-field--action {
-  align-self: end;
-}
-
-.aw-field--action span {
-  visibility: hidden;
-}
-
-.aw-field--action .aw-secondary-button {
-  height: var(--aw-row-md);
+.aw-batch-maintenance-group .aw-secondary-button {
+  width: 100%;
   min-height: var(--aw-row-md);
   white-space: nowrap;
 }
@@ -2550,6 +2561,12 @@ body.aw-submission-dialog-locked {
   cursor: default;
 }
 
+.aw-material-card__media--loading {
+  background: var(--aw-surface-muted);
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
 .aw-material-card--download-only {
   grid-template-rows: 76px 1fr;
 }
@@ -2648,6 +2665,12 @@ body.aw-submission-dialog-locked {
 .aw-material-card:focus-within .aw-material-card__actions,
 .aw-material-card--selected .aw-material-card__actions {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .aw-material-card__actions {
+    opacity: 1;
+  }
 }
 
 .aw-material-card__check {
@@ -2762,6 +2785,11 @@ body.aw-submission-dialog-locked {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   background: color-mix(in srgb, var(--aw-stage) 92%, transparent);
+}
+
+.aw-preview-dialog__pdf {
+  border: 0;
+  background: var(--aw-stage-raised);
 }
 
 .aw-preview-dialog__stage,
@@ -3589,6 +3617,10 @@ body.aw-submission-dialog-locked {
     grid-template-columns: 1fr;
   }
 
+  .aw-batch-maintenance-group {
+    grid-template-columns: 1fr;
+  }
+
   .aw-member-row__controls {
     justify-content: flex-start;
   }
@@ -3633,6 +3665,12 @@ body.aw-submission-dialog-locked {
 
   .aw-material-browser--detail .aw-material-browser__side {
     grid-template-columns: 1fr;
+  }
+
+  .aw-preview-dialog,
+  .aw-material-preview {
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .aw-preview-dialog__stage,

@@ -25,16 +25,38 @@ export function isSystemAssetImagePreviewable(asset: SystemAssetRow | SystemAsse
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(extensionOf(systemAssetFilename(asset)))
 }
 
+export function isSystemAssetPdfPreviewable(asset: SystemAssetRow | SystemAssetPreviewMeta) {
+  const mime = normalizedMime(asset.mime_type)
+  return mime === 'application/pdf' || extensionOf(systemAssetFilename(asset)) === 'pdf'
+}
+
+export function isPdfMimeOrFilename(mimeType?: string | null, filename?: string | null) {
+  const mime = normalizedMime(mimeType)
+  if (mime === 'application/pdf') return true
+  return extensionOf(filename) === 'pdf'
+}
+
 export function canAttemptSystemAssetPreview(asset: SystemAssetRow | SystemAssetPreviewMeta) {
   if (asset.preview_available) return true
   if (isSystemAssetImagePreviewable(asset)) return true
-  const mime = normalizedMime(asset.mime_type)
-  return mime === 'application/pdf' || extensionOf(systemAssetFilename(asset)) === 'pdf'
+  return isSystemAssetPdfPreviewable(asset)
 }
 
 export function resolvedSystemAssetPreviewUrl(asset?: SystemAssetRow | SystemAssetPreviewMeta | null) {
   if (!asset) return ''
   if ('preview_url' in asset && asset.preview_url) return asset.preview_url
   if ('download_url' in asset && asset.download_url && isSystemAssetImagePreviewable(asset)) return asset.download_url
+  if ('download_url' in asset && asset.download_url && isSystemAssetPdfPreviewable(asset)) return asset.download_url
+  return ''
+}
+
+/** Gallery thumbnails: prefer server preview_url only; avoid loading full originals. */
+export function resolvedSystemAssetThumbnailUrl(
+  asset?: SystemAssetRow | SystemAssetPreviewMeta | null,
+  cachedUrl?: string,
+) {
+  if (cachedUrl) return cachedUrl
+  if (!asset) return ''
+  if ('preview_url' in asset && asset.preview_url) return asset.preview_url
   return ''
 }
