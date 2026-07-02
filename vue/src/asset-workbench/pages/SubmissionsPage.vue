@@ -166,7 +166,7 @@ const submissionGridColumns = computed<Array<{ key: string; label: string; width
     { key: 'item_count', label: '单数', width: 88, align: 'right' },
     { key: 'page_count', label: '页数', width: 88, align: 'right' },
     { key: 'gross_total', label: '毛额', width: 108, align: 'right' },
-    { key: 'action', label: '动作', width: 96, align: 'center' },
+    { key: 'action', label: '动作', width: 140, align: 'center' },
   ]
   return isSimpleUser.value ? columns.filter((column) => column.key !== 'submitter_label') : columns
 })
@@ -177,7 +177,7 @@ const detailItemGridColumns = computed<GridColumn[]>(() => [
   { key: 'qc_status', label: '质检', width: 96 },
   { key: 'gross_amount', label: '毛额', width: 108, align: 'right' },
   { key: 'file_count', label: '文件', width: 84, align: 'right' },
-  { key: 'action', label: '动作', width: 220, align: 'center' },
+  { key: 'action', label: '动作', width: 348, align: 'center' },
 ])
 const detailFileGridColumns = computed<GridColumn[]>(() => [
   { key: 'selected', label: '选择', width: 84, align: 'center' },
@@ -1055,14 +1055,9 @@ watch(
                 </button>
                 <button class="aw-grid-button" type="button" @click="startEditItem(gridRowAsItem(row))">编辑</button>
                 <button class="aw-grid-button" type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
-                <details class="aw-row-menu">
-                  <summary>更多</summary>
-                  <div class="aw-row-menu__panel">
-                    <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
-                    <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
-                    <button type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
-                  </div>
-                </details>
+                <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
+                <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
+                <button class="aw-grid-button" type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
               </template>
               <span v-else class="aw-chip aw-chip--neutral">只读</span>
             </div>

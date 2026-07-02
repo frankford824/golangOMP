@@ -2122,14 +2122,14 @@ body.aw-submission-dialog-locked {
 
 .aw-root .aw-grid-toolbar input,
 .aw-root .aw-grid-toolbar select {
-  flex: 0 1 520px;
-  width: min(520px, 100%);
+  flex: 0 1 240px;
+  width: min(240px, 100%);
   min-height: var(--aw-row-sm);
 }
 
 .aw-root .aw-grid-toolbar select {
-  flex-basis: 220px;
-  width: 220px;
+  flex-basis: 180px;
+  width: 180px;
 }
 
 .aw-root .aw-grid-toolbar input[type='month'] {
@@ -2206,9 +2206,10 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-submission-dialog .aw-grid-actions {
-  justify-content: flex-start;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: var(--aw-space-1);
+  overflow: visible;
 }
 
 .aw-submission-edit-form {
@@ -3041,7 +3042,14 @@ body.aw-submission-dialog-locked {
   justify-content: center;
 }
 
-.aw-data-grid__th:has(.aw-data-grid__tools) .aw-data-grid__label {
+.aw-data-grid__spacer {
+  border-right: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.aw-data-grid__th:hover:has(.aw-data-grid__tools) .aw-data-grid__label,
+.aw-data-grid__th:focus-within:has(.aw-data-grid__tools) .aw-data-grid__label {
   padding-right: 88px;
 }
 

@@ -64,10 +64,11 @@ const orderedColumns = computed(() => {
   const missing = props.columns.filter((column) => !columnState.value.order.includes(column.key))
   return [...ordered, ...missing]
 })
-const gridTemplateColumns = computed(() =>
-  orderedColumns.value
-    .map((column) => `${Math.max(72, columnState.value.widths[column.key] ?? column.width ?? 120)}px`)
-    .join(' '),
+const gridTemplateColumns = computed(
+  () =>
+    `${orderedColumns.value
+      .map((column) => `${Math.max(72, columnState.value.widths[column.key] ?? column.width ?? 120)}px`)
+      .join(' ')} minmax(0, 1fr)`,
 )
 const flatItems = computed<FlatItem[]>(() => {
   if (!props.groupBy) {
@@ -224,6 +225,7 @@ watch(
             </button>
           </span>
         </div>
+        <div class="aw-data-grid__th aw-data-grid__spacer" role="presentation" aria-hidden="true" />
       </div>
     </div>
     <div ref="bodyRef" class="aw-data-grid__body" role="rowgroup" :style="{ maxHeight: `${height}px` }" @scroll="updateScroll">
@@ -259,6 +261,7 @@ watch(
               <span class="aw-data-grid__value">{{ cellValue(item.row, column) }}</span>
             </slot>
           </div>
+          <div class="aw-data-grid__td aw-data-grid__spacer" role="presentation" aria-hidden="true" />
         </div>
       </template>
       <div role="presentation" :style="{ height: `${bottomSpacerHeight}px` }" />
