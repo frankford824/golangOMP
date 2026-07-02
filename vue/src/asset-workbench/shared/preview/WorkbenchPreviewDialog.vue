@@ -39,40 +39,42 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section v-if="open" class="aw-preview-dialog" role="dialog" aria-modal="true" :aria-label="title || '素材预览'">
-    <div class="aw-preview-dialog__stage" @click.self="emit('close')">
-      <AssetPreviewMedia
-        v-if="previewUrl || fallbackSrc"
-        class="aw-preview-dialog__media"
-        :resolved-preview-url="previewUrl || ''"
-        :fallback-src="fallbackSrc"
-        :alt="alt || title"
-      />
-      <div v-else class="aw-preview-dialog__empty">
-        {{ emptyLabel || '暂无可展示预览' }}
-      </div>
-    </div>
-    <aside class="aw-preview-dialog__side">
-      <div class="aw-panel__head">
-        <div>
-          <p class="aw-eyebrow">{{ eyebrow || '预览' }}</p>
-          <h3>{{ title }}</h3>
+  <Teleport to="body">
+    <section v-if="open" class="aw-token-scope aw-preview-dialog" role="dialog" aria-modal="true" :aria-label="title || '素材预览'">
+      <div class="aw-preview-dialog__stage" @click.self="emit('close')">
+        <AssetPreviewMedia
+          v-if="previewUrl || fallbackSrc"
+          class="aw-preview-dialog__media"
+          :resolved-preview-url="previewUrl || ''"
+          :fallback-src="fallbackSrc"
+          :alt="alt || title"
+        />
+        <div v-else class="aw-preview-dialog__empty">
+          {{ emptyLabel || '暂无可展示预览' }}
         </div>
-        <button class="aw-secondary-button" type="button" @click="emit('close')">
-          <X :size="16" aria-hidden="true" />
-          关闭
+      </div>
+      <aside class="aw-preview-dialog__side">
+        <div class="aw-panel__head">
+          <div>
+            <p class="aw-eyebrow">{{ eyebrow || '预览' }}</p>
+            <h3>{{ title }}</h3>
+          </div>
+          <button class="aw-secondary-button" type="button" @click="emit('close')">
+            <X :size="16" aria-hidden="true" />
+            关闭
+          </button>
+        </div>
+        <dl v-if="metaRows?.length" class="aw-material-detail__list">
+          <div v-for="[label, value] in metaRows" :key="label">
+            <dt>{{ label }}</dt>
+            <dd>{{ value || '—' }}</dd>
+          </div>
+        </dl>
+        <button v-if="downloadLabel" class="aw-primary-button" type="button" @click="emit('download')">
+          <Download :size="16" aria-hidden="true" />
+          {{ downloadLabel }}
         </button>
-      </div>
-      <dl v-if="metaRows?.length" class="aw-material-detail__list">
-        <div v-for="[label, value] in metaRows" :key="label">
-          <dt>{{ label }}</dt>
-          <dd>{{ value || '—' }}</dd>
-        </div>
-      </dl>
-      <button v-if="downloadLabel" class="aw-primary-button" type="button" @click="emit('download')">
-        <Download :size="16" aria-hidden="true" />
-        {{ downloadLabel }}
-      </button>
-    </aside>
-  </section>
+      </aside>
+    </section>
+  </Teleport>
 </template>

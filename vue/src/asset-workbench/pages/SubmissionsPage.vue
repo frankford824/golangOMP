@@ -43,6 +43,14 @@ type DetailItemGridRow = SubmissionItemRow & { file_count: number; action: strin
 type DetailFileGridRow = SubmissionFileRow & { selected: boolean; action: string; page_count: number; preview_tile: string }
 type SubmissionGridRow = SubmissionRow & { status_label: string; submitter_label: string; submitted_label: string }
 type QCRejectionMessage = { item_id: number; order_no: string; reason: string; created_at: string; actor_label: string }
+type FilePreviewPayload = {
+  title: string
+  previewUrl: string
+  meta: FilePreviewMeta | null
+  statusText: string
+  sourceLabel?: string
+  expiresAt?: string
+}
 
 interface PendingItemAction {
   kind: ItemActionKind
@@ -82,12 +90,14 @@ const previewDialog = ref<{
   open: boolean
   title: string
   previewUrl: string
+  fallbackSrc: string
   emptyLabel: string
   metaRows: Array<[string, string]>
 }>({
   open: false,
   title: '',
   previewUrl: '',
+  fallbackSrc: '',
   emptyLabel: '',
   metaRows: [],
 })
@@ -609,15 +619,17 @@ function startEditItem(item: SubmissionItemRow) {
   }
 }
 
-function openFilePreview(payload: { title: string; previewUrl: string; meta: FilePreviewMeta | null; statusText: string }) {
+function openFilePreview(payload: FilePreviewPayload) {
   previewDialog.value = {
     open: true,
     title: payload.title,
     previewUrl: payload.previewUrl,
+    fallbackSrc: payload.previewUrl,
     emptyLabel: payload.statusText,
     metaRows: [
-      ['预览状态', payload.meta?.status || '等待生成'],
-      ['过期时间', payload.meta?.expires_at || '—'],
+      ['展示来源', payload.sourceLabel || (payload.previewUrl ? '预览图' : '—')],
+      ['预览状态', payload.meta?.status || (payload.previewUrl ? 'ready' : '等待生成')],
+      ['过期时间', payload.expiresAt || payload.meta?.expires_at || '—'],
     ],
   }
 }
@@ -629,26 +641,78 @@ function filePreviewStatusText(meta: FilePreviewMeta | null) {
   return meta?.preview_url ? '' : '暂无可展示预览'
 }
 
+function fileCanUseOriginalPreview(file: SubmissionFileRow) {
+  const mime = (file.mime_type || '').toLowerCase()
+  if (mime.startsWith('image/')) return true
+  const name = (file.original_filename || '').toLowerCase()
+  return /\.(jpe?g|png|webp|gif|bmp|svg)$/i.test(name)
+}
+
 async function openFilePreviewFromRow(file: SubmissionFileRow) {
   notice.value = ''
   error.value = ''
+  const title = file.original_filename || `文件 ${file.id}`
+  openFilePreview({
+    title,
+    previewUrl: '',
+    meta: null,
+    statusText: '正在加载预览…',
+    sourceLabel: '加载中',
+  })
+  let previewError = ''
   try {
     const meta = await assetWorkbenchApi.getFilePreview(file.id)
-    openFilePreview({
-      title: file.original_filename || `文件 ${file.id}`,
-      previewUrl: meta.preview_url ?? '',
-      meta,
-      statusText: filePreviewStatusText(meta),
-    })
+    if (meta.preview_url) {
+      openFilePreview({
+        title,
+        previewUrl: meta.preview_url,
+        meta,
+        statusText: filePreviewStatusText(meta),
+        sourceLabel: '预览图',
+      })
+      return
+    }
+    previewError = filePreviewStatusText(meta)
   } catch (err) {
-    const message = err instanceof Error ? err.message : '预览加载失败'
-    openFilePreview({
-      title: file.original_filename || `文件 ${file.id}`,
-      previewUrl: '',
-      meta: null,
-      statusText: message,
-    })
+    previewError = err instanceof Error ? err.message : '预览加载失败'
   }
+
+  if (fileCanUseOriginalPreview(file)) {
+    try {
+      const download = await assetWorkbenchApi.getFileDownload(file.id)
+      openFilePreview({
+        title,
+        previewUrl: download.download_url,
+        meta: null,
+        statusText: '',
+        sourceLabel: '原文件预览',
+        expiresAt: download.expires_at,
+      })
+      return
+    } catch (err) {
+      const fallbackError = err instanceof Error ? err.message : '原文件预览链接生成失败'
+      previewError = previewError ? `${previewError}；${fallbackError}` : fallbackError
+    }
+  }
+
+  openFilePreview({
+    title,
+    previewUrl: '',
+    meta: null,
+    statusText: previewError || '暂无可展示预览',
+    sourceLabel: '—',
+  })
+}
+
+async function openFilePreviewFromTile(file: SubmissionFileRow, payload: FilePreviewPayload) {
+  if (payload.previewUrl) {
+    openFilePreview({
+      ...payload,
+      sourceLabel: payload.sourceLabel || '预览图',
+    })
+    return
+  }
+  await openFilePreviewFromRow(file)
 }
 
 function closeFilePreview() {
@@ -1151,7 +1215,8 @@ watch(
             class="aw-preview-tile--table"
             :file-id="gridRowAsFile(row).id"
             :alt="gridRowAsFile(row).original_filename"
-            @preview="openFilePreview"
+            :defer-until-visible="false"
+            @preview="openFilePreviewFromTile(gridRowAsFile(row), $event)"
           />
           <button
             v-else-if="column.key === 'original_filename'"
@@ -1182,6 +1247,7 @@ watch(
         :open="previewDialog.open"
         :title="previewDialog.title"
         :preview-url="previewDialog.previewUrl"
+        :fallback-src="previewDialog.fallbackSrc"
         :empty-label="previewDialog.emptyLabel"
         :meta-rows="previewDialog.metaRows"
         eyebrow="文件预览"

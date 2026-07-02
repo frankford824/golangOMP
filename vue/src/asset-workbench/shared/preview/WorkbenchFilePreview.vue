@@ -5,10 +5,16 @@ import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 
 import { assetWorkbenchApi, type FilePreviewMeta } from '@aw/shared/api/assetWorkbenchApi'
 
-const props = defineProps<{
-  fileId: number
-  alt?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    fileId: number
+    alt?: string
+    deferUntilVisible?: boolean
+  }>(),
+  {
+    deferUntilVisible: true,
+  },
+)
 
 const emit = defineEmits<{
   preview: [payload: { fileId: number; title: string; previewUrl: string; meta: FilePreviewMeta | null; statusText: string }]
@@ -73,7 +79,8 @@ watch(
       v-if="previewUrl"
       :resolved-preview-url="previewUrl"
       :alt="alt ?? '资产预览'"
-      defer-until-visible
+      :defer-until-visible="deferUntilVisible"
+      @open-full="openPreview"
     />
     <span v-else>{{ statusText || '等待预览' }}</span>
   </button>

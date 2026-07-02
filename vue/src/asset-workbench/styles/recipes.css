@@ -931,18 +931,51 @@
 }
 
 .aw-preview-status-button {
+  min-width: 78px;
+  appearance: none;
   cursor: zoom-in;
   font: inherit;
+  color: var(--aw-accent-pressed);
+  background: color-mix(in srgb, var(--aw-accent) 12%, var(--aw-surface));
   transition:
+    background var(--aw-motion-fast) var(--aw-ease-standard),
     border-color var(--aw-motion-fast) var(--aw-ease-standard),
     box-shadow var(--aw-motion-fast) var(--aw-ease-standard),
+    color var(--aw-motion-fast) var(--aw-ease-standard),
     transform var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-preview-status-button.aw-chip--success {
+  color: var(--aw-accent-pressed);
+  background: color-mix(in srgb, var(--aw-accent) 12%, var(--aw-surface));
+}
+
+.aw-preview-status-button.aw-chip--info {
+  color: color-mix(in srgb, var(--aw-info) 76%, var(--aw-ink));
+  background: color-mix(in srgb, var(--aw-info) 12%, var(--aw-surface));
+}
+
+.aw-preview-status-button.aw-chip--danger {
+  color: var(--aw-danger);
+  background: color-mix(in srgb, var(--aw-danger) 10%, var(--aw-surface));
+}
+
+.aw-preview-status-button.aw-chip--neutral {
+  color: var(--aw-ink-2);
+  background: var(--aw-surface-muted);
 }
 
 .aw-preview-status-button:hover {
   border-color: var(--aw-accent);
+  background: var(--aw-surface);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  color: var(--aw-accent-pressed);
   transform: translateY(-1px);
+}
+
+.aw-preview-status-button:focus-visible {
+  outline: 2px solid var(--aw-accent-glow);
+  outline-offset: 2px;
 }
 
 .aw-inline-actions {
@@ -1472,6 +1505,22 @@ body.aw-submission-dialog-locked {
   border-radius: 0;
   background: var(--aw-stage);
   padding: var(--aw-space-5) var(--aw-space-6);
+}
+
+.aw-submission-dialog > .aw-page-bar .aw-eyebrow {
+  color: var(--aw-on-console-2);
+}
+
+.aw-submission-dialog > .aw-page-bar .aw-page-bar__copy h2 {
+  color: var(--aw-on-console);
+}
+
+.aw-submission-dialog > .aw-page-bar .aw-page-bar__copy p {
+  color: var(--aw-on-console-2);
+}
+
+.aw-submission-dialog > .aw-page-bar .aw-inline-check {
+  color: var(--aw-on-console);
 }
 
 .aw-submission-dialog__body {
@@ -2709,7 +2758,7 @@ body.aw-submission-dialog-locked {
 .aw-material-preview {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 140;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   background: color-mix(in srgb, var(--aw-stage) 92%, transparent);
