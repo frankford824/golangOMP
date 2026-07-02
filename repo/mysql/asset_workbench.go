@@ -2232,6 +2232,42 @@ func (r *assetWorkbenchRepo) ListSubmissionItemsByMonth(ctx context.Context, bus
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) ListPendingGradeSubmissionItemsForPayee(ctx context.Context, tx repo.Tx, payeeUserID int64, limit int) ([]*domain.AssetWorkbenchSubmissionItem, error) {
+	if payeeUserID <= 0 {
+		return []*domain.AssetWorkbenchSubmissionItem{}, nil
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	rows, err := Unwrap(tx).QueryContext(ctx, assetWorkbenchSubmissionItemSelect()+`
+		WHERE payee_user_id = ?
+		  AND pricing_status = ?
+		  AND settlement_status = ?
+		  AND current_settlement_batch_id IS NULL
+		  AND qc_status <> ?
+		ORDER BY submitted_at ASC, id ASC
+		LIMIT ? FOR UPDATE`,
+		payeeUserID,
+		domain.AssetWorkbenchPricingStatusPendingGrade,
+		domain.AssetWorkbenchSettlementStatusUnsettled,
+		domain.AssetWorkbenchSubmissionStatusVoided,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench pending-grade submission items: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchSubmissionItem{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchSubmissionItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *assetWorkbenchRepo) ListSubmissionFiles(ctx context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
 	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE submission_item_id = ? ORDER BY sort_order ASC, id ASC`, submissionItemID)
 	if err != nil {

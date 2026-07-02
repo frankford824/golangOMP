@@ -73,6 +73,17 @@ require_cmd() {
 }
 
 go_cmd() {
+  if [ -n "${GO_BIN:-}" ]; then
+    command -v "$GO_BIN" >/dev/null 2>&1 || fail "GO_BIN points to a missing go tool: $GO_BIN"
+    printf '%s\n' "$GO_BIN"
+    return
+  fi
+  if command -v go >/dev/null 2>&1; then
+    if ! go_tool_is_windows_exe go; then
+      printf '%s\n' go
+      return
+    fi
+  fi
   if command -v go.exe >/dev/null 2>&1; then
     printf '%s\n' go.exe
     return

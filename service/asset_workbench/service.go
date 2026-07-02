@@ -34,6 +34,8 @@ type Config struct {
 
 type Option func(*Service)
 
+const assetWorkbenchProfileAutoRepriceBatchSize = 200
+
 type Service struct {
 	cfg             Config
 	repo            repo.AssetWorkbenchRepo
@@ -5502,12 +5504,88 @@ func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, 
 		if err != nil {
 			return err
 		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventProfileUpserted, domain.AssetWorkbenchEntityProfile, &saved.ID, nil, saved, reason)
+		if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventProfileUpserted, domain.AssetWorkbenchEntityProfile, &saved.ID, nil, saved, reason); err != nil {
+			return err
+		}
+		return s.autoRepricePendingGradeItemsForProfile(ctx, tx, actor, saved, reason)
 	}); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to save asset workbench profile.", err.Error())
 	}
 	s.notifyProfileCompletionRequired(ctx, saved)
 	return saved, nil
+}
+
+func (s *Service) autoRepricePendingGradeItemsForProfile(ctx context.Context, tx repo.Tx, actor domain.RequestActor, profile *domain.AssetWorkbenchProfile, reason string) error {
+	if profile == nil || profile.UserID <= 0 {
+		return nil
+	}
+	workerType := strings.TrimSpace(profile.WorkerType)
+	jobGrade := strings.TrimSpace(profile.JobGrade)
+	if workerType == "" || jobGrade == "" {
+		return nil
+	}
+	pricingProfile := &domain.AssetWorkbenchProfile{
+		UserID:     profile.UserID,
+		WorkerType: workerType,
+		JobGrade:   jobGrade,
+	}
+	eventReason := strings.TrimSpace(reason)
+	if eventReason == "" {
+		eventReason = "profile grade auto reprice"
+	} else {
+		eventReason += " | profile grade auto reprice"
+	}
+	for {
+		items, err := s.repo.ListPendingGradeSubmissionItemsForPayee(ctx, tx, profile.UserID, assetWorkbenchProfileAutoRepriceBatchSize)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return nil
+		}
+		refreshIDs := map[int64]struct{}{}
+		for _, before := range items {
+			if before == nil {
+				continue
+			}
+			repriced, appErr := s.buildSubmissionItem(ctx, before.PayeeUserID, before.SubmissionID, before.SubmittedAt, before.BusinessMonth, pricingProfile, CreateSubmissionItemParams{
+				OrderNo:         before.OrderNo,
+				DifficultyClass: before.DifficultyClass,
+				Finalized:       before.Finalized,
+				PageCount:       before.PageCount,
+				ItemCount:       before.ItemCount,
+			}, nil)
+			if appErr != nil {
+				return appErr
+			}
+			repriced.ID = before.ID
+			repriced.QCStatus = before.QCStatus
+			repriced.SettlementStatus = before.SettlementStatus
+			repriced.CurrentSettlementBatchID = before.CurrentSettlementBatchID
+			updated, err := s.repo.UpdateSubmissionItemPricing(ctx, tx, repriced)
+			if err != nil {
+				return err
+			}
+			refreshIDs[before.SubmissionID] = struct{}{}
+			itemID := before.ID
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemRepriced, domain.AssetWorkbenchEntitySubmissionItem, &itemID, before, updated, eventReason); err != nil {
+				return err
+			}
+		}
+		submissionIDs := make([]int64, 0, len(refreshIDs))
+		for submissionID := range refreshIDs {
+			submissionIDs = append(submissionIDs, submissionID)
+		}
+		sort.Slice(submissionIDs, func(i, j int) bool { return submissionIDs[i] < submissionIDs[j] })
+		for _, submissionID := range submissionIDs {
+			if err := s.repo.RefreshSubmissionTotals(ctx, tx, submissionID); err != nil {
+				return err
+			}
+		}
+		if len(items) < assetWorkbenchProfileAutoRepriceBatchSize {
+			return nil
+		}
+	}
 }
 
 func (s *Service) notifyProfileCompletionRequired(ctx context.Context, profile *domain.AssetWorkbenchProfile) {

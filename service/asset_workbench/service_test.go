@@ -543,6 +543,9 @@ type profileListRepo struct {
 	saved        *domain.AssetWorkbenchProfile
 	gradePeriods []*domain.AssetWorkbenchGradePeriod
 	events       []*domain.AssetWorkbenchEvent
+	pendingItems []*domain.AssetWorkbenchSubmissionItem
+	price        *domain.AssetWorkbenchPriceMatrix
+	refreshed    []int64
 }
 
 func (r *profileListRepo) ListProfiles(context.Context, repo.AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error) {
@@ -580,6 +583,64 @@ func (r *profileListRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domai
 	copyEvent.ID = int64(len(r.events) + 1)
 	r.events = append(r.events, &copyEvent)
 	return &copyEvent, nil
+}
+
+func (r *profileListRepo) ListPendingGradeSubmissionItemsForPayee(_ context.Context, _ repo.Tx, payeeUserID int64, limit int) ([]*domain.AssetWorkbenchSubmissionItem, error) {
+	items := []*domain.AssetWorkbenchSubmissionItem{}
+	for _, item := range r.pendingItems {
+		if item == nil || item.PayeeUserID != payeeUserID || item.PricingStatus != domain.AssetWorkbenchPricingStatusPendingGrade {
+			continue
+		}
+		if item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.CurrentSettlementBatchID != nil || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+		if limit > 0 && len(items) >= limit {
+			break
+		}
+	}
+	return items, nil
+}
+
+func (r *profileListRepo) FindActivePrice(_ context.Context, workerType, jobGrade, difficulty string, _ time.Time) (*domain.AssetWorkbenchPriceMatrix, error) {
+	if r.price == nil {
+		return nil, sql.ErrNoRows
+	}
+	if r.price.WorkerType != workerType || r.price.JobGrade != jobGrade || r.price.DifficultyClass != difficulty {
+		return nil, sql.ErrNoRows
+	}
+	copyPrice := *r.price
+	return &copyPrice, nil
+}
+
+func (r *profileListRepo) ListActivePromoCoupons(context.Context, string, string, string, time.Time) ([]*domain.AssetWorkbenchPromoCoupon, error) {
+	return nil, nil
+}
+
+func (r *profileListRepo) UpdateSubmissionItemPricing(_ context.Context, _ repo.Tx, next *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
+	for _, item := range r.pendingItems {
+		if item == nil || item.ID != next.ID {
+			continue
+		}
+		item.BasePriceRuleID = next.BasePriceRuleID
+		item.BaseUnitPrice = next.BaseUnitPrice
+		item.WorkerTypeSnapshot = next.WorkerTypeSnapshot
+		item.JobGradeSnapshot = next.JobGradeSnapshot
+		item.PromoCouponID = next.PromoCouponID
+		item.PromoSnapshot = next.PromoSnapshot
+		item.PricingSnapshot = next.PricingSnapshot
+		item.GrossAmount = next.GrossAmount
+		item.PricingStatus = next.PricingStatus
+		copyItem := *item
+		return &copyItem, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *profileListRepo) RefreshSubmissionTotals(_ context.Context, _ repo.Tx, submissionID int64) error {
+	r.refreshed = append(r.refreshed, submissionID)
+	return nil
 }
 
 type profileNotificationCall struct {
@@ -1421,6 +1482,79 @@ func TestHRUpsertProfilePreservesExistingPIIWhenOmitted(t *testing.T) {
 		t.Fatalf("preserved PII should keep profile completed: %+v", saved)
 	}
 	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].Reason != "HR 定级" {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestHRUpsertProfileAutoRepricesPendingGradeItems(t *testing.T) {
+	submittedAt := time.Date(2026, 7, 1, 14, 56, 13, 0, time.UTC)
+	workbenchRepo := &profileListRepo{
+		items: []*domain.AssetWorkbenchProfile{
+			{
+				UserID:     77,
+				WorkerType: domain.AssetWorkbenchWorkerTypeParttime,
+				Status:     domain.AssetWorkbenchProfileStatusPending,
+			},
+		},
+		pendingItems: []*domain.AssetWorkbenchSubmissionItem{
+			{
+				ID:               501,
+				SubmissionID:     9001,
+				PayeeUserID:      77,
+				OrderNo:          "6954064249637049871",
+				DifficultyClass:  "A",
+				Finalized:        true,
+				PageCount:        2,
+				ItemCount:        1,
+				BusinessMonth:    "2026-07",
+				SubmittedAt:      submittedAt,
+				PricingStatus:    domain.AssetWorkbenchPricingStatusPendingGrade,
+				QCStatus:         domain.AssetWorkbenchSubmissionStatusSubmitted,
+				SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled,
+			},
+		},
+		price: &domain.AssetWorkbenchPriceMatrix{
+			ID:              99,
+			WorkerType:      domain.AssetWorkbenchWorkerTypeParttime,
+			JobGrade:        "J1",
+			DifficultyClass: "A",
+			UnitPrice:       1.14,
+			EffectiveFrom:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	_, appErr := svc.HRUpsertProfile(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleHRAdmin},
+	}, 77, UpsertProfileParams{
+		WorkerType: domain.AssetWorkbenchWorkerTypeParttime,
+		JobGrade:   "J1",
+		RealName:   "计件人员",
+		Status:     domain.AssetWorkbenchProfileStatusActive,
+		Reason:     "HR 定级",
+	})
+	if appErr != nil {
+		t.Fatalf("HRUpsertProfile() error = %+v", appErr)
+	}
+	item := workbenchRepo.pendingItems[0]
+	if item.WorkerTypeSnapshot != domain.AssetWorkbenchWorkerTypeParttime || item.JobGradeSnapshot != "J1" {
+		t.Fatalf("snapshots = %q/%q, want parttime/J1", item.WorkerTypeSnapshot, item.JobGradeSnapshot)
+	}
+	if item.PricingStatus != domain.AssetWorkbenchPricingStatusPriced || item.GrossAmount != 2.28 {
+		t.Fatalf("pricing = %s gross=%v, want priced 2.28", item.PricingStatus, item.GrossAmount)
+	}
+	if item.BasePriceRuleID == nil || *item.BasePriceRuleID != 99 || item.BaseUnitPrice == nil || *item.BaseUnitPrice != 1.14 {
+		t.Fatalf("price snapshot rule=%v unit=%v, want 99/1.14", item.BasePriceRuleID, item.BaseUnitPrice)
+	}
+	if len(workbenchRepo.refreshed) != 1 || workbenchRepo.refreshed[0] != 9001 {
+		t.Fatalf("refreshed = %+v, want [9001]", workbenchRepo.refreshed)
+	}
+	if len(workbenchRepo.events) != 2 ||
+		workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventProfileUpserted ||
+		workbenchRepo.events[1].EventType != domain.AssetWorkbenchEventItemRepriced {
 		t.Fatalf("events = %+v", workbenchRepo.events)
 	}
 }
