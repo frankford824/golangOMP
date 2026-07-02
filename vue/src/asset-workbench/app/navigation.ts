@@ -4,6 +4,7 @@ import {
   Boxes,
   Calculator,
   FileUp,
+  HardDrive,
   LayoutDashboard,
   Library,
   ReceiptText,
@@ -50,6 +51,7 @@ const DAILY_NAV_DEFS: Array<{ path: string; icon: Component; requires?: readonly
   { path: '/upload', icon: FileUp, requires: assetWorkbenchRouteAccess['/upload'].requiresAnyCapability ?? [] },
   { path: '/submissions', icon: Boxes, requires: assetWorkbenchRouteAccess['/submissions'].requiresAnyCapability ?? [] },
   { path: '/materials', icon: Library, requires: assetWorkbenchRouteAccess['/materials'].requiresAnyCapability ?? [] },
+  { path: '/drive', icon: HardDrive, requires: assetWorkbenchRouteAccess['/drive'].requiresAnyCapability ?? [] },
   { path: '/settlement', icon: ReceiptText, requires: assetWorkbenchRouteAccess['/settlement'].requiresAnyCapability ?? [], hub: 'settlement' },
   { path: '/overview', icon: Search, requires: assetWorkbenchRouteAccess['/overview'].requiresAnyCapability ?? [] },
 ]

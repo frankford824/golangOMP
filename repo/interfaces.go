@@ -398,6 +398,16 @@ type AssetWorkbenchOverviewSearchFilter struct {
 	PageSize    int
 }
 
+type AssetWorkbenchDriveFilter struct {
+	OwnerUserID       *int64
+	UploadDirectoryID *int64
+	Unassigned        bool
+	OrderNo           string
+	Keyword           string
+	Page              int
+	PageSize          int
+}
+
 type AssetWorkbenchPreviewClaim struct {
 	WorkerID string
 	Now      time.Time
@@ -550,6 +560,11 @@ type AssetWorkbenchRepo interface {
 	CreateSubmissionFile(ctx context.Context, tx Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error)
 	RefreshSubmissionTotals(ctx context.Context, tx Tx, submissionID int64) error
 	SearchOverviewRows(ctx context.Context, filter AssetWorkbenchOverviewSearchFilter) ([]*domain.AssetWorkbenchOverviewRow, int64, error)
+	DriveListDirectories(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveDirectory, error)
+	DriveListOrders(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveOrder, error)
+	DriveListFiles(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error)
+	DriveSearchFiles(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error)
+	DriveLocateFile(ctx context.Context, filter AssetWorkbenchDriveFilter, fileID int64) (*domain.AssetWorkbenchDriveFile, error)
 	ListSubmissions(ctx context.Context, filter AssetWorkbenchSubmissionFilter) ([]*domain.AssetWorkbenchSubmission, int64, error)
 	ListSubmissionItems(ctx context.Context, submissionID int64) ([]*domain.AssetWorkbenchSubmissionItem, error)
 	ListSubmissionItemsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)

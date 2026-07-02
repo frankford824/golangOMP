@@ -79,6 +79,13 @@ export const assetWorkbenchRouteAccess = {
     simple: true,
     requiresAnyCapability: ['asset.workbench.material.download', 'asset.workbench.system_search'],
   },
+  '/drive': {
+    label: '素材网盘',
+    subtitle: '目录树 + 分栏浏览与全站搜图',
+    aliases: ['网盘', '素材网盘', '文件夹', 'drive'],
+    simple: true,
+    requiresAnyCapability: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'],
+  },
   '/overview': {
     label: '全站搜索',
     subtitle: '素材/交稿/计件一条搜',

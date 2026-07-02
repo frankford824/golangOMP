@@ -90,6 +90,12 @@ const routes: RouteRecordRaw[] = [
     meta: accessMeta('/materials'),
   },
   {
+    path: '/drive',
+    name: 'asset-drive',
+    component: () => import('./pages/DrivePage.vue'),
+    meta: accessMeta('/drive'),
+  },
+  {
     path: '/overview',
     name: 'asset-overview',
     component: () => import('./pages/OverviewPage.vue'),

@@ -699,6 +699,39 @@ export interface ClientMaterialRow {
   updated_at?: string
 }
 
+export interface DriveDirectoryRow {
+  directory_id?: number | null
+  name: string
+  prefix: string
+  difficulty_class: string
+  file_count: number
+  order_count: number
+}
+
+export interface DriveOrderRow {
+  order_no: string
+  file_count: number
+  latest_at: string
+}
+
+export interface DriveFileRow {
+  id: number
+  submission_id: number
+  submission_item_id: number
+  submission_no: string
+  owner_user_id: number
+  upload_directory_id?: number | null
+  upload_directory_name: string
+  order_no: string
+  original_filename: string
+  file_type: string
+  mime_type: string
+  file_size: number
+  preview_status: string
+  business_month: string
+  created_at: string
+}
+
 export interface PaginatedResult<T> {
   items: T[]
   total: number
@@ -1350,6 +1383,42 @@ export const assetWorkbenchApi = {
 
   async overviewSearch(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<OverviewSearchResult> {
     const res = await http.get<ApiEnvelope<OverviewSearchResult>>('/v1/asset-workbench/overview-search', { params, signal })
+    return unwrap(res.data)
+  },
+
+  async driveDirectories(signal?: AbortSignal): Promise<DriveDirectoryRow[]> {
+    const res = await http.get<ApiEnvelope<DriveDirectoryRow[]>>('/v1/asset-workbench/drive/directories', { signal })
+    return unwrap(res.data)
+  },
+
+  async driveOrders(params: { dir_id?: number; unassigned?: boolean } = {}, signal?: AbortSignal): Promise<DriveOrderRow[]> {
+    const query: Record<string, unknown> = {}
+    if (params.unassigned) query.unassigned = 1
+    else if (params.dir_id) query.dir_id = params.dir_id
+    const res = await http.get<ApiEnvelope<DriveOrderRow[]>>('/v1/asset-workbench/drive/orders', { params: query, signal })
+    return unwrap(res.data)
+  },
+
+  async driveFiles(
+    params: { dir_id?: number; unassigned?: boolean; order_no: string; page?: number; page_size?: number },
+    signal?: AbortSignal,
+  ): Promise<PaginatedResult<DriveFileRow>> {
+    const query: Record<string, unknown> = { order_no: params.order_no }
+    if (params.unassigned) query.unassigned = 1
+    else if (params.dir_id) query.dir_id = params.dir_id
+    if (params.page) query.page = params.page
+    if (params.page_size) query.page_size = params.page_size
+    const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/files', { params: query, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async driveSearch(params: { q: string; page?: number; page_size?: number }, signal?: AbortSignal): Promise<PaginatedResult<DriveFileRow>> {
+    const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/search', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async driveLocate(fileId: number, signal?: AbortSignal): Promise<DriveFileRow> {
+    const res = await http.get<ApiEnvelope<DriveFileRow>>('/v1/asset-workbench/drive/locate', { params: { file_id: fileId }, signal })
     return unwrap(res.data)
   },
 

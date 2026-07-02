@@ -572,6 +572,44 @@ type AssetWorkbenchOverviewRow struct {
 	Meta          json.RawMessage `json:"meta_json,omitempty" db:"meta_json"`
 }
 
+// AssetWorkbenchDriveDirectory is a virtual top-level folder in the netdisk view,
+// aggregated from submission files grouped by their upload directory snapshot.
+type AssetWorkbenchDriveDirectory struct {
+	DirectoryID     *int64 `json:"directory_id,omitempty" db:"directory_id"`
+	Name            string `json:"name" db:"name"`
+	Prefix          string `json:"prefix" db:"prefix"`
+	DifficultyClass string `json:"difficulty_class" db:"difficulty_class"`
+	FileCount       int64  `json:"file_count" db:"file_count"`
+	OrderCount      int64  `json:"order_count" db:"order_count"`
+}
+
+// AssetWorkbenchDriveOrder is a virtual second-level folder keyed by order number.
+type AssetWorkbenchDriveOrder struct {
+	OrderNo   string    `json:"order_no" db:"order_no"`
+	FileCount int64     `json:"file_count" db:"file_count"`
+	LatestAt  time.Time `json:"latest_at" db:"latest_at"`
+}
+
+// AssetWorkbenchDriveFile is a leaf image row carrying its virtual path context so
+// the frontend can render breadcrumbs, locate ("reveal in folder") and jump to batch.
+type AssetWorkbenchDriveFile struct {
+	ID                  int64     `json:"id" db:"id"`
+	SubmissionID        int64     `json:"submission_id" db:"submission_id"`
+	SubmissionItemID    int64     `json:"submission_item_id" db:"submission_item_id"`
+	SubmissionNo        string    `json:"submission_no" db:"submission_no"`
+	OwnerUserID         int64     `json:"owner_user_id" db:"owner_user_id"`
+	UploadDirectoryID   *int64    `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
+	UploadDirectoryName string    `json:"upload_directory_name" db:"upload_directory_name"`
+	OrderNo             string    `json:"order_no" db:"order_no"`
+	OriginalFilename    string    `json:"original_filename" db:"original_filename"`
+	FileType            string    `json:"file_type" db:"file_type"`
+	MimeType            string    `json:"mime_type" db:"mime_type"`
+	FileSize            int64     `json:"file_size" db:"file_size"`
+	PreviewStatus       string    `json:"preview_status" db:"preview_status"`
+	BusinessMonth       string    `json:"business_month" db:"business_month"`
+	CreatedAt           time.Time `json:"created_at" db:"created_at"`
+}
+
 type AssetWorkbenchSettlementBatch struct {
 	ID               int64      `json:"id" db:"id"`
 	BatchNo          string     `json:"batch_no" db:"batch_no"`
