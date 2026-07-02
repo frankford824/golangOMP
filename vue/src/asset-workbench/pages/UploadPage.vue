@@ -136,14 +136,15 @@ const adminUploadLabel = computed(() => {
   if (uploading.value) return '正在上传'
   if (submitting.value) return '正在生成记录'
   if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `生成提交记录 ${uploadedItems.value.length} 个`
-  return '上传文件'
+  if (queue.value.some((item) => item.status === 'failed')) return '重试并生成记录'
+  return '上传并生成记录'
 })
 const adminUploadHint = computed(() => {
   if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
   if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
-  if (queue.value.some((item) => item.status === 'failed')) return '会重试失败文件'
-  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return '文件已上传，生成提交记录后才会进入上传记录'
-  return `将上传 ${formatInt(queue.value.length)} 个文件`
+  if (queue.value.some((item) => item.status === 'failed')) return '会重试失败文件，成功后自动生成提交记录'
+  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return '将生成提交记录，生成后进入上传记录'
+  return `将上传并生成 ${formatInt(queue.value.length)} 个提交记录`
 })
 const submitButtonLabel = computed(() => {
   if (submitting.value) return isSimpleUser.value ? '正在交作品' : '正在创建提交'
@@ -261,19 +262,17 @@ async function uploadQueuedItems() {
   return failed === 0
 }
 
-async function uploadAll() {
-  const ok = await uploadQueuedItems()
-  if (!ok) {
-    error.value = isSimpleUser.value ? '有文件没传成功，请点重试后再交。' : '部分文件上传失败'
-  }
-}
-
 async function runAdminPrimaryAction() {
   if (uploadedItems.value.length > 0 && !hasPendingUploads.value) {
     await createSubmission()
     return
   }
-  await uploadAll()
+  const uploaded = await uploadQueuedItems()
+  if (!uploaded || queue.value.some((item) => item.status === 'failed')) {
+    error.value = '部分文件上传失败'
+    return
+  }
+  await createSubmission()
 }
 
 async function createSubmission() {
@@ -319,6 +318,14 @@ async function submitSimple() {
     }
   }
   await createSubmission()
+}
+
+async function retryAndSubmit() {
+  if (isSimpleUser.value) {
+    await submitSimple()
+    return
+  }
+  await runAdminPrimaryAction()
 }
 
 function selectUploadDirectory(directory: UploadDirectoryRow) {
@@ -423,7 +430,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">{{ isSimpleUser ? '交作品' : '成品交付' }}</p>
         <h2>{{ isSimpleUser ? '把做好的文件交上来' : '成品上传中心' }}</h2>
-        <p>{{ isSimpleUser ? '先选上传目录，再拖入文件。点一次提交，系统会自动处理。' : '批量拖拽文件，提交前校正订单号、难度、页数和定稿状态。' }}</p>
+        <p>{{ isSimpleUser ? '先选上传目录，再拖入文件。点一次提交，系统会自动处理。' : '批量拖拽文件，提交前校正订单号、难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
@@ -491,7 +498,7 @@ onMounted(() => {
     >
       <FileUp :size="30" aria-hidden="true" />
       <strong>{{ queue.length ? '继续拖拽文件到这里' : '拖拽文件到这里' }}</strong>
-      <span>{{ isSimpleUser ? '拖入或选择文件后，点击提交上传会自动完成上传和提交。' : '拖入或选择文件后，先上传文件，再创建提交。' }}</span>
+      <span>{{ isSimpleUser ? '拖入或选择文件后，点击提交上传会自动完成上传和提交。' : '拖入或选择文件后，点击一次即可上传并生成提交记录。' }}</span>
       <div class="aw-dropzone__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
         <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
@@ -591,7 +598,7 @@ onMounted(() => {
         提交：已生成 {{ formatInt(lastSubmissionResult.success) }} 个文件记录。
       </p>
       <div v-if="queue.some((item) => item.status === 'failed')" class="aw-inline-actions">
-        <button class="aw-primary-button" type="button" :disabled="uploading || !canUseUploadDirectory" @click="uploadAll">重试失败文件</button>
+        <button class="aw-primary-button" type="button" :disabled="uploading || submitting || !canUseUploadDirectory" @click="retryAndSubmit">重试并提交</button>
       </div>
       <ul v-if="queue.some((item) => item.status === 'failed')" class="aw-upload-result-list">
         <li v-for="item in queue.filter((entry) => entry.status === 'failed')" :key="item.id">

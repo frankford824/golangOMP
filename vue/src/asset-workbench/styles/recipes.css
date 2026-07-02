@@ -2445,6 +2445,33 @@ body.aw-submission-dialog-locked {
   min-height: 112px;
 }
 
+.aw-material-admin-item--editing {
+  grid-template-columns: minmax(140px, 0.8fr) minmax(180px, 1fr) minmax(108px, 0.5fr) minmax(180px, 1fr) auto auto auto;
+}
+
+.aw-material-admin-item button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aw-space-1);
+  min-height: var(--aw-row-sm);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  padding: 0 var(--aw-space-3);
+  background: var(--aw-surface);
+  color: var(--aw-ink);
+}
+
+.aw-material-admin-item button:hover {
+  border-color: var(--aw-hairline-strong);
+  background: var(--aw-surface-muted);
+}
+
+.aw-material-admin-item--editing input,
+.aw-material-admin-item--editing select {
+  min-height: var(--aw-row-sm);
+}
+
 .aw-material-search--client {
   grid-template-columns: minmax(220px, 1fr) auto;
 }

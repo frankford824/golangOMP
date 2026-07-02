@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Download, FileImage, Grid3X3, List, Search } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Download, FileImage, Grid3X3, List, Pencil, Save, Search, X } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import {
@@ -84,6 +84,15 @@ const directoryName = ref('')
 const directoryPrefix = ref('')
 const directoryDescription = ref('')
 const directoryDifficulty = ref('A')
+const editingDirectoryId = ref(0)
+const directoryEditForm = ref({
+  name: '',
+  oss_prefix: '',
+  description: '',
+  difficulty_class: '',
+  enabled: true,
+  sort_order: 0,
+})
 const directoryDifficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const materialsRequest = usePageRequest(
   (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, page: page.value, page_size: pageSize.value }, signal),
@@ -626,6 +635,9 @@ async function loadUploadDirectoriesAdmin() {
     if (!directoryDifficultyOptions.value.includes(directoryDifficulty.value)) {
       directoryDifficulty.value = firstDifficultyCode(difficultyRows.value)
     }
+    if (editingDirectoryId.value && !directories.some((directory) => directory.id === editingDirectoryId.value)) {
+      cancelUploadDirectoryEdit()
+    }
   } catch (err) {
     pageError.value = err instanceof Error ? err.message : '上传目录加载失败'
   }
@@ -757,6 +769,59 @@ async function createUploadDirectory() {
 async function toggleUploadDirectory(row: UploadDirectoryRow) {
   try {
     await assetWorkbenchApi.updateUploadDirectory(row.id, { enabled: !row.enabled })
+    await loadUploadDirectoriesAdmin()
+  } catch (err) {
+    pageError.value = err instanceof Error ? err.message : '更新上传目录失败'
+  }
+}
+
+function startUploadDirectoryEdit(row: UploadDirectoryRow) {
+  editingDirectoryId.value = row.id
+  directoryEditForm.value = {
+    name: row.name,
+    oss_prefix: row.oss_prefix,
+    description: row.description,
+    difficulty_class: row.difficulty_class || firstDifficultyCode(difficultyRows.value),
+    enabled: row.enabled,
+    sort_order: row.sort_order,
+  }
+}
+
+function cancelUploadDirectoryEdit() {
+  editingDirectoryId.value = 0
+  directoryEditForm.value = {
+    name: '',
+    oss_prefix: '',
+    description: '',
+    difficulty_class: firstDifficultyCode(difficultyRows.value),
+    enabled: true,
+    sort_order: 0,
+  }
+}
+
+async function saveUploadDirectory(row: UploadDirectoryRow) {
+  const name = directoryEditForm.value.name.trim()
+  const ossPrefix = directoryEditForm.value.oss_prefix.trim()
+  if (!name || !ossPrefix) {
+    pageError.value = '目录名称和 OSS 前缀必填'
+    return
+  }
+  if (!directoryEditForm.value.difficulty_class) {
+    pageError.value = '请选择计价分类'
+    return
+  }
+  pageError.value = ''
+  try {
+    await assetWorkbenchApi.updateUploadDirectory(row.id, {
+      name,
+      oss_prefix: ossPrefix,
+      description: directoryEditForm.value.description,
+      difficulty_class: directoryEditForm.value.difficulty_class,
+      enabled: directoryEditForm.value.enabled,
+      sort_order: directoryEditForm.value.sort_order,
+    })
+    notice.value = '上传目录已更新'
+    cancelUploadDirectoryEdit()
     await loadUploadDirectoriesAdmin()
   } catch (err) {
     pageError.value = err instanceof Error ? err.message : '更新上传目录失败'
@@ -1112,12 +1177,43 @@ watch(
         <button class="aw-secondary-button" type="button" @click="createUploadDirectory">创建目录</button>
       </div>
       <div v-if="uploadDirectories.length" class="aw-material-admin-list">
-        <article v-for="directory in uploadDirectories" :key="directory.id" class="aw-material-admin-item">
-          <strong>{{ directory.name }}</strong>
-          <span>{{ directory.oss_prefix }}</span>
-          <span class="aw-chip aw-chip--info">计价 {{ directory.difficulty_class || '未设置' }}</span>
-          <span class="aw-chip" :class="directory.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ directory.enabled ? '已启用' : '已停用' }}</span>
-          <button type="button" @click="toggleUploadDirectory(directory)">{{ directory.enabled ? '停用' : '启用' }}</button>
+        <article
+          v-for="directory in uploadDirectories"
+          :key="directory.id"
+          class="aw-material-admin-item"
+          :class="{ 'aw-material-admin-item--editing': editingDirectoryId === directory.id }"
+        >
+          <template v-if="editingDirectoryId === directory.id">
+            <input v-model="directoryEditForm.name" type="text" aria-label="编辑目录名称" />
+            <input v-model="directoryEditForm.oss_prefix" type="text" aria-label="编辑 OSS 前缀" />
+            <select v-model="directoryEditForm.difficulty_class" aria-label="编辑计价分类">
+              <option v-for="option in directoryDifficultyOptions" :key="option" :value="option">{{ option }}</option>
+            </select>
+            <input v-model="directoryEditForm.description" type="text" aria-label="编辑说明" />
+            <label class="aw-inline-check">
+              <input v-model="directoryEditForm.enabled" type="checkbox" />
+              启用
+            </label>
+            <button type="button" @click="saveUploadDirectory(directory)">
+              <Save :size="16" aria-hidden="true" />
+              保存
+            </button>
+            <button type="button" @click="cancelUploadDirectoryEdit">
+              <X :size="16" aria-hidden="true" />
+              取消
+            </button>
+          </template>
+          <template v-else>
+            <strong>{{ directory.name }}</strong>
+            <span>{{ directory.oss_prefix }}</span>
+            <span class="aw-chip aw-chip--info">计价 {{ directory.difficulty_class || '未设置' }}</span>
+            <span class="aw-chip" :class="directory.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">{{ directory.enabled ? '已启用' : '已停用' }}</span>
+            <button type="button" @click="startUploadDirectoryEdit(directory)">
+              <Pencil :size="16" aria-hidden="true" />
+              编辑
+            </button>
+            <button type="button" @click="toggleUploadDirectory(directory)">{{ directory.enabled ? '停用' : '启用' }}</button>
+          </template>
         </article>
       </div>
       <p v-else class="aw-copy">没有上传目录时，客户端会继续使用默认目录。</p>
