@@ -10,7 +10,6 @@ import {
   FolderOpen,
   HardDrive,
   ImageDown,
-  MoreHorizontal,
   Pencil,
   Plus,
   Search,
@@ -419,6 +418,34 @@ function backToDir() {
   fileTotal.value = 0
   selectedFile.value = null
   selectedFileIds.value = new Set()
+}
+
+function openDirectory(dir: DriveDirectoryRow) {
+  activeMode.value = 'directories'
+  void selectDir(dir)
+}
+
+function goDrivesHome() {
+  activeMode.value = 'directories'
+  resetToRoot()
+}
+
+function openOperational() {
+  activeMode.value = 'operational'
+  selectedFile.value = null
+}
+
+const detailOpen = computed(() =>
+  activeMode.value === 'operational' ? !!activeMaterial.value : !!selectedFile.value,
+)
+
+function closeDetail() {
+  if (activeMode.value === 'operational') {
+    activeMaterial.value = null
+  } else {
+    selectedFile.value = null
+    selectedFileIds.value = new Set()
+  }
 }
 
 async function revealFile(file: DriveFileRow) {
@@ -1020,10 +1047,6 @@ onBeforeUnmount(() => {
           <h2>{{ canManageDrive ? '全站素材网盘' : '我的素材网盘' }}</h2>
         </div>
       </div>
-      <div class="aw-drive__segmented" aria-label="网盘模块">
-        <button type="button" :aria-pressed="activeMode === 'directories'" @click="activeMode = 'directories'">上传目录</button>
-        <button type="button" :aria-pressed="activeMode === 'operational'" :disabled="!canUseOperational" @click="activeMode = 'operational'">运营素材</button>
-      </div>
       <form class="aw-drive__search" @submit.prevent="runUnifiedSearch">
         <Search :size="16" aria-hidden="true" />
         <select v-model="searchScope" aria-label="搜索范围">
@@ -1042,17 +1065,6 @@ onBeforeUnmount(() => {
           <X :size="14" aria-hidden="true" />
         </button>
       </form>
-      <button
-        v-if="activeMode === 'directories'"
-        class="aw-primary-button"
-        type="button"
-        :disabled="!selectedDir"
-        :title="selectedDir ? '上传到当前位置' : '先进入一个上传目录'"
-        @click="openUpload()"
-      >
-        <Upload :size="16" aria-hidden="true" />
-        上传到此处
-      </button>
     </header>
 
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
@@ -1092,45 +1104,28 @@ onBeforeUnmount(() => {
       </ul>
     </section>
 
-    <template v-if="activeMode === 'directories'">
-      <nav class="aw-drive__breadcrumb" aria-label="路径">
-        <button class="aw-drive__crumb" type="button" :class="{ 'is-active': !selectedDir }" @click="resetToRoot">全部</button>
-        <template v-if="selectedDir">
-          <ChevronRight :size="14" aria-hidden="true" />
-          <button class="aw-drive__crumb" type="button" :class="{ 'is-active': selectedOrder == null }" @click="backToDir">
-            {{ selectedDir.name }}
-          </button>
-        </template>
-        <template v-if="selectedDir && selectedOrder != null">
-          <ChevronRight :size="14" aria-hidden="true" />
-          <span class="aw-drive__crumb" :class="{ 'is-active': true }">{{ orderLabel(selectedOrder) }}</span>
-        </template>
-      </nav>
-
-      <div class="aw-drive__body">
-        <div class="aw-drive-column">
-          <p class="aw-drive-column__label">
-            上传目录
+    <div v-show="!searchActive" class="aw-drive__shell" :class="{ 'has-drawer': detailOpen }">
+      <nav class="aw-drive-side" aria-label="网盘导航">
+        <section class="aw-drive-side__group">
+          <p class="aw-drive-side__label">
+            <Folder :size="15" aria-hidden="true" />
+            <span>上传目录</span>
             <button v-if="canManageDrive" class="aw-drive-mini-button" type="button" aria-label="新建上传目录" @click="creatingDirectory = true">
               <Plus :size="14" aria-hidden="true" />
             </button>
           </p>
-          <div class="aw-drive-column__scroll">
-            <form v-if="creatingDirectory" class="aw-drive-inline-form" @submit.prevent="createDirectory">
-              <input v-model.trim="newDirectoryName" placeholder="目录名称" aria-label="目录名称" />
-              <select v-model="newDirectoryDifficulty" aria-label="难度">
-                <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
-              </select>
-              <input
-                v-model.trim="newDirectoryFileTypes"
-                placeholder="允许格式，留空=全部"
-                aria-label="允许上传格式"
-              />
-              <div class="aw-drive-inline-form__actions">
-                <button class="aw-grid-button aw-grid-button--strong" type="submit">创建</button>
-                <button class="aw-grid-button" type="button" @click="creatingDirectory = false">取消</button>
-              </div>
-            </form>
+          <form v-if="creatingDirectory" class="aw-drive-inline-form" @submit.prevent="createDirectory">
+            <input v-model.trim="newDirectoryName" placeholder="目录名称" aria-label="目录名称" />
+            <select v-model="newDirectoryDifficulty" aria-label="难度">
+              <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+            </select>
+            <input v-model.trim="newDirectoryFileTypes" placeholder="允许格式，留空=全部" aria-label="允许上传格式" />
+            <div class="aw-drive-inline-form__actions">
+              <button class="aw-grid-button aw-grid-button--strong" type="submit">创建</button>
+              <button class="aw-grid-button" type="button" @click="creatingDirectory = false">取消</button>
+            </div>
+          </form>
+          <div class="aw-drive-side__list">
             <p v-if="dirLoading" class="aw-drive-empty">加载中…</p>
             <p v-else-if="dirError" class="aw-drive-empty">{{ dirError }}</p>
             <p v-else-if="directories.length === 0" class="aw-drive-empty">暂无上传目录</p>
@@ -1146,11 +1141,7 @@ onBeforeUnmount(() => {
                 <select v-model="directoryEditForm.difficulty_class" aria-label="编辑难度">
                   <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
                 </select>
-                <input
-                  v-model.trim="directoryEditForm.allowed_file_types"
-                  placeholder="允许格式，留空=全部"
-                  aria-label="编辑允许上传格式"
-                />
+                <input v-model.trim="directoryEditForm.allowed_file_types" placeholder="允许格式，留空=全部" aria-label="编辑允许上传格式" />
                 <label class="aw-inline-check">
                   <input v-model="directoryEditForm.enabled" type="checkbox" />
                   <span>启用</span>
@@ -1162,297 +1153,343 @@ onBeforeUnmount(() => {
               </form>
               <button
                 v-else
-                class="aw-drive-column__item"
-                :class="{ 'is-active': selectedDir?.key === dirKey(dir), 'is-disabled': dir.enabled === false }"
+                class="aw-drive-side__item"
+                :class="{ 'is-active': activeMode === 'directories' && selectedDir?.key === dirKey(dir), 'is-disabled': dir.enabled === false }"
                 type="button"
                 @dblclick="startDirectoryEdit(dir)"
-                @click="selectDir(dir)"
+                @click="openDirectory(dir)"
                 @contextmenu.prevent.stop="openContextMenu($event, { kind: 'directory', dir })"
               >
                 <Folder :size="16" aria-hidden="true" />
-                <span class="aw-drive-column__name">{{ dir.name }}</span>
+                <span class="aw-drive-side__name">{{ dir.name }}</span>
                 <span
+                  v-if="dir.allowed_file_types?.length"
                   class="aw-chip aw-chip--subtle aw-drive-column__ext"
-                  :class="{ 'aw-drive-column__ext--all': !dir.allowed_file_types?.length }"
                   :title="allowedFileTypesLabel(dir.allowed_file_types)"
                 >{{ allowedFileTypesLabel(dir.allowed_file_types) }}</span>
                 <span class="aw-chip aw-chip--neutral aw-drive-column__count">{{ dir.file_count }}</span>
-                <MoreHorizontal v-if="canManageDrive && dir.directory_id" :size="14" class="aw-drive-column__chevron" aria-hidden="true" />
               </button>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="aw-drive-column">
-          <p class="aw-drive-column__label">订单·计件</p>
-          <div class="aw-drive-column__scroll">
-            <p v-if="!selectedDir" class="aw-drive-empty">选择一个上传目录</p>
-            <p v-else-if="ordersLoading" class="aw-drive-empty">加载中…</p>
-            <p v-else-if="orders.length === 0" class="aw-drive-empty">暂无订单</p>
-            <button
-              v-for="order in orders"
-              :key="order.order_no || '__empty__'"
-              class="aw-drive-column__item"
-              :class="{ 'is-active': selectedOrder === order.order_no }"
-              type="button"
-              @click="selectOrder(order.order_no)"
-              @dragover.prevent
-              @drop.prevent="dropOnOrder($event, order)"
-              @contextmenu.prevent.stop="openContextMenu($event, { kind: 'order', order })"
-            >
-              <Folder :size="16" aria-hidden="true" />
-              <span class="aw-drive-column__name">{{ orderLabel(order.order_no) }}</span>
-              <span class="aw-chip aw-chip--neutral aw-drive-column__count">{{ order.file_count }}</span>
-              <ChevronRight :size="14" class="aw-drive-column__chevron" aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-
-        <div class="aw-drive-column aw-drive-column--files">
-          <p class="aw-drive-column__label">
-            交稿文件
-            <span v-if="selectedOrder != null && fileTotal > 0" class="aw-drive-column__sub">{{ fileTotal }} 个</span>
+        <section v-if="canUseOperational" class="aw-drive-side__group">
+          <p class="aw-drive-side__label">
+            <ImageDown :size="15" aria-hidden="true" />
+            <span>运营素材</span>
           </p>
-          <div class="aw-drive-column__scroll" @dragover.prevent @drop.prevent="dropOnCurrentOrder">
-            <p v-if="selectedOrder == null" class="aw-drive-empty">选择一个订单</p>
-            <p v-else-if="filesLoading" class="aw-drive-empty">加载中…</p>
-            <div v-else-if="files.length === 0" class="aw-drive-drop">
-              <Upload :size="22" aria-hidden="true" />
-              <span>该订单暂无文件，可拖拽上传到这里</span>
-            </div>
-            <div v-else class="aw-drive-files">
-              <article
-                v-for="file in files"
-                :key="file.id"
-                class="aw-drive-file-card"
-                :class="{
-                  'is-selected': selectedFile?.id === file.id,
-                  'is-highlight': highlightFileId === file.id,
-                }"
-                @contextmenu.prevent.stop="openContextMenu($event, { kind: 'file', file })"
-              >
-                <label class="aw-drive-file-card__check">
-                  <input
-                    type="checkbox"
-                    :checked="selectedFileIds.has(file.id)"
-                    :aria-label="`选择 ${file.original_filename}`"
-                    @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
-                  />
-                </label>
-                <button class="aw-drive-file-card__button" type="button" @click="selectFile(file)" @dblclick="openFilePreview(file)">
-                  <span class="aw-drive-file-card__media">
-                    <DriveThumb :file-id="file.id" :filename="file.original_filename" :mime-type="file.mime_type" :preview-status="file.preview_status" />
-                  </span>
-                  <span class="aw-drive-file-card__name">{{ file.original_filename }}</span>
-                </button>
-              </article>
-            </div>
-          </div>
-          <div v-if="selectedOrder != null" class="aw-drive-pager">
-            <button class="aw-grid-button" type="button" :disabled="filePage <= 1" @click="changePage(-1)">上一页</button>
-            <span>{{ filePage }} / {{ totalPages }}</span>
-            <button class="aw-grid-button" type="button" :disabled="filePage >= totalPages" @click="changePage(1)">下一页</button>
-          </div>
-        </div>
-
-        <aside class="aw-drive__detail">
-          <template v-if="selectedFile">
-            <button class="aw-drive__detail-preview" type="button" @click="openFilePreview(selectedFile)">
-              <DriveThumb :file-id="selectedFile.id" :filename="selectedFile.original_filename" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
-              <span class="aw-drive__detail-hint">点击预览</span>
-            </button>
-            <h3 class="aw-drive__detail-name">{{ selectedFile.original_filename }}</h3>
-            <dl class="aw-material-detail__list">
-              <div><dt>订单号</dt><dd>{{ orderLabel(selectedFile.order_no) }}</dd></div>
-              <div><dt>目录</dt><dd>{{ selectedFile.upload_directory_name }}</dd></div>
-              <div><dt>难度</dt><dd>{{ selectedFile.difficulty_class || '—' }}</dd></div>
-              <div><dt>QC</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
-              <div><dt>计价</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
-              <div><dt>大小</dt><dd>{{ formatSize(selectedFile.file_size) }}</dd></div>
-            </dl>
-            <div class="aw-drive__detail-actions">
-              <button class="aw-primary-button" type="button" @click="downloadFile(selectedFile)">
-                <Download :size="16" aria-hidden="true" />
-                下载
-              </button>
-              <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">{{ selectedFileActionLabel }}打包</button>
-              <button class="aw-secondary-button" type="button" @click="selectAllFilesInOrder">全选当前订单</button>
-            </div>
-            <div v-if="canMaintainItems" class="aw-drive-maintenance">
-              <p class="aw-eyebrow">内联维护</p>
-              <label class="aw-field">
-                <span>订单号</span>
-                <input v-model.trim="itemEditForm.order_no" />
-              </label>
-              <label class="aw-field">
-                <span>难度</span>
-                <select v-model="itemEditForm.difficulty_class">
-                  <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
-                </select>
-              </label>
-              <label class="aw-field">
-                <span>页数</span>
-                <input v-model.number="itemEditForm.page_count" min="1" type="number" />
-              </label>
-              <label class="aw-field">
-                <span>原因</span>
-                <input v-model.trim="maintenanceReason" placeholder="可选，维护记录原因" />
-              </label>
-              <div class="aw-inline-actions">
-                <button class="aw-secondary-button" type="button" @click="saveSelectedItemEdit">保存订单</button>
-                <button class="aw-secondary-button" type="button" @click="setSelectedQC('checked')">
-                  <CheckCircle2 :size="15" aria-hidden="true" />
-                  QC 通过
-                </button>
-                <button class="aw-secondary-button" type="button" @click="setSelectedQC('needs_fix')">需修</button>
-                <button class="aw-secondary-button" type="button" @click="repriceSelectedItem">重计价</button>
-              </div>
-              <template v-if="canManageDrive">
-                <label class="aw-field">
-                  <span>移动到目录</span>
-                  <select v-model.number="moveTargetDirectoryId">
-                    <option :value="0">选择目录</option>
-                    <option v-for="dir in directoryOptions" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
-                  </select>
-                </label>
-                <div class="aw-inline-actions">
-                  <button class="aw-secondary-button" type="button" :disabled="!moveTargetDirectoryId" @click="moveSelectedFiles">移动文件</button>
-                </div>
-                <label class="aw-field">
-                  <span>删除原因</span>
-                  <input v-model.trim="deleteReason" placeholder="删除必须填写原因" />
-                </label>
-                <button class="aw-secondary-button" type="button" :disabled="!deleteReason.trim()" @click="deleteSelectedFiles">
-                  <Trash2 :size="15" aria-hidden="true" />
-                  删除文件
-                </button>
-              </template>
-            </div>
-          </template>
-          <div v-else class="aw-drive-empty aw-drive__detail-empty">
-            选择文件后可预览、下载和维护
-          </div>
-        </aside>
-      </div>
-    </template>
-
-    <section v-else class="aw-drive-operational">
-      <div class="aw-drive-operational__bar">
-        <form class="aw-drive__search" @submit.prevent="loadMaterials()">
-          <Search :size="16" aria-hidden="true" />
-          <input v-model="materialQuery" type="search" placeholder="搜索运营素材：文件名 / SKU / 外部路径" />
           <button
-            v-if="materialQuery"
-            class="aw-drive__search-clear"
+            class="aw-drive-side__item"
+            :class="{ 'is-active': activeMode === 'operational' }"
             type="button"
-            aria-label="清除"
-            @click="materialQuery = ''; loadMaterials()"
+            @click="openOperational"
           >
-            <X :size="14" aria-hidden="true" />
+            <FolderOpen :size="16" aria-hidden="true" />
+            <span class="aw-drive-side__name">全部运营素材</span>
           </button>
-        </form>
-        <button class="aw-primary-button" type="button" @click="loadMaterials()">
-          <Search :size="16" aria-hidden="true" />
-          搜索素材
-        </button>
-      </div>
+        </section>
+      </nav>
 
-      <div class="aw-drive__body aw-drive__body--operational">
-        <div class="aw-drive-column aw-drive-column--ops">
-          <p class="aw-drive-column__label">
-            素材列表
-            <span v-if="materialItems.length" class="aw-drive-column__sub">{{ materialItems.length }} 个</span>
-          </p>
-          <div class="aw-drive-column__scroll">
+      <main class="aw-drive-main">
+        <div class="aw-drive-main__bar">
+          <nav class="aw-drive__breadcrumb" aria-label="路径">
+            <template v-if="activeMode === 'directories'">
+              <button class="aw-drive__crumb" type="button" :class="{ 'is-active': !selectedDir }" @click="goDrivesHome">全部目录</button>
+              <template v-if="selectedDir">
+                <ChevronRight :size="14" aria-hidden="true" />
+                <button class="aw-drive__crumb" type="button" :class="{ 'is-active': selectedOrder == null }" @click="backToDir">{{ selectedDir.name }}</button>
+              </template>
+              <template v-if="selectedDir && selectedOrder != null">
+                <ChevronRight :size="14" aria-hidden="true" />
+                <span class="aw-drive__crumb" :class="{ 'is-active': true }">{{ orderLabel(selectedOrder) }}</span>
+              </template>
+            </template>
+            <span v-else class="aw-drive__crumb" :class="{ 'is-active': true }">运营素材</span>
+          </nav>
+          <div class="aw-drive-main__tools">
+            <template v-if="activeMode === 'directories'">
+              <button v-if="selectedOrder != null" class="aw-secondary-button" type="button" @click="selectAllFilesInOrder">全选</button>
+              <button
+                class="aw-primary-button"
+                type="button"
+                :disabled="!selectedDir"
+                :title="selectedDir ? '上传到当前位置' : '先进入一个上传目录'"
+                @click="openUpload()"
+              >
+                <Upload :size="16" aria-hidden="true" />
+                上传到此处
+              </button>
+            </template>
+            <template v-else>
+              <form class="aw-drive__search aw-drive__search--inline" @submit.prevent="loadMaterials()">
+                <Search :size="16" aria-hidden="true" />
+                <input v-model="materialQuery" type="search" placeholder="按文件名 / SKU / 外部路径过滤" />
+                <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除" @click="materialQuery = ''; loadMaterials()">
+                  <X :size="14" aria-hidden="true" />
+                </button>
+              </form>
+              <button class="aw-primary-button" type="button" @click="loadMaterials()">
+                <Search :size="16" aria-hidden="true" />
+                搜索
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <div class="aw-drive-main__content">
+          <template v-if="activeMode === 'directories'">
+            <template v-if="!selectedDir">
+              <p v-if="dirLoading" class="aw-drive-empty">加载中…</p>
+              <p v-else-if="directories.length === 0" class="aw-drive-empty">暂无上传目录，点击左侧「+」创建</p>
+              <div v-else class="aw-drive-tiles">
+                <button
+                  v-for="dir in directories"
+                  :key="dirKey(dir)"
+                  class="aw-drive-tile"
+                  :class="{ 'is-disabled': dir.enabled === false }"
+                  type="button"
+                  @click="openDirectory(dir)"
+                  @dblclick="startDirectoryEdit(dir)"
+                  @dragover.prevent
+                  @drop.prevent="dropOnDirectory($event, dir)"
+                  @contextmenu.prevent.stop="openContextMenu($event, { kind: 'directory', dir })"
+                >
+                  <Folder :size="34" class="aw-drive-tile__icon" aria-hidden="true" />
+                  <strong class="aw-drive-tile__name">{{ dir.name }}</strong>
+                  <small class="aw-drive-tile__meta">{{ dir.file_count }} 个文件</small>
+                </button>
+              </div>
+            </template>
+
+            <template v-else-if="selectedOrder == null">
+              <p v-if="ordersLoading" class="aw-drive-empty">加载中…</p>
+              <p v-else-if="orders.length === 0" class="aw-drive-empty">该目录暂无订单</p>
+              <div v-else class="aw-drive-tiles">
+                <button
+                  v-for="order in orders"
+                  :key="order.order_no || '__empty__'"
+                  class="aw-drive-tile"
+                  type="button"
+                  @click="selectOrder(order.order_no)"
+                  @dragover.prevent
+                  @drop.prevent="dropOnOrder($event, order)"
+                  @contextmenu.prevent.stop="openContextMenu($event, { kind: 'order', order })"
+                >
+                  <FolderOpen :size="34" class="aw-drive-tile__icon" aria-hidden="true" />
+                  <strong class="aw-drive-tile__name">{{ orderLabel(order.order_no) }}</strong>
+                  <small class="aw-drive-tile__meta">{{ order.file_count }} 个文件</small>
+                </button>
+              </div>
+            </template>
+
+            <template v-else>
+              <p v-if="filesLoading" class="aw-drive-empty">加载中…</p>
+              <div v-else-if="files.length === 0" class="aw-drive-drop" @dragover.prevent @drop.prevent="dropOnCurrentOrder">
+                <Upload :size="26" aria-hidden="true" />
+                <span>该订单暂无文件，可拖拽上传到这里</span>
+              </div>
+              <template v-else>
+                <div class="aw-drive-files aw-drive-files--roomy" @dragover.prevent @drop.prevent="dropOnCurrentOrder">
+                  <article
+                    v-for="file in files"
+                    :key="file.id"
+                    class="aw-drive-file-card"
+                    :class="{ 'is-selected': selectedFile?.id === file.id, 'is-highlight': highlightFileId === file.id }"
+                    @contextmenu.prevent.stop="openContextMenu($event, { kind: 'file', file })"
+                  >
+                    <label class="aw-drive-file-card__check">
+                      <input
+                        type="checkbox"
+                        :checked="selectedFileIds.has(file.id)"
+                        :aria-label="`选择 ${file.original_filename}`"
+                        @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
+                      />
+                    </label>
+                    <button class="aw-drive-file-card__button" type="button" @click="selectFile(file)" @dblclick="openFilePreview(file)">
+                      <span class="aw-drive-file-card__media">
+                        <DriveThumb :file-id="file.id" :filename="file.original_filename" :mime-type="file.mime_type" :preview-status="file.preview_status" />
+                      </span>
+                      <span class="aw-drive-file-card__name">{{ file.original_filename }}</span>
+                    </button>
+                  </article>
+                </div>
+                <div class="aw-drive-pager">
+                  <button class="aw-grid-button" type="button" :disabled="filePage <= 1" @click="changePage(-1)">上一页</button>
+                  <span>{{ filePage }} / {{ totalPages }} · 共 {{ fileTotal }} 个</span>
+                  <button class="aw-grid-button" type="button" :disabled="filePage >= totalPages" @click="changePage(1)">下一页</button>
+                </div>
+              </template>
+            </template>
+          </template>
+
+          <template v-else>
             <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
             <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
             <p v-else-if="materialItems.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
-            <div
-              v-for="asset in materialItems"
-              v-else
-              :key="materialAssetKey(asset)"
-              class="aw-material-row"
-              :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
-              role="button"
-              tabindex="0"
-              @click="selectMaterial(asset)"
-              @keydown.enter.prevent="selectMaterial(asset)"
-              @keydown.space.prevent="selectMaterial(asset)"
-              @dblclick="openMaterialPreview(asset)"
-              @contextmenu.prevent.stop
-            >
-              <label class="aw-material-row__check" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedMaterialIds.has(materialAssetKey(asset))"
-                  :aria-label="`选择 ${titleOf(asset)}`"
-                  @change="toggleMaterial(asset, ($event.target as HTMLInputElement).checked)"
-                />
-              </label>
-              <span class="aw-material-row__thumb">
-                <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
-              </span>
-              <span class="aw-material-row__body">
-                <strong :title="titleOf(asset)">{{ titleOf(asset) }}</strong>
-                <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
-              </span>
-              <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
-            </div>
-          </div>
-        </div>
-
-        <aside class="aw-drive__detail">
-          <template v-if="activeMaterial">
-            <button class="aw-drive__detail-preview" type="button" @click="openMaterialPreview(activeMaterial)">
-              <img
-                v-if="activeMaterialPreviewUrl"
-                :src="activeMaterialPreviewUrl"
-                :alt="titleOf(activeMaterial)"
-                loading="lazy"
-              />
-              <span v-else-if="activeMaterialPreviewLoading" class="aw-drive-thumb__ph" aria-hidden="true" />
-              <ImageDown v-else :size="30" aria-hidden="true" />
-              <span class="aw-drive__detail-hint">点击预览</span>
-            </button>
-            <h3 class="aw-drive__detail-name">{{ titleOf(activeMaterial) }}</h3>
-            <dl class="aw-material-detail__list">
-              <div><dt>来源</dt><dd>{{ sourceLabelOf(activeMaterial) }}</dd></div>
-              <div><dt>SKU</dt><dd>{{ activeMaterial.scope_sku_code || activeMaterial.sku_code || activeMaterial.primary_sku_code || '—' }}</dd></div>
-              <div><dt>文件</dt><dd>{{ activeMaterial.original_filename || activeMaterial.file_name || '—' }}</dd></div>
-              <div><dt>类型</dt><dd>{{ materialTypeLabel(activeMaterial) }}</dd></div>
-              <div><dt>路径</dt><dd>{{ activeMaterial.origin_path || '—' }}</dd></div>
-            </dl>
-            <div class="aw-drive__detail-actions">
-              <button class="aw-primary-button" type="button" @click="openMaterialPreview(activeMaterial)">
-                <ImageDown :size="16" aria-hidden="true" />
-                预览
-              </button>
-              <button class="aw-secondary-button" type="button" @click="downloadMaterial(activeMaterial)">
-                <Download :size="16" aria-hidden="true" />
-                下载
-              </button>
-            </div>
-            <section v-if="canManageDrive" class="aw-drive-maintenance">
-              <p class="aw-eyebrow">发布给客户端 · {{ clientMaterials.length }} 个</p>
-              <div v-if="clientMaterials.length" class="aw-compact-list">
-                <div v-for="material in clientMaterials" :key="material.id" class="aw-compact-list__item">
-                  <div>
-                    <strong>{{ material.title || material.filename_snapshot }}</strong>
-                    <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
-                  </div>
-                  <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
-                  <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
-                </div>
+            <div v-else class="aw-drive-ops-list">
+              <div
+                v-for="asset in materialItems"
+                :key="materialAssetKey(asset)"
+                class="aw-material-row"
+                :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
+                role="button"
+                tabindex="0"
+                @click="selectMaterial(asset)"
+                @keydown.enter.prevent="selectMaterial(asset)"
+                @keydown.space.prevent="selectMaterial(asset)"
+                @dblclick="openMaterialPreview(asset)"
+                @contextmenu.prevent.stop
+              >
+                <label class="aw-material-row__check" @click.stop>
+                  <input
+                    type="checkbox"
+                    :checked="selectedMaterialIds.has(materialAssetKey(asset))"
+                    :aria-label="`选择 ${titleOf(asset)}`"
+                    @change="toggleMaterial(asset, ($event.target as HTMLInputElement).checked)"
+                  />
+                </label>
+                <span class="aw-material-row__thumb">
+                  <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
+                </span>
+                <span class="aw-material-row__body">
+                  <strong :title="titleOf(asset)">{{ titleOf(asset) }}</strong>
+                  <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
+                </span>
+                <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
               </div>
-              <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
-            </section>
+            </div>
           </template>
-          <div v-else class="aw-drive-empty aw-drive__detail-empty">
-            选择左侧素材后，这里显示大图预览、信息与下载
+        </div>
+      </main>
+
+      <aside v-if="detailOpen" class="aw-drive-drawer" aria-label="详情">
+        <template v-if="activeMode === 'directories' && selectedFile">
+          <div class="aw-drive-drawer__head">
+            <p class="aw-eyebrow">文件详情</p>
+            <button class="aw-drive-mini-button" type="button" aria-label="关闭" @click="closeDetail">
+              <X :size="14" aria-hidden="true" />
+            </button>
           </div>
-        </aside>
-      </div>
-    </section>
+          <button class="aw-drive__detail-preview" type="button" @click="openFilePreview(selectedFile)">
+            <DriveThumb :file-id="selectedFile.id" :filename="selectedFile.original_filename" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
+            <span class="aw-drive__detail-hint">点击预览</span>
+          </button>
+          <h3 class="aw-drive__detail-name">{{ selectedFile.original_filename }}</h3>
+          <dl class="aw-material-detail__list">
+            <div><dt>订单号</dt><dd>{{ orderLabel(selectedFile.order_no) }}</dd></div>
+            <div><dt>目录</dt><dd>{{ selectedFile.upload_directory_name }}</dd></div>
+            <div><dt>难度</dt><dd>{{ selectedFile.difficulty_class || '—' }}</dd></div>
+            <div><dt>QC</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
+            <div><dt>计价</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
+            <div><dt>大小</dt><dd>{{ formatSize(selectedFile.file_size) }}</dd></div>
+          </dl>
+          <div class="aw-drive__detail-actions">
+            <button class="aw-primary-button" type="button" @click="downloadFile(selectedFile)">
+              <Download :size="16" aria-hidden="true" />
+              下载
+            </button>
+            <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">{{ selectedFileActionLabel }}打包</button>
+          </div>
+          <div v-if="canMaintainItems" class="aw-drive-maintenance">
+            <p class="aw-eyebrow">内联维护</p>
+            <label class="aw-field">
+              <span>订单号</span>
+              <input v-model.trim="itemEditForm.order_no" />
+            </label>
+            <label class="aw-field">
+              <span>难度</span>
+              <select v-model="itemEditForm.difficulty_class">
+                <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+              </select>
+            </label>
+            <label class="aw-field">
+              <span>页数</span>
+              <input v-model.number="itemEditForm.page_count" min="1" type="number" />
+            </label>
+            <label class="aw-field">
+              <span>原因</span>
+              <input v-model.trim="maintenanceReason" placeholder="可选，维护记录原因" />
+            </label>
+            <div class="aw-inline-actions">
+              <button class="aw-secondary-button" type="button" @click="saveSelectedItemEdit">保存订单</button>
+              <button class="aw-secondary-button" type="button" @click="setSelectedQC('checked')">
+                <CheckCircle2 :size="15" aria-hidden="true" />
+                QC 通过
+              </button>
+              <button class="aw-secondary-button" type="button" @click="setSelectedQC('needs_fix')">需修</button>
+              <button class="aw-secondary-button" type="button" @click="repriceSelectedItem">重计价</button>
+            </div>
+            <template v-if="canManageDrive">
+              <label class="aw-field">
+                <span>移动到目录</span>
+                <select v-model.number="moveTargetDirectoryId">
+                  <option :value="0">选择目录</option>
+                  <option v-for="dir in directoryOptions" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
+                </select>
+              </label>
+              <div class="aw-inline-actions">
+                <button class="aw-secondary-button" type="button" :disabled="!moveTargetDirectoryId" @click="moveSelectedFiles">移动文件</button>
+              </div>
+              <label class="aw-field">
+                <span>删除原因</span>
+                <input v-model.trim="deleteReason" placeholder="删除必须填写原因" />
+              </label>
+              <button class="aw-secondary-button" type="button" :disabled="!deleteReason.trim()" @click="deleteSelectedFiles">
+                <Trash2 :size="15" aria-hidden="true" />
+                删除文件
+              </button>
+            </template>
+          </div>
+        </template>
+
+        <template v-else-if="activeMode === 'operational' && activeMaterial">
+          <div class="aw-drive-drawer__head">
+            <p class="aw-eyebrow">素材详情</p>
+            <button class="aw-drive-mini-button" type="button" aria-label="关闭" @click="closeDetail">
+              <X :size="14" aria-hidden="true" />
+            </button>
+          </div>
+          <button class="aw-drive__detail-preview" type="button" @click="openMaterialPreview(activeMaterial)">
+            <img v-if="activeMaterialPreviewUrl" :src="activeMaterialPreviewUrl" :alt="titleOf(activeMaterial)" loading="lazy" />
+            <span v-else-if="activeMaterialPreviewLoading" class="aw-drive-thumb__ph" aria-hidden="true" />
+            <ImageDown v-else :size="30" aria-hidden="true" />
+            <span class="aw-drive__detail-hint">点击预览</span>
+          </button>
+          <h3 class="aw-drive__detail-name">{{ titleOf(activeMaterial) }}</h3>
+          <dl class="aw-material-detail__list">
+            <div><dt>来源</dt><dd>{{ sourceLabelOf(activeMaterial) }}</dd></div>
+            <div><dt>SKU</dt><dd>{{ activeMaterial.scope_sku_code || activeMaterial.sku_code || activeMaterial.primary_sku_code || '—' }}</dd></div>
+            <div><dt>文件</dt><dd>{{ activeMaterial.original_filename || activeMaterial.file_name || '—' }}</dd></div>
+            <div><dt>类型</dt><dd>{{ materialTypeLabel(activeMaterial) }}</dd></div>
+            <div><dt>路径</dt><dd>{{ activeMaterial.origin_path || '—' }}</dd></div>
+          </dl>
+          <div class="aw-drive__detail-actions">
+            <button class="aw-primary-button" type="button" @click="openMaterialPreview(activeMaterial)">
+              <ImageDown :size="16" aria-hidden="true" />
+              预览
+            </button>
+            <button class="aw-secondary-button" type="button" @click="downloadMaterial(activeMaterial)">
+              <Download :size="16" aria-hidden="true" />
+              下载
+            </button>
+          </div>
+          <section v-if="canManageDrive" class="aw-drive-maintenance">
+            <p class="aw-eyebrow">发布给客户端 · {{ clientMaterials.length }} 个</p>
+            <div v-if="clientMaterials.length" class="aw-compact-list">
+              <div v-for="material in clientMaterials" :key="material.id" class="aw-compact-list__item">
+                <div>
+                  <strong>{{ material.title || material.filename_snapshot }}</strong>
+                  <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
+                </div>
+                <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
+                <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
+              </div>
+            </div>
+            <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
+          </section>
+        </template>
+      </aside>
+    </div>
 
     <div
       v-if="contextMenu"
