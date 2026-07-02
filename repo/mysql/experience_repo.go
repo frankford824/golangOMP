@@ -1228,7 +1228,7 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 	}
 	lastSeenAt := experienceCursorTime(cursor.LastSeenAt)
 	rows, err := r.db.db.QueryContext(ctx, `
-			SELECT id, task_id, COALESCE(flow_review_status, ''), approved_at, rejected_at,
+			SELECT id, task_id, asset_id, COALESCE(flow_review_status, ''), approved_at, rejected_at,
 			       superseded_at, superseded_by_version_id, COALESCE(is_archived, 0), archived_at, cleaned_at,
 			       GREATEST(
 			         created_at,
@@ -1263,24 +1263,33 @@ func (r *experienceRepo) ListExperienceTaskAssetReviewSnapshots(ctx context.Cont
 	out := make([]*domain.ExperienceOutcomeSnapshotRow, 0)
 	for rows.Next() {
 		var id, taskID int64
+		var assetID sql.NullInt64
 		var status string
 		var approvedAt, rejectedAt, supersededAt, archivedAt, cleanedAt sql.NullTime
 		var supersededBy sql.NullInt64
 		var archived bool
 		var sourceUpdatedAt time.Time
-		if err := rows.Scan(&id, &taskID, &status, &approvedAt, &rejectedAt, &supersededAt, &supersededBy, &archived, &archivedAt, &cleanedAt, &sourceUpdatedAt); err != nil {
+		if err := rows.Scan(&id, &taskID, &assetID, &status, &approvedAt, &rejectedAt, &supersededAt, &supersededBy, &archived, &archivedAt, &cleanedAt, &sourceUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan experience task asset review snapshot: %w", err)
 		}
 		taskIDCopy := taskID
+		targetType := "task_asset"
+		targetID := strconv.FormatInt(id, 10)
+		if assetID.Valid && assetID.Int64 > 0 {
+			targetType = "asset"
+			targetID = strconv.FormatInt(assetID.Int64, 10)
+		}
 		out = append(out, &domain.ExperienceOutcomeSnapshotRow{
 			SourceName:      "task_assets_review_snapshot",
 			EntityType:      "task_asset",
 			EntityID:        strconv.FormatInt(id, 10),
 			TaskID:          &taskIDCopy,
-			TargetType:      "task_asset",
-			TargetID:        strconv.FormatInt(id, 10),
+			TargetType:      targetType,
+			TargetID:        targetID,
 			SourceUpdatedAt: sourceUpdatedAt.UTC(),
 			ObservedValue: mustExperienceJSON(map[string]interface{}{
+				"task_asset_id":            id,
+				"asset_id":                 experienceNullableInt64Value(assetID),
 				"flow_review_status":       status,
 				"approved_at":              experienceNullableTimeValue(approvedAt),
 				"rejected_at":              experienceNullableTimeValue(rejectedAt),
@@ -1717,22 +1726,28 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 	if targetType == "" && taskTargetID == "" {
 		return []*domain.ExperienceAttributionCandidate{}, nil
 	}
+	taskFallbackID := ""
+	if taskTargetID != "" && experienceAttributionAllowsTaskFallback(targetType) {
+		taskFallbackID = taskTargetID
+	}
 
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT a.suggestion_event_id, a.suggestion_stable_key, a.suggestion_type, a.suggestion_id,
 		       a.source, a.target_type, a.target_id, a.displayed_at,
 		       COUNT(b.id) AS behavior_count,
-		       COALESCE(MAX(CASE b.action
-		         WHEN 'related_action_done' THEN 5
-		         WHEN 'jump' THEN 5
-		         WHEN 'click' THEN 4
-		         WHEN 'copy' THEN 3
-		         WHEN 'expand' THEN 2
-		         WHEN 'visible' THEN 1
-		         WHEN 'dismiss' THEN -2
-		         WHEN 'ignored_after_timeout' THEN -2
-		         ELSE 0
-		       END), 0) AS behavior_score,
+		       COALESCE(
+		         MIN(CASE WHEN b.action IN ('dismiss', 'ignored_after_timeout') THEN -2 END),
+		         MAX(CASE b.action
+		           WHEN 'related_action_done' THEN 5
+		           WHEN 'jump' THEN 5
+		           WHEN 'click' THEN 4
+		           WHEN 'copy' THEN 3
+		           WHEN 'expand' THEN 2
+		           WHEN 'visible' THEN 1
+		           ELSE 0
+		         END),
+		         0
+		       ) AS behavior_score,
 		       MAX(b.occurred_at) AS latest_behavior_at,
 		       COALESCE(GROUP_CONCAT(DISTINCT b.action ORDER BY b.action SEPARATOR ','), '') AS behavior_actions,
 		       lf.feedback_value, lf.reason_code, lf.created_at
@@ -1756,15 +1771,23 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		         a.source, a.target_type, a.target_id, a.displayed_at,
 		         lf.feedback_value, lf.reason_code, lf.created_at
 		HAVING behavior_count > 0 OR COALESCE(lf.feedback_value, '') <> ''
-		ORDER BY a.displayed_at DESC
+		ORDER BY
+		  CASE
+		    WHEN COALESCE(lf.feedback_value, '') <> '' THEN 0
+		    WHEN behavior_score >= 4 THEN 1
+		    WHEN behavior_score > 0 THEN 2
+		    WHEN behavior_score < 0 THEN 3
+		    ELSE 4
+		  END,
+		  a.displayed_at DESC
 		LIMIT ?`,
 		outcomeAt,
 		from,
 		outcomeAt,
 		targetType,
 		targetID,
-		taskTargetID,
-		taskTargetID,
+		taskFallbackID,
+		taskFallbackID,
 		limit,
 	)
 	if err != nil {
@@ -1808,6 +1831,11 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 	return out, nil
 }
 
+func experienceAttributionAllowsTaskFallback(targetType string) bool {
+	value := strings.TrimSpace(targetType)
+	return value == "" || value == "task" || strings.HasPrefix(value, "task_")
+}
+
 func (r *experienceRepo) CreateExperienceAttribution(ctx context.Context, attribution *domain.ExperienceAttribution) error {
 	if attribution == nil {
 		return fmt.Errorf("experience attribution is nil")
@@ -1841,22 +1869,39 @@ func (r *experienceRepo) CreateExperienceAttribution(ctx context.Context, attrib
 }
 
 func (r *experienceRepo) GetLatestExperienceAttributionForSuggestion(ctx context.Context, suggestionEventID string) (*domain.ExperienceAttribution, error) {
+	return r.GetLatestExperienceAttributionForSuggestionContext(ctx, suggestionEventID, "")
+}
+
+func (r *experienceRepo) GetLatestExperienceAttributionForSuggestionContext(ctx context.Context, suggestionEventID string, suggestionStableKey string) (*domain.ExperienceAttribution, error) {
 	eventID := strings.TrimSpace(suggestionEventID)
-	if eventID == "" {
+	stableKey := strings.TrimSpace(suggestionStableKey)
+	if eventID == "" && stableKey == "" {
 		return nil, nil
 	}
 	row := r.db.db.QueryRowContext(ctx, `
-		SELECT id, suggestion_event_id, suggestion_stable_key, candidate_event_key, outcome_event_key,
-		       status, confidence, score, computed_at, evidence_summary_json, created_at, updated_at
-		FROM experience_attributions
-		WHERE suggestion_event_id = ?
-		  AND status IN (?, ?, ?)
-		ORDER BY computed_at DESC, id DESC
+		SELECT ea.id, ea.suggestion_event_id, ea.suggestion_stable_key, ea.candidate_event_key, ea.outcome_event_key,
+		       ea.status, ea.confidence, ea.score, ea.computed_at, ea.evidence_summary_json, ea.created_at, ea.updated_at
+		FROM experience_attributions ea
+		LEFT JOIN ai_suggestion_events matched_event ON matched_event.suggestion_event_id = ea.suggestion_event_id
+		LEFT JOIN ai_suggestion_events current_event ON current_event.suggestion_event_id = ?
+		WHERE (ea.suggestion_event_id = ?
+		       OR (? <> '' AND ea.suggestion_stable_key = ?
+		           AND current_event.actor_id IS NOT NULL
+		           AND current_event.suggestion_stable_key = ?
+		           AND matched_event.actor_id = current_event.actor_id))
+		  AND ea.status IN (?, ?, ?)
+		ORDER BY CASE WHEN ea.suggestion_event_id = ? THEN 0 ELSE 1 END,
+		         ea.computed_at DESC, ea.id DESC
 		LIMIT 1`,
 		eventID,
+		eventID,
+		stableKey,
+		stableKey,
+		stableKey,
 		domain.ExperienceAttributionStatusPositive,
 		domain.ExperienceAttributionStatusWeak,
 		domain.ExperienceAttributionStatusRejected,
+		eventID,
 	)
 	attribution, err := scanExperienceAttribution(row)
 	if err != nil {
@@ -2040,9 +2085,20 @@ func (r *experienceRepo) CreateExperienceReviewItem(ctx context.Context, item *d
 			item_key, item_type, status, priority, evidence_summary_json
 		) VALUES (?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
-			priority = IF(status = 'open', VALUES(priority), priority),
-			evidence_summary_json = IF(status = 'open', VALUES(evidence_summary_json), evidence_summary_json),
-			updated_at = CURRENT_TIMESTAMP`,
+			priority = IF(status = 'open' OR (
+				status = 'needs_more_data'
+				AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), '')
+			), VALUES(priority), priority),
+			evidence_summary_json = IF(status = 'open' OR (
+				status = 'needs_more_data'
+				AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), '')
+			), VALUES(evidence_summary_json), evidence_summary_json),
+			updated_at = IF(status = 'open' OR (
+				status = 'needs_more_data'
+				AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), '')
+			), CURRENT_TIMESTAMP, updated_at),
+			status = IF(status = 'needs_more_data'
+				AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), ''), VALUES(status), status)`,
 		strings.TrimSpace(item.ItemKey),
 		strings.TrimSpace(item.ItemType),
 		status,
@@ -2202,27 +2258,36 @@ func materializeExperienceApprovedReview(ctx context.Context, tx *sql.Tx, decisi
 		if err != nil || taskID <= 0 {
 			return fmt.Errorf("experience review task target is invalid")
 		}
-		if ok, err := experienceTargetExists(ctx, tx, "tasks", taskID); err != nil {
+		taskSnapshot, err := loadExperienceReviewTaskSnapshot(ctx, tx, taskID)
+		if err != nil {
 			return fmt.Errorf("check experience review task target: %w", err)
-		} else if !ok {
+		}
+		if taskSnapshot == nil {
 			return fmt.Errorf("experience review task target not found")
 		}
+		sourceWatermark := experienceReviewSourceWatermark(outcome)
 		if _, err := tx.ExecContext(ctx, `
-				INSERT INTO task_experience_profiles (
+			INSERT INTO task_experience_profiles (
 				task_id, profile_version, source_event_watermark, task_type, category_code,
 				category_name, task_status, outcome, profile_json, rebuilt_at
-			) VALUES (?, 1, 0, ?, '', '', ?, ?, ?, ?)
+			) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
-				profile_version = VALUES(profile_version),
-				task_type = VALUES(task_type),
-				task_status = VALUES(task_status),
-				outcome = VALUES(outcome),
-				profile_json = VALUES(profile_json),
-				rebuilt_at = VALUES(rebuilt_at),
-				updated_at = CURRENT_TIMESTAMP`,
+				profile_version = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(profile_version), profile_version),
+				task_type = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(task_type), task_type),
+				category_code = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(category_code), category_code),
+				category_name = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(category_name), category_name),
+				task_status = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(task_status), task_status),
+				outcome = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(outcome), outcome),
+				profile_json = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(profile_json), profile_json),
+				rebuilt_at = IF(source_event_watermark <= VALUES(source_event_watermark), VALUES(rebuilt_at), rebuilt_at),
+				updated_at = IF(source_event_watermark <= VALUES(source_event_watermark), CURRENT_TIMESTAMP, updated_at),
+				source_event_watermark = GREATEST(source_event_watermark, VALUES(source_event_watermark))`,
 			taskID,
-			truncateSQLString(experienceStringValue(suggestion, "type"), 64),
-			truncateSQLString(firstNonEmptyString(experienceStringValue(outcome, "outcome"), experienceStringValue(outcome, "action")), 64),
+			sourceWatermark,
+			truncateSQLString(taskSnapshot.TaskType, 64),
+			truncateSQLString(taskSnapshot.CategoryCode, 64),
+			truncateSQLString(taskSnapshot.CategoryName, 128),
+			truncateSQLString(taskSnapshot.TaskStatus, 64),
 			truncateSQLString(experienceStringValue(outcome, "action"), 64),
 			toNullJSONString(payload),
 			time.Now().UTC(),
@@ -2263,6 +2328,44 @@ func materializeExperienceApprovedReview(ctx context.Context, tx *sql.Tx, decisi
 		return fmt.Errorf("experience review target is not materializable")
 	}
 	return nil
+}
+
+type experienceReviewTaskSnapshot struct {
+	TaskType     string
+	TaskStatus   string
+	CategoryCode string
+	CategoryName string
+}
+
+func loadExperienceReviewTaskSnapshot(ctx context.Context, tx *sql.Tx, taskID int64) (*experienceReviewTaskSnapshot, error) {
+	if tx == nil || taskID <= 0 {
+		return nil, nil
+	}
+	var item experienceReviewTaskSnapshot
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(t.task_type, ''), COALESCE(t.task_status, ''),
+		       COALESCE(td.category_code, ''),
+		       COALESCE(NULLIF(td.category_name, ''), NULLIF(td.category, ''), '')
+		FROM tasks t
+		LEFT JOIN task_details td ON td.task_id = t.id
+		WHERE t.id = ?
+		LIMIT 1`, taskID).Scan(&item.TaskType, &item.TaskStatus, &item.CategoryCode, &item.CategoryName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func experienceReviewSourceWatermark(outcome map[string]interface{}) int64 {
+	if value := strings.TrimSpace(experienceStringValue(outcome, "event_time")); value != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+			return parsed.UTC().UnixNano()
+		}
+	}
+	return time.Now().UTC().UnixNano()
 }
 
 func experienceTargetExists(ctx context.Context, tx *sql.Tx, table string, id int64) (bool, error) {

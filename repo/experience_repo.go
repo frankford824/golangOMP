@@ -42,6 +42,7 @@ type ExperienceRepo interface {
 	ListExperienceAttributionCandidates(ctx context.Context, outcome *domain.ExperienceAttributionOutcome, lookback time.Duration, limit int) ([]*domain.ExperienceAttributionCandidate, error)
 	CreateExperienceAttribution(ctx context.Context, attribution *domain.ExperienceAttribution) error
 	GetLatestExperienceAttributionForSuggestion(ctx context.Context, suggestionEventID string) (*domain.ExperienceAttribution, error)
+	GetLatestExperienceAttributionForSuggestionContext(ctx context.Context, suggestionEventID string, suggestionStableKey string) (*domain.ExperienceAttribution, error)
 	ReserveExperienceRateLimit(ctx context.Context, req ExperienceRateLimitRequest) (*domain.ExperienceRateLimitReservation, error)
 	RefundExperienceRateLimit(ctx context.Context, limitKey string) error
 	GetExperienceRateLimit(ctx context.Context, limitKey string, limit int) (*domain.ExperienceRateLimitReservation, error)

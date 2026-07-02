@@ -128,6 +128,107 @@ describe('ExperienceLearningPanel', () => {
     expect(wrapper.text()).not.toContain('加载经验观测失败')
   })
 
+  it('shows a business-safe error when main stats fail', async () => {
+    statsMock.mockRejectedValueOnce(new Error('SQL connection refused'))
+
+    const wrapper = mount(ExperienceLearningPanel)
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('经验观测主指标暂不可用')
+    expect(wrapper.text()).not.toContain('SQL connection refused')
+  })
+
+  it('keeps stats and worker diagnostics visible when sample requests fail', async () => {
+    samplesMock.mockRejectedValueOnce(new Error('samples unavailable')).mockRejectedValueOnce(new Error('effective samples unavailable'))
+
+    const wrapper = mount(ExperienceLearningPanel)
+    await flushPromises()
+    await flushPromises()
+
+    expect(statsMock).toHaveBeenCalled()
+    expect(samplesMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('闭环健康条')
+    expect(wrapper.text()).toContain('反馈率')
+    expect(wrapper.text()).toContain('L2+ 样本暂不可用')
+    expect(wrapper.text()).toContain('样本接口暂不可用')
+    expect(wrapper.text()).toContain('接口暂不可用')
+    expect(wrapper.text()).toContain('L2+ 样本接口暂时失败，不能解读为真实无有效经验。')
+    expect(wrapper.text()).toContain('样本接口暂时失败，不能解读为真实无样本。')
+    expect(wrapper.text()).not.toContain('0 条样本')
+    expect(wrapper.text()).not.toContain('暂无 L2+ 候选')
+    expect(wrapper.text()).not.toContain('暂无样本')
+    expect(wrapper.text()).not.toContain('samples unavailable')
+    expect(wrapper.text()).not.toContain('加载经验观测失败')
+  })
+
+  it('does not count locked worker runs as failures', async () => {
+    statsMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          flags: {
+            ui_enabled: true,
+            capture_enabled: true,
+            ai_feedback_enabled: true,
+            worker_enabled: true,
+            behavior_capture_enabled: true,
+            micro_question_enabled: false,
+            review_materialization_enabled: false,
+            behavior_sample_rate: 1,
+          },
+          total_events: 1,
+          sample_total: 1,
+          displayed_events: 1,
+          locatable_samples: 1,
+          feedback_samples: 0,
+          reasoned_feedback_samples: 0,
+          reusable_samples: 0,
+          feedback_accepted: 0,
+          feedback_partially_accepted: 0,
+          feedback_rejected: 0,
+          outbox_queued: 0,
+          outbox_processing: 0,
+          outbox_processed_24h: 0,
+          outbox_failed_24h: 0,
+          outbox_dead_letter: 0,
+          capture_success_rate_24h: 1,
+          capture_failure_rate_24h: 0,
+          tag_total: 8,
+          tag_enabled: 8,
+          tag_coverage_rate: 1,
+          ai_suggestion_events: 1,
+          ai_feedback_events: 0,
+          ai_feedback_rate: 0,
+          task_profiles: 0,
+          asset_quality_labels: 0,
+          worker_last_runs: [
+            {
+              worker_name: 'attribution',
+              source_name: 'experience_events',
+              started_at: '2026-07-01T08:05:00Z',
+              status: 'locked',
+              scanned_count: 0,
+              enqueued_count: 0,
+              skipped_count: 1,
+              failed_count: 0,
+            },
+          ],
+          generated_at: '2026-07-01T08:00:00Z',
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof experienceApi.stats>>)
+
+    const wrapper = mount(ExperienceLearningPanel)
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('1 个锁定跳过')
+    expect(wrapper.text()).toContain('锁定跳过')
+    expect(wrapper.text()).toContain('1 跳过')
+    expect(wrapper.text()).not.toContain('1 个失败')
+    expect(wrapper.text()).not.toContain('1 个需关注')
+  })
+
   it('keeps the main observation panel usable when reason tags fail', async () => {
     reasonTagsMock.mockRejectedValueOnce(new Error('reason tags unavailable'))
 
@@ -436,6 +537,8 @@ describe('ExperienceLearningPanel', () => {
     await flushPromises()
     await flushPromises()
 
+    expect(wrapper.text()).toContain('队列按 outcome 展示当前最佳候选，不代表全部候选')
+    expect(wrapper.text()).toContain('当前最佳候选；行为次数 1 / 行为分 5')
     const approveButton = wrapper.findAll('button').find((button) => button.text().includes('Shadow 观察中'))
     expect(approveButton?.attributes('disabled')).toBeDefined()
     await approveButton?.trigger('click')

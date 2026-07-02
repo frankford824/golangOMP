@@ -497,7 +497,7 @@ func (r *predictionRepo) searchAssetSuggestions(ctx context.Context, q string, l
 	}
 	args = append(args, limit)
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT COALESCE(ta.asset_id, ta.id) AS asset_id,
+		SELECT ta.id AS task_asset_id, ta.asset_id AS asset_id,
 		       COALESCE(ta.file_name, ''), COALESCE(ta.original_filename, ''),
 		       COALESCE(ta.asset_type, ''), COALESCE(ta.flow_review_status, ''),
 		       COALESCE(ta.task_id, 0), COALESCE(t.task_no, ''), COALESCE(t.product_name_snapshot, ''),
@@ -506,12 +506,10 @@ func (r *predictionRepo) searchAssetSuggestions(ctx context.Context, q string, l
 		LEFT JOIN design_assets da ON da.id = ta.asset_id
 		LEFT JOIN tasks t ON t.id = ta.task_id
 		WHERE `+strings.Join(where, " AND ")+`
-		  AND (
-		    ta.asset_id IS NULL
-		    OR ta.id = COALESCE(da.current_version_id, (
+		  AND ta.asset_id IS NOT NULL
+		  AND ta.id = COALESCE(da.current_version_id, (
 		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
 		    ))
-		  )
 		ORDER BY CASE COALESCE(ta.flow_review_status, '')
 		           WHEN 'approved' THEN 0
 		           WHEN 'pending_review' THEN 1
@@ -526,10 +524,10 @@ func (r *predictionRepo) searchAssetSuggestions(ctx context.Context, q string, l
 	defer rows.Close()
 	out := make([]domain.PredictionSuggestion, 0, limit)
 	for rows.Next() {
-		var assetID, taskID int64
+		var taskAssetID, assetID, taskID int64
 		var fileName, originalName, assetType, flowStatus, taskNo, productName string
 		var createdAt time.Time
-		if err := rows.Scan(&assetID, &fileName, &originalName, &assetType, &flowStatus, &taskID, &taskNo, &productName, &createdAt); err != nil {
+		if err := rows.Scan(&taskAssetID, &assetID, &fileName, &originalName, &assetType, &flowStatus, &taskID, &taskNo, &productName, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan asset prediction suggestion: %w", err)
 		}
 		stateLabel := predictionAssetStateLabel(flowStatus)
@@ -545,6 +543,8 @@ func (r *predictionRepo) searchAssetSuggestions(ctx context.Context, q string, l
 			Confidence:  predictionAssetConfidence(flowStatus),
 			Source:      "资产中心",
 			Metadata: compactMetadata(map[string]string{
+				"task_asset_id":      int64String(taskAssetID),
+				"asset_id":           int64String(assetID),
 				"task_id":            int64String(taskID),
 				"task_no":            taskNo,
 				"asset_type":         assetType,

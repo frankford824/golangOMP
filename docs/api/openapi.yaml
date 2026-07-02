@@ -308,7 +308,7 @@ components:
         finished_at: { type: string, format: date-time, nullable: true }
         status:
           type: string
-          enum: [success, partial, failed]
+          enum: [success, partial, failed, locked]
         scanned_count: { type: integer }
         enqueued_count: { type: integer }
         skipped_count: { type: integer }

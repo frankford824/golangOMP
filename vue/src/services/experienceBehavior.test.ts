@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { experienceApi, type ExperienceClientConfig } from '@/services/api/experienceApi'
+import { getToken } from '@/services/http'
 import {
   configureExperienceBehavior,
   flushExperienceBehaviorQueue,
@@ -25,6 +26,7 @@ vi.mock('@/services/http', () => ({
 
 const behaviorEventsMock = vi.mocked(experienceApi.behaviorEvents)
 const clientConfigMock = vi.mocked(experienceApi.clientConfig)
+const getTokenMock = vi.mocked(getToken)
 
 function clientConfigResponse(data: ExperienceClientConfig): Awaited<ReturnType<typeof experienceApi.clientConfig>> {
   return {
@@ -39,7 +41,9 @@ function clientConfigResponse(data: ExperienceClientConfig): Awaited<ReturnType<
 describe('experienceBehavior', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    vi.unstubAllGlobals()
     resetExperienceBehaviorForTests()
+    getTokenMock.mockReturnValue('')
     clientConfigMock.mockResolvedValue(
       clientConfigResponse({
         ai_feedback_enabled: true,
@@ -263,5 +267,75 @@ describe('experienceBehavior', () => {
         }),
       ],
     })
+  })
+
+  it('flushes queued behavior events with fetch keepalive on page lifecycle events', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    getTokenMock.mockReturnValue('token-1')
+    setExperienceBehaviorEnabled(true)
+    setExperienceBehaviorEnabledSurfaces(['task_detail'])
+    setExperienceBehaviorSampleRate(1)
+
+    recordExperienceBehavior({
+      client_event_id: 'evt-keepalive',
+      page_instance_id: 'page-keepalive',
+      action: 'jump',
+      surface: 'task_detail',
+      target_type: 'task',
+      target_id: '42',
+      suggestion_event_id: 'display-1',
+    })
+    await flushExperienceBehaviorQueue({ keepalive: true })
+
+    expect(behaviorEventsMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/v1/experience/behavior-events:batch',
+      expect.objectContaining({
+        method: 'POST',
+        keepalive: true,
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-1',
+          'Content-Type': 'application/json',
+          'X-Frontend-Version': expect.any(String),
+        }),
+      }),
+    )
+    const request = fetchMock.mock.calls[0][1] as RequestInit
+    expect(JSON.parse(String(request.body))).toEqual({
+      events: [
+        expect.objectContaining({
+          client_event_id: 'evt-keepalive',
+          page_instance_id: 'page-keepalive',
+          action: 'jump',
+          surface: 'task_detail',
+          target_type: 'task',
+          target_id: '42',
+          suggestion_event_id: 'display-1',
+        }),
+      ],
+    })
+  })
+
+  it('swallows keepalive flush failures without falling back into the business API path', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('pagehide transport failed'))
+    vi.stubGlobal('fetch', fetchMock)
+    setExperienceBehaviorEnabled(true)
+    setExperienceBehaviorEnabledSurfaces(['task_detail'])
+    setExperienceBehaviorSampleRate(1)
+
+    recordExperienceBehavior({
+      client_event_id: 'evt-failed-keepalive',
+      page_instance_id: 'page-keepalive',
+      action: 'expand',
+      surface: 'task_detail',
+      target_type: 'task',
+      target_id: '42',
+      suggestion_event_id: 'display-1',
+    })
+
+    await expect(flushExperienceBehaviorQueue({ keepalive: true })).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(behaviorEventsMock).not.toHaveBeenCalled()
   })
 })

@@ -482,7 +482,7 @@ func (s *experienceService) MicroQuestionEligibility(ctx context.Context, actor 
 		result.Reason = "already_answered"
 		return result, nil
 	}
-	supportedAttribution, appErr := s.hasMicroQuestionSupportedAttribution(ctx, suggestionEventID)
+	supportedAttribution, appErr := s.hasMicroQuestionSupportedAttribution(ctx, suggestionEventID, firstNonEmptyExperience(req.SuggestionStableKey, suggestion.SuggestionStableKey))
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -540,7 +540,7 @@ func (s *experienceService) RecordMicroQuestionAnswer(ctx context.Context, actor
 	if answered {
 		return answer, nil
 	}
-	supportedAttribution, appErr := s.hasMicroQuestionSupportedAttribution(ctx, answer.SuggestionEventID)
+	supportedAttribution, appErr := s.hasMicroQuestionSupportedAttribution(ctx, answer.SuggestionEventID, answer.SuggestionStableKey)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -626,11 +626,11 @@ func (s *experienceService) validateMicroQuestionAnswerScope(ctx context.Context
 	return nil
 }
 
-func (s *experienceService) hasMicroQuestionSupportedAttribution(ctx context.Context, suggestionEventID string) (bool, *domain.AppError) {
+func (s *experienceService) hasMicroQuestionSupportedAttribution(ctx context.Context, suggestionEventID string, suggestionStableKey string) (bool, *domain.AppError) {
 	if s == nil || s.repo == nil {
 		return false, domain.NewAppError(domain.ErrCodeInternalError, "experience repo is not configured", nil)
 	}
-	attribution, err := s.repo.GetLatestExperienceAttributionForSuggestion(ctx, suggestionEventID)
+	attribution, err := s.repo.GetLatestExperienceAttributionForSuggestionContext(ctx, suggestionEventID, suggestionStableKey)
 	if err != nil {
 		return false, infraError("load experience attribution for micro question", err)
 	}
@@ -704,6 +704,7 @@ func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit i
 	if s == nil || s.repo == nil || !flags.WorkerEnabled || !flags.CaptureEnabled {
 		return result, nil
 	}
+	startedAt := time.Now().UTC()
 	if limit <= 0 {
 		limit = s.cfg.WorkerBatchSize
 	}
@@ -715,9 +716,12 @@ func (s *experienceService) ProcessOutcomeObservers(ctx context.Context, limit i
 	})
 	if lockErr != nil {
 		result.Failed++
-		return result, infraError("acquire experience outcome observer lock", lockErr)
+		appErr := infraError("acquire experience outcome observer lock", lockErr)
+		s.recordExperienceWorkerRun(ctx, domain.ExperienceWorkerOutcomeObserver, "", startedAt, 0, 0, 0, result.Failed, appErr)
+		return result, appErr
 	}
 	if !locked {
+		s.recordExperienceWorkerLockedRun(ctx, domain.ExperienceWorkerOutcomeObserver, "", startedAt)
 		return result, nil
 	}
 	return result, nil
@@ -1062,6 +1066,7 @@ func (s *experienceService) ProcessAttributions(ctx context.Context, limit int) 
 		return result, appErr
 	}
 	if !locked {
+		s.recordExperienceWorkerLockedRun(ctx, domain.ExperienceWorkerAttribution, "experience_events", startedAt)
 		return result, nil
 	}
 	if runErr != nil {
@@ -1215,6 +1220,7 @@ func (s *experienceService) processAttributionOutcome(ctx context.Context, outco
 		result.Skipped++
 		return true, nil
 	}
+	var bestReviewAttribution *domain.ExperienceAttribution
 	for _, candidate := range candidates {
 		attribution := buildExperienceAttribution(outcome, candidate, time.Now().UTC())
 		if attribution == nil {
@@ -1225,13 +1231,16 @@ func (s *experienceService) processAttributionOutcome(ctx context.Context, outco
 			result.Failed++
 			return true, infraError("create experience attribution", err)
 		}
-		if reviewItem := buildExperienceReviewItem(attribution); reviewItem != nil {
-			if err := s.repo.CreateExperienceReviewItem(ctx, reviewItem); err != nil {
-				result.Failed++
-				return true, infraError("create experience review item", err)
-			}
+		if buildExperienceReviewItem(attribution) != nil && experienceAttributionBetterReviewCandidate(attribution, bestReviewAttribution) {
+			bestReviewAttribution = attribution
 		}
 		result.Created++
+	}
+	if reviewItem := buildExperienceReviewItem(bestReviewAttribution); reviewItem != nil {
+		if err := s.repo.CreateExperienceReviewItem(ctx, reviewItem); err != nil {
+			result.Failed++
+			return true, infraError("create experience review item", err)
+		}
 	}
 	return true, nil
 }
@@ -1302,6 +1311,7 @@ func (s *experienceService) ProcessRetention(ctx context.Context, now time.Time,
 		return result, appErr
 	}
 	if !locked {
+		s.recordExperienceWorkerLockedRun(ctx, domain.ExperienceWorkerRetention, "", startedAt)
 		return result, nil
 	}
 	if runErr != nil {
@@ -1382,6 +1392,26 @@ func (s *experienceService) recordExperienceWorkerRunWithDetails(ctx context.Con
 	}
 	if err := s.repo.CreateExperienceWorkerRun(ctx, run); err != nil {
 		s.logger.Warn("record experience worker run failed", zap.Error(err), zap.String("worker", workerName), zap.String("source", sourceName))
+	}
+}
+
+func (s *experienceService) recordExperienceWorkerLockedRun(ctx context.Context, workerName string, sourceName string, startedAt time.Time) {
+	if s == nil || s.repo == nil {
+		return
+	}
+	finishedAt := time.Now().UTC()
+	run := &domain.ExperienceWorkerRunRecord{
+		WorkerName:   trimMax(strings.TrimSpace(workerName), 96),
+		SourceName:   trimMax(strings.TrimSpace(sourceName), 96),
+		StartedAt:    startedAt.UTC(),
+		FinishedAt:   &finishedAt,
+		Status:       "locked",
+		SkippedCount: 1,
+		LastError:    "worker lock held by another runner",
+		Metadata:     mustServiceJSON(map[string]interface{}{"reason": "lock_held"}),
+	}
+	if err := s.repo.CreateExperienceWorkerRun(ctx, run); err != nil {
+		s.logger.Warn("record locked experience worker run failed", zap.Error(err), zap.String("worker", workerName), zap.String("source", sourceName))
 	}
 }
 
@@ -1473,9 +1503,8 @@ func buildExperienceReviewItem(attribution *domain.ExperienceAttribution) *domai
 	itemKey := trimMax(strings.Join([]string{
 		"attribution",
 		strings.TrimSpace(attribution.OutcomeEventKey),
-		strings.TrimSpace(attribution.SuggestionEventID),
 	}, ":"), 191)
-	if itemKey == "attribution::" {
+	if itemKey == "attribution:" {
 		return nil
 	}
 	return &domain.ExperienceReviewItem{
@@ -1484,6 +1513,35 @@ func buildExperienceReviewItem(attribution *domain.ExperienceAttribution) *domai
 		Status:          domain.ExperienceReviewItemStatusOpen,
 		Priority:        priority,
 		EvidenceSummary: attribution.EvidenceSummary,
+	}
+}
+
+func experienceAttributionBetterReviewCandidate(candidate *domain.ExperienceAttribution, current *domain.ExperienceAttribution) bool {
+	if candidate == nil {
+		return false
+	}
+	if current == nil {
+		return true
+	}
+	if candidate.Score != current.Score {
+		return candidate.Score > current.Score
+	}
+	if strings.TrimSpace(candidate.Confidence) != strings.TrimSpace(current.Confidence) {
+		return experienceAttributionConfidenceRank(candidate.Confidence) > experienceAttributionConfidenceRank(current.Confidence)
+	}
+	return strings.TrimSpace(candidate.SuggestionEventID) < strings.TrimSpace(current.SuggestionEventID)
+}
+
+func experienceAttributionConfidenceRank(confidence string) int {
+	switch strings.TrimSpace(confidence) {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -1598,7 +1656,7 @@ func experienceAttributionScore(outcome *domain.ExperienceAttributionOutcome, ca
 	case domain.ExperienceFeedbackPartiallyAccepted:
 		score += 0.1
 	case domain.ExperienceFeedbackRejected:
-		score -= 0.2
+		score -= 0.45
 	}
 	return clampExperienceScore(score)
 }

@@ -390,8 +390,8 @@ func TestExperienceServiceAssetReviewObserverUsesSemanticOutcome(t *testing.T) {
 			EntityType:      "task_asset",
 			EntityID:        "7001",
 			TaskID:          &taskID,
-			TargetType:      "task_asset",
-			TargetID:        "7001",
+			TargetType:      "asset",
+			TargetID:        "77",
 			SourceUpdatedAt: sourceUpdatedAt,
 			ObservedValue:   json.RawMessage(`{"approved_at":"2026-06-30T08:02:00Z","flow_review_status":"approved","rejected_at":null}`),
 			TerminalState:   string(domain.TaskAssetFlowReviewStatusApproved),
@@ -413,7 +413,7 @@ func TestExperienceServiceAssetReviewObserverUsesSemanticOutcome(t *testing.T) {
 	if event.Action != "asset_review_status_changed" || event.Outcome != "approved" {
 		t.Fatalf("event action/outcome = %s/%s", event.Action, event.Outcome)
 	}
-	if event.TargetType != "task_asset" || event.TargetID != "7001" {
+	if event.TargetType != "asset" || event.TargetID != "77" {
 		t.Fatalf("event target = %s/%s", event.TargetType, event.TargetID)
 	}
 }
@@ -732,6 +732,281 @@ func TestExperienceServiceProcessAttributionsCreatesWeightedCandidate(t *testing
 	}
 }
 
+func TestExperienceServiceProcessAttributionsCreatesOnlyBestReviewItemForOutcome(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{{
+			ID:         9,
+			EventKey:   "outcome:tasks:42:completed",
+			EventTime:  outcomeAt,
+			SourceType: experienceSourceTaskStatusSnapshot,
+			Action:     "task_status_changed",
+			Outcome:    "Completed",
+			TaskID:     experienceInt64Ptr(42),
+			TargetType: "task",
+			TargetID:   "42",
+		}},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{
+			{
+				SuggestionEventID:   "suggestion-weak",
+				SuggestionStableKey: "task|weak|42",
+				SuggestionType:      "task_next_action",
+				SuggestionID:        "weak",
+				TargetType:          "task",
+				TargetID:            "42",
+				DisplayedAt:         outcomeAt.Add(-2 * time.Hour),
+				BehaviorCount:       1,
+				BehaviorScore:       2,
+			},
+			{
+				SuggestionEventID:   "suggestion-best",
+				SuggestionStableKey: "task|best|42",
+				SuggestionType:      "task_next_action",
+				SuggestionID:        "best",
+				TargetType:          "task",
+				TargetID:            "42",
+				DisplayedAt:         outcomeAt.Add(-20 * time.Minute),
+				BehaviorCount:       1,
+				BehaviorScore:       5,
+				FeedbackValue:       domain.ExperienceFeedbackAccepted,
+			},
+		},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessAttributions(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if result.Created != 2 || len(stub.attributions) != 2 {
+		t.Fatalf("result=%+v attributions=%d, want two attribution records", result, len(stub.attributions))
+	}
+	if len(stub.reviewItems) != 1 {
+		t.Fatalf("review items = %+v, want exactly one best candidate", stub.reviewItems)
+	}
+	if stub.reviewItems[0].ItemKey != "attribution:outcome:tasks:42:completed" {
+		t.Fatalf("review item key = %s, want outcome-scoped review item", stub.reviewItems[0].ItemKey)
+	}
+	if !strings.Contains(string(stub.reviewItems[0].EvidenceSummary), "suggestion-best") {
+		t.Fatalf("review item evidence = %s, want best suggestion evidence", stub.reviewItems[0].EvidenceSummary)
+	}
+}
+
+func TestExperienceServiceProcessAttributionsUpdatesSingleReviewItemWhenBestCandidateChanges(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	outcome := &domain.ExperienceAttributionOutcome{
+		ID:         9,
+		EventKey:   "outcome:tasks:42:completed",
+		EventTime:  outcomeAt,
+		SourceType: experienceSourceTaskStatusSnapshot,
+		Action:     "task_status_changed",
+		Outcome:    "Completed",
+		TaskID:     experienceInt64Ptr(42),
+		TargetType: "task",
+		TargetID:   "42",
+	}
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{outcome},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{{
+			SuggestionEventID:   "suggestion-a",
+			SuggestionStableKey: "task|a|42",
+			SuggestionType:      "task_next_action",
+			SuggestionID:        "a",
+			TargetType:          "task",
+			TargetID:            "42",
+			DisplayedAt:         outcomeAt.Add(-30 * time.Minute),
+			BehaviorCount:       1,
+			BehaviorScore:       5,
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	if _, appErr := svc.ProcessAttributions(context.Background(), 10); appErr != nil {
+		t.Fatalf("ProcessAttributions first returned app error: %v", appErr)
+	}
+	stub.attributionCandidates = []*domain.ExperienceAttributionCandidate{{
+		SuggestionEventID:   "suggestion-b",
+		SuggestionStableKey: "task|b|42",
+		SuggestionType:      "task_next_action",
+		SuggestionID:        "b",
+		TargetType:          "task",
+		TargetID:            "42",
+		DisplayedAt:         outcomeAt.Add(-10 * time.Minute),
+		BehaviorCount:       1,
+		BehaviorScore:       5,
+		FeedbackValue:       domain.ExperienceFeedbackAccepted,
+	}}
+	if _, appErr := svc.ProcessAttributions(context.Background(), 10); appErr != nil {
+		t.Fatalf("ProcessAttributions second returned app error: %v", appErr)
+	}
+	if len(stub.reviewItems) != 1 {
+		t.Fatalf("review items = %+v, want one outcome-scoped item after reprocess", stub.reviewItems)
+	}
+	if stub.reviewItems[0].ItemKey != "attribution:outcome:tasks:42:completed" {
+		t.Fatalf("review item key = %s, want stable outcome-scoped key", stub.reviewItems[0].ItemKey)
+	}
+	evidence := string(stub.reviewItems[0].EvidenceSummary)
+	if !strings.Contains(evidence, "suggestion-b") || strings.Contains(evidence, "suggestion-a") {
+		t.Fatalf("review evidence = %s, want updated best candidate evidence", evidence)
+	}
+}
+
+func TestExperienceServiceProcessAttributionsReopensNeedsMoreDataReviewItemWithNewEvidence(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{{
+			ID:         9,
+			EventKey:   "outcome:tasks:42:completed",
+			EventTime:  outcomeAt,
+			SourceType: experienceSourceTaskStatusSnapshot,
+			Action:     "task_status_changed",
+			Outcome:    "Completed",
+			TaskID:     experienceInt64Ptr(42),
+			TargetType: "task",
+			TargetID:   "42",
+		}},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{{
+			SuggestionEventID:   "suggestion-accepted",
+			SuggestionStableKey: "task|accepted|42",
+			SuggestionType:      "task_next_action",
+			SuggestionID:        "accepted",
+			TargetType:          "task",
+			TargetID:            "42",
+			DisplayedAt:         outcomeAt.Add(-15 * time.Minute),
+			BehaviorCount:       1,
+			BehaviorScore:       5,
+			FeedbackValue:       domain.ExperienceFeedbackAccepted,
+		}},
+		reviewItems: []*domain.ExperienceReviewItem{{
+			ItemKey:         "attribution:outcome:tasks:42:completed",
+			ItemType:        "attribution_candidate",
+			Status:          domain.ExperienceReviewItemStatusNeedsMoreData,
+			Priority:        "medium",
+			EvidenceSummary: []byte(`{"suggestion":{"event_id":"old"}}`),
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	if _, appErr := svc.ProcessAttributions(context.Background(), 10); appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if len(stub.reviewItems) != 1 {
+		t.Fatalf("review items = %+v, want one reopened item", stub.reviewItems)
+	}
+	if stub.reviewItems[0].Status != domain.ExperienceReviewItemStatusOpen {
+		t.Fatalf("review item status = %s, want reopened open", stub.reviewItems[0].Status)
+	}
+	evidence := string(stub.reviewItems[0].EvidenceSummary)
+	if !strings.Contains(evidence, "suggestion-accepted") || strings.Contains(evidence, `"old"`) {
+		t.Fatalf("review evidence = %s, want new accepted evidence", evidence)
+	}
+}
+
+func TestExperienceServiceProcessAttributionsKeepsNeedsMoreDataWhenEvidenceUnchanged(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	outcome := &domain.ExperienceAttributionOutcome{
+		ID:         9,
+		EventKey:   "outcome:tasks:42:completed",
+		EventTime:  outcomeAt,
+		SourceType: experienceSourceTaskStatusSnapshot,
+		Action:     "task_status_changed",
+		Outcome:    "Completed",
+		TaskID:     experienceInt64Ptr(42),
+		TargetType: "task",
+		TargetID:   "42",
+	}
+	candidate := &domain.ExperienceAttributionCandidate{
+		SuggestionEventID:   "suggestion-accepted",
+		SuggestionStableKey: "task|accepted|42",
+		SuggestionType:      "task_next_action",
+		SuggestionID:        "accepted",
+		TargetType:          "task",
+		TargetID:            "42",
+		DisplayedAt:         outcomeAt.Add(-15 * time.Minute),
+		BehaviorCount:       1,
+		BehaviorScore:       5,
+		FeedbackValue:       domain.ExperienceFeedbackAccepted,
+	}
+	attribution := buildExperienceAttribution(outcome, candidate, outcomeAt.Add(time.Minute))
+	reviewItem := buildExperienceReviewItem(attribution)
+	if reviewItem == nil {
+		t.Fatal("review item = nil, want materializable attribution")
+	}
+	stub := &experienceRepoStub{
+		attributionOutcomes:   []*domain.ExperienceAttributionOutcome{outcome},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{candidate},
+		reviewItems: []*domain.ExperienceReviewItem{{
+			ItemKey:         reviewItem.ItemKey,
+			ItemType:        reviewItem.ItemType,
+			Status:          domain.ExperienceReviewItemStatusNeedsMoreData,
+			Priority:        reviewItem.Priority,
+			EvidenceSummary: append([]byte(nil), reviewItem.EvidenceSummary...),
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	if _, appErr := svc.ProcessAttributions(context.Background(), 10); appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if len(stub.reviewItems) != 1 {
+		t.Fatalf("review items = %+v, want one item", stub.reviewItems)
+	}
+	if stub.reviewItems[0].Status != domain.ExperienceReviewItemStatusNeedsMoreData {
+		t.Fatalf("review item status = %s, want unchanged needs_more_data", stub.reviewItems[0].Status)
+	}
+	if string(stub.reviewItems[0].EvidenceSummary) != string(reviewItem.EvidenceSummary) {
+		t.Fatalf("review evidence changed = %s, want unchanged %s", stub.reviewItems[0].EvidenceSummary, reviewItem.EvidenceSummary)
+	}
+}
+
+func TestExperienceServiceProcessAttributionsDoesNotReviewRejectedFeedbackDespiteJump(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{{
+			ID:         9,
+			EventKey:   "outcome:tasks:42:completed",
+			EventTime:  outcomeAt,
+			SourceType: experienceSourceTaskStatusSnapshot,
+			Action:     "task_status_changed",
+			Outcome:    "Completed",
+			TaskID:     experienceInt64Ptr(42),
+			TargetType: "task",
+			TargetID:   "42",
+		}},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{{
+			SuggestionEventID:   "suggestion-rejected",
+			SuggestionStableKey: "task|rejected|42",
+			SuggestionType:      "task_next_action",
+			SuggestionID:        "rejected",
+			TargetType:          "task",
+			TargetID:            "42",
+			DisplayedAt:         outcomeAt.Add(-20 * time.Minute),
+			BehaviorCount:       2,
+			BehaviorScore:       5,
+			BehaviorActions:     []string{domain.ExperienceBehaviorActionJump, domain.ExperienceBehaviorActionDismiss},
+			FeedbackValue:       domain.ExperienceFeedbackRejected,
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessAttributions(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if result.Created != 1 || len(stub.attributions) != 1 {
+		t.Fatalf("result=%+v attributions=%d, want one attribution record", result, len(stub.attributions))
+	}
+	if stub.attributions[0].Status != domain.ExperienceAttributionStatusRejected {
+		t.Fatalf("attribution status=%s score=%f, want rejected attribution for explicit negative feedback", stub.attributions[0].Status, stub.attributions[0].Score)
+	}
+	if len(stub.reviewItems) != 0 {
+		t.Fatalf("review items = %+v, want no review item for rejected feedback", stub.reviewItems)
+	}
+	if !experienceAttributionSupportsMicroQuestion(stub.attributions[0]) {
+		t.Fatalf("attribution evidence = %s, want rejected feedback to support micro question", stub.attributions[0].EvidenceSummary)
+	}
+}
+
 func TestExperienceServiceProcessAttributionsPreservesBehaviorActionsForMicroQuestion(t *testing.T) {
 	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	displayedAt := outcomeAt.Add(-30 * time.Minute)
@@ -756,7 +1031,7 @@ func TestExperienceServiceProcessAttributionsPreservesBehaviorActionsForMicroQue
 			TargetID:            "42",
 			DisplayedAt:         displayedAt,
 			BehaviorCount:       2,
-			BehaviorScore:       1,
+			BehaviorScore:       -2,
 			BehaviorActions:     []string{domain.ExperienceBehaviorActionIgnoredAfter, domain.ExperienceBehaviorActionVisible},
 		}},
 	}
@@ -768,6 +1043,9 @@ func TestExperienceServiceProcessAttributionsPreservesBehaviorActionsForMicroQue
 	}
 	if result.Created != 1 || len(stub.attributions) != 1 {
 		t.Fatalf("result=%+v attributions=%d, want one attribution", result, len(stub.attributions))
+	}
+	if stub.attributions[0].Status != domain.ExperienceAttributionStatusRejected || len(stub.reviewItems) != 0 {
+		t.Fatalf("attribution=%+v reviewItems=%+v, want rejected micro-question candidate only", stub.attributions[0], stub.reviewItems)
 	}
 	if !experienceAttributionSupportsMicroQuestion(stub.attributions[0]) {
 		t.Fatalf("attribution evidence = %s, want ignored action to support micro question", stub.attributions[0].EvidenceSummary)
@@ -896,6 +1174,47 @@ func TestExperienceServiceProcessAttributionsSkipsReviewItemForNonMaterializable
 	}
 }
 
+func TestExperienceServiceProcessAttributionsCreatesReviewItemForCanonicalAssetTarget(t *testing.T) {
+	outcomeAt := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	stub := &experienceRepoStub{
+		attributionOutcomes: []*domain.ExperienceAttributionOutcome{{
+			ID:         9,
+			EventKey:   "outcome:asset:77:approved",
+			EventTime:  outcomeAt,
+			SourceType: experienceSourceTaskAssetReviewSnapshot,
+			Action:     "asset_review_status_changed",
+			Outcome:    "approved",
+			TaskID:     experienceInt64Ptr(42),
+			TargetType: "asset",
+			TargetID:   "77",
+		}},
+		attributionCandidates: []*domain.ExperienceAttributionCandidate{{
+			SuggestionEventID:   "asset-display-1",
+			SuggestionStableKey: "asset|review|workflow|asset|77",
+			SuggestionType:      "asset",
+			SuggestionID:        "review-asset",
+			TargetType:          "asset",
+			TargetID:            "77",
+			DisplayedAt:         outcomeAt.Add(-30 * time.Minute),
+			BehaviorCount:       1,
+			BehaviorScore:       5,
+			FeedbackValue:       domain.ExperienceFeedbackAccepted,
+		}},
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessAttributions(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if result.Created != 1 || len(stub.attributions) != 1 {
+		t.Fatalf("result=%+v attributions=%d, want canonical asset attribution", result, len(stub.attributions))
+	}
+	if len(stub.reviewItems) != 1 || stub.reviewItems[0].ItemKey != "attribution:outcome:asset:77:approved" || !strings.Contains(string(stub.reviewItems[0].EvidenceSummary), "asset-display-1") {
+		t.Fatalf("review items = %+v, want materializable asset review item", stub.reviewItems)
+	}
+}
+
 func TestExperienceServiceProcessOutcomeObserversSkipsWhenWorkerLockHeld(t *testing.T) {
 	now := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	stub := &experienceRepoStub{
@@ -924,6 +1243,33 @@ func TestExperienceServiceProcessOutcomeObserversSkipsWhenWorkerLockHeld(t *test
 	if strings.Join(stub.workerLockNames, ",") != domain.ExperienceWorkerOutcomeObserver {
 		t.Fatalf("worker locks = %v, want outcome observer lock", stub.workerLockNames)
 	}
+	if len(stub.workerRuns) != 1 || stub.workerRuns[0].Status != "locked" || stub.workerRuns[0].SkippedCount != 1 {
+		t.Fatalf("worker runs = %+v, want locked skip run", stub.workerRuns)
+	}
+}
+
+func TestExperienceServiceProcessOutcomeObserversRecordsRunWhenWorkerLockErrors(t *testing.T) {
+	stub := &experienceRepoStub{
+		workerLockErr: errors.New("lock backend unavailable"),
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessOutcomeObservers(context.Background(), 10)
+	if appErr == nil {
+		t.Fatalf("ProcessOutcomeObservers appErr = nil, want lock error")
+	}
+	if result.Failed != 1 {
+		t.Fatalf("result=%+v, want failed lock acquisition", result)
+	}
+	if strings.Join(stub.workerLockNames, ",") != domain.ExperienceWorkerOutcomeObserver {
+		t.Fatalf("worker locks = %v, want outcome observer lock", stub.workerLockNames)
+	}
+	if len(stub.workerRuns) != 1 || stub.workerRuns[0].Status != "failed" || stub.workerRuns[0].FailedCount != 1 {
+		t.Fatalf("worker runs = %+v, want failed lock acquisition run", stub.workerRuns)
+	}
+	if !strings.Contains(stub.workerRuns[0].LastError, "acquire experience outcome observer lock") {
+		t.Fatalf("worker run error = %q, want lock context", stub.workerRuns[0].LastError)
+	}
 }
 
 func TestExperienceServiceProcessAttributionsSkipsWhenWorkerLockHeld(t *testing.T) {
@@ -947,6 +1293,9 @@ func TestExperienceServiceProcessAttributionsSkipsWhenWorkerLockHeld(t *testing.
 	if strings.Join(stub.workerLockNames, ",") != domain.ExperienceWorkerAttribution {
 		t.Fatalf("worker locks = %v, want attribution lock", stub.workerLockNames)
 	}
+	if len(stub.workerRuns) != 1 || stub.workerRuns[0].Status != "locked" || stub.workerRuns[0].SkippedCount != 1 {
+		t.Fatalf("worker runs = %+v, want locked skip run", stub.workerRuns)
+	}
 }
 
 func TestExperienceServiceProcessRetentionSkipsWhenWorkerLockHeld(t *testing.T) {
@@ -968,6 +1317,9 @@ func TestExperienceServiceProcessRetentionSkipsWhenWorkerLockHeld(t *testing.T) 
 	}
 	if strings.Join(stub.workerLockNames, ",") != domain.ExperienceWorkerRetention {
 		t.Fatalf("worker locks = %v, want retention lock", stub.workerLockNames)
+	}
+	if len(stub.workerRuns) != 1 || stub.workerRuns[0].Status != "locked" || stub.workerRuns[0].SkippedCount != 1 {
+		t.Fatalf("worker runs = %+v, want locked skip run", stub.workerRuns)
 	}
 }
 
@@ -1172,6 +1524,46 @@ func TestExperienceServiceMicroQuestionEligibilityDoesNotConsumeRateLimit(t *tes
 	}
 	if !result.Eligible || result.AnswerEventKey == "" {
 		t.Fatalf("eligibility = %+v, want eligible with answer key", result)
+	}
+	if stub.reserveCalls != 0 {
+		t.Fatalf("reserve calls = %d, want 0 for non-consuming eligibility", stub.reserveCalls)
+	}
+}
+
+func TestExperienceServiceMicroQuestionEligibilityUsesStableAttributionAfterRefresh(t *testing.T) {
+	attribution := supportedMicroQuestionAttribution("display-old", domain.ExperienceFeedbackRejected)
+	attribution.SuggestionStableKey = "stable-1"
+	stub := &experienceRepoStub{
+		aiEventsByID: map[string]*domain.AISuggestionEvent{
+			"display-new": {
+				SuggestionEventID:   "display-new",
+				SuggestionStableKey: "stable-1",
+				AttributionEligible: true,
+				TargetType:          "task",
+				TargetID:            "42",
+				ActorID:             experienceInt64Ptr(291),
+			},
+		},
+		microQuestionAttribution: attribution,
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{
+		UIEnabled:            true,
+		CaptureEnabled:       true,
+		MicroQuestionEnabled: true,
+		EnabledSurfaces:      []string{"task_detail"},
+	}, zap.NewNop())
+
+	result, appErr := svc.MicroQuestionEligibility(context.Background(), domain.RequestActor{ID: 291}, ExperienceMicroQuestionEligibilityRequest{
+		SuggestionEventID: "display-new",
+		Surface:           "task_detail",
+		TargetType:        "task",
+		TargetID:          "42",
+	})
+	if appErr != nil {
+		t.Fatalf("MicroQuestionEligibility returned app error: %v", appErr)
+	}
+	if !result.Eligible || !strings.Contains(result.AnswerEventKey, "microq:") {
+		t.Fatalf("eligibility = %+v, want refreshed suggestion eligible via stable attribution", result)
 	}
 	if stub.reserveCalls != 0 {
 		t.Fatalf("reserve calls = %d, want 0 for non-consuming eligibility", stub.reserveCalls)
@@ -2155,12 +2547,16 @@ type experienceRepoStub struct {
 	reviewDecisions           []*domain.ExperienceReviewDecision
 	createReviewDecisionErr   error
 	workerLockBlocked         bool
+	workerLockErr             error
 	workerLockNames           []string
 	onGetWatermark            func(workerName, sourceName string)
 }
 
 func (s *experienceRepoStub) RunWithExperienceWorkerLock(ctx context.Context, lockName string, _ time.Duration, fn repo.ExperienceWorkerLockFunc) (bool, error) {
 	s.workerLockNames = append(s.workerLockNames, lockName)
+	if s.workerLockErr != nil {
+		return false, s.workerLockErr
+	}
 	if s.workerLockBlocked {
 		return false, nil
 	}
@@ -2388,11 +2784,19 @@ func (s *experienceRepoStub) CreateExperienceAttribution(_ context.Context, attr
 }
 
 func (s *experienceRepoStub) GetLatestExperienceAttributionForSuggestion(_ context.Context, suggestionEventID string) (*domain.ExperienceAttribution, error) {
+	return s.GetLatestExperienceAttributionForSuggestionContext(context.Background(), suggestionEventID, "")
+}
+
+func (s *experienceRepoStub) GetLatestExperienceAttributionForSuggestionContext(_ context.Context, suggestionEventID string, suggestionStableKey string) (*domain.ExperienceAttribution, error) {
 	s.calls++
 	if s.microQuestionAttribution == nil {
 		return nil, nil
 	}
-	if strings.TrimSpace(s.microQuestionAttribution.SuggestionEventID) != strings.TrimSpace(suggestionEventID) {
+	if strings.TrimSpace(s.microQuestionAttribution.SuggestionEventID) == strings.TrimSpace(suggestionEventID) {
+		copied := *s.microQuestionAttribution
+		return &copied, nil
+	}
+	if strings.TrimSpace(suggestionStableKey) == "" || strings.TrimSpace(s.microQuestionAttribution.SuggestionStableKey) != strings.TrimSpace(suggestionStableKey) {
 		return nil, nil
 	}
 	copied := *s.microQuestionAttribution
@@ -2492,9 +2896,13 @@ func (s *experienceRepoStub) CreateExperienceReviewItem(_ context.Context, item 
 	}
 	for _, existing := range s.reviewItems {
 		if existing.ItemKey == item.ItemKey {
-			if existing.Status == "" || existing.Status == domain.ExperienceReviewItemStatusOpen {
+			evidenceChanged := string(existing.EvidenceSummary) != string(item.EvidenceSummary)
+			if existing.Status == "" || existing.Status == domain.ExperienceReviewItemStatusOpen || (existing.Status == domain.ExperienceReviewItemStatusNeedsMoreData && evidenceChanged) {
 				existing.Priority = item.Priority
 				existing.EvidenceSummary = item.EvidenceSummary
+				if existing.Status == domain.ExperienceReviewItemStatusNeedsMoreData && evidenceChanged {
+					existing.Status = item.Status
+				}
 			}
 			return nil
 		}

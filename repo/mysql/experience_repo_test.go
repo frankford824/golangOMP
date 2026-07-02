@@ -274,9 +274,13 @@ func TestExperienceRepoListAttributionCandidatesFallsBackToTaskSuggestionWhenOut
 		for _, fragment := range []string{
 			"FROM ai_suggestion_events a",
 			"GROUP_CONCAT(DISTINCT b.action",
+			"MIN(CASE WHEN b.action IN ('dismiss', 'ignored_after_timeout') THEN -2 END)",
 			"(a.target_type = ? AND a.target_id = ?)",
 			"OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)",
 			"HAVING behavior_count > 0 OR COALESCE(lf.feedback_value, '') <> ''",
+			"WHEN COALESCE(lf.feedback_value, '') <> '' THEN 0",
+			"WHEN behavior_score >= 4 THEN 1",
+			"ELSE 4 END, a.displayed_at DESC",
 		} {
 			if !strings.Contains(normalized, fragment) {
 				return fmt.Errorf("attribution candidates SQL missing %q: %s", fragment, normalized)
@@ -343,6 +347,126 @@ func TestExperienceRepoListAttributionCandidatesFallsBackToTaskSuggestionWhenOut
 	}
 }
 
+func TestExperienceRepoListAttributionCandidatesDoesNotFallbackForCanonicalAssetTarget(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		if expectedSQL != "asset-attribution-candidates" {
+			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
+		}
+		for _, fragment := range []string{
+			"(a.target_type = ? AND a.target_id = ?)",
+			"OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)",
+		} {
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("asset attribution candidates SQL missing %q: %s", fragment, normalized)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	outcomeAt := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	from := outcomeAt.Add(-7 * 24 * time.Hour)
+	taskID := int64(42)
+	mock.ExpectQuery("asset-attribution-candidates").
+		WithArgs(
+			outcomeAt,
+			from,
+			outcomeAt,
+			"asset",
+			"77",
+			"",
+			"",
+			20,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"suggestion_event_id", "suggestion_stable_key", "suggestion_type", "suggestion_id",
+			"source", "target_type", "target_id", "displayed_at", "behavior_count", "behavior_score",
+			"latest_behavior_at", "behavior_actions", "feedback_value", "reason_code", "created_at",
+		}).AddRow(
+			"asset-display-1",
+			"asset|review|workflow|asset|77",
+			"asset",
+			"asset-77",
+			"资产中心",
+			"asset",
+			"77",
+			outcomeAt.Add(-30*time.Minute),
+			1,
+			5,
+			outcomeAt.Add(-5*time.Minute),
+			"jump",
+			"",
+			"",
+			nil,
+		))
+
+	repo := NewExperienceRepo(New(db))
+	candidates, err := repo.ListExperienceAttributionCandidates(context.Background(), &domain.ExperienceAttributionOutcome{
+		EventTime:  outcomeAt,
+		TaskID:     &taskID,
+		TargetType: "asset",
+		TargetID:   "77",
+	}, 7*24*time.Hour, 20)
+	if err != nil {
+		t.Fatalf("ListExperienceAttributionCandidates() error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].TargetType != "asset" || candidates[0].TargetID != "77" {
+		t.Fatalf("candidates = %+v, want canonical asset suggestion only", candidates)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestExperienceRepoListAttributionCandidatesDoesNotFallbackForUnknownTargetType(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	outcomeAt := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	from := outcomeAt.Add(-7 * 24 * time.Hour)
+	taskID := int64(42)
+	mock.ExpectQuery("SELECT a.suggestion_event_id").
+		WithArgs(
+			outcomeAt,
+			from,
+			outcomeAt,
+			"unexpected_child",
+			"7001",
+			"",
+			"",
+			20,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"suggestion_event_id", "suggestion_stable_key", "suggestion_type", "suggestion_id",
+			"source", "target_type", "target_id", "displayed_at", "behavior_count", "behavior_score",
+			"latest_behavior_at", "behavior_actions", "feedback_value", "reason_code", "created_at",
+		}))
+
+	repo := NewExperienceRepo(New(db))
+	candidates, err := repo.ListExperienceAttributionCandidates(context.Background(), &domain.ExperienceAttributionOutcome{
+		EventTime:  outcomeAt,
+		TaskID:     &taskID,
+		TargetType: "unexpected_child",
+		TargetID:   "7001",
+	}, 7*24*time.Hour, 20)
+	if err != nil {
+		t.Fatalf("ListExperienceAttributionCandidates() error = %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %+v, want no task fallback for unknown target type", candidates)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestExperienceRepoListAttributionCandidatesScansBehaviorActions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -403,10 +527,14 @@ func TestExperienceRepoGetLatestExperienceAttributionForSuggestion(t *testing.T)
 			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
 		}
 		for _, fragment := range []string{
-			"FROM experience_attributions",
-			"WHERE suggestion_event_id = ?",
-			"AND status IN (?, ?, ?)",
-			"ORDER BY computed_at DESC, id DESC",
+			"FROM experience_attributions ea",
+			"LEFT JOIN ai_suggestion_events matched_event ON matched_event.suggestion_event_id = ea.suggestion_event_id",
+			"LEFT JOIN ai_suggestion_events current_event ON current_event.suggestion_event_id = ?",
+			"WHERE (ea.suggestion_event_id = ? OR (? <> '' AND ea.suggestion_stable_key = ?",
+			"current_event.suggestion_stable_key = ?",
+			"matched_event.actor_id = current_event.actor_id",
+			"AND ea.status IN (?, ?, ?)",
+			"ORDER BY CASE WHEN ea.suggestion_event_id = ? THEN 0 ELSE 1 END, ea.computed_at DESC, ea.id DESC",
 			"LIMIT 1",
 		} {
 			if !strings.Contains(normalized, fragment) {
@@ -424,9 +552,14 @@ func TestExperienceRepoGetLatestExperienceAttributionForSuggestion(t *testing.T)
 	mock.ExpectQuery("latest-attribution").
 		WithArgs(
 			"display-1",
+			"display-1",
+			"",
+			"",
+			"",
 			domain.ExperienceAttributionStatusPositive,
 			domain.ExperienceAttributionStatusWeak,
 			domain.ExperienceAttributionStatusRejected,
+			"display-1",
 		).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "suggestion_event_id", "suggestion_stable_key", "candidate_event_key", "outcome_event_key",
@@ -462,6 +595,57 @@ func TestExperienceRepoGetLatestExperienceAttributionForSuggestion(t *testing.T)
 	}
 }
 
+func TestExperienceRepoGetLatestExperienceAttributionForSuggestionContextUsesStableFallback(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	computedAt := time.Date(2026, 7, 1, 9, 30, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT ea.id, ea.suggestion_event_id").
+		WithArgs(
+			"display-new",
+			"display-new",
+			"stable-1",
+			"stable-1",
+			"stable-1",
+			domain.ExperienceAttributionStatusPositive,
+			domain.ExperienceAttributionStatusWeak,
+			domain.ExperienceAttributionStatusRejected,
+			"display-new",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "suggestion_event_id", "suggestion_stable_key", "candidate_event_key", "outcome_event_key",
+			"status", "confidence", "score", "computed_at", "evidence_summary_json", "created_at", "updated_at",
+		}).AddRow(
+			int64(12),
+			"display-old",
+			"stable-1",
+			"candidate:display-old",
+			"outcome-1",
+			domain.ExperienceAttributionStatusRejected,
+			"low",
+			0.31,
+			computedAt,
+			`{"behavior":{"actions":["ignored_after_timeout"]}}`,
+			computedAt,
+			computedAt,
+		))
+
+	repo := NewExperienceRepo(New(db))
+	attribution, err := repo.GetLatestExperienceAttributionForSuggestionContext(context.Background(), "display-new", "stable-1")
+	if err != nil {
+		t.Fatalf("GetLatestExperienceAttributionForSuggestionContext() error = %v", err)
+	}
+	if attribution == nil || attribution.SuggestionEventID != "display-old" || attribution.SuggestionStableKey != "stable-1" {
+		t.Fatalf("attribution = %+v, want stable fallback attribution", attribution)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestExperienceRepoGetLatestExperienceAttributionForSuggestionReturnsNilWhenMissing(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -469,12 +653,17 @@ func TestExperienceRepoGetLatestExperienceAttributionForSuggestionReturnsNilWhen
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("SELECT id, suggestion_event_id").
+	mock.ExpectQuery("SELECT ea.id, ea.suggestion_event_id").
 		WithArgs(
 			"display-unknown",
+			"display-unknown",
+			"",
+			"",
+			"",
 			domain.ExperienceAttributionStatusPositive,
 			domain.ExperienceAttributionStatusWeak,
 			domain.ExperienceAttributionStatusRejected,
+			"display-unknown",
 		).
 		WillReturnError(sql.ErrNoRows)
 
@@ -491,14 +680,16 @@ func TestExperienceRepoGetLatestExperienceAttributionForSuggestionReturnsNilWhen
 	}
 }
 
-func TestExperienceRepoCreateReviewItemDoesNotOverwriteResolvedEvidence(t *testing.T) {
+func TestExperienceRepoCreateReviewItemOnlyUpdatesOpenOrNeedsMoreDataEvidence(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
 		normalized := strings.Join(strings.Fields(actualSQL), " ")
 		for _, fragment := range []string{
 			"INSERT INTO experience_review_items",
 			"ON DUPLICATE KEY UPDATE",
-			"priority = IF(status = 'open', VALUES(priority), priority)",
-			"evidence_summary_json = IF(status = 'open', VALUES(evidence_summary_json), evidence_summary_json)",
+			"priority = IF(status = 'open' OR ( status = 'needs_more_data' AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), '') ), VALUES(priority), priority)",
+			"evidence_summary_json = IF(status = 'open' OR ( status = 'needs_more_data' AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), '') ), VALUES(evidence_summary_json), evidence_summary_json)",
+			"updated_at = IF(status = 'open' OR ( status = 'needs_more_data' AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), '') ), CURRENT_TIMESTAMP, updated_at)",
+			"status = IF(status = 'needs_more_data' AND COALESCE(CAST(evidence_summary_json AS CHAR), '') <> COALESCE(CAST(VALUES(evidence_summary_json) AS CHAR), ''), VALUES(status), status)",
 		} {
 			if !strings.Contains(normalized, fragment) {
 				return fmt.Errorf("review item upsert SQL missing %q: %s", fragment, normalized)
@@ -538,7 +729,8 @@ func TestExperienceRepoCreateReviewDecisionUpdatesItemBeforeInsert(t *testing.T)
 	defer db.Close()
 
 	actorID := int64(291)
-	evidence := `{"suggestion":{"target_type":"task","target_id":"42","type":"task_next_action"},"outcome":{"action":"task_status_changed","outcome":"Completed"}}`
+	outcomeTime := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	evidence := `{"suggestion":{"target_type":"task","target_id":"42","type":"task_next_action"},"outcome":{"action":"task_status_changed","outcome":"Completed","event_time":"` + outcomeTime.Format(time.RFC3339Nano) + `"}}`
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
 		WithArgs("review-1").
@@ -556,13 +748,17 @@ func TestExperienceRepoCreateReviewDecisionUpdatesItemBeforeInsert(t *testing.T)
 			toNullJSONString([]byte(`{"surface":"data_center"}`)),
 		).
 		WillReturnResult(sqlmock.NewResult(7, 1))
-	mock.ExpectQuery("SELECT 1 FROM tasks").
+	mock.ExpectQuery("SELECT COALESCE\\(t\\.task_type").
 		WithArgs(int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(1))
+		WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "category_code", "category_name"}).
+			AddRow("regular", "Completed", "KT_STANDARD", "常规KT板"))
 	mock.ExpectExec("INSERT INTO task_experience_profiles").
 		WithArgs(
 			int64(42),
-			"task_next_action",
+			outcomeTime.UnixNano(),
+			"regular",
+			"KT_STANDARD",
+			"常规KT板",
 			"Completed",
 			"task_status_changed",
 			sqlmock.AnyArg(),
@@ -593,7 +789,7 @@ func TestExperienceRepoCreateReviewDecisionRejectsMissingTaskTarget(t *testing.T
 	}
 	defer db.Close()
 
-	evidence := `{"suggestion":{"target_type":"task","target_id":"42","type":"task_next_action"},"outcome":{"action":"task_status_changed","outcome":"Completed"}}`
+	evidence := `{"suggestion":{"target_type":"task","target_id":"42","type":"task_next_action"},"outcome":{"action":"task_status_changed","outcome":"Completed","event_time":"2026-06-30T12:00:00Z"}}`
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT item_type, status, evidence_summary_json").
 		WithArgs("review-1").
@@ -605,7 +801,7 @@ func TestExperienceRepoCreateReviewDecisionRejectsMissingTaskTarget(t *testing.T
 	mock.ExpectExec("INSERT INTO experience_review_decisions").
 		WithArgs("review-1", domain.ExperienceReviewDecisionApprove, "", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(7, 1))
-	mock.ExpectQuery("SELECT 1 FROM tasks").
+	mock.ExpectQuery("SELECT COALESCE\\(t\\.task_type").
 		WithArgs(int64(42)).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
@@ -903,6 +1099,7 @@ func TestExperienceRepoListTaskAssetReviewSnapshotsUsesBusinessTimestampCursor(t
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
 		normalized := strings.Join(strings.Fields(actualSQL), " ")
 		for _, fragment := range []string{
+			"SELECT id, task_id, asset_id, COALESCE(flow_review_status, '')",
 			"GREATEST( created_at, COALESCE(approved_at, created_at), COALESCE(rejected_at, created_at), COALESCE(superseded_at, created_at), COALESCE(archived_at, created_at), COALESCE(cleaned_at, created_at) ) AS source_updated_at",
 			"(created_at > ?) OR (created_at = ? AND id > ?)",
 			"(approved_at > ?) OR (approved_at = ? AND id > ?)",
@@ -937,8 +1134,10 @@ func TestExperienceRepoListTaskAssetReviewSnapshotsUsesBusinessTimestampCursor(t
 	mock.ExpectQuery("task-asset-snapshot").
 		WithArgs(args...).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "task_id", "flow_review_status", "approved_at", "rejected_at", "superseded_at", "superseded_by_version_id", "is_archived", "archived_at", "cleaned_at", "source_updated_at",
-		}).AddRow(int64(11), int64(42), "superseded", nil, nil, approvedAt, int64(12), true, approvedAt, cleanedAt, cleanedAt))
+			"id", "task_id", "asset_id", "flow_review_status", "approved_at", "rejected_at", "superseded_at", "superseded_by_version_id", "is_archived", "archived_at", "cleaned_at", "source_updated_at",
+		}).
+			AddRow(int64(11), int64(42), int64(77), "superseded", nil, nil, approvedAt, int64(12), true, approvedAt, cleanedAt, cleanedAt).
+			AddRow(int64(12), int64(42), nil, "approved", approvedAt, nil, nil, nil, false, nil, nil, approvedAt))
 
 	repo := NewExperienceRepo(New(db))
 	rows, err := repo.ListExperienceTaskAssetReviewSnapshots(context.Background(), corerepo.ExperienceSourceCursor{
@@ -948,16 +1147,25 @@ func TestExperienceRepoListTaskAssetReviewSnapshotsUsesBusinessTimestampCursor(t
 	if err != nil {
 		t.Fatalf("ListExperienceTaskAssetReviewSnapshots() error = %v", err)
 	}
-	if len(rows) != 1 || rows[0].EntityID != "11" || rows[0].TerminalState != "archived" {
+	if len(rows) != 2 || rows[0].EntityID != "11" || rows[0].TerminalState != "archived" {
 		t.Fatalf("snapshot rows = %+v", rows)
+	}
+	if rows[0].TargetType != "asset" || rows[0].TargetID != "77" {
+		t.Fatalf("target = %s/%s, want canonical asset target 77", rows[0].TargetType, rows[0].TargetID)
 	}
 	if !strings.Contains(string(rows[0].ObservedValue), `"superseded_by_version_id":12`) {
 		t.Fatalf("observed value = %s, want superseded version marker", rows[0].ObservedValue)
 	}
-	for _, fragment := range []string{`"is_archived":true`, `"archived_at":"2026-06-30T08:01:00Z"`, `"cleaned_at":"2026-06-30T08:02:00Z"`} {
+	for _, fragment := range []string{`"task_asset_id":11`, `"asset_id":77`, `"is_archived":true`, `"archived_at":"2026-06-30T08:01:00Z"`, `"cleaned_at":"2026-06-30T08:02:00Z"`} {
 		if !strings.Contains(string(rows[0].ObservedValue), fragment) {
 			t.Fatalf("observed value = %s, want %s in hash input", rows[0].ObservedValue, fragment)
 		}
+	}
+	if rows[1].TargetType != "task_asset" || rows[1].TargetID != "12" {
+		t.Fatalf("legacy target = %s/%s, want task_asset/12 when asset_id is NULL", rows[1].TargetType, rows[1].TargetID)
+	}
+	if !strings.Contains(string(rows[1].ObservedValue), `"asset_id":null`) {
+		t.Fatalf("legacy observed value = %s, want null asset_id marker", rows[1].ObservedValue)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

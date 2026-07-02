@@ -32,21 +32,21 @@
       </button>
     </div>
 
-    <div v-if="microQuestionVisible" class="prediction-feedback__micro">
+    <div v-if="microQuestionVisible && !saving" class="prediction-feedback__micro">
       <button
         type="button"
         class="prediction-feedback__micro-toggle"
         :aria-expanded="microQuestionOpen"
         :aria-controls="microQuestionReasonsId"
-        :disabled="microQuestionLoading || microQuestionSaving || microQuestionSubmitted"
+        :disabled="saving || microQuestionLoading || microQuestionSaving || microQuestionSubmitted"
         @click="toggleMicroQuestion"
       >
-        {{ microQuestionSubmitted ? '已记录选择，正式反馈未改变' : microQuestionOpen ? '收起补充原因' : '可选：补充没有采用的原因' }}
+        {{ microQuestionSubmitted ? '已记录选择，正式反馈未改变' : microQuestionOpen ? '跳过补充原因' : '可选：补充没有采用的原因' }}
       </button>
     </div>
 
     <div
-      v-if="microQuestionOpen"
+      v-if="microQuestionOpen && microQuestionVisible && microQuestionEligibility?.eligible"
       :id="microQuestionReasonsId"
       class="prediction-feedback__reasons"
       aria-label="补充原因"
@@ -140,13 +140,26 @@ const errorText = ref('')
 const microQuestionError = ref('')
 const impressionRecorded = ref(false)
 const microQuestionEligibility = ref<ExperienceMicroQuestionEligibility | null>(null)
+const microQuestionEligibilityContext = ref('')
 const microQuestionReasonsId = `prediction-feedback-micro-reasons-${useId()}`
 
 let clientConfigPromise: Promise<ExperienceClientConfig | null> | null = null
 let reasonTagsPromise: Promise<ExperienceReasonTag[] | null> | null = null
+let microQuestionEligibilitySeq = 0
+let microQuestionStateVersion = 0
 
 const suggestionEventId = computed(() => props.suggestion.suggestion_event_id || '')
 const effectiveRoute = computed(() => props.route || (typeof window !== 'undefined' ? window.location.pathname : ''))
+const microQuestionContext = computed(() => {
+  const suggestion = props.suggestion
+  return [
+    suggestionEventId.value,
+    suggestion.suggestion_stable_key || '',
+    props.surface,
+    suggestion.target_type || '',
+    suggestion.target_id || '',
+  ].join('|')
+})
 const visible = computed(() => Boolean(suggestionEventId.value) && (props.enabled ?? localEnabled.value))
 const needsReason = computed(() => selectedValue.value === 'partially_accepted' || selectedValue.value === 'rejected')
 const hasNonPositiveFeedback = computed(() => selectedValue.value === 'partially_accepted' || selectedValue.value === 'rejected')
@@ -181,14 +194,13 @@ watch(
   { immediate: true },
 )
 
-watch(suggestionEventId, () => {
+watch(microQuestionContext, () => {
+  microQuestionEligibilitySeq += 1
   selectedValue.value = ''
   selectedReason.value = ''
-  selectedMicroReason.value = ''
-  microQuestionOpen.value = false
-  microQuestionSubmitted.value = false
-  microQuestionEligibility.value = null
-  microQuestionError.value = ''
+  saving.value = false
+  clearMicroQuestionState()
+  microQuestionLoading.value = false
   impressionRecorded.value = false
   maybeRecordImpression()
 })
@@ -221,6 +233,7 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
   errorText.value = ''
   const previousValue = selectedValue.value
   const previousReason = selectedReason.value
+  const requestContext = microQuestionContextKey()
   selectedValue.value = value
   selectedReason.value = reasonCode || ''
 
@@ -244,25 +257,35 @@ async function submitFeedback(value: AISuggestionFeedbackValue | '', reasonCode 
         route: effectiveRoute.value,
       },
     })
+    if (requestContext !== microQuestionContextKey()) return
+    if (!isNonPositiveFeedback(value)) {
+      clearMicroQuestionState()
+    }
   } catch {
+    if (requestContext !== microQuestionContextKey()) return
     selectedValue.value = previousValue
     selectedReason.value = previousReason
     errorText.value = '反馈未保存'
   } finally {
-    saving.value = false
+    if (requestContext === microQuestionContextKey()) {
+      saving.value = false
+    }
   }
 }
 
 async function toggleMicroQuestion(): Promise<void> {
-  if (microQuestionSubmitted.value || microQuestionLoading.value || microQuestionSaving.value) return
+  if (saving.value || microQuestionSubmitted.value || microQuestionLoading.value || microQuestionSaving.value) return
+  if (!microQuestionVisible.value) {
+    clearMicroQuestionState()
+    return
+  }
   microQuestionError.value = ''
   if (microQuestionOpen.value) {
-    if (behaviorEnabled.value) recordBehavior('dismiss')
     void submitMicroQuestionDismissed()
     microQuestionOpen.value = false
     return
   }
-  if (!microQuestionEligibility.value) {
+  if (!microQuestionEligibility.value || microQuestionEligibilityContext.value !== microQuestionContextKey()) {
     await loadMicroQuestionEligibility()
   }
   if (microQuestionEligibility.value && !microQuestionEligibility.value.eligible) {
@@ -277,6 +300,9 @@ async function toggleMicroQuestion(): Promise<void> {
 
 async function loadMicroQuestionEligibility(): Promise<void> {
   if (!suggestionEventId.value || microQuestionLoading.value) return
+  const requestSeq = microQuestionEligibilitySeq + 1
+  microQuestionEligibilitySeq = requestSeq
+  const requestContext = microQuestionContextKey()
   microQuestionLoading.value = true
   microQuestionError.value = ''
   try {
@@ -288,8 +314,10 @@ async function loadMicroQuestionEligibility(): Promise<void> {
       target_type: suggestion.target_type || undefined,
       target_id: suggestion.target_id || undefined,
     })
+    if (requestSeq !== microQuestionEligibilitySeq || requestContext !== microQuestionContextKey()) return
     const eligibility = res.data?.data ?? null
     microQuestionEligibility.value = eligibility
+    microQuestionEligibilityContext.value = requestContext
     const tags = eligibility?.reason_tags ?? []
     if (tags.length) {
       microQuestionReasonOptions.value = tags.map((tag) => ({ code: tag.code, label: tag.name }))
@@ -298,16 +326,34 @@ async function loadMicroQuestionEligibility(): Promise<void> {
       microQuestionError.value = microQuestionEligibilityMessage(eligibility?.reason)
     }
   } catch {
+    if (requestSeq !== microQuestionEligibilitySeq || requestContext !== microQuestionContextKey()) return
     microQuestionError.value = '暂不处理原因未加载'
   } finally {
-    microQuestionLoading.value = false
+    if (requestSeq === microQuestionEligibilitySeq && requestContext === microQuestionContextKey()) {
+      microQuestionLoading.value = false
+    }
   }
 }
 
+function microQuestionContextKey(): string {
+  return microQuestionContext.value
+}
+
 async function submitMicroQuestionDismissed(): Promise<void> {
-  if (!suggestionEventId.value || microQuestionSaving.value || microQuestionSubmitted.value) return
+  if (
+    !suggestionEventId.value ||
+    saving.value ||
+    microQuestionSaving.value ||
+    microQuestionSubmitted.value ||
+    !microQuestionVisible.value ||
+    !microQuestionEligibility.value?.eligible ||
+    microQuestionEligibilityContext.value !== microQuestionContextKey()
+  )
+    return
   const suggestion = props.suggestion
   const eligibility = microQuestionEligibility.value
+  const requestContext = microQuestionContextKey()
+  const requestStateVersion = microQuestionStateVersion
   microQuestionSaving.value = true
   microQuestionError.value = ''
   try {
@@ -328,18 +374,33 @@ async function submitMicroQuestionDismissed(): Promise<void> {
         action_label: suggestion.action_label || '',
       },
     })
+    if (requestContext !== microQuestionContextKey() || requestStateVersion !== microQuestionStateVersion) return
     microQuestionSubmitted.value = true
   } catch {
+    if (requestContext !== microQuestionContextKey() || requestStateVersion !== microQuestionStateVersion) return
     microQuestionError.value = ''
   } finally {
-    microQuestionSaving.value = false
+    if (requestContext === microQuestionContextKey() && requestStateVersion === microQuestionStateVersion) {
+      microQuestionSaving.value = false
+    }
   }
 }
 
 async function submitMicroQuestion(reasonCode: string): Promise<void> {
-  if (!reasonCode || !suggestionEventId.value || microQuestionSaving.value) return
+  if (
+    !reasonCode ||
+    !suggestionEventId.value ||
+    saving.value ||
+    microQuestionSaving.value ||
+    !microQuestionVisible.value ||
+    !microQuestionEligibility.value?.eligible ||
+    microQuestionEligibilityContext.value !== microQuestionContextKey()
+  )
+    return
   const suggestion = props.suggestion
   const eligibility = microQuestionEligibility.value
+  const requestContext = microQuestionContextKey()
+  const requestStateVersion = microQuestionStateVersion
   microQuestionSaving.value = true
   microQuestionError.value = ''
   const previousReason = selectedMicroReason.value
@@ -363,14 +424,33 @@ async function submitMicroQuestion(reasonCode: string): Promise<void> {
         action_label: suggestion.action_label || '',
       },
     })
+    if (requestContext !== microQuestionContextKey() || requestStateVersion !== microQuestionStateVersion) return
     microQuestionSubmitted.value = true
     microQuestionOpen.value = false
   } catch {
+    if (requestContext !== microQuestionContextKey() || requestStateVersion !== microQuestionStateVersion) return
     selectedMicroReason.value = previousReason
     microQuestionError.value = '暂不处理原因未保存'
   } finally {
-    microQuestionSaving.value = false
+    if (requestContext === microQuestionContextKey() && requestStateVersion === microQuestionStateVersion) {
+      microQuestionSaving.value = false
+    }
   }
+}
+
+function isNonPositiveFeedback(value: AISuggestionFeedbackValue | ''): boolean {
+  return value === 'partially_accepted' || value === 'rejected'
+}
+
+function clearMicroQuestionState(): void {
+  microQuestionStateVersion += 1
+  selectedMicroReason.value = ''
+  microQuestionOpen.value = false
+  microQuestionSubmitted.value = false
+  microQuestionEligibility.value = null
+  microQuestionEligibilityContext.value = ''
+  microQuestionSaving.value = false
+  microQuestionError.value = ''
 }
 
 function microQuestionEligibilityMessage(reason?: string): string {
@@ -380,7 +460,7 @@ function microQuestionEligibilityMessage(reason?: string): string {
   return '暂不可记录原因'
 }
 
-function recordBehavior(action: 'impression' | 'click' | 'expand' | 'dismiss'): void {
+function recordBehavior(action: 'impression' | 'click' | 'expand'): void {
   const suggestion = props.suggestion
   recordExperienceBehavior({
     action,

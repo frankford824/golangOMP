@@ -111,11 +111,11 @@ const pages = [
     path: '/products',
     ready: '.product-management-view',
     prepare: async (page) => {
-      if ((await page.locator('.pm-cost-help').count()) === 0) {
+      if ((await page.locator('.pm-detail-help').count()) === 0) {
         await page.locator('.pm-combo-header').first().click()
       }
-      await page.waitForSelector('.pm-cost-help', { state: 'visible' })
-      await page.locator('.pm-cost-help').first().focus()
+      await page.waitForSelector('.pm-detail-help', { state: 'visible' })
+      await page.locator('.pm-detail-help').first().focus()
       await page.waitForTimeout(200)
     },
   },

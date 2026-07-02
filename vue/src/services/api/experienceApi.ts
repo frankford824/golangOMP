@@ -78,7 +78,7 @@ export interface ExperienceWorkerRunRecord {
   source_name?: string
   started_at: string
   finished_at?: string | null
-  status: 'success' | 'partial' | 'failed' | string
+  status: 'success' | 'partial' | 'failed' | 'locked' | string
   scanned_count: number
   enqueued_count: number
   skipped_count: number

@@ -61,7 +61,7 @@
               </div>
               <div class="worker-run-meta">
                 <span :class="workerStatusClass(run.status)">{{ workerStatusLabel(run.status) }}</span>
-                <small>{{ integerLabel(run.scanned_count) }} 扫描 / {{ integerLabel(run.enqueued_count) }} 写入 / {{ integerLabel(run.failed_count) }} 失败</small>
+                <small>{{ workerRunMetricLabel(run) }}</small>
               </div>
             </article>
           </div>
@@ -74,7 +74,7 @@
               <h4 id="experience-health-title">闭环健康条</h4>
               <p>展示建议 -> 展示可定位 -> 正式反馈 -> 反馈原因 -> 侧路候选</p>
             </div>
-            <span>{{ integerLabel(sampleTotal) }} 条样本</span>
+            <span>{{ healthSampleCountLabel }}</span>
           </div>
           <div class="health-steps">
             <article v-for="step in healthSteps" :key="step.key" class="health-step">
@@ -101,7 +101,7 @@
                 <h4>监督样本池（L2+）</h4>
                 <p>默认只看 L2+；复核通过后只沉淀侧路经验，不直接驱动任务、资产、ERP、审单或成本。</p>
               </div>
-              <span>{{ integerLabel(effectiveSampleTotal) }} 条</span>
+              <span>{{ effectiveSampleCountLabel }}</span>
             </div>
             <div v-if="effectiveSamples.length" class="experience-list">
               <article v-for="item in effectiveSamples" :key="`effective-${item.id}`" class="experience-item">
@@ -113,7 +113,7 @@
                 <p>{{ feedbackLabel(item.feedback_value) }}{{ item.feedback_reason_code ? ` · ${reasonLabel(item.feedback_reason_code)}` : '' }}</p>
               </article>
             </div>
-            <BaseEmptyState v-else title="暂无 L2+ 候选" :description="effectiveEmptyDescription" />
+            <BaseEmptyState v-else :title="effectiveEmptyTitle" :description="effectiveEmptyDescription" />
           </section>
 
           <section class="panel-block">
@@ -144,7 +144,7 @@
           <div class="block-header">
             <div>
               <h4 id="experience-review-title">候选归因复核</h4>
-              <p>Attribution 只生成候选，SuperAdmin 复核后才进入侧路经验候选治理。</p>
+              <p>Attribution 只生成候选；队列按 outcome 展示当前最佳候选，不代表全部候选。SuperAdmin 复核后才进入侧路经验候选治理。</p>
             </div>
             <span>{{ integerLabel(reviewItemTotal) }} 个候选</span>
           </div>
@@ -187,7 +187,7 @@
               <h4>样本表</h4>
               <p>按证据等级分组，避免把展示流水误读成可用经验。</p>
             </div>
-            <span>{{ integerLabel(sampleTotal) }} 条</span>
+            <span>{{ sampleCountLabel }}</span>
           </div>
           <div v-if="groupedSamples.length" class="sample-groups">
             <section v-for="group in groupedSamples" :key="group.level" class="sample-group">
@@ -227,7 +227,7 @@
               </div>
             </section>
           </div>
-          <BaseEmptyState v-else title="暂无样本" :description="samplesEmptyDescription" />
+          <BaseEmptyState v-else :title="samplesEmptyTitle" :description="samplesEmptyDescription" />
         </section>
       </template>
     </template>
@@ -251,6 +251,7 @@ import {
   type ExperienceReviewItem,
   type ExperienceRuntimeFlags,
   type ExperienceStats,
+  type ExperienceWorkerRunRecord,
   type PaginatedEnvelope,
 } from '@/services/api/experienceApi'
 
@@ -312,6 +313,8 @@ const samples = ref<ExperienceEvent[]>([])
 const effectiveSamples = ref<ExperienceEvent[]>([])
 const sampleTotal = ref(0)
 const effectiveSampleTotal = ref(0)
+const sampleRequestError = ref(false)
+const effectiveSampleRequestError = ref(false)
 const tags = ref<ExperienceReasonTag[]>([])
 const reviewItems = ref<ExperienceReviewItem[]>([])
 const reviewItemTotal = ref(0)
@@ -469,12 +472,16 @@ const gapQueue = computed<GapItem[]>(() => {
 const totalGapCount = computed(() => gapQueue.value.reduce((sum, item) => sum + item.count, 0))
 const workerRuns = computed(() => stats.value?.worker_last_runs ?? [])
 const outbox24hTotal = computed(() => count(stats.value?.outbox_processed_24h) + count(stats.value?.outbox_failed_24h))
-const failedWorkerCount = computed(() => workerRuns.value.filter((run) => run.status === 'failed' || run.status === 'partial' || count(run.failed_count) > 0).length)
+const failedWorkerCount = computed(() =>
+  workerRuns.value.filter((run) => run.status === 'failed' || run.status === 'partial' || count(run.failed_count) > 0).length,
+)
+const lockedWorkerCount = computed(() => workerRuns.value.filter((run) => run.status === 'locked').length)
 
 const workerHealthLabel = computed(() => {
   if (!runtimeFlags.value.worker_enabled) return 'Worker 关闭'
   if (!workerRuns.value.length) return '无运行记录'
-  if (failedWorkerCount.value > 0) return `${integerLabel(failedWorkerCount.value)} 个失败`
+  if (failedWorkerCount.value > 0) return `${integerLabel(failedWorkerCount.value)} 个需关注`
+  if (lockedWorkerCount.value > 0) return `${integerLabel(lockedWorkerCount.value)} 个锁定跳过`
   return '最近正常'
 })
 
@@ -493,14 +500,24 @@ const groupedSamples = computed(() => {
     .filter((group) => group.items.length > 0)
 })
 
+const effectiveSampleCountLabel = computed(() =>
+  effectiveSampleRequestError.value ? '接口暂不可用' : `${integerLabel(effectiveSampleTotal.value)} 条`,
+)
+const sampleCountLabel = computed(() => (sampleRequestError.value ? '接口暂不可用' : `${integerLabel(sampleTotal.value)} 条`))
+const healthSampleCountLabel = computed(() => (sampleRequestError.value ? '样本接口暂不可用' : `${integerLabel(sampleTotal.value)} 条样本`))
+
+const effectiveEmptyTitle = computed(() => (effectiveSampleRequestError.value ? 'L2+ 样本暂不可用' : '暂无 L2+ 候选'))
 const effectiveEmptyDescription = computed(() => {
+  if (effectiveSampleRequestError.value) return 'L2+ 样本接口暂时失败，不能解读为真实无有效经验。'
   if (!runtimeFlags.value.ai_feedback_enabled) return 'AI 反馈开关未开启，当前不会采集监督信号。'
   if (displayedCount.value === 0) return '未采集、未配置，或当前筛选下真实为 0。'
   if (feedbackCount.value === 0) return '当前只有展示流水，还没有人工反馈，因此不能作为有效经验。'
   return '当前无匹配 L2+ 样本，可能是缺少原因标签、画像或资产质量信号。'
 })
 
+const samplesEmptyTitle = computed(() => (sampleRequestError.value ? '样本接口暂不可用' : '暂无样本'))
 const samplesEmptyDescription = computed(() => {
+  if (sampleRequestError.value) return '样本接口暂时失败，不能解读为真实无样本。'
   if (!runtimeFlags.value.capture_enabled) return '采集开关未开启，样本表不会新增记录。'
   return '未采集、未配置、无匹配数据，或当前真实为 0。'
 })
@@ -522,28 +539,44 @@ async function load() {
     reviewItemTotal.value = 0
     reviewQueueError.value = false
     reviewActionError.value = ''
+    sampleRequestError.value = false
+    effectiveSampleRequestError.value = false
     if (!configFlags.value.ui_enabled) {
       stats.value = null
       samples.value = []
       effectiveSamples.value = []
       sampleTotal.value = 0
       effectiveSampleTotal.value = 0
+      sampleRequestError.value = false
+      effectiveSampleRequestError.value = false
       tags.value = []
       return
     }
 
-    const [statsRes, samplesRes, effectiveSamplesRes] = await Promise.all([
-      experienceApi.stats(),
+    const statsRes = await experienceApi.stats()
+    stats.value = statsRes.data?.data ?? null
+    const [samplesRes, effectiveSamplesRes] = await Promise.allSettled([
       experienceApi.samples({ page: 1, page_size: 20 }),
       experienceApi.samples({ page: 1, page_size: 20, min_evidence_level: 'L2' }),
     ])
-    stats.value = statsRes.data?.data ?? null
-    const parsedSamples = samplesRes.data as PaginatedEnvelope<ExperienceEvent>
-    const parsedEffectiveSamples = effectiveSamplesRes.data as PaginatedEnvelope<ExperienceEvent>
-    samples.value = parsedSamples.data ?? []
-    effectiveSamples.value = parsedEffectiveSamples.data ?? []
-    sampleTotal.value = Number(parsedSamples.pagination?.total ?? samples.value.length)
-    effectiveSampleTotal.value = Number(parsedEffectiveSamples.pagination?.total ?? effectiveSamples.value.length)
+    if (samplesRes.status === 'fulfilled') {
+      const parsedSamples = samplesRes.value.data as PaginatedEnvelope<ExperienceEvent>
+      samples.value = parsedSamples.data ?? []
+      sampleTotal.value = Number(parsedSamples.pagination?.total ?? samples.value.length)
+    } else {
+      samples.value = []
+      sampleTotal.value = 0
+      sampleRequestError.value = true
+    }
+    if (effectiveSamplesRes.status === 'fulfilled') {
+      const parsedEffectiveSamples = effectiveSamplesRes.value.data as PaginatedEnvelope<ExperienceEvent>
+      effectiveSamples.value = parsedEffectiveSamples.data ?? []
+      effectiveSampleTotal.value = Number(parsedEffectiveSamples.pagination?.total ?? effectiveSamples.value.length)
+    } else {
+      effectiveSamples.value = []
+      effectiveSampleTotal.value = 0
+      effectiveSampleRequestError.value = true
+    }
     try {
       const tagsRes = await experienceApi.reasonTags({ scene: 'ai_suggestion_feedback' })
       tags.value = tagsRes.data?.data ?? []
@@ -566,8 +599,8 @@ async function load() {
       reviewItemTotal.value = 0
       reviewQueueError.value = true
     }
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载经验观测失败'
+  } catch {
+    error.value = '经验观测主指标暂不可用'
   } finally {
     loading.value = false
   }
@@ -714,6 +747,7 @@ function workerStatusLabel(status?: string): string {
   if (status === 'success') return '正常'
   if (status === 'partial') return '部分失败'
   if (status === 'failed') return '失败'
+  if (status === 'locked') return '锁定跳过'
   return status || '未知'
 }
 
@@ -721,7 +755,20 @@ function workerStatusClass(status?: string): string {
   if (status === 'success') return 'worker-status worker-status--success'
   if (status === 'partial') return 'worker-status worker-status--partial'
   if (status === 'failed') return 'worker-status worker-status--failed'
+  if (status === 'locked') return 'worker-status worker-status--locked'
   return 'worker-status'
+}
+
+function workerRunMetricLabel(run: ExperienceWorkerRunRecord): string {
+  const parts = [
+    `${integerLabel(run.scanned_count)} 扫描`,
+    `${integerLabel(run.enqueued_count)} 写入`,
+  ]
+  if (count(run.skipped_count) > 0 || run.status === 'locked') {
+    parts.push(`${integerLabel(run.skipped_count)} 跳过`)
+  }
+  parts.push(`${integerLabel(run.failed_count)} 失败`)
+  return parts.join(' / ')
 }
 
 function reviewPriorityLabel(priority?: string): string {
@@ -780,7 +827,7 @@ function reviewCandidateEvidence(item: ExperienceReviewItem): string {
   const feedback = asRecord(summary.feedback)
   const outcome = asRecord(summary.outcome)
   const changed = Array.isArray(outcome.changed_fields) ? outcome.changed_fields.length : 0
-  return `行为次数 ${integerLabel(behavior.count)} / 行为分 ${integerLabel(behavior.score)}；反馈 ${feedbackLabel(stringValue(feedback.value) as AISuggestionFeedbackValue)}；字段变化 ${integerLabel(changed)}`
+  return `当前最佳候选；行为次数 ${integerLabel(behavior.count)} / 行为分 ${integerLabel(behavior.score)}；反馈 ${feedbackLabel(stringValue(feedback.value) as AISuggestionFeedbackValue)}；字段变化 ${integerLabel(changed)}`
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1156,6 +1203,12 @@ onMounted(load)
   border-color: rgb(var(--yb-warning-border));
   background: rgb(var(--yb-warning-soft));
   color: rgb(var(--yb-warning-text));
+}
+
+.worker-status--locked {
+  border-color: rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-muted));
+  color: rgb(var(--yb-text-muted));
 }
 
 .worker-status--failed {
