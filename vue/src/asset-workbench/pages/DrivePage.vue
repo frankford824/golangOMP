@@ -1119,7 +1119,7 @@ onBeforeUnmount(() => {
             <select v-model="newDirectoryDifficulty" aria-label="难度">
               <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
             </select>
-            <input v-model.trim="newDirectoryFileTypes" placeholder="允许格式，留空=全部" aria-label="允许上传格式" />
+            <input v-model.trim="newDirectoryFileTypes" placeholder="格式限制，留空=全部" aria-label="允许上传格式" />
             <div class="aw-drive-inline-form__actions">
               <button class="aw-grid-button aw-grid-button--strong" type="submit">创建</button>
               <button class="aw-grid-button" type="button" @click="creatingDirectory = false">取消</button>
@@ -1141,7 +1141,7 @@ onBeforeUnmount(() => {
                 <select v-model="directoryEditForm.difficulty_class" aria-label="编辑难度">
                   <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
                 </select>
-                <input v-model.trim="directoryEditForm.allowed_file_types" placeholder="允许格式，留空=全部" aria-label="编辑允许上传格式" />
+                <input v-model.trim="directoryEditForm.allowed_file_types" placeholder="格式限制，留空=全部" aria-label="编辑允许上传格式" />
                 <label class="aw-inline-check">
                   <input v-model="directoryEditForm.enabled" type="checkbox" />
                   <span>启用</span>
@@ -1254,8 +1254,8 @@ onBeforeUnmount(() => {
                   @drop.prevent="dropOnDirectory($event, dir)"
                   @contextmenu.prevent.stop="openContextMenu($event, { kind: 'directory', dir })"
                 >
-                  <Folder :size="34" class="aw-drive-tile__icon" aria-hidden="true" />
-                  <strong class="aw-drive-tile__name">{{ dir.name }}</strong>
+                  <Folder class="aw-drive-tile__icon" aria-hidden="true" />
+                  <strong class="aw-drive-tile__name" :title="dir.name">{{ dir.name }}</strong>
                   <small class="aw-drive-tile__meta">{{ dir.file_count }} 个文件</small>
                 </button>
               </div>
@@ -1275,8 +1275,8 @@ onBeforeUnmount(() => {
                   @drop.prevent="dropOnOrder($event, order)"
                   @contextmenu.prevent.stop="openContextMenu($event, { kind: 'order', order })"
                 >
-                  <FolderOpen :size="34" class="aw-drive-tile__icon" aria-hidden="true" />
-                  <strong class="aw-drive-tile__name">{{ orderLabel(order.order_no) }}</strong>
+                  <FolderOpen class="aw-drive-tile__icon" aria-hidden="true" />
+                  <strong class="aw-drive-tile__name" :title="orderLabel(order.order_no)">{{ orderLabel(order.order_no) }}</strong>
                   <small class="aw-drive-tile__meta">{{ order.file_count }} 个文件</small>
                 </button>
               </div>
