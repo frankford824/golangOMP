@@ -242,6 +242,7 @@ import {
 } from '@/domain/mappers/read-model-labels-cn'
 import { normalizeAssetDetailFromApi } from '@/domain/mappers/asset-detail-from-api'
 import {
+  fetchAssetPreviewMeta,
   fetchTaskAssetPreviewWithDerivedFallback,
   primeAssetDownloadMetaCache,
 } from '@/domain/asset-access'
@@ -650,10 +651,12 @@ async function loadAsset() {
         '',
     ).trim()
     const taskIdForPreview = (taskId.value || tidFromAsset).trim() || undefined
-    const previewResult = await fetchTaskAssetPreviewWithDerivedFallback(
-      assetId.value,
-      taskIdForPreview,
-    )
+    const previewResult = isExternalAsset(asset.value)
+      ? await fetchAssetPreviewMeta(assetId.value)
+      : await fetchTaskAssetPreviewWithDerivedFallback(
+          assetId.value,
+          taskIdForPreview,
+        )
     if (previewResult.status === 'ok' && previewResult.displayUrl) {
       previewMeta.value = {
         download_url: previewResult.displayUrl,

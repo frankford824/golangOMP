@@ -843,6 +843,7 @@ const bulkSearchFilters = reactive({
 const assetSourceOptions: BaseSelectOption[] = [
   { value: 'all', label: '全部资源' },
   { value: 'system', label: '系统资源' },
+  { value: 'external', label: '外部资源' },
 ]
 
 const assetUsableStateOptions: BaseSelectOption[] = [
@@ -895,9 +896,7 @@ const bulkSearchAssetKindFilterLabel = computed(() =>
   bulkSearchAssetKindOptions.find((item) => item.value === bulkSearchFilters.assetKind)?.label ?? '全部类型',
 )
 
-const effectiveAssetSearchSource = computed<AssetResourceSource>(() =>
-  filters.resourceSource === 'all' || filters.resourceSource === 'external' ? 'system' : filters.resourceSource,
-)
+const effectiveAssetSearchSource = computed<AssetResourceSource>(() => filters.resourceSource)
 
 const requestedTaskId = computed(() => {
   const raw = route.query.task_id
@@ -2220,7 +2219,7 @@ async function reload() {
     )
     if (abortController.signal.aborted || requestSeq !== reloadRequestSeq) return
     const body = res.data
-    const backendItems = (Array.isArray(body?.data) ? body.data : []).filter((item) => !isExternalAsset(item))
+    const backendItems = Array.isArray(body?.data) ? body.data : []
     const backendTotal = Number(body?.total)
     const backendPage = Number(body?.page)
     const backendSize = Number(body?.size)
@@ -2327,7 +2326,7 @@ onMounted(() => {
     filters.keyword = requestedTaskId.value
   }
   const requestedSource = typeof route.query.source === 'string' ? route.query.source.trim() : ''
-  if (requestedSource === 'system' || requestedSource === 'all') {
+  if (requestedSource === 'system' || requestedSource === 'external' || requestedSource === 'all') {
     filters.resourceSource = requestedSource
   }
   const requestedUsableState = typeof route.query.usable_state === 'string' ? route.query.usable_state.trim() : ''
