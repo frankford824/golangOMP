@@ -130,6 +130,80 @@ func TestSyncFullIndexWalksMountAndFiltersSystemFiles(t *testing.T) {
 	}
 }
 
+func TestSyncFullIndexSkipsBrokenSubdirectory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req["path"] == "/quark/bad" {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"code":    500,
+				"message": "failed get objs: failed get dir: object not found",
+			})
+			return
+		}
+		content := []map[string]interface{}{}
+		switch req["path"] {
+		case "/quark":
+			content = []map[string]interface{}{
+				{"name": "bad", "is_dir": true, "size": 0},
+				{"name": "good", "is_dir": true, "size": 0},
+				{"name": "root.png", "is_dir": false, "size": 11},
+			}
+		case "/quark/good":
+			content = []map[string]interface{}{
+				{"name": "design.png", "is_dir": false, "size": 22},
+			}
+		default:
+			t.Fatalf("unexpected list path %v", req["path"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code":    200,
+			"message": "success",
+			"data": map[string]interface{}{
+				"total":   len(content),
+				"content": content,
+			},
+		})
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:             true,
+		AListBaseURL:        server.URL,
+		AListToken:          "token",
+		Mounts:              ParseMounts("/quark:netdisk"),
+		FullSyncEnabled:     true,
+		FullSyncPageSize:    100,
+		FullSyncMaxDepth:    8,
+		FullSyncMaxFiles:    100,
+		FullSyncMaxDirs:     100,
+		LinkRefreshInterval: time.Hour,
+	}, nil)
+
+	result, err := svc.SyncFullIndex(context.Background())
+	if err != nil {
+		t.Fatalf("SyncFullIndex() error = %v", err)
+	}
+	if result.ScannedCount != 2 || result.UpsertedCount != 2 {
+		t.Fatalf("SyncFullIndex() counts = scanned %d upserted %d, want 2/2", result.ScannedCount, result.UpsertedCount)
+	}
+	if len(result.Mounts) != 1 || result.Mounts[0].Status != domain.ExternalAssetSyncRunStatusPartial {
+		t.Fatalf("mounts = %+v, want one partial mount", result.Mounts)
+	}
+	if !strings.Contains(result.Mounts[0].ErrorMessage, "/quark/bad") {
+		t.Fatalf("mount error = %q, want skipped bad dir", result.Mounts[0].ErrorMessage)
+	}
+	if repo.missingMount != "" {
+		t.Fatalf("MarkMountMissingBefore mount=%q, want no missing mark for partial scan", repo.missingMount)
+	}
+	if len(repo.finishedRuns) != 1 || repo.finishedRuns[0].status != domain.ExternalAssetSyncRunStatusPartial {
+		t.Fatalf("finished runs=%+v, want one partial run", repo.finishedRuns)
+	}
+}
+
 func TestNetdiskBrowserURLsUseBFFProxyWhenDirectURLMissing(t *testing.T) {
 	svc := NewService(&externalAssetRepoStub{}, Config{
 		Enabled:           true,

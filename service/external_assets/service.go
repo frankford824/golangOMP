@@ -501,6 +501,8 @@ func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSy
 	dirsRead := 0
 	limited := false
 	var firstErr error
+	var partialErr error
+	skippedDirs := 0
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
 			firstErr = err
@@ -518,6 +520,13 @@ func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSy
 		for {
 			resp, err := s.alist.List(ctx, next.path, page, s.cfg.FullSyncPageSize)
 			if err != nil {
+				if next.path != mount.Path {
+					skippedDirs++
+					if partialErr == nil {
+						partialErr = fmt.Errorf("external asset full sync skipped dir %s: %w", next.path, err)
+					}
+					break
+				}
 				firstErr = err
 				break
 			}
@@ -575,6 +584,12 @@ func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSy
 			result.Status = domain.ExternalAssetSyncRunStatusPartial
 		}
 		result.ErrorMessage = firstErr.Error()
+	} else if partialErr != nil {
+		result.Status = domain.ExternalAssetSyncRunStatusPartial
+		result.ErrorMessage = partialErr.Error()
+		if skippedDirs > 1 {
+			result.ErrorMessage = fmt.Sprintf("%s; skipped_dirs=%d", result.ErrorMessage, skippedDirs)
+		}
 	} else if err := s.repo.MarkMountMissingBefore(ctx, mount.Path, startedAt); err != nil {
 		result.Status = domain.ExternalAssetSyncRunStatusPartial
 		result.ErrorMessage = err.Error()
