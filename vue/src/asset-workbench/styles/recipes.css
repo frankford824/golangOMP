@@ -4203,8 +4203,7 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-drive-column__ext--all {
-  color: var(--aw-ink-muted);
-  opacity: 0.72;
+  display: none;
 }
 
 .aw-drive-column__item-wrap {
