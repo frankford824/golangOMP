@@ -297,22 +297,163 @@ func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
 	}
 }
 
-func TestSearchUsesCachedIndexAndSchedulesKeywordRefreshAsync(t *testing.T) {
-	repo := &externalAssetRepoStub{
-		searchRows: []*domain.ExternalAssetRecord{
-			{ID: 7, FileName: "cached.jpg"},
-		},
+func TestNASLocalBrowserURLsUseBFFProxyWhenOSSNotReady(t *testing.T) {
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:           true,
+		BFFBaseURL:        "http://internal-bff",
+		BFFBrowserBaseURL: "http://browser-bff",
+		Mounts:            ParseMounts("/p3:nas_local"),
+	}, nil)
+	row := &domain.ExternalAssetRecord{
+		Kind:       domain.ExternalAssetKindNASLocal,
+		MountPath:  "/p3",
+		OriginPath: "/p3/a/b.jpg",
+		FileName:   "b.jpg",
+		FileExt:    ".jpg",
+		MimeType:   "image/jpeg",
 	}
+
+	previewURL := svc.BrowserPreviewURL(row)
+	if !strings.Contains(previewURL, "proxy=1") || !strings.Contains(previewURL, "inline=1") {
+		t.Fatalf("preview URL = %q, want BFF proxy inline URL", previewURL)
+	}
+	downloadURL := svc.BrowserDownloadURL(row)
+	if !strings.Contains(downloadURL, "proxy=1") || strings.Contains(downloadURL, "inline=1") {
+		t.Fatalf("download URL = %q, want BFF proxy download URL", downloadURL)
+	}
+}
+
+func TestSearchRefreshesCacheInlineFromBFFAndSkipsSystemFiles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/search" {
+			t.Fatalf("path=%s, want /api/search", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("q"); got != "png" {
+			t.Fatalf("q=%q, want png", got)
+		}
+		if got := r.URL.Query().Get("mounts"); got != "/p3" {
+			t.Fatalf("mounts=%q, want /p3", got)
+		}
+		if got := r.URL.Query().Get("match"); got != "contains" {
+			t.Fatalf("match=%q, want contains", got)
+		}
+		if got := r.URL.Query().Get("only_files"); got != "1" {
+			t.Fatalf("only_files=%q, want 1", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"items": []map[string]interface{}{
+				{
+					"parent":    "/p3/#recycle",
+					"name":      "old.png",
+					"is_dir":    false,
+					"size":      11,
+					"full_path": "/p3/#recycle/old.png",
+				},
+				{
+					"parent":    "/p3/designs",
+					"name":      "fresh.png",
+					"is_dir":    false,
+					"size":      22,
+					"full_path": "/p3/designs/fresh.png",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:    true,
+		BFFBaseURL: server.URL,
+		Mounts:     ParseMounts("/p3:nas_local"),
+	}, nil)
+
+	rows, total, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
+		Keyword: "png",
+		Page:    1,
+		Size:    20,
+	})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(repo.upserts) != 1 || repo.upserts[0].OriginPath != "/p3/designs/fresh.png" {
+		t.Fatalf("upserts=%+v, want only non-system BFF result", repo.upserts)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ResourceID != "ext-1" || rows[0].FileName != "fresh.png" {
+		t.Fatalf("Search() rows=%+v total=%d, want lazy cached BFF row", rows, total)
+	}
+}
+
+func TestSearchFallsBackToAListWhenBFFOnlyReturnsSystemFiles(t *testing.T) {
+	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"items": []map[string]interface{}{
+				{
+					"parent":    "/p3/#recycle",
+					"name":      "old.png",
+					"is_dir":    false,
+					"size":      11,
+					"full_path": "/p3/#recycle/old.png",
+				},
+			},
+		})
+	}))
+	defer bff.Close()
+	alist := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/fs/search" {
+			t.Fatalf("path=%s, want /api/fs/search", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code":    200,
+			"message": "success",
+			"data": map[string]interface{}{
+				"content": []map[string]interface{}{
+					{"parent": "/p3/designs", "name": "fresh.png", "is_dir": false, "size": 22},
+				},
+				"total": 1,
+			},
+		})
+	}))
+	defer alist.Close()
+
+	repo := &externalAssetRepoStub{}
 	svc := NewService(repo, Config{
 		Enabled:      true,
-		AListBaseURL: "http://alist.invalid",
+		BFFBaseURL:   bff.URL,
+		AListBaseURL: alist.URL,
 		AListToken:   "token",
 		Mounts:       ParseMounts("/p3:nas_local"),
 	}, nil)
-	scheduled := 0
-	svc.keywordRefreshAsyncFn = func(fn func()) {
-		scheduled++
+
+	rows, total, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
+		Keyword: "png",
+		Page:    1,
+		Size:    20,
+	})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
 	}
+	if total != 1 || len(rows) != 1 || rows[0].OriginPath != "/p3/designs/fresh.png" {
+		t.Fatalf("Search() rows=%+v total=%d, want AList fallback row", rows, total)
+	}
+}
+
+func TestSearchFallsBackToCachedRowsWhenLiveRefreshFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bff unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{ID: 7, ResourceID: "ext-7", FileName: "cached.jpg"},
+		},
+	}
+	svc := NewService(repo, Config{
+		Enabled:    true,
+		BFFBaseURL: server.URL,
+		Mounts:     ParseMounts("/p3:nas_local"),
+	}, nil)
 
 	rows, total, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{
 		Keyword: "cached",
@@ -325,21 +466,22 @@ func TestSearchUsesCachedIndexAndSchedulesKeywordRefreshAsync(t *testing.T) {
 	if total != 1 || len(rows) != 1 || rows[0].FileName != "cached.jpg" {
 		t.Fatalf("Search() rows=%+v total=%d, want cached row", rows, total)
 	}
-	if scheduled != 1 {
-		t.Fatalf("scheduled refreshes=%d, want 1", scheduled)
-	}
 	if len(repo.upserts) != 0 || len(repo.finishedRuns) != 0 {
-		t.Fatalf("keyword sync ran inline: upserts=%d finishedRuns=%d", len(repo.upserts), len(repo.finishedRuns))
+		t.Fatalf("unexpected inline writes from failed refresh: upserts=%d finishedRuns=%d", len(repo.upserts), len(repo.finishedRuns))
 	}
 }
 
-func TestSearchDeduplicatesActiveKeywordRefresh(t *testing.T) {
+func TestSearchDoesNotScheduleBackgroundKeywordRefresh(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"items": []map[string]interface{}{}})
+	}))
+	defer server.Close()
+
 	repo := &externalAssetRepoStub{}
 	svc := NewService(repo, Config{
-		Enabled:      true,
-		AListBaseURL: "http://alist.invalid",
-		AListToken:   "token",
-		Mounts:       ParseMounts("/p3:nas_local"),
+		Enabled:    true,
+		BFFBaseURL: server.URL,
+		Mounts:     ParseMounts("/p3:nas_local"),
 	}, nil)
 	scheduled := 0
 	svc.keywordRefreshAsyncFn = func(fn func()) {
@@ -355,18 +497,16 @@ func TestSearchDeduplicatesActiveKeywordRefresh(t *testing.T) {
 			t.Fatalf("Search() error = %v", err)
 		}
 	}
-	if scheduled != 1 {
-		t.Fatalf("scheduled refreshes=%d, want 1", scheduled)
+	if scheduled != 0 {
+		t.Fatalf("scheduled refreshes=%d, want 0", scheduled)
 	}
 }
 
 func TestSearchDoesNotRefreshVeryShortASCIIKeyword(t *testing.T) {
 	repo := &externalAssetRepoStub{}
 	svc := NewService(repo, Config{
-		Enabled:      true,
-		AListBaseURL: "http://alist.invalid",
-		AListToken:   "token",
-		Mounts:       ParseMounts("/p3:nas_local"),
+		Enabled: true,
+		Mounts:  ParseMounts("/p3:nas_local"),
 	}, nil)
 	scheduled := 0
 	svc.keywordRefreshAsyncFn = func(fn func()) {
@@ -382,6 +522,23 @@ func TestSearchDoesNotRefreshVeryShortASCIIKeyword(t *testing.T) {
 	}
 	if scheduled != 0 {
 		t.Fatalf("scheduled refreshes=%d, want 0", scheduled)
+	}
+}
+
+func TestFullSyncDisabledWhenBFFSourceIsConfigured(t *testing.T) {
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:         true,
+		BFFBaseURL:      "http://bff",
+		AListBaseURL:    "http://alist",
+		AListToken:      "token",
+		FullSyncEnabled: true,
+		Mounts:          ParseMounts("/p3:nas_local"),
+	}, nil)
+	if svc.FullSyncReady() {
+		t.Fatal("FullSyncReady() = true, want false when BFF is source")
+	}
+	if svc.LegacyIndexRefreshReady() {
+		t.Fatal("LegacyIndexRefreshReady() = true, want false when BFF is source")
 	}
 }
 
@@ -403,6 +560,31 @@ type externalAssetRepoStub struct {
 
 func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
 	r.searchQueries = append(r.searchQueries, query)
+	if len(r.searchRows) == 0 && r.searchTotal == 0 && len(r.upserts) > 0 {
+		rows := make([]*domain.ExternalAssetRecord, 0, len(r.upserts))
+		for i, item := range r.upserts {
+			id := int64(i + 1)
+			rows = append(rows, &domain.ExternalAssetRecord{
+				ID:            id,
+				ResourceID:    domain.ExternalAssetResourceID(id),
+				Provider:      item.Provider,
+				Kind:          item.Kind,
+				Driver:        item.Driver,
+				MountPath:     item.MountPath,
+				OriginPath:    item.OriginPath,
+				ParentPath:    item.ParentPath,
+				FileName:      item.FileName,
+				FileExt:       item.FileExt,
+				MimeType:      item.MimeType,
+				FileSize:      item.FileSize,
+				IsDir:         item.IsDir,
+				Status:        domain.ExternalAssetStatusIndexed,
+				OSSSyncStatus: domain.ExternalAssetOSSStatusNone,
+				PreviewStatus: domain.ExternalAssetPreviewStatusNone,
+			})
+		}
+		return rows, int64(len(rows)), nil
+	}
 	total := r.searchTotal
 	if total == 0 && len(r.searchRows) > 0 {
 		total = int64(len(r.searchRows))
@@ -412,7 +594,15 @@ func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalA
 
 func (r *externalAssetRepoStub) Upsert(_ context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error) {
 	r.upserts = append(r.upserts, item)
-	return &domain.ExternalAssetRecord{ID: int64(len(r.upserts)), FileName: item.FileName}, nil
+	id := int64(len(r.upserts))
+	return &domain.ExternalAssetRecord{
+		ID:         id,
+		ResourceID: domain.ExternalAssetResourceID(id),
+		Kind:       item.Kind,
+		MountPath:  item.MountPath,
+		OriginPath: item.OriginPath,
+		FileName:   item.FileName,
+	}, nil
 }
 
 func (r *externalAssetRepoStub) GetByID(context.Context, int64) (*domain.ExternalAssetRecord, error) {

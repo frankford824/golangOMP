@@ -164,7 +164,11 @@ func (s *Service) SyncInterval() time.Duration {
 }
 
 func (s *Service) FullSyncReady() bool {
-	return s != nil && s.Enabled() && s.cfg.FullSyncEnabled && s.alist != nil && s.alist.Enabled()
+	return s != nil && s.Enabled() && !s.bffSourceReady() && s.cfg.FullSyncEnabled && s.alist != nil && s.alist.Enabled()
+}
+
+func (s *Service) LegacyIndexRefreshReady() bool {
+	return s != nil && s.Enabled() && !s.bffSourceReady() && s.searchBackendReady()
 }
 
 func ParseMounts(raw string) []MountConfig {
@@ -229,11 +233,58 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 	query = query.Normalized()
 	if query.Keyword != "" && s.searchBackendReady() {
 		s.recordRecentKeyword(query.Keyword)
-		if shouldScheduleKeywordRefresh(query.Keyword) {
-			s.scheduleKeywordRefresh(query.Keyword, query.Size)
-		}
+		_ = s.refreshSearchCache(ctx, query)
 	}
 	return s.repo.Search(ctx, query)
+}
+
+func (s *Service) refreshSearchCache(ctx context.Context, query domain.ExternalAssetSearchQuery) error {
+	if !s.Enabled() || !s.searchBackendReady() {
+		return nil
+	}
+	query = query.Normalized()
+	if query.Keyword == "" {
+		return nil
+	}
+	limit := 200
+	var firstErr error
+	for _, mount := range s.mountsForQuery(query) {
+		resp, err := s.searchMount(ctx, mount.Path, query.Keyword, limit)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, item := range resp.Content {
+			if isSkippableExternalSearchItem(item) {
+				continue
+			}
+			upsert := s.upsertFromSearchItem(mount, item)
+			if _, err := s.repo.Upsert(ctx, upsert); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+func (s *Service) mountsForQuery(query domain.ExternalAssetSearchQuery) []MountConfig {
+	if s == nil {
+		return nil
+	}
+	query = query.Normalized()
+	mounts := make([]MountConfig, 0, len(s.cfg.Mounts))
+	for _, mount := range s.cfg.Mounts {
+		if query.MountPath != "" && mount.Path != query.MountPath {
+			continue
+		}
+		if query.Kind != "" && mount.Kind != query.Kind {
+			continue
+		}
+		mounts = append(mounts, mount)
+	}
+	return mounts
 }
 
 func shouldScheduleKeywordRefresh(keyword string) bool {
@@ -629,15 +680,44 @@ func (s *Service) searchBackendReady() bool {
 	return s != nil && ((s.bff != nil && s.bff.Enabled()) || (s.alist != nil && s.alist.Enabled()))
 }
 
+func (s *Service) bffSourceReady() bool {
+	return s != nil && s.bff != nil && s.bff.Enabled()
+}
+
 func (s *Service) directLinkBackendReady() bool {
 	return s != nil && ((s.bff != nil && s.bff.Enabled()) || (s.alist != nil && s.alist.Enabled()))
 }
 
 func (s *Service) searchMount(ctx context.Context, mountPath, keyword string, limit int) (*AListSearchResponse, error) {
 	if s.bff != nil && s.bff.Enabled() {
-		return s.bff.Search(ctx, mountPath, keyword, 1, limit)
+		resp, err := s.bff.Search(ctx, mountPath, keyword, 1, limit)
+		if err == nil && hasUsableExternalSearchItems(resp) {
+			return resp, nil
+		}
+		if s.alist != nil && s.alist.Enabled() {
+			fallback, fallbackErr := s.alist.Search(ctx, mountPath, keyword, 1, limit)
+			if fallbackErr == nil {
+				return fallback, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("external asset bff search failed: %v; alist fallback failed: %w", err, fallbackErr)
+			}
+		}
+		return resp, err
 	}
 	return s.alist.Search(ctx, mountPath, keyword, 1, limit)
+}
+
+func hasUsableExternalSearchItems(resp *AListSearchResponse) bool {
+	if resp == nil {
+		return false
+	}
+	for _, item := range resp.Content {
+		if !isSkippableExternalSearchItem(item) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) resolveNetdiskDirectURL(ctx context.Context, row *domain.ExternalAssetRecord, preview bool) (string, error) {
@@ -653,6 +733,9 @@ func (s *Service) resolveNetdiskDirectURL(ctx context.Context, row *domain.Exter
 
 func (s *Service) RefreshDirectURLs(ctx context.Context, limit int) (int, int, error) {
 	if !s.Enabled() || !s.directLinkBackendReady() {
+		return 0, 0, nil
+	}
+	if s.bffSourceReady() {
 		return 0, 0, nil
 	}
 	staleBefore := s.nowFn().UTC().Add(-s.cfg.LinkRefreshInterval)
@@ -766,6 +849,9 @@ func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
 				return urlValue
 			}
 		}
+		if s.bff != nil && s.bff.Enabled() {
+			return s.bff.BrowserFetchURL(row.OriginPath, true, true)
+		}
 		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNetdisk {
@@ -785,10 +871,13 @@ func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
 		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNASLocal {
-		if row.OSSOriginalKey == "" || row.OSSSyncStatus != domain.ExternalAssetOSSStatusReady {
-			return ""
+		if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
+			return s.presignedOriginalURL(row)
 		}
-		return s.presignedOriginalURL(row)
+		if s.bff != nil && s.bff.Enabled() {
+			return s.bff.BrowserFetchURL(row.OriginPath, false, true)
+		}
+		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNetdisk {
 		rawURL := strings.TrimSpace(row.RawURL)

@@ -766,41 +766,43 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 		runRefresh := func() {
 			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 			defer cancel()
-			if svc.FullSyncReady() {
-				full, err := svc.SyncFullIndex(refreshCtx)
+			if svc.LegacyIndexRefreshReady() {
+				if svc.FullSyncReady() {
+					full, err := svc.SyncFullIndex(refreshCtx)
+					if err != nil {
+						logger.Warn("external full index refresh finished with error", zap.Error(err))
+					}
+					if full != nil && (len(full.Mounts) > 0 || full.ScannedCount > 0 || full.UpsertedCount > 0) {
+						logger.Info("external full index refresh finished",
+							zap.Int("mounts", len(full.Mounts)),
+							zap.Int("scanned", full.ScannedCount),
+							zap.Int("upserted", full.UpsertedCount),
+						)
+					}
+				}
+				keywords := []string{"jpg", "jpeg", "png", "webp", "psd", "psb", "ai", "pdf", "tif", "tiff", "2026", "2025"}
+				seen := map[string]struct{}{}
+				for _, keyword := range keywords {
+					seen[keyword] = struct{}{}
+				}
+				for _, keyword := range svc.RecentKeywords(50) {
+					if _, ok := seen[keyword]; ok {
+						continue
+					}
+					seen[keyword] = struct{}{}
+					keywords = append(keywords, keyword)
+				}
+				for _, keyword := range keywords {
+					if err := svc.SyncKeyword(refreshCtx, keyword, 200); err != nil {
+						logger.Warn("external keyword refresh failed", zap.String("keyword", keyword), zap.Error(err))
+					}
+				}
+				ready, failed, err := svc.RefreshDirectURLs(refreshCtx, 100)
 				if err != nil {
-					logger.Warn("external full index refresh finished with error", zap.Error(err))
+					logger.Warn("external direct url refresh failed", zap.Error(err))
+				} else if ready > 0 || failed > 0 {
+					logger.Info("external direct url refresh finished", zap.Int("ready", ready), zap.Int("failed", failed))
 				}
-				if full != nil && (len(full.Mounts) > 0 || full.ScannedCount > 0 || full.UpsertedCount > 0) {
-					logger.Info("external full index refresh finished",
-						zap.Int("mounts", len(full.Mounts)),
-						zap.Int("scanned", full.ScannedCount),
-						zap.Int("upserted", full.UpsertedCount),
-					)
-				}
-			}
-			keywords := []string{"jpg", "jpeg", "png", "webp", "psd", "psb", "ai", "pdf", "tif", "tiff", "2026", "2025"}
-			seen := map[string]struct{}{}
-			for _, keyword := range keywords {
-				seen[keyword] = struct{}{}
-			}
-			for _, keyword := range svc.RecentKeywords(50) {
-				if _, ok := seen[keyword]; ok {
-					continue
-				}
-				seen[keyword] = struct{}{}
-				keywords = append(keywords, keyword)
-			}
-			for _, keyword := range keywords {
-				if err := svc.SyncKeyword(refreshCtx, keyword, 200); err != nil {
-					logger.Warn("external keyword refresh failed", zap.String("keyword", keyword), zap.Error(err))
-				}
-			}
-			ready, failed, err := svc.RefreshDirectURLs(refreshCtx, 100)
-			if err != nil {
-				logger.Warn("external direct url refresh failed", zap.Error(err))
-			} else if ready > 0 || failed > 0 {
-				logger.Info("external direct url refresh finished", zap.Int("ready", ready), zap.Int("failed", failed))
 			}
 		}
 		runRefresh()

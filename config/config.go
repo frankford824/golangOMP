@@ -353,7 +353,7 @@ func Load() (*Config, error) {
 			AListMounts:         getEnv("EXTERNAL_ASSETS_ALIST_MOUNTS", "/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local"),
 			SyncInterval:        mustParseDuration(getEnv("EXTERNAL_ASSETS_SYNC_INTERVAL", "1h")),
 			LinkRefreshInterval: mustParseDuration(getEnv("EXTERNAL_ASSETS_LINK_REFRESH_INTERVAL", "1h")),
-			FullSyncEnabled:     mustParseBool(getEnv("EXTERNAL_ASSETS_FULL_SYNC_ENABLED", "true")),
+			FullSyncEnabled:     mustParseBool(getEnv("EXTERNAL_ASSETS_FULL_SYNC_ENABLED", "false")),
 			FullSyncPageSize:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_PAGE_SIZE", "100")),
 			FullSyncMaxDepth:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DEPTH", "16")),
 			FullSyncMaxFiles:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT", "20000")),
