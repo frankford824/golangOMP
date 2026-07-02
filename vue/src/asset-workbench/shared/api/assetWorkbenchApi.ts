@@ -576,6 +576,8 @@ export interface SystemAssetDownloadInfo {
 
 export interface SystemAssetPreviewMeta {
   asset_id: number
+  source_type?: string
+  source_ref?: string
   status: string
   preparing: boolean
   preview_url?: string
@@ -590,12 +592,14 @@ export interface SystemAssetRow {
   id: number
   resource_id?: string
   source_type?: string
+  source_label?: string
   asset_no?: string
   scope_sku_code?: string
   sku_code?: string
   primary_sku_code?: string
   file_name?: string
   original_filename?: string
+  preview_url?: string
   download_url?: string
   mime_type?: string
   product_name?: string
@@ -605,6 +609,7 @@ export interface SystemAssetRow {
   task_creator_name?: string
   task_creator_username?: string
   preview_available?: boolean
+  origin_path?: string
   created_at?: string
   updated_at?: string
 }
@@ -644,8 +649,11 @@ export interface OverviewSearchResult {
 
 export interface SystemAssetBatchDownloadManifest {
   items: Array<{
+    material_id?: number
     asset_id: number
-    task_id: number
+    source_type?: string
+    source_ref?: string
+    task_id?: number
     filename: string
     file_size: number
     mime_type?: string
@@ -653,7 +661,10 @@ export interface SystemAssetBatchDownloadManifest {
     expires_at?: string
   }>
   failures?: Array<{
+    material_id?: number
     asset_id: number
+    source_type?: string
+    source_ref?: string
     task_id?: number
     filename?: string
     reason: string
@@ -681,6 +692,10 @@ export interface UploadDirectoryRow {
 export interface ClientMaterialRow {
   id: number
   asset_id: number
+  source_type?: string
+  source_ref?: string
+  resource_id?: string
+  source_label?: string
   title: string
   description: string
   filename_snapshot: string
@@ -914,6 +929,9 @@ export interface UpsertUploadDirectoryPayload {
 
 export interface UpsertClientMaterialPayload {
   asset_id?: number
+  source_type?: string
+  source_ref?: string
+  resource_id?: string
   title?: string
   description?: string
   enabled?: boolean
@@ -1376,9 +1394,42 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async systemSearch(params: { q?: string; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
+  async systemSearch(params: { q?: string; source?: 'all' | 'system' | 'external'; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
     const res = await http.get<ApiEnvelope<SystemSearchResult>>('/v1/asset-workbench/system-search', { params, signal })
     return unwrap(res.data)
+  },
+
+  async downloadMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
+    if (asset.source_type === 'external') {
+      const resourceId = asset.resource_id || `ext-${asset.id}`
+      const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/download`, { signal })
+      return unwrap(res.data)
+    }
+    return this.downloadSystemAsset(asset.id, signal)
+  },
+
+  async previewMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal): Promise<SystemAssetPreviewMeta> {
+    if (asset.source_type === 'external') {
+      const resourceId = asset.resource_id || `ext-${asset.id}`
+      const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/preview`, { signal })
+      const info = unwrap(res.data)
+      const downloadUrl = info.download_url
+      const ready = Boolean(downloadUrl && info.preview_available)
+      return {
+        asset_id: asset.id,
+        source_type: 'external',
+        source_ref: resourceId,
+        status: ready ? 'ready' : info.download_url ? 'not_applicable' : 'pending',
+        preparing: !info.download_url,
+        preview_url: ready ? downloadUrl : undefined,
+        download_url: downloadUrl,
+        expires_at: info.expires_at,
+        mime_type: info.mime_type || asset.mime_type,
+        filename: info.filename || asset.original_filename || asset.file_name,
+        preview_available: ready,
+      }
+    }
+    return this.previewSystemAsset(asset.id, signal)
   },
 
   async overviewSearch(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<OverviewSearchResult> {

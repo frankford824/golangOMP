@@ -136,6 +136,8 @@ const systemAssets = [
   {
     id: 501,
     resource_id: 'res_darkroom_501',
+    source_type: 'system',
+    source_label: '系统资源',
     asset_no: 'MAT-501',
     scope_sku_code: 'CGP000071',
     file_name: 'poster-key-visual.png',
@@ -149,6 +151,8 @@ const systemAssets = [
   {
     id: 502,
     resource_id: 'res_darkroom_502',
+    source_type: 'system',
+    source_label: '系统资源',
     asset_no: 'MAT-502',
     scope_sku_code: 'CGK000602',
     file_name: 'lamp-render.psd',
@@ -159,12 +163,31 @@ const systemAssets = [
     preview_available: false,
     download_url: 'https://example.invalid/lamp-render.psd',
   },
+  {
+    id: 900,
+    resource_id: 'ext-900',
+    source_type: 'external',
+    source_label: '外部资源',
+    file_name: 'external-reference.png',
+    original_filename: 'external-reference.png',
+    mime_type: 'image/png',
+    product_name: '/p3/reference/external-reference.png',
+    task_no: '',
+    preview_available: true,
+    preview_url: previewImageUrl,
+    download_url: previewImageUrl,
+    origin_path: '/p3/reference/external-reference.png',
+  },
 ]
 
 const clientMaterials = [
   {
     id: 1,
     asset_id: 501,
+    source_type: 'system',
+    source_ref: '501',
+    resource_id: '501',
+    source_label: '系统资源',
     title: '陈管常规海报 / 寿宴 / 红底黑字福如东海',
     description: '客户端可直接下载的已发布素材',
     filename_snapshot: 'poster-key-visual.png',
@@ -179,7 +202,29 @@ const clientMaterials = [
   },
   {
     id: 2,
+    asset_id: 900,
+    source_type: 'external',
+    source_ref: 'ext-900',
+    resource_id: 'ext-900',
+    source_label: '外部资源',
+    title: '外部参考素材',
+    description: '从外部资源发布给客户端的素材',
+    filename_snapshot: 'external-reference.png',
+    mime_type_snapshot: 'image/png',
+    file_size_snapshot: 188743,
+    preview_available: true,
+    enabled: true,
+    sort_order: 2,
+    published_by: 1001,
+    published_at: '2026-06-24T10:20:00+08:00',
+  },
+  {
+    id: 3,
     asset_id: 502,
+    source_type: 'system',
+    source_ref: '502',
+    resource_id: '502',
+    source_label: '系统资源',
     title: '菲瑶常规 KT 板 / 毕业典礼迎宾牌',
     description: 'PSD 源文件',
     filename_snapshot: 'lamp-render.psd',
@@ -188,7 +233,7 @@ const clientMaterials = [
     scope_sku_code: 'CGK000602',
     preview_available: false,
     enabled: true,
-    sort_order: 2,
+    sort_order: 3,
     published_by: 1001,
     published_at: '2026-06-24T10:05:00+08:00',
   },
@@ -379,7 +424,23 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     }
     if (path.endsWith('/client-materials/2/preview')) {
       return json(route, {
+        asset_id: 900,
+        source_type: 'external',
+        source_ref: 'ext-900',
+        status: 'ready',
+        preparing: false,
+        preview_url: previewImageUrl,
+        download_url: previewImageUrl,
+        mime_type: 'image/png',
+        filename: 'external-reference.png',
+        preview_available: true,
+      })
+    }
+    if (path.endsWith('/client-materials/3/preview')) {
+      return json(route, {
         asset_id: 502,
+        source_type: 'system',
+        source_ref: '502',
         status: 'not_applicable',
         preparing: false,
         mime_type: 'application/vnd.adobe.photoshop',
@@ -388,6 +449,23 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
       })
     }
     if (path.endsWith('/saved-views')) return json(route, [])
+    return json(route, {})
+  })
+
+  await context.route('**/v1/assets/**', async (route) => {
+    const url = new URL(route.request().url())
+    const path = url.pathname
+    if (path.endsWith('/ext-900/preview') || path.endsWith('/ext-900/download')) {
+      return json(route, {
+        download_mode: 'direct',
+        download_url: previewImageUrl,
+        access_hint: 'external_fixture',
+        preview_available: path.endsWith('/preview'),
+        filename: 'external-reference.png',
+        file_size: 188743,
+        mime_type: 'image/png',
+      })
+    }
     return json(route, {})
   })
 }

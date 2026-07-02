@@ -1116,6 +1116,64 @@ func (s *systemAssetDownloaderStub) BuildBatchDownloadManifest(_ context.Context
 	}, nil
 }
 
+type externalMaterialProviderStub struct {
+	searchCalls   int
+	detailCalls   []int64
+	downloadCalls []int64
+	previewCalls  []int64
+	details       map[int64]*assetcenter.AssetDetail
+	downloadInfo  *domain.AssetDownloadInfo
+	previewInfo   *domain.AssetDownloadInfo
+}
+
+func (s *externalMaterialProviderStub) Search(_ context.Context, _ domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError) {
+	s.searchCalls++
+	return &assetcenter.SearchResult{}, nil
+}
+
+func (s *externalMaterialProviderStub) GetExternalDetail(_ context.Context, externalID int64) (*assetcenter.AssetDetail, *domain.AppError) {
+	s.detailCalls = append(s.detailCalls, externalID)
+	if s.details != nil && s.details[externalID] != nil {
+		detail := *s.details[externalID]
+		return &detail, nil
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (s *externalMaterialProviderStub) DownloadExternal(_ context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.downloadCalls = append(s.downloadCalls, externalID)
+	if s.downloadInfo != nil {
+		info := *s.downloadInfo
+		return &info, nil
+	}
+	url := "https://assets.example.com/external/" + strconv.FormatInt(externalID, 10)
+	return &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      &url,
+		Filename:         "external-material.png",
+		FileSize:         4096,
+		MimeType:         "image/png",
+		PreviewAvailable: true,
+	}, nil
+}
+
+func (s *externalMaterialProviderStub) PreviewExternal(_ context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.previewCalls = append(s.previewCalls, externalID)
+	if s.previewInfo != nil {
+		info := *s.previewInfo
+		return &info, nil
+	}
+	url := "https://assets.example.com/external/preview/" + strconv.FormatInt(externalID, 10)
+	return &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      &url,
+		Filename:         "external-material.png",
+		FileSize:         4096,
+		MimeType:         "image/png",
+		PreviewAvailable: true,
+	}, nil
+}
+
 type itemActionRepo struct {
 	repo.AssetWorkbenchRepo
 	items        map[int64]*domain.AssetWorkbenchSubmissionItem
@@ -2382,6 +2440,83 @@ func TestClientMaterialPreviewRequiresEnabledPublishedMaterial(t *testing.T) {
 	}
 	if downloader.downloadCalls != 1 {
 		t.Fatalf("downloadCalls = %d, want 1", downloader.downloadCalls)
+	}
+}
+
+func TestExternalClientMaterialDownloadAndPreviewUseExternalProvider(t *testing.T) {
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
+		1: {
+			ID:               1,
+			AssetID:          501,
+			SourceType:       string(domain.AssetResourceSourceExternal),
+			SourceRef:        domain.ExternalAssetResourceID(501),
+			Title:            "外部素材",
+			FilenameSnapshot: "external.png",
+			MimeTypeSnapshot: "image/png",
+			Enabled:          true,
+		},
+	}}
+	externalProvider := &externalMaterialProviderStub{}
+	systemDownloader := &systemAssetDownloaderStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetSearcher(externalProvider),
+		WithSystemAssetDownloader(systemDownloader),
+	)
+	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	info, appErr := svc.ClientMaterialDownload(context.Background(), actor, 1)
+	if appErr != nil {
+		t.Fatalf("ClientMaterialDownload(external) error = %+v", appErr)
+	}
+	if info == nil || len(externalProvider.downloadCalls) != 1 || externalProvider.downloadCalls[0] != 501 {
+		t.Fatalf("download info = %+v external calls = %+v", info, externalProvider.downloadCalls)
+	}
+	if systemDownloader.downloadCalls != 0 {
+		t.Fatalf("system downloader calls = %d, want 0", systemDownloader.downloadCalls)
+	}
+
+	meta, appErr := svc.ClientMaterialPreview(context.Background(), actor, 1)
+	if appErr != nil {
+		t.Fatalf("ClientMaterialPreview(external) error = %+v", appErr)
+	}
+	if meta == nil || meta.SourceType != string(domain.AssetResourceSourceExternal) || meta.SourceRef != domain.ExternalAssetResourceID(501) || !meta.PreviewAvailable {
+		t.Fatalf("preview meta = %+v, want external ready preview", meta)
+	}
+	if len(externalProvider.previewCalls) != 1 || externalProvider.previewCalls[0] != 501 {
+		t.Fatalf("preview calls = %+v", externalProvider.previewCalls)
+	}
+}
+
+func TestClientMaterialBatchDownloadSupportsMixedSources(t *testing.T) {
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
+		1: {ID: 1, AssetID: 1001, SourceType: string(domain.AssetResourceSourceSystem), SourceRef: "1001", Title: "系统素材", Enabled: true},
+		2: {ID: 2, AssetID: 501, SourceType: string(domain.AssetResourceSourceExternal), SourceRef: domain.ExternalAssetResourceID(501), Title: "外部素材", Enabled: true},
+	}}
+	externalProvider := &externalMaterialProviderStub{}
+	systemDownloader := &systemAssetDownloaderStub{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetSearcher(externalProvider),
+		WithSystemAssetDownloader(systemDownloader),
+	)
+
+	manifest, appErr := svc.ClientMaterialBatchDownloadManifest(
+		context.Background(),
+		domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}},
+		ClientMaterialBatchDownloadParams{MaterialIDs: []int64{1, 2}},
+	)
+	if appErr != nil {
+		t.Fatalf("ClientMaterialBatchDownloadManifest() error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 2 || len(manifest.Items) != 2 {
+		t.Fatalf("manifest = %+v, want two mixed-source items", manifest)
+	}
+	if manifest.Items[0].SourceType != string(domain.AssetResourceSourceSystem) || manifest.Items[1].SourceType != string(domain.AssetResourceSourceExternal) {
+		t.Fatalf("manifest items = %+v, want system then external", manifest.Items)
+	}
+	if systemDownloader.downloadCalls != 1 || len(externalProvider.downloadCalls) != 1 {
+		t.Fatalf("system calls = %d external calls = %+v", systemDownloader.downloadCalls, externalProvider.downloadCalls)
 	}
 }
 

@@ -20508,8 +20508,8 @@ paths:
         '403': { description: Forbidden }
   /v1/asset-workbench/system-search:
     get:
-      summary: Search system assets from asset workbench
-      description: Manager-only read-only system material search. Supports page/page_size pagination; legacy `limit` is accepted as page_size.
+      summary: Search publishable material assets from asset workbench
+      description: Manager-only read-only material source search. Defaults to system + external assets, supports page/page_size pagination, and accepts legacy `limit` as page_size.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -20519,6 +20519,13 @@ paths:
         - in: query
           name: q
           schema: { type: string }
+        - in: query
+          name: source
+          description: Source bucket for publishable material search. Defaults to `all`.
+          schema:
+            type: string
+            enum: [all, system, external]
+            default: all
         - in: query
           name: page
           schema: { type: integer, minimum: 1 }
@@ -20548,12 +20555,14 @@ paths:
                             id: { type: integer }
                             resource_id: { type: string }
                             source_type: { type: string }
+                            source_label: { type: string }
                             asset_no: { type: string }
                             scope_sku_code: { type: string }
                             sku_code: { type: string }
                             primary_sku_code: { type: string }
                             file_name: { type: string }
                             original_filename: { type: string }
+                            preview_url: { type: string }
                             download_url: { type: string }
                             mime_type: { type: string }
                             product_name: { type: string }
@@ -20563,6 +20572,7 @@ paths:
                             task_creator_name: { type: string }
                             task_creator_username: { type: string }
                             preview_available: { type: boolean }
+                            origin_path: { type: string }
                             created_at: { type: string, format: date-time }
                             updated_at: { type: string, format: date-time }
                       total: { type: integer }
@@ -21001,6 +21011,10 @@ paths:
                       properties:
                         id: { type: integer }
                         asset_id: { type: integer }
+                        source_type: { type: string, enum: [system, external] }
+                        source_ref: { type: string }
+                        resource_id: { type: string }
+                        source_label: { type: string }
                         title: { type: string }
                         description: { type: string }
                         filename_snapshot: { type: string }
@@ -21020,8 +21034,8 @@ paths:
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
     post:
-      summary: Publish a system asset to client materials
-      description: Publishes an existing system asset by `asset_id`. Clients can download only published enabled rows.
+      summary: Publish an asset to client materials
+      description: Publishes an existing system or external asset by source reference. Existing `asset_id` remains supported for system assets; external assets use `source_type=external` with `source_ref`/`resource_id` such as `ext-123`. Clients can download only published enabled rows.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -21033,9 +21047,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [asset_id]
               properties:
                 asset_id: { type: integer }
+                source_type: { type: string, enum: [system, external] }
+                source_ref: { type: string }
+                resource_id: { type: string }
                 title: { type: string }
                 description: { type: string }
                 enabled: { type: boolean }
@@ -21073,6 +21089,9 @@ paths:
               type: object
               properties:
                 asset_id: { type: integer }
+                source_type: { type: string, enum: [system, external] }
+                source_ref: { type: string }
+                resource_id: { type: string }
                 title: { type: string }
                 description: { type: string }
                 enabled: { type: boolean }
@@ -21167,7 +21186,9 @@ paths:
                     type: object
                     properties:
                       asset_id: { type: integer }
-                      status: { type: string, enum: [ready, not_applicable] }
+                      source_type: { type: string, enum: [system, external] }
+                      source_ref: { type: string }
+                      status: { type: string, enum: [ready, pending, not_applicable] }
                       preparing: { type: boolean }
                       preview_url: { type: string }
                       download_url: { type: string }
@@ -21216,6 +21237,9 @@ paths:
                           type: object
                           properties:
                             asset_id: { type: integer }
+                            material_id: { type: integer }
+                            source_type: { type: string, enum: [system, external] }
+                            source_ref: { type: string }
                             task_id: { type: integer }
                             filename: { type: string }
                             file_size: { type: integer }
@@ -21228,6 +21252,9 @@ paths:
                           type: object
                           properties:
                             asset_id: { type: integer }
+                            material_id: { type: integer }
+                            source_type: { type: string, enum: [system, external] }
+                            source_ref: { type: string }
                             reason: { type: string }
                       success_count: { type: integer }
                       failure_count: { type: integer }

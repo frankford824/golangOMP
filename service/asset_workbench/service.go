@@ -72,9 +72,18 @@ type SystemAssetDetailer interface {
 	GetDetail(ctx context.Context, assetID int64) (*assetcenter.AssetDetail, *domain.AppError)
 }
 
+type ExternalAssetDetailer interface {
+	GetExternalDetail(ctx context.Context, externalID int64) (*assetcenter.AssetDetail, *domain.AppError)
+}
+
 type SystemAssetDownloader interface {
 	DownloadLatest(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 	BuildBatchDownloadManifest(ctx context.Context, assetIDs []int64, opts ...assetcenter.BatchDownloadOption) (*assetcenter.BatchDownloadManifest, *domain.AppError)
+}
+
+type ExternalAssetDownloader interface {
+	DownloadExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError)
+	PreviewExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 }
 
 func NewService(cfg Config, opts ...Option) *Service {
@@ -397,6 +406,9 @@ type UpdateUploadDirectoryParams struct {
 
 type CreateClientMaterialParams struct {
 	AssetID     int64  `json:"asset_id"`
+	SourceType  string `json:"source_type"`
+	SourceRef   string `json:"source_ref"`
+	ResourceID  string `json:"resource_id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Enabled     *bool  `json:"enabled"`
@@ -405,6 +417,9 @@ type CreateClientMaterialParams struct {
 
 type UpdateClientMaterialParams struct {
 	AssetID     *int64  `json:"asset_id"`
+	SourceType  *string `json:"source_type"`
+	SourceRef   *string `json:"source_ref"`
+	ResourceID  *string `json:"resource_id"`
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Enabled     *bool   `json:"enabled"`
@@ -414,6 +429,36 @@ type UpdateClientMaterialParams struct {
 type ClientMaterialBatchDownloadParams struct {
 	MaterialIDs []int64 `json:"material_ids"`
 	NamingMode  string  `json:"naming_mode,omitempty"`
+}
+
+type ClientMaterialBatchDownloadManifest struct {
+	Items        []ClientMaterialBatchDownloadItem    `json:"items"`
+	Failures     []ClientMaterialBatchDownloadFailure `json:"failures,omitempty"`
+	SuccessCount int                                  `json:"success_count"`
+	FailureCount int                                  `json:"failure_count"`
+	TotalSize    int64                                `json:"total_size"`
+	ExpiresAt    *time.Time                           `json:"expires_at,omitempty"`
+}
+
+type ClientMaterialBatchDownloadItem struct {
+	MaterialID  int64      `json:"material_id"`
+	AssetID     int64      `json:"asset_id"`
+	SourceType  string     `json:"source_type"`
+	SourceRef   string     `json:"source_ref"`
+	Filename    string     `json:"filename"`
+	FileSize    int64      `json:"file_size"`
+	MimeType    string     `json:"mime_type,omitempty"`
+	DownloadURL string     `json:"download_url"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
+type ClientMaterialBatchDownloadFailure struct {
+	MaterialID int64  `json:"material_id"`
+	AssetID    int64  `json:"asset_id,omitempty"`
+	SourceType string `json:"source_type,omitempty"`
+	SourceRef  string `json:"source_ref,omitempty"`
+	Filename   string `json:"filename,omitempty"`
+	Reason     string `json:"reason"`
 }
 
 type CreateUploadSessionParams struct {
@@ -526,6 +571,8 @@ type FilePreviewMeta struct {
 
 type SystemAssetPreviewMeta struct {
 	AssetID          int64      `json:"asset_id"`
+	SourceType       string     `json:"source_type,omitempty"`
+	SourceRef        string     `json:"source_ref,omitempty"`
 	Status           string     `json:"status"`
 	Preparing        bool       `json:"preparing"`
 	PreviewURL       string     `json:"preview_url,omitempty"`
@@ -4683,7 +4730,7 @@ func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor,
 	return &OverviewSearchResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
 }
 
-func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int) (*SystemSearchResult, *domain.AppError) {
+func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int, source string) (*SystemSearchResult, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can search system assets from workbench.", nil)
 	}
@@ -4697,11 +4744,12 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 	if pageSize <= 0 || pageSize > 100 {
 		pageSize = 50
 	}
+	sourceFilter := domain.NormalizeAssetResourceSource(source)
 	result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
 		Keyword:        query,
 		Page:           page,
 		Size:           pageSize,
-		Source:         domain.AssetResourceSourceSystem,
+		Source:         sourceFilter,
 		UsableState:    domain.AssetUsableStateFilterAll,
 		FormatCategory: domain.AssetFormatCategoryAll,
 		IsArchived:     domain.AssetArchiveFilterFalse,
@@ -4761,6 +4809,8 @@ func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64) (*S
 	}
 	meta := &SystemAssetPreviewMeta{
 		AssetID:          assetID,
+		SourceType:       string(domain.AssetResourceSourceSystem),
+		SourceRef:        strconv.FormatInt(assetID, 10),
 		Status:           domain.AssetWorkbenchPreviewStatusNotApplicable,
 		Filename:         info.Filename,
 		MimeType:         strings.TrimSpace(info.MimeType),
@@ -4839,21 +4889,30 @@ func (s *Service) CreateClientMaterial(ctx context.Context, actor domain.Request
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can publish client materials.", nil)
 	}
-	if params.AssetID <= 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
+	source, appErr := resolveClientMaterialSourceInput(params.AssetID, params.SourceType, params.SourceRef, params.ResourceID)
+	if appErr != nil {
+		return nil, appErr
 	}
-	info, appErr := s.systemDownloadSnapshot(ctx, params.AssetID)
+	snapshot, appErr := s.clientMaterialSourceSnapshot(ctx, source)
 	if appErr != nil {
 		return nil, appErr
 	}
 	now := s.nowFn().UTC()
 	item := &domain.AssetWorkbenchClientMaterial{
-		AssetID:          params.AssetID,
-		Title:            clientMaterialTitle(params.Title, params.AssetID, info),
+		AssetID:          snapshot.AssetID,
+		SourceType:       snapshot.SourceType,
+		SourceRef:        snapshot.SourceRef,
+		ResourceID:       snapshot.ResourceID,
+		SourceLabel:      snapshot.SourceLabel,
+		Title:            clientMaterialTitle(params.Title, snapshot.AssetID, &domain.AssetDownloadInfo{Filename: snapshot.Filename}),
 		Description:      strings.TrimSpace(params.Description),
-		FilenameSnapshot: strings.TrimSpace(info.Filename),
-		MimeTypeSnapshot: strings.TrimSpace(info.MimeType),
-		FileSizeSnapshot: info.FileSize,
+		FilenameSnapshot: snapshot.Filename,
+		MimeTypeSnapshot: snapshot.MimeType,
+		FileSizeSnapshot: snapshot.FileSize,
+		ScopeSKUCode:     snapshot.ScopeSKUCode,
+		SKUCode:          snapshot.SKUCode,
+		PrimarySKUCode:   snapshot.PrimarySKUCode,
+		PreviewAvailable: snapshot.PreviewAvailable,
 		Enabled:          boolValueDefault(params.Enabled, true),
 		SortOrder:        params.SortOrder,
 		PublishedBy:      actor.ID,
@@ -4892,20 +4951,51 @@ func (s *Service) UpdateClientMaterial(ctx context.Context, actor domain.Request
 		return nil, mapRepoReadError(err, "Client material not found.", "Failed to load client material.")
 	}
 	item := *existing
-	if params.AssetID != nil {
-		if *params.AssetID <= 0 {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
+	normalizeClientMaterialRow(&item)
+	if params.AssetID != nil || params.SourceType != nil || params.SourceRef != nil || params.ResourceID != nil {
+		sourceType := item.SourceType
+		sourceRef := item.SourceRef
+		resourceID := item.ResourceID
+		assetID := item.AssetID
+		if params.AssetID != nil {
+			assetID = *params.AssetID
+			if params.SourceType == nil && params.SourceRef == nil && params.ResourceID == nil {
+				sourceType = string(domain.AssetResourceSourceSystem)
+				sourceRef = ""
+				resourceID = ""
+			}
 		}
-		info, appErr := s.systemDownloadSnapshot(ctx, *params.AssetID)
+		if params.SourceType != nil {
+			sourceType = *params.SourceType
+		}
+		if params.SourceRef != nil {
+			sourceRef = *params.SourceRef
+		}
+		if params.ResourceID != nil {
+			resourceID = *params.ResourceID
+		}
+		source, appErr := resolveClientMaterialSourceInput(assetID, sourceType, sourceRef, resourceID)
 		if appErr != nil {
 			return nil, appErr
 		}
-		item.AssetID = *params.AssetID
-		item.FilenameSnapshot = strings.TrimSpace(info.Filename)
-		item.MimeTypeSnapshot = strings.TrimSpace(info.MimeType)
-		item.FileSizeSnapshot = info.FileSize
+		snapshot, appErr := s.clientMaterialSourceSnapshot(ctx, source)
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.AssetID = snapshot.AssetID
+		item.SourceType = snapshot.SourceType
+		item.SourceRef = snapshot.SourceRef
+		item.ResourceID = snapshot.ResourceID
+		item.SourceLabel = snapshot.SourceLabel
+		item.FilenameSnapshot = snapshot.Filename
+		item.MimeTypeSnapshot = snapshot.MimeType
+		item.FileSizeSnapshot = snapshot.FileSize
+		item.ScopeSKUCode = snapshot.ScopeSKUCode
+		item.SKUCode = snapshot.SKUCode
+		item.PrimarySKUCode = snapshot.PrimarySKUCode
+		item.PreviewAvailable = snapshot.PreviewAvailable
 		if params.Title == nil && strings.TrimSpace(item.Title) == "" {
-			item.Title = clientMaterialTitle("", item.AssetID, info)
+			item.Title = clientMaterialTitle("", item.AssetID, &domain.AssetDownloadInfo{Filename: item.FilenameSnapshot})
 		}
 	}
 	if params.Title != nil {
@@ -4978,13 +5068,15 @@ func (s *Service) ClientMaterialDownload(ctx context.Context, actor domain.Reque
 	if appErr != nil {
 		return nil, appErr
 	}
-	info, appErr := s.systemDownloadSnapshot(ctx, material.AssetID)
+	info, appErr := s.clientMaterialDownloadInfo(ctx, material)
 	if appErr != nil {
 		return nil, appErr
 	}
 	_ = s.recordSystemAssetDownloadEvent(ctx, actor, domain.AssetWorkbenchEventClientMaterialDownloaded, &material.ID, map[string]interface{}{
 		"material_id": material.ID,
 		"asset_id":    material.AssetID,
+		"source_type": material.SourceType,
+		"source_ref":  material.SourceRef,
 		"filename":    info.Filename,
 		"mode":        info.DownloadMode,
 	})
@@ -5002,10 +5094,10 @@ func (s *Service) ClientMaterialPreview(ctx context.Context, actor domain.Reques
 	if appErr != nil {
 		return nil, appErr
 	}
-	return s.systemAssetPreviewMeta(ctx, material.AssetID)
+	return s.clientMaterialPreviewMeta(ctx, material)
 }
 
-func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor domain.RequestActor, params ClientMaterialBatchDownloadParams) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
+func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor domain.RequestActor, params ClientMaterialBatchDownloadParams) (*ClientMaterialBatchDownloadManifest, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
@@ -5016,25 +5108,84 @@ func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor
 	if len(materialIDs) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_ids is required.", nil)
 	}
-	if s.systemDownloads == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
+	if len(materialIDs) > assetcenter.MaxBatchDownloadAssets {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_ids exceed batch download limit", map[string]interface{}{
+			"limit": assetcenter.MaxBatchDownloadAssets,
+		})
 	}
-	assetIDs := make([]int64, 0, len(materialIDs))
+	manifest := &ClientMaterialBatchDownloadManifest{
+		Items:    make([]ClientMaterialBatchDownloadItem, 0, len(materialIDs)),
+		Failures: make([]ClientMaterialBatchDownloadFailure, 0),
+	}
+	usedNames := map[string]int{}
+	var totalSize int64
 	for _, materialID := range materialIDs {
 		material, appErr := s.resolveDownloadableClientMaterial(ctx, actor, materialID)
 		if appErr != nil {
-			return nil, appErr
+			manifest.Failures = append(manifest.Failures, ClientMaterialBatchDownloadFailure{MaterialID: materialID, Reason: appErr.Code})
+			continue
 		}
-		assetIDs = append(assetIDs, material.AssetID)
+		info, appErr := s.clientMaterialDownloadInfo(ctx, material)
+		if appErr != nil {
+			manifest.Failures = append(manifest.Failures, ClientMaterialBatchDownloadFailure{
+				MaterialID: material.ID,
+				AssetID:    material.AssetID,
+				SourceType: material.SourceType,
+				SourceRef:  material.SourceRef,
+				Filename:   material.FilenameSnapshot,
+				Reason:     appErr.Code,
+			})
+			continue
+		}
+		if info == nil || info.DownloadURL == nil || strings.TrimSpace(*info.DownloadURL) == "" {
+			manifest.Failures = append(manifest.Failures, ClientMaterialBatchDownloadFailure{
+				MaterialID: material.ID,
+				AssetID:    material.AssetID,
+				SourceType: material.SourceType,
+				SourceRef:  material.SourceRef,
+				Filename:   material.FilenameSnapshot,
+				Reason:     "download_url_unavailable",
+			})
+			continue
+		}
+		if info.FileSize > 0 && totalSize+info.FileSize > assetcenter.MaxBatchDownloadTotalBytes {
+			manifest.Failures = append(manifest.Failures, ClientMaterialBatchDownloadFailure{
+				MaterialID: material.ID,
+				AssetID:    material.AssetID,
+				SourceType: material.SourceType,
+				SourceRef:  material.SourceRef,
+				Filename:   material.FilenameSnapshot,
+				Reason:     "total_size_limit_exceeded",
+			})
+			continue
+		}
+		filename := uniqueWorkbenchDownloadFilename(firstNonEmpty(info.Filename, material.FilenameSnapshot, fmt.Sprintf("client-material-%d", material.ID)), material.ID, usedNames)
+		totalSize += info.FileSize
+		if manifest.ExpiresAt == nil || (info.ExpiresAt != nil && info.ExpiresAt.Before(*manifest.ExpiresAt)) {
+			manifest.ExpiresAt = info.ExpiresAt
+		}
+		manifest.Items = append(manifest.Items, ClientMaterialBatchDownloadItem{
+			MaterialID:  material.ID,
+			AssetID:     material.AssetID,
+			SourceType:  material.SourceType,
+			SourceRef:   material.SourceRef,
+			Filename:    filename,
+			FileSize:    info.FileSize,
+			MimeType:    strings.TrimSpace(info.MimeType),
+			DownloadURL: strings.TrimSpace(*info.DownloadURL),
+			ExpiresAt:   info.ExpiresAt,
+		})
 	}
-	manifest, appErr := s.systemDownloads.BuildBatchDownloadManifest(
-		ctx,
-		assetIDs,
-		assetcenter.WithBatchDownloadNamingMode(assetcenter.NormalizeBatchDownloadNamingMode(params.NamingMode)),
-	)
-	if appErr != nil {
-		return nil, appErr
+	if len(manifest.Items) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "all requested client materials are unavailable for download", map[string]interface{}{
+			"material_ids":   materialIDs,
+			"failure_count":  len(manifest.Failures),
+			"total_size_max": assetcenter.MaxBatchDownloadTotalBytes,
+		})
 	}
+	manifest.SuccessCount = len(manifest.Items)
+	manifest.FailureCount = len(manifest.Failures)
+	manifest.TotalSize = totalSize
 	_ = s.recordSystemAssetDownloadEvent(ctx, actor, domain.AssetWorkbenchEventClientMaterialBatchDownload, nil, map[string]interface{}{
 		"material_ids":    materialIDs,
 		"requested_count": len(materialIDs),
@@ -6930,6 +7081,247 @@ func (s *Service) systemDownloadSnapshot(ctx context.Context, assetID int64) (*d
 	return info, nil
 }
 
+type clientMaterialSourceRef struct {
+	SourceType string
+	SourceRef  string
+	AssetID    int64
+}
+
+type clientMaterialSourceSnapshot struct {
+	AssetID          int64
+	SourceType       string
+	SourceRef        string
+	ResourceID       string
+	SourceLabel      string
+	Filename         string
+	MimeType         string
+	FileSize         int64
+	ScopeSKUCode     string
+	SKUCode          string
+	PrimarySKUCode   string
+	PreviewAvailable bool
+}
+
+func resolveClientMaterialSourceInput(assetID int64, sourceType, sourceRef, resourceID string) (clientMaterialSourceRef, *domain.AppError) {
+	sourceType = strings.TrimSpace(strings.ToLower(sourceType))
+	rawRef := firstNonEmpty(sourceRef, resourceID)
+	normalized := domain.NormalizeAssetResourceSource(sourceType)
+	if sourceType == "" || normalized == domain.AssetResourceSourceAll {
+		if _, ok := domain.ParseExternalAssetResourceID(rawRef); ok {
+			normalized = domain.AssetResourceSourceExternal
+		} else {
+			normalized = domain.AssetResourceSourceSystem
+		}
+	}
+	switch normalized {
+	case domain.AssetResourceSourceExternal:
+		id, ok := domain.ParseExternalAssetResourceID(rawRef)
+		if !ok && assetID > 0 {
+			id = assetID
+			ok = true
+		}
+		if !ok || id <= 0 {
+			return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "external source_ref is required.", nil)
+		}
+		return clientMaterialSourceRef{
+			SourceType: string(domain.AssetResourceSourceExternal),
+			SourceRef:  domain.ExternalAssetResourceID(id),
+			AssetID:    id,
+		}, nil
+	case domain.AssetResourceSourceSystem:
+		if _, ok := domain.ParseExternalAssetResourceID(rawRef); ok {
+			return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "system client material requires a numeric asset_id.", nil)
+		}
+		id := assetID
+		if strings.TrimSpace(rawRef) != "" {
+			parsed, err := strconv.ParseInt(strings.TrimSpace(rawRef), 10, 64)
+			if err != nil || parsed <= 0 {
+				return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
+			}
+			id = parsed
+		}
+		if id <= 0 {
+			return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
+		}
+		return clientMaterialSourceRef{
+			SourceType: string(domain.AssetResourceSourceSystem),
+			SourceRef:  strconv.FormatInt(id, 10),
+			AssetID:    id,
+		}, nil
+	default:
+		return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "source_type must be system or external.", nil)
+	}
+}
+
+func normalizeClientMaterialRow(material *domain.AssetWorkbenchClientMaterial) {
+	if material == nil {
+		return
+	}
+	sourceType := domain.NormalizeAssetResourceSource(material.SourceType)
+	if sourceType == domain.AssetResourceSourceAll {
+		sourceType = domain.AssetResourceSourceSystem
+	}
+	material.SourceType = string(sourceType)
+	switch sourceType {
+	case domain.AssetResourceSourceExternal:
+		id, ok := domain.ParseExternalAssetResourceID(material.SourceRef)
+		if !ok && material.AssetID > 0 {
+			id = material.AssetID
+		}
+		if id > 0 {
+			material.AssetID = id
+			material.SourceRef = domain.ExternalAssetResourceID(id)
+			material.ResourceID = material.SourceRef
+		}
+		material.SourceLabel = "外部资源"
+	case domain.AssetResourceSourceSystem:
+		if strings.TrimSpace(material.SourceRef) == "" && material.AssetID > 0 {
+			material.SourceRef = strconv.FormatInt(material.AssetID, 10)
+		}
+		if strings.TrimSpace(material.ResourceID) == "" {
+			material.ResourceID = material.SourceRef
+		}
+		material.SourceLabel = "系统资源"
+	}
+}
+
+func (s *Service) clientMaterialSourceSnapshot(ctx context.Context, source clientMaterialSourceRef) (*clientMaterialSourceSnapshot, *domain.AppError) {
+	switch domain.NormalizeAssetResourceSource(source.SourceType) {
+	case domain.AssetResourceSourceExternal:
+		detailer, _ := s.systemAssets.(ExternalAssetDetailer)
+		if detailer == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "External asset detailer is not configured.", nil)
+		}
+		detail, appErr := detailer.GetExternalDetail(ctx, source.AssetID)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if detail == nil {
+			return nil, domain.ErrNotFound
+		}
+		fileSize := int64(0)
+		if detail.FileSize != nil {
+			fileSize = *detail.FileSize
+		}
+		resourceID := firstNonEmpty(detail.ResourceID, source.SourceRef, domain.ExternalAssetResourceID(source.AssetID))
+		return &clientMaterialSourceSnapshot{
+			AssetID:          source.AssetID,
+			SourceType:       string(domain.AssetResourceSourceExternal),
+			SourceRef:        resourceID,
+			ResourceID:       resourceID,
+			SourceLabel:      firstNonEmpty(detail.SourceLabel, "外部资源"),
+			Filename:         firstNonEmpty(detail.OriginalFilename, detail.FileName, fmt.Sprintf("external-material-%d", source.AssetID)),
+			MimeType:         strings.TrimSpace(detail.MimeType),
+			FileSize:         fileSize,
+			ScopeSKUCode:     strings.TrimSpace(detail.ScopeSKUCode),
+			SKUCode:          strings.TrimSpace(detail.SKUCode),
+			PrimarySKUCode:   strings.TrimSpace(detail.PrimarySKUCode),
+			PreviewAvailable: detail.PreviewAvailable,
+		}, nil
+	default:
+		info, appErr := s.systemDownloadSnapshot(ctx, source.AssetID)
+		if appErr != nil {
+			return nil, appErr
+		}
+		snapshot := &clientMaterialSourceSnapshot{
+			AssetID:          source.AssetID,
+			SourceType:       string(domain.AssetResourceSourceSystem),
+			SourceRef:        strconv.FormatInt(source.AssetID, 10),
+			ResourceID:       strconv.FormatInt(source.AssetID, 10),
+			SourceLabel:      "系统资源",
+			Filename:         strings.TrimSpace(info.Filename),
+			MimeType:         strings.TrimSpace(info.MimeType),
+			FileSize:         info.FileSize,
+			PreviewAvailable: info.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(info.MimeType, info.Filename),
+		}
+		if detailer, _ := s.systemAssets.(SystemAssetDetailer); detailer != nil {
+			if detail, detailErr := detailer.GetDetail(ctx, source.AssetID); detailErr == nil && detail != nil {
+				snapshot.ScopeSKUCode = strings.TrimSpace(detail.ScopeSKUCode)
+				snapshot.SKUCode = strings.TrimSpace(detail.SKUCode)
+				snapshot.PrimarySKUCode = strings.TrimSpace(detail.PrimarySKUCode)
+				snapshot.Filename = firstNonEmpty(detail.OriginalFilename, detail.FileName, snapshot.Filename)
+				snapshot.MimeType = firstNonEmpty(detail.MimeType, snapshot.MimeType)
+				if detail.FileSize != nil {
+					snapshot.FileSize = *detail.FileSize
+				}
+				snapshot.PreviewAvailable = detail.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(snapshot.MimeType, snapshot.Filename)
+			}
+		}
+		return snapshot, nil
+	}
+}
+
+func (s *Service) clientMaterialDownloadInfo(ctx context.Context, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetDownloadInfo, *domain.AppError) {
+	normalizeClientMaterialRow(material)
+	switch domain.NormalizeAssetResourceSource(material.SourceType) {
+	case domain.AssetResourceSourceExternal:
+		downloader, _ := s.systemAssets.(ExternalAssetDownloader)
+		if downloader == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "External asset downloader is not configured.", nil)
+		}
+		return downloader.DownloadExternal(ctx, material.AssetID)
+	default:
+		return s.systemDownloadSnapshot(ctx, material.AssetID)
+	}
+}
+
+func (s *Service) clientMaterialPreviewMeta(ctx context.Context, material *domain.AssetWorkbenchClientMaterial) (*SystemAssetPreviewMeta, *domain.AppError) {
+	normalizeClientMaterialRow(material)
+	if domain.NormalizeAssetResourceSource(material.SourceType) != domain.AssetResourceSourceExternal {
+		meta, appErr := s.systemAssetPreviewMeta(ctx, material.AssetID)
+		if meta != nil {
+			meta.SourceType = material.SourceType
+			meta.SourceRef = material.SourceRef
+		}
+		return meta, appErr
+	}
+	downloader, _ := s.systemAssets.(ExternalAssetDownloader)
+	if downloader == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "External asset downloader is not configured.", nil)
+	}
+	info, appErr := downloader.PreviewExternal(ctx, material.AssetID)
+	if appErr != nil {
+		if appErr.Code == domain.ErrCodeInvalidRequest {
+			return clientMaterialPreviewMetaFromDownloadInfo(material, nil), nil
+		}
+		return nil, appErr
+	}
+	return clientMaterialPreviewMetaFromDownloadInfo(material, info), nil
+}
+
+func clientMaterialPreviewMetaFromDownloadInfo(material *domain.AssetWorkbenchClientMaterial, info *domain.AssetDownloadInfo) *SystemAssetPreviewMeta {
+	meta := &SystemAssetPreviewMeta{
+		AssetID:          material.AssetID,
+		SourceType:       material.SourceType,
+		SourceRef:        material.SourceRef,
+		Status:           domain.AssetWorkbenchPreviewStatusNotApplicable,
+		Preparing:        false,
+		Filename:         material.FilenameSnapshot,
+		MimeType:         material.MimeTypeSnapshot,
+		PreviewAvailable: false,
+	}
+	if info == nil {
+		return meta
+	}
+	meta.Filename = firstNonEmpty(info.Filename, meta.Filename)
+	meta.MimeType = firstNonEmpty(info.MimeType, meta.MimeType)
+	meta.ExpiresAt = info.ExpiresAt
+	if info.DownloadURL != nil {
+		meta.DownloadURL = strings.TrimSpace(*info.DownloadURL)
+	}
+	if meta.DownloadURL != "" && (info.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(meta.MimeType, meta.Filename)) {
+		meta.Status = domain.AssetWorkbenchPreviewStatusReady
+		meta.PreviewURL = meta.DownloadURL
+		meta.PreviewAvailable = true
+		return meta
+	}
+	if strings.Contains(strings.TrimSpace(info.AccessHint), "prepare_required") {
+		meta.Status = domain.AssetWorkbenchPreviewStatusPending
+		meta.Preparing = true
+	}
+	return meta
+}
+
 func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWorkbenchOverviewRow {
 	if asset == nil {
 		return nil
@@ -7015,7 +7407,27 @@ func (s *Service) hydrateClientMaterialRows(ctx context.Context, items []*domain
 		if item == nil {
 			continue
 		}
-		item.PreviewAvailable = isWorkbenchSystemAssetDirectPreviewable(item.MimeTypeSnapshot, item.FilenameSnapshot)
+		normalizeClientMaterialRow(item)
+		item.PreviewAvailable = item.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(item.MimeTypeSnapshot, item.FilenameSnapshot)
+		if domain.NormalizeAssetResourceSource(item.SourceType) == domain.AssetResourceSourceExternal {
+			externalDetailer, _ := s.systemAssets.(ExternalAssetDetailer)
+			if externalDetailer == nil || item.AssetID <= 0 {
+				continue
+			}
+			detail, appErr := externalDetailer.GetExternalDetail(ctx, item.AssetID)
+			if appErr != nil || detail == nil {
+				continue
+			}
+			item.ResourceID = firstNonEmpty(detail.ResourceID, item.ResourceID, item.SourceRef)
+			item.SourceLabel = firstNonEmpty(detail.SourceLabel, item.SourceLabel, "外部资源")
+			item.ScopeSKUCode = strings.TrimSpace(detail.ScopeSKUCode)
+			item.SKUCode = strings.TrimSpace(detail.SKUCode)
+			item.PrimarySKUCode = strings.TrimSpace(detail.PrimarySKUCode)
+			filename := firstNonEmpty(detail.OriginalFilename, detail.FileName, item.FilenameSnapshot)
+			mimeType := firstNonEmpty(detail.MimeType, item.MimeTypeSnapshot)
+			item.PreviewAvailable = detail.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(mimeType, filename)
+			continue
+		}
 		if detailer == nil || item.AssetID <= 0 {
 			continue
 		}

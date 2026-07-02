@@ -17,6 +17,15 @@ export function systemAssetFilename(asset: SystemAssetRow | SystemAssetPreviewMe
   return ''
 }
 
+export function materialAssetKey(asset: SystemAssetRow | SystemAssetPreviewMeta) {
+  const sourceType = 'source_type' in asset ? String(asset.source_type || '').trim() : ''
+  const sourceRef = 'source_ref' in asset ? String(asset.source_ref || '').trim() : ''
+  const resourceId = 'resource_id' in asset ? String(asset.resource_id || '').trim() : ''
+  const numericId = 'asset_id' in asset ? asset.asset_id : asset.id
+  if (sourceType === 'external') return resourceId || sourceRef || `external:${numericId}`
+  return resourceId || sourceRef || `system:${numericId}`
+}
+
 export function isSystemAssetImagePreviewable(asset: SystemAssetRow | SystemAssetPreviewMeta) {
   const mime = normalizedMime(asset.mime_type)
   if (mime.startsWith('image/')) {

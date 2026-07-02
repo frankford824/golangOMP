@@ -2015,7 +2015,7 @@ func (h *AssetWorkbenchHandler) SystemSearch(c *gin.Context) {
 	if pageSize <= 0 {
 		pageSize = limit
 	}
-	result, appErr := h.svc.SystemSearch(c.Request.Context(), actor, c.Query("q"), page, pageSize)
+	result, appErr := h.svc.SystemSearch(c.Request.Context(), actor, c.Query("q"), page, pageSize, c.Query("source"))
 	if appErr != nil {
 		respondError(c, appErr)
 		return

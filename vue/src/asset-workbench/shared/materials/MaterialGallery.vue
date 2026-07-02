@@ -6,6 +6,7 @@ import type { SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
 import { chipClass, systemPreviewMeta } from '@aw/shared/format/status'
 import {
   canAttemptSystemAssetPreview,
+  materialAssetKey,
   resolvedSystemAssetThumbnailUrl,
 } from '@aw/shared/materials/systemAssetPreview'
 import { computeGalleryVirtualScroll } from '@aw/shared/materials/materialGalleryVirtualScroll'
@@ -13,10 +14,10 @@ import { computeGalleryVirtualScroll } from '@aw/shared/materials/materialGaller
 const props = withDefaults(
   defineProps<{
     items: SystemAssetRow[]
-    selectedIds: Set<number>
-    previewUrls?: Record<number, string>
-    previewLoadingIds?: Set<number>
-    activeId?: number | null
+    selectedIds: Set<string>
+    previewUrls?: Record<string, string>
+    previewLoadingIds?: Set<string>
+    activeId?: string | null
     loading?: boolean
     error?: string
   }>(),
@@ -75,6 +76,7 @@ function titleOf(asset: SystemAssetRow) {
 }
 
 function codeOf(asset: SystemAssetRow) {
+  if (asset.source_type === 'external') return asset.resource_id || `ext-${asset.id}`
   const sku = asset.scope_sku_code || asset.sku_code || asset.primary_sku_code
   return sku ? `SKU ${sku}` : `素材 ${asset.id}`
 }
@@ -102,11 +104,11 @@ function iconFor(asset: SystemAssetRow) {
 }
 
 function previewUrlFor(asset: SystemAssetRow) {
-  return resolvedSystemAssetThumbnailUrl(asset, props.previewUrls?.[asset.id])
+  return resolvedSystemAssetThumbnailUrl(asset, props.previewUrls?.[materialAssetKey(asset)])
 }
 
 function isPreviewLoading(asset: SystemAssetRow) {
-  return canPreview(asset) && !previewUrlFor(asset) && Boolean(props.previewLoadingIds?.has(asset.id))
+  return canPreview(asset) && !previewUrlFor(asset) && Boolean(props.previewLoadingIds?.has(materialAssetKey(asset)))
 }
 
 function canPreview(asset: SystemAssetRow) {
@@ -192,17 +194,17 @@ watch(
       <div class="aw-material-gallery__grid" :style="gridStyle">
         <article
           v-for="{ asset, index } in visibleItems"
-          :key="asset.id"
+          :key="materialAssetKey(asset)"
           class="aw-material-card"
           :class="{
-            'aw-material-card--selected': selectedIds.has(asset.id),
-            'aw-material-card--active': activeId === asset.id,
+            'aw-material-card--selected': selectedIds.has(materialAssetKey(asset)),
+            'aw-material-card--active': activeId === materialAssetKey(asset),
             'aw-material-card--download-only': !canPreview(asset),
           }"
           tabindex="0"
           @click="emit('select', asset)"
           @keydown.enter.prevent="emit('select', asset)"
-          @keydown.space.prevent="emit('toggle', asset, !selectedIds.has(asset.id), index, false)"
+          @keydown.space.prevent="emit('toggle', asset, !selectedIds.has(materialAssetKey(asset)), index, false)"
         >
           <button
             class="aw-material-card__media"
@@ -238,11 +240,11 @@ watch(
             </div>
           </div>
           <div class="aw-material-card__actions" @click.stop>
-            <label class="aw-material-card__check" :title="selectedIds.has(asset.id) ? '取消选择' : '选择'">
+            <label class="aw-material-card__check" :title="selectedIds.has(materialAssetKey(asset)) ? '取消选择' : '选择'">
               <input
                 type="checkbox"
-                :checked="selectedIds.has(asset.id)"
-                :aria-label="`${selectedIds.has(asset.id) ? '取消选择' : '选择'}素材 ${titleOf(asset)}`"
+                :checked="selectedIds.has(materialAssetKey(asset))"
+                :aria-label="`${selectedIds.has(materialAssetKey(asset)) ? '取消选择' : '选择'}素材 ${titleOf(asset)}`"
                 @change="toggleAsset(asset, ($event.target as HTMLInputElement).checked, index, $event)"
               />
             </label>

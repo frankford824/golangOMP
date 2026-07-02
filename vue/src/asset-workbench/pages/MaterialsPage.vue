@@ -23,6 +23,7 @@ import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 import {
   canAttemptSystemAssetPreview,
   isSystemAssetImagePreviewable,
+  materialAssetKey,
   resolvedSystemAssetPreviewUrl,
 } from '@aw/shared/materials/systemAssetPreview'
 
@@ -36,6 +37,7 @@ interface GridColumn {
 type ViewMode = 'gallery' | 'table'
 
 type MaterialGridRow = SystemAssetRow & {
+  display_resource_key: string
   display_style_code: string
   display_name: string
   display_type: string
@@ -49,14 +51,14 @@ const rows = ref<SystemAssetRow[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(30)
-const selectedAssetIds = ref<Set<number>>(new Set())
+const selectedAssetIds = ref<Set<string>>(new Set())
 const activeAsset = ref<SystemAssetRow | null>(null)
 const previewAsset = ref<SystemAssetRow | null>(null)
 const previewMeta = ref<SystemAssetPreviewMeta | null>(null)
 const clientPreviewMaterial = ref<ClientMaterialRow | null>(null)
 const clientPreviewMeta = ref<SystemAssetPreviewMeta | null>(null)
-const previewUrls = ref<Record<number, string>>({})
-const previewLoadingIds = ref<Set<number>>(new Set())
+const previewUrls = ref<Record<string, string>>({})
+const previewLoadingIds = ref<Set<string>>(new Set())
 const viewMode = ref<ViewMode>('gallery')
 const typeFilter = ref('all')
 const previewFilter = ref('all')
@@ -77,7 +79,7 @@ const clientMaterialsLoading = ref(false)
 const clientMaterialKeyword = ref('')
 const clientPreviewUrls = ref<Record<number, string>>({})
 const clientPreviewLoadingIds = ref<Set<number>>(new Set())
-const clientMaterialAssetId = ref<number | null>(null)
+const clientMaterialAssetId = ref('')
 const clientMaterialTitle = ref('')
 const clientMaterialDescription = ref('')
 const directoryName = ref('')
@@ -95,18 +97,18 @@ const directoryEditForm = ref({
 })
 const directoryDifficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const materialsRequest = usePageRequest(
-  (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, page: page.value, page_size: pageSize.value }, signal),
+  (signal) => assetWorkbenchApi.systemSearch({ q: keyword.value, source: 'all', page: page.value, page_size: pageSize.value }, signal),
   { items: [], total: 0, page: 1, size: 0 },
   '素材库搜索失败',
 )
 const loading = materialsRequest.loading
 const error = materialsRequest.error
 let previewController: AbortController | null = null
-const previewInflight = new Map<number, Promise<SystemAssetPreviewMeta | null>>()
+const previewInflight = new Map<string, Promise<SystemAssetPreviewMeta | null>>()
 let lastSelectedIndex = -1
 let initializedMode: 'admin' | 'client' | '' = ''
 
-const downloadableAssetIds = computed(() => filteredRows.value.map((row) => row.id).filter((id) => id > 0))
+const downloadableAssetIds = computed(() => filteredRows.value.map((row) => materialAssetKey(row)).filter(Boolean))
 const fileTypeOptions = computed(() => {
   const values = new Set<string>()
   for (const row of rows.value) values.add(typeBucket(row))
@@ -124,6 +126,7 @@ const filteredRows = computed(() =>
 const materialRowsWithLabels = computed<MaterialGridRow[]>(() =>
   filteredRows.value.map((row) => ({
     ...row,
+    display_resource_key: materialAssetKey(row),
     display_style_code: styleCodeOf(row) || '—',
     display_name: titleOf(row),
     display_type: typeLabel(row),
@@ -166,10 +169,11 @@ const activeDetailRows = computed(() => {
   const asset = activeAsset.value
   if (!asset) return []
   return [
+    ['来源', asset.source_label || (asset.source_type === 'external' ? '外部资源' : '系统资源')],
     ['SKU', styleCodeOf(asset) || '—'],
     ['名称', titleOf(asset)],
     ['文件类型', typeLabel(asset)],
-    ['任务号', asset.task_no || '—'],
+    ['任务号', asset.task_no || (asset.source_type === 'external' ? '外部资源' : '—')],
     ['产品名', asset.product_name || '—'],
     ['创建人', creatorOf(asset) || '—'],
     ['创建时间', formatDateTime(asset.created_at)],
@@ -260,11 +264,12 @@ function titleOf(asset: SystemAssetRow) {
 }
 
 function styleCodeOf(asset: SystemAssetRow) {
+  if (asset.source_type === 'external') return asset.resource_id || `ext-${asset.id}`
   return asset.scope_sku_code || asset.sku_code || asset.primary_sku_code || ''
 }
 
 function clientMaterialTitleOf(material: ClientMaterialRow) {
-  return material.title || material.filename_snapshot || `素材 ${material.asset_id}`
+  return material.title || material.filename_snapshot || `素材 ${material.resource_id || material.asset_id}`
 }
 
 function clientMaterialSkuOf(material: ClientMaterialRow) {
@@ -272,12 +277,14 @@ function clientMaterialSkuOf(material: ClientMaterialRow) {
 }
 
 function clientMaterialFilenameOf(material: ClientMaterialRow) {
-  return material.filename_snapshot || `asset_id=${material.asset_id}`
+  return material.filename_snapshot || material.resource_id || `asset_id=${material.asset_id}`
 }
 
 function clientMaterialPreviewProbe(material: ClientMaterialRow): SystemAssetPreviewMeta {
   return {
     asset_id: material.asset_id,
+    source_type: material.source_type,
+    source_ref: material.source_ref || material.resource_id,
     status: material.preview_available ? 'ready' : 'not_applicable',
     preparing: false,
     filename: material.filename_snapshot,
@@ -301,6 +308,9 @@ function clientMaterialSearchText(material: ClientMaterialRow) {
     clientMaterialFilenameOf(material),
     material.description,
     String(material.asset_id),
+    material.source_type,
+    material.source_ref,
+    material.resource_id,
   ]
     .join(' ')
     .toLowerCase()
@@ -347,13 +357,14 @@ function toggleAsset(row: SystemAssetRow, checked: boolean, index = -1, range = 
     for (let i = start; i <= end; i += 1) {
       const asset = filteredRows.value[i]
       if (!asset) continue
-      if (checked) next.add(asset.id)
-      else next.delete(asset.id)
+      const key = materialAssetKey(asset)
+      if (checked) next.add(key)
+      else next.delete(key)
     }
   } else if (checked) {
-    next.add(row.id)
+    next.add(materialAssetKey(row))
   } else {
-    next.delete(row.id)
+    next.delete(materialAssetKey(row))
   }
   selectedAssetIds.value = next
   lastSelectedIndex = index
@@ -377,9 +388,10 @@ function canPreviewMaterial(asset: SystemAssetRow) {
 }
 
 async function ensurePreview(asset: SystemAssetRow, silent = false, signal?: AbortSignal) {
+  const key = materialAssetKey(asset)
   const inlinePreviewUrl = String(('preview_url' in asset && asset.preview_url) || '').trim()
   if (inlinePreviewUrl) {
-    previewUrls.value = { ...previewUrls.value, [asset.id]: inlinePreviewUrl }
+    previewUrls.value = { ...previewUrls.value, [key]: inlinePreviewUrl }
     return {
       asset_id: asset.id,
       status: 'ready',
@@ -393,29 +405,31 @@ async function ensurePreview(asset: SystemAssetRow, silent = false, signal?: Abo
     notice.value = '这个素材当前只能下载，不能在线预览'
     return null
   }
-  if (previewUrls.value[asset.id]) {
+  if (previewUrls.value[key]) {
     return {
       asset_id: asset.id,
+      source_type: asset.source_type,
+      source_ref: asset.resource_id,
       status: 'ready',
       preparing: false,
-      preview_url: previewUrls.value[asset.id],
+      preview_url: previewUrls.value[key],
       preview_available: true,
     } as SystemAssetPreviewMeta
   }
 
-  const inflight = previewInflight.get(asset.id)
+  const inflight = previewInflight.get(key)
   if (inflight) return inflight
 
   let task!: Promise<SystemAssetPreviewMeta | null>
   task = (async (): Promise<SystemAssetPreviewMeta | null> => {
     const next = new Set(previewLoadingIds.value)
-    next.add(asset.id)
+    next.add(key)
     previewLoadingIds.value = next
     try {
-      const meta = await assetWorkbenchApi.previewSystemAsset(asset.id, signal)
+      const meta = await assetWorkbenchApi.previewMaterialAsset(asset, signal)
       const previewUrl = resolvedSystemAssetPreviewUrl(meta)
       if (previewUrl && isSystemAssetImagePreviewable(meta)) {
-        previewUrls.value = { ...previewUrls.value, [asset.id]: previewUrl }
+        previewUrls.value = { ...previewUrls.value, [key]: previewUrl }
       }
       return {
         ...meta,
@@ -430,21 +444,21 @@ async function ensurePreview(asset: SystemAssetRow, silent = false, signal?: Abo
       return null
     } finally {
       const done = new Set(previewLoadingIds.value)
-      done.delete(asset.id)
+      done.delete(key)
       previewLoadingIds.value = done
-      if (previewInflight.get(asset.id) === task) {
-        previewInflight.delete(asset.id)
+      if (previewInflight.get(key) === task) {
+        previewInflight.delete(key)
       }
     }
   })()
 
-  previewInflight.set(asset.id, task)
+  previewInflight.set(key, task)
   return task
 }
 
 async function preloadVisiblePreviews(assets: SystemAssetRow[]) {
   const candidates = assets
-    .filter((asset) => isSystemAssetImagePreviewable(asset) && canPreviewMaterial(asset) && !previewUrls.value[asset.id])
+    .filter((asset) => isSystemAssetImagePreviewable(asset) && canPreviewMaterial(asset) && !previewUrls.value[materialAssetKey(asset)])
     .slice(0, 8)
   await Promise.allSettled(candidates.map((asset) => ensurePreview(asset, true)))
 }
@@ -474,6 +488,8 @@ async function loadClientMaterialPreviewMeta(material: ClientMaterialRow) {
   if (clientPreviewUrls.value[material.id]) {
     return {
       asset_id: material.asset_id,
+      source_type: material.source_type,
+      source_ref: material.source_ref || material.resource_id,
       status: 'ready',
       preparing: false,
       filename: material.filename_snapshot,
@@ -564,7 +580,7 @@ async function downloadAsset(row: SystemAssetRow) {
   notice.value = ''
   pageError.value = ''
   try {
-    const info = await assetWorkbenchApi.downloadSystemAsset(row.id)
+    const info = await assetWorkbenchApi.downloadMaterialAsset(row)
     if (!info.download_url) {
       throw new Error('当前素材没有可用下载链接')
     }
@@ -576,24 +592,51 @@ async function downloadAsset(row: SystemAssetRow) {
 }
 
 async function downloadSelectedAssets() {
-  const ids = Array.from(selectedAssetIds.value)
-  if (!ids.length) {
+  const selected = rows.value.filter((row) => selectedAssetIds.value.has(materialAssetKey(row)))
+  if (!selected.length) {
     notice.value = '请选择要下载的素材'
     return
   }
   notice.value = '正在生成素材下载包'
   pageError.value = ''
   try {
-    const manifest = await assetWorkbenchApi.batchDownloadSystemAssets(ids)
+    const systemOnly = selected.every((row) => row.source_type !== 'external')
+    const items: Array<{ key: string; filename: string; downloadURL: string; fallbackName: string }> = []
+    const failures: string[] = []
+    if (systemOnly) {
+      const manifest = await assetWorkbenchApi.batchDownloadSystemAssets(selected.map((row) => row.id))
+      items.push(
+        ...manifest.items.map((item) => ({
+          key: String(item.asset_id),
+          filename: item.filename,
+          downloadURL: item.download_url,
+          fallbackName: `system-asset-${item.asset_id}`,
+        })),
+      )
+      failures.push(...(manifest.failures ?? []).map((failure) => `asset_id=${failure.asset_id} reason=${failure.reason}`))
+    } else {
+      const settled = await Promise.allSettled(
+        selected.map(async (asset) => {
+          const info = await assetWorkbenchApi.downloadMaterialAsset(asset)
+          if (!info.download_url) throw new Error('download_url_unavailable')
+          return {
+            key: materialAssetKey(asset),
+            filename: info.filename || asset.original_filename || asset.file_name || materialAssetKey(asset),
+            downloadURL: info.download_url,
+            fallbackName: materialAssetKey(asset),
+          }
+        }),
+      )
+      settled.forEach((result, index) => {
+        const asset = selected[index]
+        if (result.status === 'fulfilled') items.push(result.value)
+        else failures.push(`${materialAssetKey(asset)} reason=${result.reason instanceof Error ? result.reason.message : String(result.reason)}`)
+      })
+    }
     const result = await downloadBatchAsZip({
-      items: manifest.items.map((item) => ({
-        key: String(item.asset_id),
-        filename: item.filename,
-        downloadURL: item.download_url,
-        fallbackName: `system-asset-${item.asset_id}`,
-      })),
-      serverFailures: (manifest.failures ?? []).map((failure) => `asset_id=${failure.asset_id} reason=${failure.reason}`),
-      zipFilename: buildTimestampedZipFilename('asset-workbench-system-assets'),
+      items,
+      serverFailures: failures,
+      zipFilename: buildTimestampedZipFilename('asset-workbench-material-assets'),
       onStatus: (message) => {
         notice.value = message
       },
@@ -679,12 +722,12 @@ async function downloadSelectedClientMaterials() {
     const manifest = await assetWorkbenchApi.batchDownloadClientMaterials(ids)
     const result = await downloadBatchAsZip({
       items: manifest.items.map((item) => ({
-        key: String(item.asset_id),
+        key: item.source_ref || String(item.asset_id),
         filename: item.filename,
         downloadURL: item.download_url,
-        fallbackName: `client-material-${item.asset_id}`,
+        fallbackName: `client-material-${item.material_id || item.source_ref || item.asset_id}`,
       })),
-      serverFailures: (manifest.failures ?? []).map((failure) => `asset_id=${failure.asset_id} reason=${failure.reason}`),
+      serverFailures: (manifest.failures ?? []).map((failure) => `material_id=${failure.material_id || '-'} source=${failure.source_ref || failure.asset_id} reason=${failure.reason}`),
       zipFilename: buildTimestampedZipFilename('asset-workbench-client-materials'),
       onStatus: (message) => {
         notice.value = message
@@ -697,21 +740,27 @@ async function downloadSelectedClientMaterials() {
 }
 
 async function publishClientMaterial(asset?: SystemAssetRow) {
-  const assetId = asset?.id || clientMaterialAssetId.value || 0
-  if (!assetId) {
-    pageError.value = '请输入要发布的素材 ID'
+  const manualRef = clientMaterialAssetId.value.trim()
+  const sourceType = asset?.source_type === 'external' || manualRef.startsWith('ext-') || manualRef.startsWith('external:') ? 'external' : 'system'
+  const sourceRef = asset ? (asset.resource_id || (sourceType === 'external' ? `ext-${asset.id}` : String(asset.id))) : manualRef
+  const assetId = asset?.id || (sourceType === 'system' ? Number.parseInt(manualRef, 10) : 0)
+  if (!sourceRef || (sourceType === 'system' && (!Number.isFinite(assetId) || assetId <= 0))) {
+    pageError.value = '请输入系统素材数字 ID 或 ext- 外部资源 ID'
     return
   }
   pageError.value = ''
   try {
     await assetWorkbenchApi.createClientMaterial({
-      asset_id: assetId,
+      asset_id: asset?.id || (assetId > 0 ? assetId : undefined),
+      source_type: sourceType,
+      source_ref: sourceRef,
+      resource_id: sourceRef,
       title: clientMaterialTitle.value || (asset ? titleOf(asset) : undefined),
       description: clientMaterialDescription.value,
       enabled: true,
       sort_order: adminClientMaterials.value.length + 1,
     })
-    clientMaterialAssetId.value = null
+    clientMaterialAssetId.value = ''
     clientMaterialTitle.value = ''
     clientMaterialDescription.value = ''
     notice.value = '已发布给客户端'
@@ -1009,7 +1058,7 @@ watch(
           v-if="viewMode === 'gallery'"
           :items="filteredRows"
           :selected-ids="selectedAssetIds"
-          :active-id="activeAsset?.id"
+          :active-id="activeAsset ? materialAssetKey(activeAsset) : null"
           :preview-urls="previewUrls"
           :preview-loading-ids="previewLoadingIds"
           :loading="loading"
@@ -1032,7 +1081,7 @@ watch(
               v-if="filteredRows.length"
               :columns="materialGridColumns"
               :rows="materialGridRows"
-              row-key="id"
+              row-key="display_resource_key"
               storage-key="materials"
               group-by="display_type"
               :height="520"
@@ -1042,10 +1091,10 @@ watch(
                 <label v-if="column.key === 'select'" class="aw-inline-check">
                   <input
                     type="checkbox"
-                    :checked="selectedAssetIds.has(gridRowAsAsset(row).id)"
+                    :checked="selectedAssetIds.has(materialAssetKey(gridRowAsAsset(row)))"
                     @change="toggleAsset(gridRowAsAsset(row), ($event.target as HTMLInputElement).checked)"
                   />
-                  <span>{{ gridRowAsAsset(row).id }}</span>
+                  <span>{{ gridRowAsAsset(row).resource_id || gridRowAsAsset(row).id }}</span>
                 </label>
                 <div v-else-if="column.key === 'actions'" class="aw-inline-actions">
                   <button type="button" :disabled="!canPreviewMaterial(gridRowAsAsset(row))" @click="openAssetPreview(gridRowAsAsset(row))">
@@ -1128,7 +1177,7 @@ watch(
         <button type="button" :disabled="!activeAsset" @click="activeAsset && publishClientMaterial(activeAsset)">发布当前素材</button>
       </div>
       <div class="aw-material-admin-form">
-        <input v-model.number="clientMaterialAssetId" type="number" min="1" placeholder="素材 ID" aria-label="素材 ID" />
+        <input v-model="clientMaterialAssetId" type="text" placeholder="系统ID / ext-外部ID" aria-label="素材资源 ID" />
         <input v-model="clientMaterialTitle" type="text" placeholder="展示名称" aria-label="展示名称" />
         <input v-model="clientMaterialDescription" type="text" placeholder="说明" aria-label="说明" />
         <button class="aw-secondary-button" type="button" @click="publishClientMaterial()">按 ID 发布</button>
@@ -1147,10 +1196,10 @@ watch(
           </button>
           <div class="aw-material-admin-copy">
             <strong>{{ clientMaterialTitleOf(material) }}</strong>
-            <small>SKU {{ clientMaterialSkuOf(material) || '未标注' }}</small>
+            <small>{{ material.source_label || (material.source_type === 'external' ? '外部资源' : '系统资源') }} · {{ clientMaterialSkuOf(material) || material.resource_id || '未标注' }}</small>
             <small v-if="material.description">{{ material.description }}</small>
           </div>
-          <span class="aw-material-admin-file">{{ material.filename_snapshot || `asset_id=${material.asset_id}` }}</span>
+          <span class="aw-material-admin-file">{{ material.filename_snapshot || material.resource_id || `asset_id=${material.asset_id}` }}</span>
           <span :class="chipClass(systemPreviewMeta(canPreviewClientMaterial(material)).tone)">
             {{ systemPreviewMeta(canPreviewClientMaterial(material)).label }}
           </span>

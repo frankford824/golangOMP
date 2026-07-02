@@ -377,6 +377,10 @@ type AssetWorkbenchUploadDirectory struct {
 type AssetWorkbenchClientMaterial struct {
 	ID               int64     `json:"id" db:"id"`
 	AssetID          int64     `json:"asset_id" db:"asset_id"`
+	SourceType       string    `json:"source_type" db:"source_type"`
+	SourceRef        string    `json:"source_ref" db:"source_ref"`
+	ResourceID       string    `json:"resource_id,omitempty"`
+	SourceLabel      string    `json:"source_label,omitempty"`
 	Title            string    `json:"title" db:"title"`
 	Description      string    `json:"description" db:"description"`
 	FilenameSnapshot string    `json:"filename_snapshot" db:"filename_snapshot"`

@@ -1529,10 +1529,12 @@ func (r *assetWorkbenchRepo) GetClientMaterial(ctx context.Context, materialID i
 func (r *assetWorkbenchRepo) CreateClientMaterial(ctx context.Context, tx repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_client_materials (
-			asset_id, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
+			asset_id, source_type, source_ref, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
 			enabled, sort_order, published_by, updated_by, published_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		material.AssetID,
+		material.SourceType,
+		material.SourceRef,
 		material.Title,
 		material.Description,
 		material.FilenameSnapshot,
@@ -1558,10 +1560,12 @@ func (r *assetWorkbenchRepo) CreateClientMaterial(ctx context.Context, tx repo.T
 func (r *assetWorkbenchRepo) UpdateClientMaterial(ctx context.Context, tx repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_client_materials
-		SET asset_id = ?, title = ?, description = ?, filename_snapshot = ?, mime_type_snapshot = ?,
+		SET asset_id = ?, source_type = ?, source_ref = ?, title = ?, description = ?, filename_snapshot = ?, mime_type_snapshot = ?,
 		    file_size_snapshot = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
 		material.AssetID,
+		material.SourceType,
+		material.SourceRef,
 		material.Title,
 		material.Description,
 		material.FilenameSnapshot,
@@ -3907,7 +3911,7 @@ func assetWorkbenchDifficultyClassSelect() string {
 }
 
 func assetWorkbenchClientMaterialSelect() string {
-	return `SELECT id, asset_id, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
+	return `SELECT id, asset_id, source_type, source_ref, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
 		enabled, sort_order, published_by, updated_by, published_at, created_at, updated_at
 		FROM asset_workbench_client_materials`
 }
@@ -4237,6 +4241,8 @@ func scanAssetWorkbenchClientMaterial(scanner interface{ Scan(...interface{}) er
 	if err := scanner.Scan(
 		&item.ID,
 		&item.AssetID,
+		&item.SourceType,
+		&item.SourceRef,
 		&item.Title,
 		&item.Description,
 		&item.FilenameSnapshot,

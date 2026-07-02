@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -26,14 +27,19 @@ const externalAssetSelect = `
 
 func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
 	query = query.Normalized()
-	where, args := buildExternalAssetWhere(query)
+	where, args, orderBy := buildExternalAssetWhere(query)
 	var total int64
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count external assets: %w", err)
 	}
+	if total == 0 && strings.TrimSpace(query.Keyword) != "" && externalAssetBooleanQuery(query.Keyword) != "" {
+		where, args, orderBy = buildExternalAssetLikeWhere(query)
+		if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("count external assets fallback: %w", err)
+		}
+	}
 	args = append(args, (query.Page-1)*query.Size, query.Size)
-	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+where+`
-		ORDER BY updated_at DESC, id DESC
+	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+where+orderBy+`
 		LIMIT ?, ?`, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search external assets: %w", err)
@@ -43,7 +49,15 @@ func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAss
 	return items, total, err
 }
 
-func buildExternalAssetWhere(query domain.ExternalAssetSearchQuery) (string, []interface{}) {
+func buildExternalAssetWhere(query domain.ExternalAssetSearchQuery) (string, []interface{}, string) {
+	return buildExternalAssetWhereWithMode(query, true)
+}
+
+func buildExternalAssetLikeWhere(query domain.ExternalAssetSearchQuery) (string, []interface{}, string) {
+	return buildExternalAssetWhereWithMode(query, false)
+}
+
+func buildExternalAssetWhereWithMode(query domain.ExternalAssetSearchQuery, preferFullText bool) (string, []interface{}, string) {
 	clauses := []string{
 		`status <> 'missing'`,
 		`is_dir = 0`,
@@ -53,9 +67,14 @@ func buildExternalAssetWhere(query domain.ExternalAssetSearchQuery) (string, []i
 	}
 	args := []interface{}{}
 	if query.Keyword != "" {
-		like := "%" + strings.TrimSpace(query.Keyword) + "%"
-		clauses = append(clauses, `(file_name LIKE ? OR origin_path LIKE ? OR parent_path LIKE ? OR searchable_text LIKE ?)`)
-		args = append(args, like, like, like, like)
+		if fullText := externalAssetBooleanQuery(query.Keyword); preferFullText && fullText != "" {
+			clauses = append(clauses, `MATCH(file_name, origin_path, parent_path, searchable_text) AGAINST (? IN BOOLEAN MODE)`)
+			args = append(args, fullText)
+		} else {
+			like := "%" + strings.TrimSpace(query.Keyword) + "%"
+			clauses = append(clauses, `(file_name LIKE ? OR origin_path LIKE ? OR parent_path LIKE ? OR searchable_text LIKE ?)`)
+			args = append(args, like, like, like, like)
+		}
 	}
 	if query.Kind != "" {
 		clauses = append(clauses, `kind = ?`)
@@ -80,7 +99,26 @@ func buildExternalAssetWhere(query domain.ExternalAssetSearchQuery) (string, []i
 		`LOWER(COALESCE(mime_type, ''))`,
 		query.FormatCategory,
 	)
-	return " WHERE " + strings.Join(clauses, " AND "), args
+	return " WHERE " + strings.Join(clauses, " AND "), args, `
+		ORDER BY updated_at DESC, id DESC`
+}
+
+func externalAssetBooleanQuery(keyword string) string {
+	parts := strings.FieldsFunc(strings.TrimSpace(keyword), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	terms := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.Trim(part, `"' +-*~<>`)
+		if part == "" {
+			continue
+		}
+		terms = append(terms, "+"+part+"*")
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	return strings.Join(terms, " ")
 }
 
 func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error) {

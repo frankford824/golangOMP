@@ -11375,7 +11375,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/files/batch-delete \
 ### 简介
 支持方法: GET。
 
-- `GET`: Manager-only read-only system material search. Supports page/page_size pagination; legacy `limit` is accepted as page_size.
+- `GET`: Manager-only read-only material source search. Defaults to system + external assets, supports page/page_size pagination, and accepts legacy `limit` as page_size.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -11388,6 +11388,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/files/batch-delete \
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
 | `q` | query | string | 否 | - |
+| `source` | query | enum(all/system/external) | 否 | Source bucket for publishable material search. Defaults to `all`. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 | `limit` | query | integer | 否 | - |
@@ -12034,7 +12035,7 @@ curl -X PATCH https://api.example.com/v1/asset-workbench/upload-directories/<dir
 支持方法: GET, POST。
 
 - `GET`: Returns enabled materials for clients. AssetManager/SuperAdmin may pass `admin=1` to include disabled materials.
-- `POST`: Publishes an existing system asset by `asset_id`. Clients can download only published enabled rows.
+- `POST`: Publishes an existing system or external asset by source reference. Existing `asset_id` remains supported for system assets; external assets use `source_type=external` with `source_ref`/`resource_id` such as `ext-123`. Clients can download only published enabled rows.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -12062,8 +12063,8 @@ curl -X PATCH https://api.example.com/v1/asset-workbench/upload-directories/<dir
     {
       "id": "...",
       "asset_id": "...",
-      "title": "...",
-      "description": "..."
+      "source_type": "...",
+      "source_ref": "..."
     }
   ]
 }
@@ -12096,7 +12097,10 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `asset_id` | integer | 是 | - |
+| `asset_id` | integer | 否 | - |
+| `source_type` | enum(system/external) | 否 | - |
+| `source_ref` | string | 否 | - |
+| `resource_id` | string | 否 | - |
 | `title` | string | 否 | - |
 | `description` | string | 否 | - |
 | `enabled` | boolean | 否 | - |
@@ -12110,8 +12114,8 @@ Content-Type: `application/json`
   "data": {
     "id": 123,
     "asset_id": 123,
-    "title": "string",
-    "description": "string"
+    "source_type": "system",
+    "source_ref": "string"
   }
 }
 ```
@@ -12172,6 +12176,9 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `asset_id` | integer | 否 | - |
+| `source_type` | enum(system/external) | 否 | - |
+| `source_ref` | string | 否 | - |
+| `resource_id` | string | 否 | - |
 | `title` | string | 否 | - |
 | `description` | string | 否 | - |
 | `enabled` | boolean | 否 | - |
@@ -12185,8 +12192,8 @@ Content-Type: `application/json`
   "data": {
     "id": 123,
     "asset_id": 123,
-    "title": "string",
-    "description": "string"
+    "source_type": "system",
+    "source_ref": "string"
   }
 }
 ```
@@ -12338,9 +12345,9 @@ curl -X GET https://api.example.com/v1/asset-workbench/client-materials/<materia
 {
   "data": {
     "asset_id": 123,
-    "status": "ready",
-    "preparing": true,
-    "preview_url": "string"
+    "source_type": "system",
+    "source_ref": "string",
+    "status": "ready"
   }
 }
 ```
