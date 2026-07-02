@@ -188,7 +188,7 @@ const detailFileGridColumns = computed<GridColumn[]>(() => [
   { key: 'preview_status', label: '预览', width: 108 },
   { key: 'action', label: '动作', width: 72, align: 'center' },
 ])
-const detailFileRowHeight = 64
+const detailFileRowHeight = 72
 const detailFileGridHeight = computed(() => {
   const files = selectedFiles.value
   if (!files.length) return detailFileRowHeight * 2
@@ -1020,58 +1020,70 @@ watch(
                 </div>
                 <div class="aw-submission-dialog__body">
       <p v-if="detailLoading" class="aw-copy">正在加载文件</p>
-      <WorkbenchDataGrid
+      <div
         v-else-if="selectedDetail?.items.length"
-        :columns="detailItemGridColumns"
-        :rows="detailItemGridRows"
-        row-key="id"
-        storage-key="submission-detail-items"
-        group-by="qc_status"
-        :height="300"
-        :row-height="gridRowHeight"
-        :column-tools="false"
+        class="aw-panel aw-submission-items-panel"
       >
-        <template #cell="{ row, column, value }">
-          <div v-if="column.key === 'action'" class="aw-grid-actions">
-            <template v-if="canManageItems">
-              <button
-                v-if="itemNeedsGrade(gridRowAsItem(row))"
-                class="aw-grid-button aw-grid-button--strong"
-                type="button"
-                @click="goToProfileGrading(gridRowAsItem(row))"
-              >
-                去定级
-              </button>
-              <button class="aw-grid-button" type="button" @click="startEditItem(gridRowAsItem(row))">编辑</button>
-              <button class="aw-grid-button" type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
-              <details class="aw-row-menu">
-                <summary>更多</summary>
-                <div class="aw-row-menu__panel">
-                  <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
-                  <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
-                  <button type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
-                </div>
-              </details>
-            </template>
-            <span v-else class="aw-chip aw-chip--neutral">只读</span>
+        <div class="aw-panel__head">
+          <div>
+            <h3>作品明细</h3>
+            <p class="aw-copy">这里维护订单、定级和质检状态；上方文件列表只处理预览、下载、移动和删除。</p>
           </div>
-          <span
-            v-else-if="column.key === 'pricing_status'"
-            :class="chipClass(pricingStatusMeta(gridRowAsItem(row).pricing_status).tone)"
-          >
-            {{ pricingStatusMeta(gridRowAsItem(row).pricing_status).label }}
-          </span>
-          <span
-            v-else-if="column.key === 'qc_status'"
-            :class="chipClass(qcStatusMeta(gridRowAsItem(row).qc_status).tone)"
-          >
-            {{ qcStatusMeta(gridRowAsItem(row).qc_status).label }}
-          </span>
-          <span v-else-if="column.key === 'gross_amount'" class="aw-cell-money">{{ formatMoney(value) }}</span>
-          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ formatInt(value) }}</span>
-          <span v-else>{{ value || '—' }}</span>
-        </template>
-      </WorkbenchDataGrid>
+          <span class="aw-chip aw-chip--neutral">{{ formatInt(detailItemRows.length) }} 条</span>
+        </div>
+        <WorkbenchDataGrid
+          class="aw-submission-items-grid"
+          :columns="detailItemGridColumns"
+          :rows="detailItemGridRows"
+          row-key="id"
+          storage-key="submission-detail-items"
+          group-by="qc_status"
+          :height="240"
+          :row-height="gridRowHeight"
+          :column-tools="false"
+        >
+          <template #cell="{ row, column, value }">
+            <div v-if="column.key === 'action'" class="aw-grid-actions">
+              <template v-if="canManageItems">
+                <button
+                  v-if="itemNeedsGrade(gridRowAsItem(row))"
+                  class="aw-grid-button aw-grid-button--strong"
+                  type="button"
+                  @click="goToProfileGrading(gridRowAsItem(row))"
+                >
+                  去定级
+                </button>
+                <button class="aw-grid-button" type="button" @click="startEditItem(gridRowAsItem(row))">编辑</button>
+                <button class="aw-grid-button" type="button" @click="updateItemQC(gridRowAsItem(row), 'checked')">通过</button>
+                <details class="aw-row-menu">
+                  <summary>更多</summary>
+                  <div class="aw-row-menu__panel">
+                    <button type="button" @click="startItemAction(gridRowAsItem(row), 'needs_fix')">需修</button>
+                    <button type="button" @click="startItemAction(gridRowAsItem(row), 'reprice')">重计价</button>
+                    <button type="button" @click="startItemAction(gridRowAsItem(row), 'void')">作废</button>
+                  </div>
+                </details>
+              </template>
+              <span v-else class="aw-chip aw-chip--neutral">只读</span>
+            </div>
+            <span
+              v-else-if="column.key === 'pricing_status'"
+              :class="chipClass(pricingStatusMeta(gridRowAsItem(row).pricing_status).tone)"
+            >
+              {{ pricingStatusMeta(gridRowAsItem(row).pricing_status).label }}
+            </span>
+            <span
+              v-else-if="column.key === 'qc_status'"
+              :class="chipClass(qcStatusMeta(gridRowAsItem(row).qc_status).tone)"
+            >
+              {{ qcStatusMeta(gridRowAsItem(row).qc_status).label }}
+            </span>
+            <span v-else-if="column.key === 'gross_amount'" class="aw-cell-money">{{ formatMoney(value) }}</span>
+            <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ formatInt(value) }}</span>
+            <span v-else>{{ value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+      </div>
       <div v-if="selectedFiles.length" class="aw-panel aw-file-maintenance-panel">
         <div class="aw-panel__head">
           <div>
@@ -1262,6 +1274,11 @@ watch(
           <button class="aw-secondary-button" type="button" @click="editingItem = null">取消</button>
         </div>
       </div>
+                </div>
+              </section>
+      </div>
+    </Teleport>
+    <Teleport to="body">
       <WorkbenchPreviewDialog
         :open="previewDialog.open"
         :title="previewDialog.title"
@@ -1272,9 +1289,6 @@ watch(
         eyebrow="文件预览"
         @close="closeFilePreview"
       />
-                </div>
-              </section>
-      </div>
     </Teleport>
   </section>
 </template>

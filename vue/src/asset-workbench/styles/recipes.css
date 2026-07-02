@@ -1507,6 +1507,7 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-submission-dialog > .aw-page-bar {
+  align-items: flex-start;
   border-bottom: 1px solid var(--aw-hairline);
   border-radius: 0;
   background: var(--aw-stage);
@@ -1529,12 +1530,21 @@ body.aw-submission-dialog-locked {
   color: var(--aw-on-console);
 }
 
+.aw-submission-dialog > .aw-page-bar .aw-page-bar__actions {
+  align-items: center;
+  max-width: min(680px, 100%);
+}
+
 .aw-submission-dialog__body {
   display: grid;
   min-height: 0;
   overflow: auto;
   gap: var(--aw-space-4);
   padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-6);
+}
+
+.aw-submission-dialog__body > * {
+  order: 10;
 }
 
 .aw-ledger-sheet__backdrop {
@@ -1681,6 +1691,14 @@ body.aw-submission-dialog-locked {
   .aw-submission-dialog > .aw-page-bar,
   .aw-submission-dialog__body {
     padding-inline: var(--aw-space-4);
+  }
+
+  .aw-submission-dialog > .aw-page-bar {
+    align-items: stretch;
+  }
+
+  .aw-submission-dialog > .aw-page-bar .aw-page-bar__actions {
+    justify-content: flex-start;
   }
 }
 
@@ -2121,7 +2139,22 @@ body.aw-submission-dialog-locked {
 
 .aw-file-maintenance-panel {
   display: grid;
+  order: 1;
   gap: var(--aw-space-3);
+}
+
+.aw-submission-items-panel {
+  display: grid;
+  order: 2;
+  gap: var(--aw-space-3);
+}
+
+.aw-submission-items-panel .aw-panel__head {
+  margin-bottom: 0;
+}
+
+.aw-submission-items-grid {
+  margin: 0;
 }
 
 .aw-file-maintenance-panel .aw-panel__head {
@@ -2138,7 +2171,7 @@ body.aw-submission-dialog-locked {
 
 .aw-batch-maintenance-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
   align-items: end;
   gap: var(--aw-space-4);
 }
@@ -2166,6 +2199,10 @@ body.aw-submission-dialog-locked {
   min-width: 112px;
   min-height: var(--aw-row-md);
   white-space: nowrap;
+}
+
+.aw-submission-dialog .aw-empty-state {
+  order: 1;
 }
 
 .aw-submission-dialog .aw-grid-actions {
@@ -2986,6 +3023,7 @@ body.aw-submission-dialog-locked {
 .aw-data-grid__td {
   color: var(--aw-ink);
   font-size: var(--aw-font-size-sm);
+  height: 100%;
 }
 
 .aw-data-grid__td > * {
@@ -3049,6 +3087,7 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-data-grid__row {
+  height: var(--aw-grid-row-height, var(--aw-row-sm));
   border-bottom: 1px solid var(--aw-hairline);
 }
 
@@ -3072,6 +3111,7 @@ body.aw-submission-dialog-locked {
   left: 0;
   display: flex;
   align-items: center;
+  height: var(--aw-grid-row-height, var(--aw-row-sm));
   min-height: var(--aw-row-sm);
   padding: 0 var(--aw-space-3);
   border-bottom: 1px solid var(--aw-hairline);
