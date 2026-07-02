@@ -86,7 +86,7 @@ export async function exportErrorImportTemplateWorkbook(): Promise<void> {
   workbook.creator = 'asset-workbench'
   workbook.created = new Date()
 
-  const sheet = workbook.addWorksheet('质检出错导入模板')
+  const sheet = workbook.addWorksheet('出错扣减导入表')
   sheet.columns = [
     { key: 'note', width: 14 },
     { key: 'occurred_date', width: 14 },
@@ -113,7 +113,7 @@ export async function exportErrorImportTemplateWorkbook(): Promise<void> {
   const buffer = await workbook.xlsx.writeBuffer()
   downloadBlob(
     new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    'asset-workbench-quality-error-import-template.xlsx',
+    'asset-workbench-error-deduction-template.xlsx',
   )
 }
 
@@ -155,7 +155,7 @@ export async function exportQCImportTemplateWorkbook(): Promise<void> {
   workbook.creator = 'asset-workbench'
   workbook.created = new Date()
 
-  const sheet = workbook.addWorksheet('质检状态导入模板')
+  const sheet = workbook.addWorksheet('状态导入表')
   sheet.columns = [
     { header: '明细ID', key: 'item_id', width: 14 },
     { header: '订单号', key: 'order_no', width: 24 },
@@ -169,7 +169,7 @@ export async function exportQCImportTemplateWorkbook(): Promise<void> {
   const buffer = await workbook.xlsx.writeBuffer()
   downloadBlob(
     new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    'asset-workbench-qc-status-import-template.xlsx',
+    'asset-workbench-status-update-template.xlsx',
   )
 }
 

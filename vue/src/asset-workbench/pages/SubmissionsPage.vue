@@ -180,6 +180,21 @@ const detailFileGridColumns = computed<GridColumn[]>(() => [
 ])
 
 const downloadableFileIDs = computed(() => selectedFiles.value.map((file) => file.id))
+const selectedFileCount = computed(() => selectedFileIds.value.size)
+const downloadTargetFileIDs = computed(() => {
+  const selected = Array.from(selectedFileIds.value)
+  return selected.length ? selected : downloadableFileIDs.value
+})
+const downloadButtonLabel = computed(() => {
+  const count = downloadTargetFileIDs.value.length
+  if (!count) return '批量下载'
+  return selectedFileCount.value ? `下载已选 ${formatInt(count)} 个` : `下载全部 ${formatInt(count)} 个`
+})
+const detailSelectionLabel = computed(() => {
+  const totalFiles = downloadableFileIDs.value.length
+  if (!totalFiles) return '暂无文件'
+  return `已选 ${formatInt(selectedFileCount.value)} / 共 ${formatInt(totalFiles)} 个文件`
+})
 const selectedPageCount = computed(() => {
   const selectedItemIds = new Set<number>()
   for (const file of selectedFiles.value) {
@@ -220,11 +235,11 @@ const canManageItems = computed(() => {
 })
 const canManageFiles = computed(() => bootstrap.value?.capabilities.includes('asset.workbench.manage') === true)
 const pageEyebrow = computed(() => (isSimpleUser.value ? '我的记录' : '交付维护'))
-const pageTitle = computed(() => (isSimpleUser.value ? '我的上传记录' : '资产维护专区'))
+const pageTitle = computed(() => (isSimpleUser.value ? '我的上传记录' : '提交批次维护'))
 const pageDescription = computed(() =>
   isSimpleUser.value
     ? '这里显示已经生成提交记录的文件。只上传文件但没有提交时，不会进入记录。'
-    : '批量检查提交、文件预览、质检状态和结算前重计价。视图会记住分组、密度和列设置。',
+    : '按批次核对作品、预览图片、维护质检状态和下载文件；出错扣减在结算页导入。',
 )
 const emptyTitle = computed(() => (isSimpleUser.value ? '还没有上传记录' : '还没有提交明细'))
 const emptyDescription = computed(() =>
@@ -235,7 +250,7 @@ const emptyDescription = computed(() =>
 const detailDescription = computed(() =>
   isSimpleUser.value
     ? '查看本次提交的明细、处理状态、文件预览和下载入口。'
-    : '按明细处理质检、重计价、作废和文件批量下载。',
+    : '本窗口只维护作品状态和文件；质检出错扣款请到结算页导入出错扣减表。',
 )
 let detailRequestSerial = 0
 
@@ -464,12 +479,12 @@ async function downloadFile(file: SubmissionFileRow) {
 }
 
 async function downloadSelectedFiles() {
-  const ids = Array.from(selectedFileIds.value)
+  const ids = [...downloadTargetFileIDs.value]
   if (!ids.length) {
-    notice.value = '请选择要下载的文件'
+    notice.value = '本批次没有可下载文件'
     return
   }
-  notice.value = '正在生成下载包'
+  notice.value = selectedFileCount.value ? '正在生成已选文件下载包' : '正在生成全部文件下载包'
   error.value = ''
   try {
     const manifest = await assetWorkbenchApi.batchDownloadFiles(ids)
@@ -488,7 +503,8 @@ async function downloadSelectedFiles() {
     })
     notice.value = `已打包 ${result.writtenCount} 个文件，失败 ${result.failureCount} 个`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '批量下载失败'
+    const message = err instanceof Error ? err.message : '批量下载失败'
+    error.value = `${message}；也可以先点单个文件的“下载”链接。`
   }
 }
 
@@ -517,9 +533,9 @@ async function downloadQCTemplate() {
   error.value = ''
   try {
     await exportQCImportTemplateWorkbook()
-    notice.value = '质检状态导入模板已生成'
+    notice.value = '状态导入表已生成'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '质检状态模板生成失败'
+    error.value = err instanceof Error ? err.message : '状态导入表生成失败'
   }
 }
 
@@ -539,7 +555,7 @@ async function handleQCImport(event: Event) {
     const result = await assetWorkbenchApi.importSubmissionItemQCExcel(detail.submission.business_month, file)
     const updated = result.updated?.length ?? 0
     const failed = result.failures?.length ?? 0
-    notice.value = `质检状态 Excel 已导入：成功 ${formatInt(updated)} 行，失败 ${formatInt(failed)} 行`
+    notice.value = `状态表已导入：成功 ${formatInt(updated)} 行，失败 ${formatInt(failed)} 行`
     if (failed > 0) {
       error.value = result.failures.slice(0, 5).map((item) => `第 ${item.row} 行：${item.reason}`).join('；')
     }
@@ -771,7 +787,7 @@ watch(
         <p>{{ pageDescription }}</p>
       </div>
       <div v-if="!isSimpleUser" class="aw-page-bar__actions">
-        <button class="aw-secondary-button" type="button" @click="downloadQCTemplate">质检状态模板</button>
+        <button class="aw-secondary-button" type="button" @click="downloadQCTemplate">下载状态导入表</button>
         <button class="aw-primary-button" type="button" @click="saveView">保存视图</button>
       </div>
     </div>
@@ -780,7 +796,7 @@ watch(
       class="aw-visually-hidden"
       type="file"
       accept=".xlsx,.xls"
-      aria-label="导入质检状态 Excel"
+      aria-label="导入质检状态表 Excel"
       @change="handleQCImport"
     />
     <div class="aw-data-surface">
@@ -904,14 +920,17 @@ watch(
         >
                 <div class="aw-page-bar">
                   <div class="aw-page-bar__copy">
-                    <p class="aw-eyebrow">提交文件</p>
-                    <h2 id="submission-detail-title">{{ selectedDetail?.submission.submission_no || '提交文件' }}</h2>
+                    <p class="aw-eyebrow">批次明细</p>
+                    <h2 id="submission-detail-title">{{ selectedDetail?.submission.submission_no || '批次文件与状态' }}</h2>
                     <p id="submission-detail-description">{{ detailDescription }}</p>
                   </div>
                   <div class="aw-page-bar__actions">
-                    <span class="aw-chip aw-chip--neutral">已选页数 {{ formatInt(selectedPageCount) }}</span>
-                    <button class="aw-secondary-button" type="button" :disabled="!selectedFileIds.size" @click="downloadSelectedFiles">批量下载</button>
-                    <button v-if="!isSimpleUser" class="aw-secondary-button" type="button" :disabled="!selectedDetail" @click="openQCImport">导入质检状态</button>
+                    <span class="aw-chip aw-chip--neutral">{{ detailSelectionLabel }}</span>
+                    <span v-if="selectedPageCount" class="aw-chip aw-chip--neutral">已选页数 {{ formatInt(selectedPageCount) }}</span>
+                    <button class="aw-secondary-button" type="button" :disabled="!downloadableFileIDs.length" @click="downloadSelectedFiles">
+                      {{ downloadButtonLabel }}
+                    </button>
+                    <button v-if="!isSimpleUser" class="aw-secondary-button" type="button" :disabled="!selectedDetail" @click="openQCImport">导入状态表</button>
                     <label class="aw-inline-check">
                       <input
                         type="checkbox"
@@ -1058,9 +1077,9 @@ watch(
         <div class="aw-panel__head">
           <div>
             <h3>文件批量维护</h3>
-            <p class="aw-copy">移动会重写对象前缀并保留目录快照；删除会从当前提交中移除文件并重算批次汇总。</p>
+            <p class="aw-copy">这里负责移动目录和删除文件；下载按钮未勾选时默认下载本批次全部文件。</p>
           </div>
-          <span class="aw-chip aw-chip--neutral">已选 {{ formatInt(selectedFileIds.size) }}</span>
+          <span class="aw-chip aw-chip--neutral">{{ detailSelectionLabel }}</span>
         </div>
         <div class="aw-batch-maintenance-form">
           <label class="aw-field">
@@ -1144,12 +1163,15 @@ watch(
           </button>
           <span v-else-if="column.key === 'file_type'">{{ gridRowAsFile(row).file_type || gridRowAsFile(row).mime_type }}</span>
           <span v-else-if="column.key === 'page_count'" class="aw-cell-num">{{ formatInt(value) }}</span>
-          <span
+          <button
             v-else-if="column.key === 'preview_status'"
+            class="aw-preview-status-button"
             :class="chipClass(previewStatusMeta(gridRowAsFile(row).preview_status).tone)"
+            type="button"
+            @click="openFilePreviewFromRow(gridRowAsFile(row))"
           >
             {{ previewStatusMeta(gridRowAsFile(row).preview_status).label }}
-          </span>
+          </button>
           <span v-else>{{ value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>

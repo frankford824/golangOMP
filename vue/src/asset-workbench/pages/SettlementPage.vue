@@ -630,14 +630,14 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">本月结算</p>
         <h2>工资结算</h2>
-        <p>先导入质检出错表，再生成预览。每个员工固定两条工资行：正常计件工资一条，补录计件工资一条。</p>
+        <p>这里导入的是出错扣减表：按人员和难度统计出错数，系统自动计算质检扣减。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="downloadErrorTemplate">
           <Download :size="16" aria-hidden="true" />
-          质检出错模板
+          下载出错扣减表
         </button>
-        <button class="aw-secondary-button" type="button" @click="openErrorImport">导入质检出错</button>
+        <button class="aw-secondary-button" type="button" @click="openErrorImport">导入出错扣减</button>
         <button class="aw-secondary-button" type="button" :disabled="exporting || (!preview && !selectedBatch)" @click="exportSettlement">
           导出工资条
         </button>
@@ -649,7 +649,7 @@ onMounted(() => {
       class="aw-visually-hidden"
       type="file"
       accept=".xlsx,.xls"
-      aria-label="导入质检出错 Excel"
+      aria-label="导入出错扣减 Excel"
       @change="handleErrorImport"
     />
     <input
@@ -688,7 +688,7 @@ onMounted(() => {
           </WorkbenchDataGrid>
           <div v-else class="aw-empty-state">
             <h3>还没有可结算明细</h3>
-            <p>先导入质检出错表并生成预览，这里会按人员分组显示每条工资行的计件、质检扣减与净额。</p>
+            <p>导入出错扣减表并生成预览后，这里会按人员分组显示每条工资行的计件、质检扣减与净额。</p>
           </div>
         </div>
       </template>

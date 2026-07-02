@@ -930,6 +930,21 @@
   white-space: nowrap;
 }
 
+.aw-preview-status-button {
+  cursor: zoom-in;
+  font: inherit;
+  transition:
+    border-color var(--aw-motion-fast) var(--aw-ease-standard),
+    box-shadow var(--aw-motion-fast) var(--aw-ease-standard),
+    transform var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-preview-status-button:hover {
+  border-color: var(--aw-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  transform: translateY(-1px);
+}
+
 .aw-inline-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2147,10 +2162,47 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-preview-tile--button {
+  position: relative;
   width: 100%;
   padding: 0;
   cursor: zoom-in;
   text-align: center;
+  transition:
+    border-color var(--aw-motion-fast) var(--aw-ease-standard),
+    box-shadow var(--aw-motion-fast) var(--aw-ease-standard),
+    transform var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-preview-tile--button::after {
+  content: "点击预览";
+  position: absolute;
+  right: var(--aw-space-1);
+  bottom: var(--aw-space-1);
+  max-width: calc(100% - var(--aw-space-2));
+  overflow: hidden;
+  border: 1px solid var(--aw-stage-line);
+  border-radius: var(--aw-radius-sm);
+  background: color-mix(in srgb, var(--aw-stage) 86%, transparent);
+  color: var(--aw-on-console);
+  font-size: var(--aw-font-size-xs);
+  line-height: 1;
+  opacity: 0;
+  padding: 4px 5px;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: opacity var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-preview-tile--button:hover {
+  border-color: var(--aw-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aw-accent) 18%, transparent);
+  transform: translateY(-1px);
+}
+
+.aw-preview-tile--button:hover::after,
+.aw-preview-tile--button:focus-visible::after {
+  opacity: 1;
 }
 
 .aw-preview-tile--button:focus-visible {
