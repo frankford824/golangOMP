@@ -223,10 +223,13 @@ func (c *BFFClient) Search(ctx context.Context, parent, keyword string, page, pe
 	items := make([]AListSearchItem, 0, len(out.Items))
 	for _, item := range out.Items {
 		parentPath := cleanAListPath(item.Parent)
-		name := strings.TrimSpace(item.Name)
-		if item.FullPath != "" {
+		name := item.Name
+		if strings.TrimSpace(name) == "" && item.FullPath != "" {
 			parentPath = cleanAListPath(path.Dir(item.FullPath))
 			name = path.Base(item.FullPath)
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
 		}
 		items = append(items, AListSearchItem{
 			Parent: parentPath,
@@ -421,8 +424,8 @@ func (c *BFFClient) IsBFFURL(raw string) bool {
 
 func joinAListPath(parent, name string) string {
 	parent = cleanAListPath(parent)
-	name = strings.TrimSpace(name)
-	if name == "" {
+	name = strings.ReplaceAll(name, "\\", "/")
+	if strings.TrimSpace(name) == "" {
 		return parent
 	}
 	return path.Join(parent, name)

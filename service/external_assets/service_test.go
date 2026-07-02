@@ -56,6 +56,42 @@ func TestAListClientList(t *testing.T) {
 	}
 }
 
+func TestBFFSearchPrefersParentAndNameWhenFullPathLosesLeadingSpace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/search" {
+			t.Fatalf("path=%s, want /api/search", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"items": []map[string]interface{}{
+				{
+					"parent":    "/quark/A00001模拟/A-小夜灯",
+					"name":      " id   tb701979542216-大六班.png",
+					"is_dir":    false,
+					"size":      126871,
+					"full_path": "/quark/A00001模拟/A-小夜灯/id   tb701979542216-大六班.png",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewBFFClient(server.URL, "", time.Second)
+	got, err := client.Search(context.Background(), "/quark", "png", 1, 20)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(got.Content) != 1 {
+		t.Fatalf("Search() len=%d, want 1", len(got.Content))
+	}
+	item := got.Content[0]
+	if item.Name != " id   tb701979542216-大六班.png" {
+		t.Fatalf("name=%q, want leading space preserved", item.Name)
+	}
+	if origin := joinAListPath(item.Parent, item.Name); origin != "/quark/A00001模拟/A-小夜灯/ id   tb701979542216-大六班.png" {
+		t.Fatalf("origin=%q, want leading space path", origin)
+	}
+}
+
 func TestSyncFullIndexWalksMountAndFiltersSystemFiles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]interface{}
