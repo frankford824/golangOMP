@@ -35,9 +35,9 @@ import {
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
-import MaterialGallery from '@aw/shared/materials/MaterialGallery.vue'
+import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
-import { materialAssetKey } from '@aw/shared/materials/systemAssetPreview'
+import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
 
 type DriveMode = 'directories' | 'operational'
 type SearchScope = 'all' | 'operational' | 'files' | 'orders'
@@ -866,6 +866,64 @@ function materialPreviewRows(asset: SystemAssetRow, meta: SystemAssetPreviewMeta
 
 function selectMaterial(asset: SystemAssetRow) {
   activeMaterial.value = asset
+  void ensureMaterialPreview(asset)
+}
+
+function cacheMaterialPreview(key: string, url: string) {
+  if (!key || !url || materialPreviewUrls.value[key]) return
+  materialPreviewUrls.value = { ...materialPreviewUrls.value, [key]: url }
+}
+
+async function ensureMaterialPreview(asset: SystemAssetRow) {
+  const key = materialAssetKey(asset)
+  if (materialPreviewUrls.value[key]) return
+  const inline = resolvedSystemAssetThumbnailUrl(asset)
+  if (inline) {
+    cacheMaterialPreview(key, inline)
+    return
+  }
+  if (!canAttemptSystemAssetPreview(asset) || materialPreviewLoadingIds.value.has(key)) return
+  const loading = new Set(materialPreviewLoadingIds.value)
+  loading.add(key)
+  materialPreviewLoadingIds.value = loading
+  try {
+    const meta = await previewMaterial(asset)
+    const url = meta.preview_url || ''
+    if (url) cacheMaterialPreview(key, url)
+  } catch {
+    /* silent: big preview falls back to icon, dialog surfaces errors */
+  } finally {
+    const next = new Set(materialPreviewLoadingIds.value)
+    next.delete(key)
+    materialPreviewLoadingIds.value = next
+  }
+}
+
+const activeMaterialPreviewUrl = computed(() => {
+  const asset = activeMaterial.value
+  if (!asset) return ''
+  return materialPreviewUrls.value[materialAssetKey(asset)] || resolvedSystemAssetThumbnailUrl(asset) || ''
+})
+
+const activeMaterialPreviewLoading = computed(() => {
+  const asset = activeMaterial.value
+  if (!asset) return false
+  return materialPreviewLoadingIds.value.has(materialAssetKey(asset)) && !activeMaterialPreviewUrl.value
+})
+
+function materialCodeOf(asset: SystemAssetRow): string {
+  if (asset.source_type === 'external') return asset.resource_id || `ext-${asset.id}`
+  const sku = asset.scope_sku_code || asset.sku_code || asset.primary_sku_code
+  return sku ? `SKU ${sku}` : asset.resource_id || `素材 ${asset.id}`
+}
+
+function materialTypeLabel(asset: SystemAssetRow): string {
+  const mime = (asset.mime_type || '').toLowerCase()
+  if (mime.includes('photoshop') || mime.includes('vnd.adobe')) return 'PSD'
+  if (mime.includes('pdf')) return 'PDF'
+  if (mime.startsWith('image/')) return mime.replace('image/', '').toUpperCase()
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('7z')) return '压缩包'
+  return asset.mime_type || '文件'
 }
 
 function toggleMaterial(asset: SystemAssetRow, checked: boolean) {
@@ -875,14 +933,6 @@ function toggleMaterial(asset: SystemAssetRow, checked: boolean) {
   else next.delete(key)
   selectedMaterialIds.value = next
   activeMaterial.value = asset
-}
-
-function visibleMaterials(assets: SystemAssetRow[]) {
-  for (const asset of assets) {
-    if (!materialPreviewUrls.value[materialAssetKey(asset)] && asset.preview_url) {
-      materialPreviewUrls.value = { ...materialPreviewUrls.value, [materialAssetKey(asset)]: asset.preview_url }
-    }
-  }
 }
 
 async function toggleClientMaterial(material: ClientMaterialRow) {
@@ -1287,69 +1337,116 @@ onBeforeUnmount(() => {
     </template>
 
     <section v-else class="aw-drive-operational">
-      <div class="aw-material-search aw-material-search--client">
+      <div class="aw-drive-operational__bar">
         <form class="aw-drive__search" @submit.prevent="loadMaterials()">
           <Search :size="16" aria-hidden="true" />
           <input v-model="materialQuery" type="search" placeholder="搜索运营素材：文件名 / SKU / 外部路径" />
+          <button
+            v-if="materialQuery"
+            class="aw-drive__search-clear"
+            type="button"
+            aria-label="清除"
+            @click="materialQuery = ''; loadMaterials()"
+          >
+            <X :size="14" aria-hidden="true" />
+          </button>
         </form>
-        <button class="aw-primary-button" type="button" @click="loadMaterials()">搜索素材</button>
+        <button class="aw-primary-button" type="button" @click="loadMaterials()">
+          <Search :size="16" aria-hidden="true" />
+          搜索素材
+        </button>
       </div>
-      <div class="aw-material-browser aw-material-browser--detail">
-        <div class="aw-material-browser__main">
-          <MaterialGallery
-            :items="materialItems"
-            :selected-ids="selectedMaterialIds"
-            :preview-urls="materialPreviewUrls"
-            :preview-loading-ids="materialPreviewLoadingIds"
-            :active-id="activeMaterial ? materialAssetKey(activeMaterial) : null"
-            :loading="materialLoading"
-            :error="materialError"
-            @select="selectMaterial"
-            @toggle="toggleMaterial"
-            @preview="openMaterialPreview"
-            @download="downloadMaterial"
-            @visible="visibleMaterials"
-            @retry="loadMaterials"
-          />
+
+      <div class="aw-drive__body aw-drive__body--operational">
+        <div class="aw-drive-column aw-drive-column--ops">
+          <p class="aw-drive-column__label">
+            素材列表
+            <span v-if="materialItems.length" class="aw-drive-column__sub">{{ materialItems.length }} 个</span>
+          </p>
+          <div class="aw-drive-column__scroll">
+            <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
+            <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
+            <p v-else-if="materialItems.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
+            <button
+              v-for="asset in materialItems"
+              v-else
+              :key="materialAssetKey(asset)"
+              class="aw-material-row"
+              :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
+              type="button"
+              @click="selectMaterial(asset)"
+              @dblclick="openMaterialPreview(asset)"
+              @contextmenu.prevent.stop
+            >
+              <label class="aw-material-row__check" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedMaterialIds.has(materialAssetKey(asset))"
+                  :aria-label="`选择 ${titleOf(asset)}`"
+                  @change="toggleMaterial(asset, ($event.target as HTMLInputElement).checked)"
+                />
+              </label>
+              <span class="aw-material-row__thumb">
+                <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
+              </span>
+              <span class="aw-material-row__body">
+                <strong :title="titleOf(asset)">{{ titleOf(asset) }}</strong>
+                <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
+              </span>
+              <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
+            </button>
+          </div>
         </div>
-        <aside class="aw-material-browser__side">
-          <section v-if="activeMaterial" class="aw-panel aw-material-detail">
-            <div class="aw-material-detail__hero">
-              <p class="aw-eyebrow">{{ sourceLabelOf(activeMaterial) }}</p>
-              <h3>{{ titleOf(activeMaterial) }}</h3>
-              <span>{{ activeMaterial.resource_id || activeMaterial.asset_no || activeMaterial.id }}</span>
-            </div>
+
+        <aside class="aw-drive__detail">
+          <template v-if="activeMaterial">
+            <button class="aw-drive__detail-preview" type="button" @click="openMaterialPreview(activeMaterial)">
+              <img
+                v-if="activeMaterialPreviewUrl"
+                :src="activeMaterialPreviewUrl"
+                :alt="titleOf(activeMaterial)"
+                loading="lazy"
+              />
+              <span v-else-if="activeMaterialPreviewLoading" class="aw-drive-thumb__ph" aria-hidden="true" />
+              <ImageDown v-else :size="30" aria-hidden="true" />
+              <span class="aw-drive__detail-hint">点击预览</span>
+            </button>
+            <h3 class="aw-drive__detail-name">{{ titleOf(activeMaterial) }}</h3>
             <dl class="aw-material-detail__list">
+              <div><dt>来源</dt><dd>{{ sourceLabelOf(activeMaterial) }}</dd></div>
               <div><dt>SKU</dt><dd>{{ activeMaterial.scope_sku_code || activeMaterial.sku_code || activeMaterial.primary_sku_code || '—' }}</dd></div>
               <div><dt>文件</dt><dd>{{ activeMaterial.original_filename || activeMaterial.file_name || '—' }}</dd></div>
-              <div><dt>类型</dt><dd>{{ activeMaterial.mime_type || '—' }}</dd></div>
+              <div><dt>类型</dt><dd>{{ materialTypeLabel(activeMaterial) }}</dd></div>
               <div><dt>路径</dt><dd>{{ activeMaterial.origin_path || '—' }}</dd></div>
             </dl>
-            <div class="aw-inline-actions">
-              <button class="aw-primary-button" type="button" @click="openMaterialPreview(activeMaterial)">预览</button>
-              <button class="aw-secondary-button" type="button" @click="downloadMaterial(activeMaterial)">下载</button>
+            <div class="aw-drive__detail-actions">
+              <button class="aw-primary-button" type="button" @click="openMaterialPreview(activeMaterial)">
+                <ImageDown :size="16" aria-hidden="true" />
+                预览
+              </button>
+              <button class="aw-secondary-button" type="button" @click="downloadMaterial(activeMaterial)">
+                <Download :size="16" aria-hidden="true" />
+                下载
+              </button>
             </div>
-          </section>
-          <section v-if="canManageDrive" class="aw-panel">
-            <div class="aw-panel__head">
-              <div>
-                <p class="aw-eyebrow">客户端素材</p>
-                <h3>发布清单</h3>
-              </div>
-              <span class="aw-chip aw-chip--neutral">{{ clientMaterials.length }} 个</span>
-            </div>
-            <div v-if="clientMaterials.length" class="aw-compact-list">
-              <div v-for="material in clientMaterials" :key="material.id" class="aw-compact-list__item">
-                <div>
-                  <strong>{{ material.title || material.filename_snapshot }}</strong>
-                  <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
+            <section v-if="canManageDrive" class="aw-drive-maintenance">
+              <p class="aw-eyebrow">发布给客户端 · {{ clientMaterials.length }} 个</p>
+              <div v-if="clientMaterials.length" class="aw-compact-list">
+                <div v-for="material in clientMaterials" :key="material.id" class="aw-compact-list__item">
+                  <div>
+                    <strong>{{ material.title || material.filename_snapshot }}</strong>
+                    <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
+                  </div>
+                  <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
+                  <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
                 </div>
-                <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
-                <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
               </div>
-            </div>
-            <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
-          </section>
+              <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
+            </section>
+          </template>
+          <div v-else class="aw-drive-empty aw-drive__detail-empty">
+            选择左侧素材后，这里显示大图预览、信息与下载
+          </div>
         </aside>
       </div>
     </section>
