@@ -275,8 +275,11 @@ func TestExperienceRepoListAttributionCandidatesFallsBackToTaskSuggestionWhenOut
 			"FROM ai_suggestion_events a",
 			"GROUP_CONCAT(DISTINCT b.action",
 			"MIN(CASE WHEN b.action IN ('dismiss', 'ignored_after_timeout') THEN -2 END)",
-			"(a.target_type = ? AND a.target_id = ?)",
-			"OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)",
+			"b.suggestion_stable_key COLLATE utf8mb4_unicode_ci = a.suggestion_stable_key COLLATE utf8mb4_unicode_ci",
+			"lf.suggestion_event_id COLLATE utf8mb4_unicode_ci = a.suggestion_event_id COLLATE utf8mb4_unicode_ci",
+			"(a.target_type COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci",
+			"OR (? COLLATE utf8mb4_unicode_ci <> '' COLLATE utf8mb4_unicode_ci",
+			"a.target_type COLLATE utf8mb4_unicode_ci = 'task' COLLATE utf8mb4_unicode_ci",
 			"HAVING behavior_count > 0 OR COALESCE(lf.feedback_value, '') <> ''",
 			"WHEN COALESCE(lf.feedback_value, '') <> '' THEN 0",
 			"WHEN behavior_score >= 4 THEN 1",
@@ -354,8 +357,9 @@ func TestExperienceRepoListAttributionCandidatesDoesNotFallbackForCanonicalAsset
 			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
 		}
 		for _, fragment := range []string{
-			"(a.target_type = ? AND a.target_id = ?)",
-			"OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)",
+			"(a.target_type COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci",
+			"OR (? COLLATE utf8mb4_unicode_ci <> '' COLLATE utf8mb4_unicode_ci",
+			"a.target_type COLLATE utf8mb4_unicode_ci = 'task' COLLATE utf8mb4_unicode_ci",
 		} {
 			if !strings.Contains(normalized, fragment) {
 				return fmt.Errorf("asset attribution candidates SQL missing %q: %s", fragment, normalized)

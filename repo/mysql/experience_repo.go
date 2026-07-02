@@ -1753,19 +1753,24 @@ func (r *experienceRepo) ListExperienceAttributionCandidates(ctx context.Context
 		       lf.feedback_value, lf.reason_code, lf.created_at
 		FROM ai_suggestion_events a
 		LEFT JOIN experience_behavior_events b
-		  ON (b.suggestion_event_id = a.suggestion_event_id
-		      OR (b.suggestion_event_id = '' AND b.suggestion_stable_key = a.suggestion_stable_key))
+		  ON (b.suggestion_event_id COLLATE utf8mb4_unicode_ci = a.suggestion_event_id COLLATE utf8mb4_unicode_ci
+		      OR (b.suggestion_event_id COLLATE utf8mb4_unicode_ci = '' COLLATE utf8mb4_unicode_ci
+		          AND b.suggestion_stable_key COLLATE utf8mb4_unicode_ci = a.suggestion_stable_key COLLATE utf8mb4_unicode_ci))
 		 AND a.actor_id IS NOT NULL
 		 AND b.actor_id = a.actor_id
 		 AND b.occurred_at >= a.displayed_at
 		 AND b.occurred_at <= ?
-		LEFT JOIN (`+latestAISuggestionFeedbackSQL()+`) lf ON lf.suggestion_event_id = a.suggestion_event_id
+		LEFT JOIN (`+latestAISuggestionFeedbackSQL()+`) lf
+		  ON lf.suggestion_event_id COLLATE utf8mb4_unicode_ci = a.suggestion_event_id COLLATE utf8mb4_unicode_ci
 		WHERE a.attribution_eligible = 1
 		  AND a.displayed_at >= ?
 		  AND a.displayed_at <= ?
 			  AND (
-			    (a.target_type = ? AND a.target_id = ?)
-			    OR (? <> '' AND a.target_type = 'task' AND a.target_id = ?)
+			    (a.target_type COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+			     AND a.target_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci)
+			    OR (? COLLATE utf8mb4_unicode_ci <> '' COLLATE utf8mb4_unicode_ci
+			        AND a.target_type COLLATE utf8mb4_unicode_ci = 'task' COLLATE utf8mb4_unicode_ci
+			        AND a.target_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci)
 			  )
 		GROUP BY a.suggestion_event_id, a.suggestion_stable_key, a.suggestion_type, a.suggestion_id,
 		         a.source, a.target_type, a.target_id, a.displayed_at,
