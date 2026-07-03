@@ -102,6 +102,8 @@ const selectedMaterialIds = ref<Set<string>>(new Set())
 const materialPreviewUrls = ref<Record<string, string>>({})
 const materialPreviewLoadingIds = ref<Set<string>>(new Set())
 const activeMaterial = shallowRef<SystemAssetRow | null>(null)
+const publishingClientMaterial = ref(false)
+const suppressMaterialAutoload = ref(false)
 
 const previewOpen = ref(false)
 const previewTitle = ref('')
@@ -178,6 +180,188 @@ function titleOf(asset: SystemAssetRow) {
 
 function sourceLabelOf(asset: SystemAssetRow) {
   return asset.source_label || (asset.source_type === 'external' ? '外部资源' : '系统资源')
+}
+
+function stringFromMeta(row: OverviewSearchRow, key: string): string {
+  const value = row.meta_json?.[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function numberFromUnknown(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim())
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
+function boolFromMeta(row: OverviewSearchRow, key: string): boolean | undefined {
+  const value = row.meta_json?.[key]
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') return true
+    if (normalized === 'false') return false
+  }
+  return undefined
+}
+
+function externalIDFromResourceID(value?: string): number {
+  const raw = String(value || '').trim()
+  const match = raw.match(/^(?:external:|ext-)(\d+)$/i)
+  return match ? Number(match[1]) : 0
+}
+
+function normalizeMaterialSourceType(sourceType?: string, resourceID?: string): 'system' | 'external' {
+  const normalized = String(sourceType || '').trim().toLowerCase()
+  if (normalized === 'external' || externalIDFromResourceID(resourceID) > 0) return 'external'
+  return 'system'
+}
+
+function materialResourceID(asset: SystemAssetRow): string {
+  if (asset.resource_id) return asset.resource_id
+  if (asset.source_type === 'external') return `ext-${asset.id}`
+  return String(asset.id)
+}
+
+function clientMaterialResourceID(material: ClientMaterialRow): string {
+  return material.resource_id || material.source_ref || (material.source_type === 'external' ? `ext-${material.asset_id}` : String(material.asset_id))
+}
+
+function addIdentityKey(keys: Set<string>, value?: string | number) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return
+  keys.add(raw)
+}
+
+function materialIdentityKeys(asset: SystemAssetRow): Set<string> {
+  const keys = new Set<string>()
+  const sourceType = normalizeMaterialSourceType(asset.source_type, asset.resource_id)
+  const resourceID = materialResourceID(asset)
+  addIdentityKey(keys, materialAssetKey(asset))
+  addIdentityKey(keys, resourceID)
+  addIdentityKey(keys, `${sourceType}:${resourceID}`)
+  addIdentityKey(keys, `${sourceType}:${asset.id}`)
+  if (asset.material_id) addIdentityKey(keys, `client:${asset.material_id}`)
+  if (sourceType === 'external') {
+    const externalID = externalIDFromResourceID(resourceID) || asset.id
+    if (externalID > 0) {
+      addIdentityKey(keys, `ext-${externalID}`)
+      addIdentityKey(keys, `external:ext-${externalID}`)
+      addIdentityKey(keys, `external:${externalID}`)
+    }
+  } else if (asset.id > 0) {
+    addIdentityKey(keys, String(asset.id))
+    addIdentityKey(keys, `system:${asset.id}`)
+  }
+  return keys
+}
+
+function clientMaterialIdentityKeys(material: ClientMaterialRow): Set<string> {
+  const keys = new Set<string>()
+  const resourceID = clientMaterialResourceID(material)
+  const sourceType = normalizeMaterialSourceType(material.source_type, resourceID)
+  addIdentityKey(keys, `client:${material.id}`)
+  addIdentityKey(keys, resourceID)
+  addIdentityKey(keys, material.source_ref)
+  addIdentityKey(keys, `${sourceType}:${resourceID}`)
+  addIdentityKey(keys, `${sourceType}:${material.asset_id}`)
+  if (sourceType === 'external') {
+    const externalID = externalIDFromResourceID(resourceID) || material.asset_id
+    if (externalID > 0) {
+      addIdentityKey(keys, `ext-${externalID}`)
+      addIdentityKey(keys, `external:ext-${externalID}`)
+      addIdentityKey(keys, `external:${externalID}`)
+    }
+  } else if (material.asset_id > 0) {
+    addIdentityKey(keys, String(material.asset_id))
+    addIdentityKey(keys, `system:${material.asset_id}`)
+  }
+  return keys
+}
+
+function overviewMaterialIdentityKeys(row: OverviewSearchRow): Set<string> {
+  const keys = new Set<string>()
+  const resourceID = row.locate?.resource_id || row.locate?.source_ref || stringFromMeta(row, 'resource_id') || stringFromMeta(row, 'source_ref') || row.primary_code
+  const sourceType = normalizeMaterialSourceType(row.locate?.source_type || stringFromMeta(row, 'source_type'), resourceID)
+  const assetID = overviewAssetID(row)
+  addIdentityKey(keys, resourceID)
+  addIdentityKey(keys, `${sourceType}:${resourceID}`)
+  if (row.locate?.material_id) addIdentityKey(keys, `client:${row.locate.material_id}`)
+  const materialID = numberFromUnknown(row.meta_json?.material_id)
+  if (materialID > 0) addIdentityKey(keys, `client:${materialID}`)
+  if (assetID > 0) {
+    addIdentityKey(keys, `${sourceType}:${assetID}`)
+    if (sourceType === 'system') {
+      addIdentityKey(keys, String(assetID))
+      addIdentityKey(keys, `system:${assetID}`)
+    } else {
+      addIdentityKey(keys, `ext-${assetID}`)
+      addIdentityKey(keys, `external:ext-${assetID}`)
+      addIdentityKey(keys, `external:${assetID}`)
+    }
+  }
+  return keys
+}
+
+function hasSharedIdentity(left: Set<string>, right: Set<string>): boolean {
+  for (const key of left) {
+    if (right.has(key)) return true
+  }
+  return false
+}
+
+function materialMatchesOverviewRow(asset: SystemAssetRow, row: OverviewSearchRow): boolean {
+  return hasSharedIdentity(materialIdentityKeys(asset), overviewMaterialIdentityKeys(row))
+}
+
+function overviewAssetID(row: OverviewSearchRow): number {
+  const metaAssetID = numberFromUnknown(row.meta_json?.asset_id)
+  if (metaAssetID > 0) return metaAssetID
+  const resourceID = row.locate?.resource_id || row.locate?.source_ref || stringFromMeta(row, 'resource_id') || stringFromMeta(row, 'source_ref') || row.primary_code
+  const externalID = externalIDFromResourceID(resourceID)
+  if (externalID > 0) return externalID
+  if (row.source === 'client_material') return numberFromUnknown(row.locate?.source_ref || stringFromMeta(row, 'source_ref'))
+  return row.id
+}
+
+function materialFromOverview(row: OverviewSearchRow): SystemAssetRow {
+  const resourceID = row.locate?.resource_id || row.locate?.source_ref || stringFromMeta(row, 'resource_id') || stringFromMeta(row, 'source_ref') || row.primary_code || String(row.id)
+  const sourceType = normalizeMaterialSourceType(row.locate?.source_type || stringFromMeta(row, 'source_type'), resourceID)
+  const filename = stringFromMeta(row, 'original_filename') || stringFromMeta(row, 'file_name') || stringFromMeta(row, 'filename') || row.title
+  const materialID = Number(row.locate?.material_id || numberFromUnknown(row.meta_json?.material_id) || 0)
+  return {
+    id: overviewAssetID(row),
+    material_id: materialID > 0 ? materialID : undefined,
+    resource_id: resourceID,
+    source_type: sourceType,
+    source_label: stringFromMeta(row, 'source_label') || row.source_label || (sourceType === 'external' ? '外部资源' : '系统资源'),
+    asset_no: stringFromMeta(row, 'asset_no') || (row.primary_code && row.primary_code !== resourceID ? row.primary_code : ''),
+    scope_sku_code: stringFromMeta(row, 'scope_sku_code') || row.secondary_code || '',
+    sku_code: stringFromMeta(row, 'sku_code'),
+    primary_sku_code: stringFromMeta(row, 'primary_sku_code'),
+    file_name: filename,
+    original_filename: filename,
+    mime_type: stringFromMeta(row, 'mime_type'),
+    product_name: stringFromMeta(row, 'product_name') || row.title,
+    task_no: stringFromMeta(row, 'task_no') || row.order_no || '',
+    created_by_name: stringFromMeta(row, 'created_by_name'),
+    created_by_username: stringFromMeta(row, 'created_by_username'),
+    task_creator_name: stringFromMeta(row, 'task_creator_name'),
+    preview_available: boolFromMeta(row, 'preview_available') ?? false,
+    origin_path: stringFromMeta(row, 'origin_path') || (row.title.startsWith('/') ? row.title : ''),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }
+}
+
+function upsertMaterialItem(asset: SystemAssetRow) {
+  const nextKeySet = materialIdentityKeys(asset)
+  materialItems.value = [
+    asset,
+    ...materialItems.value.filter((item) => !hasSharedIdentity(materialIdentityKeys(item), nextKeySet)),
+  ]
 }
 
 function formatSize(size?: number): string {
@@ -286,6 +470,35 @@ function materialFromClient(row: ClientMaterialRow): SystemAssetRow {
     preview_available: row.preview_available,
   }
 }
+
+function materialWithClientPublication(asset: SystemAssetRow, row: ClientMaterialRow): SystemAssetRow {
+  const published = materialFromClient(row)
+  return {
+    ...published,
+    asset_no: asset.asset_no,
+    product_name: row.title || asset.product_name || published.product_name,
+    file_name: published.file_name || asset.file_name,
+    original_filename: published.original_filename || asset.original_filename,
+    mime_type: published.mime_type || asset.mime_type,
+    preview_url: asset.preview_url,
+    download_url: asset.download_url,
+    origin_path: asset.origin_path,
+    task_no: asset.task_no,
+    created_by_name: asset.created_by_name,
+    created_by_username: asset.created_by_username,
+    task_creator_name: asset.task_creator_name,
+    task_creator_username: asset.task_creator_username,
+    created_at: asset.created_at,
+    updated_at: asset.updated_at,
+  }
+}
+
+const activeClientMaterial = computed(() => {
+  const asset = activeMaterial.value
+  if (!asset) return null
+  const assetKeys = materialIdentityKeys(asset)
+  return clientMaterials.value.find((material) => hasSharedIdentity(assetKeys, clientMaterialIdentityKeys(material))) || null
+})
 
 async function loadDifficultyClasses() {
   try {
@@ -544,17 +757,19 @@ function clearSearch() {
 
 async function locateSearchRow(row: OverviewSearchRow) {
   if (row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material') {
-    activeMode.value = 'operational'
-    await loadMaterials(row.title || row.primary_code || materialQuery.value)
-    const targetKey = row.locate?.material_id
-      ? `client:${row.locate.material_id}`
-      : row.locate?.source_type && row.locate?.source_ref
-        ? `${row.locate.source_type}:${row.locate.source_ref}`
-        : ''
-    const found = targetKey
-      ? materialItems.value.find((asset) => materialAssetKey(asset) === targetKey || String(asset.material_id || '') === String(row.locate?.material_id || ''))
-      : null
-    if (found) activeMaterial.value = found
+    suppressMaterialAutoload.value = true
+    try {
+      activeMode.value = 'operational'
+      await loadMaterials(row.title || row.primary_code || materialQuery.value)
+      const found = materialItems.value.find((asset) => materialMatchesOverviewRow(asset, row))
+      const target = found || materialFromOverview(row)
+      if (!found) upsertMaterialItem(target)
+      selectMaterial(target)
+      searchActive.value = false
+      notice.value = found ? `已定位素材：${titleOf(target)}` : `已打开搜索结果：${titleOf(target)}`
+    } finally {
+      suppressMaterialAutoload.value = false
+    }
     return
   }
   const fileID = Number(row.locate?.file_id || 0)
@@ -1014,10 +1229,60 @@ function toggleMaterial(asset: SystemAssetRow, checked: boolean) {
   activeMaterial.value = asset
 }
 
+function publishPayloadForMaterial(asset: SystemAssetRow) {
+  const resourceID = materialResourceID(asset)
+  const sourceType = normalizeMaterialSourceType(asset.source_type, resourceID)
+  const payload = {
+    asset_id: asset.id,
+    source_type: sourceType,
+    title: titleOf(asset),
+    description: '',
+    enabled: true,
+    sort_order: clientMaterials.value.length + 1,
+  } as const
+  if (sourceType === 'external') {
+    return {
+      ...payload,
+      source_ref: resourceID,
+      resource_id: resourceID,
+    }
+  }
+  return {
+    ...payload,
+    source_ref: String(asset.id),
+    resource_id: String(asset.id),
+  }
+}
+
+async function publishClientMaterial(asset: SystemAssetRow) {
+  if (publishingClientMaterial.value) return
+  publishingClientMaterial.value = true
+  actionError.value = ''
+  try {
+    const created = await assetWorkbenchApi.createClientMaterial(publishPayloadForMaterial(asset))
+    clientMaterials.value = [
+      created,
+      ...clientMaterials.value.filter((material) => material.id !== created.id),
+    ]
+    const publishedAsset = materialWithClientPublication(asset, created)
+    upsertMaterialItem(publishedAsset)
+    activeMaterial.value = publishedAsset
+    notice.value = `已上架到客户端：${created.title || created.filename_snapshot}`
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : '客户端素材上架失败'
+  } finally {
+    publishingClientMaterial.value = false
+  }
+}
+
 async function toggleClientMaterial(material: ClientMaterialRow) {
   try {
-    await assetWorkbenchApi.updateClientMaterial(material.id, { enabled: !material.enabled })
-    await loadMaterials()
+    const updated = await assetWorkbenchApi.updateClientMaterial(material.id, { enabled: !material.enabled })
+    clientMaterials.value = clientMaterials.value.map((row) => (row.id === updated.id ? updated : row))
+    if (activeMaterial.value && hasSharedIdentity(materialIdentityKeys(activeMaterial.value), clientMaterialIdentityKeys(updated))) {
+      activeMaterial.value = materialWithClientPublication(activeMaterial.value, updated)
+    }
+    notice.value = `${updated.enabled ? '已启用' : '已停用'}客户端素材：${updated.title || updated.filename_snapshot}`
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '客户端素材状态更新失败'
   }
@@ -1025,8 +1290,15 @@ async function toggleClientMaterial(material: ClientMaterialRow) {
 
 async function removeClientMaterial(material: ClientMaterialRow) {
   try {
+    const wasActive = activeMaterial.value
+      ? hasSharedIdentity(materialIdentityKeys(activeMaterial.value), clientMaterialIdentityKeys(material))
+      : false
     await assetWorkbenchApi.deleteClientMaterial(material.id)
-    await loadMaterials()
+    clientMaterials.value = clientMaterials.value.filter((row) => row.id !== material.id)
+    if (wasActive) {
+      activeMaterial.value = activeMaterial.value ? { ...activeMaterial.value, material_id: undefined } : { ...materialFromClient(material), material_id: undefined }
+    }
+    notice.value = `已从客户端下架：${material.title || material.filename_snapshot}`
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '客户端素材下架失败'
   }
@@ -1062,7 +1334,9 @@ function syncEditForm(file: DriveFileRow | null) {
 
 watch(selectedFile, syncEditForm)
 watch(activeMode, (mode) => {
-  if (mode === 'operational' && materialItems.value.length === 0) void loadMaterials()
+  if (mode === 'operational' && materialItems.value.length === 0 && !suppressMaterialAutoload.value && !materialLoading.value) {
+    void loadMaterials()
+  }
 })
 
 onMounted(async () => {
@@ -1527,6 +1801,7 @@ onBeforeUnmount(() => {
             <div><dt>文件</dt><dd>{{ activeMaterial.original_filename || activeMaterial.file_name || '—' }}</dd></div>
             <div><dt>类型</dt><dd>{{ materialTypeLabel(activeMaterial) }}</dd></div>
             <div><dt>路径</dt><dd>{{ activeMaterial.origin_path || '—' }}</dd></div>
+            <div><dt>客户端</dt><dd>{{ activeClientMaterial ? (activeClientMaterial.enabled ? '已上架' : '已停用') : '未上架' }}</dd></div>
           </dl>
           <div class="aw-drive__detail-actions">
             <button class="aw-primary-button" type="button" @click="openMaterialPreview(activeMaterial)">
@@ -1539,7 +1814,47 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <section v-if="canManageDrive" class="aw-drive-maintenance">
-            <p class="aw-eyebrow">发布给客户端 · {{ clientMaterials.length }} 个</p>
+            <p class="aw-eyebrow">当前素材发布</p>
+            <div class="aw-compact-list__item">
+              <div>
+                <strong>{{ activeClientMaterial ? '客户端已收录' : '未上架到客户端' }}</strong>
+                <span>
+                  {{ activeClientMaterial
+                    ? `${activeClientMaterial.enabled ? '上架中' : '已停用'} · ${activeClientMaterial.resource_id || activeClientMaterial.source_ref || activeClientMaterial.asset_id}`
+                    : '上架后用户端素材库可预览和下载'
+                  }}
+                </span>
+              </div>
+              <div class="aw-inline-actions aw-inline-actions--compact">
+                <button
+                  v-if="activeClientMaterial"
+                  class="aw-grid-button"
+                  type="button"
+                  @click="toggleClientMaterial(activeClientMaterial)"
+                >
+                  {{ activeClientMaterial.enabled ? '停用' : '启用' }}
+                </button>
+                <button
+                  v-if="activeClientMaterial"
+                  class="aw-grid-button"
+                  type="button"
+                  @click="removeClientMaterial(activeClientMaterial)"
+                >
+                  下架
+                </button>
+                <button
+                  v-else
+                  class="aw-grid-button aw-grid-button--strong"
+                  type="button"
+                  :disabled="publishingClientMaterial"
+                  @click="publishClientMaterial(activeMaterial)"
+                >
+                  <Plus :size="14" aria-hidden="true" />
+                  {{ publishingClientMaterial ? '上架中' : '上架' }}
+                </button>
+              </div>
+            </div>
+            <p class="aw-eyebrow">已发布素材 · {{ clientMaterials.length }} 个</p>
             <div v-if="clientMaterials.length" class="aw-compact-list">
               <div v-for="material in clientMaterials" :key="material.id" class="aw-compact-list__item">
                 <div>
