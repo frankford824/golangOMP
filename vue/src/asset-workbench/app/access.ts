@@ -114,7 +114,7 @@ export const assetWorkbenchRouteAccess = {
   '/reports': {
     label: '计件统计',
     subtitle: '按月导出明细',
-    aliases: ['计件报表'],
+    aliases: ['计件明细'],
     requiresAnyCapability: ['asset.workbench.settlement'],
   },
   '/settings': {

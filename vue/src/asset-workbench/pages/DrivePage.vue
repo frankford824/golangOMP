@@ -794,7 +794,7 @@ function statusText(value?: string) {
     unsettled: '未结算',
     in_batch: '批次中',
     settled: '已结算',
-    reversed: '已冲正',
+    reversed: '已调整',
     processing: '处理中',
     ready: '可预览',
     failed: '失败',

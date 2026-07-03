@@ -37,7 +37,7 @@ describe('asset workbench settlement export', () => {
 
     expect(rows).toEqual([
       expect.objectContaining({
-        rowTypeLabel: '正常计件工资',
+        rowTypeLabel: '日常计件工资',
         grossAmount: 120,
         deductionAmount: 4,
         welfareAmount: 30,
@@ -53,6 +53,6 @@ describe('asset workbench settlement export', () => {
   })
 
   it('keeps unknown row types on the normal payroll side', () => {
-    expect(payrollRowLabel('legacy')).toBe('正常计件工资')
+    expect(payrollRowLabel('legacy')).toBe('日常计件工资')
   })
 })

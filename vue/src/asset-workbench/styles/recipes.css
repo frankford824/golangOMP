@@ -1988,33 +1988,63 @@ body.aw-submission-dialog-locked {
   transform: translateX(18px);
 }
 
+.aw-month-control,
 .aw-month-picker {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: auto minmax(132px, 1fr);
   align-items: center;
-  gap: var(--aw-space-2);
+  overflow: hidden;
   min-height: var(--aw-row-md);
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-sm);
   background: var(--aw-surface);
-  padding: 0 var(--aw-space-3);
   color: var(--aw-ink);
   font-size: var(--aw-font-size-sm);
   box-shadow: var(--aw-shadow-soft);
 }
 
+.aw-month-control span,
 .aw-month-picker span {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  border-right: 1px solid var(--aw-hairline);
+  background: var(--aw-surface-muted);
   color: var(--aw-ink-muted);
   font-weight: var(--aw-weight-strong);
+  padding: 0 var(--aw-space-3);
   white-space: nowrap;
 }
 
-.aw-month-picker input {
-  min-width: 138px;
+.aw-root .aw-month-control input:not([type='checkbox']):not([type='radio']),
+.aw-root .aw-month-picker input:not([type='checkbox']):not([type='radio']) {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(var(--aw-row-md) - 2px);
+  appearance: none;
+  -webkit-appearance: none;
   border: 0;
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--aw-ink);
   font: inherit;
-  padding: 0;
+  outline: 0;
+  padding: 0 var(--aw-space-3);
+}
+
+.aw-month-control:focus-within,
+.aw-month-picker:focus-within {
+  border-color: color-mix(in srgb, var(--aw-accent) 46%, var(--aw-hairline));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--aw-accent) 10%, transparent),
+    var(--aw-shadow-soft);
+}
+
+.aw-month-control input::-webkit-calendar-picker-indicator,
+.aw-month-picker input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.72;
 }
 
 .aw-settlement-workbench {
@@ -2142,6 +2172,14 @@ body.aw-submission-dialog-locked {
 .aw-settlement-section__head h3,
 .aw-settlement-section__head p {
   margin: 0;
+}
+
+.aw-report-section-notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--aw-space-2);
+  min-width: min(320px, 100%);
 }
 
 .aw-advanced-settings {

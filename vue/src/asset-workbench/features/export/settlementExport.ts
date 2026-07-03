@@ -36,7 +36,7 @@ export interface SettlementPayrollExportRow {
 }
 
 export function payrollRowLabel(rowType: string): string {
-  return rowType === 'supplement_piecework' ? '补录计件工资' : '正常计件工资'
+  return rowType === 'supplement_piecework' ? '补录计件工资' : '日常计件工资'
 }
 
 export function buildSettlementPayrollExportRows(rows: SettlementPayrollRow[]): SettlementPayrollExportRow[] {
@@ -228,7 +228,7 @@ function appendSummarySheet(workbook: import('exceljs').Workbook, rows: Settleme
 }
 
 function appendReportSheet(workbook: import('exceljs').Workbook, report: SettlementReport) {
-  const sheet = workbook.addWorksheet('计件报表')
+  const sheet = workbook.addWorksheet('计件统计')
   const difficultyColumns = report.difficulty_classes.flatMap((difficulty) => [
     { header: `${difficultyLabel(difficulty)}单数`, key: difficultyKey(difficulty, 'item_count'), width: 12 },
     { header: `${difficultyLabel(difficulty)}页数`, key: difficultyKey(difficulty, 'page_count'), width: 12 },
@@ -374,7 +374,7 @@ function flattenDifficultyMetric(row: Pick<SettlementReportRow, 'payee_user_id' 
 function reportRowLabel(rowType: string): string {
   if (rowType === 'supplement_piecework') return '补录计件'
   if (rowType === 'total') return '合计'
-  return '正常计件'
+  return '日常计件'
 }
 
 function difficultyLabel(value: string): string {

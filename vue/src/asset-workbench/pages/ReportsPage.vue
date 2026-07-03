@@ -22,14 +22,23 @@ type ReportGridRow = Record<string, unknown> & {
   grid_id: string
   row_type: SettlementReportRow['row_type']
 }
+type ReportSectionKey = 'overview' | 'difficulty' | 'daily' | 'supplements'
+
+interface ReportNavItem {
+  key: ReportSectionKey
+  title: string
+  meta: string
+  count: string
+}
 
 const month = ref(defaultBusinessMonth())
 const exporting = ref(false)
+const activeReportSection = ref<ReportSectionKey>('overview')
 
 const reportRequest = usePageRequest<SettlementReport>(
   (signal) => assetWorkbenchApi.settlementReport(month.value, signal),
   null,
-  '计件报表加载失败',
+  '计件统计加载失败',
 )
 const loading = reportRequest.loading
 const error = reportRequest.error
@@ -49,6 +58,42 @@ const summaryCards = computed(() => {
   ]
 })
 const difficultySummary = computed(() => totals.value?.difficulty_metrics ?? [])
+const reportNavGroups = computed<{ label: string; items: ReportNavItem[] }[]>(() => [
+  {
+    label: '统计流程',
+    items: [
+      {
+        key: 'overview',
+        title: '统计总览',
+        meta: '先看本月单量、作图量、扣款和应结金额',
+        count: report.value ? '已加载' : '待加载',
+      },
+      {
+        key: 'difficulty',
+        title: '难度构成',
+        meta: '查看不同难度的作图量和金额占比',
+        count: difficultySummary.value.length ? `${formatInt(difficultySummary.value.length)} 类` : '待生成',
+      },
+    ],
+  },
+  {
+    label: '明细核对',
+    items: [
+      {
+        key: 'daily',
+        title: '日常计件',
+        meta: '核对本月上传作品产生的计件明细',
+        count: `${formatInt(normalRows.value.length)} 行`,
+      },
+      {
+        key: 'supplements',
+        title: '补录计件',
+        meta: '单独核对已批准的补录金额',
+        count: `${formatInt(supplementRows.value.length)} 行`,
+      },
+    ],
+  },
+])
 
 const baseColumns: GridColumn[] = [
   { key: 'creator_name', label: '创建人', width: 132 },
@@ -170,136 +215,158 @@ onMounted(loadReport)
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">计件统计</p>
-        <h2>计件报表</h2>
-        <p>订单数按非空订单号去重，金额按当前待结算成品和已批准补录计算。</p>
+        <h2>计件统计</h2>
+        <p>按“统计总览 → 难度构成 → 日常计件 → 补录计件”的顺序查看，先看结论，再核对明细。</p>
+      </div>
+      <div class="aw-page-bar__actions">
+        <label class="aw-month-control">
+          <span>结算月</span>
+          <input v-model="month" type="month" />
+        </label>
+        <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadReport">
+          <RefreshCw :size="16" aria-hidden="true" />
+          刷新
+        </button>
+        <button class="aw-primary-button" type="button" :disabled="exporting || !report" @click="exportReport">
+          <Download :size="16" aria-hidden="true" />
+          导出表格
+        </button>
       </div>
     </div>
 
-    <section class="aw-panel">
-      <div class="aw-report-toolbar">
-        <label class="aw-field aw-report-toolbar__month">
-          业务月
-          <input v-model="month" type="month" />
-        </label>
-        <div class="aw-report-toolbar__actions">
-          <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadReport">
-            <RefreshCw :size="16" aria-hidden="true" />
-            刷新
+    <div class="aw-settlement-workbench aw-report-workbench">
+      <aside class="aw-settlement-nav" aria-label="计件统计导航">
+        <div class="aw-settlement-nav__head">
+          <strong>{{ month }} 统计</strong>
+          <span>先看总览，再按明细核对</span>
+        </div>
+        <div v-for="group in reportNavGroups" :key="group.label" class="aw-settlement-nav__group">
+          <p>{{ group.label }}</p>
+          <button
+            v-for="item in group.items"
+            :key="item.key"
+            class="aw-settlement-nav__item"
+            :class="{ 'is-active': activeReportSection === item.key }"
+            type="button"
+            :aria-current="activeReportSection === item.key ? 'page' : undefined"
+            @click="activeReportSection = item.key"
+          >
+            <span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.meta }}</small>
+            </span>
+            <em>{{ item.count }}</em>
           </button>
-          <button class="aw-primary-button" type="button" :disabled="exporting || !report" @click="exportReport">
-            <Download :size="16" aria-hidden="true" />
-            导出报表
-          </button>
         </div>
-        <div class="aw-report-toolbar__notes">
-          <span class="aw-chip aw-chip--neutral">订单数=非空订单号去重</span>
-          <span class="aw-chip aw-chip--info">数据=待结算成品+已批准补录</span>
-        </div>
-      </div>
-      <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载计件报表" empty-label="暂无报表数据" @retry="loadReport">
-        <div class="aw-metric-grid">
-          <article v-for="card in summaryCards" :key="card.label" class="aw-metric-card">
-            <span>{{ card.label }}</span>
-            <strong :class="{ 'aw-money': card.money }">{{ card.value }}</strong>
-            <small>{{ card.hint }}</small>
-          </article>
-        </div>
-      </AsyncBoundary>
-    </section>
+      </aside>
 
-    <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载计件报表" empty-label="暂无报表数据" @retry="loadReport">
-      <section class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>难度构成</h3>
-            <p class="aw-copy">按全月作图量拆分，金额为对应难度的小计金额。</p>
+      <main class="aw-settlement-workspace">
+        <section v-if="activeReportSection === 'overview'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>统计总览</h3>
+              <p>先确认本月总单量、作图量、质检扣款和应结金额，再进入明细核对。</p>
+            </div>
+            <div class="aw-report-section-notes" aria-label="统计说明">
+              <span class="aw-chip aw-chip--neutral">订单数按有效订单号去重</span>
+              <span class="aw-chip aw-chip--info">包含待结算作品和已批准补录</span>
+            </div>
           </div>
-        </div>
-        <div v-if="difficultySummary.length" class="aw-metric-grid">
-          <article v-for="metric in difficultySummary" :key="metric.difficulty_class" class="aw-metric-card">
-            <span>{{ difficultyLabel(metric.difficulty_class) }}</span>
-            <strong>{{ formatInt(metric.page_count) }}</strong>
-            <small>{{ formatMoney(metric.gross_amount) }} · 出错 {{ formatInt(metric.error_count) }} · {{ formatPercent(metric.month_page_count_share * 100) }}</small>
-          </article>
-        </div>
-        <div v-else class="aw-empty-state">
-          <h3>没有难度明细</h3>
-          <p>当前业务月没有可展示的计件或补录数据。</p>
-        </div>
-      </section>
+          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载计件统计" empty-label="暂无统计数据" @retry="loadReport">
+            <div class="aw-metric-grid">
+              <article v-for="card in summaryCards" :key="card.label" class="aw-metric-card">
+                <span>{{ card.label }}</span>
+                <strong :class="{ 'aw-money': card.money }">{{ card.value }}</strong>
+                <small>{{ card.hint }}</small>
+              </article>
+            </div>
+          </AsyncBoundary>
+        </section>
 
-      <section class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>正常计件</h3>
-            <p class="aw-copy">正常计件包含结算时质检扣款、福利与难度分列。</p>
+        <section v-if="activeReportSection === 'difficulty'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>难度构成</h3>
+              <p>按全月作图量拆分，金额为对应难度的小计金额。</p>
+            </div>
           </div>
-        </div>
-        <WorkbenchDataGrid
-          v-if="normalRows.length"
-          :columns="columns"
-          :rows="normalRows"
-          row-key="grid_id"
-          storage-key="settlement-report-normal"
-          :height="520"
-          :row-height="36"
-          aria-label="正常计件报表"
-        >
-          <template #cell="{ column, value }">
-            <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-            <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-            <span v-else class="aw-cell-text">{{ gridValue(column.key, value) }}</span>
-          </template>
-        </WorkbenchDataGrid>
-        <div v-else class="aw-empty-state">
-          <h3>没有正常计件</h3>
-          <p>当前业务月没有待结算的正常计件明细。</p>
-        </div>
-      </section>
+          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载难度构成" empty-label="暂无统计数据" @retry="loadReport">
+            <div v-if="difficultySummary.length" class="aw-metric-grid">
+              <article v-for="metric in difficultySummary" :key="metric.difficulty_class" class="aw-metric-card">
+                <span>{{ difficultyLabel(metric.difficulty_class) }}</span>
+                <strong>{{ formatInt(metric.page_count) }}</strong>
+                <small>{{ formatMoney(metric.gross_amount) }} · 出错 {{ formatInt(metric.error_count) }} · {{ formatPercent(metric.month_page_count_share * 100) }}</small>
+              </article>
+            </div>
+            <div v-else class="aw-empty-state">
+              <h3>没有难度明细</h3>
+              <p>当前业务月没有可展示的计件或补录数据。</p>
+            </div>
+          </AsyncBoundary>
+        </section>
 
-      <section class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>补录计件</h3>
-            <p class="aw-copy">补录计件单独成行，不混入正常计件工资行。</p>
+        <section v-if="activeReportSection === 'daily'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>日常计件</h3>
+              <p>日常上传作品产生的计件明细，包含质检扣款、福利和难度分列。</p>
+            </div>
           </div>
-        </div>
-        <WorkbenchDataGrid
-          v-if="supplementRows.length"
-          :columns="columns"
-          :rows="supplementRows"
-          row-key="grid_id"
-          storage-key="settlement-report-supplement"
-          :height="360"
-          :row-height="36"
-          aria-label="补录计件报表"
-        >
-          <template #cell="{ column, value }">
-            <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-            <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-            <span v-else class="aw-cell-text">{{ gridValue(column.key, value) }}</span>
-          </template>
-        </WorkbenchDataGrid>
-        <div v-else class="aw-empty-state">
-          <h3>没有补录计件</h3>
-          <p>当前业务月没有已批准的补录计件。</p>
-        </div>
-      </section>
-    </AsyncBoundary>
+          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载日常计件" empty-label="暂无统计数据" @retry="loadReport">
+            <WorkbenchDataGrid
+              v-if="normalRows.length"
+              :columns="columns"
+              :rows="normalRows"
+              row-key="grid_id"
+              storage-key="settlement-report-normal"
+              :height="520"
+              :row-height="36"
+              aria-label="日常计件统计"
+            >
+              <template #cell="{ column, value }">
+                <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else class="aw-cell-text">{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <div v-else class="aw-empty-state">
+              <h3>没有日常计件</h3>
+              <p>当前业务月没有待结算的日常计件明细。</p>
+            </div>
+          </AsyncBoundary>
+        </section>
+
+        <section v-if="activeReportSection === 'supplements'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>补录计件</h3>
+              <p>补录计件单独成行，方便和日常计件分开核对。</p>
+            </div>
+          </div>
+          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载补录计件" empty-label="暂无统计数据" @retry="loadReport">
+            <WorkbenchDataGrid
+              v-if="supplementRows.length"
+              :columns="columns"
+              :rows="supplementRows"
+              row-key="grid_id"
+              storage-key="settlement-report-supplement"
+              :height="360"
+              :row-height="36"
+              aria-label="补录计件统计"
+            >
+              <template #cell="{ column, value }">
+                <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else class="aw-cell-text">{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <div v-else class="aw-empty-state">
+              <h3>没有补录计件</h3>
+              <p>当前业务月没有已批准的补录计件。</p>
+            </div>
+          </AsyncBoundary>
+        </section>
+      </main>
+    </div>
   </section>
 </template>
-
-<style scoped>
-.aw-reports-page > .aw-page-bar {
-  display: block;
-}
-
-.aw-reports-page .aw-page-bar__copy {
-  width: 100%;
-}
-
-.aw-reports-page .aw-page-bar__copy h2 {
-  white-space: nowrap;
-}
-
-</style>

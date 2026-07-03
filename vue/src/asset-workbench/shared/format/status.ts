@@ -76,7 +76,7 @@ export const settlementStatusMeta = (value?: string | null) =>
       unsettled: { label: '未结算', tone: 'neutral' },
       in_batch: { label: '批次中', tone: 'info' },
       settled: { label: '已结算', tone: 'success' },
-      reversed: { label: '已冲正', tone: 'danger' },
+      reversed: { label: '已调整', tone: 'danger' },
     },
     value,
   )
@@ -99,7 +99,7 @@ export const batchStatusMeta = (value?: string | null) =>
       generated: { label: '待确认', tone: 'warn' },
       confirmed: { label: '已确认', tone: 'success' },
       cancelled: { label: '已取消', tone: 'neutral' },
-      reversed: { label: '已冲正', tone: 'danger' },
+      reversed: { label: '已调整', tone: 'danger' },
     },
     value,
   )
@@ -110,7 +110,7 @@ export const supplementStatusMeta = (value?: string | null) =>
       pending: { label: '待审核', tone: 'warn' },
       approved: { label: '已批准', tone: 'success' },
       rejected: { label: '已拒绝', tone: 'danger' },
-      reversed: { label: '已冲正', tone: 'danger' },
+      reversed: { label: '已调整', tone: 'danger' },
     },
     value,
   )
@@ -148,12 +148,12 @@ export const systemPreviewMeta = (available?: boolean) =>
 export const itemTypeMeta = (value?: string | null) =>
   lookup(
     {
-      gross_piecework: { label: '正常计件', tone: 'success' },
+      gross_piecework: { label: '日常计件', tone: 'success' },
       error_deduction: { label: '质检扣款', tone: 'danger' },
       welfare: { label: '福利补贴', tone: 'money' },
       supplement: { label: '补录计件', tone: 'info' },
-      adjustment: { label: '补差', tone: 'money' },
-      reversal: { label: '冲正', tone: 'danger' },
+      adjustment: { label: '补发', tone: 'money' },
+      reversal: { label: '扣回', tone: 'danger' },
     },
     value,
   )
@@ -182,7 +182,7 @@ export function eventTypeMeta(value?: string | null): StatusMeta {
     'settlement.generated': { label: '生成结算', tone: 'money' },
     'settlement.confirmed': { label: '确认结算', tone: 'success' },
     'settlement.cancelled': { label: '取消结算', tone: 'danger' },
-    'settlement.adjusted': { label: '结算补差', tone: 'money' },
+    'settlement.adjusted': { label: '工资调整', tone: 'money' },
     'supplement.created': { label: '创建补录', tone: 'info' },
     'supplement_permission.changed': { label: '调整补录开放', tone: 'info' },
     'saved_view.upserted': { label: '保存视图', tone: 'neutral' },
@@ -230,7 +230,7 @@ export function entityTypeMeta(value?: string | null): StatusMeta {
       system_asset: { label: '素材库文件', tone: 'info' },
       error_import: { label: '出错导入', tone: 'warn' },
       settlement_batch: { label: '结算批次', tone: 'money' },
-      settlement_adjustment: { label: '补差冲正', tone: 'money' },
+      settlement_adjustment: { label: '工资调整', tone: 'money' },
       settlement_supplement: { label: '补录计件', tone: 'info' },
       supplement_permission: { label: '补录开放', tone: 'info' },
       saved_view: { label: '保存视图', tone: 'neutral' },
@@ -272,7 +272,7 @@ export function eventReasonText(value?: string | null) {
     'confirm settlement': '确认结算',
     'cancel settlement': '取消结算',
     'create supplement': '创建补录',
-    'create adjustment': '创建补差',
+    'create adjustment': '创建工资调整',
   }
   return known[reason] ?? businessFallback(reason, '系统操作')
 }

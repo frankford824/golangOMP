@@ -118,6 +118,13 @@ const adjustmentForm = ref({
   amount: 0,
   reason: '',
 })
+const adjustmentMode = computed({
+  get: () => (adjustmentForm.value.direction === 'debit' ? 'debit' : 'credit'),
+  set: (value: 'credit' | 'debit') => {
+    adjustmentForm.value.direction = value
+    adjustmentForm.value.adjustment_type = value === 'debit' ? 'reversal' : 'adjustment'
+  },
+})
 const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'amount'])
 const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity'])
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
@@ -128,14 +135,14 @@ const ledgerSegments = computed(() => {
   const value = totals.value
   if (!value) {
     return [
-      { key: 'gross', label: '正常计件', value: formatMoney(0), hint: '待生成预览', expandable: true },
+      { key: 'gross', label: '日常计件', value: formatMoney(0), hint: '待生成预览', expandable: true },
       { key: 'deduction', label: '质检扣款', value: formatMoney(0), hint: '结算时读取质检错误表', expandable: true },
       { key: 'supplement', label: '补录计件', value: formatMoney(0), hint: '工资条第二行', expandable: true },
       { key: 'net', label: '应结净额', value: formatMoney(0), hint: '计件 + 补录 - 质检扣款', money: true, expandable: true },
     ]
   }
   return [
-    { key: 'gross', label: '正常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单 · ${formatInt(value.page_count)} 页`, expandable: true },
+    { key: 'gross', label: '日常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单 · ${formatInt(value.page_count)} 页`, expandable: true },
     { key: 'deduction', label: '质检扣款', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错`, expandable: true },
     { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行', expandable: true },
     { key: 'net', label: '应结净额', value: formatMoney(value.net_amount), hint: '正常工资行 + 补录工资行', money: true, expandable: true },
@@ -188,9 +195,9 @@ const settlementNavGroups = computed(() => [
       },
       {
         key: 'adjustments' as const,
-        title: '冲正 / 补差',
-        meta: '批次确认后追加调整，不改原始明细',
-        count: selectedBatchConfirmed.value ? '可处理' : '先选批次',
+        title: '工资调整',
+        meta: '批次确认后，记录需要补发或扣回的金额',
+        count: selectedBatchConfirmed.value ? '可记录' : '待选批次',
       },
     ],
   },
@@ -237,7 +244,7 @@ const supplementGridColumns = computed<GridColumn[]>(() => [
 ])
 
 function payrollRowLabel(row: SettlementPayrollRow) {
-  return row.row_type === 'supplement_piecework' ? '补录计件工资' : '正常计件工资'
+  return row.row_type === 'supplement_piecework' ? '补录计件工资' : '日常计件工资'
 }
 
 function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
@@ -614,6 +621,7 @@ async function createAdjustment() {
   error.value = ''
   notice.value = ''
   try {
+    const adjustmentActionLabel = adjustmentForm.value.direction === 'debit' ? '扣回金额' : '补发金额'
     const created = await assetWorkbenchApi.createSettlementAdjustment(batch.id, {
       ...adjustmentForm.value,
       payload_json: {
@@ -621,13 +629,13 @@ async function createAdjustment() {
         batch_no: batch.batch_no,
       },
     })
-    notice.value = `已追加${created.adjustment_type === 'reversal' ? '冲正' : '补差'}：${formatMoney(created.amount)}`
+    notice.value = `已记录${adjustmentActionLabel}：${formatMoney(created.amount)}`
     adjustmentForm.value.amount = 0
     adjustmentForm.value.reason = ''
     await loadSettlement({ keepNotice: true })
     selectedBatch.value = await assetWorkbenchApi.getSettlementBatchDetail(batch.id)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '创建冲正/补差失败'
+    error.value = err instanceof Error ? err.message : '工资调整保存失败'
   }
 }
 
@@ -668,10 +676,10 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">本月结算</p>
         <h2>工资结算</h2>
-        <p>按“预览工资 → 批次确认 → 补录处理 → 冲正补差”的顺序操作，避免把结算动作混在同一屏。</p>
+        <p>按“预览工资 → 批次确认 → 补录处理 → 工资调整”的顺序操作，避免把结算动作混在同一屏。</p>
       </div>
       <div class="aw-page-bar__actions">
-        <label class="aw-month-picker">
+        <label class="aw-month-control">
           <span>结算月</span>
           <input v-model="month" type="month" aria-label="结算月份" />
         </label>
@@ -885,7 +893,7 @@ onMounted(() => {
               <div class="aw-inline-actions">
                 <span :class="chipClass(batchStatusMeta(selectedBatch.batch.status).tone)">{{ batchStatusMeta(selectedBatch.batch.status).label }}</span>
                 <strong class="aw-cell-money">{{ formatMoney(selectedBatch.batch.net_amount) }}</strong>
-                <button v-if="selectedBatch.batch.status === 'confirmed'" class="aw-secondary-button" type="button" @click="activeSettlementSection = 'adjustments'">去做冲正 / 补差</button>
+                <button v-if="selectedBatch.batch.status === 'confirmed'" class="aw-secondary-button" type="button" @click="activeSettlementSection = 'adjustments'">去记录工资调整</button>
               </div>
             </div>
             <WorkbenchDataGrid
@@ -1129,8 +1137,8 @@ onMounted(() => {
         <section v-if="activeSettlementSection === 'adjustments'" class="aw-settlement-section">
           <div class="aw-settlement-section__head">
             <div>
-              <h3>冲正 / 补差</h3>
-              <p>已确认批次不直接改原始明细。需要补发或扣回时，在这里追加调整记录并保留原因。</p>
+              <h3>工资调整</h3>
+              <p>已确认批次不直接修改原始工资明细。需要补发或扣回时，在这里记录金额和原因。</p>
             </div>
             <button class="aw-secondary-button" type="button" @click="activeSettlementSection = 'batches'">选择批次</button>
           </div>
@@ -1150,17 +1158,10 @@ onMounted(() => {
                   <input v-model.number="adjustmentForm.payee_user_id" type="number" min="1" />
                 </label>
                 <label>
-                  类型
-                  <select v-model="adjustmentForm.adjustment_type">
-                    <option value="adjustment">补差</option>
-                    <option value="reversal">冲正</option>
-                  </select>
-                </label>
-                <label>
-                  方向
-                  <select v-model="adjustmentForm.direction">
-                    <option value="credit">增加</option>
-                    <option value="debit">扣回</option>
+                  处理方式
+                  <select v-model="adjustmentMode">
+                    <option value="credit">补发给员工</option>
+                    <option value="debit">从工资中扣回</option>
                   </select>
                 </label>
                 <label>
@@ -1172,13 +1173,13 @@ onMounted(() => {
                   <input v-model="adjustmentForm.reason" />
                 </label>
               </div>
-              <button class="aw-primary-button" type="button" @click="createAdjustment">追加调整</button>
+              <button class="aw-primary-button" type="button" @click="createAdjustment">保存调整记录</button>
             </template>
-            <p v-else class="aw-copy">批次确认后才能追加冲正或补差。</p>
+            <p v-else class="aw-copy">批次确认后才能记录工资调整。</p>
           </div>
           <div v-else class="aw-empty-state">
             <h3>还没有选择批次</h3>
-            <p>先进入“批次确认”，打开一个已确认批次后再追加冲正或补差。</p>
+            <p>先进入“批次确认”，打开一个已确认批次后再记录工资调整。</p>
             <button class="aw-primary-button" type="button" @click="activeSettlementSection = 'batches'">去选择批次</button>
           </div>
         </section>

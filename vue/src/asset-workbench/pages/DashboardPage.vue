@@ -59,7 +59,7 @@ const ledgerSegments = computed(() => [
   { key: 'submitted', label: '成品单数', value: formatInt(submittedCount.value), hint: '本月已提交计件单', expandable: true },
   { key: 'pending', label: '待处理', value: formatInt(pendingSubmissionCount.value), hint: '待质检 / 待修正', expandable: true },
   { key: 'pages', label: '页数合计', value: formatInt(pagesCount.value), hint: '计价以页为单位', expandable: true },
-  { key: 'net', label: '本月预估净额', value: formatMoney(netAmount.value), hint: '正常计件与补录分开结算', money: true, expandable: true },
+  { key: 'net', label: '本月预估净额', value: formatMoney(netAmount.value), hint: '日常计件与补录分开结算', money: true, expandable: true },
 ])
 
 const pendingSubmissions = computed(() => submissions.value.filter((item) => item.status !== 'checked'))
@@ -68,7 +68,7 @@ const payrollGridRows = computed(
     (settlement.value?.payroll_rows ?? []).map((row) => ({
       ...row,
       grid_id: `${row.payee_user_id}-${row.row_type}`,
-      row_label: row.row_type === 'supplement_piecework' ? '补录计件工资' : '正常计件工资',
+      row_label: row.row_type === 'supplement_piecework' ? '补录计件工资' : '日常计件工资',
     })) as unknown as Record<string, unknown>[],
 )
 const payrollColumns = [
