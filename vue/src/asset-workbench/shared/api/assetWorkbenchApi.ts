@@ -851,6 +851,30 @@ export interface DriveFolderBrowseResult {
   truncated?: boolean
 }
 
+export interface ArchiveVirtualFolder {
+  name: string
+  path: string
+  file_count: number
+}
+
+export interface ArchiveVirtualFile {
+  name: string
+  path: string
+  mime_type: string
+  file_type: string
+  file_size: number
+  preview_url?: string
+  download_url?: string
+}
+
+export interface ArchiveBrowseResult {
+  file_id: number
+  path: string
+  format: string
+  folders: ArchiveVirtualFolder[]
+  files: ArchiveVirtualFile[]
+}
+
 export interface PaginatedResult<T> {
   items: T[]
   total: number
@@ -1460,6 +1484,14 @@ export const assetWorkbenchApi = {
 
   async getFileDownload(fileId: number, signal?: AbortSignal): Promise<FileDownloadMeta> {
     const res = await http.get<ApiEnvelope<FileDownloadMeta>>(`/v1/asset-workbench/files/${fileId}/download`, { signal })
+    return unwrap(res.data)
+  },
+
+  async browseArchiveFile(fileId: number, path = '', signal?: AbortSignal): Promise<ArchiveBrowseResult> {
+    const res = await http.get<ApiEnvelope<ArchiveBrowseResult>>(`/v1/asset-workbench/files/${fileId}/archive`, {
+      params: path ? { path } : undefined,
+      signal,
+    })
     return unwrap(res.data)
   },
 

@@ -4,6 +4,7 @@
 @import '@fontsource/geist-mono/latin-400.css';
 @import '@fontsource/geist-mono/latin-500.css';
 @import '@fontsource/geist-mono/latin-700.css';
+@import './font-local.css';
 @import './font-subset.css';
 
 .aw-root,
@@ -112,10 +113,12 @@
   --aw-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --aw-ease-enter: var(--aw-ease-standard);
   --aw-ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --aw-font-cjk: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
-  --aw-font-sans: 'Geist Sans', var(--aw-font-cjk);
-  --aw-font-display: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Geist Sans', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
-  --aw-font-mono: 'Geist Mono', 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'SFMono-Regular', ui-monospace, monospace;
+  --aw-font-brand: 'Alimama DaoLiTi';
+  --aw-font-cjk-fallback: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  --aw-font-cjk: var(--aw-font-brand), var(--aw-font-cjk-fallback);
+  --aw-font-sans: var(--aw-font-cjk);
+  --aw-font-display: var(--aw-font-cjk);
+  --aw-font-mono: 'Geist Mono', var(--aw-font-cjk);
 
   /* Compatibility aliases for shared main-ops preview media (AssetPreviewMedia) */
   --yb-surface: 32 28 22;

@@ -1,10 +1,10 @@
-# V1 API 速查表(309 path · 一行一条)
+# V1 API 速查表(311 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 309 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 311 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -211,6 +211,8 @@
 | POST | `/v1/asset-workbench/error-imports/excel` | Import asset workbench quality error deductions from Excel | POST:AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/files/{file_id}/preview` | Get uploaded work file preview metadata | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/files/{file_id}/download` | Get uploaded work file download info | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/files/{file_id}/archive` | Browse uploaded archive as a virtual folder | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/files/{file_id}/archive/entry` | Stream one virtual file from an uploaded archive | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/files/batch-move` | Batch move submission files to an upload directory | POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/files/batch-delete` | Batch delete submission files | POST:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/system-search` | Search publishable material assets from asset workbench | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |

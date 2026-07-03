@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -112,4 +114,47 @@ func (h *AssetWorkbenchHandler) DriveLocate(c *gin.Context) {
 		return
 	}
 	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) BrowseArchiveFile(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	fileID, err := strconv.ParseInt(strings.TrimSpace(c.Param("file_id")), 10, 64)
+	if err != nil || fileID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid file_id", nil))
+		return
+	}
+	result, appErr := h.svc.BrowseArchiveFile(c.Request.Context(), actor, fileID, c.Query("path"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) ServeArchiveEntry(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	fileID, err := strconv.ParseInt(strings.TrimSpace(c.Param("file_id")), 10, 64)
+	if err != nil || fileID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid file_id", nil))
+		return
+	}
+	stream, appErr := h.svc.OpenArchiveEntry(c.Request.Context(), actor, fileID, c.Query("path"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	defer stream.Close()
+	disposition := "attachment"
+	if strings.EqualFold(strings.TrimSpace(c.Query("disposition")), "inline") {
+		disposition = "inline"
+	}
+	c.DataFromReader(http.StatusOK, stream.FileSize, stream.MimeType, stream.Body, map[string]string{
+		"Content-Disposition": fmt.Sprintf(`%s; filename="%s"`, disposition, strings.ReplaceAll(stream.Filename, `"`, "")),
+	})
 }

@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   CheckCircle2,
   ChevronRight,
   Download,
   FileDown,
-  Folder,
-  FolderOpen,
+  FileArchive,
   HardDrive,
   ImageDown,
   Pencil,
@@ -21,6 +20,8 @@ import {
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import {
   assetWorkbenchApi,
+  type ArchiveVirtualFile,
+  type ArchiveVirtualFolder,
   type ClientMaterialRow,
   type DifficultyClassRow,
   type DriveDirectoryRow,
@@ -36,6 +37,7 @@ import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
 import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
+import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
 
@@ -89,6 +91,7 @@ const canManageDrive = computed(() => capabilities.value.has('asset.workbench.ma
 const canMaintainItems = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const canListUploadDirectories = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canUseOperational = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.material.download'))
+const canDeleteDriveFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 
 interface SelectedDir {
   key: string
@@ -156,6 +159,16 @@ const uploadOpen = ref(false)
 const uploadDialogKey = ref(0)
 const uploadInitialFiles = ref<File[]>([])
 const contextMenu = ref<ContextMenuState | null>(null)
+const contextMenuRef = ref<HTMLElement | null>(null)
+const archiveView = ref<{
+  source: DriveFileRow
+  path: string
+  format: string
+  folders: ArchiveVirtualFolder[]
+  files: ArchiveVirtualFile[]
+} | null>(null)
+const archiveLoading = ref(false)
+const archiveError = ref('')
 const notice = ref('')
 const actionError = ref('')
 
@@ -213,6 +226,15 @@ const selectedFileActionLabel = computed(() => {
   const count = selectedFileActionIds.value.length
   if (count === 0) return '未选择文件'
   return count === 1 ? '已选 1 个文件' : `已选 ${count} 个文件`
+})
+const archiveBreadcrumbs = computed(() => {
+  const view = archiveView.value
+  if (!view) return []
+  const parts = pathSegments(view.path)
+  return [
+    { path: '', name: fileDisplayName(view.source) },
+    ...parts.map((part, index) => ({ path: drivePathFromSegments(parts.slice(0, index + 1)), name: part })),
+  ]
 })
 const allMaterialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
   const nodes = new Map<string, MaterialDirectoryNode>()
@@ -756,7 +778,7 @@ function statusText(value?: string) {
     needs_fix: '需修',
     pending: '待处理',
     pending_grade: '待定级',
-    priced: '已计价',
+    priced: '已计件',
     unsettled: '未结算',
     settled: '已结算',
   }
@@ -915,6 +937,7 @@ async function selectDir(dir: DriveDirectoryRow, keepFile = false, initialPage =
   directoryAbortController?.abort()
   directoryAbortController = new AbortController()
   closeContextMenu()
+  closeArchiveView()
   const next: SelectedDir = {
     key: dirKey(dir),
     id: dir.directory_id ?? null,
@@ -1008,7 +1031,12 @@ function selectAllFilesInDirectory() {
   if (!selectedFile.value && files.value[0]) selectedFile.value = files.value[0]
 }
 
+function clearSelection() {
+  selectedFileIds.value = new Set()
+}
+
 function resetToRoot() {
+  closeArchiveView()
   selectedDir.value = null
   driveFolderPath.value = ''
   driveFolders.value = []
@@ -1021,6 +1049,7 @@ function resetToRoot() {
 }
 
 async function openDriveFolder(path: string) {
+  closeArchiveView()
   driveFolderPath.value = normalizeDriveFolderPath(path)
   filePage.value = 1
   selectedFile.value = null
@@ -1257,7 +1286,7 @@ async function openFilePreview(file: DriveFileRow) {
   selectFile(file, true)
   openPreviewDialog({
     title: fileDisplayName(file),
-    eyebrow: '交稿预览',
+    eyebrow: '文件预览',
     emptyLabel: '正在加载预览…',
     mimeType: file.mime_type,
     filename: fileDisplayName(file),
@@ -1276,13 +1305,13 @@ async function openFilePreview(file: DriveFileRow) {
 function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
   return [
     ['所在目录', file.upload_directory_name],
-    ['相对路径', file.relative_path || '—'],
+    ['文件夹', file.relative_path || '—'],
     ['格式', fileFormatLabel(file)],
     ['上传时间', formatDateTime(file.created_at)],
-    ['业务月', file.business_month || '—'],
+    ['结算月份', file.business_month || '—'],
     ['难度', file.difficulty_class || '—'],
-    ['QC', statusText(file.qc_status)],
-    ['计价', statusText(file.pricing_status)],
+    ['质检', statusText(file.qc_status)],
+    ['计件', statusText(file.pricing_status)],
     ['大小', formatSize(file.file_size)],
   ]
 }
@@ -1299,7 +1328,7 @@ async function downloadFile(file: DriveFileRow) {
 async function downloadSelectedFiles() {
   const ids = selectedFileActionIds.value
   if (!ids.length) return
-  notice.value = '正在生成文件包'
+  notice.value = '正在准备下载'
   actionError.value = ''
   try {
     const manifest = await assetWorkbenchApi.batchDownloadFiles(ids)
@@ -1316,9 +1345,9 @@ async function downloadSelectedFiles() {
         notice.value = message
       },
     })
-    notice.value = `已打包 ${result.writtenCount} 个文件，失败 ${result.failureCount} 个`
+    notice.value = `已下载 ${result.writtenCount} 个文件，失败 ${result.failureCount} 个`
   } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '批量下载失败'
+    actionError.value = err instanceof Error ? err.message : '下载失败'
   }
 }
 
@@ -1427,7 +1456,7 @@ async function saveSelectedItemEdit() {
       difficulty_class: itemEditForm.value.difficulty_class,
       page_count: itemEditForm.value.page_count,
       finalized: true,
-      reason: maintenanceReason.value || '素材网盘内联维护',
+      reason: maintenanceReason.value || '素材网盘文件维护',
     })
     notice.value = `已更新 ${fileDisplayName(file)}`
     await refreshCurrentDrive()
@@ -1447,7 +1476,7 @@ async function setSelectedQC(qcStatus: string) {
     notice.value = qcStatus === 'checked' ? '已标记通过' : '已标记需修'
     await refreshCurrentDrive()
   } catch (err) {
-    actionError.value = err instanceof Error ? err.message : 'QC 状态更新失败'
+    actionError.value = err instanceof Error ? err.message : '质检状态更新失败'
   }
 }
 
@@ -1455,11 +1484,11 @@ async function repriceSelectedItem() {
   const file = selectedFile.value
   if (!file || !canMaintainItems.value) return
   try {
-    const updated = await assetWorkbenchApi.repriceSubmissionItem(file.submission_item_id, maintenanceReason.value || '素材网盘重计价')
-    notice.value = `已重计价：${statusText(updated.pricing_status)}`
+    const updated = await assetWorkbenchApi.repriceSubmissionItem(file.submission_item_id, maintenanceReason.value || '素材网盘重新计件')
+    notice.value = `已重新计件：${statusText(updated.pricing_status)}`
     await refreshCurrentDrive()
   } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '重计价失败'
+    actionError.value = err instanceof Error ? err.message : '重新计件失败'
   }
 }
 
@@ -1478,7 +1507,7 @@ async function moveSelectedFiles() {
 }
 
 async function deleteSelectedFiles() {
-  if (!canManageDrive.value) return
+  if (!canDeleteDriveFiles.value) return
   const ids = selectedFileActionIds.value
   if (!ids.length || !deleteReason.value.trim()) return
   try {
@@ -1490,6 +1519,87 @@ async function deleteSelectedFiles() {
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '删除文件失败'
   }
+}
+
+function archiveFormatOf(file: DriveFileRow | null | undefined) {
+  if (!file) return ''
+  const name = (file.display_name || file.original_filename || '').toLowerCase()
+  const ext = name.split('.').pop() || ''
+  if (['zip', 'rar', '7z'].includes(ext)) return ext
+  if (file.file_type === 'archive') return ext || 'archive'
+  return ''
+}
+
+function canOpenArchive(file: DriveFileRow | null | undefined) {
+  return archiveFormatOf(file) === 'zip'
+}
+
+async function openArchiveFile(file: DriveFileRow | null | undefined, path = '') {
+  if (!file) return
+  if (!canOpenArchive(file)) {
+    actionError.value = '该压缩包暂不支持在线打开，可下载后查看'
+    return
+  }
+  closeContextMenu()
+  archiveLoading.value = true
+  archiveError.value = ''
+  try {
+    const result = await assetWorkbenchApi.browseArchiveFile(file.id, path)
+    archiveView.value = {
+      source: file,
+      path: result.path || '',
+      format: result.format,
+      folders: result.folders || [],
+      files: result.files || [],
+    }
+    selectedFile.value = file
+  } catch (err) {
+    archiveError.value = err instanceof Error ? err.message : '压缩包打开失败'
+  } finally {
+    archiveLoading.value = false
+  }
+}
+
+function closeArchiveView() {
+  archiveView.value = null
+  archiveError.value = ''
+  archiveLoading.value = false
+}
+
+function openArchiveFolder(path: string) {
+  const source = archiveView.value?.source
+  if (!source) return
+  void openArchiveFile(source, path)
+}
+
+function openArchiveVirtualFile(file: ArchiveVirtualFile) {
+  const canPreview = canPreviewArchiveVirtualFile(file)
+  openPreviewDialog({
+    title: file.name,
+    eyebrow: '压缩包内容',
+    url: canPreview ? file.preview_url : '',
+    mimeType: file.mime_type,
+    filename: file.name,
+    rows: [
+      ['路径', file.path],
+      ['格式', file.file_type || file.mime_type || '文件'],
+      ['大小', formatSize(file.file_size)],
+    ],
+    emptyLabel: canPreview ? '正在加载预览…' : '该格式暂不能在线预览，可下载后查看',
+    download: () => downloadArchiveVirtualFile(file),
+  })
+}
+
+function downloadArchiveVirtualFile(file: ArchiveVirtualFile) {
+  if (file.download_url) window.open(file.download_url, '_blank', 'noopener,noreferrer')
+}
+
+function canPreviewArchiveVirtualFile(file: ArchiveVirtualFile) {
+  if (!file.preview_url) return false
+  const mime = (file.mime_type || '').toLowerCase()
+  if (mime.startsWith('image/') || mime.startsWith('video/') || mime === 'application/pdf') return true
+  const ext = (file.name.split('.').pop() || '').toLowerCase()
+  return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tif', 'tiff', 'pdf', 'mp4', 'webm', 'mov', 'm4v'].includes(ext)
 }
 
 async function loadMaterials(query = materialQuery.value, options: { append?: boolean } = {}) {
@@ -1849,6 +1959,19 @@ async function removeClientMaterial(material: ClientMaterialRow) {
 
 function openContextMenu(event: MouseEvent, state: ContextMenuInput) {
   contextMenu.value = { ...state, x: event.clientX, y: event.clientY } as ContextMenuState
+  void nextTick(() => positionContextMenu(event.clientX, event.clientY))
+}
+
+function positionContextMenu(anchorX: number, anchorY: number) {
+  const menu = contextMenuRef.value
+  if (!contextMenu.value || !menu) return
+  const pad = 8
+  const rect = menu.getBoundingClientRect()
+  let x = anchorX
+  let y = anchorY
+  if (x + rect.width + pad > window.innerWidth) x = Math.max(pad, window.innerWidth - rect.width - pad)
+  if (y + rect.height + pad > window.innerHeight) y = Math.max(pad, window.innerHeight - rect.height - pad)
+  contextMenu.value = { ...contextMenu.value, x, y } as ContextMenuState
 }
 
 function closeContextMenu() {
@@ -1861,6 +1984,49 @@ function fileFromContext() {
 
 function directoryFromContext() {
   return contextMenu.value?.kind === 'directory' ? contextMenu.value.dir : null
+}
+
+function previewContextFile() {
+  const file = fileFromContext()
+  if (!file) return
+  closeContextMenu()
+  void openFilePreview(file)
+}
+
+function downloadContextFile() {
+  const file = fileFromContext()
+  if (!file) return
+  closeContextMenu()
+  void downloadFile(file)
+}
+
+function selectContextFile() {
+  const file = fileFromContext()
+  if (!file) return
+  selectFile(file, true)
+  closeContextMenu()
+}
+
+function downloadContextSelection() {
+  const file = fileFromContext()
+  if (!file) return
+  selectFile(file, true)
+  closeContextMenu()
+  void downloadSelectedFiles()
+}
+
+function openContextArchiveFile() {
+  const file = fileFromContext()
+  if (!file) return
+  void openArchiveFile(file)
+}
+
+function selectContextFileForDelete() {
+  const file = fileFromContext()
+  if (!file) return
+  selectFile(file, true)
+  notice.value = '已加入多选，可在上方操作栏删除'
+  closeContextMenu()
 }
 
 function syncEditForm(file: DriveFileRow | null) {
@@ -1926,7 +2092,7 @@ onBeforeUnmount(() => {
         <select v-model="searchScope" aria-label="搜索范围" @change="scheduleUnifiedSearch">
           <option value="all">全部</option>
           <option value="operational">运营素材</option>
-          <option value="files">交稿文件</option>
+          <option value="files">上传文件</option>
         </select>
         <input
           v-model="searchQuery"
@@ -1970,7 +2136,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="aw-drive-hit__actions">
             <button class="aw-secondary-button" type="button" @click="locateSearchRow(hit)">
-              <FolderOpen :size="14" aria-hidden="true" />
+              <WorkbenchFolderIcon :size="14" variant="starFilled" />
               在网盘中定位
             </button>
           </div>
@@ -1982,7 +2148,7 @@ onBeforeUnmount(() => {
       <nav class="aw-drive-side" aria-label="网盘导航">
         <section class="aw-drive-side__group">
           <p class="aw-drive-side__label">
-            <Folder :size="15" aria-hidden="true" />
+            <WorkbenchFolderIcon :size="15" variant="star" />
             <span>上传目录</span>
             <button v-if="canManageDrive" class="aw-drive-mini-button" type="button" aria-label="新建上传目录" @click="creatingDirectory = true">
               <Plus :size="14" aria-hidden="true" />
@@ -1993,7 +2159,7 @@ onBeforeUnmount(() => {
             <select v-model="newDirectoryDifficulty" aria-label="难度">
               <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
             </select>
-            <input v-model.trim="newDirectoryFileTypes" placeholder="格式限制，留空=全部" aria-label="允许上传格式" />
+            <input v-model.trim="newDirectoryFileTypes" placeholder="允许格式，不填则不限" aria-label="允许上传格式" />
             <div class="aw-drive-inline-form__actions">
               <button class="aw-grid-button aw-grid-button--strong" type="submit">创建</button>
               <button class="aw-grid-button" type="button" @click="creatingDirectory = false">取消</button>
@@ -2015,7 +2181,7 @@ onBeforeUnmount(() => {
                 <select v-model="directoryEditForm.difficulty_class" aria-label="编辑难度">
                   <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
                 </select>
-                <input v-model.trim="directoryEditForm.allowed_file_types" placeholder="格式限制，留空=全部" aria-label="编辑允许上传格式" />
+                <input v-model.trim="directoryEditForm.allowed_file_types" placeholder="允许格式，不填则不限" aria-label="编辑允许上传格式" />
                 <label class="aw-inline-check">
                   <input v-model="directoryEditForm.enabled" type="checkbox" />
                   <span>启用</span>
@@ -2034,7 +2200,10 @@ onBeforeUnmount(() => {
                 @click="queueOpenDirectory(dir)"
                 @contextmenu.prevent.stop="openContextMenu($event, { kind: 'directory', dir })"
               >
-                <Folder :size="16" aria-hidden="true" />
+                <WorkbenchFolderIcon
+                  :size="16"
+                  :variant="activeMode === 'directories' && selectedDir?.key === dirKey(dir) ? 'starFilled' : 'star'"
+                />
                 <span class="aw-drive-side__name">{{ dir.name }}</span>
                 <span
                   v-if="dir.allowed_file_types?.length"
@@ -2058,7 +2227,7 @@ onBeforeUnmount(() => {
             type="button"
             @click="openOperational"
           >
-            <FolderOpen :size="16" aria-hidden="true" />
+            <WorkbenchFolderIcon :size="16" variant="heart" />
             <span class="aw-drive-side__name">全部运营素材</span>
           </button>
         </section>
@@ -2080,6 +2249,19 @@ onBeforeUnmount(() => {
                   >
                     {{ crumb.name }}
                   </button>
+                </template>
+                <template v-if="archiveView">
+                  <template v-for="(crumb, index) in archiveBreadcrumbs" :key="`archive:${crumb.path || '__archive_root__'}`">
+                    <ChevronRight :size="14" aria-hidden="true" />
+                    <button
+                      class="aw-drive__crumb"
+                      type="button"
+                      :class="{ 'is-active': index === archiveBreadcrumbs.length - 1 }"
+                      @click="openArchiveFolder(crumb.path)"
+                    >
+                      {{ crumb.name }}
+                    </button>
+                  </template>
                 </template>
               </template>
             </template>
@@ -2127,6 +2309,29 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div v-if="activeMode === 'directories' && selectedFileActionIds.length" class="aw-drive-batch-bar">
+          <strong>{{ selectedFileActionLabel }}</strong>
+          <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">
+            <Download :size="15" aria-hidden="true" />
+            下载所选
+          </button>
+          <template v-if="canManageDrive">
+            <select v-model.number="moveTargetDirectoryId" aria-label="移动目标目录">
+              <option :value="0">移动到…</option>
+              <option v-for="dir in directoryOptions" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
+            </select>
+            <button class="aw-secondary-button" type="button" :disabled="!moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
+          </template>
+          <template v-if="canDeleteDriveFiles">
+            <input v-model.trim="deleteReason" placeholder="删除原因" aria-label="删除原因" />
+            <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="!deleteReason.trim()" @click="deleteSelectedFiles">
+              <Trash2 :size="15" aria-hidden="true" />
+              删除
+            </button>
+          </template>
+          <button class="aw-grid-button" type="button" @click="clearSelection">取消多选</button>
+        </div>
+
         <div class="aw-drive-main__content">
           <template v-if="activeMode === 'directories'">
             <template v-if="!selectedDir">
@@ -2146,7 +2351,7 @@ onBeforeUnmount(() => {
                   @drop.prevent="dropOnDirectory($event, dir)"
                   @contextmenu.prevent.stop="openContextMenu($event, { kind: 'directory', dir })"
                 >
-                  <Folder class="aw-drive-tile__icon" aria-hidden="true" />
+                  <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="star" />
                   <strong class="aw-drive-tile__name" :title="dir.name">{{ dir.name }}</strong>
                   <small class="aw-drive-tile__meta">{{ dir.file_count }} 个文件</small>
                 </button>
@@ -2154,7 +2359,45 @@ onBeforeUnmount(() => {
             </template>
 
             <template v-else>
-              <p v-if="filesLoading" class="aw-drive-empty">加载中…</p>
+              <template v-if="archiveView">
+                <p v-if="archiveLoading" class="aw-drive-empty">正在读取压缩包…</p>
+                <p v-else-if="archiveError" class="aw-drive-empty">{{ archiveError }}</p>
+                <template v-else>
+                  <div class="aw-drive-archive-head">
+                    <div>
+                      <strong>压缩包内容</strong>
+                      <span>{{ archiveView.folders.length }} 个文件夹 · {{ archiveView.files.length }} 个文件</span>
+                    </div>
+                    <button class="aw-grid-button" type="button" @click="closeArchiveView">返回所在目录</button>
+                  </div>
+                  <div v-if="archiveView.folders.length" class="aw-drive-tiles aw-drive-tiles--folders">
+                    <button
+                      v-for="folder in archiveView.folders"
+                      :key="folder.path"
+                      class="aw-drive-tile aw-drive-tile--folder"
+                      type="button"
+                      @click="openArchiveFolder(folder.path)"
+                    >
+                      <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="starFilled" />
+                      <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
+                      <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
+                    </button>
+                  </div>
+                  <div v-if="archiveView.files.length" class="aw-drive-files aw-drive-files--roomy">
+                    <article v-for="file in archiveView.files" :key="file.path" class="aw-drive-file-card">
+                      <button class="aw-drive-file-card__button" type="button" @click="openArchiveVirtualFile(file)" @dblclick="openArchiveVirtualFile(file)">
+                        <span class="aw-drive-file-card__media">
+                          <img v-if="file.preview_url && file.mime_type.startsWith('image/')" :src="file.preview_url" :alt="file.name" loading="lazy" />
+                          <FileArchive v-else :size="28" aria-hidden="true" />
+                        </span>
+                        <span class="aw-drive-file-card__name">{{ file.name }}</span>
+                      </button>
+                    </article>
+                  </div>
+                  <p v-if="archiveView.folders.length === 0 && archiveView.files.length === 0" class="aw-drive-empty">压缩包内没有可显示的文件</p>
+                </template>
+              </template>
+              <p v-else-if="filesLoading" class="aw-drive-empty">加载中…</p>
               <p v-else-if="filesError" class="aw-drive-empty">{{ filesError }}</p>
               <div v-else-if="driveFolders.length === 0 && files.length === 0" class="aw-drive-drop" @dragover.prevent @drop.prevent="dropOnCurrentDirectory">
                 <Upload :size="26" aria-hidden="true" />
@@ -2170,7 +2413,7 @@ onBeforeUnmount(() => {
                     type="button"
                     @click="openDriveFolder(folder.path)"
                   >
-                    <FolderOpen class="aw-drive-tile__icon" aria-hidden="true" />
+                    <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="starFilled" />
                     <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
                     <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
                   </button>
@@ -2191,7 +2434,7 @@ onBeforeUnmount(() => {
                         @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
                       />
                     </label>
-                    <button class="aw-drive-file-card__button" type="button" @click="selectFile(file)" @dblclick="openFilePreview(file)">
+                    <button class="aw-drive-file-card__button" type="button" @click="selectFile(file)" @dblclick="canOpenArchive(file) ? openArchiveFile(file) : openFilePreview(file)">
                       <span class="aw-drive-file-card__media">
                         <DriveThumb :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" />
                       </span>
@@ -2244,8 +2487,10 @@ onBeforeUnmount(() => {
                       aria-hidden="true"
                     />
                     <span v-else class="aw-material-folder-node__spacer" aria-hidden="true" />
-                    <FolderOpen v-if="selectedMaterialFolderPath === node.path" :size="15" aria-hidden="true" />
-                    <Folder v-else :size="15" aria-hidden="true" />
+                    <WorkbenchFolderIcon
+                      :size="15"
+                      :variant="selectedMaterialFolderPath === node.path ? 'heart' : 'star'"
+                    />
                     <span>{{ node.name }}</span>
                     <small>{{ node.file_count }}</small>
                   </button>
@@ -2276,7 +2521,7 @@ onBeforeUnmount(() => {
                     type="button"
                     @click="openMaterialFolder(folder.path)"
                   >
-                    <FolderOpen :size="24" aria-hidden="true" />
+                    <WorkbenchFolderIcon :size="28" variant="heart" />
                     <strong :title="folder.name">{{ folder.name }}</strong>
                     <small>{{ folder.file_count }} 个素材</small>
                   </button>
@@ -2391,13 +2636,13 @@ onBeforeUnmount(() => {
           <h3 class="aw-drive__detail-name">{{ fileDisplayName(selectedFile) }}</h3>
           <dl class="aw-material-detail__list">
             <div><dt>目录</dt><dd>{{ selectedFile.upload_directory_name }}</dd></div>
-            <div><dt>相对路径</dt><dd>{{ selectedFile.relative_path || '—' }}</dd></div>
+            <div><dt>文件夹</dt><dd>{{ selectedFile.relative_path || '—' }}</dd></div>
             <div><dt>格式</dt><dd>{{ fileFormatLabel(selectedFile) }}</dd></div>
             <div><dt>上传时间</dt><dd>{{ formatDateTime(selectedFile.created_at) }}</dd></div>
-            <div><dt>业务月</dt><dd>{{ selectedFile.business_month || '—' }}</dd></div>
+            <div><dt>结算月份</dt><dd>{{ selectedFile.business_month || '—' }}</dd></div>
             <div><dt>难度</dt><dd>{{ selectedFile.difficulty_class || '—' }}</dd></div>
-            <div><dt>QC</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
-            <div><dt>计价</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
+            <div><dt>质检</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
+            <div><dt>计件</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
             <div><dt>大小</dt><dd>{{ formatSize(selectedFile.file_size) }}</dd></div>
           </dl>
           <div class="aw-drive__detail-actions">
@@ -2405,33 +2650,44 @@ onBeforeUnmount(() => {
               <Download :size="16" aria-hidden="true" />
               下载
             </button>
-            <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">{{ selectedFileActionLabel }}打包</button>
+            <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">下载所选</button>
+            <button
+              v-if="canOpenArchive(selectedFile)"
+              class="aw-secondary-button"
+              type="button"
+              @click="openArchiveFile(selectedFile)"
+            >
+              <FileArchive :size="16" aria-hidden="true" />
+              查看压缩包内容
+            </button>
           </div>
-          <div v-if="canMaintainItems" class="aw-drive-maintenance">
-            <p class="aw-eyebrow">内联维护</p>
-            <label class="aw-field">
-              <span>难度</span>
-              <select v-model="itemEditForm.difficulty_class">
-                <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
-              </select>
-            </label>
-            <label class="aw-field">
-              <span>页数</span>
-              <input v-model.number="itemEditForm.page_count" min="1" type="number" />
-            </label>
-            <label class="aw-field">
-              <span>原因</span>
-              <input v-model.trim="maintenanceReason" placeholder="可选，维护记录原因" />
-            </label>
-            <div class="aw-inline-actions">
-              <button class="aw-secondary-button" type="button" @click="saveSelectedItemEdit">保存计件</button>
-              <button class="aw-secondary-button" type="button" @click="setSelectedQC('checked')">
-                <CheckCircle2 :size="15" aria-hidden="true" />
-                QC 通过
-              </button>
-              <button class="aw-secondary-button" type="button" @click="setSelectedQC('needs_fix')">需修</button>
-              <button class="aw-secondary-button" type="button" @click="repriceSelectedItem">重计价</button>
-            </div>
+          <div v-if="canMaintainItems || canDeleteDriveFiles" class="aw-drive-maintenance">
+            <template v-if="canMaintainItems">
+              <p class="aw-eyebrow">文件维护</p>
+              <label class="aw-field">
+                <span>难度</span>
+                <select v-model="itemEditForm.difficulty_class">
+                  <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+                </select>
+              </label>
+              <label class="aw-field">
+                <span>页数</span>
+                <input v-model.number="itemEditForm.page_count" min="1" type="number" />
+              </label>
+              <label class="aw-field">
+                <span>原因</span>
+                <input v-model.trim="maintenanceReason" placeholder="可选，维护记录原因" />
+              </label>
+              <div class="aw-inline-actions">
+                <button class="aw-secondary-button" type="button" @click="saveSelectedItemEdit">保存计件</button>
+                <button class="aw-secondary-button" type="button" @click="setSelectedQC('checked')">
+                  <CheckCircle2 :size="15" aria-hidden="true" />
+                  质检通过
+                </button>
+                <button class="aw-secondary-button" type="button" @click="setSelectedQC('needs_fix')">标记需修</button>
+                <button class="aw-secondary-button" type="button" @click="repriceSelectedItem">重新计件</button>
+              </div>
+            </template>
             <template v-if="canManageDrive">
               <label class="aw-field">
                 <span>移动到目录</span>
@@ -2443,6 +2699,8 @@ onBeforeUnmount(() => {
               <div class="aw-inline-actions">
                 <button class="aw-secondary-button" type="button" :disabled="!moveTargetDirectoryId" @click="moveSelectedFiles">移动文件</button>
               </div>
+            </template>
+            <template v-if="canDeleteDriveFiles">
               <label class="aw-field">
                 <span>删除原因</span>
                 <input v-model.trim="deleteReason" placeholder="删除必须填写原因" />
@@ -2535,6 +2793,7 @@ onBeforeUnmount(() => {
 
     <div
       v-if="contextMenu"
+      ref="contextMenuRef"
       class="aw-drive-context-menu"
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       @click.stop
@@ -2554,9 +2813,16 @@ onBeforeUnmount(() => {
         <button v-else type="button" @click="directoryFromContext() && setDirectoryEnabled(directoryFromContext()!, true)">启用目录</button>
       </template>
       <template v-else>
-        <button type="button" @click="fileFromContext() && openFilePreview(fileFromContext()!)">预览</button>
-        <button type="button" @click="fileFromContext() && downloadFile(fileFromContext()!)">下载</button>
-        <button type="button" @click="fileFromContext() && selectFile(fileFromContext()!, true)">加入选择</button>
+        <button type="button" @click="previewContextFile">预览</button>
+        <button type="button" @click="downloadContextFile">下载</button>
+        <button type="button" @click="selectContextFile">加入多选</button>
+        <button type="button" @click="downloadContextSelection">下载所选</button>
+        <button v-if="canOpenArchive(fileFromContext())" type="button" @click="openContextArchiveFile">
+          查看压缩包内容
+        </button>
+        <button v-if="canDeleteDriveFiles" type="button" @click="selectContextFileForDelete">
+          删除…
+        </button>
       </template>
     </div>
 
@@ -2582,6 +2848,7 @@ onBeforeUnmount(() => {
       :meta-rows="previewRows"
       :empty-label="previewEmptyLabel"
       download-label="下载"
+      windowed
       @close="closePreview"
       @download="previewDownload && previewDownload()"
     />

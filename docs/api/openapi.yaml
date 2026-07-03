@@ -20773,6 +20773,95 @@ paths:
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
         '404': { description: File not found }
+  /v1/asset-workbench/files/{file_id}/archive:
+    get:
+      summary: Browse uploaded archive as a virtual folder
+      description: Lists folders and files inside an uploaded archive without extracting it into the workbench drive. The first implementation supports ZIP virtual browsing.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: file_id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: path
+          required: false
+          schema: { type: string }
+          description: Virtual folder path inside the archive.
+      responses:
+        '200':
+          description: Archive virtual folder listing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      file_id: { type: integer }
+                      path: { type: string }
+                      format: { type: string }
+                      folders:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name: { type: string }
+                            path: { type: string }
+                            file_count: { type: integer }
+                      files:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name: { type: string }
+                            path: { type: string }
+                            mime_type: { type: string }
+                            file_type: { type: string }
+                            file_size: { type: integer }
+                            preview_url: { type: string }
+                            download_url: { type: string }
+        '400': { description: Invalid request or unsupported archive format }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: File not found }
+  /v1/asset-workbench/files/{file_id}/archive/entry:
+    get:
+      summary: Stream one virtual file from an uploaded archive
+      description: Streams a single file entry from a ZIP archive for inline preview or download. This endpoint returns file bytes rather than the standard JSON envelope.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: file_id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: path
+          required: true
+          schema: { type: string }
+        - in: query
+          name: disposition
+          required: false
+          schema: { type: string, enum: [inline, attachment] }
+      responses:
+        '200':
+          description: Archive entry bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: File or entry not found }
   /v1/asset-workbench/files/batch-move:
     post:
       summary: Batch move submission files to an upload directory
