@@ -65,7 +65,7 @@ const visibleNavItems = computed(() => {
 
     <main class="aw-simple">
       <RouterView v-slot="{ Component, route: activeRoute }">
-        <MotionReveal :key="activeRoute.fullPath" class="aw-route-view">
+        <MotionReveal :key="activeRoute.path" class="aw-route-view">
           <component :is="Component" />
         </MotionReveal>
       </RouterView>

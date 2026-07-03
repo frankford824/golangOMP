@@ -42,7 +42,7 @@ const themeOverrides: GlobalThemeOverrides = {
       <NDialogProvider>
         <div v-if="isPublicRoute" class="aw-root aw-root--auth">
           <RouterView v-slot="{ Component, route: activeRoute }">
-            <MotionReveal :key="activeRoute.fullPath" class="aw-route-view">
+            <MotionReveal :key="activeRoute.path" class="aw-route-view">
               <component :is="Component" />
             </MotionReveal>
           </RouterView>

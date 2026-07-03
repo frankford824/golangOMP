@@ -344,6 +344,14 @@ function hasQueryValue(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== ''
 }
 
+function routeQueryString(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.find((item): item is string => typeof item === 'string' && item.trim() !== '') || ''
+  }
+  return ''
+}
+
 function dirKey(dir: DriveDirectoryRow): string {
   return dir.directory_id == null ? UNASSIGNED_KEY : String(dir.directory_id)
 }
@@ -2042,6 +2050,20 @@ watch(activeMode, (mode) => {
     void loadMaterials()
   }
 })
+watch(
+  () => [route.query.q, route.query.scope] as const,
+  ([nextQuery, nextScope], [previousQuery, previousScope]) => {
+    if (nextQuery === previousQuery && nextScope === previousScope) return
+    const q = routeQueryString(nextQuery).trim()
+    if (!q) {
+      if (searchActive.value || searchQuery.value) resetSearchState(false)
+      return
+    }
+    searchQuery.value = q
+    searchScope.value = normalizeScope(nextScope)
+    void runUnifiedSearch()
+  },
+)
 
 onMounted(async () => {
   await Promise.all([loadDifficultyClasses(), loadDirectories()])
@@ -2057,12 +2079,13 @@ onMounted(async () => {
       /* ignore stale locate links */
     }
   }
-  if (hasQueryValue(route.query.q)) {
-    searchQuery.value = route.query.q
+  const initialQuery = routeQueryString(route.query.q).trim()
+  if (initialQuery) {
+    searchQuery.value = initialQuery
     searchScope.value = normalizeScope(route.query.scope)
     await runUnifiedSearch()
   }
-  if (activeMode.value === 'operational') await loadMaterials(hasQueryValue(route.query.q) ? route.query.q : '')
+  if (activeMode.value === 'operational') await loadMaterials(initialQuery)
   window.addEventListener('click', closeContextMenu)
 })
 

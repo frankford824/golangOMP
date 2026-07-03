@@ -321,7 +321,7 @@ watch(commandQuery, () => {
           <span class="aw-statusline__item">{{ permissionSummary }}</span>
         </div>
         <RouterView v-slot="{ Component, route: activeRoute }">
-          <MotionReveal :key="activeRoute.fullPath" class="aw-route-view">
+          <MotionReveal :key="activeRoute.path" class="aw-route-view">
             <component :is="Component" />
           </MotionReveal>
         </RouterView>
