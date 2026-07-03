@@ -41,6 +41,7 @@ import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThum
 
 type DriveMode = 'directories' | 'operational'
 type SearchScope = 'all' | 'operational' | 'files' | 'orders'
+type ClientMaterialFilter = 'all' | 'enabled' | 'disabled'
 type ContextMenuState =
   | { kind: 'directory'; x: number; y: number; dir: DriveDirectoryRow }
   | { kind: 'order'; x: number; y: number; order: DriveOrderRow }
@@ -122,6 +123,8 @@ const activeMaterial = shallowRef<SystemAssetRow | null>(null)
 const publishingClientMaterial = ref(false)
 const suppressMaterialAutoload = ref(false)
 const selectedMaterialFolderPath = ref('')
+const expandedMaterialFolderPaths = ref<Set<string>>(new Set(['']))
+const clientMaterialFilter = ref<ClientMaterialFilter>('all')
 
 const previewOpen = ref(false)
 const previewTitle = ref('')
@@ -179,7 +182,7 @@ const selectedFileActionLabel = computed(() => {
   if (count === 0) return '未选择文件'
   return count === 1 ? '已选 1 个文件' : `已选 ${count} 个文件`
 })
-const materialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
+const allMaterialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
   const nodes = new Map<string, MaterialDirectoryNode>()
   const ensure = (path: string) => {
     const normalized = normalizeVirtualPath(path)
@@ -223,6 +226,10 @@ const materialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
     return left.path.localeCompare(right.path, 'zh-CN')
   })
 })
+const materialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
+  if (materialQuery.value.trim()) return allMaterialDirectoryNodes.value
+  return allMaterialDirectoryNodes.value.filter((node) => materialFolderAncestorsExpanded(node.path))
+})
 const materialFolderBreadcrumbs = computed(() => {
   const parts = pathSegments(selectedMaterialFolderPath.value)
   return [
@@ -234,11 +241,11 @@ const materialFolderBreadcrumbs = computed(() => {
   ]
 })
 const selectedMaterialFolderNode = computed(() =>
-  materialDirectoryNodes.value.find((node) => node.path === selectedMaterialFolderPath.value) ?? materialDirectoryNodes.value[0] ?? null,
+  allMaterialDirectoryNodes.value.find((node) => node.path === selectedMaterialFolderPath.value) ?? allMaterialDirectoryNodes.value[0] ?? null,
 )
 const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
   const selectedParts = pathSegments(selectedMaterialFolderPath.value)
-  return materialDirectoryNodes.value
+  return allMaterialDirectoryNodes.value
     .filter((node) => {
       if (!node.path || node.path === selectedMaterialFolderPath.value) return false
       const parts = pathSegments(node.path)
@@ -382,6 +389,65 @@ function rememberMaterialFolders(folders: MaterialFolderRow[]) {
     }
   }
   materialKnownFolders.value = next
+}
+
+function materialFolderDescendantOf(path: string, parentPath: string) {
+  const normalized = normalizeVirtualPath(path)
+  const parent = normalizeVirtualPath(parentPath)
+  if (!parent) return !!normalized
+  return normalized.startsWith(`${parent}/`)
+}
+
+function materialFolderAncestorsExpanded(path: string) {
+  const parts = pathSegments(path)
+  if (parts.length === 0) return true
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    const ancestor = pathFromSegments(parts.slice(0, index + 1))
+    if (!expandedMaterialFolderPaths.value.has(ancestor)) return false
+  }
+  return true
+}
+
+function materialFolderHasChildren(path: string) {
+  const normalized = normalizeVirtualPath(path)
+  const depth = pathSegments(normalized).length
+  return allMaterialDirectoryNodes.value.some((node) => {
+    if (!node.path || node.path === normalized) return false
+    const parts = pathSegments(node.path)
+    if (parts.length !== depth + 1) return false
+    if (!normalized) return parts.length === 1
+    return node.path.startsWith(`${normalized}/`)
+  })
+}
+
+function isMaterialFolderExpanded(path: string) {
+  return expandedMaterialFolderPaths.value.has(normalizeVirtualPath(path))
+}
+
+function setMaterialFolderExpanded(path: string, expanded: boolean) {
+  const normalized = normalizeVirtualPath(path)
+  const next = new Set(expandedMaterialFolderPaths.value)
+  next.add('')
+  if (expanded) {
+    next.add(normalized)
+  } else if (normalized) {
+    for (const candidate of [...next]) {
+      if (candidate === normalized || materialFolderDescendantOf(candidate, normalized)) {
+        next.delete(candidate)
+      }
+    }
+  }
+  expandedMaterialFolderPaths.value = next
+}
+
+function expandMaterialFolderTreePath(path: string) {
+  const next = new Set(expandedMaterialFolderPaths.value)
+  next.add('')
+  const parts = pathSegments(path)
+  for (let index = 1; index <= parts.length; index += 1) {
+    next.add(pathFromSegments(parts.slice(0, index)))
+  }
+  expandedMaterialFolderPaths.value = next
 }
 
 function sourceLabelOf(asset: SystemAssetRow) {
@@ -705,6 +771,18 @@ const activeClientMaterial = computed(() => {
   const assetKeys = materialIdentityKeys(asset)
   return clientMaterials.value.find((material) => hasSharedIdentity(assetKeys, clientMaterialIdentityKeys(material))) || null
 })
+const enabledClientMaterialCount = computed(() => clientMaterials.value.filter((material) => material.enabled).length)
+const disabledClientMaterialCount = computed(() => clientMaterials.value.length - enabledClientMaterialCount.value)
+const visibleClientMaterials = computed(() => {
+  switch (clientMaterialFilter.value) {
+    case 'enabled':
+      return clientMaterials.value.filter((material) => material.enabled)
+    case 'disabled':
+      return clientMaterials.value.filter((material) => !material.enabled)
+    default:
+      return clientMaterials.value
+  }
+})
 
 async function loadDifficultyClasses() {
   try {
@@ -904,7 +982,21 @@ function openOperational() {
 }
 
 function openMaterialFolder(path: string) {
-  void loadMaterialFolder(path)
+  void loadMaterialFolder(path, { expandTree: true })
+}
+
+function toggleMaterialFolderNode(path: string) {
+  const normalized = normalizeVirtualPath(path)
+  const canCollapse = normalized && isMaterialFolderExpanded(normalized) && materialFolderHasChildren(normalized)
+  if (canCollapse) {
+    setMaterialFolderExpanded(normalized, false)
+    if (selectedMaterialFolderPath.value === normalized || materialFolderDescendantOf(selectedMaterialFolderPath.value, normalized)) {
+      void loadMaterialFolder(normalized, { expandTree: false })
+    }
+    return
+  }
+  setMaterialFolderExpanded(normalized, true)
+  void loadMaterialFolder(normalized, { expandTree: true })
 }
 
 function openMaterialFolderParent() {
@@ -912,7 +1004,7 @@ function openMaterialFolderParent() {
 }
 
 async function revealMaterialInFolder(asset: SystemAssetRow) {
-  await loadMaterialFolder(materialDirectoryPath(asset))
+  await loadMaterialFolder(materialDirectoryPath(asset), { expandTree: true })
   upsertMaterialItem(asset)
   selectMaterial(asset)
 }
@@ -1330,8 +1422,9 @@ async function loadMaterials(query = materialQuery.value) {
   }
 }
 
-async function loadMaterialFolder(path = selectedMaterialFolderPath.value) {
+async function loadMaterialFolder(path = selectedMaterialFolderPath.value, options: { expandTree?: boolean } = {}) {
   if (!canUseOperational.value) return
+  const expandTree = options.expandTree !== false
   const normalized = normalizeVirtualPath(path)
   materialLoading.value = true
   materialError.value = ''
@@ -1339,6 +1432,7 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value) {
   selectedMaterialFolderPath.value = normalized
   activeMaterial.value = null
   rememberMaterialPath(normalized)
+  if (expandTree) expandMaterialFolderTreePath(normalized)
   try {
     if (canManageDrive.value) {
       const [browse, published] = await Promise.all([
@@ -1347,6 +1441,7 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value) {
       ])
       selectedMaterialFolderPath.value = normalizeVirtualPath(browse.path || normalized)
       rememberMaterialFolders(browse.folders || [])
+      if (expandTree) expandMaterialFolderTreePath(selectedMaterialFolderPath.value)
       if (selectedMaterialFolderPath.value) {
         const childCount = (browse.folders || []).reduce((sum, folder) => sum + Number(folder.file_count || 0), 0)
         rememberMaterialFolder({
@@ -1438,6 +1533,12 @@ function materialPreviewRows(asset: SystemAssetRow, meta: SystemAssetPreviewMeta
 function selectMaterial(asset: SystemAssetRow) {
   activeMaterial.value = asset
   void ensureMaterialPreview(asset)
+}
+
+function selectClientMaterial(material: ClientMaterialRow) {
+  const materialKeys = clientMaterialIdentityKeys(material)
+  const existing = materialItems.value.find((asset) => hasSharedIdentity(materialIdentityKeys(asset), materialKeys))
+  selectMaterial(existing ? materialWithClientPublication(existing, material) : materialFromClient(material))
 }
 
 function cacheMaterialPreview(key: string, url: string) {
@@ -1966,11 +2067,23 @@ onBeforeUnmount(() => {
                     v-for="node in materialDirectoryNodes"
                     :key="node.path || '__material_root__'"
                     class="aw-material-folder-node"
-                    :class="{ 'is-active': selectedMaterialFolderPath === node.path }"
+                    :class="{
+                      'is-active': selectedMaterialFolderPath === node.path,
+                      'is-expanded': isMaterialFolderExpanded(node.path),
+                      'has-children': materialFolderHasChildren(node.path),
+                    }"
                     type="button"
+                    :aria-expanded="materialFolderHasChildren(node.path) ? isMaterialFolderExpanded(node.path) : undefined"
                     :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
-                    @click="openMaterialFolder(node.path)"
+                    @click="toggleMaterialFolderNode(node.path)"
                   >
+                    <ChevronRight
+                      v-if="materialFolderHasChildren(node.path)"
+                      :size="13"
+                      class="aw-material-folder-node__chevron"
+                      aria-hidden="true"
+                    />
+                    <span v-else class="aw-material-folder-node__spacer" aria-hidden="true" />
                     <FolderOpen v-if="selectedMaterialFolderPath === node.path" :size="15" aria-hidden="true" />
                     <Folder v-else :size="15" aria-hidden="true" />
                     <span>{{ node.name }}</span>
@@ -2040,6 +2153,57 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
                 </div>
+
+                <section v-if="canManageDrive" class="aw-client-materials-panel" aria-label="客户端素材管理">
+                  <div class="aw-client-materials-panel__head">
+                    <div>
+                      <strong>客户端素材管理</strong>
+                      <span>{{ enabledClientMaterialCount }} 个上架中 · {{ disabledClientMaterialCount }} 个已停用</span>
+                    </div>
+                    <div class="aw-segmented-control" aria-label="客户端素材状态筛选">
+                      <button
+                        type="button"
+                        :class="{ 'is-active': clientMaterialFilter === 'all' }"
+                        @click="clientMaterialFilter = 'all'"
+                      >
+                        全部 {{ clientMaterials.length }}
+                      </button>
+                      <button
+                        type="button"
+                        :class="{ 'is-active': clientMaterialFilter === 'enabled' }"
+                        @click="clientMaterialFilter = 'enabled'"
+                      >
+                        上架中 {{ enabledClientMaterialCount }}
+                      </button>
+                      <button
+                        type="button"
+                        :class="{ 'is-active': clientMaterialFilter === 'disabled' }"
+                        @click="clientMaterialFilter = 'disabled'"
+                      >
+                        已停用 {{ disabledClientMaterialCount }}
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="visibleClientMaterials.length" class="aw-client-materials-list">
+                    <article v-for="material in visibleClientMaterials" :key="material.id" class="aw-client-material-row">
+                      <div class="aw-client-material-row__main">
+                        <strong :title="material.title || material.filename_snapshot">{{ material.title || material.filename_snapshot }}</strong>
+                        <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
+                      </div>
+                      <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">
+                        {{ material.enabled ? '上架中' : '已停用' }}
+                      </span>
+                      <div class="aw-inline-actions aw-inline-actions--compact">
+                        <button class="aw-grid-button" type="button" @click="selectClientMaterial(material)">查看</button>
+                        <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
+                        <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
+                      </div>
+                    </article>
+                  </div>
+                  <p v-else class="aw-copy">
+                    {{ clientMaterials.length ? '当前筛选下没有客户端素材。' : '还没有发布给客户端的素材。' }}
+                  </p>
+                </section>
               </section>
             </div>
           </template>
@@ -2202,18 +2366,6 @@ onBeforeUnmount(() => {
                 </button>
               </div>
             </div>
-            <p class="aw-eyebrow">已发布素材 · {{ clientMaterials.length }} 个</p>
-            <div v-if="clientMaterials.length" class="aw-compact-list">
-              <div v-for="material in clientMaterials" :key="material.id" class="aw-compact-list__item">
-                <div>
-                  <strong>{{ material.title || material.filename_snapshot }}</strong>
-                  <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
-                </div>
-                <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
-                <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
-              </div>
-            </div>
-            <p v-else class="aw-copy">还没有发布给客户端的素材。</p>
           </section>
         </template>
       </aside>

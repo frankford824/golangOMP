@@ -4301,7 +4301,7 @@ body.aw-submission-dialog-locked {
 
 .aw-material-folder-node {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: 14px 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--aw-space-2);
   min-height: 30px;
@@ -4328,6 +4328,20 @@ body.aw-submission-dialog-locked {
 
 .aw-material-folder-node svg {
   color: var(--aw-money);
+}
+
+.aw-material-folder-node__chevron {
+  color: var(--aw-ink-muted);
+  transition: transform var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-material-folder-node.is-expanded .aw-material-folder-node__chevron {
+  transform: rotate(90deg);
+}
+
+.aw-material-folder-node__spacer {
+  width: 14px;
+  height: 14px;
 }
 
 .aw-material-folder-node span {
@@ -4393,6 +4407,103 @@ body.aw-submission-dialog-locked {
 .aw-material-folder-card small {
   color: var(--aw-ink-muted);
   font-size: var(--aw-font-size-xs);
+}
+
+.aw-client-materials-panel {
+  display: grid;
+  gap: var(--aw-space-3);
+  margin-top: var(--aw-space-5);
+  padding-top: var(--aw-space-4);
+  border-top: 1px solid var(--aw-hairline);
+}
+
+.aw-client-materials-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  min-width: 0;
+}
+
+.aw-client-materials-panel__head > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aw-client-materials-panel__head strong,
+.aw-client-material-row__main strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-client-materials-panel__head span,
+.aw-client-material-row__main span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-muted);
+  padding: 2px;
+}
+
+.aw-segmented-control button {
+  min-height: 28px;
+  border: 0;
+  border-radius: calc(var(--aw-radius-sm) - 2px);
+  background: transparent;
+  color: var(--aw-ink-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--aw-font-size-xs);
+  padding: 0 var(--aw-space-3);
+  white-space: nowrap;
+}
+
+.aw-segmented-control button:hover {
+  color: var(--aw-ink);
+}
+
+.aw-segmented-control button.is-active {
+  background: var(--aw-surface);
+  color: var(--aw-ink);
+  box-shadow: var(--aw-shadow-xs);
+}
+
+.aw-client-materials-list {
+  display: grid;
+  gap: var(--aw-space-2);
+  max-height: 320px;
+  overflow: auto;
+  padding-right: var(--aw-space-1);
+  scrollbar-width: thin;
+}
+
+.aw-client-material-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--aw-space-3);
+  min-width: 0;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+  padding: var(--aw-space-3);
+}
+
+.aw-client-material-row__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .aw-drive-drawer {
@@ -5340,6 +5451,25 @@ body.aw-submission-dialog-locked {
     border-bottom: 1px solid var(--aw-hairline);
     padding-right: 0;
     padding-bottom: var(--aw-space-3);
+  }
+
+  .aw-client-materials-panel__head,
+  .aw-client-material-row {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-client-materials-panel__head {
+    display: grid;
+  }
+
+  .aw-segmented-control {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .aw-client-material-row > .aw-inline-actions {
+    justify-content: flex-start;
   }
 
   .aw-drive-drawer {
