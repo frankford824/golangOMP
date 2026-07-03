@@ -72,6 +72,20 @@ export function hasValidRetouchRequirementDrafts(form: Pick<TaskCreateFormModel,
   return normalizeRetouchRequirementDrafts(form.retouchRequirements).length > 0
 }
 
+export function selectRetouchRequirementForReferenceSupplement(
+  items: RetouchRequirement[] | undefined,
+): RetouchRequirement | null {
+  const persisted = sortRetouchRequirementsBySortOrder(
+    (items ?? []).filter((item) => item.id > 0),
+  )
+  if (!persisted.length) return null
+  return (
+    persisted.find((item) => (item.referenceFileRefs?.length ?? 0) === 0) ??
+    persisted[0] ??
+    null
+  )
+}
+
 /** Task-level summary for design_requirement / demand_text (never JSON). */
 export function resolveRetouchTaskDesignRequirementText(
   form: Pick<TaskCreateFormModel, 'designRequirement' | 'retouchRequirements'>,

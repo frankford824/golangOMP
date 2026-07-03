@@ -3,8 +3,9 @@ import {
   buildRetouchRequirementsPayload,
   normalizeRetouchRequirementDrafts,
   normalizeRetouchRequirementDraftsWithPending,
+  selectRetouchRequirementForReferenceSupplement,
 } from '@/domain/retouch-requirements'
-import type { RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
+import type { RetouchRequirement, RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
 
 describe('retouch-requirements payload', () => {
   it('buildRetouchRequirementsPayload omits pending local files', () => {
@@ -46,5 +47,47 @@ describe('retouch-requirements payload', () => {
     ])
     expect(normalized[0].pendingReferenceFiles).toEqual([ref])
     expect(normalized[0].pendingSourceFiles).toEqual([src])
+  })
+
+  it('selects the first persisted requirement without reference files for supplement upload', () => {
+    const requirements = [
+      {
+        id: 108,
+        taskId: 2003,
+        description: '需求 2',
+        sortOrder: 2,
+        referenceFileRefs: [{ ref_id: 'ref-2' }],
+      },
+      {
+        id: 107,
+        taskId: 2003,
+        description: '需求 1',
+        sortOrder: 1,
+        referenceFileRefs: [],
+      },
+    ] as RetouchRequirement[]
+
+    expect(selectRetouchRequirementForReferenceSupplement(requirements)?.id).toBe(107)
+  })
+
+  it('falls back to the first persisted requirement when every requirement already has references', () => {
+    const requirements = [
+      {
+        id: 109,
+        taskId: 2003,
+        description: '需求 2',
+        sortOrder: 2,
+        referenceFileRefs: [{ ref_id: 'ref-2' }],
+      },
+      {
+        id: 108,
+        taskId: 2003,
+        description: '需求 1',
+        sortOrder: 1,
+        referenceFileRefs: [{ ref_id: 'ref-1' }],
+      },
+    ] as RetouchRequirement[]
+
+    expect(selectRetouchRequirementForReferenceSupplement(requirements)?.id).toBe(108)
   })
 })

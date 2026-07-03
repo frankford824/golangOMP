@@ -64,24 +64,22 @@
           <div class="asset-section-head">
             <p class="asset-section-label">本条参考图（{{ referenceItems(item).length }}）</p>
             <div class="asset-section-actions">
-              <input
-                :ref="(el) => setUploadInputRef(item, 'reference', el)"
-                type="file"
-                class="hidden-upload-input"
-                multiple
-                :accept="UPLOAD_ACCEPT_ATTRIBUTE"
-                aria-label="补传本条参考图"
-                @change="handleRequirementUploadInput(item, 'reference', $event)"
-              />
-              <button
+              <label
                 v-if="canUploadRequirementFiles(item)"
-                type="button"
-                class="batch-link-btn"
-                :disabled="isRequirementUploading(item, 'reference')"
-                @click="triggerRequirementUpload(item, 'reference')"
+                class="batch-link-btn upload-file-label"
+                :class="{ 'is-disabled': isRequirementUploading(item, 'reference') }"
               >
-                {{ isRequirementUploading(item, 'reference') ? '上传中…' : '补传参考图' }}
-              </button>
+                <input
+                  type="file"
+                  class="hidden-upload-input"
+                  multiple
+                  :disabled="isRequirementUploading(item, 'reference')"
+                  :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                  aria-label="补传本条参考图"
+                  @change="handleRequirementUploadInput(item, 'reference', $event)"
+                />
+                <span>{{ isRequirementUploading(item, 'reference') ? '上传中…' : '补传参考图' }}</span>
+              </label>
               <button
                 v-if="referenceItems(item).length > 0"
                 type="button"
@@ -145,24 +143,22 @@
           <div class="asset-section-head">
             <p class="asset-section-label">本条素材文件（{{ sourceItems(item).length }}）</p>
             <div class="asset-section-actions">
-              <input
-                :ref="(el) => setUploadInputRef(item, 'source', el)"
-                type="file"
-                class="hidden-upload-input"
-                multiple
-                :accept="UPLOAD_ACCEPT_ATTRIBUTE"
-                aria-label="补传本条素材文件"
-                @change="handleRequirementUploadInput(item, 'source', $event)"
-              />
-              <button
+              <label
                 v-if="canUploadRequirementFiles(item)"
-                type="button"
-                class="batch-link-btn"
-                :disabled="isRequirementUploading(item, 'source')"
-                @click="triggerRequirementUpload(item, 'source')"
+                class="batch-link-btn upload-file-label"
+                :class="{ 'is-disabled': isRequirementUploading(item, 'source') }"
               >
-                {{ isRequirementUploading(item, 'source') ? '上传中…' : '补传素材' }}
-              </button>
+                <input
+                  type="file"
+                  class="hidden-upload-input"
+                  multiple
+                  :disabled="isRequirementUploading(item, 'source')"
+                  :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                  aria-label="补传本条素材文件"
+                  @change="handleRequirementUploadInput(item, 'source', $event)"
+                />
+                <span>{{ isRequirementUploading(item, 'source') ? '上传中…' : '补传素材' }}</span>
+              </label>
               <button
                 v-if="sourceItems(item).length > 0"
                 type="button"
@@ -233,7 +229,6 @@
 
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import type { ComponentPublicInstance } from 'vue'
 import FileIconFallback from '@/components/base/FileIconFallback.vue'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import {
@@ -290,7 +285,6 @@ const batchLoadingKey = ref<string | null>(null)
 const blockBatchError = ref('')
 type RequirementUploadKind = 'reference' | 'source'
 const uploadingKeys = ref(new Set<string>())
-const uploadInputRefs = ref<Record<string, HTMLInputElement | null>>({})
 const uploadStatusByRequirement = ref(new Map<number, string>())
 const uploadErrorByRequirement = ref(new Map<number, string>())
 
@@ -371,22 +365,6 @@ function canUploadRequirementFiles(item: RetouchRequirement): boolean {
 
 function isRequirementUploading(item: RetouchRequirement, kind: RequirementUploadKind): boolean {
   return uploadingKeys.value.has(uploadKey(item, kind))
-}
-
-function setUploadInputRef(
-  item: RetouchRequirement,
-  kind: RequirementUploadKind,
-  el: Element | ComponentPublicInstance | null,
-) {
-  const key = uploadKey(item, kind)
-  uploadInputRefs.value[key] = el instanceof HTMLInputElement ? el : null
-}
-
-function triggerRequirementUpload(item: RetouchRequirement, kind: RequirementUploadKind) {
-  if (!canUploadRequirementFiles(item) || isRequirementUploading(item, kind)) return
-  setRequirementUploadError(item, '')
-  setRequirementUploadStatus(item, '')
-  uploadInputRefs.value[uploadKey(item, kind)]?.click()
 }
 
 async function handleRequirementUploadInput(
@@ -843,9 +821,17 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   border-color: rgb(var(--yb-brand-border-strong));
 }
 
-.batch-link-btn:disabled {
+.batch-link-btn:disabled,
+.batch-link-btn.is-disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.upload-file-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
 }
 
 .requirement-no {
@@ -921,7 +907,15 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 }
 
 .hidden-upload-input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .asset-section-label {

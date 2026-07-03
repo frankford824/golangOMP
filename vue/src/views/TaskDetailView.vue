@@ -252,14 +252,20 @@
                       >
                         {{ isBatchTask ? '编辑母任务' : '编辑信息' }}
                       </BaseButton>
-                      <button
+                      <label
                         v-if="canUploadReferenceFromOps"
-                        type="button"
                         class="detail-v3-soft-chip"
-                        @click="triggerReferenceUploadFromDetail"
                       >
-                        重传参考图
-                      </button>
+                        <input
+                          type="file"
+                          :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                          multiple
+                          class="detail-v3-hidden-file-input"
+                          aria-label="重传参考图"
+                          @change="handleOpsReferenceUpload"
+                        />
+                        <span>重传参考图</span>
+                      </label>
                     </div>
                   </div>
                   <div class="detail-v3-info-grid">
@@ -361,25 +367,22 @@
                         "
                         class="detail-v3-ref-actions"
                       >
-                        <input
-                          ref="opsReferenceUploadInputRef"
-                          type="file"
-                          :accept="UPLOAD_ACCEPT_ATTRIBUTE"
-                          multiple
-                          class="detail-v3-hidden-file-input"
-                          aria-label="上传参考图或附件"
-                          @change="handleOpsReferenceUpload"
-                        />
-                        <button
+                        <label
                           v-if="canUploadReferenceFromOps"
-                          type="button"
                           class="detail-v3-upload-ref-btn"
                           @focusin="activateDetailFileReceiver('reference')"
                           @pointerenter="activateDetailFileReceiver('reference')"
-                          @click="opsReferenceUploadInputRef?.click()"
                         >
-                          上传/拖拽/粘贴参考图
-                        </button>
+                          <input
+                            type="file"
+                            :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                            multiple
+                            class="detail-v3-hidden-file-input"
+                            aria-label="上传参考图或附件"
+                            @change="handleOpsReferenceUpload"
+                          />
+                          <span>上传/拖拽/粘贴参考图</span>
+                        </label>
                         <button
                           v-if="opsReferenceThumbItems.length > 0"
                           type="button"
@@ -1181,7 +1184,7 @@ import {
 } from '@/services/api/productManagementApi'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import type { BackendAsset } from '@/services/apiTypes'
-import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
+import { uploadReferenceFileRef, uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { buildTimestampedZipFilename, downloadBatchAsZip, sanitizeZipEntryName } from '@/utils/batchZipDownload'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { formatErpSyncFailureMessage } from '@/utils/business-copy'
@@ -1197,6 +1200,7 @@ import {
   targetSkuCodeForUpload,
   taskHasSkuItemsForBatchUi,
 } from '@/domain/task-batch-assets'
+import { selectRetouchRequirementForReferenceSupplement } from '@/domain/retouch-requirements'
 import { latestDeliveryBatchVersionsForSelection } from '@/domain/task-final-delivery'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
 import { formatDateOnlyBeijing, formatMonthDayTimeBeijingOffsetAware, formatTaskDueAtDisplay } from '@/utils/date'
@@ -1998,7 +2002,6 @@ const warehouseProofThumbItems = computed((): AssetThumbItem[] => {
 const opsReferenceThumbItems = computed((): AssetThumbItem[] =>
   referenceRefsToThumbItems(motherTaskOpsReferenceRefs.value, 'ops-ref', '参考图').slice(0, 6),
 )
-const opsReferenceUploadInputRef = ref<HTMLInputElement | null>(null)
 const opsReferenceUploadError = ref('')
 const opsReferenceUploadStatus = ref('')
 const referenceBatchDownloading = ref(false)
@@ -2636,15 +2639,6 @@ function focusReferenceSectionFromDetail(): void {
 }
 
 
-function triggerReferenceUploadFromDetail(): void {
-  if (!canUploadReferenceFromOps.value) {
-    actionError.value = '当前状态不可上传参考图'
-    return
-  }
-  actionError.value = ''
-  opsReferenceUploadInputRef.value?.click()
-}
-
 async function handleOpsReferenceUpload(e: Event) {
   const input = e.target as HTMLInputElement
   const files = input.files
@@ -2687,6 +2681,25 @@ async function handleOpsReferenceFiles(files: FileList | File[]) {
 
   opsReferenceUploadStatus.value = '上传中...'
   try {
+    if (isRetouchTask.value) {
+      const targetRequirement = selectRetouchRequirementForReferenceSupplement(
+        currentTask.retouchRequirements,
+      )
+      if (!targetRequirement) {
+        opsReferenceUploadError.value = '未找到可绑定的 P 图需求，无法补传参考图'
+        opsReferenceUploadStatus.value = ''
+        return
+      }
+      for (const file of validFiles) {
+        await uploadReferenceFileRef(file, {
+          taskId: String(currentTask.id),
+          retouchRequirementId: targetRequirement.id,
+        })
+      }
+      opsReferenceUploadStatus.value = `参考图已补传至需求 ${targetRequirement.sortOrder || 1}`
+      await tasksStore.loadTaskById(currentTask.id)
+      return
+    }
     await loadOpsReferenceBackendAssets()
     const replaceAssetId = validFiles.length === 1 ? replaceableOpsReferenceAssetID.value : undefined
     for (const file of validFiles) {
@@ -4726,6 +4739,9 @@ watch(taskId, (id) => {
 }
 .detail-v3-link-chip,
 .detail-v3-soft-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 2rem;
   border: none;
   padding: 0.4rem 0.7rem;
@@ -5068,6 +5084,10 @@ watch(taskId, (id) => {
   margin-top: 0.65rem;
 }
 .detail-v3-upload-ref-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 2.25rem;
   border: 1px solid var(--td-blue);
   padding: 0.5rem 0.85rem;
