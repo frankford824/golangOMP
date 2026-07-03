@@ -69,6 +69,10 @@ type SystemAssetSearcher interface {
 	Search(ctx context.Context, query domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError)
 }
 
+type SystemMaterialBrowser interface {
+	BrowseMaterials(ctx context.Context, query assetcenter.MaterialBrowseQuery) (*assetcenter.MaterialBrowseResult, *domain.AppError)
+}
+
 type SystemAssetDetailer interface {
 	GetDetail(ctx context.Context, assetID int64) (*assetcenter.AssetDetail, *domain.AppError)
 }
@@ -4830,6 +4834,28 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 		return nil, appErr
 	}
 	return &SystemSearchResult{Items: result.Items, Total: result.Total, Page: result.Page, Size: result.Size}, nil
+}
+
+func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor, path string, page int, pageSize int, source string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material assets from workbench.", nil)
+	}
+	browser, _ := s.systemAssets.(SystemMaterialBrowser)
+	if browser == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Material browser is not configured.", nil)
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 50
+	}
+	return browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
+		Path:   path,
+		Source: domain.NormalizeAssetResourceSource(source),
+		Page:   page,
+		Size:   pageSize,
+	})
 }
 
 func (s *Service) SystemAssetDownload(ctx context.Context, actor domain.RequestActor, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {

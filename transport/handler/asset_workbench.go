@@ -2005,6 +2005,25 @@ func (h *AssetWorkbenchHandler) BatchDownloadClientMaterials(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) BrowseMaterials(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	if pageSize <= 0 {
+		pageSize = limit
+	}
+	result, appErr := h.svc.BrowseMaterials(c.Request.Context(), actor, c.Query("path"), page, pageSize, c.Query("source"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) SystemSearch(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

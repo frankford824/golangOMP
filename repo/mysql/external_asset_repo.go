@@ -2,9 +2,12 @@ package mysqlrepo
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 	"unicode"
@@ -15,15 +18,28 @@ import (
 
 type externalAssetRepo struct{ db *DB }
 
+type sqlExecContext interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+type sqlQueryRowContext interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func NewExternalAssetRepo(db *DB) repo.ExternalAssetRepo { return &externalAssetRepo{db: db} }
 
-const externalAssetSelect = `
+const externalAssetSelectColumns = `
 	SELECT id, provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
 	       file_name, file_ext, mime_type, file_size, is_dir, status, raw_url, raw_url_expires_at,
 	       direct_url_status, oss_original_key, oss_preview_key, oss_thumb_key, oss_sync_status,
 	       preview_status, last_seen_at, last_scanned_at, last_link_checked_at, last_prepare_error,
-	       searchable_text, created_at, updated_at
+	       searchable_text, created_at, updated_at`
+
+const externalAssetSelect = externalAssetSelectColumns + `
 	  FROM external_asset_records`
+
+const externalAssetBrowseSelect = externalAssetSelectColumns + `
+	  FROM external_asset_records FORCE INDEX (idx_external_asset_browse_parent)`
 
 func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
 	query = query.Normalized()
@@ -43,6 +59,76 @@ func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAss
 		LIMIT ?, ?`, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search external assets: %w", err)
+	}
+	defer rows.Close()
+	items, err := scanExternalAssetRows(rows)
+	return items, total, err
+}
+
+func (r *externalAssetRepo) ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int) ([]domain.ExternalAssetDirectoryEntry, error) {
+	parentPath = cleanExternalAssetBrowsePath(parentPath)
+	if limit <= 0 || limit > 2000 {
+		limit = 1000
+	}
+	clauses, args := externalAssetDirectoryClauses(parentPath, mountPaths)
+	args = append(args, limit)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT path, name, descendant_file_count, direct_file_count
+		  FROM external_asset_directory_index
+		 WHERE `+strings.Join(clauses, " AND ")+`
+		 ORDER BY name ASC, path ASC
+		 LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list external asset directory children: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.ExternalAssetDirectoryEntry{}
+	for rows.Next() {
+		var childPath string
+		var name string
+		var fileCount int64
+		var directFileCount int64
+		if err := rows.Scan(&childPath, &name, &fileCount, &directFileCount); err != nil {
+			return nil, fmt.Errorf("scan external asset directory child: %w", err)
+		}
+		out = append(out, domain.ExternalAssetDirectoryEntry{
+			Path:            cleanExternalAssetBrowsePath(childPath),
+			Name:            name,
+			FileCount:       fileCount,
+			DirectFileCount: directFileCount,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate external asset directory children: %w", err)
+	}
+	return out, nil
+}
+
+func (r *externalAssetRepo) ListDirectoryFiles(ctx context.Context, parentPath string, mountPaths []string, page int, size int) ([]*domain.ExternalAssetRecord, int64, error) {
+	parentPath = cleanExternalAssetBrowsePath(parentPath)
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 50
+	}
+	if size > 100 {
+		size = 100
+	}
+	clauses, args := externalAssetVisibleClauses(mountPaths)
+	clauses = append(clauses, `parent_path = ?`)
+	args = append(args, parentPath)
+	where := ` WHERE ` + strings.Join(clauses, " AND ")
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records FORCE INDEX (idx_external_asset_browse_parent)`+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count external asset directory files: %w", err)
+	}
+	args = append(args, (page-1)*size, size)
+	rows, err := r.db.db.QueryContext(ctx, externalAssetBrowseSelect+where+`
+		ORDER BY file_name ASC, updated_at DESC, id DESC
+		LIMIT ?, ?`, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list external asset directory files: %w", err)
 	}
 	defer rows.Close()
 	items, err := scanExternalAssetRows(rows)
@@ -121,13 +207,295 @@ func externalAssetBooleanQuery(keyword string) string {
 	return strings.Join(terms, " ")
 }
 
+func externalAssetVisibleClauses(mountPaths []string) ([]string, []interface{}) {
+	clauses := []string{
+		`status <> 'missing'`,
+		`is_dir = 0`,
+		`origin_path NOT LIKE '%/@eaDir/%'`,
+		`origin_path NOT LIKE '%/#recycle/%'`,
+		`file_name NOT LIKE '%@Syno%'`,
+	}
+	args := []interface{}{}
+	cleanMounts := make([]string, 0, len(mountPaths))
+	seen := map[string]struct{}{}
+	for _, raw := range mountPaths {
+		mount := cleanExternalAssetBrowsePath(raw)
+		if mount == "" {
+			continue
+		}
+		if _, ok := seen[mount]; ok {
+			continue
+		}
+		seen[mount] = struct{}{}
+		cleanMounts = append(cleanMounts, mount)
+	}
+	if len(cleanMounts) > 0 {
+		placeholders := make([]string, 0, len(cleanMounts))
+		for _, mount := range cleanMounts {
+			placeholders = append(placeholders, "?")
+			args = append(args, mount)
+		}
+		clauses = append(clauses, `mount_path IN (`+strings.Join(placeholders, ",")+`)`)
+	}
+	return clauses, args
+}
+
+func externalAssetDirectoryClauses(parentPath string, mountPaths []string) ([]string, []interface{}) {
+	clauses := []string{
+		`status <> 'missing'`,
+		`parent_path_hash = ?`,
+	}
+	args := []interface{}{externalAssetParentPathHash(parentPath)}
+	cleanMounts := cleanExternalAssetMountPaths(mountPaths)
+	if len(cleanMounts) > 0 {
+		placeholders := make([]string, 0, len(cleanMounts))
+		for _, mount := range cleanMounts {
+			placeholders = append(placeholders, "?")
+			args = append(args, mount)
+		}
+		clauses = append(clauses, `mount_path IN (`+strings.Join(placeholders, ",")+`)`)
+	}
+	return clauses, args
+}
+
+func cleanExternalAssetMountPaths(mountPaths []string) []string {
+	cleanMounts := make([]string, 0, len(mountPaths))
+	seen := map[string]struct{}{}
+	for _, raw := range mountPaths {
+		mount := cleanExternalAssetBrowsePath(raw)
+		if mount == "" {
+			continue
+		}
+		if _, ok := seen[mount]; ok {
+			continue
+		}
+		seen[mount] = struct{}{}
+		cleanMounts = append(cleanMounts, mount)
+	}
+	return cleanMounts
+}
+
+func cleanExternalAssetBrowsePath(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if value == "" || value == "/" {
+		return ""
+	}
+	cleaned := path.Clean("/" + strings.TrimLeft(value, "/"))
+	if cleaned == "." || cleaned == "/" {
+		return ""
+	}
+	return cleaned
+}
+
+func parentExternalAssetBrowsePath(value string) string {
+	value = cleanExternalAssetBrowsePath(value)
+	if value == "" {
+		return ""
+	}
+	idx := strings.LastIndex(value, "/")
+	if idx <= 0 {
+		return ""
+	}
+	return value[:idx]
+}
+
+func externalAssetDirectoryPaths(parentPath, mountPath string) []string {
+	parentPath = cleanExternalAssetBrowsePath(parentPath)
+	mountPath = cleanExternalAssetBrowsePath(mountPath)
+	if parentPath == "" || mountPath == "" {
+		return nil
+	}
+	if parentPath != mountPath && !strings.HasPrefix(parentPath, mountPath+"/") {
+		return nil
+	}
+	paths := []string{}
+	for current := parentPath; current != ""; current = parentExternalAssetBrowsePath(current) {
+		paths = append(paths, current)
+		if current == mountPath {
+			break
+		}
+	}
+	for left, right := 0, len(paths)-1; left < right; left, right = left+1, right-1 {
+		paths[left], paths[right] = paths[right], paths[left]
+	}
+	return paths
+}
+
+func externalAssetDirectoryPathHash(provider, mountPath, dirPath string) string {
+	return domain.ExternalAssetOriginHash(provider, mountPath, dirPath)
+}
+
+func externalAssetParentPathHash(parentPath string) string {
+	sum := sha256.Sum256([]byte(cleanExternalAssetBrowsePath(parentPath)))
+	return hex.EncodeToString(sum[:])
+}
+
+func joinExternalAssetBrowsePath(parentPath, name string) string {
+	name = strings.Trim(strings.ReplaceAll(name, "\\", "/"), "/")
+	if name == "" {
+		return cleanExternalAssetBrowsePath(parentPath)
+	}
+	parentPath = cleanExternalAssetBrowsePath(parentPath)
+	if parentPath == "" {
+		return "/" + name
+	}
+	return path.Join(parentPath, name)
+}
+
+type externalAssetCountState struct {
+	Provider   string
+	Kind       domain.ExternalAssetKind
+	Driver     string
+	MountPath  string
+	ParentPath string
+	IsDir      bool
+	Status     domain.ExternalAssetStatus
+}
+
+func getExternalAssetCountStateForUpdate(ctx context.Context, q sqlQueryRowContext, hash string) (*externalAssetCountState, error) {
+	row := q.QueryRowContext(ctx, `
+		SELECT provider, kind, driver, mount_path, parent_path, is_dir, status
+		  FROM external_asset_records
+		 WHERE origin_path_hash = ?
+		 FOR UPDATE`, hash)
+	var state externalAssetCountState
+	var kind string
+	var status string
+	if err := row.Scan(&state.Provider, &kind, &state.Driver, &state.MountPath, &state.ParentPath, &state.IsDir, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load external asset count state: %w", err)
+	}
+	state.Kind = domain.ExternalAssetKind(kind)
+	state.Status = domain.ExternalAssetStatus(status)
+	return &state, nil
+}
+
+func maintainExternalAssetDirectoryIndex(ctx context.Context, exec sqlExecContext, existing *externalAssetCountState, item domain.ExternalAssetUpsert) error {
+	if item.IsDir {
+		return upsertExternalAssetDirectoryPresence(ctx, exec, item.Provider, item.Kind, item.Driver, item.MountPath, item.OriginPath, item.ScannedAt)
+	}
+	if existing != nil && !existing.IsDir && existing.Status != domain.ExternalAssetStatusMissing {
+		sameLocation := existing.Provider == item.Provider &&
+			existing.MountPath == item.MountPath &&
+			existing.ParentPath == item.ParentPath
+		if sameLocation {
+			return upsertExternalAssetDirectoryPresence(ctx, exec, item.Provider, item.Kind, item.Driver, item.MountPath, item.ParentPath, item.ScannedAt)
+		}
+		if err := applyExternalAssetDirectoryCountDelta(ctx, exec, existing.Provider, existing.Kind, existing.Driver, existing.MountPath, existing.ParentPath, item.ScannedAt, -1); err != nil {
+			return err
+		}
+	}
+	return applyExternalAssetDirectoryCountDelta(ctx, exec, item.Provider, item.Kind, item.Driver, item.MountPath, item.ParentPath, item.ScannedAt, 1)
+}
+
+func upsertExternalAssetDirectoryPresence(ctx context.Context, exec sqlExecContext, provider string, kind domain.ExternalAssetKind, driver, mountPath, directoryPath string, scannedAt time.Time) error {
+	for _, dirPath := range externalAssetDirectoryPaths(directoryPath, mountPath) {
+		if err := upsertExternalAssetDirectory(ctx, exec, provider, kind, driver, mountPath, dirPath, scannedAt, 0, 0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyExternalAssetDirectoryCountDelta(ctx context.Context, exec sqlExecContext, provider string, kind domain.ExternalAssetKind, driver, mountPath, parentPath string, scannedAt time.Time, delta int64) error {
+	if delta == 0 {
+		return upsertExternalAssetDirectoryPresence(ctx, exec, provider, kind, driver, mountPath, parentPath, scannedAt)
+	}
+	for _, dirPath := range externalAssetDirectoryPaths(parentPath, mountPath) {
+		directDelta := int64(0)
+		if cleanExternalAssetBrowsePath(dirPath) == cleanExternalAssetBrowsePath(parentPath) {
+			directDelta = delta
+		}
+		if delta > 0 {
+			if err := upsertExternalAssetDirectory(ctx, exec, provider, kind, driver, mountPath, dirPath, scannedAt, delta, directDelta); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := decrementExternalAssetDirectory(ctx, exec, provider, mountPath, dirPath, delta, directDelta); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func upsertExternalAssetDirectory(ctx context.Context, exec sqlExecContext, provider string, kind domain.ExternalAssetKind, driver, mountPath, dirPath string, scannedAt time.Time, descendantDelta, directDelta int64) error {
+	dirPath = cleanExternalAssetBrowsePath(dirPath)
+	mountPath = cleanExternalAssetBrowsePath(mountPath)
+	if dirPath == "" || mountPath == "" {
+		return nil
+	}
+	parentPath := parentExternalAssetBrowsePath(dirPath)
+	name := path.Base(dirPath)
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO external_asset_directory_index (
+		  provider, kind, driver, mount_path, path_hash, parent_path_hash, path, parent_path, name,
+		  status, descendant_file_count, direct_file_count, last_seen_at, last_scanned_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'indexed', ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+		  kind = VALUES(kind),
+		  driver = VALUES(driver),
+		  mount_path = VALUES(mount_path),
+		  parent_path_hash = VALUES(parent_path_hash),
+		  parent_path = VALUES(parent_path),
+		  name = VALUES(name),
+		  status = 'indexed',
+		  descendant_file_count = GREATEST(descendant_file_count + VALUES(descendant_file_count), 0),
+		  direct_file_count = GREATEST(direct_file_count + VALUES(direct_file_count), 0),
+		  last_seen_at = VALUES(last_seen_at),
+		  last_scanned_at = VALUES(last_scanned_at)`,
+		provider, string(kind), driver, mountPath, externalAssetDirectoryPathHash(provider, mountPath, dirPath),
+		externalAssetParentPathHash(parentPath), dirPath, parentPath, name, descendantDelta, directDelta, scannedAt, scannedAt)
+	if err != nil {
+		return fmt.Errorf("upsert external asset directory index: %w", err)
+	}
+	return nil
+}
+
+func decrementExternalAssetDirectory(ctx context.Context, exec sqlExecContext, provider, mountPath, dirPath string, descendantDelta, directDelta int64) error {
+	dirPath = cleanExternalAssetBrowsePath(dirPath)
+	mountPath = cleanExternalAssetBrowsePath(mountPath)
+	if dirPath == "" || mountPath == "" {
+		return nil
+	}
+	pathHash := externalAssetDirectoryPathHash(provider, mountPath, dirPath)
+	_, err := exec.ExecContext(ctx, `
+		UPDATE external_asset_directory_index
+		   SET descendant_file_count = GREATEST(descendant_file_count + ?, 0),
+		       direct_file_count = GREATEST(direct_file_count + ?, 0)
+		 WHERE path_hash = ?`,
+		descendantDelta, directDelta, pathHash)
+	if err != nil {
+		return fmt.Errorf("decrement external asset directory index: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `
+		DELETE FROM external_asset_directory_index
+		 WHERE path_hash = ?
+		   AND descendant_file_count = 0
+		   AND direct_file_count = 0`, pathHash); err != nil {
+		return fmt.Errorf("delete empty external asset directory index: %w", err)
+	}
+	return nil
+}
+
 func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error) {
 	item = item.Normalized()
 	if item.OriginPath == "" || item.FileName == "" {
 		return nil, fmt.Errorf("external asset origin_path and file_name are required")
 	}
 	hash := domain.ExternalAssetOriginHash(item.Provider, item.MountPath, item.OriginPath)
-	_, err := r.db.db.ExecContext(ctx, `
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin external asset upsert: %w", err)
+	}
+	defer tx.Rollback()
+	existing, err := getExternalAssetCountStateForUpdate(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO external_asset_records (
 		  provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
 		  file_name, file_ext, mime_type, file_size, is_dir, status, raw_url,
@@ -154,6 +522,12 @@ func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAsse
 		item.ScannedAt, item.ScannedAt, item.SearchableText)
 	if err != nil {
 		return nil, fmt.Errorf("upsert external asset: %w", err)
+	}
+	if err := maintainExternalAssetDirectoryIndex(ctx, tx, existing, item); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit external asset upsert: %w", err)
 	}
 	return r.getByHash(ctx, hash)
 }
@@ -220,7 +594,12 @@ func (r *externalAssetRepo) MarkMountMissingBefore(ctx context.Context, mountPat
 	if mountPath == "" || scannedBefore.IsZero() {
 		return nil
 	}
-	_, err := r.db.db.ExecContext(ctx, `
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin external mount missing update: %w", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
 		UPDATE external_asset_records
 		   SET status = 'missing'
 		 WHERE mount_path = ?
@@ -229,6 +608,88 @@ func (r *externalAssetRepo) MarkMountMissingBefore(ctx context.Context, mountPat
 		mountPath, scannedBefore)
 	if err != nil {
 		return fmt.Errorf("mark external mount missing: %w", err)
+	}
+	if err := rebuildExternalAssetDirectoryIndexForMount(ctx, tx, mountPath); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit external mount missing update: %w", err)
+	}
+	return nil
+}
+
+func rebuildExternalAssetDirectoryIndexForMount(ctx context.Context, exec sqlExecContext, mountPath string) error {
+	mountPath = cleanExternalAssetBrowsePath(mountPath)
+	if mountPath == "" {
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM external_asset_directory_index WHERE mount_path = ?`, mountPath); err != nil {
+		return fmt.Errorf("clear external asset directory index: %w", err)
+	}
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO external_asset_directory_index (
+		  path_hash, parent_path_hash, provider, kind, driver, mount_path, path, parent_path, name,
+		  status, descendant_file_count, direct_file_count, last_seen_at, last_scanned_at
+		)
+		WITH RECURSIVE file_dirs AS (
+		  SELECT provider, kind, driver, mount_path, parent_path AS path, parent_path AS direct_parent_path,
+		         last_seen_at, last_scanned_at
+		    FROM external_asset_records
+		   WHERE status <> 'missing'
+		     AND is_dir = 0
+		     AND mount_path = ?
+		     AND parent_path <> ''
+		     AND parent_path <> '/'
+		     AND parent_path NOT LIKE '%/@eaDir/%'
+		     AND parent_path NOT LIKE '%/#recycle/%'
+		     AND file_name NOT LIKE '%@Syno%'
+		  UNION ALL
+		  SELECT provider, kind, driver, mount_path,
+		         CASE
+		           WHEN (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))) <= 1 THEN ''
+		           ELSE SUBSTRING_INDEX(path, '/', (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))))
+		         END AS path,
+		         direct_parent_path, last_seen_at, last_scanned_at
+		    FROM file_dirs
+		   WHERE path <> ''
+		     AND (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))) > 1
+		)
+		SELECT SHA2(CONCAT(LOWER(TRIM(provider)), '|', mount_path, '|', path), 256) AS path_hash,
+		       SHA2(CASE
+		         WHEN (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))) <= 1 THEN ''
+		         ELSE SUBSTRING_INDEX(path, '/', (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))))
+		       END, 256) AS parent_path_hash,
+		       provider,
+		       kind,
+		       driver,
+		       mount_path,
+		       path,
+		       CASE
+		         WHEN (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))) <= 1 THEN ''
+		         ELSE SUBSTRING_INDEX(path, '/', (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))))
+		       END AS parent_path,
+		       SUBSTRING_INDEX(path, '/', -1) AS name,
+		       'indexed' AS status,
+		       COUNT(*) AS descendant_file_count,
+		       SUM(path = direct_parent_path) AS direct_file_count,
+		       MAX(last_seen_at) AS last_seen_at,
+		       MAX(last_scanned_at) AS last_scanned_at
+		  FROM file_dirs
+		 WHERE path <> ''
+		 GROUP BY provider, kind, driver, mount_path, path
+		ON DUPLICATE KEY UPDATE
+		  kind = VALUES(kind),
+		  driver = VALUES(driver),
+		  parent_path_hash = VALUES(parent_path_hash),
+		  parent_path = VALUES(parent_path),
+		  name = VALUES(name),
+		  status = VALUES(status),
+		  descendant_file_count = VALUES(descendant_file_count),
+		  direct_file_count = VALUES(direct_file_count),
+		  last_seen_at = VALUES(last_seen_at),
+		  last_scanned_at = VALUES(last_scanned_at)`, mountPath)
+	if err != nil {
+		return fmt.Errorf("rebuild external asset directory index: %w", err)
 	}
 	return nil
 }

@@ -94,6 +94,13 @@ type ExternalAssetRecord struct {
 	UpdatedAt         time.Time                  `json:"updated_at"`
 }
 
+type ExternalAssetDirectoryEntry struct {
+	Path            string `json:"path"`
+	Name            string `json:"name"`
+	FileCount       int64  `json:"file_count"`
+	DirectFileCount int64  `json:"direct_file_count"`
+}
+
 type ExternalAssetSearchQuery struct {
 	Keyword        string
 	Kind           ExternalAssetKind

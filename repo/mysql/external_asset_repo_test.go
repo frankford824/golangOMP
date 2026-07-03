@@ -37,3 +37,41 @@ func TestBuildExternalAssetLikeWhereKeepsFallbackContainsMatch(t *testing.T) {
 		t.Fatalf("args = %#v, want contains fallback args", args)
 	}
 }
+
+func TestExternalAssetDirectoryPathsIncludeMountAncestors(t *testing.T) {
+	paths := externalAssetDirectoryPaths(`/quark/A06杨玲/2025杨玲`, `/quark`)
+	want := []string{`/quark`, `/quark/A06杨玲`, `/quark/A06杨玲/2025杨玲`}
+
+	if len(paths) != len(want) {
+		t.Fatalf("paths = %#v, want %#v", paths, want)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Fatalf("paths[%d] = %q, want %q in %#v", i, paths[i], want[i], paths)
+		}
+	}
+}
+
+func TestExternalAssetDirectoryPathsRejectsOutsideMount(t *testing.T) {
+	if got := externalAssetDirectoryPaths(`/p3/A`, `/quark`); len(got) != 0 {
+		t.Fatalf("paths outside mount = %#v, want empty", got)
+	}
+}
+
+func TestExternalAssetDirectoryClausesUseParentHash(t *testing.T) {
+	clauses, args := externalAssetDirectoryClauses(`/quark/A06杨玲`, []string{`/quark`, `/quark`})
+
+	joined := strings.Join(clauses, " AND ")
+	if !strings.Contains(joined, `parent_path_hash = ?`) {
+		t.Fatalf("clauses = %#v, want parent_path_hash predicate", clauses)
+	}
+	if !strings.Contains(joined, `mount_path IN (?)`) {
+		t.Fatalf("clauses = %#v, want deduplicated mount predicate", clauses)
+	}
+	if len(args) != 2 {
+		t.Fatalf("args = %#v, want parent hash and one mount", args)
+	}
+	if args[0] != externalAssetParentPathHash(`/quark/A06杨玲`) || args[1] != `/quark` {
+		t.Fatalf("args = %#v, want parent hash and /quark", args)
+	}
+}

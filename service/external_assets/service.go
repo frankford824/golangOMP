@@ -64,6 +64,11 @@ type MountSyncResult struct {
 	ErrorMessage  string `json:"error_message,omitempty"`
 }
 
+type directoryBrowserRepo interface {
+	ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int) ([]domain.ExternalAssetDirectoryEntry, error)
+	ListDirectoryFiles(ctx context.Context, parentPath string, mountPaths []string, page int, size int) ([]*domain.ExternalAssetRecord, int64, error)
+}
+
 type Service struct {
 	cfg       Config
 	repo      repo.ExternalAssetRepo
@@ -238,6 +243,64 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 		}
 	}
 	return s.repo.Search(ctx, query)
+}
+
+func (s *Service) ListDirectoryChildren(ctx context.Context, parentPath string, limit int) ([]domain.ExternalAssetDirectoryEntry, error) {
+	if !s.Enabled() {
+		return []domain.ExternalAssetDirectoryEntry{}, nil
+	}
+	browser, ok := s.repo.(directoryBrowserRepo)
+	if !ok {
+		return []domain.ExternalAssetDirectoryEntry{}, nil
+	}
+	parentPath = cleanExternalMaterialBrowsePath(parentPath)
+	mounts := s.mountPathsForBrowse(parentPath)
+	if parentPath != "" && len(mounts) == 0 {
+		return []domain.ExternalAssetDirectoryEntry{}, nil
+	}
+	return browser.ListDirectoryChildren(ctx, parentPath, mounts, limit)
+}
+
+func (s *Service) ListDirectoryFiles(ctx context.Context, parentPath string, page int, size int) ([]*domain.ExternalAssetRecord, int64, error) {
+	if !s.Enabled() {
+		return []*domain.ExternalAssetRecord{}, 0, nil
+	}
+	browser, ok := s.repo.(directoryBrowserRepo)
+	if !ok {
+		return []*domain.ExternalAssetRecord{}, 0, nil
+	}
+	parentPath = cleanExternalMaterialBrowsePath(parentPath)
+	mounts := s.mountPathsForBrowse(parentPath)
+	if parentPath == "" || len(mounts) == 0 {
+		return []*domain.ExternalAssetRecord{}, 0, nil
+	}
+	return browser.ListDirectoryFiles(ctx, parentPath, mounts, page, size)
+}
+
+func (s *Service) mountPathsForBrowse(parentPath string) []string {
+	if s == nil {
+		return nil
+	}
+	parentPath = cleanExternalMaterialBrowsePath(parentPath)
+	out := []string{}
+	for _, mount := range s.cfg.Mounts {
+		mountPath := cleanExternalMaterialBrowsePath(mount.Path)
+		if mountPath == "" {
+			continue
+		}
+		if parentPath == "" || parentPath == mountPath || strings.HasPrefix(parentPath, mountPath+"/") {
+			out = append(out, mountPath)
+		}
+	}
+	return out
+}
+
+func cleanExternalMaterialBrowsePath(value string) string {
+	cleaned := cleanAListPath(value)
+	if cleaned == "/" {
+		return ""
+	}
+	return cleaned
 }
 
 func (s *Service) refreshSearchCache(ctx context.Context, query domain.ExternalAssetSearchQuery) error {

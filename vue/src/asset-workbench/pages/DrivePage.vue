@@ -26,6 +26,7 @@ import {
   type DriveDirectoryRow,
   type DriveFileRow,
   type DriveOrderRow,
+  type MaterialFolderRow,
   type OverviewSearchRow,
   type SystemAssetRow,
   type SystemAssetPreviewMeta,
@@ -59,6 +60,8 @@ interface MaterialFolderEntry {
   path: string
   name: string
   file_count: number
+  direct_file_count: number
+  source_type?: string
 }
 
 const session = useAssetWorkbenchSessionStore()
@@ -109,6 +112,8 @@ const materialQuery = ref('')
 const materialLoading = ref(false)
 const materialError = ref('')
 const materialItems = ref<SystemAssetRow[]>([])
+const materialKnownFolders = ref<Record<string, MaterialFolderEntry>>({})
+const materialFileTotal = ref(0)
 const clientMaterials = ref<ClientMaterialRow[]>([])
 const selectedMaterialIds = ref<Set<string>>(new Set())
 const materialPreviewUrls = ref<Record<string, string>>({})
@@ -192,13 +197,25 @@ const materialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
     return node
   }
   ensure('')
-  for (const asset of materialItems.value) {
-    const dirParts = pathSegments(materialDirectoryPath(asset))
-    ensure('').file_count += 1
-    for (let index = 1; index <= dirParts.length; index += 1) {
-      ensure(pathFromSegments(dirParts.slice(0, index))).file_count += 1
+  for (const folder of Object.values(materialKnownFolders.value)) {
+    const node = ensure(folder.path)
+    node.name = folder.name || materialFolderLabel(folder.path)
+    node.file_count = folder.file_count
+    node.direct_file_count = folder.direct_file_count
+  }
+  const selectedParts = pathSegments(selectedMaterialFolderPath.value)
+  for (let index = 1; index <= selectedParts.length; index += 1) {
+    ensure(pathFromSegments(selectedParts.slice(0, index)))
+  }
+  if (materialQuery.value.trim()) {
+    for (const asset of materialItems.value) {
+      const dirParts = pathSegments(materialDirectoryPath(asset))
+      ensure('').file_count += 1
+      for (let index = 1; index <= dirParts.length; index += 1) {
+        ensure(pathFromSegments(dirParts.slice(0, index))).file_count += 1
+      }
+      ensure(pathFromSegments(dirParts)).direct_file_count += 1
     }
-    ensure(pathFromSegments(dirParts)).direct_file_count += 1
   }
   return [...nodes.values()].sort((left, right) => {
     if (left.path === '') return -1
@@ -227,10 +244,12 @@ const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
       const parts = pathSegments(node.path)
       return parts.length === selectedParts.length + 1 && selectedParts.every((part, index) => parts[index] === part)
     })
-    .map((node) => ({ path: node.path, name: node.name, file_count: node.file_count }))
+    .map((node) => ({ path: node.path, name: node.name, file_count: node.file_count, direct_file_count: node.direct_file_count }))
 })
 const visibleMaterialFiles = computed(() =>
-  materialItems.value.filter((asset) => materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
+  materialQuery.value.trim()
+    ? materialItems.value
+    : materialItems.value.filter((asset) => materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
 )
 const selectedMaterialFolderParent = computed(() => {
   const parts = pathSegments(selectedMaterialFolderPath.value)
@@ -287,8 +306,7 @@ function materialDisplayTitle(asset: SystemAssetRow): string {
 function materialVirtualFilePath(asset: SystemAssetRow): string {
   const externalPath = normalizeVirtualPath(asset.origin_path || (asset.source_type === 'external' ? titleOf(asset) : ''))
   if (asset.source_type === 'external' && externalPath) return externalPath
-  const bucket = asset.scope_sku_code || asset.sku_code || asset.primary_sku_code || asset.task_no || '未归类'
-  return normalizeVirtualPath(`/系统资源/${bucket}/${asset.original_filename || asset.file_name || titleOf(asset)}`)
+  return normalizeVirtualPath(`/系统资源/${asset.original_filename || asset.file_name || titleOf(asset)}`)
 }
 
 function materialDirectoryPath(asset: SystemAssetRow): string {
@@ -303,6 +321,67 @@ function materialFolderFileName(asset: SystemAssetRow): string {
 
 function materialFolderLabel(path: string): string {
   return fileNameFromPath(path) || '全部素材'
+}
+
+function rememberMaterialFolder(folder: MaterialFolderRow | MaterialFolderEntry) {
+  const path = normalizeVirtualPath(folder.path)
+  if (!path) return
+  materialKnownFolders.value = {
+    ...materialKnownFolders.value,
+    [path]: {
+      path,
+      name: folder.name || materialFolderLabel(path),
+      file_count: Number(folder.file_count || 0),
+      direct_file_count: Number(folder.direct_file_count || 0),
+      source_type: folder.source_type,
+    },
+  }
+  rememberMaterialPath(path)
+}
+
+function rememberMaterialPath(path: string) {
+  const parts = pathSegments(path)
+  const next = { ...materialKnownFolders.value }
+  for (let index = 1; index <= parts.length; index += 1) {
+    const current = pathFromSegments(parts.slice(0, index))
+    if (!next[current]) {
+      next[current] = {
+        path: current,
+        name: materialFolderLabel(current),
+        file_count: 0,
+        direct_file_count: 0,
+      }
+    }
+  }
+  materialKnownFolders.value = next
+}
+
+function rememberMaterialFolders(folders: MaterialFolderRow[]) {
+  const next = { ...materialKnownFolders.value }
+  for (const folder of folders) {
+    const path = normalizeVirtualPath(folder.path)
+    if (!path) continue
+    next[path] = {
+      path,
+      name: folder.name || materialFolderLabel(path),
+      file_count: Number(folder.file_count || 0),
+      direct_file_count: Number(folder.direct_file_count || 0),
+      source_type: folder.source_type,
+    }
+    const parts = pathSegments(path)
+    for (let index = 1; index < parts.length; index += 1) {
+      const ancestor = pathFromSegments(parts.slice(0, index))
+      if (!next[ancestor]) {
+        next[ancestor] = {
+          path: ancestor,
+          name: materialFolderLabel(ancestor),
+          file_count: 0,
+          direct_file_count: 0,
+        }
+      }
+    }
+  }
+  materialKnownFolders.value = next
 }
 
 function sourceLabelOf(asset: SystemAssetRow) {
@@ -825,16 +904,16 @@ function openOperational() {
 }
 
 function openMaterialFolder(path: string) {
-  selectedMaterialFolderPath.value = normalizeVirtualPath(path)
-  activeMaterial.value = null
+  void loadMaterialFolder(path)
 }
 
 function openMaterialFolderParent() {
   openMaterialFolder(selectedMaterialFolderParent.value)
 }
 
-function revealMaterialInFolder(asset: SystemAssetRow) {
-  selectedMaterialFolderPath.value = materialDirectoryPath(asset)
+async function revealMaterialInFolder(asset: SystemAssetRow) {
+  await loadMaterialFolder(materialDirectoryPath(asset))
+  upsertMaterialItem(asset)
   selectMaterial(asset)
 }
 
@@ -905,7 +984,7 @@ async function locateSearchRow(row: OverviewSearchRow) {
       const found = materialItems.value.find((asset) => materialMatchesOverviewRow(asset, row))
       const target = found || materialFromOverview(row)
       if (!found) upsertMaterialItem(target)
-      revealMaterialInFolder(target)
+      await revealMaterialInFolder(target)
       searchActive.value = false
       notice.value = `已定位目录：${materialDirectoryPath(target) || '全部素材'} · ${materialFolderFileName(target)}`
     } finally {
@@ -1206,10 +1285,16 @@ async function deleteSelectedFiles() {
 
 async function loadMaterials(query = materialQuery.value) {
   if (!canUseOperational.value) return
+  const nextQuery = query.trim()
+  if (canManageDrive.value && !nextQuery) {
+    await loadMaterialFolder('')
+    return
+  }
   materialLoading.value = true
   materialError.value = ''
-  materialQuery.value = query.trim()
+  materialQuery.value = nextQuery
   selectedMaterialFolderPath.value = ''
+  activeMaterial.value = null
   try {
     if (canManageDrive.value) {
       const [systemResult, published] = await Promise.all([
@@ -1217,7 +1302,11 @@ async function loadMaterials(query = materialQuery.value) {
         assetWorkbenchApi.listClientMaterials(true),
       ])
       materialItems.value = systemResult.items
+      materialFileTotal.value = systemResult.total
       clientMaterials.value = published
+      for (const asset of systemResult.items) {
+        rememberMaterialPath(materialDirectoryPath(asset))
+      }
     } else {
       const published = await assetWorkbenchApi.listClientMaterials(false)
       clientMaterials.value = published
@@ -1230,9 +1319,55 @@ async function loadMaterials(query = materialQuery.value) {
           .toLowerCase()
           .includes(q)
       })
+      materialFileTotal.value = materialItems.value.length
     }
   } catch (err) {
     materialItems.value = []
+    materialFileTotal.value = 0
+    materialError.value = err instanceof Error ? err.message : '运营素材加载失败'
+  } finally {
+    materialLoading.value = false
+  }
+}
+
+async function loadMaterialFolder(path = selectedMaterialFolderPath.value) {
+  if (!canUseOperational.value) return
+  const normalized = normalizeVirtualPath(path)
+  materialLoading.value = true
+  materialError.value = ''
+  materialQuery.value = ''
+  selectedMaterialFolderPath.value = normalized
+  activeMaterial.value = null
+  rememberMaterialPath(normalized)
+  try {
+    if (canManageDrive.value) {
+      const [browse, published] = await Promise.all([
+        assetWorkbenchApi.browseMaterials({ path: normalized, source: 'all', page: 1, page_size: 100 }),
+        assetWorkbenchApi.listClientMaterials(true),
+      ])
+      selectedMaterialFolderPath.value = normalizeVirtualPath(browse.path || normalized)
+      rememberMaterialFolders(browse.folders || [])
+      if (selectedMaterialFolderPath.value) {
+        const childCount = (browse.folders || []).reduce((sum, folder) => sum + Number(folder.file_count || 0), 0)
+        rememberMaterialFolder({
+          path: selectedMaterialFolderPath.value,
+          name: materialFolderLabel(selectedMaterialFolderPath.value),
+          file_count: Number(browse.total || 0) + childCount,
+          direct_file_count: Number(browse.total || 0),
+        })
+      }
+      materialItems.value = browse.files || []
+      materialFileTotal.value = browse.total || 0
+      clientMaterials.value = published
+    } else {
+      const published = await assetWorkbenchApi.listClientMaterials(false)
+      clientMaterials.value = published
+      materialItems.value = published.map(materialFromClient)
+      materialFileTotal.value = materialItems.value.length
+    }
+  } catch (err) {
+    materialItems.value = []
+    materialFileTotal.value = 0
     materialError.value = err instanceof Error ? err.message : '运营素材加载失败'
   } finally {
     materialLoading.value = false
@@ -1819,12 +1954,12 @@ onBeforeUnmount(() => {
           <template v-else>
             <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
             <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
-            <p v-else-if="materialItems.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
+            <p v-else-if="visibleMaterialFolders.length === 0 && visibleMaterialFiles.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
             <div v-else class="aw-material-drive">
               <aside class="aw-material-drive__folders" aria-label="全部素材目录">
                 <div class="aw-material-drive__head">
                   <strong>全部素材目录</strong>
-                  <span>{{ materialItems.length }} 个素材</span>
+                  <span>{{ materialQuery ? '搜索结果' : '目录浏览' }}</span>
                 </div>
                 <div class="aw-material-drive__tree">
                   <button
@@ -1848,7 +1983,7 @@ onBeforeUnmount(() => {
                 <div class="aw-material-drive__summary">
                   <div>
                     <strong>{{ selectedMaterialFolderNode?.name || '全部素材' }}</strong>
-                    <span>{{ visibleMaterialFolders.length }} 个子目录 · {{ visibleMaterialFiles.length }} 个素材</span>
+                    <span>{{ visibleMaterialFolders.length }} 个子目录 · {{ visibleMaterialFiles.length }} / {{ materialFileTotal }} 个素材</span>
                   </div>
                   <button
                     v-if="selectedMaterialFolderPath"

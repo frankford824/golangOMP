@@ -2,12 +2,16 @@ package asset_center
 
 import (
 	"context"
+	pathpkg "path"
+	"strings"
 
 	"workflow/domain"
 	"workflow/repo"
 	baseservice "workflow/service"
 	externalassets "workflow/service/external_assets"
 )
+
+const materialSystemRoot = "/系统资源"
 
 type Service struct {
 	searchRepo   repo.TaskAssetSearchRepo
@@ -72,6 +76,145 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 		total += externalTotal
 	}
 	return &SearchResult{Items: items, Total: total, Page: query.Page, Size: query.Size}, nil
+}
+
+func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery) (*MaterialBrowseResult, *domain.AppError) {
+	query = normalizeMaterialBrowseQuery(query)
+	result := &MaterialBrowseResult{
+		Path:    query.Path,
+		Folders: []MaterialFolder{},
+		Files:   []*AssetDetail{},
+		Total:   0,
+		Page:    query.Page,
+		Size:    query.Size,
+	}
+	includeSystem := query.Source == domain.AssetResourceSourceAll || query.Source == domain.AssetResourceSourceSystem
+	includeExternal := query.Source == domain.AssetResourceSourceAll || query.Source == domain.AssetResourceSourceExternal
+
+	if query.Path == "" {
+		if includeSystem {
+			total, appErr := s.countSystemMaterials(ctx)
+			if appErr != nil {
+				return nil, appErr
+			}
+			result.Folders = append(result.Folders, MaterialFolder{
+				Path:       materialSystemRoot,
+				Name:       strings.TrimPrefix(materialSystemRoot, "/"),
+				SourceType: string(domain.AssetResourceSourceSystem),
+				FileCount:  total,
+			})
+		}
+		if includeExternal && s.externalSvc != nil && s.externalSvc.Enabled() {
+			folders, err := s.externalSvc.ListDirectoryChildren(ctx, "", 2000)
+			if err != nil {
+				return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+			}
+			result.Folders = append(result.Folders, materialFoldersFromExternal(folders)...)
+		}
+		return result, nil
+	}
+
+	if query.Path == materialSystemRoot || strings.HasPrefix(query.Path, materialSystemRoot+"/") {
+		if !includeSystem || query.Path != materialSystemRoot {
+			return result, nil
+		}
+		search, appErr := s.Search(ctx, materialSystemSearchQuery(query.Page, query.Size))
+		if appErr != nil {
+			return nil, appErr
+		}
+		result.Files = search.Items
+		result.Total = search.Total
+		result.Page = search.Page
+		result.Size = search.Size
+		return result, nil
+	}
+
+	if includeExternal && s.externalSvc != nil && s.externalSvc.Enabled() {
+		folders, err := s.externalSvc.ListDirectoryChildren(ctx, query.Path, 2000)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		}
+		files, total, err := s.externalSvc.ListDirectoryFiles(ctx, query.Path, query.Page, query.Size)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		}
+		result.Folders = materialFoldersFromExternal(folders)
+		result.Files = make([]*AssetDetail, 0, len(files))
+		for _, row := range files {
+			result.Files = append(result.Files, s.buildExternalAssetDetail(row))
+		}
+		result.Total = total
+	}
+	return result, nil
+}
+
+func normalizeMaterialBrowseQuery(query MaterialBrowseQuery) MaterialBrowseQuery {
+	query.Path = normalizeMaterialBrowsePath(query.Path)
+	switch query.Source {
+	case domain.AssetResourceSourceSystem, domain.AssetResourceSourceExternal:
+	default:
+		query.Source = domain.AssetResourceSourceAll
+	}
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.Size <= 0 {
+		query.Size = 50
+	}
+	if query.Size > 100 {
+		query.Size = 100
+	}
+	return query
+}
+
+func normalizeMaterialBrowsePath(raw string) string {
+	value := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	if value == "" || value == "/" {
+		return ""
+	}
+	cleaned := pathpkg.Clean("/" + strings.TrimLeft(value, "/"))
+	if cleaned == "." || cleaned == "/" {
+		return ""
+	}
+	return cleaned
+}
+
+func materialSystemSearchQuery(page, size int) domain.AssetSearchQuery {
+	return domain.AssetSearchQuery{
+		Page:           page,
+		Size:           size,
+		Source:         domain.AssetResourceSourceSystem,
+		UsableState:    domain.AssetUsableStateFilterAll,
+		FormatCategory: domain.AssetFormatCategoryAll,
+		IsArchived:     domain.AssetArchiveFilterFalse,
+		TaskStatus:     domain.AssetTaskStatusFilterAll,
+	}
+}
+
+func (s *Service) countSystemMaterials(ctx context.Context) (int64, *domain.AppError) {
+	search, appErr := s.Search(ctx, materialSystemSearchQuery(1, 1))
+	if appErr != nil {
+		return 0, appErr
+	}
+	return search.Total, nil
+}
+
+func materialFoldersFromExternal(entries []domain.ExternalAssetDirectoryEntry) []MaterialFolder {
+	folders := make([]MaterialFolder, 0, len(entries))
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			name = pathpkg.Base(entry.Path)
+		}
+		folders = append(folders, MaterialFolder{
+			Path:            entry.Path,
+			Name:            name,
+			SourceType:      string(domain.AssetResourceSourceExternal),
+			FileCount:       entry.FileCount,
+			DirectFileCount: entry.DirectFileCount,
+		})
+	}
+	return folders
 }
 
 func (s *Service) searchExternal(ctx context.Context, query domain.AssetSearchQuery) (*SearchResult, *domain.AppError) {

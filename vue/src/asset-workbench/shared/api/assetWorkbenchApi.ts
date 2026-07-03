@@ -622,6 +622,23 @@ export interface SystemSearchResult {
   size: number
 }
 
+export interface MaterialFolderRow {
+  path: string
+  name: string
+  source_type: 'system' | 'external' | string
+  file_count: number
+  direct_file_count?: number
+}
+
+export interface MaterialBrowseResult {
+  path: string
+  folders: MaterialFolderRow[]
+  files: SystemAssetRow[]
+  total: number
+  page: number
+  size: number
+}
+
 export interface OverviewSearchRow {
   source: 'system_asset' | 'client_material' | 'submission_file' | 'submission' | 'piecework_item' | string
   scope?: 'all' | 'operational' | 'files' | 'orders' | string
@@ -1424,6 +1441,11 @@ export const assetWorkbenchApi = {
 
   async systemSearch(params: { q?: string; source?: 'all' | 'system' | 'external'; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
     const res = await http.get<ApiEnvelope<SystemSearchResult>>('/v1/asset-workbench/system-search', { params, signal })
+    return unwrap(res.data)
+  },
+
+  async browseMaterials(params: { path?: string; source?: 'all' | 'system' | 'external'; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialBrowseResult> {
+    const res = await http.get<ApiEnvelope<MaterialBrowseResult>>('/v1/asset-workbench/materials/browse', { params, signal })
     return unwrap(res.data)
   },
 

@@ -20790,6 +20790,67 @@ paths:
                       size: { type: integer }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/materials/browse:
+    get:
+      summary: Browse material assets as a virtual directory tree
+      description: Manager-only virtual material browser. Root returns system and external top-level folders; a folder path returns direct child folders and direct files without changing preview/download semantics.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: query
+          name: path
+          description: Virtual folder path. Empty string means root; examples include `/系统资源`, `/quark`, and `/p3/仓库素材区`.
+          schema: { type: string }
+        - in: query
+          name: source
+          description: Source bucket to browse. Defaults to `all`.
+          schema:
+            type: string
+            enum: [all, system, external]
+            default: all
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - in: query
+          name: limit
+          deprecated: true
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Material virtual folder result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      path: { type: string }
+                      folders:
+                        type: array
+                        items: &AssetWorkbenchMaterialFolder
+                          type: object
+                          properties:
+                            path: { type: string }
+                            name: { type: string }
+                            source_type: { type: string, enum: [system, external] }
+                            file_count: { type: integer }
+                            direct_file_count: { type: integer }
+                      files:
+                        type: array
+                        items: *AssetWorkbenchSystemAssetRow
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
   /v1/asset-workbench/settlement/report:
     get:
       summary: Get asset workbench settlement report

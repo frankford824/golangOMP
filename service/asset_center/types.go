@@ -98,3 +98,27 @@ type SearchResult struct {
 	Page  int
 	Size  int
 }
+
+type MaterialBrowseQuery struct {
+	Path   string
+	Source domain.AssetResourceSource
+	Page   int
+	Size   int
+}
+
+type MaterialFolder struct {
+	Path            string `json:"path"`
+	Name            string `json:"name"`
+	SourceType      string `json:"source_type"`
+	FileCount       int64  `json:"file_count"`
+	DirectFileCount int64  `json:"direct_file_count"`
+}
+
+type MaterialBrowseResult struct {
+	Path    string           `json:"path"`
+	Folders []MaterialFolder `json:"folders"`
+	Files   []*AssetDetail   `json:"files"`
+	Total   int64            `json:"total"`
+	Page    int              `json:"page"`
+	Size    int              `json:"size"`
+}
