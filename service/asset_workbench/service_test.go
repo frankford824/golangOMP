@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -1177,6 +1178,8 @@ func (s *externalMaterialProviderStub) PreviewExternal(_ context.Context, extern
 type itemActionRepo struct {
 	repo.AssetWorkbenchRepo
 	items        map[int64]*domain.AssetWorkbenchSubmissionItem
+	submissions  map[int64]*domain.AssetWorkbenchSubmission
+	filesByItem  map[int64][]*domain.AssetWorkbenchSubmissionFile
 	price        *domain.AssetWorkbenchPriceMatrix
 	profile      *domain.AssetWorkbenchProfile
 	events       []*domain.AssetWorkbenchEvent
@@ -1194,6 +1197,43 @@ func (r *itemActionRepo) GetSubmissionItem(_ context.Context, itemID int64) (*do
 	}
 	copyItem := *item
 	return &copyItem, nil
+}
+
+func (r *itemActionRepo) GetSubmission(_ context.Context, submissionID int64) (*domain.AssetWorkbenchSubmission, error) {
+	submission := r.submissions[submissionID]
+	if submission == nil {
+		return nil, sql.ErrNoRows
+	}
+	copySubmission := *submission
+	return &copySubmission, nil
+}
+
+func (r *itemActionRepo) ListSubmissionItemsByMonth(_ context.Context, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
+	items := make([]*domain.AssetWorkbenchSubmissionItem, 0, len(r.items))
+	for _, item := range r.items {
+		if item == nil {
+			continue
+		}
+		if businessMonth != "" && item.BusinessMonth != businessMonth {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return items, nil
+}
+
+func (r *itemActionRepo) ListSubmissionFiles(_ context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
+	files := make([]*domain.AssetWorkbenchSubmissionFile, 0, len(r.filesByItem[submissionItemID]))
+	for _, file := range r.filesByItem[submissionItemID] {
+		if file == nil {
+			continue
+		}
+		copyFile := *file
+		files = append(files, &copyFile)
+	}
+	return files, nil
 }
 
 func (r *itemActionRepo) GetProfileByUserID(_ context.Context, userID int64) (*domain.AssetWorkbenchProfile, error) {
@@ -1285,6 +1325,7 @@ type batchFileMutationRepo struct {
 	directories   map[int64]*domain.AssetWorkbenchUploadDirectory
 	files         map[int64]*domain.AssetWorkbenchSubmissionFile
 	blockedDelete map[int64]bool
+	failVoid      bool
 	updatedFiles  []*domain.AssetWorkbenchSubmissionFile
 	deletedFiles  []int64
 	refreshed     []int64
@@ -1328,7 +1369,7 @@ func (r *batchFileMutationRepo) UpdateSubmissionFileLocation(_ context.Context, 
 	return &copyFile, nil
 }
 
-func (r *batchFileMutationRepo) DeleteSubmissionFile(_ context.Context, _ repo.Tx, fileID int64) error {
+func (r *batchFileMutationRepo) DeleteSubmissionFile(_ context.Context, _ repo.Tx, fileID int64, _ int64, _ string, _ time.Time) error {
 	if r.blockedDelete[fileID] {
 		return domain.NewAppError(domain.ErrCodeConflict, "blocked file", nil)
 	}
@@ -1338,6 +1379,60 @@ func (r *batchFileMutationRepo) DeleteSubmissionFile(_ context.Context, _ repo.T
 	delete(r.files, fileID)
 	r.deletedFiles = append(r.deletedFiles, fileID)
 	return nil
+}
+
+func (r *batchFileMutationRepo) GetSubmissionItem(_ context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error) {
+	for _, file := range r.files {
+		if file != nil && file.SubmissionItemID == itemID {
+			return &domain.AssetWorkbenchSubmissionItem{
+				ID:               itemID,
+				SubmissionID:     file.SubmissionID,
+				PayeeUserID:      file.OwnerUserID,
+				OrderNo:          "AWF",
+				DifficultyClass:  "A",
+				Finalized:        true,
+				PageCount:        1,
+				ItemCount:        1,
+				BusinessMonth:    "2026-07",
+				SubmittedAt:      time.Date(2026, 7, 3, 8, 0, 0, 0, time.UTC),
+				SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled,
+				QCStatus:         domain.AssetWorkbenchSubmissionStatusSubmitted,
+			}, nil
+		}
+	}
+	return &domain.AssetWorkbenchSubmissionItem{
+		ID:               itemID,
+		SubmissionID:     9001,
+		PayeeUserID:      99,
+		OrderNo:          "AWF",
+		DifficultyClass:  "A",
+		Finalized:        true,
+		PageCount:        1,
+		ItemCount:        1,
+		BusinessMonth:    "2026-07",
+		SubmittedAt:      time.Date(2026, 7, 3, 8, 0, 0, 0, time.UTC),
+		SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled,
+		QCStatus:         domain.AssetWorkbenchSubmissionStatusSubmitted,
+	}, nil
+}
+
+func (r *batchFileMutationRepo) ListSubmissionFiles(_ context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
+	items := []*domain.AssetWorkbenchSubmissionFile{}
+	for _, file := range r.files {
+		if file != nil && file.SubmissionItemID == submissionItemID {
+			copyFile := *file
+			items = append(items, &copyFile)
+		}
+	}
+	return items, nil
+}
+
+func (r *batchFileMutationRepo) VoidSubmissionItem(_ context.Context, _ repo.Tx, itemID int64, _ int64, _ string, _ time.Time) (*domain.AssetWorkbenchSubmissionItem, error) {
+	if r.failVoid {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "void failed", nil)
+	}
+	voidedAt := time.Date(2026, 7, 3, 8, 0, 0, 0, time.UTC)
+	return &domain.AssetWorkbenchSubmissionItem{ID: itemID, SubmissionID: 9001, VoidedAt: &voidedAt}, nil
 }
 
 func (r *batchFileMutationRepo) RefreshSubmissionTotals(_ context.Context, _ repo.Tx, submissionID int64) error {
@@ -1350,6 +1445,32 @@ func (r *batchFileMutationRepo) AppendEvent(_ context.Context, _ repo.Tx, event 
 	copyEvent.ID = int64(len(r.events) + 1)
 	r.events = append(r.events, &copyEvent)
 	return &copyEvent, nil
+}
+
+type rollbackBatchFileTxRunner struct {
+	repo *batchFileMutationRepo
+}
+
+func (r rollbackBatchFileTxRunner) RunInTx(_ context.Context, fn func(tx repo.Tx) error) error {
+	files := map[int64]*domain.AssetWorkbenchSubmissionFile{}
+	for id, file := range r.repo.files {
+		if file == nil {
+			continue
+		}
+		copyFile := *file
+		files[id] = &copyFile
+	}
+	deleted := append([]int64(nil), r.repo.deletedFiles...)
+	refreshed := append([]int64(nil), r.repo.refreshed...)
+	events := append([]*domain.AssetWorkbenchEvent(nil), r.repo.events...)
+	err := fn(assetWorkbenchTestTx{})
+	if err != nil {
+		r.repo.files = files
+		r.repo.deletedFiles = deleted
+		r.repo.refreshed = refreshed
+		r.repo.events = events
+	}
+	return err
 }
 
 type submissionVoidRepo struct {
@@ -2303,7 +2424,7 @@ func TestUploadDirectorySnapshotObjectKeyUsesDirectoryPrefix(t *testing.T) {
 	if directory.DifficultyClass != "C" {
 		t.Fatalf("directory difficulty = %q, want C", directory.DifficultyClass)
 	}
-	key := svc.buildObjectKey(time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), "session-1", "../final.psd", directory)
+	key := svc.buildObjectKey(time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), "session-1", "../final.psd", directory, "final.psd")
 	if !strings.Contains(key, "/uploads/client-a/2026/06/session-1/final.psd") || strings.Contains(key, "..") {
 		t.Fatalf("object key = %q", key)
 	}
@@ -2610,6 +2731,59 @@ func TestUpdateSubmissionItemQCRequiresReasonForNeedsFixAndWritesEvent(t *testin
 	}
 }
 
+func TestImportSubmissionItemQCExcelMatchesBySubmissionAndFilename(t *testing.T) {
+	item := &domain.AssetWorkbenchSubmissionItem{
+		ID:               501,
+		SubmissionID:     9001,
+		PayeeUserID:      77,
+		OrderNo:          "AWF20260703080000ABCDEF12",
+		QCStatus:         domain.AssetWorkbenchSubmissionStatusSubmitted,
+		SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled,
+		BusinessMonth:    "2026-07",
+	}
+	workbenchRepo := &itemActionRepo{
+		items: map[int64]*domain.AssetWorkbenchSubmissionItem{501: item},
+		submissions: map[int64]*domain.AssetWorkbenchSubmission{9001: &domain.AssetWorkbenchSubmission{
+			ID:           9001,
+			SubmissionNo: "SUB-202607-001",
+		}},
+		filesByItem: map[int64][]*domain.AssetWorkbenchSubmissionFile{501: []*domain.AssetWorkbenchSubmissionFile{
+			{
+				ID:                  7001,
+				SubmissionID:        9001,
+				SubmissionItemID:    501,
+				OriginalFilename:    "客户海报.jpg",
+				UploadDirectoryName: "挂布",
+			},
+		}},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}}
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(f.GetActiveSheetIndex())
+	if err := f.SetSheetRow(sheet, "A1", &[]interface{}{"提交编号", "文件名", "质检状态", "原因"}); err != nil {
+		t.Fatalf("set header row: %v", err)
+	}
+	if err := f.SetSheetRow(sheet, "A2", &[]interface{}{"SUB-202607-001", "客户海报.jpg", "通过", ""}); err != nil {
+		t.Fatalf("set data row: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+
+	result, appErr := svc.ImportSubmissionItemQCExcel(context.Background(), actor, "2026-07", bytes.NewReader(buf.Bytes()))
+	if appErr != nil {
+		t.Fatalf("ImportSubmissionItemQCExcel appErr = %+v", appErr)
+	}
+	if len(result.Failures) != 0 || len(result.Updated) != 1 {
+		t.Fatalf("result = %+v, want one update and no failures", result)
+	}
+	if item.QCStatus != domain.AssetWorkbenchSubmissionStatusChecked {
+		t.Fatalf("qc_status = %q, want checked", item.QCStatus)
+	}
+}
+
 func TestVoidSubmissionItemRequiresUnsettledAndRefreshesTotals(t *testing.T) {
 	batchID := int64(123)
 	workbenchRepo := &itemActionRepo{items: map[int64]*domain.AssetWorkbenchSubmissionItem{
@@ -2773,8 +2947,38 @@ func TestBatchDeleteFilesSplitsSuccessAndFailureAndWritesEvents(t *testing.T) {
 	if len(workbenchRepo.refreshed) != 1 || workbenchRepo.refreshed[0] != 9001 {
 		t.Fatalf("refreshed = %+v, want [9001]", workbenchRepo.refreshed)
 	}
-	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventFileDeleted {
+	if len(workbenchRepo.events) != 2 ||
+		workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventFileDeleted ||
+		workbenchRepo.events[1].EventType != domain.AssetWorkbenchEventItemVoided {
 		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestBatchDeleteFilesRollsBackFileDeleteWhenItemReconcileFails(t *testing.T) {
+	workbenchRepo := &batchFileMutationRepo{
+		files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+			501: {ID: 501, SubmissionID: 9001, SubmissionItemID: 8001, OwnerUserID: 99, ObjectKey: "asset-workbench/uploads/a.psd"},
+		},
+		failVoid: true,
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, rollbackBatchFileTxRunner{repo: workbenchRepo}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}}
+
+	result, appErr := svc.BatchDeleteFiles(context.Background(), actor, BatchDeleteFilesParams{
+		FileIDs: []int64{501},
+		Reason:  "重复文件",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchDeleteFiles() appErr = %+v", appErr)
+	}
+	if len(result.Deleted) != 0 || len(result.Failures) != 1 || result.Failures[0].FileID != 501 {
+		t.Fatalf("result = %+v, want one per-file failure and no deleted ids", result)
+	}
+	if workbenchRepo.files[501] == nil {
+		t.Fatalf("file 501 should remain when item reconcile fails")
+	}
+	if len(workbenchRepo.deletedFiles) != 0 || len(workbenchRepo.refreshed) != 0 || len(workbenchRepo.events) != 0 {
+		t.Fatalf("write side effects should roll back: deleted=%+v refreshed=%+v events=%+v", workbenchRepo.deletedFiles, workbenchRepo.refreshed, workbenchRepo.events)
 	}
 }
 
@@ -2920,6 +3124,37 @@ func TestBuildSubmissionItemFreezesGrossOnly(t *testing.T) {
 	}
 	if _, exists := snapshot["deduction_amount"]; exists {
 		t.Fatalf("submission pricing snapshot must not freeze deduction_amount: %#v", snapshot)
+	}
+}
+
+func TestBuildSubmissionItemGeneratesInternalOrderNoWhenOmitted(t *testing.T) {
+	submittedAt := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &priceOnlyRepo{price: &domain.AssetWorkbenchPriceMatrix{
+		ID:              42,
+		WorkerType:      domain.AssetWorkbenchWorkerTypeFulltime,
+		JobGrade:        "P1",
+		DifficultyClass: "A",
+		UnitPrice:       12.5,
+		EffectiveFrom:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+	}}
+
+	item, appErr := svc.buildSubmissionItem(context.Background(), 1001, 2002, submittedAt, "2026-06", &domain.AssetWorkbenchProfile{
+		UserID:     1001,
+		WorkerType: domain.AssetWorkbenchWorkerTypeFulltime,
+		JobGrade:   "P1",
+	}, CreateSubmissionItemParams{
+		DifficultyClass: "A",
+		PageCount:       1,
+	})
+	if appErr != nil {
+		t.Fatalf("buildSubmissionItem returned app error: %v", appErr)
+	}
+	if !strings.HasPrefix(item.OrderNo, "AWF20260625103000") {
+		t.Fatalf("generated order no = %q, want AWF timestamp prefix", item.OrderNo)
+	}
+	if item.GrossAmount != 12.5 {
+		t.Fatalf("gross amount = %v, want 12.5", item.GrossAmount)
 	}
 }
 
@@ -3491,5 +3726,27 @@ func TestParseErrorRecordsExcelDefaultsFormalTemplateErrorCountToOne(t *testing.
 	}
 	if len(records) != 1 || records[0].ErrorCount != 1 || records[0].OrderNo != "" || records[0].DifficultyClass != "C类" || records[0].PayeeName != "张三" {
 		t.Fatalf("records = %+v, want one formal row defaulting to one error", records)
+	}
+}
+
+func TestParseErrorRecordsExcelSupportsFormalTemplateWithoutOrderColumn(t *testing.T) {
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(f.GetActiveSheetIndex())
+	if err := f.SetSheetRow(sheet, "A1", &[]interface{}{"日期", "分类", "出错人", "问题描述"}); err != nil {
+		t.Fatalf("set header row: %v", err)
+	}
+	if err := f.SetSheetRow(sheet, "A2", &[]interface{}{"2026-07-01", "B类", "李四", "文件尺寸不对"}); err != nil {
+		t.Fatalf("set data row: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	records, appErr := parseErrorRecordsExcel(bytes.NewReader(buf.Bytes()))
+	if appErr != nil {
+		t.Fatalf("parseErrorRecordsExcel appErr = %v", appErr)
+	}
+	if len(records) != 1 || records[0].OrderNo != "" || records[0].DifficultyClass != "B类" || records[0].PayeeName != "李四" {
+		t.Fatalf("records = %+v, want one quality row without order_no", records)
 	}
 }

@@ -11,13 +11,13 @@ import { formatFileSize, formatInt } from '@aw/shared/format/number'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
+import { parseApiErrorPayload } from '@/utils/api-message-zh'
 
 type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
 
 interface QueueItem {
   id: string
   file: File
-  orderNo: string
   difficultyClass: string
   finalized: boolean
   pageCount: number
@@ -54,6 +54,7 @@ const lastUploadResult = ref<UploadBatchResult | null>(null)
 const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
 const draggingFiles = ref(false)
+const pageBusinessMonth = currentBusinessMonth()
 const previewDialog = ref<{
   open: boolean
   title: string
@@ -205,7 +206,6 @@ function enqueueFiles(files: FileList | null | undefined) {
     queue.value.push({
       id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
       file,
-      orderNo: filenameWithoutExt(file.name),
       difficultyClass: selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value),
       finalized: true,
       pageCount: 1,
@@ -238,6 +238,7 @@ async function uploadQueuedItems() {
     try {
       const uploaded = await uploadWorkbenchFile(item.file, {
         uploadDirectoryId,
+        expectedBusinessMonth: pageBusinessMonth,
         onProgress: (progress) => {
           item.progress = progress.percent
         },
@@ -283,8 +284,9 @@ async function createSubmission() {
   try {
     const detail = await assetWorkbenchApi.createSubmission({
       notes: '',
+      expected_business_month: pageBusinessMonth,
+      month_rollover_ack: false,
       items: uploadedItems.value.map((item) => ({
-        order_no: item.orderNo,
         difficulty_class: item.difficultyClass || selectedUploadDirectory.value?.difficulty_class || undefined,
         finalized: item.finalized,
         page_count: item.pageCount,
@@ -299,10 +301,18 @@ async function createSubmission() {
       : `提交记录已生成：${formatInt(submittedFiles.value.length)} 个文件，可在查改作品里查看。`
     queue.value = queue.value.filter((item) => item.status !== 'uploaded')
   } catch (err) {
-    error.value = err instanceof Error ? `上传已完成，但提交失败：${err.message}` : '上传已完成，但提交失败'
+    error.value = submissionErrorMessage(err)
   } finally {
     submitting.value = false
   }
+}
+
+function submissionErrorMessage(err: unknown) {
+  const parsed = parseApiErrorPayload(err)
+  if (parsed.code === 'MONTH_ROLLOVER_REQUIRED') {
+    return '上传已完成，但当前已跨入新的结算月份。请刷新页面后重新确认提交，避免计入错误账期。'
+  }
+  return err instanceof Error ? `上传已完成，但提交失败：${err.message}` : '上传已完成，但提交失败'
 }
 
 async function submitSimple() {
@@ -405,9 +415,15 @@ function closeFilePreview() {
   previewDialog.value.open = false
 }
 
-function filenameWithoutExt(filename: string) {
-  const dot = filename.lastIndexOf('.')
-  return dot > 0 ? filename.slice(0, dot) : filename
+function currentBusinessMonth() {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date())
+  const year = parts.find((part) => part.type === 'year')?.value || new Date().getFullYear().toString()
+  const month = parts.find((part) => part.type === 'month')?.value || String(new Date().getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
 }
 
 async function loadContext() {
@@ -430,7 +446,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">{{ isSimpleUser ? '交作品' : '成品交付' }}</p>
         <h2>{{ isSimpleUser ? '把做好的文件交上来' : '成品上传中心' }}</h2>
-        <p>{{ isSimpleUser ? '先选上传目录，再拖入文件。点一次提交，系统会自动处理。' : '批量拖拽文件，提交前校正订单号、难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
+        <p>{{ isSimpleUser ? '先选上传目录，再拖入文件。点一次提交，系统会自动处理。' : '批量拖拽文件，提交前校正难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
@@ -548,10 +564,6 @@ onMounted(() => {
           </div>
           <div v-if="expandedItemIds.has(item.id)" class="aw-simple-upload-item__details">
             <label class="aw-field">
-              <span>文件名识别</span>
-              <input v-model="item.orderNo" aria-label="文件名识别" />
-            </label>
-            <label class="aw-field">
               <span>张数</span>
               <input v-model.number="item.pageCount" aria-label="张数" min="1" type="number" />
             </label>
@@ -565,10 +577,7 @@ onMounted(() => {
       </div>
       <div v-else-if="queue.length" class="aw-upload-list">
         <div v-for="item in queue" :key="item.id" class="aw-upload-row">
-          <label class="aw-field aw-upload-row__order">
-            <span>订单号</span>
-            <input v-model="item.orderNo" aria-label="订单号" />
-          </label>
+          <span class="aw-cell-text">{{ item.file.name }}</span>
           <select v-model="item.difficultyClass" aria-label="难度类">
             <option v-for="option in difficultyOptions" :key="option" :value="option">{{ option }}</option>
           </select>

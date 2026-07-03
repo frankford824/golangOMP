@@ -1893,6 +1893,29 @@ func (h *AssetWorkbenchHandler) ListClientMaterials(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) SearchClientMaterials(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	admin := c.Query("admin") == "1" || strings.EqualFold(c.Query("admin"), "true") || strings.EqualFold(c.Query("scope"), "admin")
+	result, appErr := h.svc.SearchClientMaterials(c.Request.Context(), actor, assetworkbench.ClientMaterialSearchParams{
+		Query:    c.Query("q"),
+		SKU:      c.Query("sku"),
+		Creator:  c.Query("creator"),
+		Admin:    admin,
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) CreateClientMaterial(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -1998,6 +2021,41 @@ func (h *AssetWorkbenchHandler) BatchDownloadClientMaterials(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.ClientMaterialBatchDownloadManifest(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) MaterialGroups(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	result, appErr := h.svc.MaterialGroups(c.Request.Context(), actor, assetworkbench.MaterialGroupSearchParams{
+		Query:    c.Query("q"),
+		Source:   c.Query("source"),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) MaterialGroupFiles(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	result, appErr := h.svc.MaterialGroupFiles(c.Request.Context(), actor, c.Query("group_key"), page, pageSize)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

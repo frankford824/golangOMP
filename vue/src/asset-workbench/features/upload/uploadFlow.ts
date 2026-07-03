@@ -23,6 +23,10 @@ export async function uploadWorkbenchFile(
     signal?: AbortSignal
     onProgress?: (progress: WorkbenchUploadProgress) => void
     uploadDirectoryId?: number
+    uploadBatchId?: string
+    relativePath?: string
+    isFolderUpload?: boolean
+    expectedBusinessMonth?: string
   } = {},
 ): Promise<UploadedWorkbenchFile> {
   const fileHash = await computeWorkbenchFileHash(file)
@@ -33,6 +37,10 @@ export async function uploadWorkbenchFile(
       mime_type: file.type || 'application/octet-stream',
       file_hash: fileHash,
       upload_directory_id: options.uploadDirectoryId,
+      upload_batch_id: options.uploadBatchId,
+      relative_path: options.relativePath,
+      is_folder_upload: options.isFolderUpload,
+      expected_business_month: options.expectedBusinessMonth,
     },
     options.signal,
   )

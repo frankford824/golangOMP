@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `179` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `185` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -10882,7 +10882,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/orders \
 ### 简介
 支持方法: GET。
 
-- `GET`: Lists files under a drive directory and order folder. Non-manager users are scoped to their own uploads.
+- `GET`: Lists files under a drive directory ordered by upload time. `order_no` is optional legacy/internal trace filtering; normal asset-workbench clients should browse by directory. Non-manager users are scoped to their own uploads.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -10937,6 +10937,74 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/orders \
 ### curl 示例
 ```bash
 curl -X GET https://api.example.com/v1/asset-workbench/drive/files \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/drive/folder
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns immediate child folders derived from uploaded relative_path values plus direct files under the requested virtual folder. Non-manager users are scoped to their own uploads.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `dir_id` | query | integer | 否 | - |
+| `unassigned` | query | boolean | 否 | - |
+| `path` | query | string | 否 | Relative virtual folder path inside the selected upload directory. |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "path": "string",
+    "folders": [
+      "..."
+    ],
+    "files": [
+      "..."
+    ],
+    "total": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/drive/folder \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -11024,7 +11092,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/search \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns one drive file row for reveal-in-folder behavior. Non-manager users are scoped to their own uploads.
+- `GET`: Returns one drive file row with locate_page metadata for reveal-in-folder behavior. Non-manager users are scoped to their own uploads.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -11164,6 +11232,9 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `notes` | string | 否 | - |
+| `expected_business_month` | string | 否 | Business month displayed to the client when the upload page was rendered. If it differs from server current month, backend returns MONTH_ROLLOVER_REQUIRED unless acknowledged. |
+| `month_rollover_ack` | boolean | 否 | Explicit confirmation that a cross-month submission should count to the current server business month. |
+| `business_month_override` | string | 否 | Manager-only manual backfill month. Rejected when the target month already has a non-cancelled settlement batch. |
 | `items` | array<object> | 是 | - |
 
 ##### 响应体 schema
@@ -11554,6 +11625,130 @@ curl -X POST https://api.example.com/v1/asset-workbench/error-imports/excel \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## GET /v1/asset-workbench/files/{file_id}/preview
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns preview metadata for one uploaded work file. Submitters can access only their own files; managers and settlement roles can access visible workbench files.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `file_id` | path | integer | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "file_id": 123,
+    "status": "pending",
+    "preparing": true,
+    "preview_url": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | File not found |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/files/<file_id>/preview \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/files/{file_id}/download
+
+### 简介
+支持方法: GET。
+
+- `GET`: Get uploaded work file download info
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `file_id` | path | integer | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "file_id": 123,
+    "filename": "string",
+    "mime_type": "string",
+    "file_size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | File not found |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/files/<file_id>/download \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## POST /v1/asset-workbench/files/batch-move
 
 ### 简介
@@ -11632,11 +11827,11 @@ curl -X POST https://api.example.com/v1/asset-workbench/files/batch-move \
 ### 简介
 支持方法: POST。
 
-- `POST`: Manager-only file maintenance operation. Deletes file rows from unsettled submissions, refreshes submission totals, records events, and best-effort removes stored objects and previews.
+- `POST`: Soft-deletes unsettled files, refreshes submission totals, and reprices or voids the related item. Submitters may delete only their own files; managers may delete any unlocked file.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: AssetManager, SuperAdmin。
+- `POST` 允许角色: AssetSubmitter, AssetManager, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -11752,6 +11947,136 @@ curl -X POST https://api.example.com/v1/asset-workbench/files/batch-delete \
 ### curl 示例
 ```bash
 curl -X GET https://api.example.com/v1/asset-workbench/system-search \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/materials/groups
+
+### 简介
+支持方法: GET。
+
+- `GET`: Groups materials by SKU namespace or external directory fallback. Group keys are namespaced, for example `sku:ABC123`, `ext-sku:ABC123`, `ext-dir:/p3/path`, or `system-asset:123`.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetManager, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `q` | query | string | 否 | - |
+| `source` | query | enum(all/system/external) | 否 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ],
+    "total": 123,
+    "page": 123,
+    "size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/materials/groups \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/materials/group-files
+
+### 简介
+支持方法: GET。
+
+- `GET`: List files inside one material group
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetManager, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `group_key` | query | string | 是 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "group_key": "string",
+    "items": [
+      "..."
+    ],
+    "total": 123,
+    "page": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/materials/group-files \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -12062,6 +12387,10 @@ Content-Type: `application/json`
 | `mime_type` | string | 是 | - |
 | `file_hash` | string | 否 | - |
 | `upload_directory_id` | integer | 否 | - |
+| `upload_batch_id` | string | 否 | - |
+| `relative_path` | string | 否 | Browser folder-upload path such as folder/sub/file.jpg. Backend normalizes and rejects unsafe segments. |
+| `is_folder_upload` | boolean | 否 | - |
+| `expected_business_month` | string | 否 | - |
 
 ### 响应体 schema
 成功响应: `201 application/json`
@@ -12535,6 +12864,73 @@ curl -X POST https://api.example.com/v1/asset-workbench/client-materials \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/client-materials/search
+
+### 简介
+支持方法: GET。
+
+- `GET`: Paginated search over materials published to clients. Non-manager users only receive enabled materials.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSubmitter, AssetManager, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `q` | query | string | 否 | - |
+| `sku` | query | string | 否 | - |
+| `creator` | query | string | 否 | - |
+| `admin` | query | boolean | 否 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ],
+    "total": 123,
+    "page": 123,
+    "size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/client-materials/search \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践

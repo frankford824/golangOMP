@@ -517,7 +517,11 @@ export interface FilePreviewMeta {
   status: string
   preparing: boolean
   preview_url?: string
+  download_url?: string
   expires_at?: string
+  mime_type?: string
+  filename?: string
+  preview_available?: boolean
   error?: string
 }
 
@@ -747,6 +751,38 @@ export interface ClientMaterialRow {
   updated_at?: string
 }
 
+export interface ClientMaterialSearchResult {
+  items: ClientMaterialRow[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface MaterialGroupRow {
+  group_key: string
+  group_code: string
+  group_type: string
+  title: string
+  source_type: string
+  file_total: number
+  preview_files?: SystemAssetRow[]
+}
+
+export interface MaterialGroupSearchResult {
+  items: MaterialGroupRow[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface MaterialGroupFilesResult {
+  group_key: string
+  items: SystemAssetRow[]
+  total: number
+  page: number
+  size: number
+}
+
 export interface DriveDirectoryRow {
   directory_id?: number | null
   name: string
@@ -779,6 +815,10 @@ export interface DriveFileRow {
   difficulty_class?: string
   order_no: string
   original_filename: string
+  display_name?: string
+  relative_path?: string
+  upload_batch_id?: string
+  is_folder_upload?: boolean
   file_type: string
   mime_type: string
   file_size: number
@@ -789,6 +829,26 @@ export interface DriveFileRow {
   page_count?: number
   business_month: string
   created_at: string
+  locate_page?: number
+  locate_page_size?: number
+}
+
+export interface DriveFolderRow {
+  name: string
+  path: string
+  file_count: number
+  direct_file_count: number
+  latest_at?: string
+}
+
+export interface DriveFolderBrowseResult {
+  path: string
+  folders: DriveFolderRow[]
+  files: DriveFileRow[]
+  total: number
+  page: number
+  size: number
+  truncated?: boolean
 }
 
 export interface PaginatedResult<T> {
@@ -802,6 +862,10 @@ export interface CreateUploadSessionPayload {
   mime_type: string
   file_hash?: string
   upload_directory_id?: number
+  upload_batch_id?: string
+  relative_path?: string
+  is_folder_upload?: boolean
+  expected_business_month?: string
 }
 
 export interface UploadSessionRow {
@@ -813,6 +877,10 @@ export interface UploadSessionRow {
   upload_directory_name?: string
   upload_directory_prefix?: string
   upload_directory_difficulty_class?: string
+  upload_batch_id?: string
+  relative_path?: string
+  is_folder_upload?: boolean
+  expected_business_month?: string
   original_filename: string
   file_size: number
   mime_type: string
@@ -850,8 +918,11 @@ export interface CompleteUploadSessionPayload {
 
 export interface CreateSubmissionPayload {
   notes?: string
+  expected_business_month?: string
+  month_rollover_ack?: boolean
+  business_month_override?: string
   items: Array<{
-    order_no: string
+    order_no?: string
     difficulty_class?: string
     finalized: boolean
     page_count: number
@@ -1501,16 +1572,31 @@ export const assetWorkbenchApi = {
   },
 
   async driveFiles(
-    params: { dir_id?: number; unassigned?: boolean; order_no: string; page?: number; page_size?: number },
+    params: { dir_id?: number; unassigned?: boolean; order_no?: string; page?: number; page_size?: number },
     signal?: AbortSignal,
   ): Promise<PaginatedResult<DriveFileRow>> {
-    const query: Record<string, unknown> = { order_no: params.order_no }
+    const query: Record<string, unknown> = {}
+    if (params.order_no) query.order_no = params.order_no
     if (params.unassigned) query.unassigned = 1
     else if (params.dir_id) query.dir_id = params.dir_id
     if (params.page) query.page = params.page
     if (params.page_size) query.page_size = params.page_size
     const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/files', { params: query, signal })
     return unwrapPaginated(res.data)
+  },
+
+  async driveFolder(
+    params: { dir_id?: number; unassigned?: boolean; path?: string; page?: number; page_size?: number },
+    signal?: AbortSignal,
+  ): Promise<DriveFolderBrowseResult> {
+    const query: Record<string, unknown> = {}
+    if (params.unassigned) query.unassigned = 1
+    else if (params.dir_id) query.dir_id = params.dir_id
+    if (params.path) query.path = params.path
+    if (params.page) query.page = params.page
+    if (params.page_size) query.page_size = params.page_size
+    const res = await http.get<ApiEnvelope<DriveFolderBrowseResult>>('/v1/asset-workbench/drive/folder', { params: query, signal })
+    return unwrap(res.data)
   },
 
   async driveSearch(params: { q: string; page?: number; page_size?: number }, signal?: AbortSignal): Promise<PaginatedResult<DriveFileRow>> {
@@ -1549,6 +1635,14 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async searchClientMaterials(params: { q?: string; sku?: string; creator?: string; admin?: boolean; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<ClientMaterialSearchResult> {
+    const res = await http.get<ApiEnvelope<ClientMaterialSearchResult>>('/v1/asset-workbench/client-materials/search', {
+      params: { ...params, admin: params.admin ? 1 : undefined },
+      signal,
+    })
+    return unwrap(res.data)
+  },
+
   async createClientMaterial(payload: UpsertClientMaterialPayload, signal?: AbortSignal): Promise<ClientMaterialRow> {
     const res = await http.post<ApiEnvelope<ClientMaterialRow>>('/v1/asset-workbench/client-materials', payload, { signal })
     return unwrap(res.data)
@@ -1579,6 +1673,16 @@ export const assetWorkbenchApi = {
       material_ids: materialIds,
       naming_mode: namingMode,
     }, { signal })
+    return unwrap(res.data)
+  },
+
+  async materialGroups(params: { q?: string; source?: 'all' | 'system' | 'external'; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialGroupSearchResult> {
+    const res = await http.get<ApiEnvelope<MaterialGroupSearchResult>>('/v1/asset-workbench/materials/groups', { params, signal })
+    return unwrap(res.data)
+  },
+
+  async materialGroupFiles(params: { group_key: string; page?: number; page_size?: number }, signal?: AbortSignal): Promise<MaterialGroupFilesResult> {
+    const res = await http.get<ApiEnvelope<MaterialGroupFilesResult>>('/v1/asset-workbench/materials/group-files', { params, signal })
     return unwrap(res.data)
   },
 

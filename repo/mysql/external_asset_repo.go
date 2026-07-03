@@ -45,10 +45,18 @@ func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAss
 	query = query.Normalized()
 	where, args, orderBy := buildExternalAssetWhere(query)
 	var total int64
+	usedFallback := false
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count external assets: %w", err)
+		if strings.TrimSpace(query.Keyword) == "" || !isMySQLFullTextIndexMissing(err) {
+			return nil, 0, fmt.Errorf("count external assets: %w", err)
+		}
+		where, args, orderBy = buildExternalAssetLikeWhere(query)
+		usedFallback = true
+		if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("count external assets fallback: %w", err)
+		}
 	}
-	if total == 0 && strings.TrimSpace(query.Keyword) != "" && externalAssetBooleanQuery(query.Keyword) != "" {
+	if !usedFallback && total == 0 && strings.TrimSpace(query.Keyword) != "" && externalAssetBooleanQuery(query.Keyword) != "" {
 		where, args, orderBy = buildExternalAssetLikeWhere(query)
 		if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
 			return nil, 0, fmt.Errorf("count external assets fallback: %w", err)

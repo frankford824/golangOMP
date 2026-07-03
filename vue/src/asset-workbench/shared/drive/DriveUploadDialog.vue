@@ -14,7 +14,6 @@ const props = defineProps<{
   directoryId?: number
   directoryName: string
   difficultyClass?: string
-  defaultOrderNo?: string
   initialFiles?: File[]
   allowedFileTypes?: string[]
 }>()
@@ -25,8 +24,8 @@ const emit = defineEmits<{
 }>()
 
 const queue = ref<DriveUploadQueueItem[]>([])
-const orderNo = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
+const folderInputRef = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const busy = ref(false)
 const error = ref('')
@@ -49,7 +48,6 @@ watch(
   (open) => {
     if (open) {
       queue.value = createDriveUploadQueue(filterAllowedFiles(props.initialFiles ?? []))
-      orderNo.value = (props.defaultOrderNo ?? '').trim()
       error.value = ''
       busy.value = false
     }
@@ -57,24 +55,13 @@ watch(
   { immediate: true },
 )
 
-watch(
-  () => props.defaultOrderNo,
-  (value) => {
-    if (props.open && !orderNo.value.trim()) {
-      orderNo.value = (value ?? '').trim()
-    }
-  },
-)
-
 const targetLabel = computed(() => {
   const dir = props.directoryName || '未分类'
-  const order = orderNo.value.trim()
-  return order ? `${dir} / ${order}` : dir
+  return dir
 })
 
 const canUpload = computed(() => {
   if (busy.value) return false
-  if (!orderNo.value.trim()) return false
   return queue.value.some((item) => item.status === 'queued' || item.status === 'failed')
 })
 
@@ -82,7 +69,17 @@ function openPicker() {
   inputRef.value?.click()
 }
 
+function openFolderPicker() {
+  folderInputRef.value?.click()
+}
+
 function handleInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  enqueue(target.files)
+  target.value = ''
+}
+
+function handleFolderInput(event: Event) {
   const target = event.target as HTMLInputElement
   enqueue(target.files)
   target.value = ''
@@ -130,10 +127,8 @@ async function runUpload() {
   if (!canUpload.value) return
   busy.value = true
   error.value = ''
-  const order = orderNo.value.trim()
   try {
     const uploadedCount = await uploadDriveQueue(queue.value, {
-      orderNo: order,
       directoryId: props.directoryId,
       difficultyClass: props.difficultyClass,
       onItemChange: () => {
@@ -183,25 +178,32 @@ function statusIcon(status: DriveUploadQueueStatus) {
           @keydown.space.prevent="openPicker"
         >
           <FileUp :size="28" aria-hidden="true" />
-          <strong>拖拽图片到此处</strong>
-          <span>或点击选择文件，上传后自动归档到该订单 · 允许：{{ allowedLabel }}</span>
+          <strong>拖拽文件或文件夹到此处</strong>
+          <span>上传后自动归档到该目录 · 允许：{{ allowedLabel }}</span>
           <div class="aw-dropzone__actions">
             <button class="aw-secondary-button" type="button" @click="openPicker">选择文件</button>
+            <button class="aw-secondary-button" type="button" @click="openFolderPicker">选择文件夹</button>
           </div>
         </div>
 
         <input ref="inputRef" class="aw-visually-hidden" type="file" multiple :accept="acceptString" aria-label="选择上传文件" @change="handleInput" />
-
-        <label class="aw-field aw-drive-upload__order">
-          <span>订单号（默认=当前）</span>
-          <input v-model="orderNo" placeholder="输入订单号" aria-label="订单号" />
-        </label>
+        <input
+          ref="folderInputRef"
+          class="aw-visually-hidden"
+          type="file"
+          multiple
+          webkitdirectory
+          directory
+          :accept="acceptString"
+          aria-label="选择上传文件夹"
+          @change="handleFolderInput"
+        />
 
         <div v-if="queue.length" class="aw-drive-upload__queue">
           <article v-for="item in queue" :key="item.id" class="aw-drive-upload__row">
             <component :is="statusIcon(item.status)" :size="18" aria-hidden="true" />
             <div class="aw-drive-upload__row-body">
-              <strong>{{ item.file.name }}</strong>
+              <strong>{{ item.relativePath || item.file.name }}</strong>
               <span v-if="item.status === 'uploading'" class="aw-upload-progress"><span :style="{ width: `${item.progress}%` }" /></span>
               <small v-else-if="item.error" class="aw-upload-row__error">{{ item.error }}</small>
               <small v-else-if="item.status === 'uploaded'">已完成</small>

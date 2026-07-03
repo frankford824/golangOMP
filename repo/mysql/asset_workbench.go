@@ -1607,15 +1607,20 @@ func (r *assetWorkbenchRepo) CreateUploadSession(ctx context.Context, tx repo.Tx
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_upload_sessions (
 			session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
+			upload_batch_id, relative_path, is_folder_upload, expected_business_month,
 			status, object_key, original_filename, file_size, mime_type,
 			file_hash, upload_id, multipart_plan_json, expires_at, uploaded_at, cancelled_at, submitted_item_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.SessionID,
 		session.OwnerUserID,
 		toNullInt64(session.UploadDirectoryID),
 		session.UploadDirectoryName,
 		session.UploadDirectoryPrefix,
 		session.UploadDirectoryDifficultyClass,
+		session.UploadBatchID,
+		session.RelativePath,
+		session.IsFolderUpload,
+		session.ExpectedBusinessMonth,
 		session.Status,
 		session.ObjectKey,
 		session.OriginalFilename,
@@ -1973,9 +1978,10 @@ func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.T
 		INSERT INTO asset_workbench_submission_files (
 			submission_id, submission_item_id, upload_session_id, owner_user_id,
 			upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
+			upload_batch_id, relative_path, display_name, is_folder_upload,
 			object_key, preview_key,
 			preview_status, original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		file.SubmissionID,
 		file.SubmissionItemID,
 		toNullInt64(file.UploadSessionID),
@@ -1984,6 +1990,10 @@ func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.T
 		file.UploadDirectoryName,
 		file.UploadDirectoryPrefix,
 		file.UploadDirectoryDifficultyClass,
+		file.UploadBatchID,
+		file.RelativePath,
+		firstNonEmpty(file.DisplayName, file.OriginalFilename),
+		file.IsFolderUpload,
 		file.ObjectKey,
 		file.PreviewKey,
 		file.PreviewStatus,
@@ -2009,10 +2019,10 @@ func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.T
 func (r *assetWorkbenchRepo) RefreshSubmissionTotals(ctx context.Context, tx repo.Tx, submissionID int64) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_submissions s
-		SET item_count = (SELECT COUNT(*) FROM asset_workbench_submission_items i WHERE i.submission_id = s.id),
-		    file_count = (SELECT COUNT(*) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id),
-		    page_count = COALESCE((SELECT SUM(i.page_count) FROM asset_workbench_submission_items i WHERE i.submission_id = s.id), 0),
-		    gross_total = COALESCE((SELECT SUM(i.gross_amount) FROM asset_workbench_submission_items i WHERE i.submission_id = s.id), 0),
+		SET item_count = (SELECT COUNT(*) FROM asset_workbench_submission_items i WHERE i.submission_id = s.id AND i.voided_at IS NULL),
+		    file_count = (SELECT COUNT(*) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id AND f.deleted_at IS NULL),
+		    page_count = COALESCE((SELECT SUM(i.page_count) FROM asset_workbench_submission_items i WHERE i.submission_id = s.id AND i.voided_at IS NULL), 0),
+		    gross_total = COALESCE((SELECT SUM(i.gross_amount) FROM asset_workbench_submission_items i WHERE i.submission_id = s.id AND i.voided_at IS NULL), 0),
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE s.id = ?`, submissionID)
 	if err != nil {
@@ -2076,8 +2086,22 @@ func (r *assetWorkbenchRepo) ListSubmissions(ctx context.Context, filter repo.As
 func (r *assetWorkbenchRepo) SearchOverviewRows(ctx context.Context, filter repo.AssetWorkbenchOverviewSearchFilter) ([]*domain.AssetWorkbenchOverviewRow, int64, error) {
 	query, args := buildAssetWorkbenchOverviewQuery(filter)
 	var total int64
+	usedFallback := false
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+query+`) aw_overview_count`, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count asset workbench overview rows: %w", err)
+		if strings.TrimSpace(filter.Keyword) == "" || !isMySQLFullTextIndexMissing(err) {
+			return nil, 0, fmt.Errorf("count asset workbench overview rows: %w", err)
+		}
+		query, args = buildAssetWorkbenchOverviewQueryWithMode(filter, false)
+		usedFallback = true
+		if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+query+`) aw_overview_count`, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("count asset workbench overview rows fallback: %w", err)
+		}
+	}
+	if !usedFallback && total == 0 && strings.TrimSpace(filter.Keyword) != "" && externalAssetBooleanQuery(filter.Keyword) != "" {
+		query, args = buildAssetWorkbenchOverviewQueryWithMode(filter, false)
+		if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+query+`) aw_overview_count`, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("count asset workbench overview rows fallback: %w", err)
+		}
 	}
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	rows, err := r.db.db.QueryContext(ctx, `SELECT source, id, title, primary_code, secondary_code, order_no,
@@ -2102,6 +2126,10 @@ func (r *assetWorkbenchRepo) SearchOverviewRows(ctx context.Context, filter repo
 }
 
 func buildAssetWorkbenchOverviewQuery(filter repo.AssetWorkbenchOverviewSearchFilter) (string, []interface{}) {
+	return buildAssetWorkbenchOverviewQueryWithMode(filter, true)
+}
+
+func buildAssetWorkbenchOverviewQueryWithMode(filter repo.AssetWorkbenchOverviewSearchFilter, preferFullText bool) (string, []interface{}) {
 	includeSubmissions := filter.Submissions
 	includeItems := filter.Items
 	includeFiles := filter.Files
@@ -2113,17 +2141,17 @@ func buildAssetWorkbenchOverviewQuery(filter repo.AssetWorkbenchOverviewSearchFi
 	queries := []string{}
 	args := []interface{}{}
 	if includeSubmissions {
-		submissionWhere, submissionArgs := buildAssetWorkbenchOverviewSubmissionWhere(filter)
+		submissionWhere, submissionArgs := buildAssetWorkbenchOverviewSubmissionWhere(filter, preferFullText)
 		queries = append(queries, assetWorkbenchOverviewSubmissionSelect()+` WHERE `+strings.Join(submissionWhere, " AND "))
 		args = append(args, submissionArgs...)
 	}
 	if includeItems {
-		itemWhere, itemArgs := buildAssetWorkbenchOverviewItemWhere(filter)
+		itemWhere, itemArgs := buildAssetWorkbenchOverviewItemWhere(filter, preferFullText)
 		queries = append(queries, assetWorkbenchOverviewItemSelect()+` WHERE `+strings.Join(itemWhere, " AND "))
 		args = append(args, itemArgs...)
 	}
 	if includeFiles {
-		fileWhere, fileArgs := buildAssetWorkbenchOverviewFileWhere(filter)
+		fileWhere, fileArgs := buildAssetWorkbenchOverviewFileWhere(filter, preferFullText)
 		queries = append(queries, assetWorkbenchOverviewFileSelect()+` WHERE `+strings.Join(fileWhere, " AND "))
 		args = append(args, fileArgs...)
 	}
@@ -2135,17 +2163,32 @@ func buildAssetWorkbenchOverviewQuery(filter repo.AssetWorkbenchOverviewSearchFi
 		`), args
 }
 
-func buildAssetWorkbenchOverviewSubmissionWhere(filter repo.AssetWorkbenchOverviewSearchFilter) ([]string, []interface{}) {
+func buildAssetWorkbenchOverviewSubmissionWhere(filter repo.AssetWorkbenchOverviewSearchFilter, preferFullText bool) ([]string, []interface{}) {
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		like := "%" + keyword + "%"
-		where = append(where, `(s.submission_no LIKE ? OR s.notes LIKE ? OR `+assetWorkbenchOverviewCreatorName("s.submitter_user_id")+` LIKE ? OR EXISTS (
+		if fullText := externalAssetBooleanQuery(keyword); preferFullText && fullText != "" {
+			like := "%" + keyword + "%"
+			where = append(where, `(s.id IN (
+			SELECT s2.id FROM asset_workbench_submissions s2 WHERE `+assetWorkbenchSubmissionFullTextMatchFor("s2")+`
+		) OR `+assetWorkbenchOverviewCreatorName("s.submitter_user_id")+` LIKE ? OR s.id IN (
+			SELECT i2.submission_id FROM asset_workbench_submission_items i2 WHERE `+assetWorkbenchItemFullTextMatchFor("i2")+`
+		) OR s.id IN (
+			SELECT f2.submission_id
+			FROM asset_workbench_submission_files f2
+			JOIN asset_workbench_submission_items i3 ON i3.id = f2.submission_item_id AND i3.voided_at IS NULL
+			WHERE f2.deleted_at IS NULL AND `+assetWorkbenchFileFullTextMatchFor("f2")+`
+		))`)
+			args = append(args, fullText, like, fullText, fullText)
+		} else {
+			like := "%" + keyword + "%"
+			where = append(where, `(s.submission_no LIKE ? OR s.notes LIKE ? OR `+assetWorkbenchOverviewCreatorName("s.submitter_user_id")+` LIKE ? OR EXISTS (
 			SELECT 1 FROM asset_workbench_submission_items i WHERE i.submission_id = s.id AND i.order_no LIKE ?
 		) OR EXISTS (
-			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_id = s.id AND (f.original_filename LIKE ? OR f.file_type LIKE ?)
+			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_id = s.id AND f.deleted_at IS NULL AND (f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR f.file_type LIKE ?)
 		))`)
-		args = append(args, like, like, like, like, like, like)
+			args = append(args, like, like, like, like, like, like, like, like)
+		}
 	}
 	if creator := strings.TrimSpace(filter.Creator); creator != "" {
 		like := "%" + creator + "%"
@@ -2167,15 +2210,27 @@ func buildAssetWorkbenchOverviewSubmissionWhere(filter repo.AssetWorkbenchOvervi
 	return where, args
 }
 
-func buildAssetWorkbenchOverviewItemWhere(filter repo.AssetWorkbenchOverviewSearchFilter) ([]string, []interface{}) {
+func buildAssetWorkbenchOverviewItemWhere(filter repo.AssetWorkbenchOverviewSearchFilter, preferFullText bool) ([]string, []interface{}) {
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		like := "%" + keyword + "%"
-		where = append(where, `(i.order_no LIKE ? OR i.template_name_snapshot LIKE ? OR i.category_snapshot LIKE ? OR i.difficulty_class LIKE ? OR s.submission_no LIKE ? OR `+assetWorkbenchOverviewCreatorName("i.payee_user_id")+` LIKE ? OR EXISTS (
-			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_item_id = i.id AND (f.original_filename LIKE ? OR f.file_type LIKE ?)
+		if fullText := externalAssetBooleanQuery(keyword); preferFullText && fullText != "" {
+			like := "%" + keyword + "%"
+			where = append(where, `(i.id IN (
+			SELECT i2.id FROM asset_workbench_submission_items i2 WHERE `+assetWorkbenchItemFullTextMatchFor("i2")+`
+		) OR i.submission_id IN (
+			SELECT s2.id FROM asset_workbench_submissions s2 WHERE `+assetWorkbenchSubmissionFullTextMatchFor("s2")+`
+		) OR `+assetWorkbenchOverviewCreatorName("i.payee_user_id")+` LIKE ? OR i.id IN (
+			SELECT f2.submission_item_id FROM asset_workbench_submission_files f2 WHERE f2.deleted_at IS NULL AND `+assetWorkbenchFileFullTextMatchFor("f2")+`
 		))`)
-		args = append(args, like, like, like, like, like, like, like, like)
+			args = append(args, fullText, fullText, like, fullText)
+		} else {
+			like := "%" + keyword + "%"
+			where = append(where, `(i.order_no LIKE ? OR i.template_name_snapshot LIKE ? OR i.category_snapshot LIKE ? OR i.difficulty_class LIKE ? OR s.submission_no LIKE ? OR `+assetWorkbenchOverviewCreatorName("i.payee_user_id")+` LIKE ? OR EXISTS (
+			SELECT 1 FROM asset_workbench_submission_files f WHERE f.submission_item_id = i.id AND f.deleted_at IS NULL AND (f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR f.file_type LIKE ?)
+		))`)
+			args = append(args, like, like, like, like, like, like, like, like, like, like)
+		}
 	}
 	if creator := strings.TrimSpace(filter.Creator); creator != "" {
 		like := "%" + creator + "%"
@@ -2197,13 +2252,25 @@ func buildAssetWorkbenchOverviewItemWhere(filter repo.AssetWorkbenchOverviewSear
 	return where, args
 }
 
-func buildAssetWorkbenchOverviewFileWhere(filter repo.AssetWorkbenchOverviewSearchFilter) ([]string, []interface{}) {
-	where := []string{"1=1", "i.voided_at IS NULL"}
+func buildAssetWorkbenchOverviewFileWhere(filter repo.AssetWorkbenchOverviewSearchFilter, preferFullText bool) ([]string, []interface{}) {
+	where := []string{"f.deleted_at IS NULL", "i.voided_at IS NULL"}
 	args := []interface{}{}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		like := "%" + keyword + "%"
-		where = append(where, `(f.original_filename LIKE ? OR f.file_type LIKE ? OR f.mime_type LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ? OR COALESCE(f.upload_directory_name, '') LIKE ? OR `+assetWorkbenchOverviewCreatorName("f.owner_user_id")+` LIKE ?)`)
-		args = append(args, like, like, like, like, like, like, like)
+		if fullText := externalAssetBooleanQuery(keyword); preferFullText && fullText != "" {
+			like := "%" + keyword + "%"
+			where = append(where, `(f.id IN (
+			SELECT f2.id FROM asset_workbench_submission_files f2 WHERE f2.deleted_at IS NULL AND `+assetWorkbenchFileFullTextMatchFor("f2")+`
+		) OR f.submission_item_id IN (
+			SELECT i2.id FROM asset_workbench_submission_items i2 WHERE `+assetWorkbenchItemFullTextMatchFor("i2")+`
+		) OR f.submission_id IN (
+			SELECT s2.id FROM asset_workbench_submissions s2 WHERE `+assetWorkbenchSubmissionFullTextMatchFor("s2")+`
+		) OR `+assetWorkbenchOverviewCreatorName("f.owner_user_id")+` LIKE ?)`)
+			args = append(args, fullText, fullText, fullText, like)
+		} else {
+			like := "%" + keyword + "%"
+			where = append(where, `(f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR f.file_type LIKE ? OR f.mime_type LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ? OR COALESCE(f.upload_directory_name, '') LIKE ? OR `+assetWorkbenchOverviewCreatorName("f.owner_user_id")+` LIKE ?)`)
+			args = append(args, like, like, like, like, like, like, like, like, like)
+		}
 	}
 	if creator := strings.TrimSpace(filter.Creator); creator != "" {
 		like := "%" + creator + "%"
@@ -2257,9 +2324,9 @@ func assetWorkbenchSubmissionOrderBy(orderBy, orderDir string) string {
 	case "submitted_at", "time":
 		return "s.submitted_at " + dir + ", s.id " + idDir
 	case "file_type":
-		return "(SELECT MIN(LOWER(f.file_type)) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id) " + dir + ", s.submitted_at DESC, s.id DESC"
+		return "(SELECT MIN(LOWER(f.file_type)) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id AND f.deleted_at IS NULL) " + dir + ", s.submitted_at DESC, s.id DESC"
 	case "file_name", "filename":
-		return "(SELECT MIN(LOWER(f.original_filename)) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id) " + dir + ", s.submitted_at DESC, s.id DESC"
+		return "(SELECT MIN(LOWER(COALESCE(NULLIF(f.display_name, ''), f.original_filename))) FROM asset_workbench_submission_files f WHERE f.submission_id = s.id AND f.deleted_at IS NULL) " + dir + ", s.submitted_at DESC, s.id DESC"
 	default:
 		return "s.submitted_at DESC, s.id DESC"
 	}
@@ -2338,7 +2405,7 @@ func (r *assetWorkbenchRepo) ListPendingGradeSubmissionItemsForPayee(ctx context
 }
 
 func (r *assetWorkbenchRepo) ListSubmissionFiles(ctx context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
-	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE submission_item_id = ? ORDER BY sort_order ASC, id ASC`, submissionItemID)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE submission_item_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC`, submissionItemID)
 	if err != nil {
 		return nil, fmt.Errorf("list asset workbench submission files: %w", err)
 	}
@@ -2355,7 +2422,7 @@ func (r *assetWorkbenchRepo) ListSubmissionFiles(ctx context.Context, submission
 }
 
 func (r *assetWorkbenchRepo) GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error) {
-	row := r.db.db.QueryRowContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE id = ?`, fileID)
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE id = ? AND deleted_at IS NULL`, fileID)
 	return scanAssetWorkbenchSubmissionFile(row)
 }
 
@@ -2363,7 +2430,7 @@ func (r *assetWorkbenchRepo) ListSubmissionFilesByIDs(ctx context.Context, fileI
 	if len(fileIDs) == 0 {
 		return []*domain.AssetWorkbenchSubmissionFile{}, nil
 	}
-	query, args := simpleInClause(assetWorkbenchSubmissionFileSelect()+` WHERE id IN (`, `) ORDER BY id ASC`, int64SliceToInterfaces(fileIDs)...)
+	query, args := simpleInClause(assetWorkbenchSubmissionFileSelect()+` WHERE id IN (`, `) AND deleted_at IS NULL ORDER BY id ASC`, int64SliceToInterfaces(fileIDs)...)
 	rows, err := r.db.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list asset workbench submission files by ids: %w", err)
@@ -2417,14 +2484,22 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 	return scanAssetWorkbenchSubmissionFile(row)
 }
 
-func (r *assetWorkbenchRepo) DeleteSubmissionFile(ctx context.Context, tx repo.Tx, fileID int64) error {
+func (r *assetWorkbenchRepo) DeleteSubmissionFile(ctx context.Context, tx repo.Tx, fileID int64, actorID int64, reason string, at time.Time) error {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
 	res, err := Unwrap(tx).ExecContext(ctx, `
-		DELETE f FROM asset_workbench_submission_files f
+		UPDATE asset_workbench_submission_files f
 		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id
+		SET f.deleted_at = ?, f.deleted_by = ?, f.delete_reason = ?, f.updated_at = CURRENT_TIMESTAMP
 		WHERE f.id = ?
+		  AND f.deleted_at IS NULL
 		  AND i.settlement_status = ?
 		  AND i.current_settlement_batch_id IS NULL
 		  AND i.qc_status <> ?`,
+		at,
+		actorID,
+		strings.TrimSpace(reason),
 		fileID,
 		domain.AssetWorkbenchSettlementStatusUnsettled,
 		domain.AssetWorkbenchSubmissionStatusVoided,
@@ -2464,6 +2539,7 @@ func (r *assetWorkbenchRepo) ClaimPendingPreviewFiles(ctx context.Context, claim
 
 	rows, err := sqlTx.QueryContext(ctx, assetWorkbenchSubmissionFileSelect()+`
 		WHERE (preview_status = ? OR (preview_status = ? AND preview_lease_expires_at <= ?))
+		  AND deleted_at IS NULL
 		  AND (preview_next_retry_at IS NULL OR preview_next_retry_at <= ?)
 		  AND (preview_lease_expires_at IS NULL OR preview_lease_expires_at <= ?)
 		ORDER BY id ASC
@@ -3877,6 +3953,7 @@ func assetWorkbenchPriceMatrixSelect() string {
 
 func assetWorkbenchUploadSessionSelect() string {
 	return `SELECT id, session_id, owner_user_id, upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
+		upload_batch_id, relative_path, is_folder_upload, expected_business_month,
 		status, object_key, original_filename, file_size, mime_type,
 		file_hash, upload_id, multipart_plan_json, expires_at, uploaded_at, cancelled_at, submitted_item_id, created_at, updated_at
 		FROM asset_workbench_upload_sessions`
@@ -3947,8 +4024,8 @@ func assetWorkbenchOverviewItemSelect() string {
 func assetWorkbenchOverviewFileSelect() string {
 	return `SELECT ` + assetWorkbenchOverviewText("'submission_file'") + ` AS source,
 		f.id AS id,
-		COALESCE(` + assetWorkbenchOverviewNullIfBlank("f.original_filename") + `, ` + assetWorkbenchOverviewText("CONCAT('交稿文件 ', f.id)") + `) AS title,
-		` + assetWorkbenchOverviewText("f.original_filename") + ` AS primary_code,
+		COALESCE(` + assetWorkbenchOverviewNullIfBlank("f.display_name") + `, ` + assetWorkbenchOverviewNullIfBlank("f.original_filename") + `, ` + assetWorkbenchOverviewText("CONCAT('交稿文件 ', f.id)") + `) AS title,
+		COALESCE(` + assetWorkbenchOverviewNullIfBlank("f.relative_path") + `, ` + assetWorkbenchOverviewNullIfBlank("f.display_name") + `, ` + assetWorkbenchOverviewText("f.original_filename") + `) AS primary_code,
 		COALESCE(` + assetWorkbenchOverviewNullIfBlank("f.upload_directory_name") + `, ` + assetWorkbenchOverviewNullIfBlank("f.file_type") + `, ` + assetWorkbenchOverviewText("f.mime_type") + `) AS secondary_code,
 		` + assetWorkbenchOverviewText("i.order_no") + ` AS order_no,
 		f.owner_user_id AS creator_user_id,
@@ -3960,7 +4037,7 @@ func assetWorkbenchOverviewFileSelect() string {
 		f.created_at AS created_at,
 		f.updated_at AS updated_at,
 		` + assetWorkbenchOverviewText("CONCAT('/drive?file_id=', f.id)") + ` AS route_path,
-		` + assetWorkbenchOverviewText("JSON_OBJECT('file_id', f.id, 'submission_id', f.submission_id, 'submission_item_id', f.submission_item_id, 'upload_directory_id', f.upload_directory_id, 'upload_directory_name', f.upload_directory_name, 'mime_type', f.mime_type, 'file_size', f.file_size, 'preview_status', f.preview_status, 'difficulty_class', i.difficulty_class)") + ` AS meta_json
+		` + assetWorkbenchOverviewText("JSON_OBJECT('file_id', f.id, 'submission_id', f.submission_id, 'submission_item_id', f.submission_item_id, 'upload_directory_id', f.upload_directory_id, 'upload_directory_name', f.upload_directory_name, 'mime_type', f.mime_type, 'file_size', f.file_size, 'preview_status', f.preview_status, 'difficulty_class', i.difficulty_class, 'display_name', f.display_name, 'relative_path', f.relative_path, 'upload_batch_id', f.upload_batch_id)") + ` AS meta_json
 		FROM asset_workbench_submission_files f
 		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id
 		JOIN asset_workbench_submissions s ON s.id = f.submission_id
@@ -3979,9 +4056,11 @@ func assetWorkbenchSubmissionItemSelect() string {
 
 func assetWorkbenchSubmissionFileSelect() string {
 	return `SELECT id, submission_id, submission_item_id, upload_session_id, owner_user_id,
-		upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class, object_key, preview_key,
+		upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
+		upload_batch_id, relative_path, display_name, is_folder_upload, object_key, preview_key,
 		preview_status, preview_attempts, preview_error, preview_next_retry_at, preview_worker_id, preview_lease_expires_at,
-		original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order, created_at, updated_at
+		original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order, created_at, updated_at,
+		deleted_at, deleted_by, delete_reason
 		FROM asset_workbench_submission_files`
 }
 
@@ -4261,7 +4340,9 @@ func scanAssetWorkbenchUploadSession(scanner interface{ Scan(...interface{}) err
 	var submittedItemID sql.NullInt64
 	if err := scanner.Scan(
 		&item.ID, &item.SessionID, &item.OwnerUserID, &uploadDirectoryID, &item.UploadDirectoryName,
-		&item.UploadDirectoryPrefix, &item.UploadDirectoryDifficultyClass, &item.Status, &item.ObjectKey, &item.OriginalFilename,
+		&item.UploadDirectoryPrefix, &item.UploadDirectoryDifficultyClass, &item.UploadBatchID,
+		&item.RelativePath, &item.IsFolderUpload, &item.ExpectedBusinessMonth,
+		&item.Status, &item.ObjectKey, &item.OriginalFilename,
 		&item.FileSize, &item.MimeType, &item.FileHash, &item.UploadID, &rawPlan, &item.ExpiresAt,
 		&uploadedAt, &cancelledAt, &submittedItemID, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
@@ -4405,22 +4486,29 @@ func scanAssetWorkbenchSubmissionItem(scanner interface{ Scan(...interface{}) er
 
 func scanAssetWorkbenchSubmissionFile(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSubmissionFile, error) {
 	var item domain.AssetWorkbenchSubmissionFile
-	var uploadSessionID, uploadDirectoryID sql.NullInt64
-	var previewNextRetryAt, previewLeaseExpiresAt sql.NullTime
+	var uploadSessionID, uploadDirectoryID, deletedBy sql.NullInt64
+	var previewNextRetryAt, previewLeaseExpiresAt, deletedAt sql.NullTime
 	if err := scanner.Scan(
 		&item.ID, &item.SubmissionID, &item.SubmissionItemID, &uploadSessionID, &item.OwnerUserID,
 		&uploadDirectoryID, &item.UploadDirectoryName, &item.UploadDirectoryPrefix, &item.UploadDirectoryDifficultyClass,
+		&item.UploadBatchID, &item.RelativePath, &item.DisplayName, &item.IsFolderUpload,
 		&item.ObjectKey, &item.PreviewKey, &item.PreviewStatus, &item.PreviewAttempts,
 		&item.PreviewError, &previewNextRetryAt, &item.PreviewWorkerID, &previewLeaseExpiresAt,
 		&item.OriginalFilename, &item.FileExt, &item.FileType, &item.MimeType, &item.FileSize,
 		&item.FileHash, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
+		&deletedAt, &deletedBy, &item.DeleteReason,
 	); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(item.DisplayName) == "" {
+		item.DisplayName = item.OriginalFilename
 	}
 	item.UploadSessionID = fromNullInt64(uploadSessionID)
 	item.UploadDirectoryID = fromNullInt64(uploadDirectoryID)
 	item.PreviewNextRetryAt = fromNullTime(previewNextRetryAt)
 	item.PreviewLeaseExpiresAt = fromNullTime(previewLeaseExpiresAt)
+	item.DeletedAt = fromNullTime(deletedAt)
+	item.DeletedBy = fromNullInt64(deletedBy)
 	return &item, nil
 }
 

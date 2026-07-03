@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { Download, ExternalLink, X } from 'lucide-vue-next'
 
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
-import { isPdfMimeOrFilename } from '@aw/shared/materials/systemAssetPreview'
+import { isPdfMimeOrFilename, isVideoMimeOrFilename } from '@aw/shared/materials/systemAssetPreview'
 
 const props = defineProps<{
   open: boolean
@@ -26,8 +26,10 @@ const emit = defineEmits<{
 
 const displayUrl = computed(() => (props.previewUrl || props.fallbackSrc || '').trim())
 const isPdf = computed(() => isPdfMimeOrFilename(props.mimeType, props.filename || props.title))
+const isVideo = computed(() => isVideoMimeOrFilename(props.mimeType, props.filename || props.title))
 const showPdfFrame = computed(() => isPdf.value && Boolean(displayUrl.value))
-const showImagePreview = computed(() => !isPdf.value && Boolean(displayUrl.value))
+const showVideoPreview = computed(() => isVideo.value && Boolean(displayUrl.value))
+const showImagePreview = computed(() => !isPdf.value && !isVideo.value && Boolean(displayUrl.value))
 
 function handleKeydown(event: KeyboardEvent) {
   if (!props.open || event.key !== 'Escape') return
@@ -82,6 +84,13 @@ onBeforeUnmount(() => {
           class="aw-preview-dialog__media aw-preview-dialog__pdf"
           :src="displayUrl"
           :title="title"
+        />
+        <video
+          v-else-if="showVideoPreview"
+          class="aw-preview-dialog__media aw-preview-dialog__video"
+          :src="displayUrl"
+          controls
+          preload="metadata"
         />
         <AssetPreviewMedia
           v-else-if="showImagePreview"

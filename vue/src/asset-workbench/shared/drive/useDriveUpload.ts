@@ -6,6 +6,7 @@ export type DriveUploadQueueStatus = 'queued' | 'uploading' | 'uploaded' | 'fail
 export interface DriveUploadQueueItem {
   id: string
   file: File
+  relativePath: string
   progress: number
   status: DriveUploadQueueStatus
   sessionId?: string
@@ -13,9 +14,9 @@ export interface DriveUploadQueueItem {
 }
 
 export interface DriveUploadOptions {
-  orderNo: string
   directoryId?: number
   difficultyClass?: string
+  expectedBusinessMonth?: string
   onItemChange?: (item: DriveUploadQueueItem) => void
 }
 
@@ -24,15 +25,15 @@ export function createDriveUploadQueue(files: FileList | File[] | null | undefin
   return Array.from(files).map((file) => ({
     id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
     file,
+    relativePath: fileRelativePath(file),
     progress: 0,
     status: 'queued',
   }))
 }
 
 export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: DriveUploadOptions): Promise<number> {
-  const orderNo = options.orderNo.trim()
-  if (!orderNo) throw new Error('订单号必填')
-
+  const uploadBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
+  const expectedBusinessMonth = options.expectedBusinessMonth || currentBusinessMonth()
   for (const item of queue) {
     if (item.status !== 'queued' && item.status !== 'failed') continue
     item.status = 'uploading'
@@ -42,6 +43,10 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
     try {
       const uploaded = await uploadWorkbenchFile(item.file, {
         uploadDirectoryId: options.directoryId,
+        uploadBatchId,
+        relativePath: item.relativePath,
+        isFolderUpload: item.relativePath.includes('/'),
+        expectedBusinessMonth,
         onProgress: (progress) => {
           item.progress = progress.percent
           options.onItemChange?.(item)
@@ -63,16 +68,33 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
 
   await assetWorkbenchApi.createSubmission({
     notes: '',
-    items: uploadedItems.map((item) => ({
-      order_no: orderNo,
+    expected_business_month: expectedBusinessMonth,
+    month_rollover_ack: false,
+    items: [{
       difficulty_class: options.difficultyClass || undefined,
       finalized: true,
-      page_count: 1,
-      item_count: 1,
-      upload_session_ids: item.sessionId ? [item.sessionId] : [],
-    })),
+      page_count: uploadedItems.length,
+      item_count: uploadedItems.length,
+      upload_session_ids: uploadedItems.map((item) => item.sessionId).filter(Boolean) as string[],
+    }],
   })
   return uploadedItems.length
+}
+
+function fileRelativePath(file: File) {
+  const withPath = file as File & { webkitRelativePath?: string }
+  return (withPath.webkitRelativePath || file.name).replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+function currentBusinessMonth() {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date())
+  const year = parts.find((part) => part.type === 'year')?.value || new Date().getFullYear().toString()
+  const month = parts.find((part) => part.type === 'month')?.value || String(new Date().getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
 }
 
 export function useDriveUpload() {

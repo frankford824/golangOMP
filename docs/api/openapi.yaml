@@ -20077,7 +20077,7 @@ paths:
   /v1/asset-workbench/drive/files:
     get:
       summary: List asset workbench drive files
-      description: Lists files under a drive directory and order folder. Non-manager users are scoped to their own uploads.
+      description: Lists files under a drive directory ordered by upload time. `order_no` is optional legacy/internal trace filtering; normal asset-workbench clients should browse by directory. Non-manager users are scoped to their own uploads.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -20122,6 +20122,10 @@ paths:
                         difficulty_class: { type: string }
                         order_no: { type: string }
                         original_filename: { type: string }
+                        display_name: { type: string }
+                        relative_path: { type: string }
+                        upload_batch_id: { type: string }
+                        is_folder_upload: { type: boolean }
                         file_type: { type: string }
                         mime_type: { type: string }
                         file_size: { type: integer }
@@ -20132,12 +20136,75 @@ paths:
                         page_count: { type: integer }
                         business_month: { type: string }
                         created_at: { type: string, format: date-time }
+                        locate_page:
+                          type: integer
+                          description: Present on locate responses; page number under the current directory upload-time ordering.
+                        locate_page_size:
+                          type: integer
+                          description: Present on locate responses; page size used to calculate locate_page.
                   pagination:
                     type: object
                     properties:
                       total: { type: integer }
                       page: { type: integer }
                       page_size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/drive/folder:
+    get:
+      summary: Browse one virtual drive folder
+      description: Returns immediate child folders derived from uploaded relative_path values plus direct files under the requested virtual folder. Non-manager users are scoped to their own uploads.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: dir_id
+          schema: { type: integer }
+        - in: query
+          name: unassigned
+          schema: { type: boolean }
+        - in: query
+          name: path
+          schema: { type: string }
+          description: Relative virtual folder path inside the selected upload directory.
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Drive folder browse result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      path: { type: string }
+                      folders:
+                        type: array
+                        items: &AssetWorkbenchDriveFolder
+                          type: object
+                          properties:
+                            name: { type: string }
+                            path: { type: string }
+                            file_count: { type: integer }
+                            direct_file_count: { type: integer }
+                            latest_at: { type: string, format: date-time }
+                      files:
+                        type: array
+                        items: *AssetWorkbenchDriveFile
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+                      truncated: { type: boolean }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/drive/search:
@@ -20181,7 +20248,7 @@ paths:
   /v1/asset-workbench/drive/locate:
     get:
       summary: Locate one asset workbench drive file
-      description: Returns one drive file row for reveal-in-folder behavior. Non-manager users are scoped to their own uploads.
+      description: Returns one drive file row with locate_page metadata for reveal-in-folder behavior. Non-manager users are scoped to their own uploads.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -20301,14 +20368,27 @@ paths:
               required: [items]
               properties:
                 notes: { type: string }
+                expected_business_month:
+                  type: string
+                  pattern: '^[0-9]{4}-[0-9]{2}$'
+                  description: Business month displayed to the client when the upload page was rendered. If it differs from server current month, backend returns MONTH_ROLLOVER_REQUIRED unless acknowledged.
+                month_rollover_ack:
+                  type: boolean
+                  description: Explicit confirmation that a cross-month submission should count to the current server business month.
+                business_month_override:
+                  type: string
+                  pattern: '^[0-9]{4}-[0-9]{2}$'
+                  description: Manager-only manual backfill month. Rejected when the target month already has a non-cancelled settlement batch.
                 items:
                   type: array
                   minItems: 1
                   items:
                     type: object
-                    required: [order_no, finalized, page_count, upload_session_ids]
+                    required: [finalized, page_count, upload_session_ids]
                     properties:
-                      order_no: { type: string }
+                      order_no:
+                        type: string
+                        description: Optional internal trace number; when omitted, the backend generates one.
                       difficulty_class:
                         type: string
                         description: Optional when all uploaded sessions carry an upload-directory difficulty snapshot.
@@ -20366,6 +20446,10 @@ paths:
                                   upload_directory_name: { type: string }
                                   upload_directory_prefix: { type: string }
                                   upload_directory_difficulty_class: { type: string }
+                                  upload_batch_id: { type: string }
+                                  relative_path: { type: string }
+                                  display_name: { type: string }
+                                  is_folder_upload: { type: boolean }
                                   original_filename: { type: string }
                                   file_type: { type: string }
                                   mime_type: { type: string }
@@ -20616,6 +20700,79 @@ paths:
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/files/{file_id}/preview:
+    get:
+      summary: Get uploaded work file preview metadata
+      description: Returns preview metadata for one uploaded work file. Submitters can access only their own files; managers and settlement roles can access visible workbench files.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: file_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: File preview metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      file_id: { type: integer }
+                      status: { type: string, enum: [pending, processing, ready, failed, not_applicable] }
+                      preparing: { type: boolean }
+                      preview_url: { type: string }
+                      download_url: { type: string }
+                      expires_at: { type: string, format: date-time }
+                      mime_type: { type: string }
+                      filename: { type: string }
+                      preview_available: { type: boolean }
+                      error: { type: string }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: File not found }
+  /v1/asset-workbench/files/{file_id}/download:
+    get:
+      summary: Get uploaded work file download info
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: file_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: File download metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      file_id: { type: integer }
+                      filename: { type: string }
+                      mime_type: { type: string }
+                      file_size: { type: integer }
+                      download_url: { type: string }
+                      expires_at: { type: string, format: date-time }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: File not found }
   /v1/asset-workbench/files/batch-move:
     post:
       summary: Batch move submission files to an upload directory
@@ -20661,6 +20818,10 @@ paths:
                             upload_directory_name: { type: string }
                             upload_directory_prefix: { type: string }
                             upload_directory_difficulty_class: { type: string }
+                            upload_batch_id: { type: string }
+                            relative_path: { type: string }
+                            display_name: { type: string }
+                            is_folder_upload: { type: boolean }
                             original_filename: { type: string }
                             file_type: { type: string }
                             mime_type: { type: string }
@@ -20686,12 +20847,12 @@ paths:
   /v1/asset-workbench/files/batch-delete:
     post:
       summary: Batch delete submission files
-      description: Manager-only file maintenance operation. Deletes file rows from unsettled submissions, refreshes submission totals, records events, and best-effort removes stored objects and previews.
+      description: Soft-deletes unsettled files, refreshes submission totals, and reprices or voids the related item. Submitters may delete only their own files; managers may delete any unlocked file.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetManager, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
       requestBody:
         required: true
         content:
@@ -20788,6 +20949,102 @@ paths:
                       total: { type: integer }
                       page: { type: integer }
                       size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/materials/groups:
+    get:
+      summary: Group operational and external materials
+      description: Groups materials by SKU namespace or external directory fallback. Group keys are namespaced, for example `sku:ABC123`, `ext-sku:ABC123`, `ext-dir:/p3/path`, or `system-asset:123`.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: source
+          schema: { type: string, enum: [all, system, external] }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Material groups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: &AssetWorkbenchMaterialGroup
+                          type: object
+                          properties:
+                            group_key: { type: string }
+                            group_code: { type: string }
+                            group_type: { type: string, enum: [sku, ext-sku, ext-dir, system-asset] }
+                            title: { type: string }
+                            source_type: { type: string }
+                            file_total: { type: integer }
+                            preview_files:
+                              type: array
+                              items:
+                                type: object
+                                additionalProperties: true
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/materials/group-files:
+    get:
+      summary: List files inside one material group
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: query
+          name: group_key
+          required: true
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Material group files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      group_key: { type: string }
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: true
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+        '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/materials/browse:
@@ -21052,6 +21309,14 @@ paths:
                 mime_type: { type: string }
                 file_hash: { type: string }
                 upload_directory_id: { type: integer }
+                upload_batch_id: { type: string }
+                relative_path:
+                  type: string
+                  description: Browser folder-upload path such as folder/sub/file.jpg. Backend normalizes and rejects unsafe segments.
+                is_folder_upload: { type: boolean }
+                expected_business_month:
+                  type: string
+                  pattern: '^[0-9]{4}-[0-9]{2}$'
       responses:
         '201':
           description: Created upload session and upload plan
@@ -21074,6 +21339,10 @@ paths:
                           upload_directory_name: { type: string }
                           upload_directory_prefix: { type: string }
                           upload_directory_difficulty_class: { type: string }
+                          upload_batch_id: { type: string }
+                          relative_path: { type: string }
+                          is_folder_upload: { type: boolean }
+                          expected_business_month: { type: string }
                           original_filename: { type: string }
                           file_size: { type: integer }
                           mime_type: { type: string }
@@ -21349,6 +21618,53 @@ paths:
                 properties:
                   data: *AssetWorkbenchClientMaterial
         '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/client-materials/search:
+    get:
+      summary: Search client-downloadable materials
+      description: Paginated search over materials published to clients. Non-manager users only receive enabled materials.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: sku
+          schema: { type: string }
+        - in: query
+          name: creator
+          schema: { type: string }
+        - in: query
+          name: admin
+          schema: { type: boolean }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Client material search result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: *AssetWorkbenchClientMaterial
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/client-materials/{material_id}:

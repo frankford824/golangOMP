@@ -462,6 +462,10 @@ type AssetWorkbenchUploadSession struct {
 	UploadDirectoryName            string          `json:"upload_directory_name" db:"upload_directory_name"`
 	UploadDirectoryPrefix          string          `json:"upload_directory_prefix" db:"upload_directory_prefix"`
 	UploadDirectoryDifficultyClass string          `json:"upload_directory_difficulty_class" db:"upload_directory_difficulty_class"`
+	UploadBatchID                  string          `json:"upload_batch_id,omitempty" db:"upload_batch_id"`
+	RelativePath                   string          `json:"relative_path,omitempty" db:"relative_path"`
+	IsFolderUpload                 bool            `json:"is_folder_upload" db:"is_folder_upload"`
+	ExpectedBusinessMonth          string          `json:"expected_business_month,omitempty" db:"expected_business_month"`
 	Status                         string          `json:"status" db:"status"`
 	ObjectKey                      string          `json:"object_key" db:"object_key"`
 	OriginalFilename               string          `json:"original_filename" db:"original_filename"`
@@ -539,6 +543,10 @@ type AssetWorkbenchSubmissionFile struct {
 	UploadDirectoryName            string     `json:"upload_directory_name" db:"upload_directory_name"`
 	UploadDirectoryPrefix          string     `json:"upload_directory_prefix" db:"upload_directory_prefix"`
 	UploadDirectoryDifficultyClass string     `json:"upload_directory_difficulty_class" db:"upload_directory_difficulty_class"`
+	UploadBatchID                  string     `json:"upload_batch_id,omitempty" db:"upload_batch_id"`
+	RelativePath                   string     `json:"relative_path,omitempty" db:"relative_path"`
+	DisplayName                    string     `json:"display_name" db:"display_name"`
+	IsFolderUpload                 bool       `json:"is_folder_upload" db:"is_folder_upload"`
 	ObjectKey                      string     `json:"object_key" db:"object_key"`
 	PreviewKey                     string     `json:"preview_key" db:"preview_key"`
 	PreviewStatus                  string     `json:"preview_status" db:"preview_status"`
@@ -556,6 +564,9 @@ type AssetWorkbenchSubmissionFile struct {
 	SortOrder                      int        `json:"sort_order" db:"sort_order"`
 	CreatedAt                      time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at" db:"updated_at"`
+	DeletedAt                      *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
+	DeletedBy                      *int64     `json:"deleted_by,omitempty" db:"deleted_by"`
+	DeleteReason                   string     `json:"delete_reason,omitempty" db:"delete_reason"`
 }
 
 type AssetWorkbenchOverviewRow struct {
@@ -600,6 +611,16 @@ type AssetWorkbenchDriveOrder struct {
 	LatestAt          time.Time `json:"latest_at" db:"latest_at"`
 }
 
+// AssetWorkbenchDriveFolder is a virtual folder derived from uploaded file
+// relative_path values. It is not persisted as a separate row.
+type AssetWorkbenchDriveFolder struct {
+	Name            string    `json:"name"`
+	Path            string    `json:"path"`
+	FileCount       int64     `json:"file_count"`
+	DirectFileCount int64     `json:"direct_file_count"`
+	LatestAt        time.Time `json:"latest_at"`
+}
+
 // AssetWorkbenchDriveFile is a leaf image row carrying its virtual path context so
 // the frontend can render breadcrumbs, locate ("reveal in folder") and jump to batch.
 type AssetWorkbenchDriveFile struct {
@@ -613,6 +634,10 @@ type AssetWorkbenchDriveFile struct {
 	DifficultyClass     string    `json:"difficulty_class,omitempty" db:"difficulty_class"`
 	OrderNo             string    `json:"order_no" db:"order_no"`
 	OriginalFilename    string    `json:"original_filename" db:"original_filename"`
+	DisplayName         string    `json:"display_name" db:"display_name"`
+	RelativePath        string    `json:"relative_path,omitempty" db:"relative_path"`
+	UploadBatchID       string    `json:"upload_batch_id,omitempty" db:"upload_batch_id"`
+	IsFolderUpload      bool      `json:"is_folder_upload" db:"is_folder_upload"`
 	FileType            string    `json:"file_type" db:"file_type"`
 	MimeType            string    `json:"mime_type" db:"mime_type"`
 	FileSize            int64     `json:"file_size" db:"file_size"`
@@ -623,6 +648,8 @@ type AssetWorkbenchDriveFile struct {
 	PageCount           int       `json:"page_count,omitempty" db:"page_count"`
 	BusinessMonth       string    `json:"business_month" db:"business_month"`
 	CreatedAt           time.Time `json:"created_at" db:"created_at"`
+	LocatePage          int       `json:"locate_page,omitempty" db:"-"`
+	LocatePageSize      int       `json:"locate_page_size,omitempty" db:"-"`
 }
 
 type AssetWorkbenchSettlementBatch struct {

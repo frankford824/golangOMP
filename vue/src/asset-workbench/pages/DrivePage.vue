@@ -25,7 +25,7 @@ import {
   type DifficultyClassRow,
   type DriveDirectoryRow,
   type DriveFileRow,
-  type DriveOrderRow,
+  type DriveFolderRow,
   type MaterialFolderRow,
   type OverviewSearchRow,
   type SystemAssetRow,
@@ -44,11 +44,9 @@ type SearchScope = 'all' | 'operational' | 'files' | 'orders'
 type ClientMaterialFilter = 'all' | 'enabled' | 'disabled'
 type ContextMenuState =
   | { kind: 'directory'; x: number; y: number; dir: DriveDirectoryRow }
-  | { kind: 'order'; x: number; y: number; order: DriveOrderRow }
   | { kind: 'file'; x: number; y: number; file: DriveFileRow }
 type ContextMenuInput =
   | { kind: 'directory'; dir: DriveDirectoryRow }
-  | { kind: 'order'; order: DriveOrderRow }
   | { kind: 'file'; file: DriveFileRow }
 interface MaterialDirectoryNode {
   path: string
@@ -56,6 +54,10 @@ interface MaterialDirectoryNode {
   depth: number
   file_count: number
   direct_file_count: number
+}
+interface VisibleMaterialDirectoryNode extends MaterialDirectoryNode {
+  has_children: boolean
+  expanded: boolean
 }
 interface MaterialFolderEntry {
   path: string
@@ -70,6 +72,16 @@ const route = useRoute()
 
 const UNASSIGNED_KEY = 'unassigned'
 const pageSize = 60
+const materialPageSize = 100
+const searchDebounceMs = 250
+const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+})
 
 const activeMode = ref<DriveMode>('directories')
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
@@ -91,11 +103,12 @@ const difficultyClasses = ref<DifficultyClassRow[]>([])
 const dirLoading = ref(false)
 const dirError = ref('')
 const selectedDir = ref<SelectedDir | null>(null)
-const orders = ref<DriveOrderRow[]>([])
-const ordersLoading = ref(false)
-const selectedOrder = ref<string | null>(null)
+const driveFolderPath = ref('')
+const driveFolders = ref<DriveFolderRow[]>([])
+const driveFolderTruncated = ref(false)
 const files = ref<DriveFileRow[]>([])
 const filesLoading = ref(false)
+const filesError = ref('')
 const fileTotal = ref(0)
 const filePage = ref(1)
 const selectedFile = ref<DriveFileRow | null>(null)
@@ -106,15 +119,18 @@ const searchQuery = ref('')
 const searchScope = ref<SearchScope>('all')
 const searchActive = ref(false)
 const searchLoading = ref(false)
+const searchError = ref('')
 const searchResults = ref<OverviewSearchRow[]>([])
 const searchTotal = ref(0)
 
 const materialQuery = ref('')
 const materialLoading = ref(false)
+const materialLoadingMore = ref(false)
 const materialError = ref('')
 const materialItems = ref<SystemAssetRow[]>([])
 const materialKnownFolders = ref<Record<string, MaterialFolderEntry>>({})
 const materialFileTotal = ref(0)
+const materialPage = ref(1)
 const clientMaterials = ref<ClientMaterialRow[]>([])
 const selectedMaterialIds = ref<Set<string>>(new Set())
 const materialPreviewUrls = ref<Record<string, string>>({})
@@ -139,10 +155,20 @@ const previewDownload = shallowRef<(() => void | Promise<void>) | null>(null)
 const uploadOpen = ref(false)
 const uploadDialogKey = ref(0)
 const uploadInitialFiles = ref<File[]>([])
-const uploadDefaultOrderNo = ref('')
 const contextMenu = ref<ContextMenuState | null>(null)
 const notice = ref('')
 const actionError = ref('')
+
+let directoryAbortController: AbortController | null = null
+let filesAbortController: AbortController | null = null
+let searchAbortController: AbortController | null = null
+let materialAbortController: AbortController | null = null
+let directoryRequestSeq = 0
+let filesRequestSeq = 0
+let searchRequestSeq = 0
+let materialRequestSeq = 0
+let directoryClickTimer: number | null = null
+let searchDebounceTimer: number | null = null
 
 const creatingDirectory = ref(false)
 const newDirectoryName = ref('')
@@ -160,7 +186,6 @@ const moveTargetDirectoryId = ref(0)
 const deleteReason = ref('')
 const maintenanceReason = ref('')
 const itemEditForm = ref({
-  order_no: '',
   difficulty_class: '',
   page_count: 1,
 })
@@ -171,6 +196,13 @@ const currentDirRow = computed(() =>
 const directoryOptions = computed(() => uploadDirectories.value.filter((item) => item.enabled))
 const difficultyOptions = computed(() => difficultyClasses.value.filter((item) => item.enabled).map((item) => item.code))
 const totalPages = computed(() => Math.max(1, Math.ceil(fileTotal.value / pageSize)))
+const driveFolderBreadcrumbs = computed(() => {
+  const parts = pathSegments(driveFolderPath.value)
+  return [
+    { path: '', name: selectedDir.value?.name || '上传目录' },
+    ...parts.map((part, index) => ({ path: drivePathFromSegments(parts.slice(0, index + 1)), name: part })),
+  ]
+})
 const selectedFiles = computed(() => files.value.filter((file) => selectedFileIds.value.has(file.id)))
 const selectedFileActionIds = computed(() => {
   const ids = selectedFiles.value.map((file) => file.id)
@@ -226,10 +258,26 @@ const allMaterialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
     return left.path.localeCompare(right.path, 'zh-CN')
   })
 })
+const materialFolderPathsWithChildren = computed(() => {
+  const paths = new Set<string>()
+  for (const node of allMaterialDirectoryNodes.value) {
+    const parts = pathSegments(node.path)
+    if (parts.length === 0) continue
+    paths.add(pathFromSegments(parts.slice(0, -1)))
+  }
+  return paths
+})
 const materialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
   if (materialQuery.value.trim()) return allMaterialDirectoryNodes.value
   return allMaterialDirectoryNodes.value.filter((node) => materialFolderAncestorsExpanded(node.path))
 })
+const visibleMaterialDirectoryNodes = computed<VisibleMaterialDirectoryNode[]>(() =>
+  materialDirectoryNodes.value.map((node) => ({
+    ...node,
+    has_children: materialFolderPathsWithChildren.value.has(node.path),
+    expanded: expandedMaterialFolderPaths.value.has(node.path),
+  })),
+)
 const materialFolderBreadcrumbs = computed(() => {
   const parts = pathSegments(selectedMaterialFolderPath.value)
   return [
@@ -258,6 +306,12 @@ const visibleMaterialFiles = computed(() =>
     ? materialItems.value
     : materialItems.value.filter((asset) => materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
 )
+const materialCanLoadMore = computed(() =>
+  canManageDrive.value &&
+  !materialLoading.value &&
+  !materialLoadingMore.value &&
+  materialItems.value.length < materialFileTotal.value,
+)
 const selectedMaterialFolderParent = computed(() => {
   const parts = pathSegments(selectedMaterialFolderPath.value)
   if (parts.length === 0) return ''
@@ -270,10 +324,6 @@ function hasQueryValue(value: unknown): value is string {
 
 function dirKey(dir: DriveDirectoryRow): string {
   return dir.directory_id == null ? UNASSIGNED_KEY : String(dir.directory_id)
-}
-
-function orderLabel(orderNo: string): string {
-  return orderNo && orderNo.trim() ? orderNo : '无订单号'
 }
 
 function titleOf(asset: SystemAssetRow) {
@@ -290,6 +340,20 @@ function pathSegments(path: string): string[] {
 
 function pathFromSegments(parts: string[]): string {
   return parts.length ? `/${parts.join('/')}` : ''
+}
+
+function drivePathFromSegments(parts: string[]): string {
+  return parts.join('/')
+}
+
+function normalizeDriveFolderPath(path?: string): string {
+  return drivePathFromSegments(pathSegments(path || ''))
+}
+
+function driveFileParentPath(file: DriveFileRow): string {
+  const parts = pathSegments(file.relative_path || file.display_name || file.original_filename || '')
+  parts.pop()
+  return drivePathFromSegments(parts)
 }
 
 function fileNameFromPath(path?: string): string {
@@ -409,15 +473,7 @@ function materialFolderAncestorsExpanded(path: string) {
 }
 
 function materialFolderHasChildren(path: string) {
-  const normalized = normalizeVirtualPath(path)
-  const depth = pathSegments(normalized).length
-  return allMaterialDirectoryNodes.value.some((node) => {
-    if (!node.path || node.path === normalized) return false
-    const parts = pathSegments(node.path)
-    if (parts.length !== depth + 1) return false
-    if (!normalized) return parts.length === 1
-    return node.path.startsWith(`${normalized}/`)
-  })
+  return materialFolderPathsWithChildren.value.has(normalizeVirtualPath(path))
 }
 
 function isMaterialFolderExpanded(path: string) {
@@ -636,6 +692,31 @@ function upsertMaterialItem(asset: SystemAssetRow) {
   ]
 }
 
+function mergeMaterialItems(current: SystemAssetRow[], incoming: SystemAssetRow[]) {
+  const seen = new Set<string>()
+  const merged: SystemAssetRow[] = []
+  for (const item of [...current, ...incoming]) {
+    const key = materialAssetKey(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(item)
+  }
+  return merged
+}
+
+function isAbortError(err: unknown) {
+  if (!err || typeof err !== 'object') return false
+  const maybe = err as { name?: string; code?: string }
+  return maybe.name === 'AbortError' || maybe.code === 'ERR_CANCELED'
+}
+
+function abortDriveRequests() {
+  directoryAbortController?.abort()
+  filesAbortController?.abort()
+  searchAbortController?.abort()
+  materialAbortController?.abort()
+}
+
 function formatSize(size?: number): string {
   if (!size) return '—'
   if (size < 1024) return `${size} B`
@@ -647,23 +728,25 @@ function formatDateTime(value?: string) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
+  return dateTimeFormatter.format(date)
 }
 
 function fileFormatLabel(file: DriveFileRow): string {
   const rawType = file.file_type?.trim().replace(/^\./, '')
-  const suffix = file.original_filename.includes('.') ? file.original_filename.split('.').pop()?.trim() : ''
+  const name = file.display_name || file.original_filename
+  const suffix = name.includes('.') ? name.split('.').pop()?.trim() : ''
   const ext = (rawType || suffix || '').replace(/^\./, '')
   const extLabel = ext ? ext.toUpperCase() : ''
   if (file.mime_type) return extLabel ? `${extLabel} · ${file.mime_type}` : file.mime_type
   return extLabel || '—'
+}
+
+function fileDisplayName(file: DriveFileRow): string {
+  return file.display_name || file.original_filename || `文件 ${file.id}`
+}
+
+function filePathLabel(file: DriveFileRow): string {
+  return file.relative_path || fileDisplayName(file)
 }
 
 function statusText(value?: string) {
@@ -827,7 +910,10 @@ async function loadDirectories() {
   }
 }
 
-async function selectDir(dir: DriveDirectoryRow, keepFile = false) {
+async function selectDir(dir: DriveDirectoryRow, keepFile = false, initialPage = 1, initialFolderPath = '') {
+  const requestID = ++directoryRequestSeq
+  directoryAbortController?.abort()
+  directoryAbortController = new AbortController()
   closeContextMenu()
   const next: SelectedDir = {
     key: dirKey(dir),
@@ -836,62 +922,62 @@ async function selectDir(dir: DriveDirectoryRow, keepFile = false) {
     unassigned: dir.directory_id == null,
   }
   selectedDir.value = next
-  selectedOrder.value = null
+  driveFolderPath.value = normalizeDriveFolderPath(initialFolderPath)
+  driveFolders.value = []
+  driveFolderTruncated.value = false
   files.value = []
   fileTotal.value = 0
+  filesError.value = ''
   selectedFileIds.value = new Set()
   if (!keepFile) selectedFile.value = null
-  ordersLoading.value = true
-  try {
-    orders.value = await assetWorkbenchApi.driveOrders(
-      next.unassigned ? { unassigned: true } : { dir_id: next.id ?? undefined },
-    )
-  } catch {
-    orders.value = []
-  } finally {
-    ordersLoading.value = false
+  filePage.value = Math.max(1, Math.floor(initialPage || 1))
+  await loadFiles(directoryAbortController.signal, requestID)
+}
+
+async function loadFiles(signal?: AbortSignal, parentRequestID?: number) {
+  if (!selectedDir.value) return
+  const requestID = ++filesRequestSeq
+  if (!signal) {
+    filesAbortController?.abort()
+    filesAbortController = new AbortController()
+    signal = filesAbortController.signal
   }
-}
-
-async function selectOrder(orderNo: string, keepFile = false) {
-  closeContextMenu()
-  selectedOrder.value = orderNo
-  filePage.value = 1
-  selectedFileIds.value = new Set()
-  if (!keepFile) selectedFile.value = null
-  await loadFiles()
-}
-
-async function loadFiles() {
-  if (!selectedDir.value || selectedOrder.value == null) return
   filesLoading.value = true
+  filesError.value = ''
   try {
-    const result = await assetWorkbenchApi.driveFiles({
+    const result = await assetWorkbenchApi.driveFolder({
       dir_id: selectedDir.value.unassigned ? undefined : selectedDir.value.id ?? undefined,
       unassigned: selectedDir.value.unassigned,
-      order_no: selectedOrder.value,
+      path: driveFolderPath.value,
       page: filePage.value,
       page_size: pageSize,
-    })
-    files.value = result.items
+    }, signal)
+    if (requestID !== filesRequestSeq || (parentRequestID && parentRequestID !== directoryRequestSeq)) return
+    driveFolderPath.value = normalizeDriveFolderPath(result.path)
+    driveFolders.value = result.folders || []
+    driveFolderTruncated.value = Boolean(result.truncated)
+    files.value = result.files || []
     fileTotal.value = result.total
-  } catch {
+  } catch (err) {
+    if (requestID !== filesRequestSeq || isAbortError(err)) return
     files.value = []
+    driveFolders.value = []
+    driveFolderTruncated.value = false
     fileTotal.value = 0
+    filesError.value = err instanceof Error ? err.message : '文件列表加载失败'
   } finally {
-    filesLoading.value = false
+    if (requestID === filesRequestSeq) filesLoading.value = false
   }
 }
 
 async function refreshCurrentDrive() {
   const prevKey = selectedDir.value?.key ?? null
-  const prevOrder = selectedOrder.value
+  const prevFolderPath = driveFolderPath.value
   await loadDirectories()
   if (!prevKey) return
   const dir = directories.value.find((item) => dirKey(item) === prevKey)
   if (!dir) return
-  await selectDir(dir, true)
-  if (prevOrder != null) await selectOrder(prevOrder, true)
+  await selectDir(dir, true, filePage.value, prevFolderPath)
 }
 
 async function changePage(delta: number) {
@@ -917,58 +1003,55 @@ function toggleFile(file: DriveFileRow, checked: boolean) {
   selectedFile.value = file
 }
 
-function selectAllFilesInOrder() {
+function selectAllFilesInDirectory() {
   selectedFileIds.value = new Set(files.value.map((file) => file.id))
   if (!selectedFile.value && files.value[0]) selectedFile.value = files.value[0]
 }
 
-async function editOrderFolder(order: DriveOrderRow) {
-  await selectOrder(order.order_no, true)
-  const firstFile = files.value[0]
-  if (!firstFile) {
-    notice.value = '该订单暂无文件，可先上传作品'
-    return
-  }
-  selectFile(firstFile)
-  notice.value = `已打开 ${orderLabel(order.order_no)} 的首个文件，可在右侧维护订单信息`
-}
-
-function openUploadForOrder(order: DriveOrderRow) {
-  if (!selectedDir.value) return
-  uploadInitialFiles.value = []
-  uploadDefaultOrderNo.value = order.order_no
-  uploadDialogKey.value += 1
-  uploadOpen.value = true
-  closeContextMenu()
-}
-
-async function selectAllFilesForOrder(order: DriveOrderRow) {
-  await selectOrder(order.order_no, true)
-  selectAllFilesInOrder()
-  closeContextMenu()
-}
-
 function resetToRoot() {
   selectedDir.value = null
-  selectedOrder.value = null
-  orders.value = []
+  driveFolderPath.value = ''
+  driveFolders.value = []
+  driveFolderTruncated.value = false
   files.value = []
   fileTotal.value = 0
+  filesError.value = ''
   selectedFile.value = null
   selectedFileIds.value = new Set()
 }
 
-function backToDir() {
-  selectedOrder.value = null
-  files.value = []
-  fileTotal.value = 0
+async function openDriveFolder(path: string) {
+  driveFolderPath.value = normalizeDriveFolderPath(path)
+  filePage.value = 1
   selectedFile.value = null
   selectedFileIds.value = new Set()
+  await loadFiles()
+}
+
+function upsertDriveFile(file: DriveFileRow) {
+  if (files.value.some((item) => item.id === file.id)) return
+  files.value = [file, ...files.value]
 }
 
 function openDirectory(dir: DriveDirectoryRow) {
   activeMode.value = 'directories'
   void selectDir(dir)
+}
+
+function queueOpenDirectory(dir: DriveDirectoryRow) {
+  if (directoryClickTimer) window.clearTimeout(directoryClickTimer)
+  directoryClickTimer = window.setTimeout(() => {
+    directoryClickTimer = null
+    openDirectory(dir)
+  }, 180)
+}
+
+function editDirectoryFromDoubleClick(dir: DriveDirectoryRow) {
+  if (directoryClickTimer) {
+    window.clearTimeout(directoryClickTimer)
+    directoryClickTimer = null
+  }
+  startDirectoryEdit(dir)
 }
 
 function goDrivesHome() {
@@ -1032,8 +1115,9 @@ async function revealFile(file: DriveFileRow) {
     dir = directories.value.find((item) => dirKey(item) === targetKey)
   }
   if (!dir) return
-  await selectDir(dir, true)
-  await selectOrder(file.order_no, true)
+  const parentPath = driveFileParentPath(file)
+  await selectDir(dir, true, parentPath ? 1 : file.locate_page || 1, parentPath)
+  upsertDriveFile(file)
   selectFile(file)
   window.setTimeout(() => {
     if (highlightFileId.value === file.id) highlightFileId.value = null
@@ -1041,30 +1125,72 @@ async function revealFile(file: DriveFileRow) {
 }
 
 async function runUnifiedSearch() {
+  cancelSearchDebounce()
   const q = searchQuery.value.trim()
   if (!q) {
     clearSearch()
     return
   }
+  const requestID = ++searchRequestSeq
+  searchAbortController?.abort()
+  searchAbortController = new AbortController()
   searchActive.value = true
   searchLoading.value = true
+  searchError.value = ''
+  searchResults.value = []
+  searchTotal.value = 0
   try {
-    const result = await assetWorkbenchApi.overviewSearch({ q, scope: searchScope.value, page: 1, page_size: 60 })
+    const result = await assetWorkbenchApi.overviewSearch({ q, scope: searchScope.value, page: 1, page_size: 60 }, searchAbortController.signal)
+    if (requestID !== searchRequestSeq) return
     searchResults.value = result.items
     searchTotal.value = result.total
-  } catch {
+  } catch (err) {
+    if (requestID !== searchRequestSeq || isAbortError(err)) return
     searchResults.value = []
     searchTotal.value = 0
+    searchError.value = err instanceof Error ? err.message : '统一检索失败'
   } finally {
-    searchLoading.value = false
+    if (requestID === searchRequestSeq) searchLoading.value = false
   }
 }
 
 function clearSearch() {
+  cancelSearchDebounce()
+  resetSearchState(false)
+}
+
+function resetSearchState(keepQuery: boolean) {
+  searchAbortController?.abort()
+  searchRequestSeq += 1
   searchActive.value = false
-  searchQuery.value = ''
+  if (!keepQuery) searchQuery.value = ''
+  searchError.value = ''
   searchResults.value = []
   searchTotal.value = 0
+  searchLoading.value = false
+}
+
+function cancelSearchDebounce() {
+  if (!searchDebounceTimer) return
+  window.clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = null
+}
+
+function scheduleUnifiedSearch() {
+  cancelSearchDebounce()
+  const q = searchQuery.value.trim()
+  if (!q) {
+    resetSearchState(false)
+    return
+  }
+  if (q.length < 2) {
+    resetSearchState(true)
+    return
+  }
+  searchDebounceTimer = window.setTimeout(() => {
+    searchDebounceTimer = null
+    void runUnifiedSearch()
+  }, searchDebounceMs)
 }
 
 async function locateSearchRow(row: OverviewSearchRow) {
@@ -1130,11 +1256,11 @@ function closePreview() {
 async function openFilePreview(file: DriveFileRow) {
   selectFile(file, true)
   openPreviewDialog({
-    title: file.original_filename || `文件 ${file.id}`,
+    title: fileDisplayName(file),
     eyebrow: '交稿预览',
     emptyLabel: '正在加载预览…',
     mimeType: file.mime_type,
-    filename: file.original_filename,
+    filename: fileDisplayName(file),
     rows: filePreviewRows(file),
     download: () => downloadFile(file),
   })
@@ -1149,8 +1275,8 @@ async function openFilePreview(file: DriveFileRow) {
 
 function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
   return [
-    ['订单号', orderLabel(file.order_no)],
     ['所在目录', file.upload_directory_name],
+    ['相对路径', file.relative_path || '—'],
     ['格式', fileFormatLabel(file)],
     ['上传时间', formatDateTime(file.created_at)],
     ['业务月', file.business_month || '—'],
@@ -1199,7 +1325,6 @@ async function downloadSelectedFiles() {
 function openUpload(files: File[] = []) {
   if (!selectedDir.value) return
   uploadInitialFiles.value = files
-  uploadDefaultOrderNo.value = selectedOrder.value ?? ''
   uploadDialogKey.value += 1
   uploadOpen.value = true
 }
@@ -1214,22 +1339,15 @@ function dropOnDirectory(event: DragEvent, dir: DriveDirectoryRow) {
   void selectDir(dir, true).then(() => openUpload(dropped))
 }
 
-function dropOnOrder(event: DragEvent, order: DriveOrderRow) {
+function dropOnCurrentDirectory(event: DragEvent) {
   const dropped = filesFromDrop(event)
-  if (!dropped.length) return
-  void selectOrder(order.order_no, true).then(() => openUpload(dropped))
-}
-
-function dropOnCurrentOrder(event: DragEvent) {
-  const dropped = filesFromDrop(event)
-  if (!dropped.length || !selectedOrder.value) return
+  if (!dropped.length || !selectedDir.value) return
   openUpload(dropped)
 }
 
 async function onUploaded() {
   uploadOpen.value = false
   uploadInitialFiles.value = []
-  uploadDefaultOrderNo.value = ''
   await refreshCurrentDrive()
 }
 
@@ -1305,17 +1423,16 @@ async function saveSelectedItemEdit() {
   const file = selectedFile.value
   if (!file || !canMaintainItems.value) return
   try {
-    const updated = await assetWorkbenchApi.updateSubmissionItem(file.submission_item_id, {
-      order_no: itemEditForm.value.order_no,
+    await assetWorkbenchApi.updateSubmissionItem(file.submission_item_id, {
       difficulty_class: itemEditForm.value.difficulty_class,
       page_count: itemEditForm.value.page_count,
       finalized: true,
       reason: maintenanceReason.value || '素材网盘内联维护',
     })
-    notice.value = `已更新 ${updated.order_no}`
+    notice.value = `已更新 ${fileDisplayName(file)}`
     await refreshCurrentDrive()
   } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '订单维护保存失败'
+    actionError.value = err instanceof Error ? err.message : '文件维护保存失败'
   }
 }
 
@@ -1375,26 +1492,36 @@ async function deleteSelectedFiles() {
   }
 }
 
-async function loadMaterials(query = materialQuery.value) {
+async function loadMaterials(query = materialQuery.value, options: { append?: boolean } = {}) {
   if (!canUseOperational.value) return
   const nextQuery = query.trim()
   if (canManageDrive.value && !nextQuery) {
     await loadMaterialFolder('')
     return
   }
-  materialLoading.value = true
+  const append = options.append === true
+  const requestID = ++materialRequestSeq
+  materialAbortController?.abort()
+  materialAbortController = new AbortController()
+  if (append) materialLoadingMore.value = true
+  else materialLoading.value = true
   materialError.value = ''
   materialQuery.value = nextQuery
-  selectedMaterialFolderPath.value = ''
-  activeMaterial.value = null
+  const page = append ? materialPage.value + 1 : 1
+  if (!append) {
+    selectedMaterialFolderPath.value = ''
+    activeMaterial.value = null
+  }
   try {
     if (canManageDrive.value) {
       const [systemResult, published] = await Promise.all([
-        assetWorkbenchApi.systemSearch({ q: materialQuery.value, source: 'all', page: 1, page_size: 80 }),
-        assetWorkbenchApi.listClientMaterials(true),
+        assetWorkbenchApi.systemSearch({ q: materialQuery.value, source: 'all', page, page_size: materialPageSize }, materialAbortController.signal),
+        assetWorkbenchApi.listClientMaterials(true, materialAbortController.signal),
       ])
-      materialItems.value = systemResult.items
+      if (requestID !== materialRequestSeq) return
+      materialItems.value = append ? mergeMaterialItems(materialItems.value, systemResult.items) : systemResult.items
       materialFileTotal.value = systemResult.total
+      materialPage.value = systemResult.page || page
       clientMaterials.value = published
       for (const asset of systemResult.items) {
         rememberMaterialPath(materialDirectoryPath(asset))
@@ -1412,33 +1539,51 @@ async function loadMaterials(query = materialQuery.value) {
           .includes(q)
       })
       materialFileTotal.value = materialItems.value.length
+      materialPage.value = 1
     }
   } catch (err) {
-    materialItems.value = []
-    materialFileTotal.value = 0
-    materialError.value = err instanceof Error ? err.message : '运营素材加载失败'
+    if (requestID !== materialRequestSeq || isAbortError(err)) return
+    if (!append) {
+      materialItems.value = []
+      materialFileTotal.value = 0
+    }
+    const message = err instanceof Error ? err.message : '运营素材加载失败'
+    if (append) actionError.value = message
+    else materialError.value = message
   } finally {
-    materialLoading.value = false
+    if (requestID === materialRequestSeq) {
+      materialLoading.value = false
+      materialLoadingMore.value = false
+    }
   }
 }
 
-async function loadMaterialFolder(path = selectedMaterialFolderPath.value, options: { expandTree?: boolean } = {}) {
+async function loadMaterialFolder(path = selectedMaterialFolderPath.value, options: { expandTree?: boolean; append?: boolean } = {}) {
   if (!canUseOperational.value) return
   const expandTree = options.expandTree !== false
+  const append = options.append === true
   const normalized = normalizeVirtualPath(path)
-  materialLoading.value = true
+  const requestID = ++materialRequestSeq
+  materialAbortController?.abort()
+  materialAbortController = new AbortController()
+  if (append) materialLoadingMore.value = true
+  else materialLoading.value = true
   materialError.value = ''
-  materialQuery.value = ''
-  selectedMaterialFolderPath.value = normalized
-  activeMaterial.value = null
+  const page = append ? materialPage.value + 1 : 1
+  if (!append) {
+    materialQuery.value = ''
+    selectedMaterialFolderPath.value = normalized
+    activeMaterial.value = null
+  }
   rememberMaterialPath(normalized)
   if (expandTree) expandMaterialFolderTreePath(normalized)
   try {
     if (canManageDrive.value) {
       const [browse, published] = await Promise.all([
-        assetWorkbenchApi.browseMaterials({ path: normalized, source: 'all', page: 1, page_size: 100 }),
-        assetWorkbenchApi.listClientMaterials(true),
+        assetWorkbenchApi.browseMaterials({ path: normalized, source: 'all', page, page_size: materialPageSize }, materialAbortController.signal),
+        assetWorkbenchApi.listClientMaterials(true, materialAbortController.signal),
       ])
+      if (requestID !== materialRequestSeq) return
       selectedMaterialFolderPath.value = normalizeVirtualPath(browse.path || normalized)
       rememberMaterialFolders(browse.folders || [])
       if (expandTree) expandMaterialFolderTreePath(selectedMaterialFolderPath.value)
@@ -1451,22 +1596,42 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
           direct_file_count: Number(browse.total || 0),
         })
       }
-      materialItems.value = browse.files || []
+      materialItems.value = append ? mergeMaterialItems(materialItems.value, browse.files || []) : browse.files || []
       materialFileTotal.value = browse.total || 0
+      materialPage.value = browse.page || page
       clientMaterials.value = published
     } else {
-      const published = await assetWorkbenchApi.listClientMaterials(false)
+      const published = await assetWorkbenchApi.listClientMaterials(false, materialAbortController.signal)
+      if (requestID !== materialRequestSeq) return
       clientMaterials.value = published
       materialItems.value = published.map(materialFromClient)
       materialFileTotal.value = materialItems.value.length
+      materialPage.value = 1
     }
   } catch (err) {
-    materialItems.value = []
-    materialFileTotal.value = 0
-    materialError.value = err instanceof Error ? err.message : '运营素材加载失败'
+    if (requestID !== materialRequestSeq || isAbortError(err)) return
+    if (!append) {
+      materialItems.value = []
+      materialFileTotal.value = 0
+    }
+    const message = err instanceof Error ? err.message : '运营素材加载失败'
+    if (append) actionError.value = message
+    else materialError.value = message
   } finally {
-    materialLoading.value = false
+    if (requestID === materialRequestSeq) {
+      materialLoading.value = false
+      materialLoadingMore.value = false
+    }
   }
+}
+
+function loadMoreMaterials() {
+  if (!materialCanLoadMore.value) return
+  if (materialQuery.value.trim()) {
+    void loadMaterials(materialQuery.value, { append: true })
+    return
+  }
+  void loadMaterialFolder(selectedMaterialFolderPath.value, { expandTree: false, append: true })
 }
 
 async function openMaterialPreview(asset: SystemAssetRow) {
@@ -1694,17 +1859,12 @@ function fileFromContext() {
   return contextMenu.value?.kind === 'file' ? contextMenu.value.file : null
 }
 
-function orderFromContext() {
-  return contextMenu.value?.kind === 'order' ? contextMenu.value.order : null
-}
-
 function directoryFromContext() {
   return contextMenu.value?.kind === 'directory' ? contextMenu.value.dir : null
 }
 
 function syncEditForm(file: DriveFileRow | null) {
   itemEditForm.value = {
-    order_no: file?.order_no ?? '',
     difficulty_class: file?.difficulty_class || currentDirRow.value?.difficulty_class || difficultyOptions.value[0] || '',
     page_count: file?.page_count || 1,
   }
@@ -1741,6 +1901,12 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  abortDriveRequests()
+  cancelSearchDebounce()
+  if (directoryClickTimer) {
+    window.clearTimeout(directoryClickTimer)
+    directoryClickTimer = null
+  }
   window.removeEventListener('click', closeContextMenu)
 })
 </script>
@@ -1757,17 +1923,16 @@ onBeforeUnmount(() => {
       </div>
       <form class="aw-drive__search" @submit.prevent="runUnifiedSearch">
         <Search :size="16" aria-hidden="true" />
-        <select v-model="searchScope" aria-label="搜索范围">
+        <select v-model="searchScope" aria-label="搜索范围" @change="scheduleUnifiedSearch">
           <option value="all">全部</option>
           <option value="operational">运营素材</option>
           <option value="files">交稿文件</option>
-          <option value="orders">订单·计件</option>
         </select>
         <input
           v-model="searchQuery"
           type="search"
-          placeholder="搜索运营素材、订单号、文件名"
-          @keyup.enter="runUnifiedSearch"
+          placeholder="搜索运营素材、文件名、上传目录"
+          @input="scheduleUnifiedSearch"
         />
         <button v-if="searchActive" class="aw-drive__search-clear" type="button" aria-label="清除搜索" @click="clearSearch">
           <X :size="14" aria-hidden="true" />
@@ -1783,7 +1948,8 @@ onBeforeUnmount(() => {
         <span>统一检索「{{ searchQuery }}」</span>
         <span class="aw-drive-search-results__count">{{ searchLoading ? '搜索中…' : `共 ${searchTotal} 条` }}</span>
       </div>
-      <p v-if="!searchLoading && searchResults.length === 0" class="aw-drive-empty">没有匹配内容</p>
+      <p v-if="searchError" class="aw-drive-empty">{{ searchError }}</p>
+      <p v-else-if="!searchLoading && searchResults.length === 0" class="aw-drive-empty">没有匹配内容</p>
       <ul v-else class="aw-drive-hit-list">
         <li v-for="hit in searchResults" :key="`${hit.source}-${hit.id}`" class="aw-drive-hit">
           <button
@@ -1798,9 +1964,9 @@ onBeforeUnmount(() => {
           <div class="aw-drive-hit__body">
             <strong>{{ hit.title || hit.primary_code }}</strong>
             <span class="aw-drive-hit__path">
-              {{ hit.source_label || hit.source }} <ChevronRight :size="12" /> {{ hit.primary_code || hit.order_no || '—' }}
+              {{ hit.source_label || hit.source }} <ChevronRight :size="12" /> {{ hit.primary_code || hit.business_month || '—' }}
             </span>
-            <small>{{ hit.order_no || hit.business_month || '—' }} · {{ statusText(hit.status) }}</small>
+            <small>{{ hit.business_month || '—' }} · {{ statusText(hit.status) }}</small>
           </div>
           <div class="aw-drive-hit__actions">
             <button class="aw-secondary-button" type="button" @click="locateSearchRow(hit)">
@@ -1864,8 +2030,8 @@ onBeforeUnmount(() => {
                 class="aw-drive-side__item"
                 :class="{ 'is-active': activeMode === 'directories' && selectedDir?.key === dirKey(dir), 'is-disabled': dir.enabled === false }"
                 type="button"
-                @dblclick="startDirectoryEdit(dir)"
-                @click="openDirectory(dir)"
+                @dblclick.stop.prevent="editDirectoryFromDoubleClick(dir)"
+                @click="queueOpenDirectory(dir)"
                 @contextmenu.prevent.stop="openContextMenu($event, { kind: 'directory', dir })"
               >
                 <Folder :size="16" aria-hidden="true" />
@@ -1904,12 +2070,17 @@ onBeforeUnmount(() => {
             <template v-if="activeMode === 'directories'">
               <button class="aw-drive__crumb" type="button" :class="{ 'is-active': !selectedDir }" @click="goDrivesHome">全部目录</button>
               <template v-if="selectedDir">
-                <ChevronRight :size="14" aria-hidden="true" />
-                <button class="aw-drive__crumb" type="button" :class="{ 'is-active': selectedOrder == null }" @click="backToDir">{{ selectedDir.name }}</button>
-              </template>
-              <template v-if="selectedDir && selectedOrder != null">
-                <ChevronRight :size="14" aria-hidden="true" />
-                <span class="aw-drive__crumb" :class="{ 'is-active': true }">{{ orderLabel(selectedOrder) }}</span>
+                <template v-for="(crumb, index) in driveFolderBreadcrumbs" :key="crumb.path || '__drive_root__'">
+                  <ChevronRight :size="14" aria-hidden="true" />
+                  <button
+                    class="aw-drive__crumb"
+                    type="button"
+                    :class="{ 'is-active': index === driveFolderBreadcrumbs.length - 1 }"
+                    @click="openDriveFolder(crumb.path)"
+                  >
+                    {{ crumb.name }}
+                  </button>
+                </template>
               </template>
             </template>
             <template v-else>
@@ -1928,7 +2099,7 @@ onBeforeUnmount(() => {
           </nav>
           <div class="aw-drive-main__tools">
             <template v-if="activeMode === 'directories'">
-              <button v-if="selectedOrder != null" class="aw-secondary-button" type="button" @click="selectAllFilesInOrder">全选</button>
+              <button v-if="selectedDir && files.length" class="aw-secondary-button" type="button" @click="selectAllFilesInDirectory">全选</button>
               <button
                 class="aw-primary-button"
                 type="button"
@@ -1960,6 +2131,7 @@ onBeforeUnmount(() => {
           <template v-if="activeMode === 'directories'">
             <template v-if="!selectedDir">
               <p v-if="dirLoading" class="aw-drive-empty">加载中…</p>
+              <p v-else-if="dirError" class="aw-drive-empty">{{ dirError }}</p>
               <p v-else-if="directories.length === 0" class="aw-drive-empty">暂无上传目录，点击左侧「+」创建</p>
               <div v-else class="aw-drive-tiles">
                 <button
@@ -1968,8 +2140,8 @@ onBeforeUnmount(() => {
                   class="aw-drive-tile"
                   :class="{ 'is-disabled': dir.enabled === false }"
                   type="button"
-                  @click="openDirectory(dir)"
-                  @dblclick="startDirectoryEdit(dir)"
+                  @click="queueOpenDirectory(dir)"
+                  @dblclick.stop.prevent="editDirectoryFromDoubleClick(dir)"
                   @dragover.prevent
                   @drop.prevent="dropOnDirectory($event, dir)"
                   @contextmenu.prevent.stop="openContextMenu($event, { kind: 'directory', dir })"
@@ -1981,45 +2153,29 @@ onBeforeUnmount(() => {
               </div>
             </template>
 
-            <template v-else-if="selectedOrder == null">
-              <p v-if="ordersLoading" class="aw-drive-empty">加载中…</p>
-              <p v-else-if="orders.length === 0" class="aw-drive-empty">该目录暂无订单</p>
-              <div v-else class="aw-drive-tiles">
-                <article
-                  v-for="order in orders"
-                  :key="order.order_no || '__empty__'"
-                  class="aw-drive-tile aw-drive-tile--with-action"
-                  @dragover.prevent
-                  @drop.prevent="dropOnOrder($event, order)"
-                  @contextmenu.prevent.stop="openContextMenu($event, { kind: 'order', order })"
-                >
-                  <button class="aw-drive-tile__button" type="button" @click="selectOrder(order.order_no)">
-                    <FolderOpen class="aw-drive-tile__icon" aria-hidden="true" />
-                    <strong class="aw-drive-tile__name" :title="orderLabel(order.order_no)">{{ orderLabel(order.order_no) }}</strong>
-                    <small class="aw-drive-tile__meta">{{ order.file_count }} 个文件</small>
-                  </button>
-                  <button
-                    v-if="canMaintainItems"
-                    class="aw-drive-tile__quick"
-                    type="button"
-                    :aria-label="`编辑 ${orderLabel(order.order_no)}`"
-                    title="编辑订单文件"
-                    @click.stop="editOrderFolder(order)"
-                  >
-                    <Pencil :size="14" aria-hidden="true" />
-                  </button>
-                </article>
-              </div>
-            </template>
-
             <template v-else>
               <p v-if="filesLoading" class="aw-drive-empty">加载中…</p>
-              <div v-else-if="files.length === 0" class="aw-drive-drop" @dragover.prevent @drop.prevent="dropOnCurrentOrder">
+              <p v-else-if="filesError" class="aw-drive-empty">{{ filesError }}</p>
+              <div v-else-if="driveFolders.length === 0 && files.length === 0" class="aw-drive-drop" @dragover.prevent @drop.prevent="dropOnCurrentDirectory">
                 <Upload :size="26" aria-hidden="true" />
-                <span>该订单暂无文件，可拖拽上传到这里</span>
+                <span>该目录暂无文件，可拖拽上传到这里</span>
               </div>
               <template v-else>
-                <div class="aw-drive-files aw-drive-files--roomy" @dragover.prevent @drop.prevent="dropOnCurrentOrder">
+                <p v-if="driveFolderTruncated" class="aw-drive-inline-note">当前目录文件量较大，已优先展示前 10000 个文件生成的文件夹索引。</p>
+                <div v-if="driveFolders.length" class="aw-drive-tiles aw-drive-tiles--folders">
+                  <button
+                    v-for="folder in driveFolders"
+                    :key="folder.path"
+                    class="aw-drive-tile aw-drive-tile--folder"
+                    type="button"
+                    @click="openDriveFolder(folder.path)"
+                  >
+                    <FolderOpen class="aw-drive-tile__icon" aria-hidden="true" />
+                    <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
+                    <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
+                  </button>
+                </div>
+                <div v-if="files.length" class="aw-drive-files aw-drive-files--roomy" @dragover.prevent @drop.prevent="dropOnCurrentDirectory">
                   <article
                     v-for="file in files"
                     :key="file.id"
@@ -2031,19 +2187,23 @@ onBeforeUnmount(() => {
                       <input
                         type="checkbox"
                         :checked="selectedFileIds.has(file.id)"
-                        :aria-label="`选择 ${file.original_filename}`"
+                        :aria-label="`选择 ${fileDisplayName(file)}`"
                         @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
                       />
                     </label>
                     <button class="aw-drive-file-card__button" type="button" @click="selectFile(file)" @dblclick="openFilePreview(file)">
                       <span class="aw-drive-file-card__media">
-                        <DriveThumb :file-id="file.id" :filename="file.original_filename" :mime-type="file.mime_type" :preview-status="file.preview_status" />
+                        <DriveThumb :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" />
                       </span>
-                      <span class="aw-drive-file-card__name">{{ file.original_filename }}</span>
+                      <span class="aw-drive-file-card__name">{{ filePathLabel(file) }}</span>
                     </button>
                   </article>
                 </div>
-                <div class="aw-drive-pager">
+                <div v-else class="aw-drive-drop" @dragover.prevent @drop.prevent="dropOnCurrentDirectory">
+                  <Upload :size="26" aria-hidden="true" />
+                  <span>当前文件夹暂无直接文件，可继续打开子文件夹</span>
+                </div>
+                <div v-if="fileTotal > 0" class="aw-drive-pager">
                   <button class="aw-grid-button" type="button" :disabled="filePage <= 1" @click="changePage(-1)">上一页</button>
                   <span>{{ filePage }} / {{ totalPages }} · 共 {{ fileTotal }} 个</span>
                   <button class="aw-grid-button" type="button" :disabled="filePage >= totalPages" @click="changePage(1)">下一页</button>
@@ -2064,21 +2224,21 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="aw-material-drive__tree">
                   <button
-                    v-for="node in materialDirectoryNodes"
+                    v-for="node in visibleMaterialDirectoryNodes"
                     :key="node.path || '__material_root__'"
                     class="aw-material-folder-node"
                     :class="{
                       'is-active': selectedMaterialFolderPath === node.path,
-                      'is-expanded': isMaterialFolderExpanded(node.path),
-                      'has-children': materialFolderHasChildren(node.path),
+                      'is-expanded': node.expanded,
+                      'has-children': node.has_children,
                     }"
                     type="button"
-                    :aria-expanded="materialFolderHasChildren(node.path) ? isMaterialFolderExpanded(node.path) : undefined"
+                    :aria-expanded="node.has_children ? node.expanded : undefined"
                     :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
                     @click="toggleMaterialFolderNode(node.path)"
                   >
                     <ChevronRight
-                      v-if="materialFolderHasChildren(node.path)"
+                      v-if="node.has_children"
                       :size="13"
                       class="aw-material-folder-node__chevron"
                       aria-hidden="true"
@@ -2153,6 +2313,12 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
                 </div>
+                <div v-if="materialCanLoadMore" class="aw-drive-pager">
+                  <button class="aw-grid-button" type="button" :disabled="materialLoadingMore" @click="loadMoreMaterials">
+                    {{ materialLoadingMore ? '加载中…' : '加载更多素材' }}
+                  </button>
+                  <span>已显示 {{ visibleMaterialFiles.length }} / {{ materialFileTotal }} 个</span>
+                </div>
 
                 <section v-if="canManageDrive" class="aw-client-materials-panel" aria-label="客户端素材管理">
                   <div class="aw-client-materials-panel__head">
@@ -2219,13 +2385,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <button class="aw-drive__detail-preview" type="button" @click="openFilePreview(selectedFile)">
-            <DriveThumb :file-id="selectedFile.id" :filename="selectedFile.original_filename" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
+            <DriveThumb :file-id="selectedFile.id" :filename="fileDisplayName(selectedFile)" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
             <span class="aw-drive__detail-hint">点击预览</span>
           </button>
-          <h3 class="aw-drive__detail-name">{{ selectedFile.original_filename }}</h3>
+          <h3 class="aw-drive__detail-name">{{ fileDisplayName(selectedFile) }}</h3>
           <dl class="aw-material-detail__list">
-            <div><dt>订单号</dt><dd>{{ orderLabel(selectedFile.order_no) }}</dd></div>
             <div><dt>目录</dt><dd>{{ selectedFile.upload_directory_name }}</dd></div>
+            <div><dt>相对路径</dt><dd>{{ selectedFile.relative_path || '—' }}</dd></div>
             <div><dt>格式</dt><dd>{{ fileFormatLabel(selectedFile) }}</dd></div>
             <div><dt>上传时间</dt><dd>{{ formatDateTime(selectedFile.created_at) }}</dd></div>
             <div><dt>业务月</dt><dd>{{ selectedFile.business_month || '—' }}</dd></div>
@@ -2244,10 +2410,6 @@ onBeforeUnmount(() => {
           <div v-if="canMaintainItems" class="aw-drive-maintenance">
             <p class="aw-eyebrow">内联维护</p>
             <label class="aw-field">
-              <span>订单号</span>
-              <input v-model.trim="itemEditForm.order_no" />
-            </label>
-            <label class="aw-field">
               <span>难度</span>
               <select v-model="itemEditForm.difficulty_class">
                 <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
@@ -2262,7 +2424,7 @@ onBeforeUnmount(() => {
               <input v-model.trim="maintenanceReason" placeholder="可选，维护记录原因" />
             </label>
             <div class="aw-inline-actions">
-              <button class="aw-secondary-button" type="button" @click="saveSelectedItemEdit">保存订单</button>
+              <button class="aw-secondary-button" type="button" @click="saveSelectedItemEdit">保存计件</button>
               <button class="aw-secondary-button" type="button" @click="setSelectedQC('checked')">
                 <CheckCircle2 :size="15" aria-hidden="true" />
                 QC 通过
@@ -2391,17 +2553,6 @@ onBeforeUnmount(() => {
         </button>
         <button v-else type="button" @click="directoryFromContext() && setDirectoryEnabled(directoryFromContext()!, true)">启用目录</button>
       </template>
-      <template v-else-if="contextMenu.kind === 'order'">
-        <button type="button" @click="orderFromContext() && openUploadForOrder(orderFromContext()!)">
-          <Upload :size="14" aria-hidden="true" />
-          上传到订单
-        </button>
-        <button v-if="canMaintainItems" type="button" @click="orderFromContext() && editOrderFolder(orderFromContext()!)">
-          <Pencil :size="14" aria-hidden="true" />
-          编辑订单文件
-        </button>
-        <button type="button" @click="orderFromContext() && selectAllFilesForOrder(orderFromContext()!)">全选订单文件</button>
-      </template>
       <template v-else>
         <button type="button" @click="fileFromContext() && openFilePreview(fileFromContext()!)">预览</button>
         <button type="button" @click="fileFromContext() && downloadFile(fileFromContext()!)">下载</button>
@@ -2415,7 +2566,6 @@ onBeforeUnmount(() => {
       :directory-id="selectedDir && !selectedDir.unassigned ? selectedDir.id ?? undefined : undefined"
       :directory-name="selectedDir?.name ?? ''"
       :difficulty-class="currentDirRow?.difficulty_class"
-      :default-order-no="uploadDefaultOrderNo"
       :initial-files="uploadInitialFiles"
       :allowed-file-types="currentDirRow?.allowed_file_types"
       @close="uploadOpen = false"

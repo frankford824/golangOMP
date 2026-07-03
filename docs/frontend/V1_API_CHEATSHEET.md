@@ -1,10 +1,10 @@
-# V1 API 速查表(303 path · 一行一条)
+# V1 API 速查表(309 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 303 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 309 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -200,6 +200,7 @@
 | GET | `/v1/asset-workbench/drive/directories` | List asset workbench drive directories | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/drive/orders` | List asset workbench drive orders | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/drive/files` | List asset workbench drive files | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/drive/folder` | Browse one virtual drive folder | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/drive/search` | Search asset workbench drive files | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/drive/locate` | Locate one asset workbench drive file | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/submissions` | List asset workbench submissions；Create asset workbench submission | GET:AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, HRAdmin, SuperAdmin; POST:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -208,9 +209,13 @@
 | POST | `/v1/asset-workbench/items/qc/excel` | Import submission item QC statuses from Excel | POST:AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/error-imports` | Import asset workbench quality error deductions | POST:AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/error-imports/excel` | Import asset workbench quality error deductions from Excel | POST:AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/files/{file_id}/preview` | Get uploaded work file preview metadata | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/files/{file_id}/download` | Get uploaded work file download info | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/files/batch-move` | Batch move submission files to an upload directory | POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/asset-workbench/files/batch-delete` | Batch delete submission files | POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/files/batch-delete` | Batch delete submission files | POST:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/system-search` | Search publishable material assets from asset workbench | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/materials/groups` | Group operational and external materials | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/materials/group-files` | List files inside one material group | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/materials/browse` | Browse material assets as a virtual directory tree | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/settlement/report` | Get asset workbench settlement report | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/settlement/supplements/excel` | Import monthly settlement supplements from Excel | POST:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -221,6 +226,7 @@
 | GET | `/v1/asset-workbench/upload-directories/admin` | List all asset workbench upload directories for administration | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/asset-workbench/upload-directories/{directory_id}` | Update asset workbench upload directory | PATCH:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/client-materials` | List client-downloadable materials；Publish an asset to client materials | GET:AssetSubmitter, AssetManager, SuperAdmin; POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/client-materials/search` | Search client-downloadable materials | GET:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH, DELETE | `/v1/asset-workbench/client-materials/{material_id}` | Update client material publication；Delete client material publication | PATCH:AssetManager, SuperAdmin; DELETE:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/client-materials/{material_id}/download` | Get client material download info | GET:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/client-materials/{material_id}/preview` | Get client material preview metadata | GET:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |

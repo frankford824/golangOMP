@@ -65,6 +65,22 @@ func (h *AssetWorkbenchHandler) DriveListFiles(c *gin.Context) {
 	respondOKWithPagination(c, result.Items, gin.H{"total": result.Total, "page": result.Page, "page_size": result.Size})
 }
 
+func (h *AssetWorkbenchHandler) DriveBrowseFolder(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	dirID, unassigned := parseDriveDirectory(c)
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	result, appErr := h.svc.BrowseDriveFolder(c.Request.Context(), actor, dirID, unassigned, c.Query("path"), page, pageSize)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) DriveSearch(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

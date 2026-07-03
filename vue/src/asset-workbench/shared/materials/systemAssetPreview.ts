@@ -45,10 +45,17 @@ export function isPdfMimeOrFilename(mimeType?: string | null, filename?: string 
   return extensionOf(filename) === 'pdf'
 }
 
+export function isVideoMimeOrFilename(mimeType?: string | null, filename?: string | null) {
+  const mime = normalizedMime(mimeType)
+  if (mime.startsWith('video/')) return true
+  return ['mp4', 'webm', 'mov', 'm4v'].includes(extensionOf(filename))
+}
+
 export function canAttemptSystemAssetPreview(asset: SystemAssetRow | SystemAssetPreviewMeta) {
   if (asset.preview_available) return true
   if (isSystemAssetImagePreviewable(asset)) return true
-  return isSystemAssetPdfPreviewable(asset)
+  if (isSystemAssetPdfPreviewable(asset)) return true
+  return isVideoMimeOrFilename(asset.mime_type, systemAssetFilename(asset))
 }
 
 export function resolvedSystemAssetPreviewUrl(asset?: SystemAssetRow | SystemAssetPreviewMeta | null) {
@@ -56,6 +63,7 @@ export function resolvedSystemAssetPreviewUrl(asset?: SystemAssetRow | SystemAss
   if ('preview_url' in asset && asset.preview_url) return asset.preview_url
   if ('download_url' in asset && asset.download_url && isSystemAssetImagePreviewable(asset)) return asset.download_url
   if ('download_url' in asset && asset.download_url && isSystemAssetPdfPreviewable(asset)) return asset.download_url
+  if ('download_url' in asset && asset.download_url && isVideoMimeOrFilename(asset.mime_type, systemAssetFilename(asset))) return asset.download_url
   return ''
 }
 

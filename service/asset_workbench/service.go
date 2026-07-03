@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -468,12 +469,64 @@ type ClientMaterialBatchDownloadFailure struct {
 	Reason     string `json:"reason"`
 }
 
+type ClientMaterialSearchParams struct {
+	Query    string `json:"q"`
+	SKU      string `json:"sku"`
+	Creator  string `json:"creator"`
+	Admin    bool   `json:"admin"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+}
+
+type ClientMaterialSearchResult struct {
+	Items []*domain.AssetWorkbenchClientMaterial `json:"items"`
+	Total int64                                  `json:"total"`
+	Page  int                                    `json:"page"`
+	Size  int                                    `json:"size"`
+}
+
+type MaterialGroupSearchParams struct {
+	Query    string `json:"q"`
+	Source   string `json:"source"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+}
+
+type MaterialGroupRow struct {
+	GroupKey     string                     `json:"group_key"`
+	GroupCode    string                     `json:"group_code"`
+	GroupType    string                     `json:"group_type"`
+	Title        string                     `json:"title"`
+	SourceType   string                     `json:"source_type"`
+	FileTotal    int64                      `json:"file_total"`
+	PreviewFiles []*assetcenter.AssetDetail `json:"preview_files,omitempty"`
+}
+
+type MaterialGroupSearchResult struct {
+	Items []*MaterialGroupRow `json:"items"`
+	Total int64               `json:"total"`
+	Page  int                 `json:"page"`
+	Size  int                 `json:"size"`
+}
+
+type MaterialGroupFilesResult struct {
+	GroupKey string                     `json:"group_key"`
+	Items    []*assetcenter.AssetDetail `json:"items"`
+	Total    int64                      `json:"total"`
+	Page     int                        `json:"page"`
+	Size     int                        `json:"size"`
+}
+
 type CreateUploadSessionParams struct {
-	OriginalFilename  string `json:"original_filename"`
-	FileSize          int64  `json:"file_size"`
-	MimeType          string `json:"mime_type"`
-	FileHash          string `json:"file_hash"`
-	UploadDirectoryID int64  `json:"upload_directory_id"`
+	OriginalFilename      string `json:"original_filename"`
+	FileSize              int64  `json:"file_size"`
+	MimeType              string `json:"mime_type"`
+	FileHash              string `json:"file_hash"`
+	UploadDirectoryID     int64  `json:"upload_directory_id"`
+	UploadBatchID         string `json:"upload_batch_id"`
+	RelativePath          string `json:"relative_path"`
+	IsFolderUpload        bool   `json:"is_folder_upload"`
+	ExpectedBusinessMonth string `json:"expected_business_month"`
 }
 
 type CompleteUploadSessionParams struct {
@@ -486,8 +539,11 @@ type UploadSessionResponse struct {
 }
 
 type CreateSubmissionParams struct {
-	Notes string                       `json:"notes"`
-	Items []CreateSubmissionItemParams `json:"items"`
+	Notes                 string                       `json:"notes"`
+	ExpectedBusinessMonth string                       `json:"expected_business_month"`
+	MonthRolloverAck      bool                         `json:"month_rollover_ack"`
+	BusinessMonthOverride string                       `json:"business_month_override"`
+	Items                 []CreateSubmissionItemParams `json:"items"`
 }
 
 type CreateSubmissionItemParams struct {
@@ -568,12 +624,16 @@ type SubmissionItemDetail struct {
 }
 
 type FilePreviewMeta struct {
-	FileID     int64      `json:"file_id"`
-	Status     string     `json:"status"`
-	Preparing  bool       `json:"preparing"`
-	PreviewURL string     `json:"preview_url,omitempty"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	FileID           int64      `json:"file_id"`
+	Status           string     `json:"status"`
+	Preparing        bool       `json:"preparing"`
+	PreviewURL       string     `json:"preview_url,omitempty"`
+	DownloadURL      string     `json:"download_url,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	MimeType         string     `json:"mime_type,omitempty"`
+	Filename         string     `json:"filename,omitempty"`
+	PreviewAvailable bool       `json:"preview_available"`
+	Error            string     `json:"error,omitempty"`
 }
 
 type SystemAssetPreviewMeta struct {
@@ -2676,18 +2736,31 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 	if params.FileSize < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_size must be non-negative.", nil)
 	}
+	relativePath, appErr := normalizeUploadRelativePath(params.RelativePath, filename)
+	if appErr != nil {
+		return nil, appErr
+	}
+	uploadBatchID := normalizeUploadBatchID(params.UploadBatchID)
+	expectedBusinessMonth := strings.TrimSpace(params.ExpectedBusinessMonth)
+	if expectedBusinessMonth != "" {
+		if _, err := time.Parse("2006-01", expectedBusinessMonth); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_business_month must use YYYY-MM format.", map[string]string{
+				"expected_business_month": expectedBusinessMonth,
+			})
+		}
+	}
 	directory, appErr := s.resolveUploadDirectoryForSession(ctx, params.UploadDirectoryID)
 	if appErr != nil {
 		return nil, appErr
 	}
-	if !uploadDirectoryAllowsFile(directory, filename, params.MimeType) {
+	if !uploadDirectoryAllowsFile(directory, path.Base(relativePath), params.MimeType) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file type is not allowed for this upload directory.", map[string]interface{}{
 			"allowed_file_types": directory.AllowedFileTypes,
 		})
 	}
 	now := s.nowFn().UTC()
 	sessionID := uuid.NewString()
-	objectKey := s.buildObjectKey(now, sessionID, filename, directory)
+	objectKey := s.buildObjectKey(now, sessionID, filename, directory, relativePath)
 	plan, err := s.oss.CreateMultipartUploadPlan(ctx, objectKey, params.FileSize, params.MimeType)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to create OSS upload plan.", err.Error())
@@ -2706,6 +2779,10 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 		MultipartPlan:    planJSON,
 		ExpiresAt:        now.Add(s.cfg.UploadSessionTTL),
 	}
+	session.UploadBatchID = uploadBatchID
+	session.RelativePath = relativePath
+	session.IsFolderUpload = params.IsFolderUpload || strings.Contains(relativePath, "/")
+	session.ExpectedBusinessMonth = expectedBusinessMonth
 	if directory != nil {
 		session.UploadDirectoryID = &directory.ID
 		session.UploadDirectoryName = directory.Name
@@ -2869,7 +2946,10 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 		profile = &domain.AssetWorkbenchProfile{UserID: actor.ID, Status: domain.AssetWorkbenchProfileStatusPending}
 	}
 	now := s.nowFn().UTC()
-	businessMonth := s.businessMonth(now)
+	businessMonth, appErr := s.resolveSubmissionBusinessMonth(ctx, actor, params, now)
+	if appErr != nil {
+		return nil, appErr
+	}
 	submission := &domain.AssetWorkbenchSubmission{
 		SubmissionNo:    "AW" + now.Format("20060102150405") + strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", "")),
 		SubmitterUserID: actor.ID,
@@ -2929,6 +3009,10 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 					UploadDirectoryName:            session.UploadDirectoryName,
 					UploadDirectoryPrefix:          session.UploadDirectoryPrefix,
 					UploadDirectoryDifficultyClass: session.UploadDirectoryDifficultyClass,
+					UploadBatchID:                  session.UploadBatchID,
+					RelativePath:                   session.RelativePath,
+					DisplayName:                    path.Base(firstNonEmpty(session.RelativePath, session.OriginalFilename)),
+					IsFolderUpload:                 session.IsFolderUpload,
 					ObjectKey:                      session.ObjectKey,
 					PreviewStatus:                  initialPreviewStatus(session.OriginalFilename, session.MimeType),
 					OriginalFilename:               session.OriginalFilename,
@@ -3141,26 +3225,18 @@ func (s *Service) ImportSubmissionItemQCExcel(ctx context.Context, actor domain.
 	if appErr != nil {
 		return nil, appErr
 	}
-	orderNoToItemID := map[string]int64{}
-	if strings.TrimSpace(businessMonth) != "" {
-		items, err := s.repo.ListSubmissionItemsByMonth(ctx, strings.TrimSpace(businessMonth))
+	indexes := newSubmissionItemQCImportIndexes()
+	indexOptions := submissionItemQCImportIndexOptionsForRows(rows)
+	businessMonth = strings.TrimSpace(businessMonth)
+	if businessMonth != "" {
+		items, err := s.repo.ListSubmissionItemsByMonth(ctx, businessMonth)
 		if err != nil {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission items for QC import.", err.Error())
 		}
-		duplicates := map[string]bool{}
-		for _, item := range items {
-			key := strings.TrimSpace(item.OrderNo)
-			if key == "" {
-				continue
-			}
-			if _, ok := orderNoToItemID[key]; ok {
-				duplicates[key] = true
-				continue
-			}
-			orderNoToItemID[key] = item.ID
-		}
-		for key := range duplicates {
-			delete(orderNoToItemID, key)
+		var buildErr *domain.AppError
+		indexes, buildErr = s.buildSubmissionItemQCImportIndexes(ctx, items, indexOptions)
+		if buildErr != nil {
+			return nil, buildErr
 		}
 	}
 	result := &SubmissionItemQCImportResult{
@@ -3168,18 +3244,13 @@ func (s *Service) ImportSubmissionItemQCExcel(ctx context.Context, actor domain.
 		Failures: []SubmissionItemQCImportFailure{},
 	}
 	for _, row := range rows {
-		itemID := row.itemID
+		itemID, reason := indexes.match(row)
 		if itemID <= 0 {
-			if row.orderNo == "" {
-				result.Failures = append(result.Failures, SubmissionItemQCImportFailure{Row: row.row, Reason: "item_id or order_no is required"})
-				continue
+			if reason == "" {
+				reason = "item_id, file_id, submission_no+filename, filename, or order_no is required"
 			}
-			matched := orderNoToItemID[row.orderNo]
-			if matched <= 0 {
-				result.Failures = append(result.Failures, SubmissionItemQCImportFailure{Row: row.row, Reason: "order_no is not unique or not found in business_month"})
-				continue
-			}
-			itemID = matched
+			result.Failures = append(result.Failures, SubmissionItemQCImportFailure{Row: row.row, Reason: reason})
+			continue
 		}
 		updated, appErr := s.UpdateSubmissionItemQC(ctx, actor, itemID, UpdateSubmissionItemQCParams{QCStatus: row.qcStatus, Reason: row.reason})
 		if appErr != nil {
@@ -3189,6 +3260,169 @@ func (s *Service) ImportSubmissionItemQCExcel(ctx context.Context, actor domain.
 		result.Updated = append(result.Updated, updated)
 	}
 	return result, nil
+}
+
+type submissionItemQCImportIndexes struct {
+	orderNoToItemID         map[string]int64
+	fileIDToItemID          map[int64]int64
+	submissionFileToItemID  map[string]int64
+	filenameToItemID        map[string]int64
+	ambiguousSubmissionFile map[string]bool
+	ambiguousFilename       map[string]bool
+}
+
+type submissionItemQCImportIndexOptions struct {
+	includeFiles         bool
+	includeSubmissionNos bool
+}
+
+func submissionItemQCImportIndexOptionsForRows(rows []submissionItemQCExcelRow) submissionItemQCImportIndexOptions {
+	var options submissionItemQCImportIndexOptions
+	for _, row := range rows {
+		if row.fileID > 0 || strings.TrimSpace(row.filename) != "" {
+			options.includeFiles = true
+		}
+		if strings.TrimSpace(row.submissionNo) != "" && strings.TrimSpace(row.filename) != "" {
+			options.includeFiles = true
+			options.includeSubmissionNos = true
+		}
+	}
+	return options
+}
+
+func newSubmissionItemQCImportIndexes() *submissionItemQCImportIndexes {
+	return &submissionItemQCImportIndexes{
+		orderNoToItemID:         map[string]int64{},
+		fileIDToItemID:          map[int64]int64{},
+		submissionFileToItemID:  map[string]int64{},
+		filenameToItemID:        map[string]int64{},
+		ambiguousSubmissionFile: map[string]bool{},
+		ambiguousFilename:       map[string]bool{},
+	}
+}
+
+func (s *Service) buildSubmissionItemQCImportIndexes(ctx context.Context, items []*domain.AssetWorkbenchSubmissionItem, options submissionItemQCImportIndexOptions) (*submissionItemQCImportIndexes, *domain.AppError) {
+	indexes := newSubmissionItemQCImportIndexes()
+	orderDuplicates := map[string]bool{}
+	submissionNoByID := map[int64]string{}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		orderKey := strings.TrimSpace(item.OrderNo)
+		if orderKey != "" {
+			if existing, ok := indexes.orderNoToItemID[orderKey]; ok && existing != item.ID {
+				orderDuplicates[orderKey] = true
+			} else {
+				indexes.orderNoToItemID[orderKey] = item.ID
+			}
+		}
+		if options.includeSubmissionNos {
+			if _, ok := submissionNoByID[item.SubmissionID]; !ok {
+				submission, err := s.repo.GetSubmission(ctx, item.SubmissionID)
+				if err != nil {
+					return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission records for QC import.", err.Error())
+				}
+				submissionNoByID[item.SubmissionID] = strings.TrimSpace(submission.SubmissionNo)
+			}
+		}
+		if !options.includeFiles {
+			continue
+		}
+		files, err := s.repo.ListSubmissionFiles(ctx, item.ID)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission files for QC import.", err.Error())
+		}
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			if file.ID > 0 {
+				indexes.fileIDToItemID[file.ID] = item.ID
+			}
+			filenameKey := normalizeSubmissionItemQCImportKey(file.OriginalFilename)
+			if filenameKey == "" {
+				continue
+			}
+			indexes.addUniqueFilename(filenameKey, item.ID)
+			if !options.includeSubmissionNos {
+				continue
+			}
+			if submissionNo := normalizeSubmissionItemQCImportKey(submissionNoByID[item.SubmissionID]); submissionNo != "" {
+				indexes.addUniqueSubmissionFile(submissionNo+"|"+filenameKey, item.ID)
+			}
+		}
+	}
+	for key := range orderDuplicates {
+		delete(indexes.orderNoToItemID, key)
+	}
+	return indexes, nil
+}
+
+func (idx *submissionItemQCImportIndexes) addUniqueSubmissionFile(key string, itemID int64) {
+	if key == "" {
+		return
+	}
+	if existing, ok := idx.submissionFileToItemID[key]; ok && existing != itemID {
+		idx.ambiguousSubmissionFile[key] = true
+		delete(idx.submissionFileToItemID, key)
+		return
+	}
+	if !idx.ambiguousSubmissionFile[key] {
+		idx.submissionFileToItemID[key] = itemID
+	}
+}
+
+func (idx *submissionItemQCImportIndexes) addUniqueFilename(key string, itemID int64) {
+	if key == "" {
+		return
+	}
+	if existing, ok := idx.filenameToItemID[key]; ok && existing != itemID {
+		idx.ambiguousFilename[key] = true
+		delete(idx.filenameToItemID, key)
+		return
+	}
+	if !idx.ambiguousFilename[key] {
+		idx.filenameToItemID[key] = itemID
+	}
+}
+
+func (idx *submissionItemQCImportIndexes) match(row submissionItemQCExcelRow) (int64, string) {
+	if row.itemID > 0 {
+		return row.itemID, ""
+	}
+	if row.fileID > 0 {
+		if itemID := idx.fileIDToItemID[row.fileID]; itemID > 0 {
+			return itemID, ""
+		}
+		return 0, "file_id is not found in business_month"
+	}
+	filename := normalizeSubmissionItemQCImportKey(row.filename)
+	submissionNo := normalizeSubmissionItemQCImportKey(row.submissionNo)
+	if submissionNo != "" && filename != "" {
+		key := submissionNo + "|" + filename
+		if itemID := idx.submissionFileToItemID[key]; itemID > 0 {
+			return itemID, ""
+		}
+		return 0, "submission_no and filename are not unique or not found in business_month"
+	}
+	if filename != "" {
+		if itemID := idx.filenameToItemID[filename]; itemID > 0 {
+			return itemID, ""
+		}
+		return 0, "filename is not unique or not found in business_month"
+	}
+	if row.orderNo != "" {
+		if itemID := idx.orderNoToItemID[row.orderNo]; itemID > 0 {
+			return itemID, ""
+		}
+		return 0, "order_no is not unique or not found in business_month"
+	}
+	return 0, ""
+}
+
+func normalizeSubmissionItemQCImportKey(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func (s *Service) VoidSubmissionItem(ctx context.Context, actor domain.RequestActor, itemID int64, params VoidSubmissionItemParams) (*domain.AssetWorkbenchSubmissionItem, *domain.AppError) {
@@ -3431,8 +3665,8 @@ func (s *Service) BatchDeleteFiles(ctx context.Context, actor domain.RequestActo
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers can delete submission files.", nil)
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench members can delete submission files.", nil)
 	}
 	reason := strings.TrimSpace(params.Reason)
 	if reason == "" {
@@ -3515,29 +3749,81 @@ func (s *Service) deleteSubmissionFile(ctx context.Context, actor domain.Request
 	if file == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", nil)
 	}
+	if file.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Submission file is not owned by current user.", nil)
+	}
+	item, err := s.repo.GetSubmissionItem(ctx, file.SubmissionItemID)
+	if err != nil {
+		return mapRepoReadError(err, "Submission item not found.", "Failed to load submission item after file delete.")
+	}
+	activeFiles, err := s.repo.ListSubmissionFiles(ctx, item.ID)
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to list remaining submission files.", err.Error())
+	}
+	remaining := make([]*domain.AssetWorkbenchSubmissionFile, 0, len(activeFiles))
+	for _, candidate := range activeFiles {
+		if candidate == nil || candidate.ID == file.ID {
+			continue
+		}
+		remaining = append(remaining, candidate)
+	}
+	before := *item
+	var repriced *domain.AssetWorkbenchSubmissionItem
+	if len(remaining) > 0 {
+		nextCount := len(remaining)
+		if item.PageCount != nextCount || item.ItemCount != nextCount {
+			profile, appErr := s.pricingProfileForItem(ctx, item)
+			if appErr != nil {
+				return appErr
+			}
+			req := CreateSubmissionItemParams{
+				OrderNo:         item.OrderNo,
+				DifficultyClass: item.DifficultyClass,
+				Finalized:       item.Finalized,
+				PageCount:       nextCount,
+				ItemCount:       nextCount,
+			}
+			if item.TemplateID != nil {
+				req.TemplateID = *item.TemplateID
+			}
+			repriced, appErr = s.buildSubmissionItem(ctx, item.PayeeUserID, item.SubmissionID, item.SubmittedAt, item.BusinessMonth, profile, req)
+			if appErr != nil {
+				return appErr
+			}
+			repriced.ID = item.ID
+		}
+	}
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.repo.DeleteSubmissionFile(ctx, tx, file.ID); err != nil {
+		now := s.nowFn().UTC()
+		if err := s.repo.DeleteSubmissionFile(ctx, tx, file.ID, actor.ID, reason, now); err != nil {
 			return err
 		}
-		if err := s.repo.RefreshSubmissionTotals(ctx, tx, file.SubmissionID); err != nil {
+		if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileDeleted, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, nil, reason); err != nil {
 			return err
 		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileDeleted, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, nil, reason)
+		if len(remaining) == 0 && item.VoidedAt == nil {
+			updated, err := s.repo.VoidSubmissionItem(ctx, tx, item.ID, actor.ID, "all files deleted: "+reason, now)
+			if err != nil {
+				return err
+			}
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemVoided, domain.AssetWorkbenchEntitySubmissionItem, &item.ID, &before, updated, reason); err != nil {
+				return err
+			}
+		} else if repriced != nil {
+			updated, err := s.repo.UpdateSubmissionItemEditableFields(ctx, tx, repriced)
+			if err != nil {
+				return err
+			}
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemRepriced, domain.AssetWorkbenchEntitySubmissionItem, &item.ID, &before, updated, reason); err != nil {
+				return err
+			}
+		}
+		return s.repo.RefreshSubmissionTotals(ctx, tx, file.SubmissionID)
 	}); err != nil {
 		if appErr := asAppError(err); appErr != nil {
 			return appErr
 		}
 		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to delete submission file.", err.Error())
-	}
-	if s.oss != nil && s.oss.Enabled() {
-		objectKey := strings.TrimSpace(file.ObjectKey)
-		if objectKey != "" {
-			_ = s.oss.DeleteObject(ctx, objectKey)
-		}
-		previewKey := strings.TrimSpace(file.PreviewKey)
-		if previewKey != "" && previewKey != objectKey {
-			_ = s.oss.DeleteObject(ctx, previewKey)
-		}
 	}
 	return nil
 }
@@ -3557,10 +3843,13 @@ func (s *Service) GetFilePreview(ctx context.Context, actor domain.RequestActor,
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Submission file is not visible to current user.", nil)
 	}
 	meta := &FilePreviewMeta{
-		FileID:    file.ID,
-		Status:    file.PreviewStatus,
-		Preparing: file.PreviewStatus == domain.AssetWorkbenchPreviewStatusPending || file.PreviewStatus == domain.AssetWorkbenchPreviewStatusProcessing,
-		Error:     file.PreviewError,
+		FileID:   file.ID,
+		Status:   file.PreviewStatus,
+		MimeType: file.MimeType,
+		Filename: firstNonEmpty(file.DisplayName, file.OriginalFilename),
+		Preparing: file.PreviewStatus == domain.AssetWorkbenchPreviewStatusPending ||
+			file.PreviewStatus == domain.AssetWorkbenchPreviewStatusProcessing,
+		Error: file.PreviewError,
 	}
 	if file.PreviewStatus != domain.AssetWorkbenchPreviewStatusReady {
 		return meta, nil
@@ -3575,7 +3864,9 @@ func (s *Service) GetFilePreview(ctx context.Context, actor domain.RequestActor,
 	signed := s.oss.PresignPreviewURL(previewKey)
 	if signed != nil {
 		meta.PreviewURL = signed.DownloadURL
+		meta.DownloadURL = signed.DownloadURL
 		meta.ExpiresAt = &signed.ExpiresAt
+		meta.PreviewAvailable = true
 	}
 	return meta, nil
 }
@@ -4858,6 +5149,126 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	})
 }
 
+func (s *Service) SearchClientMaterials(ctx context.Context, actor domain.RequestActor, params ClientMaterialSearchParams) (*ClientMaterialSearchResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can search client materials.", nil)
+	}
+	admin := params.Admin && actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin)
+	items, appErr := s.ListClientMaterials(ctx, actor, admin)
+	if appErr != nil {
+		return nil, appErr
+	}
+	query := strings.ToLower(strings.TrimSpace(params.Query))
+	sku := strings.ToLower(strings.TrimSpace(params.SKU))
+	filtered := make([]*domain.AssetWorkbenchClientMaterial, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if query != "" && !clientMaterialMatchesQuery(item, query) {
+			continue
+		}
+		if sku != "" && !clientMaterialMatchesSKU(item, sku) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	page, pageSize := normalizeServicePage(params.Page, params.PageSize, 50, 100)
+	start := (page - 1) * pageSize
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return &ClientMaterialSearchResult{
+		Items: filtered[start:end],
+		Total: int64(len(filtered)),
+		Page:  page,
+		Size:  pageSize,
+	}, nil
+}
+
+func (s *Service) MaterialGroups(ctx context.Context, actor domain.RequestActor, params MaterialGroupSearchParams) (*MaterialGroupSearchResult, *domain.AppError) {
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material groups from workbench.", nil)
+	}
+	if s.systemAssets == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset searcher is not configured.", nil)
+	}
+	page, pageSize := normalizeServicePage(params.Page, params.PageSize, 50, 100)
+	sourceFilter := domain.NormalizeAssetResourceSource(params.Source)
+	result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
+		Keyword:        strings.TrimSpace(params.Query),
+		Page:           1,
+		Size:           500,
+		Source:         sourceFilter,
+		UsableState:    domain.AssetUsableStateFilterAll,
+		FormatCategory: domain.AssetFormatCategoryAll,
+		IsArchived:     domain.AssetArchiveFilterFalse,
+		TaskStatus:     domain.AssetTaskStatusFilterAll,
+	})
+	if appErr != nil {
+		return nil, appErr
+	}
+	grouped := groupMaterialAssets(result.Items)
+	start := (page - 1) * pageSize
+	if start > len(grouped) {
+		start = len(grouped)
+	}
+	end := start + pageSize
+	if end > len(grouped) {
+		end = len(grouped)
+	}
+	return &MaterialGroupSearchResult{Items: grouped[start:end], Total: int64(len(grouped)), Page: page, Size: pageSize}, nil
+}
+
+func (s *Service) MaterialGroupFiles(ctx context.Context, actor domain.RequestActor, groupKey string, page int, pageSize int) (*MaterialGroupFilesResult, *domain.AppError) {
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material group files from workbench.", nil)
+	}
+	if s.systemAssets == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset searcher is not configured.", nil)
+	}
+	groupKey = strings.TrimSpace(groupKey)
+	if groupKey == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "group_key is required.", nil)
+	}
+	page, pageSize = normalizeServicePage(page, pageSize, 50, 100)
+	result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
+		Keyword:        materialGroupSearchKeyword(groupKey),
+		Page:           1,
+		Size:           500,
+		Source:         domain.AssetResourceSourceAll,
+		UsableState:    domain.AssetUsableStateFilterAll,
+		FormatCategory: domain.AssetFormatCategoryAll,
+		IsArchived:     domain.AssetArchiveFilterFalse,
+		TaskStatus:     domain.AssetTaskStatusFilterAll,
+	})
+	if appErr != nil {
+		return nil, appErr
+	}
+	matches := make([]*assetcenter.AssetDetail, 0)
+	for _, asset := range result.Items {
+		if assetMaterialGroupKey(asset) == groupKey {
+			matches = append(matches, asset)
+		}
+	}
+	start := (page - 1) * pageSize
+	if start > len(matches) {
+		start = len(matches)
+	}
+	end := start + pageSize
+	if end > len(matches) {
+		end = len(matches)
+	}
+	return &MaterialGroupFilesResult{GroupKey: groupKey, Items: matches[start:end], Total: int64(len(matches)), Page: page, Size: pageSize}, nil
+}
+
 func (s *Service) SystemAssetDownload(ctx context.Context, actor domain.RequestActor, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can download system assets from workbench.", nil)
@@ -5415,12 +5826,15 @@ func (s *Service) buildSubmissionItem(ctx context.Context, payeeUserID, submissi
 		template = templates[0]
 	}
 	orderNo := strings.TrimSpace(req.OrderNo)
+	if orderNo == "" {
+		orderNo = "AWF" + submittedAt.Format("20060102150405") + strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", ""))
+	}
 	difficulty := strings.TrimSpace(req.DifficultyClass)
 	if template != nil {
 		difficulty = strings.TrimSpace(template.DifficultyClass)
 	}
-	if orderNo == "" || difficulty == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no and difficulty_class are required.", nil)
+	if difficulty == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "difficulty_class is required.", nil)
 	}
 	normalizedDifficulty, appErr := normalizeWorkbenchDifficultyCode(difficulty, false)
 	if appErr != nil {
@@ -5677,7 +6091,13 @@ func (s *Service) buildFileDownloadMeta(file *domain.AssetWorkbenchSubmissionFil
 	if objectKey == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Submission file object key is empty.", nil)
 	}
-	filename := uniqueWorkbenchDownloadFilename(strings.TrimSpace(file.OriginalFilename), file.ID, usedNames)
+	preferredName := firstNonEmpty(file.DisplayName, file.OriginalFilename)
+	if usedNames != nil {
+		preferredName = firstNonEmpty(file.RelativePath, preferredName)
+	} else {
+		preferredName = path.Base(preferredName)
+	}
+	filename := uniqueWorkbenchDownloadFilename(strings.TrimSpace(preferredName), file.ID, usedNames)
 	signed := s.oss.PresignDownloadURLWithFilename(objectKey, filename)
 	if signed == nil || strings.TrimSpace(signed.DownloadURL) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Download URL is unavailable.", nil)
@@ -7103,8 +7523,11 @@ func (s *Service) resolveUploadDirectoryForSession(ctx context.Context, director
 	return nil, nil
 }
 
-func (s *Service) buildObjectKey(now time.Time, sessionID, filename string, directory *domain.AssetWorkbenchUploadDirectory) string {
-	clean := strings.TrimSpace(filepath.Base(filename))
+func (s *Service) buildObjectKey(now time.Time, sessionID, filename string, directory *domain.AssetWorkbenchUploadDirectory, relativePath string) string {
+	clean := strings.TrimSpace(strings.Trim(relativePath, "/"))
+	if clean == "" {
+		clean = strings.TrimSpace(filepath.Base(filename))
+	}
 	if clean == "." || clean == string(filepath.Separator) || clean == "" {
 		clean = "upload.bin"
 	}
@@ -7133,6 +7556,70 @@ func (s *Service) buildMovedFileObjectKey(now time.Time, file *domain.AssetWorkb
 		return fmt.Sprintf("%s/uploads/%s/moved/%s-%s", base, now.Format("2006/01"), uuid.NewString(), clean)
 	}
 	return fmt.Sprintf("%s/uploads/%s/%s/moved/%s-%s", base, prefix, now.Format("2006/01"), uuid.NewString(), clean)
+}
+
+func normalizeUploadBatchID(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return uuid.NewString()
+	}
+	value = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-' || r == '_':
+			return r
+		default:
+			return -1
+		}
+	}, value)
+	if value == "" {
+		return uuid.NewString()
+	}
+	if len(value) > 64 {
+		return value[:64]
+	}
+	return value
+}
+
+func normalizeUploadRelativePath(raw string, filename string) (string, *domain.AppError) {
+	fallback := strings.TrimSpace(filepath.Base(filename))
+	if fallback == "" || fallback == "." || fallback == string(filepath.Separator) {
+		fallback = "upload.bin"
+	}
+	value := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	if value == "" {
+		value = fallback
+	}
+	value = strings.Trim(value, "/")
+	if value == "" {
+		value = fallback
+	}
+	if strings.Contains(value, "\x00") || strings.Contains(value, ":") {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "relative_path contains invalid characters.", nil)
+	}
+	clean := path.Clean(value)
+	if clean == "." {
+		clean = fallback
+	}
+	if strings.HasPrefix(clean, "../") || clean == ".." || strings.HasPrefix(clean, "/") {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "relative_path cannot escape the upload folder.", nil)
+	}
+	parts := strings.Split(clean, "/")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") {
+			return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "relative_path contains invalid path segments.", nil)
+		}
+	}
+	if len(clean) > 1024 {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "relative_path is too long.", map[string]int{"max_length": 1024})
+	}
+	return clean, nil
 }
 
 func normalizeUploadDirectoryPrefix(raw string) (string, *domain.AppError) {
@@ -7216,6 +7703,190 @@ func boolValueDefault(value *bool, fallback bool) bool {
 		return fallback
 	}
 	return *value
+}
+
+func normalizeServicePage(page int, pageSize int, defaultPageSize int, maxPageSize int) (int, int) {
+	if page <= 0 {
+		page = 1
+	}
+	if defaultPageSize <= 0 {
+		defaultPageSize = 50
+	}
+	if maxPageSize <= 0 {
+		maxPageSize = 100
+	}
+	if pageSize <= 0 {
+		pageSize = defaultPageSize
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+	return page, pageSize
+}
+
+func clientMaterialMatchesQuery(item *domain.AssetWorkbenchClientMaterial, query string) bool {
+	haystack := strings.ToLower(strings.Join([]string{
+		item.Title,
+		item.Description,
+		item.FilenameSnapshot,
+		item.MimeTypeSnapshot,
+		item.SourceLabel,
+		item.ResourceID,
+		item.SourceRef,
+		item.ScopeSKUCode,
+		item.SKUCode,
+		item.PrimarySKUCode,
+	}, " "))
+	return strings.Contains(haystack, query)
+}
+
+func clientMaterialMatchesSKU(item *domain.AssetWorkbenchClientMaterial, sku string) bool {
+	return strings.Contains(strings.ToLower(item.ScopeSKUCode), sku) ||
+		strings.Contains(strings.ToLower(item.SKUCode), sku) ||
+		strings.Contains(strings.ToLower(item.PrimarySKUCode), sku)
+}
+
+var externalMaterialCodePattern = regexp.MustCompile(`(?i)([A-Z]{1,8}[-_]?\d{3,}[A-Z0-9_-]*|\d{6}-\d{8,}|[A-Z0-9]{6,}[-_][A-Z0-9_-]{2,})`)
+
+func groupMaterialAssets(items []*assetcenter.AssetDetail) []*MaterialGroupRow {
+	byKey := map[string]*MaterialGroupRow{}
+	order := []string{}
+	for _, asset := range items {
+		if asset == nil {
+			continue
+		}
+		key := assetMaterialGroupKey(asset)
+		if key == "" {
+			key = fmt.Sprintf("system-asset:%d", asset.ID)
+		}
+		group := byKey[key]
+		if group == nil {
+			group = &MaterialGroupRow{
+				GroupKey:   key,
+				GroupCode:  materialGroupCodeFromKey(key),
+				GroupType:  materialGroupTypeFromKey(key),
+				Title:      materialGroupTitle(asset, key),
+				SourceType: firstNonEmpty(asset.SourceType, string(domain.AssetResourceSourceSystem)),
+			}
+			byKey[key] = group
+			order = append(order, key)
+		}
+		group.FileTotal++
+		if len(group.PreviewFiles) < 5 {
+			group.PreviewFiles = append(group.PreviewFiles, asset)
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		left := byKey[order[i]]
+		right := byKey[order[j]]
+		if left.FileTotal == right.FileTotal {
+			return left.GroupKey < right.GroupKey
+		}
+		return left.FileTotal > right.FileTotal
+	})
+	out := make([]*MaterialGroupRow, 0, len(order))
+	for _, key := range order {
+		out = append(out, byKey[key])
+	}
+	return out
+}
+
+func assetMaterialGroupKey(asset *assetcenter.AssetDetail) string {
+	if asset == nil {
+		return ""
+	}
+	source := domain.NormalizeAssetResourceSource(asset.SourceType)
+	if source == domain.AssetResourceSourceExternal {
+		if code := inferExternalMaterialCode(asset.OriginPath); code != "" {
+			return "ext-sku:" + code
+		}
+		parent := normalizeExternalMaterialParent(asset.OriginPath)
+		if parent != "" {
+			return "ext-dir:" + parent
+		}
+	}
+	if code := firstNonEmpty(asset.ScopeSKUCode, asset.SKUCode, asset.PrimarySKUCode); code != "" {
+		return "sku:" + strings.TrimSpace(code)
+	}
+	return fmt.Sprintf("system-asset:%d", asset.ID)
+}
+
+func materialGroupSearchKeyword(groupKey string) string {
+	groupKey = strings.TrimSpace(groupKey)
+	for _, prefix := range []string{"sku:", "ext-sku:", "ext-dir:", "system-asset:"} {
+		if strings.HasPrefix(groupKey, prefix) {
+			return strings.TrimPrefix(groupKey, prefix)
+		}
+	}
+	return groupKey
+}
+
+func materialGroupCodeFromKey(key string) string {
+	if idx := strings.Index(key, ":"); idx >= 0 {
+		return key[idx+1:]
+	}
+	return key
+}
+
+func materialGroupTypeFromKey(key string) string {
+	if idx := strings.Index(key, ":"); idx >= 0 {
+		return key[:idx]
+	}
+	return "unknown"
+}
+
+func materialGroupTitle(asset *assetcenter.AssetDetail, key string) string {
+	code := materialGroupCodeFromKey(key)
+	switch materialGroupTypeFromKey(key) {
+	case "ext-dir":
+		return path.Base(strings.Trim(code, "/"))
+	case "system-asset":
+		return firstNonEmpty(asset.ProductName, asset.OriginalFilename, asset.FileName, code)
+	default:
+		return code
+	}
+}
+
+func inferExternalMaterialCode(originPath string) string {
+	parts := strings.Split(strings.ReplaceAll(originPath, "\\", "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := strings.TrimSpace(parts[i])
+		if part == "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		if lower == "quark" || lower == "p1" || lower == "p2" || lower == "p3" || lower == "#recycle" || lower == "@eadir" {
+			continue
+		}
+		match := externalMaterialCodePattern.FindString(part)
+		if match != "" && !looksLikePlainDateCode(match) {
+			return strings.ToUpper(match)
+		}
+	}
+	return ""
+}
+
+func looksLikePlainDateCode(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 8 {
+		return false
+	}
+	if _, err := time.Parse("20060102", value); err == nil {
+		return true
+	}
+	return false
+}
+
+func normalizeExternalMaterialParent(originPath string) string {
+	value := strings.Trim(strings.ReplaceAll(strings.TrimSpace(originPath), "\\", "/"), "/")
+	if value == "" {
+		return ""
+	}
+	parent := path.Dir(value)
+	if parent == "." || parent == "/" {
+		return value
+	}
+	return "/" + strings.Trim(parent, "/")
 }
 
 func (s *Service) systemDownloadSnapshot(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
@@ -7868,6 +8539,63 @@ func (s *Service) businessMonth(t time.Time) string {
 	return t.In(s.loc).Format("2006-01")
 }
 
+func (s *Service) resolveSubmissionBusinessMonth(ctx context.Context, actor domain.RequestActor, params CreateSubmissionParams, now time.Time) (string, *domain.AppError) {
+	currentMonth := s.businessMonth(now)
+	expectedMonth := strings.TrimSpace(params.ExpectedBusinessMonth)
+	if expectedMonth != "" {
+		if _, err := time.Parse("2006-01", expectedMonth); err != nil {
+			return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_business_month must use YYYY-MM format.", map[string]string{"expected_business_month": expectedMonth})
+		}
+	}
+	overrideMonth := strings.TrimSpace(params.BusinessMonthOverride)
+	if overrideMonth != "" {
+		if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+			return "", domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can override business_month.", nil)
+		}
+		if _, err := time.Parse("2006-01", overrideMonth); err != nil {
+			return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month_override must use YYYY-MM format.", map[string]string{"business_month_override": overrideMonth})
+		}
+		if appErr := s.ensureBusinessMonthOpenForManualSubmission(ctx, overrideMonth); appErr != nil {
+			return "", appErr
+		}
+		return overrideMonth, nil
+	}
+	if expectedMonth != "" && expectedMonth != currentMonth && !params.MonthRolloverAck {
+		return "", domain.NewAppError("MONTH_ROLLOVER_REQUIRED", "Business month changed before submission; confirm the upload should count to the current month.", map[string]string{
+			"expected_business_month": expectedMonth,
+			"current_business_month":  currentMonth,
+		})
+	}
+	return currentMonth, nil
+}
+
+func (s *Service) ensureBusinessMonthOpenForManualSubmission(ctx context.Context, businessMonth string) *domain.AppError {
+	if s.repo == nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench repository is not configured.", nil)
+	}
+	batches, _, err := s.repo.ListSettlementBatches(ctx, repo.AssetWorkbenchSettlementBatchFilter{
+		BusinessMonth: businessMonth,
+		Page:          1,
+		PageSize:      100,
+	})
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to check settlement batch state.", err.Error())
+	}
+	for _, batch := range batches {
+		if batch == nil {
+			continue
+		}
+		if batch.Status != domain.AssetWorkbenchBatchStatusCancelled {
+			return domain.NewAppError(domain.ErrCodeConflict, "business_month_override is locked by an existing settlement batch.", map[string]interface{}{
+				"business_month": businessMonth,
+				"batch_id":       batch.ID,
+				"batch_status":   batch.Status,
+			})
+		}
+	}
+	return nil
+}
+
 func (s *Service) requireRepo() *domain.AppError {
 	if s.repo == nil || s.tx == nil {
 		return domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench repository is not configured.", nil)
@@ -8208,7 +8936,7 @@ func periodsOverlap(aStart time.Time, aEnd *time.Time, bStart time.Time, bEnd *t
 func initialPreviewStatus(filename, mimeType string) string {
 	fileType := inferFileType(filename, mimeType)
 	switch fileType {
-	case "image", "pdf", "design":
+	case "image", "pdf", "design", "video":
 		return domain.AssetWorkbenchPreviewStatusPending
 	default:
 		return domain.AssetWorkbenchPreviewStatusNotApplicable
@@ -8220,12 +8948,17 @@ func inferFileType(filename, mimeType string) string {
 	if strings.HasPrefix(strings.ToLower(mimeType), "image/") {
 		return "image"
 	}
+	if strings.HasPrefix(strings.ToLower(mimeType), "video/") {
+		return "video"
+	}
 	switch ext {
 	case "psd", "ai", "cdr", "sketch", "fig":
 		return "design"
 	case "pdf":
 		return "pdf"
-	case "zip", "rar", "7z":
+	case "mp4", "webm", "mov", "m4v":
+		return "video"
+	case "zip", "rar", "7z", "tar", "gz", "tgz":
 		return "archive"
 	default:
 		if ext != "" {
@@ -8243,8 +8976,11 @@ func isWorkbenchSystemAssetDirectPreviewable(mimeType string, filename string) b
 	if mime == "application/pdf" {
 		return true
 	}
+	if strings.HasPrefix(mime, "video/") {
+		return true
+	}
 	switch strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".") {
-	case "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "pdf":
+	case "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tif", "tiff", "pdf", "mp4", "webm", "mov", "m4v":
 		return true
 	default:
 		return false
@@ -8465,10 +9201,7 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 	if !ok {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing quality error import headers.", nil)
 	}
-	orderIndex, ok := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号", "文件名")
-	if !ok {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing order_no column.", nil)
-	}
+	orderIndex, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号", "文件名")
 	errorIndex, hasErrorCount := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数")
 	payeeIndex, hasPayee := firstExcelColumn(headers, "payee_user_id", "payeeuserid", "user_id", "userid", "人员id", "用户id")
 	payeeNameIndex, hasPayeeName := firstExcelColumn(headers, "payee_name", "payeename", "出错人", "人员", "姓名", "计件人")
@@ -8486,7 +9219,7 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 		if len(records) >= 50000 {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel rows exceed error import limit.", map[string]int{"limit": 50000})
 		}
-		orderNo := strings.TrimSpace(excelCell(row, orderIndex))
+		orderNo := excelOptionalCell(row, orderIndex, hasOrder)
 		difficulty := excelOptionalCell(row, difficultyIndex, hasDifficulty)
 		payeeName := excelOptionalCell(row, payeeNameIndex, hasPayeeName)
 		errorRaw := excelOptionalCell(row, errorIndex, hasErrorCount)
@@ -8496,7 +9229,7 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 			continue
 		}
 		if orderNo == "" && !isQualityRow {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no is required.", map[string]int{"row": currentRow})
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no or quality import columns are required.", map[string]int{"row": currentRow})
 		}
 		errorCount := 1
 		if errorRaw != "" {
@@ -8557,11 +9290,14 @@ type settlementSupplementExcelRow struct {
 }
 
 type submissionItemQCExcelRow struct {
-	row      int
-	itemID   int64
-	orderNo  string
-	qcStatus string
-	reason   string
+	row          int
+	itemID       int64
+	fileID       int64
+	submissionNo string
+	filename     string
+	orderNo      string
+	qcStatus     string
+	reason       string
 }
 
 func parseSubmissionItemQCExcel(businessMonth string, reader io.Reader) ([]submissionItemQCExcelRow, *domain.AppError) {
@@ -8591,6 +9327,9 @@ func parseSubmissionItemQCExcel(businessMonth string, reader io.Reader) ([]submi
 		headers[normalizeExcelHeader(cell)] = index
 	}
 	itemIDIndex, hasItemID := firstExcelColumn(headers, "item_id", "itemid", "明细id", "计件明细id")
+	fileIDIndex, hasFileID := firstExcelColumn(headers, "file_id", "fileid", "文件id", "素材id", "作品id")
+	submissionIndex, hasSubmission := firstExcelColumn(headers, "submission_no", "submissionno", "提交编号", "提交单号", "批次号")
+	filenameIndex, hasFilename := firstExcelColumn(headers, "filename", "file_name", "original_filename", "文件名", "作品名称", "素材名称")
 	orderIndex, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "单号")
 	statusIndex, ok := firstExcelColumn(headers, "qc_status", "qcstatus", "status", "质检状态", "状态")
 	if !ok {
@@ -8604,6 +9343,12 @@ func parseSubmissionItemQCExcel(businessMonth string, reader io.Reader) ([]submi
 		if hasItemID {
 			itemIDRaw = strings.TrimSpace(excelCell(row, itemIDIndex))
 		}
+		fileIDRaw := ""
+		if hasFileID {
+			fileIDRaw = strings.TrimSpace(excelCell(row, fileIDIndex))
+		}
+		submissionNo := excelOptionalCell(row, submissionIndex, hasSubmission)
+		filename := excelOptionalCell(row, filenameIndex, hasFilename)
 		orderNo := ""
 		if hasOrder {
 			orderNo = strings.TrimSpace(excelCell(row, orderIndex))
@@ -8613,7 +9358,7 @@ func parseSubmissionItemQCExcel(businessMonth string, reader io.Reader) ([]submi
 		if hasReason {
 			reason = strings.TrimSpace(excelCell(row, reasonIndex))
 		}
-		if itemIDRaw == "" && orderNo == "" && status == "" && reason == "" {
+		if itemIDRaw == "" && fileIDRaw == "" && submissionNo == "" && filename == "" && orderNo == "" && status == "" && reason == "" {
 			continue
 		}
 		var itemID int64
@@ -8624,10 +9369,27 @@ func parseSubmissionItemQCExcel(businessMonth string, reader io.Reader) ([]submi
 			}
 			itemID = value
 		}
+		var fileID int64
+		if fileIDRaw != "" {
+			value, appErr := parseExcelNonNegativeInt64(fileIDRaw, "file_id", currentRow)
+			if appErr != nil {
+				return nil, appErr
+			}
+			fileID = value
+		}
 		if status == "" {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "qc_status must be submitted, checked or needs_fix.", map[string]int{"row": currentRow})
 		}
-		parsed = append(parsed, submissionItemQCExcelRow{row: currentRow, itemID: itemID, orderNo: orderNo, qcStatus: status, reason: reason})
+		parsed = append(parsed, submissionItemQCExcelRow{
+			row:          currentRow,
+			itemID:       itemID,
+			fileID:       fileID,
+			submissionNo: submissionNo,
+			filename:     filename,
+			orderNo:      orderNo,
+			qcStatus:     status,
+			reason:       reason,
+		})
 	}
 	if len(parsed) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file has no valid QC rows.", nil)
@@ -8758,11 +9520,10 @@ func findErrorImportHeaderRow(rows [][]string) (int, map[string]int, bool) {
 			}
 			headers[key] = index
 		}
-		_, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号", "文件名")
 		_, hasError := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数")
 		_, hasPayee := firstExcelColumn(headers, "payee_name", "payeename", "出错人", "人员", "姓名", "计件人")
 		_, hasDifficulty := firstExcelColumn(headers, "difficulty_class", "difficultyclass", "分类", "难度", "难度类", "难度类别")
-		if hasOrder && (hasError || hasPayee || hasDifficulty) {
+		if hasError || hasPayee || hasDifficulty {
 			return rowIndex, headers, true
 		}
 	}

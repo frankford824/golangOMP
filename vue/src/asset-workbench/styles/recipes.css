@@ -2948,6 +2948,10 @@ body.aw-submission-dialog-locked {
   background: var(--aw-stage-raised);
 }
 
+.aw-preview-dialog__video {
+  object-fit: contain;
+}
+
 .aw-preview-dialog__stage,
 .aw-material-preview__stage {
   display: grid;
@@ -4127,6 +4131,10 @@ body.aw-submission-dialog-locked {
   gap: var(--aw-space-3);
 }
 
+.aw-drive-tiles--folders {
+  margin-bottom: var(--aw-space-4);
+}
+
 .aw-drive-tile {
   position: relative;
   display: grid;
@@ -4192,6 +4200,11 @@ body.aw-submission-dialog-locked {
 
 .aw-drive-tile.is-disabled {
   opacity: 0.55;
+}
+
+.aw-drive-tile--folder {
+  min-height: 116px;
+  padding-block: var(--aw-space-4);
 }
 
 .aw-drive-tile__icon {
@@ -5222,6 +5235,12 @@ body.aw-submission-dialog-locked {
   color: var(--aw-ink-muted);
   font-size: var(--aw-font-size-sm);
   text-align: center;
+}
+
+.aw-drive-inline-note {
+  margin: 0 0 var(--aw-space-3);
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
 }
 
 .aw-drive-search-results {

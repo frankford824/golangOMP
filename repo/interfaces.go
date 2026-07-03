@@ -577,7 +577,7 @@ type AssetWorkbenchRepo interface {
 	GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error)
 	ListSubmissionFilesByIDs(ctx context.Context, fileIDs []int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	UpdateSubmissionFileLocation(ctx context.Context, tx Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error)
-	DeleteSubmissionFile(ctx context.Context, tx Tx, fileID int64) error
+	DeleteSubmissionFile(ctx context.Context, tx Tx, fileID int64, actorID int64, reason string, at time.Time) error
 
 	ClaimPendingPreviewFiles(ctx context.Context, claim AssetWorkbenchPreviewClaim) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	MarkPreviewReady(ctx context.Context, tx Tx, fileID int64, previewKey string) error
