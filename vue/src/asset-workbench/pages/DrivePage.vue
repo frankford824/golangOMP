@@ -187,6 +187,29 @@ function formatSize(size?: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function fileFormatLabel(file: DriveFileRow): string {
+  const rawType = file.file_type?.trim().replace(/^\./, '')
+  const suffix = file.original_filename.includes('.') ? file.original_filename.split('.').pop()?.trim() : ''
+  const ext = (rawType || suffix || '').replace(/^\./, '')
+  const extLabel = ext ? ext.toUpperCase() : ''
+  if (file.mime_type) return extLabel ? `${extLabel} · ${file.mime_type}` : file.mime_type
+  return extLabel || '—'
+}
+
 function statusText(value?: string) {
   const normalized = (value || '').trim()
   const map: Record<string, string> = {
@@ -402,6 +425,32 @@ function selectAllFilesInOrder() {
   if (!selectedFile.value && files.value[0]) selectedFile.value = files.value[0]
 }
 
+async function editOrderFolder(order: DriveOrderRow) {
+  await selectOrder(order.order_no, true)
+  const firstFile = files.value[0]
+  if (!firstFile) {
+    notice.value = '该订单暂无文件，可先上传作品'
+    return
+  }
+  selectFile(firstFile)
+  notice.value = `已打开 ${orderLabel(order.order_no)} 的首个文件，可在右侧维护订单信息`
+}
+
+function openUploadForOrder(order: DriveOrderRow) {
+  if (!selectedDir.value) return
+  uploadInitialFiles.value = []
+  uploadDefaultOrderNo.value = order.order_no
+  uploadDialogKey.value += 1
+  uploadOpen.value = true
+  closeContextMenu()
+}
+
+async function selectAllFilesForOrder(order: DriveOrderRow) {
+  await selectOrder(order.order_no, true)
+  selectAllFilesInOrder()
+  closeContextMenu()
+}
+
 function resetToRoot() {
   selectedDir.value = null
   selectedOrder.value = null
@@ -575,6 +624,9 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
   return [
     ['订单号', orderLabel(file.order_no)],
     ['所在目录', file.upload_directory_name],
+    ['格式', fileFormatLabel(file)],
+    ['上传时间', formatDateTime(file.created_at)],
+    ['业务月', file.business_month || '—'],
     ['难度', file.difficulty_class || '—'],
     ['QC', statusText(file.qc_status)],
     ['计价', statusText(file.pricing_status)],
@@ -992,6 +1044,10 @@ function fileFromContext() {
   return contextMenu.value?.kind === 'file' ? contextMenu.value.file : null
 }
 
+function orderFromContext() {
+  return contextMenu.value?.kind === 'order' ? contextMenu.value.order : null
+}
+
 function directoryFromContext() {
   return contextMenu.value?.kind === 'directory' ? contextMenu.value.dir : null
 }
@@ -1265,20 +1321,30 @@ onBeforeUnmount(() => {
               <p v-if="ordersLoading" class="aw-drive-empty">加载中…</p>
               <p v-else-if="orders.length === 0" class="aw-drive-empty">该目录暂无订单</p>
               <div v-else class="aw-drive-tiles">
-                <button
+                <article
                   v-for="order in orders"
                   :key="order.order_no || '__empty__'"
-                  class="aw-drive-tile"
-                  type="button"
-                  @click="selectOrder(order.order_no)"
+                  class="aw-drive-tile aw-drive-tile--with-action"
                   @dragover.prevent
                   @drop.prevent="dropOnOrder($event, order)"
                   @contextmenu.prevent.stop="openContextMenu($event, { kind: 'order', order })"
                 >
-                  <FolderOpen class="aw-drive-tile__icon" aria-hidden="true" />
-                  <strong class="aw-drive-tile__name" :title="orderLabel(order.order_no)">{{ orderLabel(order.order_no) }}</strong>
-                  <small class="aw-drive-tile__meta">{{ order.file_count }} 个文件</small>
-                </button>
+                  <button class="aw-drive-tile__button" type="button" @click="selectOrder(order.order_no)">
+                    <FolderOpen class="aw-drive-tile__icon" aria-hidden="true" />
+                    <strong class="aw-drive-tile__name" :title="orderLabel(order.order_no)">{{ orderLabel(order.order_no) }}</strong>
+                    <small class="aw-drive-tile__meta">{{ order.file_count }} 个文件</small>
+                  </button>
+                  <button
+                    v-if="canMaintainItems"
+                    class="aw-drive-tile__quick"
+                    type="button"
+                    :aria-label="`编辑 ${orderLabel(order.order_no)}`"
+                    title="编辑订单文件"
+                    @click.stop="editOrderFolder(order)"
+                  >
+                    <Pencil :size="14" aria-hidden="true" />
+                  </button>
+                </article>
               </div>
             </template>
 
@@ -1374,6 +1440,9 @@ onBeforeUnmount(() => {
           <dl class="aw-material-detail__list">
             <div><dt>订单号</dt><dd>{{ orderLabel(selectedFile.order_no) }}</dd></div>
             <div><dt>目录</dt><dd>{{ selectedFile.upload_directory_name }}</dd></div>
+            <div><dt>格式</dt><dd>{{ fileFormatLabel(selectedFile) }}</dd></div>
+            <div><dt>上传时间</dt><dd>{{ formatDateTime(selectedFile.created_at) }}</dd></div>
+            <div><dt>业务月</dt><dd>{{ selectedFile.business_month || '—' }}</dd></div>
             <div><dt>难度</dt><dd>{{ selectedFile.difficulty_class || '—' }}</dd></div>
             <div><dt>QC</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
             <div><dt>计价</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
@@ -1508,11 +1577,15 @@ onBeforeUnmount(() => {
         <button v-else type="button" @click="directoryFromContext() && setDirectoryEnabled(directoryFromContext()!, true)">启用目录</button>
       </template>
       <template v-else-if="contextMenu.kind === 'order'">
-        <button type="button" @click="openUpload()">
+        <button type="button" @click="orderFromContext() && openUploadForOrder(orderFromContext()!)">
           <Upload :size="14" aria-hidden="true" />
           上传到订单
         </button>
-        <button type="button" @click="selectAllFilesInOrder">全选订单文件</button>
+        <button v-if="canMaintainItems" type="button" @click="orderFromContext() && editOrderFolder(orderFromContext()!)">
+          <Pencil :size="14" aria-hidden="true" />
+          编辑订单文件
+        </button>
+        <button type="button" @click="orderFromContext() && selectAllFilesForOrder(orderFromContext()!)">全选订单文件</button>
       </template>
       <template v-else>
         <button type="button" @click="fileFromContext() && openFilePreview(fileFromContext()!)">预览</button>
