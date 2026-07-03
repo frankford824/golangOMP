@@ -47,6 +47,26 @@ function normalizeHeaders(input: unknown): Record<string, string> {
   return result
 }
 
+function readResponseHeader(headers: unknown, name: string): string | undefined {
+  if (!headers || typeof headers !== 'object') return undefined
+  const maybeGetter = (headers as { get?: unknown }).get
+  if (typeof maybeGetter === 'function') {
+    const value = maybeGetter.call(headers, name) ?? maybeGetter.call(headers, name.toLowerCase())
+    if (value != null) {
+      const trimmed = String(value).trim()
+      if (trimmed) return trimmed
+    }
+  }
+  const record = headers as Record<string, unknown>
+  const lower = name.toLowerCase()
+  for (const [key, value] of Object.entries(record)) {
+    if (key.toLowerCase() !== lower || value == null) continue
+    const trimmed = String(value).trim()
+    if (trimmed) return trimmed
+  }
+  return undefined
+}
+
 function strOrUndef(v: unknown): string | undefined {
   if (typeof v !== 'string') return undefined
   const t = v.trim()
@@ -248,7 +268,7 @@ async function putBlob(
       emitProgress(options, uploadedBefore + ev.loaded, byteTotal, parts)
     },
   })
-  const etagRaw = res.headers?.etag ?? res.headers?.ETag
+  const etagRaw = readResponseHeader(res.headers, 'ETag')
   if (etagRaw == null) return undefined
   const etag = String(etagRaw).trim().replace(/^"+|"+$/g, '')
   return etag || undefined
@@ -336,9 +356,12 @@ export async function runOssDirectUploadPlan(
       completed: partNo - 1,
       total: totalParts,
     })
-    if (etag) {
-      uploadedParts.push({ part_number: partNo, etag })
+    if (!etag) {
+      throw new Error(
+        `OSS multipart 第 ${partNo} 片上传已返回，但浏览器无法读取 ETag；请检查 OSS Bucket CORS Expose-Headers 是否包含 ETag`,
+      )
     }
+    uploadedParts.push({ part_number: partNo, etag })
     uploaded += blob.size
     emitProgress(options, uploaded, byteTotal, { completed: partNo, total: totalParts })
   }

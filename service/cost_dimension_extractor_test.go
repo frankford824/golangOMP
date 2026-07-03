@@ -63,6 +63,20 @@ func TestExtractCostDimensionsSumsMultipleIndependentSizes(t *testing.T) {
 	}
 }
 
+func TestExtractCostDimensionsDeduplicatesRepeatedSameSize(t *testing.T) {
+	text := "100*150cm 汪程/常规海报/小王子骑着蓝鲸/9岁/100x150cm 汪程/常规海报/小王子骑着蓝鲸/9岁/100x150cm"
+	dims := extractCostDimensionsFromText(text)
+	if dims.WidthM == nil || math.Abs(*dims.WidthM-1) > 0.000001 {
+		t.Fatalf("width = %+v, want 1", dims.WidthM)
+	}
+	if dims.HeightM == nil || math.Abs(*dims.HeightM-1.5) > 0.000001 {
+		t.Fatalf("height = %+v, want 1.5", dims.HeightM)
+	}
+	if dims.AreaM2 == nil || math.Abs(*dims.AreaM2-1.5) > 0.000001 {
+		t.Fatalf("area = %+v, want 1.5", dims.AreaM2)
+	}
+}
+
 func TestExtractCostDimensionsDoesNotSumCutoutSize(t *testing.T) {
 	dims := extractCostDimensionsFromText("30*42cm（镂空18*18cm）")
 	if dims.AreaM2 == nil || math.Abs(*dims.AreaM2-0.126) > 0.000001 {

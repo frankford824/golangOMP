@@ -2667,6 +2667,86 @@ func TestTaskServiceUpdateBusinessInfoSumsMultiplePosterSizes(t *testing.T) {
 	}
 }
 
+func TestTaskServiceUpdateBusinessInfoDoesNotDoubleCountRepeatedPosterSize(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   1,
+		CategoryCode: "POSTER_STANDARD",
+		CategoryName: "常规海报",
+		DisplayName:  "常规海报",
+		CategoryType: domain.CategoryTypeCloth,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        1,
+			RuleVersion:   1,
+			RuleName:      "常规海报基础单价",
+			CategoryCode:  "POSTER_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(5),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	productName := "汪程/常规海报/小王子骑着蓝鲸/9岁/100x150cm"
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			137: {
+				ID:                  137,
+				TaskType:            domain.TaskTypeNewProductDevelopment,
+				SKUCode:             "CGP000127",
+				ProductNameSnapshot: productName,
+			},
+		},
+		details: map[int64]*domain.TaskDetail{
+			137: {
+				TaskID:            137,
+				Category:          "常规海报",
+				CategoryName:      "常规海报",
+				DesignRequirement: productName,
+				DemandText:        productName,
+			},
+		},
+	}
+
+	svc := NewTaskServiceWithCatalog(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		categoryRepo,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
+			upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
+		}),
+	)
+
+	detail, appErr := svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
+		TaskID:     137,
+		OperatorID: 9,
+		Category:   "常规海报",
+		SpecText:   "100*150cm",
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
+	}
+	if detail.Area == nil || math.Abs(*detail.Area-1.5) > 0.000001 {
+		t.Fatalf("area = %+v, want 1.5", detail.Area)
+	}
+	if detail.CostPrice == nil || math.Abs(*detail.CostPrice-8.25) > 0.000001 {
+		t.Fatalf("cost_price = %+v, want 8.25", detail.CostPrice)
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoPrefersFlagClothOverHangingClothAlias(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

@@ -204,6 +204,7 @@ func extractCostMultipleSizePairsM(text string) extractedCostDimensions {
 	}
 	totalArea := 0.0
 	usable := 0
+	seen := make(map[string]bool)
 	for _, match := range matches {
 		if len(match) < 10 || ignoreCostSizePairForAreaSum(text, match[0]) {
 			continue
@@ -218,6 +219,13 @@ func extractCostMultipleSizePairsM(text string) extractedCostDimensions {
 		if dims.AreaM2 == nil || *dims.AreaM2 <= 0 {
 			continue
 		}
+		key := costSizePairAreaSumKey(dims)
+		if key != "" && seen[key] {
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
 		totalArea += *dims.AreaM2
 		usable++
 	}
@@ -225,6 +233,21 @@ func extractCostMultipleSizePairsM(text string) extractedCostDimensions {
 		return extractedCostDimensions{}
 	}
 	return extractedCostDimensions{AreaM2: &totalArea}
+}
+
+func costSizePairAreaSumKey(dims extractedCostDimensions) string {
+	if dims.WidthM != nil && dims.HeightM != nil && *dims.WidthM > 0 && *dims.HeightM > 0 {
+		width := *dims.WidthM
+		height := *dims.HeightM
+		if width > height {
+			width, height = height, width
+		}
+		return strconv.FormatFloat(width, 'f', 6, 64) + "x" + strconv.FormatFloat(height, 'f', 6, 64)
+	}
+	if dims.AreaM2 != nil && *dims.AreaM2 > 0 {
+		return "area:" + strconv.FormatFloat(*dims.AreaM2, 'f', 6, 64)
+	}
+	return ""
 }
 
 func costSubmatch(text string, match []int, group int) string {

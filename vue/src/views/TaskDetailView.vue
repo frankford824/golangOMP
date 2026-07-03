@@ -322,8 +322,11 @@
                     <RetouchRequirementsBlock
                       v-if="showRetouchRequirementsBlock"
                       :requirements="task!.retouchRequirements ?? []"
+                      :task-id="task!.id"
+                      :can-upload="canUploadRetouchRequirementAttachments"
                       :task-title="detailRetouchDownloadTitle"
                       class="detail-v3-retouch-requirements"
+                      @uploaded="onRetouchRequirementAttachmentUploaded"
                     />
 
                     <article class="detail-v3-info-card">
@@ -2345,6 +2348,9 @@ const canUploadReferenceFromOps = computed(() => {
   }
   return isLegacyTaskStatusInDesignerEditablePhase(task.value)
 })
+const canUploadRetouchRequirementAttachments = computed(
+  () => isRetouchTask.value && canUploadReferenceFromOps.value,
+)
 const canEditSkuItemInfo = computed(() => {
   if (!task.value || !hasTaskScopeAccess.value) return false
   return canMaintainTaskProductInfoAtAnyStage(
@@ -2697,6 +2703,13 @@ async function handleOpsReferenceFiles(files: FileList | File[]) {
     opsReferenceUploadError.value = formatUploadFailureMessage('reference_upload', err)
     opsReferenceUploadStatus.value = ''
   }
+}
+
+async function onRetouchRequirementAttachmentUploaded() {
+  const currentTask = task.value
+  if (!currentTask?.id) return
+  await tasksStore.loadTaskById(currentTask.id)
+  flashSuccess('P 图需求附件已补传')
 }
 
 function formatTaskReferenceBatchFailure(item: {

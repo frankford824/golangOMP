@@ -63,19 +63,39 @@
         <div class="asset-section">
           <div class="asset-section-head">
             <p class="asset-section-label">本条参考图（{{ referenceItems(item).length }}）</p>
-            <button
-              v-if="referenceItems(item).length > 0"
-              type="button"
-              class="batch-link-btn"
-              :disabled="Boolean(batchLoadingKey)"
-              @click="handleBatchRequirementReferences(item, index)"
-            >
-              {{
-                batchLoadingKey === batchScopeKey(item, 'references')
-                  ? '打包中…'
-                  : '下载全部参考图'
-              }}
-            </button>
+            <div class="asset-section-actions">
+              <input
+                :ref="(el) => setUploadInputRef(item, 'reference', el)"
+                type="file"
+                class="hidden-upload-input"
+                multiple
+                :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                aria-label="补传本条参考图"
+                @change="handleRequirementUploadInput(item, 'reference', $event)"
+              />
+              <button
+                v-if="canUploadRequirementFiles(item)"
+                type="button"
+                class="batch-link-btn"
+                :disabled="isRequirementUploading(item, 'reference')"
+                @click="triggerRequirementUpload(item, 'reference')"
+              >
+                {{ isRequirementUploading(item, 'reference') ? '上传中…' : '补传参考图' }}
+              </button>
+              <button
+                v-if="referenceItems(item).length > 0"
+                type="button"
+                class="batch-link-btn"
+                :disabled="Boolean(batchLoadingKey)"
+                @click="handleBatchRequirementReferences(item, index)"
+              >
+                {{
+                  batchLoadingKey === batchScopeKey(item, 'references')
+                    ? '打包中…'
+                    : '下载全部参考图'
+                }}
+              </button>
+            </div>
           </div>
 
           <div v-if="referenceItems(item).length > 0" class="reference-grid" role="list">
@@ -124,17 +144,37 @@
         <div class="asset-section">
           <div class="asset-section-head">
             <p class="asset-section-label">本条素材文件（{{ sourceItems(item).length }}）</p>
-            <button
-              v-if="sourceItems(item).length > 0"
-              type="button"
-              class="batch-link-btn"
-              :disabled="Boolean(batchLoadingKey)"
-              @click="handleBatchRequirementSources(item, index)"
-            >
-              {{
-                batchLoadingKey === batchScopeKey(item, 'sources') ? '打包中…' : '下载全部素材'
-              }}
-            </button>
+            <div class="asset-section-actions">
+              <input
+                :ref="(el) => setUploadInputRef(item, 'source', el)"
+                type="file"
+                class="hidden-upload-input"
+                multiple
+                :accept="UPLOAD_ACCEPT_ATTRIBUTE"
+                aria-label="补传本条素材文件"
+                @change="handleRequirementUploadInput(item, 'source', $event)"
+              />
+              <button
+                v-if="canUploadRequirementFiles(item)"
+                type="button"
+                class="batch-link-btn"
+                :disabled="isRequirementUploading(item, 'source')"
+                @click="triggerRequirementUpload(item, 'source')"
+              >
+                {{ isRequirementUploading(item, 'source') ? '上传中…' : '补传素材' }}
+              </button>
+              <button
+                v-if="sourceItems(item).length > 0"
+                type="button"
+                class="batch-link-btn"
+                :disabled="Boolean(batchLoadingKey)"
+                @click="handleBatchRequirementSources(item, index)"
+              >
+                {{
+                  batchLoadingKey === batchScopeKey(item, 'sources') ? '打包中…' : '下载全部素材'
+                }}
+              </button>
+            </div>
           </div>
 
           <ul v-if="sourceItems(item).length > 0" class="source-file-list">
@@ -178,6 +218,12 @@
         </div>
       </div>
 
+      <p v-if="uploadStatusByRequirement.get(cacheKey(item))" class="requirement-upload-status">
+        {{ uploadStatusByRequirement.get(cacheKey(item)) }}
+      </p>
+      <p v-if="uploadErrorByRequirement.get(cacheKey(item))" class="requirement-download-error">
+        {{ uploadErrorByRequirement.get(cacheKey(item)) }}
+      </p>
       <p v-if="downloadErrorByRequirement.get(cacheKey(item))" class="requirement-download-error">
         {{ downloadErrorByRequirement.get(cacheKey(item)) }}
       </p>
@@ -187,6 +233,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import FileIconFallback from '@/components/base/FileIconFallback.vue'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import {
@@ -211,10 +258,28 @@ import {
 } from '@/domain/retouch-requirement-assets'
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
+import { uploadReferenceFileRef, uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
+import { formatUploadFailureMessage } from '@/utils/upload-errors'
+import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
+import {
+  REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
+  isAcceptableReferenceFile,
+  referenceFileTooLargeMessage,
+} from '@/domain/constants/reference-upload'
+import {
+  DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES,
+  designUploadTooLargeMessage,
+} from '@/domain/copy/design-upload'
 
 const props = defineProps<{
   requirements: RetouchRequirement[]
   taskTitle?: string
+  taskId?: string | number | null
+  canUpload?: boolean
+}>()
+
+const emit = defineEmits<{
+  uploaded: []
 }>()
 
 const openLightbox = inject<OpenImagePreviewLightbox>(IMAGE_PREVIEW_LIGHTBOX_KEY, () => {})
@@ -223,6 +288,11 @@ const downloadingKeys = ref(new Set<string>())
 const downloadErrorByRequirement = ref(new Map<number, string>())
 const batchLoadingKey = ref<string | null>(null)
 const blockBatchError = ref('')
+type RequirementUploadKind = 'reference' | 'source'
+const uploadingKeys = ref(new Set<string>())
+const uploadInputRefs = ref<Record<string, HTMLInputElement | null>>({})
+const uploadStatusByRequirement = ref(new Map<number, string>())
+const uploadErrorByRequirement = ref(new Map<number, string>())
 
 const totalDownloadableCount = computed(() => countRetouchDownloadableAttachments(props.requirements))
 
@@ -254,6 +324,10 @@ function cacheKey(item: RetouchRequirement): number {
   return item.id || item.sortOrder
 }
 
+function uploadKey(item: RetouchRequirement, kind: RequirementUploadKind): string {
+  return `${cacheKey(item)}:${kind}`
+}
+
 function referenceItems(item: RetouchRequirement): RetouchReferenceDisplayItem[] {
   return referenceCache.value.get(cacheKey(item)) ?? []
 }
@@ -275,6 +349,155 @@ function setRequirementError(item: RetouchRequirement, message: string) {
   if (message) next.set(cacheKey(item), message)
   else next.delete(cacheKey(item))
   downloadErrorByRequirement.value = next
+}
+
+function setRequirementUploadStatus(item: RetouchRequirement, message: string) {
+  const next = new Map(uploadStatusByRequirement.value)
+  if (message) next.set(cacheKey(item), message)
+  else next.delete(cacheKey(item))
+  uploadStatusByRequirement.value = next
+}
+
+function setRequirementUploadError(item: RetouchRequirement, message: string) {
+  const next = new Map(uploadErrorByRequirement.value)
+  if (message) next.set(cacheKey(item), message)
+  else next.delete(cacheKey(item))
+  uploadErrorByRequirement.value = next
+}
+
+function canUploadRequirementFiles(item: RetouchRequirement): boolean {
+  return props.canUpload === true && Boolean(String(props.taskId ?? '').trim()) && item.id > 0
+}
+
+function isRequirementUploading(item: RetouchRequirement, kind: RequirementUploadKind): boolean {
+  return uploadingKeys.value.has(uploadKey(item, kind))
+}
+
+function setUploadInputRef(
+  item: RetouchRequirement,
+  kind: RequirementUploadKind,
+  el: Element | ComponentPublicInstance | null,
+) {
+  const key = uploadKey(item, kind)
+  uploadInputRefs.value[key] = el instanceof HTMLInputElement ? el : null
+}
+
+function triggerRequirementUpload(item: RetouchRequirement, kind: RequirementUploadKind) {
+  if (!canUploadRequirementFiles(item) || isRequirementUploading(item, kind)) return
+  setRequirementUploadError(item, '')
+  setRequirementUploadStatus(item, '')
+  uploadInputRefs.value[uploadKey(item, kind)]?.click()
+}
+
+async function handleRequirementUploadInput(
+  item: RetouchRequirement,
+  kind: RequirementUploadKind,
+  event: Event,
+) {
+  const input = event.target as HTMLInputElement
+  const files = input.files
+  input.value = ''
+  await uploadRequirementFiles(item, kind, files ? Array.from(files) : [])
+}
+
+function validateRequirementFiles(kind: RequirementUploadKind, files: File[]) {
+  const valid: File[] = []
+  const errors: string[] = []
+  for (const file of files) {
+    if (kind === 'reference') {
+      if (!isAcceptableReferenceFile(file)) {
+        errors.push(`参考图无效：${file.name}`)
+        continue
+      }
+      if (file.size > REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES) {
+        errors.push(referenceFileTooLargeMessage(file.name))
+        continue
+      }
+    } else {
+      if (!isAllowedUploadFile(file.name)) {
+        errors.push(`不支持的素材类型：${file.name}`)
+        continue
+      }
+      if (file.size > DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES) {
+        errors.push(designUploadTooLargeMessage(file.name))
+        continue
+      }
+    }
+    valid.push(file)
+  }
+  return { valid, errors }
+}
+
+async function uploadRequirementFiles(
+  item: RetouchRequirement,
+  kind: RequirementUploadKind,
+  files: File[],
+) {
+  if (!files.length || !canUploadRequirementFiles(item)) return
+  const taskId = String(props.taskId ?? '').trim()
+  const requirementId = item.id
+  const key = uploadKey(item, kind)
+  const { valid, errors } = validateRequirementFiles(kind, files)
+  setRequirementUploadError(item, errors.join('；'))
+  setRequirementUploadStatus(item, '')
+  if (!valid.length) return
+
+  const nextUploading = new Set(uploadingKeys.value)
+  nextUploading.add(key)
+  uploadingKeys.value = nextUploading
+
+  let uploaded = 0
+  const failures: string[] = []
+  try {
+    for (const file of valid) {
+      setRequirementUploadStatus(
+        item,
+        `正在上传${kind === 'reference' ? '参考图' : '素材'}：${file.name}`,
+      )
+      try {
+        if (kind === 'reference') {
+          await uploadReferenceFileRef(file, {
+            taskId,
+            retouchRequirementId: requirementId,
+          })
+        } else {
+          await uploadTaskFileViaAssetSession(
+            taskId,
+            file,
+            { asset_kind: 'source', remark: file.name },
+            { retouchRequirementId: requirementId },
+          )
+        }
+        uploaded += 1
+      } catch (error) {
+        failures.push(
+          `${file.name}：${formatUploadFailureMessage(
+            kind === 'reference' ? 'reference_upload' : 'main_complete',
+            error,
+          )}`,
+        )
+      }
+    }
+  } finally {
+    const doneUploading = new Set(uploadingKeys.value)
+    doneUploading.delete(key)
+    uploadingKeys.value = doneUploading
+  }
+
+  if (uploaded > 0) {
+    setRequirementUploadStatus(
+      item,
+      `已补传 ${uploaded} 个${kind === 'reference' ? '参考图' : '素材文件'}`,
+    )
+    emit('uploaded')
+  } else {
+    setRequirementUploadStatus(item, '')
+  }
+  if (failures.length) {
+    setRequirementUploadError(item, [...errors, ...failures].join('；'))
+  } else if (!errors.length) {
+    setRequirementUploadError(item, '')
+  }
 }
 
 function findRequirementForKey(fileKey: string): RetouchRequirement | undefined {
@@ -690,6 +913,17 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
   gap: 8px;
 }
 
+.asset-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.hidden-upload-input {
+  display: none;
+}
+
 .asset-section-label {
   margin: 0;
   font-size: 13px;
@@ -856,6 +1090,12 @@ function handleBatchRequirementSources(item: RetouchRequirement, index: number) 
 .asset-download-btn:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.requirement-upload-status {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: rgb(var(--yb-brand));
 }
 
 .requirement-download-error {
