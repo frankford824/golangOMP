@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RefreshCw, Search, ShieldCheck, UserRound } from 'lucide-vue-next'
+import { RefreshCw, ShieldCheck, UserRound } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
@@ -8,6 +8,7 @@ import { assetWorkbenchApi, type AccountMergePreview, type WorkbenchMemberRow } 
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 import { managedAssetRoles, roleDisplayList, roleDisplayName } from '@aw/shared/format/roleDisplay'
+import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 const savingUserId = ref<number | null>(null)
@@ -298,7 +299,7 @@ onMounted(() => {
             <input v-model="query" placeholder="输入姓名、账号或手机号" @keydown.enter="loadMembers" />
           </label>
           <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="loading" @click="loadMembers">
-            <Search :size="16" aria-hidden="true" />
+            <IconfontActionIcon name="search" :size="16" />
             搜索
           </button>
         </div>

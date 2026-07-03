@@ -124,8 +124,8 @@ export const assetWorkbenchRouteAccess = {
   },
   '/settings/pricing': {
     label: '计价设置',
-    subtitle: '改单价、扣款、补贴、大促',
-    aliases: ['成本中心', '价格规则'],
+    subtitle: '单价、质检扣款、补贴、活动价',
+    aliases: ['计价设置', '单价设置', '质检扣款'],
     requiresAnyCapability: ['asset.workbench.cost_center.manage'],
   },
   '/settings/people': {
@@ -148,8 +148,8 @@ export const assetWorkbenchRouteAccess = {
   },
   '/cost-center': {
     label: '计价设置',
-    subtitle: '改单价、扣款、补贴、大促',
-    aliases: ['成本中心'],
+    subtitle: '单价、质检扣款、补贴、活动价',
+    aliases: ['计价设置', '单价设置'],
     requiresAnyCapability: ['asset.workbench.cost_center.manage'],
   },
   '/people': {

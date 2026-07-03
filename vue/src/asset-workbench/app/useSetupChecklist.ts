@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 
 import { canAccessPath } from '@aw/app/access'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
+import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 
 export interface SetupStep {
@@ -14,14 +15,6 @@ export interface SetupStep {
 }
 
 const SETUP_COLLAPSED_KEY = 'aw-setup-collapsed'
-
-function businessMonthNow() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).format(new Date())
-}
 
 export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | null) {
   const loading = ref(false)
@@ -84,7 +77,7 @@ export function useSetupChecklist(bootstrap: () => AssetWorkbenchBootstrap | nul
   async function refresh() {
     loading.value = true
     try {
-      const month = businessMonthNow()
+      const month = currentBusinessMonth()
       const tasks: Promise<void>[] = []
 
       if (canAccessPath(bootstrap(), '/settings/pricing')) {

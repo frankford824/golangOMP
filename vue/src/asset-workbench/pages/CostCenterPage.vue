@@ -16,6 +16,7 @@ import { formatMoney, formatPercent } from '@aw/shared/format/number'
 import { chipClass, enabledMeta, promoModeMeta, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 interface GridColumn {
   key: string
@@ -30,6 +31,7 @@ type WelfareGridRow = WelfareRuleRow & { worker_type_label: string; amount_label
 type PromoGridRow = PromoCouponRow & { worker_type_label: string; mode_label: string; value_label: string; enabled_label: string; action: string }
 type DifficultyGridRow = DifficultyClassRow & { enabled_label: string; action: string }
 type CostCenterData = Awaited<ReturnType<typeof fetchCostCenter>>
+type PricingSectionKey = 'guide' | 'difficulty' | 'price' | 'deduction' | 'welfare' | 'promo'
 
 const parttimeGrades = ['J1', 'J2', 'J3']
 const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
@@ -40,6 +42,7 @@ const priceRows = ref<PriceMatrixRow[]>([])
 const deductionRows = ref<DeductionRuleRow[]>([])
 const welfareRows = ref<WelfareRuleRow[]>([])
 const promoRows = ref<PromoCouponRow[]>([])
+const activePricingSection = ref<PricingSectionKey>('guide')
 const priceSupersedeId = ref(0)
 const confirmingPriceSupersede = ref(false)
 const pendingPriceToggle = ref<PriceGridRow | null>(null)
@@ -55,7 +58,7 @@ const totals = ref({
 })
 const notice = ref('')
 const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/pricing')
-const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, '成本中心加载失败')
+const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, '计价设置加载失败')
 const loading = costCenterRequest.loading
 const error = costCenterRequest.error
 const today = shanghaiDateInput()
@@ -113,8 +116,31 @@ const welfareGradeOptions = computed(() => gradeOptionsFor(welfareForm.value.wor
 const promoGradeOptions = computed(() => gradeOptionsFor(promoForm.value.worker_type, true))
 const difficultyOptionCodes = computed(() => difficultyCodes(difficultyRows.value))
 const difficultyOptionCodesWithAll = computed(() => difficultyOptionsWithAll(difficultyRows.value))
+const pricingNavGroups = computed(() => [
+  {
+    label: '一级菜单：基础档案',
+    items: [
+      { key: 'guide' as const, title: '配置向导', meta: '先看设置顺序', count: '建议先读' },
+      { key: 'difficulty' as const, title: '难度分类', meta: '三级字段：代码 / 名称 / 启用', count: `${difficultyRows.value.length} 项` },
+    ],
+  },
+  {
+    label: '一级菜单：日常计价',
+    items: [
+      { key: 'price' as const, title: '单价设置', meta: '三级字段：人员类型 / 岗级 / 难度 / 单价 / 生效日', count: `${totals.value.price} 条` },
+    ],
+  },
+  {
+    label: '一级菜单：结算调整',
+    items: [
+      { key: 'deduction' as const, title: '质检扣款', meta: '按导入的质检错误在结算时扣款', count: `${totals.value.deduction} 条` },
+      { key: 'welfare' as const, title: '福利补贴', meta: '按人员和月份发放，不绑定单个文件', count: `${totals.value.welfare} 条` },
+      { key: 'promo' as const, title: '临时活动价', meta: '临时一口价、加价或涨幅', count: `${totals.value.promo} 条` },
+    ],
+  },
+])
 const difficultyRowsWithLabels = computed<DifficultyGridRow[]>(() =>
-  difficultyRows.value.map((row) => ({
+  safeRows<DifficultyClassRow>(difficultyRows.value).map((row) => ({
     ...row,
     enabled_label: enabledMeta(row.enabled).label,
     action: 'actions',
@@ -122,7 +148,7 @@ const difficultyRowsWithLabels = computed<DifficultyGridRow[]>(() =>
 )
 const difficultyGridRows = computed(() => difficultyRowsWithLabels.value as unknown as Record<string, unknown>[])
 const priceRowsWithLabels = computed<PriceGridRow[]>(() =>
-  priceRows.value.map((row) => ({
+  safeRows<PriceMatrixRow>(priceRows.value).map((row) => ({
     ...row,
     worker_type_label: workerTypeMeta(row.worker_type).label,
     unit_price_label: formatMoney(row.unit_price),
@@ -131,7 +157,7 @@ const priceRowsWithLabels = computed<PriceGridRow[]>(() =>
   })),
 )
 const deductionRowsWithLabels = computed<DeductionGridRow[]>(() =>
-  deductionRows.value.map((row) => ({
+  safeRows<DeductionRuleRow>(deductionRows.value).map((row) => ({
     ...row,
     worker_type_label: workerTypeMeta(row.worker_type).label,
     deduction_amount_label: formatMoney(row.deduction_amount),
@@ -140,7 +166,7 @@ const deductionRowsWithLabels = computed<DeductionGridRow[]>(() =>
   })),
 )
 const welfareRowsWithLabels = computed<WelfareGridRow[]>(() =>
-  welfareRows.value.map((row) => ({
+  safeRows<WelfareRuleRow>(welfareRows.value).map((row) => ({
     ...row,
     worker_type_label: workerTypeMeta(row.worker_type).label,
     amount_label: formatMoney(row.amount),
@@ -162,7 +188,7 @@ const priceSupersedeConfirmText = computed(() => {
 const deductionGridRows = computed(() => deductionRowsWithLabels.value as unknown as Record<string, unknown>[])
 const welfareGridRows = computed(() => welfareRowsWithLabels.value as unknown as Record<string, unknown>[])
 const promoRowsWithLabels = computed<PromoGridRow[]>(() =>
-  promoRows.value.map((row) => ({
+  safeRows<PromoCouponRow>(promoRows.value).map((row) => ({
     ...row,
     worker_type_label: workerTypeMeta(row.worker_type).label,
     mode_label: promoModeMeta(row.mode).label,
@@ -192,7 +218,7 @@ const deductionGridColumns = computed<GridColumn[]>(() => [
   { key: 'worker_type_label', label: '类型', width: 96 },
   { key: 'job_grade', label: '岗级', width: 96 },
   { key: 'difficulty_class', label: '难度', width: 120 },
-  { key: 'deduction_amount_label', label: '每错扣减', width: 112, align: 'right' },
+  { key: 'deduction_amount_label', label: '每错扣款', width: 112, align: 'right' },
   { key: 'enabled_label', label: '启用', width: 88 },
   { key: 'action', label: '动作', width: 156, align: 'center' },
 ])
@@ -213,6 +239,10 @@ const promoGridColumns = computed<GridColumn[]>(() => [
   { key: 'enabled_label', label: '启用', width: 88 },
   { key: 'action', label: '动作', width: 156, align: 'center' },
 ])
+
+function safeRows<T>(rows: T[] | unknown): T[] {
+  return Array.isArray(rows) ? rows : []
+}
 
 function gridRowAsPrice(row: Record<string, unknown>): PriceGridRow {
   return row as unknown as PriceGridRow
@@ -248,16 +278,20 @@ async function fetchCostCenter() {
 async function loadCostCenter() {
   const data = await costCenterRequest.run()
   if (!data) return
+  const prices = Array.isArray(data.prices.items) ? data.prices.items : []
+  const deductions = Array.isArray(data.deductions.items) ? data.deductions.items : []
+  const welfare = Array.isArray(data.welfare.items) ? data.welfare.items : []
+  const promos = Array.isArray(data.promos.items) ? data.promos.items : []
   difficultyRows.value = data.difficulties
-  priceRows.value = data.prices.items
-  deductionRows.value = data.deductions.items
-  welfareRows.value = data.welfare.items
-  promoRows.value = data.promos.items
+  priceRows.value = prices
+  deductionRows.value = deductions
+  welfareRows.value = welfare
+  promoRows.value = promos
   totals.value = {
-    price: data.prices.total,
-    deduction: data.deductions.total,
-    welfare: data.welfare.total,
-    promo: data.promos.total,
+    price: data.prices.total || prices.length,
+    deduction: data.deductions.total || deductions.length,
+    welfare: data.welfare.total || welfare.length,
+    promo: data.promos.total || promos.length,
   }
   syncDifficultyDefaults()
 }
@@ -371,7 +405,7 @@ async function saveDifficultyClass() {
     resetDifficultyForm()
     await loadCostCenter()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '难度档案保存失败'
+    error.value = costCenterError(err, '难度分类保存失败')
   }
 }
 
@@ -383,7 +417,7 @@ async function toggleDifficultyClass(row: DifficultyGridRow) {
     notice.value = '难度状态已更新'
     await loadCostCenter()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '难度状态更新失败'
+    error.value = costCenterError(err, '难度状态更新失败')
   }
 }
 
@@ -405,6 +439,10 @@ function priceRuleIdentity(row: Pick<PriceMatrixRow, 'worker_type' | 'job_grade'
   return `${workerTypeMeta(row.worker_type).label} / ${row.job_grade} / ${row.difficulty_class}`
 }
 
+function costCenterError(err: unknown, fallback: string) {
+  return resolveApiUserMessage(err, { fallback })
+}
+
 function submitPriceRuleAction() {
   if (priceSupersedeId.value) {
     openPriceSupersedeConfirm()
@@ -416,7 +454,7 @@ function submitPriceRuleAction() {
 function openPriceSupersedeConfirm() {
   error.value = ''
   if (!priceSupersedeSource.value) {
-    error.value = '请先选择要修改的价目项'
+    error.value = '请先选择要修改的单价规则'
     return
   }
   if (!priceForm.value.effective_from) {
@@ -455,11 +493,11 @@ async function createPriceRule() {
         : '价格修改已发布，旧规则会自动截止到新版生效日前一天'
     } else {
       await assetWorkbenchApi.createPriceMatrix(payload)
-      notice.value = '价目规则已创建'
+      notice.value = '单价规则已创建'
     }
     await loadCostCenter()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '价目规则创建失败'
+    error.value = costCenterError(err, '单价规则创建失败')
   }
 }
 
@@ -475,14 +513,14 @@ async function createDeductionRule() {
     if (deductionSupersedeId.value) {
       await assetWorkbenchApi.supersedeDeductionRule(deductionSupersedeId.value, payload)
       deductionSupersedeId.value = 0
-      notice.value = '扣减规则已创建替代版本'
+      notice.value = '质检扣款已创建替代版本'
     } else {
       await assetWorkbenchApi.createDeductionRule(payload)
-      notice.value = '扣减规则已创建'
+      notice.value = '质检扣款已创建'
     }
     await loadCostCenter()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '扣减规则创建失败'
+    error.value = costCenterError(err, '质检扣款创建失败')
   }
 }
 
@@ -506,7 +544,7 @@ async function createWelfareRule() {
     }
     await loadCostCenter()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '福利规则创建失败'
+    error.value = costCenterError(err, '福利补贴创建失败')
   }
 }
 
@@ -526,19 +564,19 @@ async function createPromoCoupon() {
     if (promoSupersedeId.value) {
       await assetWorkbenchApi.supersedePromoCoupon(promoSupersedeId.value, payload)
       promoSupersedeId.value = 0
-      notice.value = '大促价格券已创建替代版本'
+      notice.value = '临时活动价已创建替代版本'
     } else {
       await assetWorkbenchApi.createPromoCoupon(payload)
-      notice.value = '大促价格券已创建'
+      notice.value = '临时活动价已创建'
     }
     await loadCostCenter()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '大促价格券创建失败'
+    error.value = costCenterError(err, '临时活动价创建失败')
   }
 }
 
 async function togglePriceRule(row: PriceGridRow) {
-  await toggleRule(() => assetWorkbenchApi.updatePriceMatrix(row.id, { enabled: !row.enabled, reason: row.enabled ? '停用价目规则' : '启用价目规则' }))
+  await toggleRule(() => assetWorkbenchApi.updatePriceMatrix(row.id, { enabled: !row.enabled, reason: row.enabled ? '停用单价规则' : '启用单价规则' }))
 }
 
 async function requestTogglePriceRule(row: PriceGridRow) {
@@ -559,7 +597,7 @@ async function confirmPriceToggle() {
 }
 
 async function toggleDeductionRule(row: DeductionGridRow) {
-  await toggleRule(() => assetWorkbenchApi.updateDeductionRule(row.id, { enabled: !row.enabled, reason: row.enabled ? '停用扣减规则' : '启用扣减规则' }))
+  await toggleRule(() => assetWorkbenchApi.updateDeductionRule(row.id, { enabled: !row.enabled, reason: row.enabled ? '停用质检扣款' : '启用质检扣款' }))
 }
 
 async function toggleWelfareRule(row: WelfareGridRow) {
@@ -567,7 +605,7 @@ async function toggleWelfareRule(row: WelfareGridRow) {
 }
 
 async function togglePromoRule(row: PromoGridRow) {
-  await toggleRule(() => assetWorkbenchApi.updatePromoCoupon(row.id, { enabled: !row.enabled, reason: row.enabled ? '停用大促价格券' : '启用大促价格券' }))
+  await toggleRule(() => assetWorkbenchApi.updatePromoCoupon(row.id, { enabled: !row.enabled, reason: row.enabled ? '停用临时活动价' : '启用临时活动价' }))
 }
 
 async function toggleRule(action: () => Promise<unknown>) {
@@ -578,7 +616,7 @@ async function toggleRule(action: () => Promise<unknown>) {
     notice.value = '规则状态已更新'
     await loadCostCenter()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '规则状态更新失败'
+    error.value = costCenterError(err, '状态更新失败')
   }
 }
 
@@ -607,7 +645,7 @@ function startDeductionSupersede(row: DeductionGridRow) {
     effective_from: toDateInput(row.effective_from) || today,
     effective_to: toDateInput(row.effective_to),
   }
-  notice.value = `已带入扣减规则 ${row.id}，保存后会生成替代版本`
+  notice.value = `已带入质检扣款 ${row.id}，保存后会生成替代版本`
 }
 
 function startWelfareSupersede(row: WelfareGridRow) {
@@ -641,7 +679,7 @@ function startPromoSupersede(row: PromoGridRow) {
     effective_from: toDateInput(row.effective_from) || today,
     effective_to: toDateInput(row.effective_to),
   }
-  notice.value = `已带入大促价格券 ${row.id}，保存后会生成替代版本`
+  notice.value = `已带入临时活动价 ${row.id}，保存后会生成替代版本`
 }
 
 onMounted(async () => {
@@ -655,25 +693,90 @@ onMounted(async () => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">设置</p>
         <h2>{{ pageLabel }}</h2>
-        <p>{{ pageSubtitle }}。常用链路是上传目录绑定难度、价目矩阵按生效日接班、人员定级命中单价；扣减、福利和大促在结算侧按需启用。</p>
+        <p>{{ pageSubtitle }}。普通配置只需要先维护「难度分类」，再维护「单价设置」；质检扣款、福利补贴、临时活动价属于结算调整，不需要每天处理。</p>
       </div>
       <div class="aw-page-bar__actions">
-        <button class="aw-primary-button" type="button" @click="submitPriceRuleAction">{{ priceSupersedeId ? '预览并发布' : '新增价目' }}</button>
+        <button class="aw-primary-button" type="button" @click="activePricingSection = 'price'">进入单价设置</button>
       </div>
     </div>
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <div class="aw-cost-flow" aria-label="计价链路">
-      <span>上传目录绑定难度</span>
-      <span>价格日历接班</span>
-      <span>人员定级命中单价</span>
-    </div>
-    <div class="aw-panel">
+    <p v-if="error" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
+
+    <div class="aw-pricing-settings">
+      <aside class="aw-pricing-nav" aria-label="计价设置导航">
+        <div class="aw-pricing-nav__head">
+          <strong>计价设置</strong>
+          <span>按顺序配置，不要从底层表格开始</span>
+        </div>
+        <div v-for="group in pricingNavGroups" :key="group.label" class="aw-pricing-nav__group">
+          <p>{{ group.label }}</p>
+          <button
+            v-for="item in group.items"
+            :key="item.key"
+            class="aw-pricing-nav__item"
+            :class="{ 'is-active': activePricingSection === item.key }"
+            type="button"
+            :aria-current="activePricingSection === item.key ? 'page' : undefined"
+            @click="activePricingSection = item.key"
+          >
+            <span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.meta }}</small>
+            </span>
+            <em>{{ item.count }}</em>
+          </button>
+        </div>
+      </aside>
+
+      <main class="aw-pricing-workspace">
+        <section v-if="activePricingSection === 'guide'" class="aw-panel aw-pricing-guide">
+          <div class="aw-panel__head">
+            <div>
+              <h3>先按这 3 步设置</h3>
+              <p class="aw-copy">这里不要求理解系统字段，只要按业务顺序维护即可。单价会在作品提交时自动匹配，结算时按已匹配的价格计算。</p>
+            </div>
+          </div>
+          <div class="aw-pricing-steps" aria-label="推荐设置顺序">
+            <button type="button" @click="activePricingSection = 'difficulty'">
+              <span>第一步</span>
+              <strong>定义难度分类</strong>
+              <small>例如 A/B/C 或专项分类。上传目录会绑定这个分类，后面单价也按它匹配。</small>
+            </button>
+            <button type="button" @click="activePricingSection = 'price'">
+              <span>第二步</span>
+              <strong>维护每类作品单价</strong>
+              <small>选择人员类型、岗级、难度、单价和生效日。日常改价只改这一块。</small>
+            </button>
+            <button type="button" @click="activePricingSection = 'deduction'">
+              <span>第三步</span>
+              <strong>按需开启结算调整</strong>
+              <small>质检扣款、福利补贴、临时活动价只在结算侧使用，不影响日常上传。</small>
+            </button>
+          </div>
+          <div class="aw-pricing-explain">
+            <div>
+              <strong>普通管理员每天看哪里</strong>
+              <p>只看「单价设置」。需要新增上传目录分类时，再回到「难度分类」。</p>
+            </div>
+            <div>
+              <strong>什么不会重算</strong>
+              <p>已提交、已结算的历史记录会保留当时价格快照；新单价只影响生效日之后的新提交。</p>
+            </div>
+          </div>
+        </section>
+
+        <div v-if="activePricingSection === 'difficulty'" class="aw-panel aw-pricing-section">
       <div class="aw-panel__head">
         <div>
-          <h3>难度档案</h3>
-          <p class="aw-copy">配置上传目录、价目规则和补录共用的难度代码。代码用于历史快照和计价匹配，创建后不再修改。</p>
+          <h3>难度分类</h3>
+          <p class="aw-copy">先把作品难度分清楚。上传目录会绑定这个分类，单价设置也会按这个分类匹配。</p>
         </div>
         <span class="aw-chip aw-chip--neutral">{{ difficultyRows.length }} 项</span>
+      </div>
+      <div class="aw-pricing-field-help">
+        <span><b>代码</b>：系统识别用，创建后不要随意改</span>
+        <span><b>名称</b>：给管理员看的显示名</span>
+        <span><b>启用</b>：停用后不会再给新配置选择</span>
       </div>
       <div class="aw-form-grid">
         <label>
@@ -723,11 +826,11 @@ onMounted(async () => {
         </template>
       </WorkbenchDataGrid>
     </div>
-    <div class="aw-panel">
+    <div v-if="activePricingSection === 'price'" class="aw-panel aw-pricing-section">
       <div class="aw-panel__head">
         <div>
-          <h3>价目矩阵时间带</h3>
-          <p class="aw-copy">按人员类型、岗级和难度命中单价；新版从生效日开始接班，旧版自动截止到前一天。</p>
+          <h3>单价设置</h3>
+          <p class="aw-copy">设置「谁、做哪类作品、从哪天开始、每件多少钱」。日常改价只需要维护这里。</p>
         </div>
         <div class="aw-inline-actions">
           <span v-if="priceSupersedeId" class="aw-chip aw-chip--info">改价草稿 #{{ priceSupersedeId }}</span>
@@ -740,7 +843,7 @@ onMounted(async () => {
       </p>
       <div v-if="priceSupersedeSource" class="aw-price-change-card" aria-live="polite">
         <div class="aw-price-change-card__item">
-          <span>当前价目项</span>
+          <span>当前单价规则</span>
           <strong>{{ priceRuleIdentity(priceSupersedeSource) }}</strong>
         </div>
         <div class="aw-price-change-card__item aw-price-change-card__item--money">
@@ -757,8 +860,14 @@ onMounted(async () => {
         </div>
         <div class="aw-price-change-card__item aw-price-change-card__item--impact">
           <span>影响范围</span>
-          <strong>从新版生效日之后的新提交开始命中；过往月度、历史提交、已结算记录保持原价目快照。</strong>
-        </div>
+          <strong>从新版生效日之后的新提交开始使用；过往月度、历史提交、已结算记录保持原单价快照。</strong>
+      </div>
+      </div>
+      <div class="aw-pricing-field-help">
+        <span><b>人员类型</b>：全职或兼职</span>
+        <span><b>岗级</b>：人员档案里的等级</span>
+        <span><b>难度</b>：上传目录绑定的难度分类</span>
+        <span><b>生效日</b>：从这一天之后的新提交开始使用新单价</span>
       </div>
       <div class="aw-form-grid">
         <label>
@@ -803,10 +912,10 @@ onMounted(async () => {
       <AsyncBoundary
         :loading="loading"
         :error="error"
-        loading-label="正在加载价目矩阵"
+        loading-label="正在加载单价设置"
         @retry="loadCostCenter"
       >
-        <p class="aw-copy">已配置 {{ totals.price }} 条价目规则</p>
+        <p class="aw-copy">已配置 {{ totals.price }} 条单价规则</p>
       </AsyncBoundary>
       <div class="aw-timeline-band">
         <span class="aw-timeline-band__past">过期</span>
@@ -871,7 +980,7 @@ onMounted(async () => {
         <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="price-toggle-confirm-title">
           <div>
             <p class="aw-eyebrow">应急停用</p>
-            <h3 id="price-toggle-confirm-title">确认停用这条价目规则</h3>
+            <h3 id="price-toggle-confirm-title">确认停用这条单价规则</h3>
             <p class="aw-copy">
               {{ priceRuleIdentity(pendingPriceToggle) }} 停用后不再参与新提交计价；已按历史规则计算过的提交和结算不会重算。
             </p>
@@ -884,18 +993,17 @@ onMounted(async () => {
       </div>
     </div>
 
-    <details class="aw-advanced-settings">
-      <summary>
-        <span>高级设置：扣减 / 福利 / 大促</span>
-        <small>默认在结算阶段计算，日常改价优先维护难度档案和价目矩阵</small>
-      </summary>
-      <div class="aw-three-column">
-        <div class="aw-panel">
+        <div v-if="activePricingSection === 'deduction'" class="aw-panel aw-pricing-section">
         <div class="aw-panel__head">
           <div>
-            <h3>出错扣减</h3>
-            <p class="aw-copy">结算时读取出错 Excel 与扣减规则，提交时不冻结扣减结果。</p>
+            <h3>质检扣款</h3>
+            <p class="aw-copy">结算时读取质检错误记录，再按这里的金额扣款。日常上传不需要设置这一项。</p>
           </div>
+        </div>
+        <div class="aw-pricing-field-help">
+          <span><b>人员类型/岗级</b>：可以选择全部，也可以只对某一类人员生效</span>
+          <span><b>难度</b>：可以选择全部或指定难度分类</span>
+          <span><b>每错扣款</b>：每条质检错误扣多少钱</span>
         </div>
         <div class="aw-form-grid">
           <label>
@@ -919,7 +1027,7 @@ onMounted(async () => {
             </select>
           </label>
           <label>
-            每错扣减
+            每错扣款
             <input v-model.number="deductionForm.deduction_amount" min="0" type="number" />
           </label>
           <label>
@@ -934,7 +1042,7 @@ onMounted(async () => {
         <div class="aw-inline-actions aw-form-action">
           <span v-if="deductionSupersedeId" class="aw-chip aw-chip--info">替代 #{{ deductionSupersedeId }}</span>
           <button v-if="deductionSupersedeId" class="aw-secondary-button" type="button" @click="deductionSupersedeId = 0">取消替代</button>
-          <button class="aw-secondary-button" type="button" @click="createDeductionRule">{{ deductionSupersedeId ? '保存替代' : '新增扣减' }}</button>
+          <button class="aw-secondary-button" type="button" @click="createDeductionRule">{{ deductionSupersedeId ? '保存替代' : '新增扣款规则' }}</button>
         </div>
         <WorkbenchDataGrid
           v-if="deductionRows.length"
@@ -957,15 +1065,20 @@ onMounted(async () => {
             <span v-else>{{ value || '—' }}</span>
           </template>
         </WorkbenchDataGrid>
-        <p v-else class="aw-copy">已配置 {{ totals.deduction }} 条扣减规则</p>
+        <p v-else class="aw-copy">已配置 {{ totals.deduction }} 条质检扣款规则</p>
       </div>
 
-        <div class="aw-panel">
+        <div v-if="activePricingSection === 'welfare'" class="aw-panel aw-pricing-section">
         <div class="aw-panel__head">
           <div>
             <h3>福利补贴</h3>
-            <p class="aw-copy">福利按人员和月份发放，不归属到单个订单。</p>
+            <p class="aw-copy">按人员和月份发放补贴，不归属到单个订单。没有固定补贴时可以不配置。</p>
           </div>
+        </div>
+        <div class="aw-pricing-field-help">
+          <span><b>名称</b>：例如月度补贴、临时补贴</span>
+          <span><b>人员类型/岗级</b>：决定哪些人可以拿到</span>
+          <span><b>金额</b>：结算时增加到对应人员名下</span>
         </div>
         <div class="aw-form-grid">
           <label>
@@ -1025,15 +1138,21 @@ onMounted(async () => {
             <span v-else>{{ value || '—' }}</span>
           </template>
         </WorkbenchDataGrid>
-        <p v-else class="aw-copy">已配置 {{ totals.welfare }} 条福利规则</p>
+        <p v-else class="aw-copy">已配置 {{ totals.welfare }} 条福利补贴规则</p>
       </div>
 
-        <div class="aw-panel">
+        <div v-if="activePricingSection === 'promo'" class="aw-panel aw-pricing-section">
         <div class="aw-panel__head">
           <div>
-            <h3>大促价格券</h3>
-            <p class="aw-copy">同一订单只采用一条大促规则；一口价优先，其他按优先级选择。</p>
+            <h3>临时活动价</h3>
+            <p class="aw-copy">用于临时活动、特殊订单或指定编码价格。没有活动价时可以不配置。</p>
           </div>
+        </div>
+        <div class="aw-pricing-field-help">
+          <span><b>一口价</b>：直接覆盖为指定价格</span>
+          <span><b>加价</b>：在原单价上增加固定金额</span>
+          <span><b>涨幅</b>：按百分比调整</span>
+          <span><b>生效编码/人员</b>：可限制只对指定订单或人员生效</span>
         </div>
         <div class="aw-form-grid">
           <label>
@@ -1104,7 +1223,7 @@ onMounted(async () => {
         <div class="aw-inline-actions aw-form-action">
           <span v-if="promoSupersedeId" class="aw-chip aw-chip--info">替代 #{{ promoSupersedeId }}</span>
           <button v-if="promoSupersedeId" class="aw-secondary-button" type="button" @click="promoSupersedeId = 0">取消替代</button>
-          <button class="aw-secondary-button" type="button" @click="createPromoCoupon">{{ promoSupersedeId ? '保存替代' : '新增大促券' }}</button>
+          <button class="aw-secondary-button" type="button" @click="createPromoCoupon">{{ promoSupersedeId ? '保存替代' : '新增活动价' }}</button>
         </div>
         <WorkbenchDataGrid
           v-if="promoRows.length"
@@ -1128,9 +1247,9 @@ onMounted(async () => {
             <span v-else>{{ value || '—' }}</span>
           </template>
         </WorkbenchDataGrid>
-        <p v-else class="aw-copy">已配置 {{ totals.promo }} 条大促规则</p>
+        <p v-else class="aw-copy">已配置 {{ totals.promo }} 条临时活动价</p>
         </div>
-      </div>
-    </details>
+      </main>
+    </div>
   </section>
 </template>

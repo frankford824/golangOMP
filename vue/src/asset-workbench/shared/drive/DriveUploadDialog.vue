@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { CheckCircle2, FileUp, LoaderCircle, Upload, X, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, FileUp, LoaderCircle, Upload, XCircle } from 'lucide-vue-next'
 
 import {
   createDriveUploadQueue,
@@ -8,6 +8,7 @@ import {
   type DriveUploadQueueItem,
   type DriveUploadQueueStatus,
 } from '@aw/shared/drive/useDriveUpload'
+import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 
 const props = defineProps<{
   open: boolean
@@ -162,7 +163,7 @@ function statusIcon(status: DriveUploadQueueStatus) {
             <h3>{{ targetLabel }}</h3>
           </div>
           <button class="aw-icon-action" type="button" aria-label="关闭" @click="emit('close')">
-            <X :size="16" aria-hidden="true" />
+            <IconfontActionIcon name="close" :size="16" />
           </button>
         </header>
 

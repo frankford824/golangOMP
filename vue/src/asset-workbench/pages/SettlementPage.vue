@@ -16,6 +16,7 @@ import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupp
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
+import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes } from '@aw/shared/format/difficulty'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import {
@@ -126,14 +127,14 @@ const ledgerSegments = computed(() => {
   if (!value) {
     return [
       { key: 'gross', label: '正常计件', value: formatMoney(0), hint: '待生成预览', expandable: true },
-      { key: 'deduction', label: '质检扣减', value: formatMoney(0), hint: '结算时读取质检出错表', expandable: true },
+      { key: 'deduction', label: '质检扣款', value: formatMoney(0), hint: '结算时读取质检错误表', expandable: true },
       { key: 'supplement', label: '补录计件', value: formatMoney(0), hint: '工资条第二行', expandable: true },
-      { key: 'net', label: '应结净额', value: formatMoney(0), hint: '计件 + 补录 - 质检扣减', money: true, expandable: true },
+      { key: 'net', label: '应结净额', value: formatMoney(0), hint: '计件 + 补录 - 质检扣款', money: true, expandable: true },
     ]
   }
   return [
     { key: 'gross', label: '正常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单 · ${formatInt(value.page_count)} 页`, expandable: true },
-    { key: 'deduction', label: '质检扣减', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错`, expandable: true },
+    { key: 'deduction', label: '质检扣款', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错`, expandable: true },
     { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行', expandable: true },
     { key: 'net', label: '应结净额', value: formatMoney(value.net_amount), hint: '正常工资行 + 补录工资行', money: true, expandable: true },
   ]
@@ -161,7 +162,7 @@ const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
   { key: 'page_count', label: '页数', width: 88, align: 'right' },
   { key: 'gross_amount', label: '毛额', width: 100, align: 'right' },
-  { key: 'deduction_amount', label: '质检扣减', width: 112, align: 'right' },
+  { key: 'deduction_amount', label: '质检扣款', width: 112, align: 'right' },
   { key: 'welfare_amount', label: '福利', width: 100, align: 'right' },
   { key: 'supplement_amount', label: '补录', width: 100, align: 'right' },
   { key: 'adjustment_amount', label: '调整', width: 100, align: 'right' },
@@ -263,11 +264,7 @@ function gridValue(key: string, value: unknown) {
 }
 
 function defaultBusinessMonth() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).format(new Date())
+  return currentBusinessMonth()
 }
 
 async function loadSettlement(options: { keepNotice?: boolean } = {}) {
@@ -630,14 +627,14 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">本月结算</p>
         <h2>工资结算</h2>
-        <p>这里导入的是出错扣减表：按人员和难度统计出错数，系统自动计算质检扣减。</p>
+        <p>这里导入的是质检扣款表：按人员和难度统计出错数，系统自动计算质检扣款。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="downloadErrorTemplate">
           <Download :size="16" aria-hidden="true" />
-          下载出错扣减表
+          下载质检扣款表
         </button>
-        <button class="aw-secondary-button" type="button" @click="openErrorImport">导入出错扣减</button>
+        <button class="aw-secondary-button" type="button" @click="openErrorImport">导入质检扣款</button>
         <button class="aw-secondary-button" type="button" :disabled="exporting || (!preview && !selectedBatch)" @click="exportSettlement">
           导出工资条
         </button>
@@ -649,7 +646,7 @@ onMounted(() => {
       class="aw-visually-hidden"
       type="file"
       accept=".xlsx,.xls"
-      aria-label="导入出错扣减 Excel"
+      aria-label="导入质检扣款 Excel"
       @change="handleErrorImport"
     />
     <input
@@ -688,7 +685,7 @@ onMounted(() => {
           </WorkbenchDataGrid>
           <div v-else class="aw-empty-state">
             <h3>还没有可结算明细</h3>
-            <p>导入出错扣减表并生成预览后，这里会按人员分组显示每条工资行的计件、质检扣减与净额。</p>
+            <p>导入质检扣款表并生成预览后，这里会按人员分组显示每条工资行的计件、质检扣款与净额。</p>
           </div>
         </div>
       </template>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
-import { Bell, Command, LogOut, Search, Settings, UserRound } from 'lucide-vue-next'
+import { Bell, Command, LogOut, Settings, UserRound } from 'lucide-vue-next'
 
 import {
   appendSearchCommand,
@@ -16,6 +16,8 @@ import { useAssetWorkbenchBootstrap } from '../app/useAssetWorkbenchBootstrap'
 import { useWorkbenchSession } from '../app/useWorkbenchSession'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
 import { notificationsApi } from '@/services/api/notificationsApi'
+import { currentBusinessMonth } from '../shared/format/businessMonth'
+import IconfontActionIcon from '../shared/icons/IconfontActionIcon.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
 
 const SETTLEMENT_HUB_TAB_KEY = 'aw-settlement-hub-tab'
@@ -116,9 +118,7 @@ const profileState = computed(() => {
   return 'idle'
 })
 
-const businessMonth = computed(() =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date()),
-)
+const businessMonth = computed(() => currentBusinessMonth())
 
 const displayName = computed(
   () => bootstrap.value?.profile?.real_name || bootstrap.value?.user?.name || bootstrap.value?.user?.username || '我的账号',
@@ -281,7 +281,7 @@ watch(commandQuery, () => {
         </div>
         <div class="aw-page-bar__actions">
           <button class="aw-command-button" type="button" @click="toggleCommand">
-            <Search :size="16" aria-hidden="true" />
+            <IconfontActionIcon name="search" :size="16" />
             <span>搜索或执行动作</span>
             <kbd>⌘K</kbd>
           </button>
@@ -361,7 +361,7 @@ watch(commandQuery, () => {
             </button>
           </template>
           <p v-if="flatCommandItems.length === 0" class="aw-command__empty">
-            没有匹配的页面或动作，试试：总盘、成本中心、交作品
+            没有匹配的页面或动作，试试：总盘、计价设置、交作品
           </p>
           <p v-if="commandNotice" class="aw-command__notice">{{ commandNotice }}</p>
         </div>

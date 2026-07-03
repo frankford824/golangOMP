@@ -1736,6 +1736,174 @@ body.aw-submission-dialog-locked {
   font-weight: 700;
 }
 
+.aw-pricing-settings {
+  display: grid;
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  gap: var(--aw-space-4);
+  align-items: start;
+}
+
+.aw-pricing-nav {
+  position: sticky;
+  top: var(--aw-space-4);
+  display: grid;
+  gap: var(--aw-space-4);
+  min-width: 0;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-panel);
+  padding: var(--aw-space-4);
+}
+
+.aw-pricing-nav__head {
+  display: grid;
+  gap: 2px;
+  padding-bottom: var(--aw-space-3);
+  border-bottom: 1px solid var(--aw-hairline);
+}
+
+.aw-pricing-nav__head strong {
+  font-size: var(--aw-font-size-md);
+}
+
+.aw-pricing-nav__head span,
+.aw-pricing-nav__group p,
+.aw-pricing-nav__item small,
+.aw-pricing-nav__item em,
+.aw-pricing-steps small,
+.aw-pricing-explain p,
+.aw-pricing-field-help span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-pricing-nav__group {
+  display: grid;
+  gap: var(--aw-space-2);
+}
+
+.aw-pricing-nav__group p {
+  margin: 0;
+  font-weight: var(--aw-weight-strong);
+}
+
+.aw-pricing-nav__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-3);
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  color: var(--aw-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: var(--aw-space-3);
+  text-align: left;
+}
+
+.aw-pricing-nav__item:hover {
+  background: var(--aw-surface-muted);
+}
+
+.aw-pricing-nav__item.is-active {
+  border-color: color-mix(in srgb, var(--aw-accent) 36%, var(--aw-hairline));
+  background: color-mix(in srgb, var(--aw-accent) 10%, var(--aw-surface));
+}
+
+.aw-pricing-nav__item span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aw-pricing-nav__item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-pricing-nav__item em {
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.aw-pricing-workspace {
+  display: grid;
+  gap: var(--aw-space-4);
+  min-width: 0;
+}
+
+.aw-pricing-guide,
+.aw-pricing-section {
+  display: grid;
+  gap: var(--aw-space-4);
+}
+
+.aw-pricing-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--aw-space-3);
+}
+
+.aw-pricing-steps button {
+  display: grid;
+  align-content: start;
+  gap: var(--aw-space-2);
+  min-height: 150px;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: var(--aw-space-4);
+  text-align: left;
+}
+
+.aw-pricing-steps button:hover {
+  border-color: color-mix(in srgb, var(--aw-accent) 38%, var(--aw-hairline));
+  background: var(--aw-surface-muted);
+}
+
+.aw-pricing-steps span {
+  color: var(--aw-accent);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-weight-strong);
+}
+
+.aw-pricing-steps strong,
+.aw-pricing-explain strong {
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-pricing-explain,
+.aw-pricing-field-help {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--aw-space-3);
+}
+
+.aw-pricing-explain div,
+.aw-pricing-field-help span {
+  min-width: 0;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-muted);
+  padding: var(--aw-space-3);
+}
+
+.aw-pricing-explain p {
+  margin: var(--aw-space-1) 0 0;
+  line-height: var(--aw-line-normal);
+}
+
+.aw-pricing-field-help {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .aw-advanced-settings {
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
@@ -4248,6 +4416,12 @@ body.aw-submission-dialog-locked {
   color: currentColor;
 }
 
+.aw-iconfont-action {
+  display: inline-block;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
 .aw-drive-side__label .aw-workbench-folder-icon,
 .aw-drive-side__item .aw-workbench-folder-icon,
 .aw-material-folder-node .aw-workbench-folder-icon,
@@ -5866,6 +6040,19 @@ body.aw-submission-dialog-locked {
 
 @media (max-width: 860px) {
   .aw-cost-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-pricing-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-pricing-nav {
+    position: static;
+  }
+
+  .aw-pricing-steps,
+  .aw-pricing-explain {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -1094,6 +1094,11 @@ function unwrapPaginated<T>(payload: ApiEnvelope<T[]> | T[]): PaginatedResult<T>
       total: wrapped.pagination?.total ?? wrapped.data?.length ?? 0,
     }
   }
+  if (payload && typeof payload === 'object' && 'items' in payload) {
+    const wrapped = payload as { items?: T[]; total?: number }
+    const items = Array.isArray(wrapped.items) ? wrapped.items : []
+    return { items, total: Number.isFinite(Number(wrapped.total)) ? Number(wrapped.total) : items.length }
+  }
   const items = Array.isArray(payload) ? payload : []
   return { items, total: items.length }
 }

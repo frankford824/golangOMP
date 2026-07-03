@@ -1,5 +1,7 @@
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
+import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 export type DriveUploadQueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
 
@@ -58,7 +60,7 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
       options.onItemChange?.(item)
     } catch (err) {
       item.status = 'failed'
-      item.error = err instanceof Error ? err.message : '上传失败'
+      item.error = resolveApiUserMessage(err, { fallback: '上传失败，请重试' })
       options.onItemChange?.(item)
     }
   }
@@ -66,35 +68,28 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
   const uploadedItems = queue.filter((item) => item.status === 'uploaded' && item.sessionId)
   if (!uploadedItems.length) throw new Error('没有文件上传成功，请重试')
 
-  await assetWorkbenchApi.createSubmission({
-    notes: '',
-    expected_business_month: expectedBusinessMonth,
-    month_rollover_ack: false,
-    items: [{
-      difficulty_class: options.difficultyClass || undefined,
-      finalized: true,
-      page_count: uploadedItems.length,
-      item_count: uploadedItems.length,
-      upload_session_ids: uploadedItems.map((item) => item.sessionId).filter(Boolean) as string[],
-    }],
-  })
+  try {
+    await assetWorkbenchApi.createSubmission({
+      notes: '',
+      expected_business_month: expectedBusinessMonth,
+      month_rollover_ack: false,
+      items: [{
+        difficulty_class: options.difficultyClass || undefined,
+        finalized: true,
+        page_count: uploadedItems.length,
+        item_count: uploadedItems.length,
+        upload_session_ids: uploadedItems.map((item) => item.sessionId).filter(Boolean) as string[],
+      }],
+    })
+  } catch (err) {
+    throw new Error(resolveApiUserMessage(err, { fallback: '上传完成，但提交记录生成失败' }))
+  }
   return uploadedItems.length
 }
 
 function fileRelativePath(file: File) {
   const withPath = file as File & { webkitRelativePath?: string }
   return (withPath.webkitRelativePath || file.name).replace(/\\/g, '/').replace(/^\/+/, '')
-}
-
-function currentBusinessMonth() {
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).formatToParts(new Date())
-  const year = parts.find((part) => part.type === 'year')?.value || new Date().getFullYear().toString()
-  const month = parts.find((part) => part.type === 'month')?.value || String(new Date().getMonth() + 1).padStart(2, '0')
-  return `${year}-${month}`
 }
 
 export function useDriveUpload() {

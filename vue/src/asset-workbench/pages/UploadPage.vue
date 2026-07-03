@@ -6,12 +6,13 @@ import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
-import { parseApiErrorPayload } from '@/utils/api-message-zh'
+import { parseApiErrorPayload, resolveApiUserMessage } from '@/utils/api-message-zh'
 
 type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
 
@@ -248,7 +249,7 @@ async function uploadQueuedItems() {
       item.status = 'uploaded'
     } catch (err) {
       item.status = 'failed'
-      item.error = err instanceof Error ? err.message : '上传失败'
+      item.error = resolveApiUserMessage(err, { fallback: '上传失败，请重试' })
     }
   }
   uploading.value = false
@@ -312,7 +313,7 @@ function submissionErrorMessage(err: unknown) {
   if (parsed.code === 'MONTH_ROLLOVER_REQUIRED') {
     return '上传已完成，但当前已跨入新的结算月份。请刷新页面后重新确认提交，避免计入错误账期。'
   }
-  return err instanceof Error ? `上传已完成，但提交失败：${err.message}` : '上传已完成，但提交失败'
+  return `上传已完成，但提交失败：${resolveApiUserMessage(err, { fallback: '请稍后重试' })}`
 }
 
 async function submitSimple() {
@@ -413,17 +414,6 @@ function openFilePreview(payload: { title: string; previewUrl: string; meta: Fil
 
 function closeFilePreview() {
   previewDialog.value.open = false
-}
-
-function currentBusinessMonth() {
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).formatToParts(new Date())
-  const year = parts.find((part) => part.type === 'year')?.value || new Date().getFullYear().toString()
-  const month = parts.find((part) => part.type === 'month')?.value || String(new Date().getMonth() + 1).padStart(2, '0')
-  return `${year}-${month}`
 }
 
 async function loadContext() {

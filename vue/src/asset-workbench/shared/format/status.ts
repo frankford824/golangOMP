@@ -149,7 +149,7 @@ export const itemTypeMeta = (value?: string | null) =>
   lookup(
     {
       gross_piecework: { label: '正常计件', tone: 'success' },
-      error_deduction: { label: '出错扣减', tone: 'danger' },
+      error_deduction: { label: '质检扣款', tone: 'danger' },
       welfare: { label: '福利补贴', tone: 'money' },
       supplement: { label: '补录计件', tone: 'info' },
       adjustment: { label: '补差', tone: 'money' },
@@ -171,10 +171,10 @@ export function eventTypeMeta(value?: string | null): StatusMeta {
   const key = value || ''
   const known: Record<string, StatusMeta> = {
     'profile.upserted': { label: '更新人员资料', tone: 'info' },
-    'price.created': { label: '新增价目', tone: 'money' },
-    'deduction.created': { label: '新增扣减规则', tone: 'warn' },
+    'price.created': { label: '新增单价', tone: 'money' },
+    'deduction.created': { label: '新增质检扣款', tone: 'warn' },
     'welfare.created': { label: '新增福利规则', tone: 'money' },
-    'promo.created': { label: '新增大促规则', tone: 'money' },
+    'promo.created': { label: '新增临时活动价', tone: 'money' },
     'upload_session.created': { label: '创建上传', tone: 'info' },
     'upload_session.updated': { label: '更新上传', tone: 'info' },
     'submission.created': { label: '提交作品', tone: 'success' },
@@ -219,10 +219,10 @@ export function entityTypeMeta(value?: string | null): StatusMeta {
   return lookup(
     {
       profile: { label: '人员资料', tone: 'info' },
-      price_matrix: { label: '价目', tone: 'money' },
-      deduction_rule: { label: '扣减规则', tone: 'warn' },
+      price_matrix: { label: '单价设置', tone: 'money' },
+      deduction_rule: { label: '质检扣款', tone: 'warn' },
       welfare_rule: { label: '福利规则', tone: 'money' },
-      promo_coupon: { label: '大促规则', tone: 'money' },
+      promo_coupon: { label: '临时活动价', tone: 'money' },
       upload_session: { label: '上传会话', tone: 'info' },
       submission: { label: '作品提交', tone: 'success' },
       submission_item: { label: '作品明细', tone: 'success' },
@@ -265,10 +265,10 @@ export function eventReasonText(value?: string | null) {
     'update submission': '更新作品提交',
     'create profile': '创建人员资料',
     'update profile': '更新人员资料',
-    'create price': '新增价目',
-    'create deduction': '新增扣减规则',
+    'create price': '新增单价',
+    'create deduction': '新增质检扣款',
     'create welfare': '新增福利规则',
-    'create promo': '新增大促规则',
+    'create promo': '新增临时活动价',
     'confirm settlement': '确认结算',
     'cancel settlement': '取消结算',
     'create supplement': '创建补录',

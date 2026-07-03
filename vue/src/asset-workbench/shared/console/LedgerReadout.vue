@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Maximize2, X } from 'lucide-vue-next'
+import { Maximize2 } from 'lucide-vue-next'
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 
+import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import { animateOpacity, ledgerCloseMotion, ledgerOpenMotion } from '@aw/shared/motion/useFlip'
 import { prefersReducedMotion, readAssetMotionTokens } from '@aw/shared/motion/tokens'
 import { useScrollLock } from '@aw/shared/motion/useScrollLock'
@@ -210,7 +211,7 @@ watch(
                 </div>
                 <DialogClose as-child>
                   <button ref="closeBtnRef" class="aw-ledger-sheet__close" type="button" aria-label="收起明细" autofocus>
-                    <X :size="18" aria-hidden="true" />
+                    <IconfontActionIcon name="close" :size="18" />
                   </button>
                 </DialogClose>
               </header>

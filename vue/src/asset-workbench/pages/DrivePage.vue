@@ -11,11 +11,7 @@ import {
   HardDrive,
   ImageDown,
   Pencil,
-  Plus,
-  Search,
-  Trash2,
   Upload,
-  X,
 } from 'lucide-vue-next'
 
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
@@ -38,6 +34,7 @@ import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
 import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
+import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
@@ -2145,7 +2142,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <form class="aw-drive__search" @submit.prevent="runUnifiedSearch">
-        <Search :size="16" aria-hidden="true" />
+        <IconfontActionIcon name="search" :size="16" />
         <span class="aw-drive__scope-select">
           <select v-model="searchScope" aria-label="搜索范围" @change="scheduleUnifiedSearch">
             <option value="all">全部</option>
@@ -2161,7 +2158,7 @@ onBeforeUnmount(() => {
           @input="scheduleUnifiedSearch"
         />
         <button v-if="searchActive" class="aw-drive__search-clear" type="button" aria-label="清除搜索" @click="clearSearch">
-          <X :size="14" aria-hidden="true" />
+          <IconfontActionIcon name="close" :size="14" />
         </button>
       </form>
       <div v-if="canManageDrive" class="aw-drive__toolbar-actions">
@@ -2192,7 +2189,7 @@ onBeforeUnmount(() => {
             <span>{{ enabledClientMaterialCount }} 个上架中 · {{ disabledClientMaterialCount }} 个已停用</span>
           </div>
           <button class="aw-drive-mini-button" type="button" aria-label="关闭客户端素材管理" @click="clientMaterialManagerOpen = false">
-            <X :size="14" aria-hidden="true" />
+            <IconfontActionIcon name="close" :size="14" />
           </button>
         </header>
         <div class="aw-client-material-manager__toolbar">
@@ -2289,7 +2286,7 @@ onBeforeUnmount(() => {
             <WorkbenchFolderIcon :size="15" variant="star" />
             <span>上传目录</span>
             <button v-if="canManageDrive" class="aw-drive-mini-button" type="button" aria-label="新建上传目录" @click="creatingDirectory = true">
-              <Plus :size="14" aria-hidden="true" />
+              <IconfontActionIcon name="add" :size="14" />
             </button>
           </p>
           <form v-if="creatingDirectory" class="aw-drive-inline-form" @submit.prevent="createDirectory">
@@ -2433,14 +2430,14 @@ onBeforeUnmount(() => {
             </template>
             <template v-else>
               <form class="aw-drive__search aw-drive__search--inline" @submit.prevent="loadMaterials()">
-                <Search :size="16" aria-hidden="true" />
+                <IconfontActionIcon name="search" :size="16" />
                 <input v-model="materialQuery" type="search" placeholder="按文件名 / SKU / 外部路径过滤" />
                 <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除" @click="materialQuery = ''; loadMaterials()">
-                  <X :size="14" aria-hidden="true" />
+                  <IconfontActionIcon name="close" :size="14" />
                 </button>
               </form>
               <button class="aw-primary-button" type="button" @click="loadMaterials()">
-                <Search :size="16" aria-hidden="true" />
+                <IconfontActionIcon name="search" :size="16" />
                 搜索
               </button>
             </template>
@@ -2463,7 +2460,7 @@ onBeforeUnmount(() => {
           <template v-if="canDeleteDriveFiles">
             <input v-model.trim="deleteReason" placeholder="删除原因" aria-label="删除原因" />
             <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="!deleteReason.trim()" @click="deleteSelectedFiles">
-              <Trash2 :size="15" aria-hidden="true" />
+              <IconfontActionIcon name="delete" :size="15" />
               删除
             </button>
           </template>
@@ -2714,7 +2711,7 @@ onBeforeUnmount(() => {
           <div class="aw-drive-drawer__head">
             <p class="aw-eyebrow">文件详情</p>
             <button class="aw-drive-mini-button" type="button" aria-label="关闭" @click="closeDetail">
-              <X :size="14" aria-hidden="true" />
+              <IconfontActionIcon name="close" :size="14" />
             </button>
           </div>
           <button class="aw-drive__detail-preview" type="button" @click="openFilePreview(selectedFile)">
@@ -2794,7 +2791,7 @@ onBeforeUnmount(() => {
                 <input v-model.trim="deleteReason" placeholder="删除必须填写原因" />
               </label>
               <button class="aw-secondary-button" type="button" :disabled="!deleteReason.trim()" @click="deleteSelectedFiles">
-                <Trash2 :size="15" aria-hidden="true" />
+                <IconfontActionIcon name="delete" :size="15" />
                 删除文件
               </button>
             </template>
@@ -2805,7 +2802,7 @@ onBeforeUnmount(() => {
           <div class="aw-drive-drawer__head">
             <p class="aw-eyebrow">素材详情</p>
             <button class="aw-drive-mini-button" type="button" aria-label="关闭" @click="closeDetail">
-              <X :size="14" aria-hidden="true" />
+              <IconfontActionIcon name="close" :size="14" />
             </button>
           </div>
           <button class="aw-drive__detail-preview" type="button" @click="openMaterialPreview(activeMaterial)">
@@ -2869,7 +2866,7 @@ onBeforeUnmount(() => {
                   :disabled="publishingClientMaterial"
                   @click="publishClientMaterial(activeMaterial)"
                 >
-                  <Plus :size="14" aria-hidden="true" />
+                  <IconfontActionIcon name="add" :size="14" />
                   {{ publishingClientMaterial ? '上架中' : '上架' }}
                 </button>
               </div>

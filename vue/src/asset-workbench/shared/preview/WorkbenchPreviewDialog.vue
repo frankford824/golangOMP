@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Download, ExternalLink, Maximize2, Minimize2, Minus, X } from 'lucide-vue-next'
+import { Download, ExternalLink, Maximize2, Minimize2, Minus } from 'lucide-vue-next'
 
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import { isPdfMimeOrFilename, isVideoMimeOrFilename } from '@aw/shared/materials/systemAssetPreview'
 
 const props = defineProps<{
@@ -277,7 +278,7 @@ onBeforeUnmount(() => {
             <Maximize2 v-else :size="15" aria-hidden="true" />
           </button>
           <button type="button" title="关闭" aria-label="关闭" @pointerdown.stop @click="emit('close')">
-            <X :size="15" aria-hidden="true" />
+            <IconfontActionIcon name="close" :size="15" />
           </button>
         </div>
       </header>
@@ -314,7 +315,7 @@ onBeforeUnmount(() => {
               <h3>{{ title }}</h3>
             </div>
             <button class="aw-secondary-button" type="button" @click="emit('close')">
-              <X :size="16" aria-hidden="true" />
+              <IconfontActionIcon name="close" :size="16" />
               关闭
             </button>
           </div>

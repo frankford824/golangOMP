@@ -77,7 +77,7 @@ const payrollColumns = [
   { key: 'item_count', label: '单数', width: 80, align: 'right' as const },
   { key: 'page_count', label: '页数', width: 80, align: 'right' as const },
   { key: 'gross_amount', label: '毛额', width: 104, align: 'right' as const },
-  { key: 'deduction_amount', label: '质检扣减', width: 112, align: 'right' as const },
+  { key: 'deduction_amount', label: '质检扣款', width: 112, align: 'right' as const },
   { key: 'net_amount', label: '净额', width: 116, align: 'right' as const },
 ]
 const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'net_amount'])
