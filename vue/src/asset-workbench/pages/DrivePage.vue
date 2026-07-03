@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import { useRoute } from 'vue-router'
 import {
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Download,
   FileDown,
@@ -135,6 +136,9 @@ const materialKnownFolders = ref<Record<string, MaterialFolderEntry>>({})
 const materialFileTotal = ref(0)
 const materialPage = ref(1)
 const clientMaterials = ref<ClientMaterialRow[]>([])
+const clientMaterialManagerOpen = ref(false)
+const clientMaterialLoading = ref(false)
+const clientMaterialError = ref('')
 const selectedMaterialIds = ref<Set<string>>(new Set())
 const materialPreviewUrls = ref<Record<string, string>>({})
 const materialPreviewLoadingIds = ref<Set<string>>(new Set())
@@ -782,13 +786,22 @@ function filePathLabel(file: DriveFileRow): string {
 function statusText(value?: string) {
   const normalized = (value || '').trim()
   const map: Record<string, string> = {
+    submitted: '已提交',
     checked: '已通过',
     needs_fix: '需修',
     pending: '待处理',
     pending_grade: '待定级',
+    unpriced: '待补价',
     priced: '已计件',
+    voided: '已作废',
     unsettled: '未结算',
+    in_batch: '批次中',
     settled: '已结算',
+    reversed: '已冲正',
+    processing: '处理中',
+    ready: '可预览',
+    failed: '失败',
+    not_applicable: '不适用',
   }
   return map[normalized] || normalized || '—'
 }
@@ -1821,7 +1834,28 @@ function selectMaterial(asset: SystemAssetRow) {
 function selectClientMaterial(material: ClientMaterialRow) {
   const materialKeys = clientMaterialIdentityKeys(material)
   const existing = materialItems.value.find((asset) => hasSharedIdentity(materialIdentityKeys(asset), materialKeys))
+  searchActive.value = false
+  activeMode.value = 'operational'
+  clientMaterialManagerOpen.value = false
   selectMaterial(existing ? materialWithClientPublication(existing, material) : materialFromClient(material))
+}
+
+async function refreshClientMaterials() {
+  if (!canManageDrive.value || clientMaterialLoading.value) return
+  clientMaterialLoading.value = true
+  clientMaterialError.value = ''
+  try {
+    clientMaterials.value = await assetWorkbenchApi.listClientMaterials(true)
+  } catch (err) {
+    clientMaterialError.value = err instanceof Error ? err.message : '客户端素材加载失败'
+  } finally {
+    clientMaterialLoading.value = false
+  }
+}
+
+function openClientMaterialManager() {
+  clientMaterialManagerOpen.value = true
+  void refreshClientMaterials()
 }
 
 function cacheMaterialPreview(key: string, url: string) {
@@ -2112,11 +2146,14 @@ onBeforeUnmount(() => {
       </div>
       <form class="aw-drive__search" @submit.prevent="runUnifiedSearch">
         <Search :size="16" aria-hidden="true" />
-        <select v-model="searchScope" aria-label="搜索范围" @change="scheduleUnifiedSearch">
-          <option value="all">全部</option>
-          <option value="operational">运营素材</option>
-          <option value="files">上传文件</option>
-        </select>
+        <span class="aw-drive__scope-select">
+          <select v-model="searchScope" aria-label="搜索范围" @change="scheduleUnifiedSearch">
+            <option value="all">全部</option>
+            <option value="operational">运营素材</option>
+            <option value="files">上传文件</option>
+          </select>
+          <ChevronDown :size="15" aria-hidden="true" />
+        </span>
         <input
           v-model="searchQuery"
           type="search"
@@ -2127,10 +2164,88 @@ onBeforeUnmount(() => {
           <X :size="14" aria-hidden="true" />
         </button>
       </form>
+      <div v-if="canManageDrive" class="aw-drive__toolbar-actions">
+        <button class="aw-secondary-button aw-client-material-button" type="button" @click="openClientMaterialManager">
+          <ImageDown :size="16" aria-hidden="true" />
+          <span>客户端素材</span>
+          <span class="aw-client-material-button__count">{{ enabledClientMaterialCount }}/{{ clientMaterials.length }}</span>
+        </button>
+      </div>
     </header>
 
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="actionError" class="aw-inline-alert aw-inline-alert--error">{{ actionError }}</p>
+
+    <div
+      v-if="clientMaterialManagerOpen"
+      class="aw-client-material-manager"
+      role="dialog"
+      aria-modal="true"
+      aria-label="客户端素材管理"
+      @click.self="clientMaterialManagerOpen = false"
+    >
+      <section class="aw-client-material-manager__panel">
+        <header class="aw-client-material-manager__head">
+          <div>
+            <p class="aw-eyebrow">客户端素材</p>
+            <h3>发布管理</h3>
+            <span>{{ enabledClientMaterialCount }} 个上架中 · {{ disabledClientMaterialCount }} 个已停用</span>
+          </div>
+          <button class="aw-drive-mini-button" type="button" aria-label="关闭客户端素材管理" @click="clientMaterialManagerOpen = false">
+            <X :size="14" aria-hidden="true" />
+          </button>
+        </header>
+        <div class="aw-client-material-manager__toolbar">
+          <div class="aw-segmented-control" aria-label="客户端素材状态筛选">
+            <button
+              type="button"
+              :class="{ 'is-active': clientMaterialFilter === 'all' }"
+              @click="clientMaterialFilter = 'all'"
+            >
+              全部 {{ clientMaterials.length }}
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-active': clientMaterialFilter === 'enabled' }"
+              @click="clientMaterialFilter = 'enabled'"
+            >
+              上架中 {{ enabledClientMaterialCount }}
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-active': clientMaterialFilter === 'disabled' }"
+              @click="clientMaterialFilter = 'disabled'"
+            >
+              已停用 {{ disabledClientMaterialCount }}
+            </button>
+          </div>
+          <button class="aw-grid-button" type="button" :disabled="clientMaterialLoading" @click="refreshClientMaterials">
+            {{ clientMaterialLoading ? '刷新中…' : '刷新' }}
+          </button>
+        </div>
+        <p v-if="clientMaterialError" class="aw-inline-alert aw-inline-alert--error">{{ clientMaterialError }}</p>
+        <p v-else-if="clientMaterialLoading && clientMaterials.length === 0" class="aw-drive-empty">正在加载客户端素材…</p>
+        <div v-else-if="visibleClientMaterials.length" class="aw-client-materials-list">
+          <article v-for="material in visibleClientMaterials" :key="material.id" class="aw-client-material-row">
+            <div class="aw-client-material-row__main">
+              <strong :title="material.title || material.filename_snapshot">{{ material.title || material.filename_snapshot }}</strong>
+              <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
+            </div>
+            <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">
+              {{ material.enabled ? '上架中' : '已停用' }}
+            </span>
+            <div class="aw-inline-actions aw-inline-actions--compact">
+              <button class="aw-grid-button" type="button" @click="selectClientMaterial(material)">查看</button>
+              <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
+              <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
+            </div>
+          </article>
+        </div>
+        <p v-else class="aw-copy">
+          {{ clientMaterials.length ? '当前筛选下没有客户端素材。' : '还没有发布给客户端的素材。' }}
+        </p>
+      </section>
+    </div>
 
     <section v-if="searchActive" class="aw-drive-search-results">
       <div class="aw-drive-search-results__head">
@@ -2588,56 +2703,6 @@ onBeforeUnmount(() => {
                   <span>已显示 {{ visibleMaterialFiles.length }} / {{ materialFileTotal }} 个</span>
                 </div>
 
-                <section v-if="canManageDrive" class="aw-client-materials-panel" aria-label="客户端素材管理">
-                  <div class="aw-client-materials-panel__head">
-                    <div>
-                      <strong>客户端素材管理</strong>
-                      <span>{{ enabledClientMaterialCount }} 个上架中 · {{ disabledClientMaterialCount }} 个已停用</span>
-                    </div>
-                    <div class="aw-segmented-control" aria-label="客户端素材状态筛选">
-                      <button
-                        type="button"
-                        :class="{ 'is-active': clientMaterialFilter === 'all' }"
-                        @click="clientMaterialFilter = 'all'"
-                      >
-                        全部 {{ clientMaterials.length }}
-                      </button>
-                      <button
-                        type="button"
-                        :class="{ 'is-active': clientMaterialFilter === 'enabled' }"
-                        @click="clientMaterialFilter = 'enabled'"
-                      >
-                        上架中 {{ enabledClientMaterialCount }}
-                      </button>
-                      <button
-                        type="button"
-                        :class="{ 'is-active': clientMaterialFilter === 'disabled' }"
-                        @click="clientMaterialFilter = 'disabled'"
-                      >
-                        已停用 {{ disabledClientMaterialCount }}
-                      </button>
-                    </div>
-                  </div>
-                  <div v-if="visibleClientMaterials.length" class="aw-client-materials-list">
-                    <article v-for="material in visibleClientMaterials" :key="material.id" class="aw-client-material-row">
-                      <div class="aw-client-material-row__main">
-                        <strong :title="material.title || material.filename_snapshot">{{ material.title || material.filename_snapshot }}</strong>
-                        <span>{{ material.source_label || material.source_type || '系统资源' }} · {{ material.resource_id || material.source_ref || material.asset_id }}</span>
-                      </div>
-                      <span class="aw-chip" :class="material.enabled ? 'aw-chip--success' : 'aw-chip--neutral'">
-                        {{ material.enabled ? '上架中' : '已停用' }}
-                      </span>
-                      <div class="aw-inline-actions aw-inline-actions--compact">
-                        <button class="aw-grid-button" type="button" @click="selectClientMaterial(material)">查看</button>
-                        <button class="aw-grid-button" type="button" @click="toggleClientMaterial(material)">{{ material.enabled ? '停用' : '启用' }}</button>
-                        <button class="aw-grid-button" type="button" @click="removeClientMaterial(material)">下架</button>
-                      </div>
-                    </article>
-                  </div>
-                  <p v-else class="aw-copy">
-                    {{ clientMaterials.length ? '当前筛选下没有客户端素材。' : '还没有发布给客户端的素材。' }}
-                  </p>
-                </section>
               </section>
             </div>
           </template>

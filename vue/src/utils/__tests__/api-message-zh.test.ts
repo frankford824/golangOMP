@@ -30,4 +30,32 @@ describe('resolveApiUserMessage', () => {
 
     expect(message).toBe('账号或密码不正确，请检查后重试')
   })
+
+  it('maps asset-workbench price overlap conflicts to business copy', () => {
+    const message = resolveApiUserMessage({
+      status: 409,
+      responseData: {
+        error: {
+          code: 'CONFLICT',
+          message: 'Price effective range overlaps an existing rule.',
+        },
+      },
+    })
+
+    expect(message).toBe('该价目规则的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本')
+  })
+
+  it('does not leak unmapped English backend messages to users', () => {
+    const message = resolveApiUserMessage({
+      status: 409,
+      responseData: {
+        error: {
+          code: 'CONFLICT',
+          message: 'Unknown internal conflict from service.',
+        },
+      },
+    })
+
+    expect(message).toBe('与已有数据冲突，请更换后重试')
+  })
 })

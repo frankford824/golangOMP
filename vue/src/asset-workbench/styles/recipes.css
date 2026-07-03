@@ -4966,26 +4966,57 @@ body.aw-submission-dialog-locked {
   min-width: 0;
   border: 0;
   outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 0;
   background: transparent;
   color: var(--aw-ink);
   font: inherit;
 }
 
-.aw-drive__search select {
+.aw-drive__search input[type='search']::-webkit-search-decoration,
+.aw-drive__search input[type='search']::-webkit-search-cancel-button,
+.aw-drive__search input[type='search']::-webkit-search-results-button,
+.aw-drive__search input[type='search']::-webkit-search-results-decoration {
+  display: none;
+  -webkit-appearance: none;
+}
+
+.aw-drive__scope-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 92px;
   width: auto;
   min-width: 92px;
   max-width: 112px;
   min-height: calc(var(--aw-row-md) - 8px);
-  padding: 0 var(--aw-space-3) 0 0;
-  border: 0;
   border-right: 1px solid var(--aw-hairline);
+}
+
+.aw-drive__scope-select select {
+  width: 100%;
+  min-height: calc(var(--aw-row-md) - 8px);
+  padding: 0 28px 0 0;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
   border-radius: 0;
   background: transparent;
   color: var(--aw-ink);
   font: inherit;
   font-size: var(--aw-font-size-sm);
-  outline: 0;
+  cursor: pointer;
+}
+
+.aw-drive__scope-select svg {
+  position: absolute;
+  right: var(--aw-space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--aw-ink-2);
 }
 
 .aw-drive__search-clear {
@@ -4998,6 +5029,91 @@ body.aw-submission-dialog-locked {
   background: var(--aw-surface-muted);
   color: var(--aw-ink-2);
   cursor: pointer;
+}
+
+.aw-drive__toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aw-space-2);
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.aw-client-material-button {
+  min-height: var(--aw-row-md);
+  border-radius: var(--aw-radius-pill);
+  padding-inline: var(--aw-space-4);
+}
+
+.aw-client-material-button__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 22px;
+  padding: 0 var(--aw-space-2);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-surface-muted);
+  color: var(--aw-ink-2);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-client-material-manager {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--aw-space-4);
+  background: color-mix(in srgb, var(--aw-ink) 18%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.aw-client-material-manager__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aw-space-4);
+  width: min(720px, 100%);
+  max-height: calc(100vh - var(--aw-space-4) * 2);
+  overflow: hidden;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-popover);
+  padding: var(--aw-space-4);
+  animation: aw-drawer-in var(--aw-motion-standard) var(--aw-ease-standard) both;
+}
+
+.aw-client-material-manager__head,
+.aw-client-material-manager__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  min-width: 0;
+}
+
+.aw-client-material-manager__head > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.aw-client-material-manager__head h3 {
+  margin: 0;
+  font-size: var(--aw-font-size-h3);
+  line-height: 1.15;
+}
+
+.aw-client-material-manager__head span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-client-material-manager .aw-client-materials-list {
+  max-height: min(58vh, 560px);
 }
 
 .aw-drive__breadcrumb {
@@ -5742,6 +5858,10 @@ body.aw-submission-dialog-locked {
     max-width: none;
     order: 3;
   }
+
+  .aw-drive__toolbar-actions {
+    order: 2;
+  }
 }
 
 @media (max-width: 860px) {
@@ -5809,6 +5929,25 @@ body.aw-submission-dialog-locked {
   .aw-segmented-control {
     width: 100%;
     overflow-x: auto;
+  }
+
+  .aw-client-material-manager {
+    padding: var(--aw-space-2);
+  }
+
+  .aw-client-material-manager__panel {
+    max-height: calc(100vh - var(--aw-space-2) * 2);
+    border-radius: var(--aw-radius-sm);
+  }
+
+  .aw-client-material-manager__head,
+  .aw-client-material-manager__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .aw-client-material-manager__head .aw-drive-mini-button {
+    align-self: flex-end;
   }
 
   .aw-client-material-row > .aw-inline-actions {

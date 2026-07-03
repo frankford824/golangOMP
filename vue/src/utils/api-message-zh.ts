@@ -89,6 +89,16 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   /** GET /v1/assets/{id}/preview 等：409 + INVALID_STATE_TRANSITION 常见英文文案 */
   'asset preview is not available': '资产预览不可用',
   'asset preview is not available.': '资产预览不可用',
+  'price effective range overlaps an existing rule.': '该价目规则的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本',
+  'deduction effective range overlaps an existing rule.': '该扣减规则的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本',
+  'welfare effective range overlaps an existing rule.': '该福利规则的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本',
+  'promo effective range overlaps an existing rule.': '该大促规则的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本',
+  'effective_from is required.': '请选择生效开始日期',
+  'effective_to must be after effective_from.': '生效结束日期必须晚于生效开始日期',
+  'worker_type, job_grade and difficulty_class are required.': '请选择用工类型、等级和计件分类',
+  'unit_price must be non-negative.': '单价不能小于 0',
+  'deduction_amount must be non-negative.': '扣减金额不能小于 0',
+  'job_grade is not valid for worker_type.': '当前等级不适用于所选用工类型',
   'network error': '网络异常，请检查连接后重试',
   timeout: '请求超时，请稍后重试',
   'network timeout': '请求超时，请稍后重试',
@@ -203,10 +213,23 @@ export function mapRawBackendMessageToZh(raw: string): string {
   return API_ERROR_MESSAGE_ZH[lower] ?? API_ERROR_MESSAGE_ZH[t] ?? t
 }
 
+function hasChineseText(raw: string): boolean {
+  return /[\u4e00-\u9fff]/.test(raw)
+}
+
+function mapBackendMessageForUser(raw: string): string {
+  const t = String(raw ?? '').trim()
+  if (!t) return ''
+  const mapped = mapRawBackendMessageToZh(t)
+  if (!mapped) return ''
+  if (mapped === t && !hasChineseText(t)) return ''
+  return mapped
+}
+
 function mapDetailToZh(detail: string): string {
   const t = detail.trim()
   if (!t) return ''
-  if (/[\u4e00-\u9fff]/.test(t)) return t
+  if (hasChineseText(t)) return t
   const lower = t.toLowerCase()
   return API_ERROR_MESSAGE_ZH[lower] ?? API_ERROR_MESSAGE_ZH[t] ?? ''
 }
@@ -273,7 +296,7 @@ export function resolveApiUserMessage(
   }
 
   if (!main && shouldPreferBackendMessage && hasRealMessage) {
-    main = mapRawBackendMessageToZh(parsed.message!)
+    main = mapBackendMessageForUser(parsed.message!)
   }
 
   if (!main && codeZh) {
@@ -281,7 +304,7 @@ export function resolveApiUserMessage(
   }
 
   if (!main && hasRealMessage) {
-    main = mapRawBackendMessageToZh(parsed.message!)
+    main = mapBackendMessageForUser(parsed.message!)
   }
 
   if (!main && parsed.detail) {
@@ -296,7 +319,7 @@ export function resolveApiUserMessage(
   if (!main && err instanceof Error) {
     const m = err.message?.trim() ?? ''
     if (m && !m.startsWith('Request failed with status code')) {
-      main = mapRawBackendMessageToZh(m)
+      main = mapBackendMessageForUser(m)
     }
   }
 
