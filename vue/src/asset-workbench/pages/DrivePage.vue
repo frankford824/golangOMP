@@ -48,6 +48,18 @@ type ContextMenuInput =
   | { kind: 'directory'; dir: DriveDirectoryRow }
   | { kind: 'order'; order: DriveOrderRow }
   | { kind: 'file'; file: DriveFileRow }
+interface MaterialDirectoryNode {
+  path: string
+  name: string
+  depth: number
+  file_count: number
+  direct_file_count: number
+}
+interface MaterialFolderEntry {
+  path: string
+  name: string
+  file_count: number
+}
 
 const session = useAssetWorkbenchSessionStore()
 const route = useRoute()
@@ -104,6 +116,7 @@ const materialPreviewLoadingIds = ref<Set<string>>(new Set())
 const activeMaterial = shallowRef<SystemAssetRow | null>(null)
 const publishingClientMaterial = ref(false)
 const suppressMaterialAutoload = ref(false)
+const selectedMaterialFolderPath = ref('')
 
 const previewOpen = ref(false)
 const previewTitle = ref('')
@@ -161,6 +174,69 @@ const selectedFileActionLabel = computed(() => {
   if (count === 0) return '未选择文件'
   return count === 1 ? '已选 1 个文件' : `已选 ${count} 个文件`
 })
+const materialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
+  const nodes = new Map<string, MaterialDirectoryNode>()
+  const ensure = (path: string) => {
+    const normalized = normalizeVirtualPath(path)
+    let node = nodes.get(normalized)
+    if (!node) {
+      node = {
+        path: normalized,
+        name: materialFolderLabel(normalized),
+        depth: pathSegments(normalized).length,
+        file_count: 0,
+        direct_file_count: 0,
+      }
+      nodes.set(normalized, node)
+    }
+    return node
+  }
+  ensure('')
+  for (const asset of materialItems.value) {
+    const dirParts = pathSegments(materialDirectoryPath(asset))
+    ensure('').file_count += 1
+    for (let index = 1; index <= dirParts.length; index += 1) {
+      ensure(pathFromSegments(dirParts.slice(0, index))).file_count += 1
+    }
+    ensure(pathFromSegments(dirParts)).direct_file_count += 1
+  }
+  return [...nodes.values()].sort((left, right) => {
+    if (left.path === '') return -1
+    if (right.path === '') return 1
+    return left.path.localeCompare(right.path, 'zh-CN')
+  })
+})
+const materialFolderBreadcrumbs = computed(() => {
+  const parts = pathSegments(selectedMaterialFolderPath.value)
+  return [
+    { path: '', name: '运营素材' },
+    ...parts.map((_, index) => {
+      const path = pathFromSegments(parts.slice(0, index + 1))
+      return { path, name: materialFolderLabel(path) }
+    }),
+  ]
+})
+const selectedMaterialFolderNode = computed(() =>
+  materialDirectoryNodes.value.find((node) => node.path === selectedMaterialFolderPath.value) ?? materialDirectoryNodes.value[0] ?? null,
+)
+const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
+  const selectedParts = pathSegments(selectedMaterialFolderPath.value)
+  return materialDirectoryNodes.value
+    .filter((node) => {
+      if (!node.path || node.path === selectedMaterialFolderPath.value) return false
+      const parts = pathSegments(node.path)
+      return parts.length === selectedParts.length + 1 && selectedParts.every((part, index) => parts[index] === part)
+    })
+    .map((node) => ({ path: node.path, name: node.name, file_count: node.file_count }))
+})
+const visibleMaterialFiles = computed(() =>
+  materialItems.value.filter((asset) => materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
+)
+const selectedMaterialFolderParent = computed(() => {
+  const parts = pathSegments(selectedMaterialFolderPath.value)
+  if (parts.length === 0) return ''
+  return pathFromSegments(parts.slice(0, -1))
+})
 
 function hasQueryValue(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== ''
@@ -176,6 +252,57 @@ function orderLabel(orderNo: string): string {
 
 function titleOf(asset: SystemAssetRow) {
   return asset.product_name || asset.original_filename || asset.file_name || asset.task_no || `素材 ${asset.resource_id || asset.id}`
+}
+
+function pathSegments(path: string): string[] {
+  return path
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((part) => part.trim())
+    .filter((part) => part && part !== '.')
+}
+
+function pathFromSegments(parts: string[]): string {
+  return parts.length ? `/${parts.join('/')}` : ''
+}
+
+function fileNameFromPath(path?: string): string {
+  const parts = pathSegments(path || '')
+  return parts.at(-1) || ''
+}
+
+function normalizeVirtualPath(path?: string): string {
+  const parts = pathSegments(path || '')
+  return pathFromSegments(parts)
+}
+
+function materialDisplayTitle(asset: SystemAssetRow): string {
+  const title = titleOf(asset)
+  if (asset.source_type === 'external') {
+    return fileNameFromPath(asset.origin_path || title) || title
+  }
+  return title
+}
+
+function materialVirtualFilePath(asset: SystemAssetRow): string {
+  const externalPath = normalizeVirtualPath(asset.origin_path || (asset.source_type === 'external' ? titleOf(asset) : ''))
+  if (asset.source_type === 'external' && externalPath) return externalPath
+  const bucket = asset.scope_sku_code || asset.sku_code || asset.primary_sku_code || asset.task_no || '未归类'
+  return normalizeVirtualPath(`/系统资源/${bucket}/${asset.original_filename || asset.file_name || titleOf(asset)}`)
+}
+
+function materialDirectoryPath(asset: SystemAssetRow): string {
+  const parts = pathSegments(materialVirtualFilePath(asset))
+  parts.pop()
+  return pathFromSegments(parts)
+}
+
+function materialFolderFileName(asset: SystemAssetRow): string {
+  return fileNameFromPath(materialVirtualFilePath(asset)) || materialDisplayTitle(asset)
+}
+
+function materialFolderLabel(path: string): string {
+  return fileNameFromPath(path) || '全部素材'
 }
 
 function sourceLabelOf(asset: SystemAssetRow) {
@@ -697,6 +824,20 @@ function openOperational() {
   selectedFile.value = null
 }
 
+function openMaterialFolder(path: string) {
+  selectedMaterialFolderPath.value = normalizeVirtualPath(path)
+  activeMaterial.value = null
+}
+
+function openMaterialFolderParent() {
+  openMaterialFolder(selectedMaterialFolderParent.value)
+}
+
+function revealMaterialInFolder(asset: SystemAssetRow) {
+  selectedMaterialFolderPath.value = materialDirectoryPath(asset)
+  selectMaterial(asset)
+}
+
 const detailOpen = computed(() =>
   activeMode.value === 'operational' ? !!activeMaterial.value : !!selectedFile.value,
 )
@@ -764,9 +905,9 @@ async function locateSearchRow(row: OverviewSearchRow) {
       const found = materialItems.value.find((asset) => materialMatchesOverviewRow(asset, row))
       const target = found || materialFromOverview(row)
       if (!found) upsertMaterialItem(target)
-      selectMaterial(target)
+      revealMaterialInFolder(target)
       searchActive.value = false
-      notice.value = found ? `已定位素材：${titleOf(target)}` : `已打开搜索结果：${titleOf(target)}`
+      notice.value = `已定位目录：${materialDirectoryPath(target) || '全部素材'} · ${materialFolderFileName(target)}`
     } finally {
       suppressMaterialAutoload.value = false
     }
@@ -1068,6 +1209,7 @@ async function loadMaterials(query = materialQuery.value) {
   materialLoading.value = true
   materialError.value = ''
   materialQuery.value = query.trim()
+  selectedMaterialFolderPath.value = ''
   try {
     if (canManageDrive.value) {
       const [systemResult, published] = await Promise.all([
@@ -1104,7 +1246,7 @@ async function openMaterialPreview(asset: SystemAssetRow) {
   loading.add(key)
   materialPreviewLoadingIds.value = loading
   openPreviewDialog({
-    title: titleOf(asset),
+    title: materialDisplayTitle(asset),
     eyebrow: sourceLabelOf(asset),
     emptyLabel: '正在加载预览…',
     mimeType: asset.mime_type,
@@ -1235,7 +1377,7 @@ function publishPayloadForMaterial(asset: SystemAssetRow) {
   const payload = {
     asset_id: asset.id,
     source_type: sourceType,
-    title: titleOf(asset),
+    title: materialDisplayTitle(asset),
     description: '',
     enabled: true,
     sort_order: clientMaterials.value.length + 1,
@@ -1267,7 +1409,7 @@ async function publishClientMaterial(asset: SystemAssetRow) {
     const publishedAsset = materialWithClientPublication(asset, created)
     upsertMaterialItem(publishedAsset)
     activeMaterial.value = publishedAsset
-    notice.value = `已上架到客户端：${created.title || created.filename_snapshot}`
+    notice.value = `已上架到客户端：${created.title || created.filename_snapshot || materialDisplayTitle(asset)}`
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '客户端素材上架失败'
   } finally {
@@ -1534,7 +1676,19 @@ onBeforeUnmount(() => {
                 <span class="aw-drive__crumb" :class="{ 'is-active': true }">{{ orderLabel(selectedOrder) }}</span>
               </template>
             </template>
-            <span v-else class="aw-drive__crumb" :class="{ 'is-active': true }">运营素材</span>
+            <template v-else>
+              <template v-for="(crumb, index) in materialFolderBreadcrumbs" :key="crumb.path || '__material_root__'">
+                <ChevronRight v-if="index > 0" :size="14" aria-hidden="true" />
+                <button
+                  class="aw-drive__crumb"
+                  type="button"
+                  :class="{ 'is-active': index === materialFolderBreadcrumbs.length - 1 }"
+                  @click="openMaterialFolder(crumb.path)"
+                >
+                  {{ crumb.name }}
+                </button>
+              </template>
+            </template>
           </nav>
           <div class="aw-drive-main__tools">
             <template v-if="activeMode === 'directories'">
@@ -1666,33 +1820,92 @@ onBeforeUnmount(() => {
             <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
             <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
             <p v-else-if="materialItems.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
-            <div v-else class="aw-drive-ops-list">
-              <div
-                v-for="asset in materialItems"
-                :key="materialAssetKey(asset)"
-                class="aw-material-row"
-                :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
-                @contextmenu.prevent.stop
-              >
-                <label class="aw-material-row__check" @click.stop>
-                  <input
-                    type="checkbox"
-                    :checked="selectedMaterialIds.has(materialAssetKey(asset))"
-                    :aria-label="`选择 ${titleOf(asset)}`"
-                    @change="toggleMaterial(asset, ($event.target as HTMLInputElement).checked)"
-                  />
-                </label>
-                <button class="aw-material-row__button" type="button" @click="selectMaterial(asset)" @dblclick="openMaterialPreview(asset)">
-                  <span class="aw-material-row__thumb">
-                    <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
-                  </span>
-                  <span class="aw-material-row__body">
-                    <strong :title="titleOf(asset)">{{ titleOf(asset) }}</strong>
-                    <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
-                  </span>
-                  <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
-                </button>
-              </div>
+            <div v-else class="aw-material-drive">
+              <aside class="aw-material-drive__folders" aria-label="全部素材目录">
+                <div class="aw-material-drive__head">
+                  <strong>全部素材目录</strong>
+                  <span>{{ materialItems.length }} 个素材</span>
+                </div>
+                <div class="aw-material-drive__tree">
+                  <button
+                    v-for="node in materialDirectoryNodes"
+                    :key="node.path || '__material_root__'"
+                    class="aw-material-folder-node"
+                    :class="{ 'is-active': selectedMaterialFolderPath === node.path }"
+                    type="button"
+                    :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
+                    @click="openMaterialFolder(node.path)"
+                  >
+                    <FolderOpen v-if="selectedMaterialFolderPath === node.path" :size="15" aria-hidden="true" />
+                    <Folder v-else :size="15" aria-hidden="true" />
+                    <span>{{ node.name }}</span>
+                    <small>{{ node.file_count }}</small>
+                  </button>
+                </div>
+              </aside>
+
+              <section class="aw-material-drive__files" aria-label="当前素材目录">
+                <div class="aw-material-drive__summary">
+                  <div>
+                    <strong>{{ selectedMaterialFolderNode?.name || '全部素材' }}</strong>
+                    <span>{{ visibleMaterialFolders.length }} 个子目录 · {{ visibleMaterialFiles.length }} 个素材</span>
+                  </div>
+                  <button
+                    v-if="selectedMaterialFolderPath"
+                    class="aw-grid-button"
+                    type="button"
+                    @click="openMaterialFolderParent"
+                  >
+                    上一级
+                  </button>
+                </div>
+
+                <div v-if="visibleMaterialFolders.length" class="aw-material-folder-grid">
+                  <button
+                    v-for="folder in visibleMaterialFolders"
+                    :key="folder.path"
+                    class="aw-material-folder-card"
+                    type="button"
+                    @click="openMaterialFolder(folder.path)"
+                  >
+                    <FolderOpen :size="24" aria-hidden="true" />
+                    <strong :title="folder.name">{{ folder.name }}</strong>
+                    <small>{{ folder.file_count }} 个素材</small>
+                  </button>
+                </div>
+
+                <p v-if="visibleMaterialFolders.length === 0 && visibleMaterialFiles.length === 0" class="aw-drive-empty">
+                  当前目录没有直接素材，选择上级或其他子目录
+                </p>
+                <div v-if="visibleMaterialFiles.length" class="aw-drive-ops-list">
+                  <div
+                    v-for="asset in visibleMaterialFiles"
+                    :key="materialAssetKey(asset)"
+                    class="aw-material-row"
+                    :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
+                    @contextmenu.prevent.stop
+                  >
+                    <label class="aw-material-row__check" @click.stop>
+                      <input
+                        type="checkbox"
+                        :checked="selectedMaterialIds.has(materialAssetKey(asset))"
+                        :aria-label="`选择 ${materialDisplayTitle(asset)}`"
+                        @change="toggleMaterial(asset, ($event.target as HTMLInputElement).checked)"
+                      />
+                    </label>
+                    <button class="aw-material-row__button" type="button" @click="selectMaterial(asset)" @dblclick="openMaterialPreview(asset)">
+                      <span class="aw-material-row__thumb">
+                        <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
+                      </span>
+                      <span class="aw-material-row__body">
+                        <strong :title="titleOf(asset)">{{ materialFolderFileName(asset) }}</strong>
+                        <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
+                      </span>
+                      <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
+                    </button>
+                  </div>
+                </div>
+              </section>
             </div>
           </template>
         </div>
@@ -1789,12 +2002,12 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <button class="aw-drive__detail-preview" type="button" @click="openMaterialPreview(activeMaterial)">
-            <img v-if="activeMaterialPreviewUrl" :src="activeMaterialPreviewUrl" :alt="titleOf(activeMaterial)" loading="lazy" />
+            <img v-if="activeMaterialPreviewUrl" :src="activeMaterialPreviewUrl" :alt="materialDisplayTitle(activeMaterial)" loading="lazy" />
             <span v-else-if="activeMaterialPreviewLoading" class="aw-drive-thumb__ph" aria-hidden="true" />
             <ImageDown v-else :size="30" aria-hidden="true" />
             <span class="aw-drive__detail-hint">点击预览</span>
           </button>
-          <h3 class="aw-drive__detail-name">{{ titleOf(activeMaterial) }}</h3>
+          <h3 class="aw-drive__detail-name">{{ materialDisplayTitle(activeMaterial) }}</h3>
           <dl class="aw-material-detail__list">
             <div><dt>来源</dt><dd>{{ sourceLabelOf(activeMaterial) }}</dd></div>
             <div><dt>SKU</dt><dd>{{ activeMaterial.scope_sku_code || activeMaterial.sku_code || activeMaterial.primary_sku_code || '—' }}</dd></div>

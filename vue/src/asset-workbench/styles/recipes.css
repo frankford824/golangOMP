@@ -4229,6 +4229,172 @@ body.aw-submission-dialog-locked {
   gap: 2px;
 }
 
+.aw-material-drive {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: var(--aw-space-4);
+  min-height: 0;
+}
+
+.aw-material-drive__folders,
+.aw-material-drive__files {
+  min-width: 0;
+}
+
+.aw-material-drive__folders {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--aw-space-2);
+  max-height: calc(100dvh - 300px);
+  border-right: 1px solid var(--aw-hairline);
+  padding-right: var(--aw-space-3);
+}
+
+.aw-material-drive__head,
+.aw-material-drive__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  min-width: 0;
+}
+
+.aw-material-drive__head {
+  padding: 0 var(--aw-space-1) var(--aw-space-2);
+  border-bottom: 1px solid var(--aw-hairline);
+}
+
+.aw-material-drive__head strong,
+.aw-material-drive__summary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-material-drive__head span,
+.aw-material-drive__summary span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+  white-space: nowrap;
+}
+
+.aw-material-drive__summary {
+  margin-bottom: var(--aw-space-3);
+}
+
+.aw-material-drive__summary > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aw-material-drive__tree {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.aw-material-folder-node {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-height: 30px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--aw-radius-sm);
+  padding-block: 0;
+  padding-right: var(--aw-space-2);
+  background: transparent;
+  color: var(--aw-ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.aw-material-folder-node:hover {
+  background: var(--aw-surface-muted);
+}
+
+.aw-material-folder-node.is-active {
+  background: color-mix(in srgb, var(--aw-accent) 12%, var(--aw-surface));
+  color: var(--aw-accent-pressed);
+}
+
+.aw-material-folder-node svg {
+  color: var(--aw-money);
+}
+
+.aw-material-folder-node span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-material-folder-node small {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.aw-material-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+  gap: var(--aw-space-3);
+  margin-bottom: var(--aw-space-3);
+}
+
+.aw-material-folder-card {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: var(--aw-space-1);
+  min-height: 104px;
+  min-width: 0;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  padding: var(--aw-space-4) var(--aw-space-2);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+}
+
+.aw-material-folder-card:hover {
+  border-color: color-mix(in srgb, var(--aw-accent) 40%, var(--aw-hairline));
+  background: var(--aw-surface-muted);
+}
+
+.aw-material-folder-card svg {
+  color: var(--aw-money);
+}
+
+.aw-material-folder-card strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.25;
+}
+
+.aw-material-folder-card small {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
 .aw-drive-drawer {
   flex: 0 0 336px;
   display: flex;
@@ -5162,6 +5328,18 @@ body.aw-submission-dialog-locked {
 
   .aw-drive-main {
     min-height: 60vh;
+  }
+
+  .aw-material-drive {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-material-drive__folders {
+    max-height: 260px;
+    border-right: 0;
+    border-bottom: 1px solid var(--aw-hairline);
+    padding-right: 0;
+    padding-bottom: var(--aw-space-3);
   }
 
   .aw-drive-drawer {
