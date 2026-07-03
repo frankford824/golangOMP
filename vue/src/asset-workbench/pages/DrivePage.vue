@@ -2141,8 +2141,10 @@ onBeforeUnmount(() => {
           <h2>{{ canManageDrive ? '全站素材网盘' : '我的素材网盘' }}</h2>
         </div>
       </div>
-      <form class="aw-drive__search" @submit.prevent="runUnifiedSearch">
-        <IconfontActionIcon name="search" :size="16" />
+      <form class="aw-drive__search aw-drive__search--global" @submit.prevent="runUnifiedSearch">
+        <span class="aw-drive__search-icon" aria-hidden="true">
+          <IconfontActionIcon name="search" :size="17" />
+        </span>
         <span class="aw-drive__scope-select">
           <select v-model="searchScope" aria-label="搜索范围" @change="scheduleUnifiedSearch">
             <option value="all">全部</option>
@@ -2151,12 +2153,14 @@ onBeforeUnmount(() => {
           </select>
           <ChevronDown :size="15" aria-hidden="true" />
         </span>
+        <span class="aw-drive__search-divider" aria-hidden="true"></span>
         <input
           v-model="searchQuery"
           type="search"
           placeholder="搜索运营素材、文件名、上传目录"
           @input="scheduleUnifiedSearch"
         />
+        <span v-if="searchLoading" class="aw-drive__search-state">搜索中</span>
         <button v-if="searchActive" class="aw-drive__search-clear" type="button" aria-label="清除搜索" @click="clearSearch">
           <IconfontActionIcon name="close" :size="14" />
         </button>
@@ -2430,16 +2434,17 @@ onBeforeUnmount(() => {
             </template>
             <template v-else>
               <form class="aw-drive__search aw-drive__search--inline" @submit.prevent="loadMaterials()">
-                <IconfontActionIcon name="search" :size="16" />
+                <span class="aw-drive__search-icon" aria-hidden="true">
+                  <IconfontActionIcon name="search" :size="17" />
+                </span>
+                <span class="aw-drive__search-context">全部素材</span>
+                <span class="aw-drive__search-divider" aria-hidden="true"></span>
                 <input v-model="materialQuery" type="search" placeholder="按文件名 / SKU / 外部路径过滤" />
                 <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除" @click="materialQuery = ''; loadMaterials()">
                   <IconfontActionIcon name="close" :size="14" />
                 </button>
+                <button class="aw-drive__search-submit" type="submit">搜索</button>
               </form>
-              <button class="aw-primary-button" type="button" @click="loadMaterials()">
-                <IconfontActionIcon name="search" :size="16" />
-                搜索
-              </button>
             </template>
           </div>
         </div>

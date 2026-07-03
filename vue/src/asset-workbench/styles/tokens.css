@@ -113,7 +113,7 @@
   --aw-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --aw-ease-enter: var(--aw-ease-standard);
   --aw-ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --aw-font-brand: 'Alimama DaoLiTi';
+  --aw-font-brand: 'Alibaba PuHuiTi 2.0';
   --aw-font-cjk-fallback: 'Source Han Sans CN AW Core', 'Source Han Sans CN VF Fallback', 'Noto Sans SC', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
   --aw-font-cjk: var(--aw-font-brand), var(--aw-font-cjk-fallback);
   --aw-font-sans: var(--aw-font-cjk);

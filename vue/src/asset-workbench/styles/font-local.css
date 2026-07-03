@@ -1,7 +1,7 @@
 @font-face {
-  font-family: 'Alimama DaoLiTi';
+  font-family: 'Alibaba PuHuiTi 2.0';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 400 800;
   font-display: swap;
-  src: url('../assets/fonts/AlimamaDaoLiTi.woff2') format('woff2');
+  src: url('../assets/fonts/AlibabaPuHuiTi2-Regular.woff2') format('woff2');
 }

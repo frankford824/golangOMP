@@ -52,6 +52,7 @@ type BatchItemGridRow = {
 }
 type PermissionGridRow = SupplementPermissionRow & { status_label: string; reason_label: string }
 type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string; action: string }
+type SettlementSectionKey = 'preview' | 'batches' | 'supplements' | 'adjustments'
 
 const month = ref(defaultBusinessMonth())
 const preview = ref<SettlementPreview | null>(null)
@@ -71,6 +72,7 @@ const supplementDeleteReason = ref('')
 const exporting = ref(false)
 const eligibleMonthsLoading = ref(false)
 const entryEligibleMonthsLoading = ref(false)
+const activeSettlementSection = ref<SettlementSectionKey>('preview')
 const notice = ref('')
 const errorInputRef = ref<HTMLInputElement | null>(null)
 const supplementInputRef = ref<HTMLInputElement | null>(null)
@@ -156,6 +158,43 @@ const supplementGridRows = computed(() => supplementRowsWithLabels.value as unkn
 const entryEligibleReady = computed(() =>
   entryEligiblePayeeUserId.value === supplementForm.value.payee_user_id && entryEligibleSupplementMonths.value.length > 0,
 )
+const selectedBatchConfirmed = computed(() => selectedBatch.value?.batch.status === 'confirmed')
+const settlementNavGroups = computed(() => [
+  {
+    label: '结算流程',
+    items: [
+      {
+        key: 'preview' as const,
+        title: '预览工资',
+        meta: '先核对本月计件、扣款、补录和净额',
+        count: payrollRows.value.length ? `${formatInt(payrollRows.value.length)} 行` : '待预览',
+      },
+      {
+        key: 'batches' as const,
+        title: '批次确认',
+        meta: '生成批次后锁定本月可结算明细',
+        count: `${formatInt(batches.value.length)} 个`,
+      },
+    ],
+  },
+  {
+    label: '补充处理',
+    items: [
+      {
+        key: 'supplements' as const,
+        title: '补录管理',
+        meta: '开放补录月份、导入或手动补发',
+        count: `${formatInt(supplements.value.length)} 条`,
+      },
+      {
+        key: 'adjustments' as const,
+        title: '冲正 / 补差',
+        meta: '批次确认后追加调整，不改原始明细',
+        count: selectedBatchConfirmed.value ? '可处理' : '先选批次',
+      },
+    ],
+  },
+])
 const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_user_id', label: '人员', width: 96 },
   { key: 'row_label', label: '工资条', width: 140 },
@@ -289,6 +328,7 @@ async function generateBatch() {
   try {
     const batch = await assetWorkbenchApi.generateSettlementBatch(month.value)
     notice.value = `已生成批次：${batch.batch_no}`
+    activeSettlementSection.value = 'batches'
     await loadSettlement({ keepNotice: true })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '生成批次失败'
@@ -337,6 +377,7 @@ async function openBatch(batch: SettlementBatchRow) {
   error.value = ''
   try {
     selectedBatch.value = await assetWorkbenchApi.getSettlementBatchDetail(batch.id)
+    activeSettlementSection.value = 'batches'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '批次明细加载失败'
   }
@@ -627,18 +668,14 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">本月结算</p>
         <h2>工资结算</h2>
-        <p>这里导入的是质检扣款表：按人员和难度统计出错数，系统自动计算质检扣款。</p>
+        <p>按“预览工资 → 批次确认 → 补录处理 → 冲正补差”的顺序操作，避免把结算动作混在同一屏。</p>
       </div>
       <div class="aw-page-bar__actions">
-        <button class="aw-secondary-button" type="button" @click="downloadErrorTemplate">
-          <Download :size="16" aria-hidden="true" />
-          下载质检扣款表
-        </button>
-        <button class="aw-secondary-button" type="button" @click="openErrorImport">导入质检扣款</button>
-        <button class="aw-secondary-button" type="button" :disabled="exporting || (!preview && !selectedBatch)" @click="exportSettlement">
-          导出工资条
-        </button>
-        <button class="aw-primary-button" type="button" @click="generateBatch">生成批次</button>
+        <label class="aw-month-picker">
+          <span>结算月</span>
+          <input v-model="month" type="month" aria-label="结算月份" />
+        </label>
+        <button class="aw-secondary-button" type="button" @click="() => loadSettlement()">刷新</button>
       </div>
     </div>
     <input
@@ -660,399 +697,492 @@ onMounted(() => {
     />
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
 
-    <LedgerReadout :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
-      <template #actions>
-        <input v-model="month" type="month" aria-label="结算月份" />
-        <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
-      </template>
-      <template #detail>
-        <div class="aw-sheet-detail">
-          <WorkbenchDataGrid
-            v-if="payrollRows.length"
-            :columns="payrollGridColumns"
-            :rows="payrollGridRows"
-            row-key="grid_id"
-            storage-key="settlement-ledger-payroll"
-            group-by="payee_user_id"
-            :height="440"
-            :row-height="34"
+    <div class="aw-settlement-workbench">
+      <aside class="aw-settlement-nav" aria-label="结算操作导航">
+        <div class="aw-settlement-nav__head">
+          <strong>{{ month }} 结算</strong>
+          <span>按顺序处理，当前只展示一个工作区</span>
+        </div>
+        <div v-for="group in settlementNavGroups" :key="group.label" class="aw-settlement-nav__group">
+          <p>{{ group.label }}</p>
+          <button
+            v-for="item in group.items"
+            :key="item.key"
+            class="aw-settlement-nav__item"
+            :class="{ 'is-active': activeSettlementSection === item.key }"
+            type="button"
+            :aria-current="activeSettlementSection === item.key ? 'page' : undefined"
+            @click="activeSettlementSection = item.key"
           >
-            <template #cell="{ column, value }">
-              <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-              <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-              <span v-else>{{ gridValue(column.key, value) }}</span>
+            <span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.meta }}</small>
+            </span>
+            <em>{{ item.count }}</em>
+          </button>
+        </div>
+      </aside>
+
+      <main class="aw-settlement-workspace">
+        <section v-if="activeSettlementSection === 'preview'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>预览工资</h3>
+              <p>先核对本月工资预览；质检扣款表只影响预览和后续批次，不会直接确认发薪。</p>
+            </div>
+            <div class="aw-inline-actions">
+              <button class="aw-secondary-button" type="button" @click="downloadErrorTemplate">
+                <Download :size="16" aria-hidden="true" />
+                下载质检扣款表
+              </button>
+              <button class="aw-secondary-button" type="button" @click="openErrorImport">导入质检扣款</button>
+              <button class="aw-secondary-button" type="button" :disabled="exporting || (!preview && !selectedBatch)" @click="exportSettlement">
+                导出工资条
+              </button>
+            </div>
+          </div>
+
+          <LedgerReadout :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
+            <template #actions>
+              <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
             </template>
-          </WorkbenchDataGrid>
-          <div v-else class="aw-empty-state">
-            <h3>还没有可结算明细</h3>
-            <p>导入质检扣款表并生成预览后，这里会按人员分组显示每条工资行的计件、质检扣款与净额。</p>
-          </div>
-        </div>
-      </template>
-    </LedgerReadout>
+            <template #detail>
+              <div class="aw-sheet-detail">
+                <WorkbenchDataGrid
+                  v-if="payrollRows.length"
+                  :columns="payrollGridColumns"
+                  :rows="payrollGridRows"
+                  row-key="grid_id"
+                  storage-key="settlement-ledger-payroll"
+                  group-by="payee_user_id"
+                  :height="440"
+                  :row-height="34"
+                >
+                  <template #cell="{ column, value }">
+                    <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                    <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                    <span v-else>{{ gridValue(column.key, value) }}</span>
+                  </template>
+                </WorkbenchDataGrid>
+                <div v-else class="aw-empty-state">
+                  <h3>还没有可结算明细</h3>
+                  <p>导入质检扣款表并生成预览后，这里会按人员分组显示每条工资行的计件、质检扣款与净额。</p>
+                </div>
+              </div>
+            </template>
+          </LedgerReadout>
 
-    <div class="aw-panel">
-      <div class="aw-panel__head">
-        <h3>工资条明细</h3>
-        <span class="aw-chip aw-chip--neutral">无补录时第二行显示 0</span>
-      </div>
-      <AsyncBoundary
-        :loading="loading"
-        :error="error"
-        :loading-label="`正在加载 ${month} 结算预览`"
-        @retry="() => loadSettlement()"
-      >
-        <WorkbenchDataGrid
-          v-if="payrollRows.length"
-          :columns="payrollGridColumns"
-          :rows="payrollGridRows"
-          row-key="grid_id"
-          storage-key="settlement-preview-payroll"
-          group-by="payee_user_id"
-          :height="260"
-          :row-height="34"
-        >
-          <template #cell="{ column, value }">
-            <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-            <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-            <span v-else>{{ gridValue(column.key, value) }}</span>
-          </template>
-        </WorkbenchDataGrid>
-        <div v-else class="aw-empty-state">
-          <h3>还没有可结算明细</h3>
-          <p>生成预览后会在这里显示工资条明细。</p>
-        </div>
-      </AsyncBoundary>
-    </div>
-
-    <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
-        <span>结算批次</span>
-        <span>{{ formatInt(batches.length) }} 个批次</span>
-      </div>
-      <WorkbenchDataGrid
-        v-if="batches.length"
-        :columns="batchGridColumns"
-        :rows="batchGridRows"
-        row-key="id"
-        storage-key="settlement-batches"
-        group-by="status_label"
-        :height="260"
-        :row-height="36"
-      >
-        <template #cell="{ row, column, value }">
-          <div v-if="column.key === 'actions'" class="aw-inline-actions">
-            <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
-            <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="confirmBatch(gridRowAsBatch(row))">
-              确认
-            </button>
-            <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="startCancelBatch(gridRowAsBatch(row))">
-              取消
-            </button>
-          </div>
-          <span
-            v-else-if="column.key === 'status_label'"
-            :class="chipClass(batchStatusMeta(gridRowAsBatch(row).status).tone)"
-          >
-            {{ value }}
-          </span>
-          <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-          <span v-else>{{ gridValue(column.key, value) }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <div v-if="pendingCancelBatch" class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>取消结算批次</h3>
-            <p class="aw-copy">{{ pendingCancelBatch.batch_no }}</p>
-          </div>
-          <span :class="chipClass(batchStatusMeta(pendingCancelBatch.status).tone)">
-            {{ batchStatusMeta(pendingCancelBatch.status).label }}
-          </span>
-        </div>
-        <label class="aw-field">
-          <span>取消原因</span>
-          <input v-model="cancelReason" required />
-        </label>
-        <div class="aw-inline-actions">
-          <button class="aw-primary-button" type="button" @click="cancelBatch">确认取消</button>
-          <button class="aw-secondary-button" type="button" @click="pendingCancelBatch = null">返回</button>
-        </div>
-      </div>
-      <div v-if="!batches.length" class="aw-empty-state">
-        <h3>还没有结算批次</h3>
-        <p>生成批次会锁定本月可结算明细；未确认前可以取消后重新生成，确认后只能做冲正或补差。</p>
-      </div>
-    </div>
-
-    <div v-if="selectedBatch" class="aw-detail-panel">
-      <div class="aw-detail-panel__head">
-        <div>
-          <p class="aw-eyebrow">批次明细</p>
-          <h3>{{ selectedBatch.batch.batch_no }}</h3>
-        </div>
-        <strong class="aw-cell-money">{{ formatMoney(selectedBatch.batch.net_amount) }}</strong>
-      </div>
-      <WorkbenchDataGrid
-        :columns="batchItemGridColumns"
-        :rows="batchItemGridRows"
-        row-key="id"
-        storage-key="settlement-batch-items"
-        group-by="item_type_label"
-        :height="260"
-        :row-height="34"
-      >
-        <template #cell="{ row, column, value }">
-          <span v-if="column.key === 'item_type_label'" :class="chipClass(itemTypeMeta(gridRowAsBatchItem(row).item_type).tone)">{{ value }}</span>
-          <span v-else-if="column.key === 'direction_label'" :class="chipClass(directionMeta(gridRowAsBatchItem(row).direction).tone)">{{ value }}</span>
-          <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-          <span v-else>{{ gridValue(column.key, value) }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <WorkbenchDataGrid
-        v-if="selectedBatch.payroll_rows.length"
-        :columns="payrollGridColumns"
-        :rows="batchPayrollGridRows"
-        row-key="grid_id"
-        storage-key="settlement-batch-payroll"
-        group-by="payee_user_id"
-        :height="260"
-        :row-height="34"
-      >
-        <template #cell="{ column, value }">
-          <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-          <span v-else>{{ gridValue(column.key, value) }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <div v-if="selectedBatch.batch.status === 'confirmed'" class="aw-panel">
-        <h3>冲正 / 补差</h3>
-        <p class="aw-copy">已确认批次不直接改原始明细。需要补发或扣回时，在这里追加调整记录并保留原因。</p>
-        <div class="aw-form-grid">
-          <label>
-            人员编号
-            <input v-model.number="adjustmentForm.payee_user_id" type="number" min="1" />
-          </label>
-          <label>
-            类型
-            <select v-model="adjustmentForm.adjustment_type">
-              <option value="adjustment">补差</option>
-              <option value="reversal">冲正</option>
-            </select>
-          </label>
-          <label>
-            方向
-            <select v-model="adjustmentForm.direction">
-              <option value="credit">增加</option>
-              <option value="debit">扣回</option>
-            </select>
-          </label>
-          <label>
-            金额
-            <input v-model.number="adjustmentForm.amount" type="number" min="0" />
-          </label>
-          <label>
-            原因
-            <input v-model="adjustmentForm.reason" />
-          </label>
-        </div>
-        <button class="aw-secondary-button" type="button" @click="createAdjustment">追加调整</button>
-      </div>
-      <p v-else class="aw-copy">批次确认后才能追加冲正或补差。</p>
-    </div>
-
-    <div class="aw-two-column">
-      <div class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>补录开放</h3>
-            <p class="aw-copy">补录按人员 + 结算月手动开放。</p>
-          </div>
-          <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
-        </div>
-        <div class="aw-form-grid">
-          <label>
-            开放人员编号
-            <input v-model.number="permissionForm.payee_user_id" type="number" min="1" />
-          </label>
-          <label>
-            可补录月份
-            <select v-model="month" :disabled="eligibleSupplementMonths.length === 0">
-              <option v-if="eligibleSupplementMonths.length === 0" :value="month">{{ month }}</option>
-              <option v-for="item in eligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
-            </select>
-          </label>
-          <label>
-            开关
-            <select v-model="permissionForm.enabled">
-              <option :value="true">开放</option>
-              <option :value="false">关闭</option>
-            </select>
-          </label>
-          <label>
-            原因
-            <input v-model="permissionForm.reason" />
-          </label>
-        </div>
-        <div class="aw-inline-actions">
-          <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
-            读取可补录月份
-          </button>
-          <button class="aw-primary-button" type="button" @click="upsertSupplementPermission">保存开放设置</button>
-        </div>
-      </div>
-
-      <div class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>补录录入</h3>
-            <p class="aw-copy">已批准补录会在工资条中单独形成补录计件工资行。</p>
-          </div>
-          <div class="aw-inline-actions">
-            <span class="aw-chip aw-chip--info">无补录显示 0</span>
-            <button class="aw-secondary-button" type="button" @click="downloadSupplementTemplate">补录模板</button>
-            <button class="aw-secondary-button" type="button" @click="openSupplementImport">导入补录</button>
-          </div>
-        </div>
-        <div class="aw-form-grid">
-          <label>
-            人员编号
-            <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
-          </label>
-          <label>
-            补录月份
-            <select v-model="supplementMonth" :disabled="!entryEligibleReady">
-              <option v-if="!entryEligibleReady" :value="supplementMonth">{{ supplementMonth }}</option>
-              <option v-for="item in entryEligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
-            </select>
-          </label>
-          <label>
-            订单号
-            <input v-model="supplementForm.order_no" />
-          </label>
-          <label>
-            难度
-            <select v-model="supplementForm.difficulty_class">
-              <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
-            </select>
-          </label>
-          <label>
-            页数
-            <input v-model.number="supplementForm.page_count" min="1" type="number" />
-          </label>
-          <label>
-            补录金额
-            <input v-model.number="supplementForm.gross_amount" min="0" type="number" />
-          </label>
-          <label class="aw-inline-check">
-            <input v-model="supplementForm.finalized" type="checkbox" />
-            定稿
-          </label>
-        </div>
-        <div class="aw-inline-actions">
-          <button class="aw-secondary-button" type="button" :disabled="entryEligibleMonthsLoading" @click="loadEntrySupplementEligibleMonths">
-            读取录入月份
-          </button>
-          <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
-        </div>
-        <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
-          <span>补录 Excel 批量导入</span>
-          <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
-        <span>补录开放记录</span>
-        <span>{{ formatInt(supplementPermissions.length) }} 条</span>
-      </div>
-      <WorkbenchDataGrid
-        v-if="supplementPermissions.length"
-        :columns="permissionGridColumns"
-        :rows="permissionGridRows"
-        row-key="id"
-        storage-key="settlement-supplement-permissions"
-        group-by="status_label"
-        :height="220"
-        :row-height="34"
-      >
-        <template #cell="{ row, column, value }">
-          <span
-            v-if="column.key === 'status_label'"
-            :class="chipClass(gridRowAsPermission(row).enabled ? 'success' : 'neutral')"
-          >
-            {{ value }}
-          </span>
-          <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-          <span v-else>{{ gridValue(column.key, value) }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <p v-else class="aw-copy">当前月份还没有补录开放记录</p>
-    </div>
-
-    <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
-        <span>补录明细</span>
-        <span>{{ formatInt(supplements.length) }} 条</span>
-      </div>
-      <WorkbenchDataGrid
-        v-if="supplements.length"
-        :columns="supplementGridColumns"
-        :rows="supplementGridRows"
-        row-key="id"
-        storage-key="settlement-supplements"
-        group-by="status_label"
-        :height="220"
-        :row-height="34"
-      >
-        <template #cell="{ row, column, value }">
-          <div v-if="column.key === 'action'" class="aw-inline-actions">
-            <button
-              type="button"
-              :disabled="['in_batch', 'settled', 'voided'].includes(gridRowAsSupplement(row).status)"
-              @click="startDeleteSupplement(gridRowAsSupplement(row))"
+          <div class="aw-panel">
+            <div class="aw-panel__head">
+              <h3>工资条明细</h3>
+              <span class="aw-chip aw-chip--neutral">无补录时第二行显示 0</span>
+            </div>
+            <AsyncBoundary
+              :loading="loading"
+              :error="error"
+              :loading-label="`正在加载 ${month} 结算预览`"
+              @retry="() => loadSettlement()"
             >
-              删除
-            </button>
+              <WorkbenchDataGrid
+                v-if="payrollRows.length"
+                :columns="payrollGridColumns"
+                :rows="payrollGridRows"
+                row-key="grid_id"
+                storage-key="settlement-preview-payroll"
+                group-by="payee_user_id"
+                :height="260"
+                :row-height="34"
+              >
+                <template #cell="{ column, value }">
+                  <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                  <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                  <span v-else>{{ gridValue(column.key, value) }}</span>
+                </template>
+              </WorkbenchDataGrid>
+              <div v-else class="aw-empty-state">
+                <h3>还没有可结算明细</h3>
+                <p>生成预览后会在这里显示工资条明细。</p>
+              </div>
+            </AsyncBoundary>
           </div>
-          <span
-            v-else-if="column.key === 'status_label'"
-            :class="chipClass(supplementStatusMeta(gridRowAsSupplement(row).status).tone)"
-          >
-            {{ value }}
-          </span>
-          <span
-            v-else-if="column.key === 'duplicate_label'"
-            :class="chipClass(duplicateMeta(gridRowAsSupplement(row).duplicate_hint_json?.has_duplicates).tone)"
-          >
-            {{ value }}
-          </span>
-          <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-          <span v-else>{{ gridValue(column.key, value) }}</span>
-        </template>
-      </WorkbenchDataGrid>
-      <div v-if="pendingDeleteSupplement" class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <h3>删除补录</h3>
-            <p class="aw-copy">{{ pendingDeleteSupplement.order_no }} · {{ pendingDeleteSupplement.business_month }}</p>
+        </section>
+
+        <section v-if="activeSettlementSection === 'batches'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>批次确认</h3>
+              <p>生成批次会锁定本月可结算明细；未确认前可以取消后重新生成。</p>
+            </div>
+            <button class="aw-primary-button" type="button" @click="generateBatch">生成批次</button>
           </div>
-          <span :class="chipClass(supplementStatusMeta(pendingDeleteSupplement.status).tone)">
-            {{ supplementStatusMeta(pendingDeleteSupplement.status).label }}
-          </span>
-        </div>
-        <label class="aw-field">
-          <span>删除原因</span>
-          <input v-model="supplementDeleteReason" required />
-        </label>
-        <div class="aw-inline-actions">
-          <button class="aw-primary-button" type="button" @click="deleteSupplement">确认删除</button>
-          <button class="aw-secondary-button" type="button" @click="pendingDeleteSupplement = null">取消</button>
-        </div>
-      </div>
-      <p v-else-if="!supplements.length" class="aw-copy">当前月份没有补录记录</p>
+
+          <div class="aw-data-surface">
+            <div class="aw-grid-toolbar">
+              <span>结算批次</span>
+              <span>{{ formatInt(batches.length) }} 个批次</span>
+            </div>
+            <WorkbenchDataGrid
+              v-if="batches.length"
+              :columns="batchGridColumns"
+              :rows="batchGridRows"
+              row-key="id"
+              storage-key="settlement-batches"
+              group-by="status_label"
+              :height="260"
+              :row-height="36"
+            >
+              <template #cell="{ row, column, value }">
+                <div v-if="column.key === 'actions'" class="aw-inline-actions">
+                  <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
+                  <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="confirmBatch(gridRowAsBatch(row))">
+                    确认
+                  </button>
+                  <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="startCancelBatch(gridRowAsBatch(row))">
+                    取消
+                  </button>
+                </div>
+                <span
+                  v-else-if="column.key === 'status_label'"
+                  :class="chipClass(batchStatusMeta(gridRowAsBatch(row).status).tone)"
+                >
+                  {{ value }}
+                </span>
+                <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <div v-if="pendingCancelBatch" class="aw-panel">
+              <div class="aw-panel__head">
+                <div>
+                  <h3>取消结算批次</h3>
+                  <p class="aw-copy">{{ pendingCancelBatch.batch_no }}</p>
+                </div>
+                <span :class="chipClass(batchStatusMeta(pendingCancelBatch.status).tone)">
+                  {{ batchStatusMeta(pendingCancelBatch.status).label }}
+                </span>
+              </div>
+              <label class="aw-field">
+                <span>取消原因</span>
+                <input v-model="cancelReason" required />
+              </label>
+              <div class="aw-inline-actions">
+                <button class="aw-primary-button" type="button" @click="cancelBatch">确认取消</button>
+                <button class="aw-secondary-button" type="button" @click="pendingCancelBatch = null">返回</button>
+              </div>
+            </div>
+            <div v-if="!batches.length" class="aw-empty-state">
+              <h3>还没有结算批次</h3>
+              <p>先在“预览工资”确认金额，再生成批次。</p>
+            </div>
+          </div>
+
+          <div v-if="selectedBatch" class="aw-detail-panel">
+            <div class="aw-detail-panel__head">
+              <div>
+                <p class="aw-eyebrow">批次明细</p>
+                <h3>{{ selectedBatch.batch.batch_no }}</h3>
+              </div>
+              <div class="aw-inline-actions">
+                <span :class="chipClass(batchStatusMeta(selectedBatch.batch.status).tone)">{{ batchStatusMeta(selectedBatch.batch.status).label }}</span>
+                <strong class="aw-cell-money">{{ formatMoney(selectedBatch.batch.net_amount) }}</strong>
+                <button v-if="selectedBatch.batch.status === 'confirmed'" class="aw-secondary-button" type="button" @click="activeSettlementSection = 'adjustments'">去做冲正 / 补差</button>
+              </div>
+            </div>
+            <WorkbenchDataGrid
+              :columns="batchItemGridColumns"
+              :rows="batchItemGridRows"
+              row-key="id"
+              storage-key="settlement-batch-items"
+              group-by="item_type_label"
+              :height="260"
+              :row-height="34"
+            >
+              <template #cell="{ row, column, value }">
+                <span v-if="column.key === 'item_type_label'" :class="chipClass(itemTypeMeta(gridRowAsBatchItem(row).item_type).tone)">{{ value }}</span>
+                <span v-else-if="column.key === 'direction_label'" :class="chipClass(directionMeta(gridRowAsBatchItem(row).direction).tone)">{{ value }}</span>
+                <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <WorkbenchDataGrid
+              v-if="selectedBatch.payroll_rows.length"
+              :columns="payrollGridColumns"
+              :rows="batchPayrollGridRows"
+              row-key="grid_id"
+              storage-key="settlement-batch-payroll"
+              group-by="payee_user_id"
+              :height="260"
+              :row-height="34"
+            >
+              <template #cell="{ column, value }">
+                <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+          </div>
+        </section>
+
+        <section v-if="activeSettlementSection === 'supplements'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>补录管理</h3>
+              <p>补录先按人员开放月份，再录入或导入补录明细，工资条会单独形成补录行。</p>
+            </div>
+            <div class="aw-inline-actions">
+              <button class="aw-secondary-button" type="button" @click="downloadSupplementTemplate">补录模板</button>
+              <button class="aw-secondary-button" type="button" @click="openSupplementImport">导入补录</button>
+            </div>
+          </div>
+
+          <div class="aw-two-column">
+            <div class="aw-panel">
+              <div class="aw-panel__head">
+                <div>
+                  <h3>补录开放</h3>
+                  <p class="aw-copy">补录按人员 + 结算月手动开放。</p>
+                </div>
+                <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
+              </div>
+              <div class="aw-form-grid">
+                <label>
+                  开放人员编号
+                  <input v-model.number="permissionForm.payee_user_id" type="number" min="1" />
+                </label>
+                <label>
+                  可补录月份
+                  <select v-model="month" :disabled="eligibleSupplementMonths.length === 0">
+                    <option v-if="eligibleSupplementMonths.length === 0" :value="month">{{ month }}</option>
+                    <option v-for="item in eligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
+                  </select>
+                </label>
+                <label>
+                  开关
+                  <select v-model="permissionForm.enabled">
+                    <option :value="true">开放</option>
+                    <option :value="false">关闭</option>
+                  </select>
+                </label>
+                <label>
+                  原因
+                  <input v-model="permissionForm.reason" />
+                </label>
+              </div>
+              <div class="aw-inline-actions">
+                <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
+                  读取可补录月份
+                </button>
+                <button class="aw-primary-button" type="button" @click="upsertSupplementPermission">保存开放设置</button>
+              </div>
+            </div>
+
+            <div class="aw-panel">
+              <div class="aw-panel__head">
+                <div>
+                  <h3>补录录入</h3>
+                  <p class="aw-copy">已批准补录会在工资条中单独形成补录计件工资行。</p>
+                </div>
+                <span class="aw-chip aw-chip--info">无补录显示 0</span>
+              </div>
+              <div class="aw-form-grid">
+                <label>
+                  人员编号
+                  <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
+                </label>
+                <label>
+                  补录月份
+                  <select v-model="supplementMonth" :disabled="!entryEligibleReady">
+                    <option v-if="!entryEligibleReady" :value="supplementMonth">{{ supplementMonth }}</option>
+                    <option v-for="item in entryEligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
+                  </select>
+                </label>
+                <label>
+                  订单号
+                  <input v-model="supplementForm.order_no" />
+                </label>
+                <label>
+                  难度
+                  <select v-model="supplementForm.difficulty_class">
+                    <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+                  </select>
+                </label>
+                <label>
+                  页数
+                  <input v-model.number="supplementForm.page_count" min="1" type="number" />
+                </label>
+                <label>
+                  补录金额
+                  <input v-model.number="supplementForm.gross_amount" min="0" type="number" />
+                </label>
+                <label class="aw-inline-check">
+                  <input v-model="supplementForm.finalized" type="checkbox" />
+                  定稿
+                </label>
+              </div>
+              <div class="aw-inline-actions">
+                <button class="aw-secondary-button" type="button" :disabled="entryEligibleMonthsLoading" @click="loadEntrySupplementEligibleMonths">
+                  读取录入月份
+                </button>
+                <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
+              </div>
+              <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
+                <span>补录 Excel 批量导入</span>
+                <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="aw-data-surface">
+            <div class="aw-grid-toolbar">
+              <span>补录开放记录</span>
+              <span>{{ formatInt(supplementPermissions.length) }} 条</span>
+            </div>
+            <WorkbenchDataGrid
+              v-if="supplementPermissions.length"
+              :columns="permissionGridColumns"
+              :rows="permissionGridRows"
+              row-key="id"
+              storage-key="settlement-supplement-permissions"
+              group-by="status_label"
+              :height="220"
+              :row-height="34"
+            >
+              <template #cell="{ row, column, value }">
+                <span
+                  v-if="column.key === 'status_label'"
+                  :class="chipClass(gridRowAsPermission(row).enabled ? 'success' : 'neutral')"
+                >
+                  {{ value }}
+                </span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <p v-else class="aw-copy">当前月份还没有补录开放记录</p>
+          </div>
+
+          <div class="aw-data-surface">
+            <div class="aw-grid-toolbar">
+              <span>补录明细</span>
+              <span>{{ formatInt(supplements.length) }} 条</span>
+            </div>
+            <WorkbenchDataGrid
+              v-if="supplements.length"
+              :columns="supplementGridColumns"
+              :rows="supplementGridRows"
+              row-key="id"
+              storage-key="settlement-supplements"
+              group-by="status_label"
+              :height="220"
+              :row-height="34"
+            >
+              <template #cell="{ row, column, value }">
+                <div v-if="column.key === 'action'" class="aw-inline-actions">
+                  <button
+                    type="button"
+                    :disabled="['in_batch', 'settled', 'voided'].includes(gridRowAsSupplement(row).status)"
+                    @click="startDeleteSupplement(gridRowAsSupplement(row))"
+                  >
+                    删除
+                  </button>
+                </div>
+                <span
+                  v-else-if="column.key === 'status_label'"
+                  :class="chipClass(supplementStatusMeta(gridRowAsSupplement(row).status).tone)"
+                >
+                  {{ value }}
+                </span>
+                <span
+                  v-else-if="column.key === 'duplicate_label'"
+                  :class="chipClass(duplicateMeta(gridRowAsSupplement(row).duplicate_hint_json?.has_duplicates).tone)"
+                >
+                  {{ value }}
+                </span>
+                <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <div v-if="pendingDeleteSupplement" class="aw-panel">
+              <div class="aw-panel__head">
+                <div>
+                  <h3>删除补录</h3>
+                  <p class="aw-copy">{{ pendingDeleteSupplement.order_no }} · {{ pendingDeleteSupplement.business_month }}</p>
+                </div>
+                <span :class="chipClass(supplementStatusMeta(pendingDeleteSupplement.status).tone)">
+                  {{ supplementStatusMeta(pendingDeleteSupplement.status).label }}
+                </span>
+              </div>
+              <label class="aw-field">
+                <span>删除原因</span>
+                <input v-model="supplementDeleteReason" required />
+              </label>
+              <div class="aw-inline-actions">
+                <button class="aw-primary-button" type="button" @click="deleteSupplement">确认删除</button>
+                <button class="aw-secondary-button" type="button" @click="pendingDeleteSupplement = null">取消</button>
+              </div>
+            </div>
+            <p v-else-if="!supplements.length" class="aw-copy">当前月份没有补录记录</p>
+          </div>
+        </section>
+
+        <section v-if="activeSettlementSection === 'adjustments'" class="aw-settlement-section">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>冲正 / 补差</h3>
+              <p>已确认批次不直接改原始明细。需要补发或扣回时，在这里追加调整记录并保留原因。</p>
+            </div>
+            <button class="aw-secondary-button" type="button" @click="activeSettlementSection = 'batches'">选择批次</button>
+          </div>
+
+          <div v-if="selectedBatch" class="aw-panel">
+            <div class="aw-panel__head">
+              <div>
+                <p class="aw-eyebrow">当前批次</p>
+                <h3>{{ selectedBatch.batch.batch_no }}</h3>
+              </div>
+              <span :class="chipClass(batchStatusMeta(selectedBatch.batch.status).tone)">{{ batchStatusMeta(selectedBatch.batch.status).label }}</span>
+            </div>
+            <template v-if="selectedBatch.batch.status === 'confirmed'">
+              <div class="aw-form-grid">
+                <label>
+                  人员编号
+                  <input v-model.number="adjustmentForm.payee_user_id" type="number" min="1" />
+                </label>
+                <label>
+                  类型
+                  <select v-model="adjustmentForm.adjustment_type">
+                    <option value="adjustment">补差</option>
+                    <option value="reversal">冲正</option>
+                  </select>
+                </label>
+                <label>
+                  方向
+                  <select v-model="adjustmentForm.direction">
+                    <option value="credit">增加</option>
+                    <option value="debit">扣回</option>
+                  </select>
+                </label>
+                <label>
+                  金额
+                  <input v-model.number="adjustmentForm.amount" type="number" min="0" />
+                </label>
+                <label class="aw-form-grid__full">
+                  原因
+                  <input v-model="adjustmentForm.reason" />
+                </label>
+              </div>
+              <button class="aw-primary-button" type="button" @click="createAdjustment">追加调整</button>
+            </template>
+            <p v-else class="aw-copy">批次确认后才能追加冲正或补差。</p>
+          </div>
+          <div v-else class="aw-empty-state">
+            <h3>还没有选择批次</h3>
+            <p>先进入“批次确认”，打开一个已确认批次后再追加冲正或补差。</p>
+            <button class="aw-primary-button" type="button" @click="activeSettlementSection = 'batches'">去选择批次</button>
+          </div>
+        </section>
+      </main>
     </div>
   </section>
 </template>

@@ -791,10 +791,25 @@ onMounted(async () => {
           排序
           <input v-model.number="difficultyForm.sort_order" type="number" />
         </label>
-        <label class="aw-inline-check">
-          <input v-model="difficultyForm.enabled" type="checkbox" />
-          启用
-        </label>
+        <div class="aw-field aw-toggle-field">
+          <span>启用状态</span>
+          <div class="aw-toggle-control">
+            <button
+              class="aw-switch-button"
+              :class="{ 'is-on': difficultyForm.enabled }"
+              type="button"
+              role="switch"
+              :aria-checked="difficultyForm.enabled"
+              @click="difficultyForm.enabled = !difficultyForm.enabled"
+            >
+              <span aria-hidden="true"></span>
+            </button>
+            <div>
+              <strong>{{ difficultyForm.enabled ? '启用' : '停用' }}</strong>
+              <small>{{ difficultyForm.enabled ? '新上传目录可以选择这个分类' : '只保留历史记录，不再给新配置选择' }}</small>
+            </div>
+          </div>
+        </div>
         <label class="aw-form-grid__full">
           说明
           <input v-model.trim="difficultyForm.description" placeholder="给管理员看的计价说明" />
