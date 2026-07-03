@@ -41,8 +41,27 @@ async function setFileInput(
   files: File[],
 ) {
   const input = wrapper.find(`input[aria-label="${ariaLabel}"]`)
+  let cleared = false
+  const liveFiles = {
+    get length() {
+      return cleared ? 0 : files.length
+    },
+    item(index: number) {
+      return cleared ? null : files[index] ?? null
+    },
+    *[Symbol.iterator]() {
+      if (!cleared) yield* files
+    },
+  } as unknown as FileList
   Object.defineProperty(input.element, 'files', {
-    value: files,
+    get: () => liveFiles,
+    configurable: true,
+  })
+  Object.defineProperty(input.element, 'value', {
+    get: () => (cleared ? '' : 'C:\\fakepath\\upload.png'),
+    set: (value: string) => {
+      if (value === '') cleared = true
+    },
     configurable: true,
   })
   await input.trigger('change')

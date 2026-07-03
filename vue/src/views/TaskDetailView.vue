@@ -1172,6 +1172,7 @@ import {
   useFileDropPasteReceiver,
 } from '@/composables/useFileDropPasteReceiver'
 import { isReferenceUrlExpiringSoon } from '@/utils/referenceUrl'
+import { snapshotAndResetFileInput } from '@/utils/file-input'
 import { tasksApi } from '@/services/api/tasksApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { recordExperienceBehavior } from '@/services/experienceBehavior'
@@ -2641,9 +2642,8 @@ function focusReferenceSectionFromDetail(): void {
 
 async function handleOpsReferenceUpload(e: Event) {
   const input = e.target as HTMLInputElement
-  const files = input.files
-  input.value = ''
-  await handleOpsReferenceFiles(files ?? [])
+  const files = snapshotAndResetFileInput(input)
+  await handleOpsReferenceFiles(files)
 }
 
 async function handleOpsReferenceFiles(files: FileList | File[]) {
@@ -2869,9 +2869,8 @@ function validateAuditUploadFiles(files: File[], kind: AssetKind): { validFiles:
 
 async function handleAuditAssetUpload(e: Event, kind: AssetKind) {
   const input = e.target as HTMLInputElement
-  const files = input.files
-  input.value = ''
-  await handleAuditAssetFiles(files ?? [], kind)
+  const files = snapshotAndResetFileInput(input)
+  await handleAuditAssetFiles(files, kind)
 }
 
 async function handleAuditAssetFiles(files: FileList | File[], kind: AssetKind) {

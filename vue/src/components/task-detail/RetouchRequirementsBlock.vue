@@ -253,6 +253,7 @@ import {
 } from '@/domain/retouch-requirement-assets'
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
+import { snapshotAndResetFileInput } from '@/utils/file-input'
 import { uploadReferenceFileRef, uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
@@ -373,9 +374,8 @@ async function handleRequirementUploadInput(
   event: Event,
 ) {
   const input = event.target as HTMLInputElement
-  const files = input.files
-  input.value = ''
-  await uploadRequirementFiles(item, kind, files ? Array.from(files) : [])
+  const files = snapshotAndResetFileInput(input)
+  await uploadRequirementFiles(item, kind, files)
 }
 
 function validateRequirementFiles(kind: RequirementUploadKind, files: File[]) {
