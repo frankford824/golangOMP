@@ -13238,7 +13238,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/client-materials/<materia
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns preview metadata for a published client material without opening system asset search to submitters and without recording a download event.
+- `GET`: Returns preview metadata for a published client material without opening system asset search to submitters and without recording a download event. External materials return OSS/public preview URLs when ready, or `pending` while backend preview generation is queued.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13369,7 +13369,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/client-materials/batch-d
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns preview metadata for a read-only system asset in the asset workbench. Preview URLs are provided only for browser-previewable assets; otherwise status is `not_applicable` and callers should offer download only.
+- `GET`: Returns preview metadata for a read-only system asset in the asset workbench. The endpoint reuses the main asset-center preview semantics, including OSS image transforms and backend-derived preview/design-thumb assets for source formats such as PSD/AI/PDF/TIFF when available.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

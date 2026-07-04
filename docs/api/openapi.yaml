@@ -11400,6 +11400,8 @@ paths:
         this endpoint returns a signed private-bucket URL with `x-oss-process` preview transform.
         For source formats that are not directly previewable (such as PSD/PSB), this endpoint resolves
         backend-derived `preview/design_thumb` assets linked by `source_asset_id` when available.
+        External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs;
+        browser-facing BFF proxy URLs are not returned as the default preview surface.
         When preview metadata is not currently available for the asset, runtime returns HTTP 409 with
         `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
       tags: [Assets, ReadyForFrontend]
@@ -21851,7 +21853,7 @@ paths:
   /v1/asset-workbench/client-materials/{material_id}/preview:
     get:
       summary: Get client material preview metadata
-      description: Returns preview metadata for a published client material without opening system asset search to submitters and without recording a download event.
+      description: Returns preview metadata for a published client material without opening system asset search to submitters and without recording a download event. External materials return OSS/public preview URLs when ready, or `pending` while backend preview generation is queued.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -21954,7 +21956,7 @@ paths:
   /v1/asset-workbench/system-assets/{asset_id}/preview:
     get:
       summary: Get asset workbench system asset preview
-      description: Returns preview metadata for a read-only system asset in the asset workbench. Preview URLs are provided only for browser-previewable assets; otherwise status is `not_applicable` and callers should offer download only.
+      description: Returns preview metadata for a read-only system asset in the asset workbench. The endpoint reuses the main asset-center preview semantics, including OSS image transforms and backend-derived preview/design-thumb assets for source formats such as PSD/AI/PDF/TIFF when available.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -21977,7 +21979,7 @@ paths:
                     type: object
                     properties:
                       asset_id: { type: integer }
-                      status: { type: string, enum: [ready, not_applicable] }
+                      status: { type: string, enum: [ready, pending, not_applicable] }
                       preparing: { type: boolean }
                       preview_url: { type: string }
                       download_url: { type: string }

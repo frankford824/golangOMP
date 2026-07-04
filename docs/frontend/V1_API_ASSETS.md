@@ -361,7 +361,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/download \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns preview metadata for one asset resource. For source formats that OSS IMG can process directly (`jpg/png/bmp/gif/webp/tiff/heic/avif`), this endpoint returns a signed private-bucket URL with `x-oss-process` preview transform. For source formats that are not directly previewable (such as PSD/PSB), this endpoint resolves backend-derived `preview/design_thumb` assets linked by `source_asset_id` when available. When preview metadata is not currently available for the asset, runtime returns HTTP 409 with `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
+- `GET`: Returns preview metadata for one asset resource. For source formats that OSS IMG can process directly (`jpg/png/bmp/gif/webp/tiff/heic/avif`), this endpoint returns a signed private-bucket URL with `x-oss-process` preview transform. For source formats that are not directly previewable (such as PSD/PSB), this endpoint resolves backend-derived `preview/design_thumb` assets linked by `source_asset_id` when available. External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs; browser-facing BFF proxy URLs are not returned as the default preview surface. When preview metadata is not currently available for the asset, runtime returns HTTP 409 with `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

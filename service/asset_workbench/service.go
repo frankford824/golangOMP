@@ -50,6 +50,7 @@ type Service struct {
 	renderer        baseservice.AssetPreviewRenderer
 	systemAssets    SystemAssetSearcher
 	systemDownloads SystemAssetDownloader
+	systemPreviews  SystemAssetPreviewer
 	nowFn           func() time.Time
 	loc             *time.Location
 }
@@ -85,6 +86,10 @@ type ExternalAssetDetailer interface {
 type SystemAssetDownloader interface {
 	DownloadLatest(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 	BuildBatchDownloadManifest(ctx context.Context, assetIDs []int64, opts ...assetcenter.BatchDownloadOption) (*assetcenter.BatchDownloadManifest, *domain.AppError)
+}
+
+type SystemAssetPreviewer interface {
+	GetAssetPreviewInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 }
 
 type ExternalAssetDownloader interface {
@@ -172,12 +177,18 @@ func WithSystemAssetSearcher(searcher SystemAssetSearcher) Option {
 		if downloader, ok := searcher.(SystemAssetDownloader); ok {
 			s.systemDownloads = downloader
 		}
+		if previewer, ok := searcher.(SystemAssetPreviewer); ok {
+			s.systemPreviews = previewer
+		}
 	}
 }
 
 func WithSystemAssetDownloader(downloader SystemAssetDownloader) Option {
 	return func(s *Service) {
 		s.systemDownloads = downloader
+		if previewer, ok := downloader.(SystemAssetPreviewer); ok {
+			s.systemPreviews = previewer
+		}
 	}
 }
 
@@ -5305,6 +5316,15 @@ func (s *Service) SystemAssetPreview(ctx context.Context, actor domain.RequestAc
 }
 
 func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64) (*SystemAssetPreviewMeta, *domain.AppError) {
+	if s.systemPreviews != nil {
+		info, appErr := s.systemPreviews.GetAssetPreviewInfoByID(ctx, assetID)
+		if appErr == nil {
+			return systemAssetPreviewMetaFromDownloadInfo(assetID, string(domain.AssetResourceSourceSystem), strconv.FormatInt(assetID, 10), info), nil
+		}
+		if appErr.Code != domain.ErrCodeInvalidStateTransition {
+			return nil, appErr
+		}
+	}
 	if s.systemDownloads == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
 	}
@@ -5315,16 +5335,23 @@ func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64) (*S
 	if info == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset preview info is empty.", nil)
 	}
+	return systemAssetPreviewMetaFromDownloadInfo(assetID, string(domain.AssetResourceSourceSystem), strconv.FormatInt(assetID, 10), info), nil
+}
+
+func systemAssetPreviewMetaFromDownloadInfo(assetID int64, sourceType, sourceRef string, info *domain.AssetDownloadInfo) *SystemAssetPreviewMeta {
 	meta := &SystemAssetPreviewMeta{
 		AssetID:          assetID,
-		SourceType:       string(domain.AssetResourceSourceSystem),
-		SourceRef:        strconv.FormatInt(assetID, 10),
+		SourceType:       sourceType,
+		SourceRef:        sourceRef,
 		Status:           domain.AssetWorkbenchPreviewStatusNotApplicable,
-		Filename:         info.Filename,
-		MimeType:         strings.TrimSpace(info.MimeType),
-		ExpiresAt:        info.ExpiresAt,
 		PreviewAvailable: false,
 	}
+	if info == nil {
+		return meta
+	}
+	meta.Filename = info.Filename
+	meta.MimeType = strings.TrimSpace(info.MimeType)
+	meta.ExpiresAt = info.ExpiresAt
 	if info.DownloadURL != nil {
 		meta.DownloadURL = strings.TrimSpace(*info.DownloadURL)
 	}
@@ -5333,7 +5360,11 @@ func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64) (*S
 		meta.PreviewURL = meta.DownloadURL
 		meta.PreviewAvailable = true
 	}
-	return meta, nil
+	if strings.Contains(strings.TrimSpace(info.AccessHint), "prepare_required") {
+		meta.Status = domain.AssetWorkbenchPreviewStatusPending
+		meta.Preparing = true
+	}
+	return meta
 }
 
 func (s *Service) SystemAssetBatchDownloadManifest(ctx context.Context, actor domain.RequestActor, params SystemAssetBatchDownloadParams) (*assetcenter.BatchDownloadManifest, *domain.AppError) {

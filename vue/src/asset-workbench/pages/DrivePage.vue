@@ -44,7 +44,7 @@ import type {
   WorkbenchSpreadsheetSource,
   WorkbenchSpreadsheetValidation,
 } from '@aw/shared/spreadsheet/types'
-import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
+import { materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
 
 type DriveMode = 'directories' | 'operational'
 type SearchScope = 'all' | 'operational' | 'files' | 'orders'
@@ -2012,28 +2012,12 @@ function cacheMaterialPreview(key: string, url: string) {
   materialPreviewUrls.value = { ...materialPreviewUrls.value, [key]: url }
 }
 
-async function ensureMaterialPreview(asset: SystemAssetRow) {
+function ensureMaterialPreview(asset: SystemAssetRow) {
   const key = materialAssetKey(asset)
   if (materialPreviewUrls.value[key]) return
   const inline = resolvedSystemAssetThumbnailUrl(asset)
   if (inline) {
     cacheMaterialPreview(key, inline)
-    return
-  }
-  if (!canAttemptSystemAssetPreview(asset) || materialPreviewLoadingIds.value.has(key)) return
-  const loading = new Set(materialPreviewLoadingIds.value)
-  loading.add(key)
-  materialPreviewLoadingIds.value = loading
-  try {
-    const meta = await previewMaterial(asset)
-    const url = meta.preview_url || ''
-    if (url) cacheMaterialPreview(key, url)
-  } catch {
-    /* silent: big preview falls back to icon, dialog surfaces errors */
-  } finally {
-    const next = new Set(materialPreviewLoadingIds.value)
-    next.delete(key)
-    materialPreviewLoadingIds.value = next
   }
 }
 
@@ -2856,7 +2840,7 @@ onBeforeUnmount(() => {
                     </label>
                     <button class="aw-material-row__button" type="button" @click="selectMaterial(asset)" @dblclick="openMaterialPreview(asset)">
                       <span class="aw-material-row__thumb">
-                        <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" @loaded="cacheMaterialPreview" />
+                        <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" />
                       </span>
                       <span class="aw-material-row__body">
                         <strong :title="titleOf(asset)">{{ materialFolderFileName(asset) }}</strong>

@@ -48,6 +48,9 @@ type Config struct {
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	LocalPathMappings   map[string]string
+	PrepareInterval     time.Duration
+	PrepareLimit        int
+	PrepareConcurrency  int
 }
 
 type FullSyncResult struct {
@@ -86,6 +89,7 @@ type Service struct {
 	keywordRefreshCooldown time.Duration
 	keywordRefreshTimeout  time.Duration
 	keywordRefreshAsyncFn  func(func())
+	previewPrepareAsyncFn  func(func())
 }
 
 func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
@@ -106,6 +110,9 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		OSSOriginalPrefix:   strings.Trim(strings.TrimSpace(cfg.OSSOriginalPrefix), "/"),
 		OSSPreviewPrefix:    strings.Trim(strings.TrimSpace(cfg.OSSPreviewPrefix), "/"),
 		LocalPathMappings:   ParseLocalPathMappings(cfg.LocalPathMappings),
+		PrepareInterval:     cfg.PrepareInterval,
+		PrepareLimit:        cfg.PrepareLimit,
+		PrepareConcurrency:  cfg.PrepareConcurrency,
 	}
 }
 
@@ -137,6 +144,15 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 	if cfg.FullSyncMaxDirs < 0 {
 		cfg.FullSyncMaxDirs = 0
 	}
+	if cfg.PrepareInterval <= 0 {
+		cfg.PrepareInterval = 30 * time.Second
+	}
+	if cfg.PrepareLimit <= 0 || cfg.PrepareLimit > 200 {
+		cfg.PrepareLimit = 50
+	}
+	if cfg.PrepareConcurrency <= 0 || cfg.PrepareConcurrency > 16 {
+		cfg.PrepareConcurrency = 4
+	}
 	return &Service{
 		cfg:       cfg,
 		repo:      repo,
@@ -154,6 +170,9 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 		keywordRefreshAsyncFn: func(fn func()) {
 			go fn()
 		},
+		previewPrepareAsyncFn: func(fn func()) {
+			go fn()
+		},
 	}
 }
 
@@ -166,6 +185,20 @@ func (s *Service) SyncInterval() time.Duration {
 		return time.Hour
 	}
 	return s.cfg.SyncInterval
+}
+
+func (s *Service) PrepareInterval() time.Duration {
+	if s == nil || s.cfg.PrepareInterval <= 0 {
+		return 30 * time.Second
+	}
+	return s.cfg.PrepareInterval
+}
+
+func (s *Service) PrepareLimit() int {
+	if s == nil || s.cfg.PrepareLimit <= 0 {
+		return 50
+	}
+	return s.cfg.PrepareLimit
 }
 
 func (s *Service) FullSyncReady() bool {
@@ -242,7 +275,11 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 			s.scheduleKeywordRefresh(query.Keyword, 50)
 		}
 	}
-	return s.repo.Search(ctx, query)
+	rows, total, err := s.repo.Search(ctx, query)
+	if err == nil {
+		s.schedulePreviewPrepare(rows)
+	}
+	return rows, total, err
 }
 
 func (s *Service) ListDirectoryChildren(ctx context.Context, parentPath string, limit int) ([]domain.ExternalAssetDirectoryEntry, error) {
@@ -274,7 +311,11 @@ func (s *Service) ListDirectoryFiles(ctx context.Context, parentPath string, pag
 	if parentPath == "" || len(mounts) == 0 {
 		return []*domain.ExternalAssetRecord{}, 0, nil
 	}
-	return browser.ListDirectoryFiles(ctx, parentPath, mounts, page, size)
+	rows, total, err := browser.ListDirectoryFiles(ctx, parentPath, mounts, page, size)
+	if err == nil {
+		s.schedulePreviewPrepare(rows)
+	}
+	return rows, total, err
 }
 
 func (s *Service) mountPathsForBrowse(parentPath string) []string {
@@ -432,6 +473,54 @@ func (s *Service) scheduleKeywordRefresh(keyword string, perMountLimit int) {
 			_, _, _ = s.RefreshDirectURLs(refreshCtx, perMountLimit)
 		}
 	})
+}
+
+func (s *Service) schedulePreviewPrepare(rows []*domain.ExternalAssetRecord) {
+	if s == nil || s.repo == nil || len(rows) == 0 {
+		return
+	}
+	ids := make([]int64, 0, len(rows))
+	seen := map[int64]struct{}{}
+	for _, row := range rows {
+		if !shouldPrepareExternalDerivedPreview(row) {
+			continue
+		}
+		if _, ok := seen[row.ID]; ok {
+			continue
+		}
+		seen[row.ID] = struct{}{}
+		ids = append(ids, row.ID)
+		if len(ids) >= 20 {
+			break
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	runAsync := s.previewPrepareAsyncFn
+	if runAsync == nil {
+		runAsync = func(fn func()) { go fn() }
+	}
+	runAsync(func() {
+		prepareCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, id := range ids {
+			_ = s.repo.MarkPreviewPreparePending(prepareCtx, id)
+		}
+	})
+}
+
+func shouldPrepareExternalDerivedPreview(row *domain.ExternalAssetRecord) bool {
+	if row == nil || row.ID <= 0 || row.IsDir || row.Status == domain.ExternalAssetStatusMissing {
+		return false
+	}
+	if row.OSSPreviewKey != "" && row.PreviewStatus == domain.ExternalAssetPreviewStatusReady {
+		return false
+	}
+	if row.PreviewStatus == domain.ExternalAssetPreviewStatusPending {
+		return false
+	}
+	return canRenderDerivedPreview(row.FileName, row.MimeType)
 }
 
 func (s *Service) recordRecentKeyword(keyword string) {
@@ -914,9 +1003,6 @@ func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
 				return urlValue
 			}
 		}
-		if s.bff != nil && s.bff.Enabled() {
-			return s.bff.BrowserFetchURL(row.OriginPath, true, true)
-		}
 		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNetdisk {
@@ -925,10 +1011,7 @@ func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
 			return rawURL
 		}
 	}
-	if s.bff == nil || !s.bff.Enabled() {
-		return ""
-	}
-	return s.bff.BrowserFetchURL(row.OriginPath, true, true)
+	return ""
 }
 
 func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
@@ -939,9 +1022,6 @@ func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
 		if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
 			return s.presignedOriginalURL(row)
 		}
-		if s.bff != nil && s.bff.Enabled() {
-			return s.bff.BrowserFetchURL(row.OriginPath, false, true)
-		}
 		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNetdisk {
@@ -950,10 +1030,7 @@ func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
 			return rawURL
 		}
 	}
-	if s.bff == nil || !s.bff.Enabled() {
-		return ""
-	}
-	return s.bff.BrowserFetchURL(row.OriginPath, false, true)
+	return ""
 }
 
 func (s *Service) presignedPreviewURL(row *domain.ExternalAssetRecord) string {
@@ -1130,14 +1207,17 @@ func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	done := 0
-	for _, row := range rows {
+	var done int
+	var mu sync.Mutex
+	s.runPrepareWorkers(ctx, rows, func(row *domain.ExternalAssetRecord) {
 		if err := s.uploadLocalOriginal(ctx, row); err != nil {
 			_ = s.repo.MarkPrepareFailed(ctx, row.ID, "oss", err.Error())
-			continue
+			return
 		}
+		mu.Lock()
 		done++
-	}
+		mu.Unlock()
+	})
 	return done, nil
 }
 
@@ -1146,15 +1226,61 @@ func (s *Service) ProcessPendingPreview(ctx context.Context, limit int) (int, er
 	if err != nil {
 		return 0, err
 	}
-	done := 0
-	for _, row := range rows {
+	var done int
+	var mu sync.Mutex
+	s.runPrepareWorkers(ctx, rows, func(row *domain.ExternalAssetRecord) {
 		if err := s.renderAndUploadPreview(ctx, row); err != nil {
 			_ = s.repo.MarkPrepareFailed(ctx, row.ID, "preview", err.Error())
-			continue
+			return
 		}
+		mu.Lock()
 		done++
-	}
+		mu.Unlock()
+	})
 	return done, nil
+}
+
+func (s *Service) runPrepareWorkers(ctx context.Context, rows []*domain.ExternalAssetRecord, handle func(*domain.ExternalAssetRecord)) {
+	if len(rows) == 0 || handle == nil {
+		return
+	}
+	workers := s.cfg.PrepareConcurrency
+	if workers <= 0 {
+		workers = 1
+	}
+	if workers > len(rows) {
+		workers = len(rows)
+	}
+	ch := make(chan *domain.ExternalAssetRecord)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for row := range ch {
+				if row == nil {
+					continue
+				}
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				handle(row)
+			}
+		}()
+	}
+	for _, row := range rows {
+		select {
+		case <-ctx.Done():
+			close(ch)
+			wg.Wait()
+			return
+		case ch <- row:
+		}
+	}
+	close(ch)
+	wg.Wait()
 }
 
 func (s *Service) uploadLocalOriginal(ctx context.Context, row *domain.ExternalAssetRecord) error {
@@ -1343,14 +1469,26 @@ func normalizeMimeType(filename, fallback string) string {
 
 func canDirectBrowserPreview(filename, mimeType string) bool {
 	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
-	if strings.HasPrefix(mimeType, "image/") && !strings.Contains(mimeType, "photoshop") {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if (mimeType == "image/jpeg" || mimeType == "image/png" || mimeType == "image/webp" || mimeType == "image/gif" || mimeType == "image/bmp" || mimeType == "image/svg+xml") &&
+		!strings.Contains(mimeType, "photoshop") {
 		return true
 	}
-	if strings.HasPrefix(mimeType, "video/") || mimeType == "application/pdf" {
+	if mimeType == "application/pdf" {
 		return true
 	}
-	switch strings.ToLower(filepath.Ext(filename)) {
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".pdf", ".mp4", ".mov":
+	if strings.HasPrefix(mimeType, "video/") {
+		switch ext {
+		case ".mp4", ".webm", ".mov", ".m4v":
+			return true
+		}
+		return false
+	}
+	if strings.HasPrefix(mimeType, "image/") {
+		return false
+	}
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".pdf", ".mp4", ".webm", ".mov", ".m4v":
 		return true
 	default:
 		return false
@@ -1367,7 +1505,7 @@ func canRenderDerivedPreview(filename, mimeType string) bool {
 		return true
 	}
 	switch ext {
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".pdf", ".psd", ".psb", ".ai":
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".tif", ".tiff", ".heic", ".heif", ".avif", ".pdf", ".psd", ".psb", ".ai", ".eps", ".ps":
 		return true
 	default:
 		return false

@@ -816,18 +816,19 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 		}
 	}()
 	go func() {
-		interval := 2 * time.Minute
+		interval := svc.PrepareInterval()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		logger.Info("external asset prepare worker started", zap.Duration("interval", interval))
 		runPrepare := func() {
 			prepareCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 			defer cancel()
-			ossDone, err := svc.ProcessPendingOSS(prepareCtx, 5)
+			limit := svc.PrepareLimit()
+			ossDone, err := svc.ProcessPendingOSS(prepareCtx, limit)
 			if err != nil {
 				logger.Warn("external oss prepare failed", zap.Error(err))
 			}
-			previewDone, err := svc.ProcessPendingPreview(prepareCtx, 5)
+			previewDone, err := svc.ProcessPendingPreview(prepareCtx, limit)
 			if err != nil {
 				logger.Warn("external preview prepare failed", zap.Error(err))
 			}

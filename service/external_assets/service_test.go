@@ -240,7 +240,7 @@ func TestSyncFullIndexSkipsBrokenSubdirectory(t *testing.T) {
 	}
 }
 
-func TestNetdiskBrowserURLsUseBFFProxyWhenDirectURLMissing(t *testing.T) {
+func TestNetdiskBrowserURLsDoNotExposeBFFProxyWhenDirectURLMissing(t *testing.T) {
 	svc := NewService(&externalAssetRepoStub{}, Config{
 		Enabled:           true,
 		BFFBaseURL:        "http://internal-bff",
@@ -256,13 +256,11 @@ func TestNetdiskBrowserURLsUseBFFProxyWhenDirectURLMissing(t *testing.T) {
 		MimeType:   "image/jpeg",
 	}
 
-	previewURL := svc.BrowserPreviewURL(row)
-	if !strings.Contains(previewURL, "proxy=1") || !strings.Contains(previewURL, "inline=1") {
-		t.Fatalf("preview URL = %q, want BFF proxy inline URL", previewURL)
+	if previewURL := svc.BrowserPreviewURL(row); previewURL != "" {
+		t.Fatalf("preview URL = %q, want empty URL until OSS/raw preview is ready", previewURL)
 	}
-	downloadURL := svc.BrowserDownloadURL(row)
-	if !strings.Contains(downloadURL, "proxy=1") || strings.Contains(downloadURL, "inline=1") {
-		t.Fatalf("download URL = %q, want BFF proxy download URL", downloadURL)
+	if downloadURL := svc.BrowserDownloadURL(row); downloadURL != "" {
+		t.Fatalf("download URL = %q, want empty URL until OSS/raw download is ready", downloadURL)
 	}
 }
 
@@ -333,7 +331,7 @@ func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
 	}
 }
 
-func TestNASLocalBrowserURLsUseBFFProxyWhenOSSNotReady(t *testing.T) {
+func TestNASLocalBrowserURLsDoNotExposeBFFProxyWhenOSSNotReady(t *testing.T) {
 	svc := NewService(&externalAssetRepoStub{}, Config{
 		Enabled:           true,
 		BFFBaseURL:        "http://internal-bff",
@@ -349,13 +347,46 @@ func TestNASLocalBrowserURLsUseBFFProxyWhenOSSNotReady(t *testing.T) {
 		MimeType:   "image/jpeg",
 	}
 
-	previewURL := svc.BrowserPreviewURL(row)
-	if !strings.Contains(previewURL, "proxy=1") || !strings.Contains(previewURL, "inline=1") {
-		t.Fatalf("preview URL = %q, want BFF proxy inline URL", previewURL)
+	if previewURL := svc.BrowserPreviewURL(row); previewURL != "" {
+		t.Fatalf("preview URL = %q, want empty URL until OSS preview/original is ready", previewURL)
 	}
-	downloadURL := svc.BrowserDownloadURL(row)
-	if !strings.Contains(downloadURL, "proxy=1") || strings.Contains(downloadURL, "inline=1") {
-		t.Fatalf("download URL = %q, want BFF proxy download URL", downloadURL)
+	if downloadURL := svc.BrowserDownloadURL(row); downloadURL != "" {
+		t.Fatalf("download URL = %q, want empty URL until OSS original is ready", downloadURL)
+	}
+}
+
+func TestPreviewInfoQueuesDerivedPreviewInsteadOfReturningBFFURL(t *testing.T) {
+	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
+		ID:            42,
+		Kind:          domain.ExternalAssetKindNASLocal,
+		MountPath:     "/p3",
+		OriginPath:    "/p3/a/poster.tif",
+		FileName:      "poster.tif",
+		FileExt:       ".tif",
+		MimeType:      "image/tiff",
+		Status:        domain.ExternalAssetStatusIndexed,
+		OSSSyncStatus: domain.ExternalAssetOSSStatusNone,
+		PreviewStatus: domain.ExternalAssetPreviewStatusNone,
+	}}
+	svc := NewService(repo, Config{
+		Enabled:           true,
+		BFFBaseURL:        "http://internal-bff",
+		BFFBrowserBaseURL: "http://browser-bff",
+		Mounts:            ParseMounts("/p3:nas_local"),
+	}, nil)
+
+	info, appErr := svc.PreviewInfo(context.Background(), 42)
+	if appErr != nil {
+		t.Fatalf("PreviewInfo() error = %+v", appErr)
+	}
+	if info == nil || info.DownloadURL != nil || info.PreviewAvailable {
+		t.Fatalf("PreviewInfo() = %+v, want prepare metadata without URL", info)
+	}
+	if !strings.Contains(info.AccessHint, "prepare_required") {
+		t.Fatalf("AccessHint = %q, want prepare_required", info.AccessHint)
+	}
+	if len(repo.previewPendingIDs) != 1 || repo.previewPendingIDs[0] != 42 {
+		t.Fatalf("preview pending ids = %+v, want [42]", repo.previewPendingIDs)
 	}
 }
 
@@ -601,10 +632,12 @@ type externalAssetRepoStub struct {
 		upserted int
 		message  string
 	}
-	missingMount  string
-	searchRows    []*domain.ExternalAssetRecord
-	searchTotal   int64
-	searchQueries []domain.ExternalAssetSearchQuery
+	missingMount      string
+	searchRows        []*domain.ExternalAssetRecord
+	searchTotal       int64
+	searchQueries     []domain.ExternalAssetSearchQuery
+	getRow            *domain.ExternalAssetRecord
+	previewPendingIDs []int64
 }
 
 func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
@@ -654,7 +687,11 @@ func (r *externalAssetRepoStub) Upsert(_ context.Context, item domain.ExternalAs
 	}, nil
 }
 
-func (r *externalAssetRepoStub) GetByID(context.Context, int64) (*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepoStub) GetByID(_ context.Context, id int64) (*domain.ExternalAssetRecord, error) {
+	if r.getRow != nil && r.getRow.ID == id {
+		row := *r.getRow
+		return &row, nil
+	}
 	return nil, nil
 }
 
@@ -687,7 +724,8 @@ func (r *externalAssetRepoStub) MarkOSSPreparePending(context.Context, int64) er
 	return nil
 }
 
-func (r *externalAssetRepoStub) MarkPreviewPreparePending(context.Context, int64) error {
+func (r *externalAssetRepoStub) MarkPreviewPreparePending(_ context.Context, id int64) error {
+	r.previewPendingIDs = append(r.previewPendingIDs, id)
 	return nil
 }
 

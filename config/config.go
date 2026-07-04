@@ -140,6 +140,9 @@ type ExternalAssetsConfig struct {
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	LocalPathMappings   string
+	PrepareInterval     time.Duration
+	PrepareLimit        int
+	PrepareConcurrency  int
 }
 
 type AssetWorkbenchConfig struct {
@@ -361,6 +364,9 @@ func Load() (*Config, error) {
 			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
 			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
 			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),
+			PrepareInterval:     mustParseDuration(getEnv("EXTERNAL_ASSETS_PREPARE_INTERVAL", "30s")),
+			PrepareLimit:        mustParseInt(getEnv("EXTERNAL_ASSETS_PREPARE_LIMIT", "50")),
+			PrepareConcurrency:  mustParseInt(getEnv("EXTERNAL_ASSETS_PREPARE_CONCURRENCY", "4")),
 		},
 		AssetWorkbench: AssetWorkbenchConfig{
 			CookieDomain:                getEnv("ASSET_COOKIE_DOMAIN", ""),

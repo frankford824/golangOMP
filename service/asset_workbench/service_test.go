@@ -941,6 +941,35 @@ func (s *systemAssetDownloaderStub) DownloadLatest(_ context.Context, assetID in
 	}, nil
 }
 
+type systemAssetPreviewDownloaderStub struct {
+	systemAssetDownloaderStub
+	previewCalls int
+	previewIDs   []int64
+	previewInfo  *domain.AssetDownloadInfo
+	previewErr   *domain.AppError
+}
+
+func (s *systemAssetPreviewDownloaderStub) GetAssetPreviewInfoByID(_ context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.previewCalls++
+	s.previewIDs = append(s.previewIDs, assetID)
+	if s.previewErr != nil {
+		return nil, s.previewErr
+	}
+	if s.previewInfo != nil {
+		copyInfo := *s.previewInfo
+		return &copyInfo, nil
+	}
+	url := "https://assets.example.com/system/preview/" + strconv.FormatInt(assetID, 10)
+	return &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      &url,
+		Filename:         "preview.webp",
+		FileSize:         1024,
+		MimeType:         "image/webp",
+		PreviewAvailable: true,
+	}, nil
+}
+
 type uploadDirectorySessionRepo struct {
 	repo.AssetWorkbenchRepo
 	directories []*domain.AssetWorkbenchUploadDirectory
@@ -2493,6 +2522,36 @@ func TestCreateSubmissionInfersDifficultyFromUploadDirectorySnapshot(t *testing.
 	}
 	if workbenchRepo.sessionStatus != domain.AssetWorkbenchUploadStatusSubmitted {
 		t.Fatalf("session status = %q, want submitted", workbenchRepo.sessionStatus)
+	}
+}
+
+func TestSystemAssetPreviewUsesSharedPreviewerBeforeDownload(t *testing.T) {
+	url := "https://assets.example.com/system/preview.webp"
+	previewer := &systemAssetPreviewDownloaderStub{
+		previewInfo: &domain.AssetDownloadInfo{
+			DownloadMode:     domain.AssetDownloadModeDirect,
+			DownloadURL:      &url,
+			Filename:         "preview.webp",
+			FileSize:         1024,
+			MimeType:         "image/webp",
+			PreviewAvailable: true,
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetDownloader(previewer))
+	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
+
+	meta, appErr := svc.SystemAssetPreview(context.Background(), actor, 1001)
+	if appErr != nil {
+		t.Fatalf("SystemAssetPreview() error = %+v", appErr)
+	}
+	if meta == nil || meta.PreviewURL != url || !meta.PreviewAvailable || meta.Status != domain.AssetWorkbenchPreviewStatusReady {
+		t.Fatalf("preview meta = %+v, want shared preview URL", meta)
+	}
+	if previewer.previewCalls != 1 || previewer.previewIDs[0] != 1001 {
+		t.Fatalf("preview calls = %d ids=%+v, want one preview call for 1001", previewer.previewCalls, previewer.previewIDs)
+	}
+	if previewer.downloadCalls != 0 {
+		t.Fatalf("downloadCalls = %d, want 0", previewer.downloadCalls)
 	}
 }
 
