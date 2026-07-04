@@ -5045,7 +5045,8 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-upload-ledger__toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--aw-space-3);
@@ -5056,9 +5057,8 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-upload-ledger__filters {
-  flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(190px, 1.4fr) minmax(140px, .8fr) minmax(150px, .9fr) 132px 132px auto;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(150px, .8fr) minmax(160px, .9fr) 138px 138px auto;
   align-items: end;
   gap: var(--aw-space-2);
   min-width: 0;
@@ -5066,14 +5066,17 @@ body.aw-submission-dialog-locked {
 
 .aw-upload-ledger__filters label {
   display: grid;
-  gap: 5px;
+  gap: 6px;
+  align-self: end;
   min-width: 0;
 }
 
 .aw-upload-ledger__filters label span {
+  min-height: 16px;
   color: var(--aw-muted);
   font-size: var(--aw-font-size-xs);
   font-weight: 700;
+  line-height: 16px;
 }
 
 .aw-upload-ledger__filters input,
@@ -5082,12 +5085,45 @@ body.aw-submission-dialog-locked {
 .aw-upload-ledger__batch select {
   width: 100%;
   min-height: var(--aw-row-md);
+  box-sizing: border-box;
   border: 1px solid var(--aw-border);
   border-radius: var(--aw-radius-sm);
   background: var(--aw-paper);
   color: var(--aw-text);
   padding: 0 var(--aw-space-3);
   font-size: var(--aw-font-size-sm);
+}
+
+.aw-upload-ledger__filters input,
+.aw-upload-ledger__filters select {
+  height: var(--aw-row-md);
+  line-height: calc(var(--aw-row-md) - 2px);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--aw-paper) 70%, transparent);
+}
+
+.aw-upload-ledger__filters select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--aw-muted) 50%),
+    linear-gradient(135deg, var(--aw-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 13px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.aw-upload-ledger__filters input:focus,
+.aw-upload-ledger__filters select:focus {
+  border-color: var(--aw-accent);
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 18%, transparent);
+  outline-offset: 1px;
+}
+
+.aw-upload-ledger__filters input[type='date']::-webkit-calendar-picker-indicator {
+  margin-right: -2px;
 }
 
 .aw-upload-ledger__filter-actions,
@@ -5103,6 +5139,18 @@ body.aw-submission-dialog-locked {
 .aw-upload-ledger__tools {
   flex: 0 0 auto;
   justify-content: flex-end;
+}
+
+.aw-upload-ledger__filter-actions,
+.aw-upload-ledger__tools {
+  align-self: end;
+  min-height: var(--aw-row-md);
+}
+
+.aw-upload-ledger__filter-actions > button,
+.aw-upload-ledger__tools > button {
+  min-height: var(--aw-row-md);
+  white-space: nowrap;
 }
 
 .aw-upload-ledger__batch {
