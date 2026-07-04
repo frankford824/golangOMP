@@ -1388,12 +1388,33 @@ func (r *batchFileMutationRepo) ListSubmissionFilesByIDs(_ context.Context, file
 	return items, nil
 }
 
+func (r *batchFileMutationRepo) GetSubmissionFile(_ context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error) {
+	file := r.files[fileID]
+	if file == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyFile := *file
+	return &copyFile, nil
+}
+
 func (r *batchFileMutationRepo) UpdateSubmissionFileLocation(_ context.Context, _ repo.Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error) {
 	if file == nil || r.files[file.ID] == nil {
 		return nil, sql.ErrNoRows
 	}
 	copyFile := *file
 	r.files[file.ID] = &copyFile
+	r.updatedFiles = append(r.updatedFiles, &copyFile)
+	return &copyFile, nil
+}
+
+func (r *batchFileMutationRepo) UpdateSubmissionFileDisplayName(_ context.Context, _ repo.Tx, fileID int64, displayName string) (*domain.AssetWorkbenchSubmissionFile, error) {
+	file := r.files[fileID]
+	if file == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyFile := *file
+	copyFile.DisplayName = displayName
+	r.files[fileID] = &copyFile
 	r.updatedFiles = append(r.updatedFiles, &copyFile)
 	return &copyFile, nil
 }
@@ -2970,6 +2991,30 @@ func TestBatchMoveFilesReturnsPerFileFailuresWhenOSSDisabled(t *testing.T) {
 	}
 	if len(workbenchRepo.updatedFiles) != 0 || len(workbenchRepo.events) != 0 {
 		t.Fatalf("move should not update files or events when OSS is disabled: updated=%+v events=%+v", workbenchRepo.updatedFiles, workbenchRepo.events)
+	}
+}
+
+func TestUpdateSubmissionFileDisplayNameAllowsSettlementRole(t *testing.T) {
+	workbenchRepo := &batchFileMutationRepo{
+		files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+			501: {ID: 501, SubmissionID: 9001, SubmissionItemID: 8001, OwnerUserID: 7, OriginalFilename: "source.psd", DisplayName: "source.psd"},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	updated, appErr := svc.UpdateSubmissionFileDisplayName(context.Background(), actor, 501, " 夏季主视觉 ")
+	if appErr != nil {
+		t.Fatalf("UpdateSubmissionFileDisplayName() appErr = %+v", appErr)
+	}
+	if updated.DisplayName != "夏季主视觉" || workbenchRepo.files[501].DisplayName != "夏季主视觉" {
+		t.Fatalf("display name not updated: updated=%+v stored=%+v", updated.DisplayName, workbenchRepo.files[501].DisplayName)
+	}
+	if updated.OriginalFilename != "source.psd" {
+		t.Fatalf("original filename changed: %q", updated.OriginalFilename)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventFileRenamed {
+		t.Fatalf("events = %+v", workbenchRepo.events)
 	}
 }
 

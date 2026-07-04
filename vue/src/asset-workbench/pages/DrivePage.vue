@@ -95,7 +95,6 @@ const activeMode = ref<DriveMode>('directories')
 const driveSpreadsheetOpen = ref(false)
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
-const canViewUploadOverview = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const canMaintainItems = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const canListUploadDirectories = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canUseOperational = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.material.download'))
@@ -225,7 +224,6 @@ const currentDirRow = computed(() =>
 const directoryOptions = computed(() => uploadDirectories.value.filter((item) => item.enabled))
 const difficultyOptions = computed(() => difficultyClasses.value.filter((item) => item.enabled).map((item) => item.code))
 const totalPages = computed(() => Math.max(1, Math.ceil(fileTotal.value / pageSize)))
-const uploadOverviewTotal = computed(() => directories.value.reduce((sum, dir) => sum + Number(dir.file_count || 0), 0))
 const uploadOverviewFilterActive = computed(() =>
   Boolean(uploadOverviewQuery.value.trim() || uploadOverviewOwner.value.trim() || uploadOverviewFrom.value || uploadOverviewTo.value || uploadOverviewDirectory.value !== 'all'),
 )
@@ -2375,7 +2373,7 @@ onBeforeUnmount(() => {
         <HardDrive :size="20" aria-hidden="true" />
         <div>
           <p class="aw-eyebrow">素材网盘</p>
-          <h2>{{ canViewUploadOverview ? '全站素材网盘' : '我的素材网盘' }}</h2>
+          <h2>素材网盘</h2>
         </div>
       </div>
       <form class="aw-drive__search aw-drive__search--global" @submit.prevent="runUnifiedSearch">
@@ -2522,23 +2520,6 @@ onBeforeUnmount(() => {
 
     <div v-show="!searchActive" class="aw-drive__shell" :class="{ 'has-drawer': detailOpen }">
       <nav class="aw-drive-side" aria-label="网盘导航">
-        <section v-if="canViewUploadOverview" class="aw-drive-side__group">
-          <p class="aw-drive-side__label">
-            <FileDown :size="15" aria-hidden="true" />
-            <span>上传台账</span>
-          </p>
-          <button
-            class="aw-drive-side__item"
-            :class="{ 'is-active': activeMode === 'uploads' }"
-            type="button"
-            @click="openUploadOverview"
-          >
-            <FileDown :size="16" aria-hidden="true" />
-            <span class="aw-drive-side__name">上传总览</span>
-            <span class="aw-chip aw-chip--neutral aw-drive-column__count">{{ uploadOverviewTotal }}</span>
-          </button>
-        </section>
-
         <section class="aw-drive-side__group">
           <p class="aw-drive-side__label">
             <WorkbenchFolderIcon :size="15" variant="star" />

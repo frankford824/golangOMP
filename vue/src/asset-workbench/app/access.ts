@@ -68,10 +68,16 @@ export const assetWorkbenchRouteAccess = {
   },
   '/submissions': {
     label: '上传记录',
-    subtitle: '已并入素材网盘',
+    subtitle: '跳转到上传总览',
     aliases: ['维护区', '维护专区', '上传记录', '我的上传记录'],
     simple: true,
-    requiresAnyCapability: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'],
+    requiresAnyCapability: ['asset.workbench.manage', 'asset.workbench.settlement'],
+  },
+  '/upload-overview': {
+    label: '上传总览',
+    subtitle: '全站上传台账与批量管理',
+    aliases: ['上传台账', '上传记录', '作品总览', '作品台账'],
+    requiresAnyCapability: ['asset.workbench.manage', 'asset.workbench.settlement'],
   },
   '/materials': {
     label: '素材库',

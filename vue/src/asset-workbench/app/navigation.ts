@@ -47,6 +47,7 @@ const DAILY_NAV_DEFS: Array<{ path: string; icon: Component; requires?: readonly
   { path: '/', icon: LayoutDashboard },
   { path: '/upload', icon: FileUp, requires: assetWorkbenchRouteAccess['/upload'].requiresAnyCapability ?? [] },
   { path: '/drive', icon: HardDrive, requires: assetWorkbenchRouteAccess['/drive'].requiresAnyCapability ?? [] },
+  { path: '/upload-overview', icon: ScrollText, requires: assetWorkbenchRouteAccess['/upload-overview'].requiresAnyCapability ?? [] },
   { path: '/settlement', icon: ReceiptText, requires: assetWorkbenchRouteAccess['/settlement'].requiresAnyCapability ?? [], hub: 'settlement' },
 ]
 

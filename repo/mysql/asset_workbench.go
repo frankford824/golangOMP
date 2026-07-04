@@ -2447,6 +2447,28 @@ func (r *assetWorkbenchRepo) ListSubmissionFilesByIDs(ctx context.Context, fileI
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) UpdateSubmissionFileDisplayName(ctx context.Context, tx repo.Tx, fileID int64, displayName string) (*domain.AssetWorkbenchSubmissionFile, error) {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_submission_files
+		SET display_name = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND deleted_at IS NULL`,
+		displayName,
+		fileID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update asset workbench submission file display name: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench file display name rows affected: %w", err)
+	}
+	if affected != 1 {
+		return nil, sql.ErrNoRows
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE id = ?`, fileID)
+	return scanAssetWorkbenchSubmissionFile(row)
+}
+
 func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, tx repo.Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error) {
 	if file == nil {
 		return nil, sql.ErrNoRows

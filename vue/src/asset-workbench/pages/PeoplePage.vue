@@ -48,6 +48,8 @@ const peopleRequest = usePageRequest(
 )
 const loading = peopleRequest.loading
 const error = peopleRequest.error
+const capabilities = computed(() => new Set(peopleRequest.data.value?.bootstrap?.capabilities ?? []))
+const canViewUploadOverview = computed(() => capabilities.value.has('asset.workbench.manage') || capabilities.value.has('asset.workbench.settlement'))
 const hrForm = reactive({
   worker_type: 'parttime',
   job_grade: '',
@@ -199,7 +201,7 @@ async function clearFocusedProfile() {
 }
 
 async function goToPendingSubmissions() {
-  await router.push({ path: '/drive', query: { scope: 'orders' } })
+  await router.push(canViewUploadOverview.value ? { path: '/upload-overview' } : { path: '/drive', query: { scope: 'orders' } })
 }
 
 async function saveHRProfile() {

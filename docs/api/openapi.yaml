@@ -20112,6 +20112,14 @@ paths:
           description: Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD.
           schema: { type: string }
         - in: query
+          name: sort_by
+          description: Sort field for upload ledger views.
+          schema: { type: string, enum: [created_at, owner, creator, directory, category, name, display_name, format, file_type] }
+        - in: query
+          name: sort_dir
+          description: Sort direction.
+          schema: { type: string, enum: [asc, desc] }
+        - in: query
           name: page
           schema: { type: integer, minimum: 1 }
         - in: query
@@ -20725,6 +20733,66 @@ paths:
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/files/{file_id}:
+    patch:
+      summary: Update uploaded work file metadata
+      description: Updates the editable display name for one uploaded work file. The original filename and object key remain unchanged.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: file_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name]
+              properties:
+                display_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 180
+      responses:
+        '200':
+          description: Updated uploaded work file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      submission_id: { type: integer }
+                      submission_item_id: { type: integer }
+                      upload_directory_id: { type: integer, nullable: true }
+                      upload_directory_name: { type: string }
+                      upload_directory_prefix: { type: string }
+                      upload_directory_difficulty_class: { type: string }
+                      upload_batch_id: { type: string }
+                      relative_path: { type: string }
+                      display_name: { type: string }
+                      is_folder_upload: { type: boolean }
+                      original_filename: { type: string }
+                      file_type: { type: string }
+                      mime_type: { type: string }
+                      file_size: { type: integer }
+                      file_hash: { type: string }
+                      preview_status: { type: string }
+                      preview_key: { type: string }
+                      preview_error: { type: string }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: File not found }
   /v1/asset-workbench/files/{file_id}/preview:
     get:
       summary: Get uploaded work file preview metadata

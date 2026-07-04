@@ -84,6 +84,7 @@ func registerAssetWorkbenchRoutes(
 		group.GET("/submissions/:submission_id", access(group, http.MethodGet, "/submissions/:submission_id", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.GetSubmissionDetail)
 		group.POST("/submissions", access(group, http.MethodPost, "/submissions", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.CreateSubmission)
 		group.POST("/submissions/:submission_id/void", access(group, http.MethodPost, "/submissions/:submission_id/void", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.VoidSubmission)
+		group.PATCH("/files/:file_id", access(group, http.MethodPatch, "/files/:file_id", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.UpdateSubmissionFile)
 		group.GET("/files/:file_id/archive", access(group, http.MethodGet, "/files/:file_id/archive", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.BrowseArchiveFile)
 		group.GET("/files/:file_id/archive/entry", access(group, http.MethodGet, "/files/:file_id/archive/entry", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.ServeArchiveEntry)
 		group.GET("/files/:file_id/preview", access(group, http.MethodGet, "/files/:file_id/preview", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.GetFilePreview)

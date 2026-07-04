@@ -178,6 +178,30 @@ func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.Ass
 	return item, nil
 }
 
+func driveListFileOrderBy(filter repo.AssetWorkbenchDriveFilter, orderNo string) string {
+	if orderNo != "" {
+		return `f.sort_order ASC, f.id ASC`
+	}
+	dir := "DESC"
+	if strings.EqualFold(strings.TrimSpace(filter.SortDir), "asc") {
+		dir = "ASC"
+	}
+	switch strings.TrimSpace(filter.SortBy) {
+	case "owner", "creator":
+		return `owner_name ` + dir + `, f.created_at DESC, f.id DESC`
+	case "directory", "category":
+		return `upload_directory_name ` + dir + `, f.created_at DESC, f.id DESC`
+	case "name", "display_name":
+		return `display_name ` + dir + `, f.created_at DESC, f.id DESC`
+	case "format", "file_type":
+		return `f.file_type ` + dir + `, f.mime_type ` + dir + `, f.created_at DESC, f.id DESC`
+	case "created_at", "":
+		return `f.created_at ` + dir + `, f.id ` + dir
+	default:
+		return `f.created_at DESC, f.id DESC`
+	}
+}
+
 func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error) {
 	ownerSQL, ownerArgs := driveOwnerClause(filter)
 	dirSQL, dirArgs := driveDirectoryClause(filter)
@@ -207,10 +231,7 @@ func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.Ass
 		where += ` AND f.created_at <= ?`
 		args = append(args, *filter.CreatedTo)
 	}
-	orderBy := `f.created_at DESC, f.id DESC`
-	if orderNo != "" {
-		orderBy = `f.sort_order ASC, f.id ASC`
-	}
+	orderBy := driveListFileOrderBy(filter, orderNo)
 
 	base := `FROM asset_workbench_submission_files f
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL

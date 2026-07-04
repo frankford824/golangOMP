@@ -77,7 +77,7 @@ func (s *Service) ListDriveOrders(ctx context.Context, actor domain.RequestActor
 	return items, nil
 }
 
-func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, keyword string, ownerKeyword string, createdFrom *time.Time, createdTo *time.Time, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
+func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, keyword string, ownerKeyword string, createdFrom *time.Time, createdTo *time.Time, sortBy string, sortDir string, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
@@ -91,6 +91,8 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 		OwnerKeyword:      strings.TrimSpace(ownerKeyword),
 		CreatedFrom:       createdFrom,
 		CreatedTo:         createdTo,
+		SortBy:            strings.TrimSpace(sortBy),
+		SortDir:           strings.TrimSpace(sortDir),
 		Page:              page,
 		PageSize:          pageSize,
 	})

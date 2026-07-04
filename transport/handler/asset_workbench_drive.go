@@ -92,7 +92,7 @@ func (h *AssetWorkbenchHandler) DriveListFiles(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
-	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, dirID, unassigned, c.Query("order_no"), c.Query("q"), c.Query("owner"), createdFrom, createdTo, page, pageSize)
+	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, dirID, unassigned, c.Query("order_no"), c.Query("q"), c.Query("owner"), createdFrom, createdTo, c.Query("sort_by"), c.Query("sort_dir"), page, pageSize)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -142,6 +142,31 @@ func (h *AssetWorkbenchHandler) DriveLocate(c *gin.Context) {
 		return
 	}
 	result, appErr := h.svc.LocateDriveFile(c.Request.Context(), actor, fileID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) UpdateSubmissionFile(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	fileID, err := strconv.ParseInt(strings.TrimSpace(c.Param("file_id")), 10, 64)
+	if err != nil || fileID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid file_id", nil))
+		return
+	}
+	var req struct {
+		DisplayName string `json:"display_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateSubmissionFileDisplayName(c.Request.Context(), actor, fileID, req.DisplayName)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

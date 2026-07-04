@@ -55,6 +55,8 @@ const pendingSubmissionCount = computed(() => submissions.value.filter((item) =>
 const netAmount = computed(() => settlement.value?.totals?.net_amount ?? 0)
 const pagesCount = computed(() => settlement.value?.totals?.page_count ?? 0)
 const recentSubmissions = computed(() => submissions.value.slice(0, 8))
+const capabilities = computed(() => new Set(bootstrap.value?.capabilities ?? []))
+const canViewUploadOverview = computed(() => capabilities.value.has('asset.workbench.manage') || capabilities.value.has('asset.workbench.settlement'))
 const ledgerSegments = computed(() => [
   { key: 'submitted', label: '成品单数', value: formatInt(submittedCount.value), hint: '本月已提交计件单', expandable: true },
   { key: 'pending', label: '待处理', value: formatInt(pendingSubmissionCount.value), hint: '待质检 / 待修正', expandable: true },
@@ -95,9 +97,9 @@ function gridValue(key: string, value: unknown) {
 
 function submissionDriveTarget(submission: SubmissionRow) {
   return {
-    path: '/drive',
+    path: canViewUploadOverview.value ? '/upload-overview' : '/drive',
     query: {
-      scope: 'orders',
+      ...(canViewUploadOverview.value ? {} : { scope: 'orders' }),
       q: submission.submission_no,
     },
   }
@@ -203,7 +205,13 @@ onMounted(() => {
         <section class="aw-panel">
           <div class="aw-panel__head">
             <h3>最近提交</h3>
-            <RouterLink v-if="recentSubmissions.length" class="aw-link-button" :to="{ path: '/drive', query: { scope: 'orders' } }">查看全部</RouterLink>
+            <RouterLink
+              v-if="recentSubmissions.length"
+              class="aw-link-button"
+              :to="canViewUploadOverview ? '/upload-overview' : { path: '/drive', query: { scope: 'orders' } }"
+            >
+              查看全部
+            </RouterLink>
           </div>
           <div v-if="recentSubmissions.length" class="aw-contact-sheet">
             <RouterLink

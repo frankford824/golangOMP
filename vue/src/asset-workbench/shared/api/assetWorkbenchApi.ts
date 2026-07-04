@@ -256,6 +256,10 @@ export interface SubmissionFileRow {
   upload_directory_name?: string
   upload_directory_prefix?: string
   upload_directory_difficulty_class?: string
+  upload_batch_id?: string
+  relative_path?: string
+  display_name?: string
+  is_folder_upload?: boolean
   original_filename: string
   file_type: string
   mime_type: string
@@ -1620,6 +1624,8 @@ export const assetWorkbenchApi = {
       owner?: string
       created_from?: string
       created_to?: string
+      sort_by?: string
+      sort_dir?: string
       page?: number
       page_size?: number
     },
@@ -1631,12 +1637,19 @@ export const assetWorkbenchApi = {
     if (params.owner) query.owner = params.owner
     if (params.created_from) query.created_from = params.created_from
     if (params.created_to) query.created_to = params.created_to
+    if (params.sort_by) query.sort_by = params.sort_by
+    if (params.sort_dir) query.sort_dir = params.sort_dir
     if (params.unassigned) query.unassigned = 1
     else if (params.dir_id) query.dir_id = params.dir_id
     if (params.page) query.page = params.page
     if (params.page_size) query.page_size = params.page_size
     const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/files', { params: query, signal })
     return unwrapPaginated(res.data)
+  },
+
+  async updateSubmissionFile(fileId: number, payload: { display_name: string }, signal?: AbortSignal): Promise<SubmissionFileRow> {
+    const res = await http.patch<ApiEnvelope<SubmissionFileRow>>(`/v1/asset-workbench/files/${fileId}`, payload, { signal })
+    return unwrap(res.data)
   },
 
   async driveFolder(

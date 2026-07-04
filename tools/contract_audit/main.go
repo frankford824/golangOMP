@@ -132,6 +132,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/asset-workbench/files/:file_id/archive/entry"):              "legitimate-binary-stream-response",
 	knownGapKey("GET", "/v1/asset-workbench/files/:file_id/download"):                   "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/files/:file_id/preview"):                    "asset-workbench-mounted-route-contract-pending",
+	knownGapKey("PATCH", "/v1/asset-workbench/files/:file_id"):                          "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/groups"):                                    "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/groups/:group_id/members"):                  "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/materials/browse"):                          "asset-workbench-mounted-route-contract-pending",

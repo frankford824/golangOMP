@@ -3839,6 +3839,44 @@ func (s *Service) deleteSubmissionFile(ctx context.Context, actor domain.Request
 	return nil
 }
 
+func (s *Service) UpdateSubmissionFileDisplayName(ctx context.Context, actor domain.RequestActor, fileID int64, displayName string) (*domain.AssetWorkbenchSubmissionFile, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if fileID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_id is required.", nil)
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers can edit uploaded work names.", nil)
+	}
+	nextName := strings.TrimSpace(displayName)
+	if nextName == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "display_name is required.", nil)
+	}
+	if len([]rune(nextName)) > 180 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "display_name is too long.", map[string]interface{}{"max_length": 180})
+	}
+	file, err := s.repo.GetSubmissionFile(ctx, fileID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Submission file not found.", "Failed to load submission file.")
+	}
+	var updated *domain.AssetWorkbenchSubmissionFile
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		updated, err = s.repo.UpdateSubmissionFileDisplayName(ctx, tx, fileID, nextName)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileRenamed, domain.AssetWorkbenchEntitySubmissionFile, &fileID, file, updated, "rename uploaded work")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update uploaded work name.", err.Error())
+	}
+	return updated, nil
+}
+
 func (s *Service) GetFilePreview(ctx context.Context, actor domain.RequestActor, fileID int64) (*FilePreviewMeta, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err

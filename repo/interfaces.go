@@ -411,6 +411,8 @@ type AssetWorkbenchDriveFilter struct {
 	OwnerKeyword      string
 	CreatedFrom       *time.Time
 	CreatedTo         *time.Time
+	SortBy            string
+	SortDir           string
 	Page              int
 	PageSize          int
 }
@@ -579,6 +581,7 @@ type AssetWorkbenchRepo interface {
 	ListSubmissionFiles(ctx context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error)
 	ListSubmissionFilesByIDs(ctx context.Context, fileIDs []int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
+	UpdateSubmissionFileDisplayName(ctx context.Context, tx Tx, fileID int64, displayName string) (*domain.AssetWorkbenchSubmissionFile, error)
 	UpdateSubmissionFileLocation(ctx context.Context, tx Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error)
 	DeleteSubmissionFile(ctx context.Context, tx Tx, fileID int64, actorID int64, reason string, at time.Time) error
 

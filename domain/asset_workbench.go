@@ -158,6 +158,7 @@ const (
 	AssetWorkbenchEventItemVoided                  = "item.voided"
 	AssetWorkbenchEventItemRepriced                = "item.repriced"
 	AssetWorkbenchEventFileMoved                   = "file.moved"
+	AssetWorkbenchEventFileRenamed                 = "file.renamed"
 	AssetWorkbenchEventFileDeleted                 = "file.deleted"
 	AssetWorkbenchEventGroupUpserted               = "group.upserted"
 	AssetWorkbenchEventTemplateUpserted            = "template.upserted"

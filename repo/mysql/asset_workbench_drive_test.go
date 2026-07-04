@@ -153,6 +153,98 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 	}
 }
 
+func TestDriveListFilesAppliesUploadOverviewSort(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		if expectedSQL == "drive-list-files-select" && !strings.Contains(actualSQL, "ORDER BY owner_name ASC, f.created_at DESC, f.id DESC") {
+			return fmt.Errorf("DriveListFiles query missing owner sort:\n%s", actualSQL)
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("drive-list-files-count").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectQuery("drive-list-files-select").
+		WithArgs(50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "submission_id", "submission_item_id", "submission_no", "owner_user_id",
+			"owner_name", "owner_username",
+			"upload_directory_id", "upload_directory_name", "difficulty_class", "order_no",
+			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
+			"file_type", "mime_type", "file_size", "preview_status",
+			"qc_status", "pricing_status", "settlement_status", "page_count",
+			"gross_amount", "business_month", "created_at",
+		}))
+
+	workbenchRepo := NewAssetWorkbenchRepo(New(db))
+	_, _, err = workbenchRepo.DriveListFiles(context.Background(), repo.AssetWorkbenchDriveFilter{
+		SortBy:   "owner",
+		SortDir:  "asc",
+		Page:     1,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatalf("DriveListFiles() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestUpdateSubmissionFileDisplayName(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 7, 3, 8, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE asset_workbench_submission_files").
+		WithArgs("夏季主视觉", int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT id, submission_id, submission_item_id").
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "submission_id", "submission_item_id", "upload_session_id", "owner_user_id",
+			"upload_directory_id", "upload_directory_name", "upload_directory_prefix", "upload_directory_difficulty_class",
+			"upload_batch_id", "relative_path", "display_name", "is_folder_upload", "object_key", "preview_key",
+			"preview_status", "preview_attempts", "preview_error", "preview_next_retry_at", "preview_worker_id", "preview_lease_expires_at",
+			"original_filename", "file_ext", "file_type", "mime_type", "file_size", "file_hash", "sort_order", "created_at", "updated_at",
+			"deleted_at", "deleted_by", "delete_reason",
+		}).AddRow(
+			int64(42), int64(11), int64(21), nil, int64(7),
+			int64(3), "挂布", "uploads/gb", "A",
+			"batch-1", "folder/source.psd", "夏季主视觉", true, "object-key", "preview-key",
+			"ready", 0, "", nil, "", nil,
+			"source.psd", ".psd", "psd", "image/vnd.adobe.photoshop", int64(1024), "hash", 1, now, now,
+			nil, nil, "",
+		))
+	mock.ExpectCommit()
+
+	workbenchRepo := NewAssetWorkbenchRepo(New(db))
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	updated, err := workbenchRepo.UpdateSubmissionFileDisplayName(context.Background(), &MySQLTx{tx: tx}, 42, "夏季主视觉")
+	if err != nil {
+		t.Fatalf("UpdateSubmissionFileDisplayName() error = %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+	if updated.DisplayName != "夏季主视觉" || updated.OriginalFilename != "source.psd" {
+		t.Fatalf("updated = %+v", updated)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestBuildDriveSearchBaseUsesFullTextWhenPreferred(t *testing.T) {
 	base, args := buildDriveSearchBase(repo.AssetWorkbenchDriveFilter{Keyword: "海报"}, true)
 
