@@ -34,11 +34,24 @@ done
 die() { echo "[publish-front] ERROR: $*" >&2; exit 1; }
 step() { echo "[publish-front] $*"; }
 
-if [[ "$SKIP_CHECKS" != "true" ]]; then
-  step "Local check: dist/front ..."
+guard_main_artifact() {
   [[ -d "$FRONT" ]] || die "Missing directory: $FRONT"
   [[ -f "$FRONT/index.html" ]] || die "Missing file: $FRONT/index.html"
   [[ -d "$FRONT/assets" ]] || die "Missing directory: $FRONT/assets"
+  [[ ! -f "$FRONT/asset.html" ]] || die "dist/front contains asset.html; refusing to publish an asset-workbench bundle to yongbo.cloud"
+  if ! grep -q 'id="app"' "$FRONT/index.html"; then
+    die "dist/front/index.html does not contain the main-ops mount node"
+  fi
+  if grep -qE 'asset-workbench-app|<title>[[:space:]]*资产工作台[[:space:]]*</title>|src="/assets/asset-[^"]+\.js"' "$FRONT/index.html"; then
+    die "dist/front/index.html looks like an asset-workbench entry; rebuild the main frontend before publishing yongbo.cloud"
+  fi
+}
+
+step "Artifact identity guard: main-ops frontend ..."
+guard_main_artifact
+
+if [[ "$SKIP_CHECKS" != "true" ]]; then
+  step "Local check: dist/front ..."
   if grep -qE 'localhost|127\.0\.0\.1' "$FRONT/index.html"; then
     die "index.html contains localhost or 127.0.0.1"
   fi
@@ -86,6 +99,10 @@ if command -v rsync >/dev/null 2>&1; then
 else
   scp -r "$FRONT"/* "$SSH_HOST:$STAGING/"
 fi
+
+step "Remote artifact guard: main-ops staging ..."
+ssh "$SSH_HOST" "test -f \"$STAGING/index.html\" && test -d \"$STAGING/assets\" && test ! -f \"$STAGING/asset.html\" && grep -q 'id=\"app\"' \"$STAGING/index.html\" && ! grep -q 'asset-workbench-app' \"$STAGING/index.html\" && ! grep -q '<title>资产工作台</title>' \"$STAGING/index.html\" && ! grep -Eq 'src=\"/assets/asset-[^\"]+\\.js\"' \"$STAGING/index.html\"" \
+  || die "staged artifact failed the main-ops identity guard"
 
 step "Sync to web root, chmod, nginx reload"
 ssh "$SSH_HOST" "rsync -a --delete \"$STAGING\"/ \"$REMOTE_WEB\"/ && chmod -R a+rX \"$REMOTE_WEB\" && nginx -t && systemctl reload nginx"

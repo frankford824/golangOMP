@@ -35,11 +35,27 @@ done
 die() { echo "[publish-asset-front] ERROR: $*" >&2; exit 1; }
 step() { echo "[publish-asset-front] $*"; }
 
-if [[ "$SKIP_CHECKS" != "true" ]]; then
-  step "Local check: vue/dist-asset ..."
+guard_asset_artifact() {
   [[ -d "$FRONT" ]] || die "Missing directory: $FRONT"
   [[ -f "$FRONT/asset.html" ]] || die "Missing file: $FRONT/asset.html"
   [[ -d "$FRONT/assets" ]] || die "Missing directory: $FRONT/assets"
+  [[ ! -f "$FRONT/index.html" ]] || die "vue/dist-asset contains index.html; refusing to publish a main-ops shaped bundle to assets.yongbo.cloud"
+  if ! grep -q 'asset-workbench-app' "$FRONT/asset.html"; then
+    die "vue/dist-asset/asset.html does not contain the asset-workbench mount node"
+  fi
+  if ! grep -qE 'src="/assets/asset-[^"]+\.js"' "$FRONT/asset.html"; then
+    die "vue/dist-asset/asset.html does not reference an asset-workbench entry bundle"
+  fi
+  if grep -qE '<title>[[:space:]]*永箔运营管理系统[[:space:]]*</title>|id="app"' "$FRONT/asset.html"; then
+    die "vue/dist-asset/asset.html looks like the main-ops entry; rebuild asset-workbench before publishing"
+  fi
+}
+
+step "Artifact identity guard: asset-workbench frontend ..."
+guard_asset_artifact
+
+if [[ "$SKIP_CHECKS" != "true" ]]; then
+  step "Local check: vue/dist-asset ..."
   if grep -qE 'localhost|127\.0\.0\.1' "$FRONT/asset.html"; then
     die "asset.html contains localhost or 127.0.0.1"
   fi
@@ -69,6 +85,10 @@ if command -v rsync >/dev/null 2>&1; then
 else
   scp -r "$FRONT"/* "$SSH_HOST:$STAGING/"
 fi
+
+step "Remote artifact guard: asset-workbench staging ..."
+ssh "$SSH_HOST" "test -f \"$STAGING/asset.html\" && test -d \"$STAGING/assets\" && test ! -f \"$STAGING/index.html\" && grep -q 'asset-workbench-app' \"$STAGING/asset.html\" && grep -Eq 'src=\"/assets/asset-[^\"]+\\.js\"' \"$STAGING/asset.html\" && ! grep -q '<title>永箔运营管理系统</title>' \"$STAGING/asset.html\" && ! grep -q 'id=\"app\"' \"$STAGING/asset.html\"" \
+  || die "staged artifact failed the asset-workbench identity guard"
 
 step "Sync to web root, chmod, nginx reload"
 ssh "$SSH_HOST" "rsync -a --delete \"$STAGING\"/ \"$REMOTE_WEB\"/ && chmod -R a+rX \"$REMOTE_WEB\" && nginx -t && systemctl reload nginx"
