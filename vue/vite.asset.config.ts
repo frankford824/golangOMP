@@ -68,7 +68,9 @@ export default defineConfig({
   build: {
     outDir: 'dist-asset',
     emptyOutDir: true,
-    chunkSizeWarningLimit: 1100,
+    modulePreload: false,
+    // Univer formula/render engines are sheet-mode lazy chunks; keep the warning budget tight to catch further growth.
+    chunkSizeWarningLimit: 5300,
     sourcemap: false,
     rolldownOptions: {
       input: 'asset.html',

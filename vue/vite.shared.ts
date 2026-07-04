@@ -16,19 +16,59 @@ export function sharedPlugins() {
 }
 
 export function sharedManualChunks(id: string): string | undefined {
-  if (!id.includes('node_modules')) {
+  const normalizedId = id.replace(/\\/g, '/')
+  if (normalizedId.includes('vite/preload-helper') || normalizedId.includes('importAnalysisBuild')) {
+    return 'asset-runtime'
+  }
+  if (!normalizedId.includes('node_modules')) {
     return undefined
   }
-  if (id.includes('echarts')) {
+  if (normalizedId.includes('@formatjs/intl-segmenter')) {
+    return 'univer-intl'
+  }
+  if (normalizedId.includes('@univerjs/core') || normalizedId.includes('@wendellhu')) {
+    return 'univer-core'
+  }
+  if (normalizedId.includes('@univerjs/preset-sheets-core')) {
+    return 'univer-sheets-core'
+  }
+  if (normalizedId.includes('@univerjs/engine-formula') || normalizedId.includes('@univerjs/sheets-formula')) {
+    return 'univer-formula'
+  }
+  if (normalizedId.includes('@univerjs/engine-render') || normalizedId.includes('@univerjs/design')) {
+    return 'univer-render'
+  }
+  if (
+    normalizedId.includes('@univerjs/ui') ||
+    normalizedId.includes('@univerjs/docs') ||
+    normalizedId.includes('@univerjs/sheets-ui') ||
+    normalizedId.includes('@univerjs/sheets-numfmt-ui')
+  ) {
+    return 'univer-ui'
+  }
+  if (normalizedId.includes('@univerjs/sheets') || normalizedId.includes('@univerjs/sheets-numfmt')) {
+    return 'univer-sheets'
+  }
+  if (normalizedId.includes('@univerjs') || normalizedId.includes('node_modules/rxjs')) {
+    return 'univer-runtime'
+  }
+  if (
+    normalizedId.includes('node_modules/react') ||
+    normalizedId.includes('node_modules/react-dom') ||
+    normalizedId.includes('node_modules/scheduler')
+  ) {
+    return 'react-runtime'
+  }
+  if (normalizedId.includes('echarts')) {
     return 'echarts'
   }
-  if (id.includes('exceljs') || id.includes('jszip')) {
+  if (normalizedId.includes('exceljs') || normalizedId.includes('jszip')) {
     return 'office-export'
   }
-  if (id.includes('naive-ui') || id.includes('@css-render')) {
+  if (normalizedId.includes('naive-ui') || normalizedId.includes('@css-render')) {
     return 'ui-vendor'
   }
-  if (id.includes('vue') || id.includes('pinia')) {
+  if (normalizedId.includes('vue') || normalizedId.includes('pinia')) {
     return 'vue-vendor'
   }
   return 'vendor'

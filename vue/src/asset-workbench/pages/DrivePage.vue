@@ -11,6 +11,7 @@ import {
   HardDrive,
   ImageDown,
   Pencil,
+  Table2,
   Upload,
 } from 'lucide-vue-next'
 
@@ -37,6 +38,12 @@ import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
+import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
+import type {
+  WorkbenchSpreadsheetActionPayload,
+  WorkbenchSpreadsheetSource,
+  WorkbenchSpreadsheetValidation,
+} from '@aw/shared/spreadsheet/types'
 import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
 
 type DriveMode = 'directories' | 'operational'
@@ -84,6 +91,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
 })
 
 const activeMode = ref<DriveMode>('directories')
+const driveSpreadsheetOpen = ref(false)
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
 const canMaintainItems = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
@@ -328,6 +336,132 @@ const visibleMaterialFiles = computed(() =>
   materialQuery.value.trim()
     ? materialItems.value
     : materialItems.value.filter((asset) => materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
+)
+const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
+  activeMode.value === 'operational'
+    ? {
+        id: 'asset-drive-material-spreadsheet',
+        revision: `materials:${selectedMaterialFolderPath.value}:${visibleMaterialFiles.value.map((asset) => materialAssetKey(asset)).join('|')}`,
+        mode: 'drive',
+        title: '运营素材清单模式',
+        description: '用于批量核对素材标题、目录、SKU 和来源；预览、发布和下载仍在右侧详情与原操作栏完成。',
+        readonly: true,
+        actions: [
+          { key: 'refresh_materials', label: '刷新素材', tone: 'neutral', disabled: materialLoading.value },
+        ],
+        sheets: [
+          {
+            id: 'materials',
+            name: '运营素材',
+            rowKey: 'row_id',
+            readonly: true,
+            freezeHeader: true,
+            columns: [
+              { key: 'row_id', label: 'ID', width: 160, readonly: true },
+              { key: 'title', label: '标题', width: 260, readonly: true },
+              { key: 'directory', label: '目录', width: 220, readonly: true },
+              { key: 'sku', label: 'SKU', width: 140, readonly: true },
+              { key: 'source', label: '来源', width: 110, kind: 'status', readonly: true },
+              { key: 'filename', label: '文件名', width: 240, readonly: true },
+              { key: 'size', label: '大小', width: 110, readonly: true },
+            ],
+            rows: visibleMaterialFiles.value.map((asset) => ({
+              row_id: materialAssetKey(asset),
+              title: materialDisplayTitle(asset),
+              directory: materialDirectoryPath(asset) || '根目录',
+              sku: asset.scope_sku_code || asset.sku_code || asset.primary_sku_code || '',
+              source: sourceLabelOf(asset),
+              filename: asset.original_filename || '',
+              size: '—',
+            })),
+            validations: materialSpreadsheetValidations.value,
+          },
+        ],
+      }
+    : {
+        id: 'asset-drive-file-spreadsheet',
+        revision: `files:${selectedDir.value?.key ?? 'home'}:${driveFolderPath.value}:${driveFolders.value.map((folder) => folder.path).join('|')}:${files.value.map((file) => file.id).join('|')}`,
+        mode: 'drive',
+        title: '上传素材清单模式',
+        description: '用于批量核对当前目录文件、文件夹、相对路径、质检和计件状态；移动、删除和下载仍走原 Drive 操作。',
+        readonly: true,
+        actions: [
+          { key: 'select_all_files', label: '全选当前文件', tone: 'neutral', disabled: !selectedDir.value || files.value.length === 0 },
+          { key: 'download_selected', label: '下载所选', tone: 'success', disabled: selectedFileActionIds.value.length === 0 },
+          { key: 'open_drive_upload', label: '上传到此处', tone: 'success', disabled: !selectedDir.value },
+        ],
+        sheets: [
+          {
+            id: 'files',
+            name: selectedDir.value?.name ? `${selectedDir.value.name} 清单` : '目录清单',
+            rowKey: 'row_id',
+            readonly: true,
+            freezeHeader: true,
+            columns: [
+              { key: 'row_id', label: 'ID', width: 132, readonly: true },
+              { key: 'item_type', label: '类型', width: 88, kind: 'status', readonly: true },
+              { key: 'name', label: '名称', width: 260, readonly: true },
+              { key: 'relative_path', label: '相对路径', width: 220, readonly: true },
+              { key: 'directory', label: '上传目录', width: 160, readonly: true },
+              { key: 'format', label: '格式', width: 96, readonly: true },
+              { key: 'business_month', label: '结算月', width: 104, readonly: true },
+              { key: 'difficulty_class', label: '难度', width: 96, readonly: true },
+              { key: 'qc_status', label: '质检', width: 96, kind: 'status', readonly: true },
+              { key: 'pricing_status', label: '计件', width: 96, kind: 'status', readonly: true },
+              { key: 'size', label: '大小', width: 110, readonly: true },
+              { key: 'created_at', label: '上传时间', width: 150, readonly: true },
+            ],
+            rows: [
+              ...driveFolders.value.map((folder) => ({
+                row_id: `folder:${folder.path}`,
+                item_type: '文件夹',
+                name: folder.name,
+                relative_path: folder.path,
+                directory: selectedDir.value?.name || '',
+                format: '',
+                business_month: '',
+                difficulty_class: '',
+                qc_status: '',
+                pricing_status: '',
+                size: `${folder.file_count} 个文件`,
+                created_at: '',
+              })),
+              ...files.value.map((file) => ({
+                row_id: `file:${file.id}`,
+                item_type: '文件',
+                name: filePathLabel(file),
+                relative_path: file.relative_path || '',
+                directory: file.upload_directory_name || selectedDir.value?.name || '',
+                format: fileFormatLabel(file),
+                business_month: file.business_month || '',
+                difficulty_class: file.difficulty_class || '',
+                qc_status: statusText(file.qc_status),
+                pricing_status: statusText(file.pricing_status),
+                size: formatSize(file.file_size),
+                created_at: formatDateTime(file.created_at),
+              })),
+            ],
+            validations: fileSpreadsheetValidations.value,
+          },
+        ],
+      },
+)
+const fileSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]>(() =>
+  files.value.flatMap((file) => {
+    const validations: WorkbenchSpreadsheetValidation[] = []
+    if (file.qc_status === 'needs_fix') {
+      validations.push({ rowKey: `file:${file.id}`, columnKey: 'qc_status', tone: 'warn', message: `${fileDisplayName(file)} 质检标记为需修` })
+    }
+    if (!file.relative_path && driveFolderPath.value) {
+      validations.push({ rowKey: `file:${file.id}`, columnKey: 'relative_path', tone: 'info', message: `${fileDisplayName(file)} 位于当前虚拟目录根部` })
+    }
+    return validations
+  }),
+)
+const materialSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]>(() =>
+  visibleMaterialFiles.value
+    .filter((asset) => !(asset.scope_sku_code || asset.sku_code || asset.primary_sku_code))
+    .map((asset) => ({ rowKey: materialAssetKey(asset), columnKey: 'sku', tone: 'warn', message: `${materialDisplayTitle(asset)} 缺少 SKU` })),
 )
 const materialCanLoadMore = computed(() =>
   canManageDrive.value &&
@@ -1376,6 +1510,24 @@ function openUpload(files: File[] = []) {
   uploadOpen.value = true
 }
 
+async function handleDriveSpreadsheetAction(payload: WorkbenchSpreadsheetActionPayload) {
+  if (payload.action.key === 'select_all_files') {
+    selectAllFilesInDirectory()
+    return
+  }
+  if (payload.action.key === 'download_selected') {
+    await downloadSelectedFiles()
+    return
+  }
+  if (payload.action.key === 'open_drive_upload') {
+    openUpload()
+    return
+  }
+  if (payload.action.key === 'refresh_materials') {
+    await loadMaterials()
+  }
+}
+
 function filesFromDrop(event: DragEvent) {
   return Array.from(event.dataTransfer?.files ?? []).filter((file) => file.size > 0)
 }
@@ -2421,6 +2573,10 @@ onBeforeUnmount(() => {
           <div class="aw-drive-main__tools">
             <template v-if="activeMode === 'directories'">
               <button v-if="selectedDir && files.length" class="aw-secondary-button" type="button" @click="selectAllFilesInDirectory">全选</button>
+              <button class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
+                <Table2 :size="16" aria-hidden="true" />
+                {{ driveSpreadsheetOpen ? '收起清单模式' : '清单模式' }}
+              </button>
               <button
                 class="aw-primary-button"
                 type="button"
@@ -2445,6 +2601,10 @@ onBeforeUnmount(() => {
                 </button>
                 <button class="aw-drive__search-submit" type="submit">搜索</button>
               </form>
+              <button class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
+                <Table2 :size="16" aria-hidden="true" />
+                {{ driveSpreadsheetOpen ? '收起清单模式' : '清单模式' }}
+              </button>
             </template>
           </div>
         </div>
@@ -2471,6 +2631,14 @@ onBeforeUnmount(() => {
           </template>
           <button class="aw-grid-button" type="button" @click="clearSelection">取消多选</button>
         </div>
+
+        <SpreadsheetWorkbench
+          v-if="driveSpreadsheetOpen"
+          :source="driveSpreadsheetSource"
+          :height="460"
+          @close="driveSpreadsheetOpen = false"
+          @action="handleDriveSpreadsheetAction"
+        />
 
         <div class="aw-drive-main__content">
           <template v-if="activeMode === 'directories'">

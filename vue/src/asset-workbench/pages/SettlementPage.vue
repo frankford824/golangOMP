@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Download } from 'lucide-vue-next'
+import { Download, Table2 } from 'lucide-vue-next'
 
 import {
   assetWorkbenchApi,
@@ -29,6 +29,14 @@ import {
   supplementStatusMeta,
 } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
+import { buildImportReviewSource, workbookReviewRowsToFiles } from '@aw/shared/spreadsheet/excelReview'
+import type {
+  WorkbenchSpreadsheetActionPayload,
+  WorkbenchSpreadsheetColumn,
+  WorkbenchSpreadsheetSource,
+  WorkbenchSpreadsheetValidation,
+} from '@aw/shared/spreadsheet/types'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 interface GridColumn {
@@ -76,6 +84,11 @@ const activeSettlementSection = ref<SettlementSectionKey>('preview')
 const notice = ref('')
 const errorInputRef = ref<HTMLInputElement | null>(null)
 const supplementInputRef = ref<HTMLInputElement | null>(null)
+const settlementSpreadsheetOpen = ref(false)
+const importReviewSource = ref<WorkbenchSpreadsheetSource | null>(null)
+const importReviewLoading = ref(false)
+const pendingImportKind = ref<'error-deduction' | 'supplement' | ''>('')
+const importReviewRevision = ref(0)
 const settlementRequest = usePageRequest(
   async () => {
     const [previewResult, batchResult, supplementResult, permissionResult, difficultyResult] = await Promise.all([
@@ -242,6 +255,60 @@ const supplementGridColumns = computed<GridColumn[]>(() => [
   { key: 'gross_amount', label: '补录金额', width: 112, align: 'right' },
   { key: 'action', label: '动作', width: 120, align: 'center' },
 ])
+const settlementSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
+  id: 'asset-settlement-spreadsheet',
+  revision: `${month.value}:${payrollRows.value.length}:${batches.value.length}:${supplements.value.length}:${supplementPermissions.value.length}`,
+  mode: 'settlement',
+  title: `${month.value} 结算表格工作台`,
+  description: '用于集中核对工资条、批次和补录记录。这里不替代批次确认、删除、调整等原页面动作。',
+  readonly: true,
+  actions: [
+    { key: 'refresh_settlement', label: '刷新预览', tone: 'neutral' },
+    { key: 'export_settlement', label: '导出工资条', tone: 'money', disabled: exporting.value || (!preview.value && !selectedBatch.value) },
+    { key: 'open_error_import', label: '导入质检扣款', tone: 'neutral' },
+    { key: 'open_supplement_import', label: '导入补录', tone: 'neutral' },
+  ],
+  sheets: [
+    {
+      id: 'payroll',
+      name: '工资条',
+      rowKey: 'grid_id',
+      readonly: true,
+      freezeHeader: true,
+      columns: toSpreadsheetColumns(payrollGridColumns.value),
+      rows: payrollGridRows.value,
+    },
+    {
+      id: 'batches',
+      name: '批次',
+      rowKey: 'id',
+      readonly: true,
+      freezeHeader: true,
+      columns: toSpreadsheetColumns(batchGridColumns.value.filter((column) => column.key !== 'actions')),
+      rows: batchGridRows.value,
+    },
+    {
+      id: 'supplements',
+      name: '补录',
+      rowKey: 'id',
+      readonly: true,
+      freezeHeader: true,
+      columns: toSpreadsheetColumns(supplementGridColumns.value.filter((column) => column.key !== 'action')),
+      rows: supplementGridRows.value,
+      validations: supplementSpreadsheetValidations.value,
+    },
+  ],
+}))
+const supplementSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]>(() =>
+  supplementRowsWithLabels.value
+    .filter((row) => row.duplicate_hint_json?.has_duplicates)
+    .map((row) => ({
+      rowKey: row.id,
+      columnKey: 'duplicate_label',
+      tone: 'warn',
+      message: `${row.order_no} 存在重复提示，导入或确认前需要复核。`,
+    })),
+)
 
 function payrollRowLabel(row: SettlementPayrollRow) {
   return row.row_type === 'supplement_piecework' ? '补录计件工资' : '日常计件工资'
@@ -260,6 +327,17 @@ function toBatchGridRow(row: SettlementBatchRow): BatchGridRow {
     ...row,
     status_label: batchStatusMeta(row.status).label,
   }
+}
+
+function toSpreadsheetColumns(columns: GridColumn[]): WorkbenchSpreadsheetColumn[] {
+  return columns.map((column) => ({
+    key: column.key,
+    label: column.label,
+    width: column.width,
+    align: column.align,
+    readonly: true,
+    kind: isMoneyColumn(column.key) ? 'money' : intColumns.has(column.key) ? 'number' : column.key.includes('status') ? 'status' : 'text',
+  }))
 }
 
 function toBatchItemGridRow(row: SettlementBatchDetail['items'][number]): BatchItemGridRow {
@@ -425,14 +503,24 @@ async function handleErrorImport(event: Event) {
   const file = target.files?.[0]
   target.value = ''
   if (!file) return
+  await prepareImportReview('error-deduction', [file])
+}
+
+async function prepareImportReview(kind: 'error-deduction' | 'supplement', files: File[]) {
+  if (!files.length) return
   error.value = ''
   notice.value = ''
+  importReviewLoading.value = true
   try {
-    const batch = await assetWorkbenchApi.importErrorExcel(month.value, file)
-    notice.value = `质检出错 Excel 已导入：匹配 ${batch.matched_rows} 行，未匹配 ${batch.unmatched_rows} 行，多匹配 ${batch.ambiguous_rows} 行`
-    await loadSettlement({ keepNotice: true })
+    pendingImportKind.value = kind
+    importReviewSource.value = await buildImportReviewSource(kind, files, ++importReviewRevision.value)
+    notice.value = kind === 'supplement' ? `已载入 ${formatInt(files.length)} 个补录 Excel，确认前可先校对。` : '质检扣款 Excel 已载入，确认前可先校对。'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '质检出错 Excel 导入失败'
+    pendingImportKind.value = ''
+    importReviewSource.value = null
+    error.value = err instanceof Error ? err.message : 'Excel 预览加载失败'
+  } finally {
+    importReviewLoading.value = false
   }
 }
 
@@ -440,12 +528,12 @@ async function handleSupplementImport(event: Event) {
   const target = event.target as HTMLInputElement
   const files = Array.from(target.files ?? [])
   target.value = ''
-  await importSupplementFiles(files)
+  await prepareImportReview('supplement', files)
 }
 
 async function handleSupplementDrop(event: DragEvent) {
   const files = Array.from(event.dataTransfer?.files ?? []).filter(isExcelFile)
-  await importSupplementFiles(files)
+  await prepareImportReview('supplement', files)
 }
 
 function isExcelFile(file: File) {
@@ -482,6 +570,68 @@ async function importSupplementFiles(files: File[]) {
     await loadSettlement({ keepNotice: true })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '补录 Excel 批量导入失败'
+  }
+}
+
+async function handleImportReviewAction(payload: WorkbenchSpreadsheetActionPayload) {
+  if (payload.action.key === 'cancel_import') {
+    cancelImportReview()
+    return
+  }
+  if (payload.action.key !== 'confirm_import' || !importReviewSource.value || !pendingImportKind.value) return
+  importReviewLoading.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const files = await workbookReviewRowsToFiles(importReviewSource.value, payload.sheets, `asset-workbench-${pendingImportKind.value}`)
+    if (pendingImportKind.value === 'error-deduction') {
+      await importErrorReviewFiles(files)
+    } else {
+      await importSupplementFiles(files)
+    }
+    cancelImportReview({ keepNotice: true })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '导入校对表提交失败'
+  } finally {
+    importReviewLoading.value = false
+  }
+}
+
+async function importErrorReviewFiles(files: File[]) {
+  let matched = 0
+  let unmatched = 0
+  let ambiguous = 0
+  for (const file of files) {
+    const batch = await assetWorkbenchApi.importErrorExcel(month.value, file)
+    matched += batch.matched_rows
+    unmatched += batch.unmatched_rows
+    ambiguous += batch.ambiguous_rows
+  }
+  notice.value = `质检出错 Excel 已导入：匹配 ${formatInt(matched)} 行，未匹配 ${formatInt(unmatched)} 行，多匹配 ${formatInt(ambiguous)} 行`
+  await loadSettlement({ keepNotice: true })
+}
+
+function cancelImportReview(options: { keepNotice?: boolean } = {}) {
+  importReviewSource.value = null
+  pendingImportKind.value = ''
+  if (!options.keepNotice) notice.value = ''
+}
+
+async function handleSettlementSpreadsheetAction(payload: WorkbenchSpreadsheetActionPayload) {
+  if (payload.action.key === 'refresh_settlement') {
+    await loadSettlement()
+    return
+  }
+  if (payload.action.key === 'export_settlement') {
+    await exportSettlement()
+    return
+  }
+  if (payload.action.key === 'open_error_import') {
+    openErrorImport()
+    return
+  }
+  if (payload.action.key === 'open_supplement_import') {
+    openSupplementImport()
   }
 }
 
@@ -684,6 +834,10 @@ onMounted(() => {
           <input v-model="month" type="month" aria-label="结算月份" />
         </label>
         <button class="aw-secondary-button" type="button" @click="() => loadSettlement()">刷新</button>
+        <button class="aw-secondary-button" type="button" @click="settlementSpreadsheetOpen = !settlementSpreadsheetOpen">
+          <Table2 :size="16" aria-hidden="true" />
+          {{ settlementSpreadsheetOpen ? '收起表格工作台' : '表格工作台' }}
+        </button>
       </div>
     </div>
     <input
@@ -704,6 +858,22 @@ onMounted(() => {
       @change="handleSupplementImport"
     />
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
+    <p v-if="importReviewLoading" class="aw-inline-alert">正在处理导入校对表…</p>
+
+    <SpreadsheetWorkbench
+      v-if="importReviewSource"
+      :source="importReviewSource"
+      :height="460"
+      @close="cancelImportReview"
+      @action="handleImportReviewAction"
+    />
+    <SpreadsheetWorkbench
+      v-if="settlementSpreadsheetOpen"
+      :source="settlementSpreadsheetSource"
+      :height="520"
+      @close="settlementSpreadsheetOpen = false"
+      @action="handleSettlementSpreadsheetAction"
+    />
 
     <div class="aw-settlement-workbench">
       <aside class="aw-settlement-nav" aria-label="结算操作导航">

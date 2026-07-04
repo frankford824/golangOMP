@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, Table2, XCircle } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
@@ -11,6 +11,12 @@ import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficul
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
 import WorkbenchFilePreview from '@aw/shared/preview/WorkbenchFilePreview.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
+import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
+import type {
+  WorkbenchSpreadsheetActionPayload,
+  WorkbenchSpreadsheetSource,
+  WorkbenchSpreadsheetValidation,
+} from '@aw/shared/spreadsheet/types'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 import { parseApiErrorPayload, resolveApiUserMessage } from '@/utils/api-message-zh'
 
@@ -55,6 +61,7 @@ const lastUploadResult = ref<UploadBatchResult | null>(null)
 const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
 const draggingFiles = ref(false)
+const uploadSpreadsheetOpen = ref(false)
 const pageBusinessMonth = currentBusinessMonth()
 const previewDialog = ref<{
   open: boolean
@@ -158,6 +165,73 @@ const canUseAdminPrimaryAction = computed(() => {
   if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return canSubmit.value
   return canUseUploadDirectory.value
 })
+const uploadSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]>(() =>
+  queue.value.flatMap((item) => {
+    const validations: WorkbenchSpreadsheetValidation[] = []
+    if (!item.difficultyClass) {
+      validations.push({ rowKey: item.id, columnKey: 'difficultyClass', tone: 'warn', message: `${item.file.name} 缺少难度` })
+    }
+    if (!Number.isFinite(item.pageCount) || item.pageCount < 1) {
+      validations.push({ rowKey: item.id, columnKey: 'pageCount', tone: 'danger', message: `${item.file.name} 页数必须大于 0` })
+    }
+    if (item.status === 'failed') {
+      validations.push({ rowKey: item.id, columnKey: 'status', tone: 'danger', message: item.error || `${item.file.name} 上传失败` })
+    }
+    return validations
+  }),
+)
+const uploadSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
+  id: 'asset-upload-queue-spreadsheet',
+  revision: queue.value
+    .map((item) => `${item.id}:${item.status}:${item.difficultyClass}:${item.pageCount}:${item.finalized}:${item.error ?? ''}`)
+    .join('|'),
+  mode: 'import-review',
+  title: '上传队列表格校对',
+  description: '用于批量校正难度、页数和定稿状态。文件名、目录、状态和大小只读，提交仍走原上传流程。',
+  readonly: false,
+  actions: [
+    { key: 'apply_upload_queue', label: '应用到队列', tone: 'success', disabled: queue.value.length === 0 },
+    { key: 'open_file_picker', label: '继续选文件', tone: 'neutral' },
+    {
+      key: 'submit_upload_queue',
+      label: isSimpleUser.value ? simpleSubmitLabel.value : adminUploadLabel.value,
+      tone: 'success',
+      disabled: isSimpleUser.value ? !canSimpleSubmit.value : !canUseAdminPrimaryAction.value,
+    },
+  ],
+  sheets: [
+    {
+      id: 'upload_queue',
+      name: '待上传文件',
+      rowKey: 'id',
+      readonly: false,
+      freezeHeader: true,
+      columns: [
+        { key: 'id', label: 'ID', width: 140, readonly: true },
+        { key: 'file_name', label: '文件名', width: 260, readonly: true },
+        { key: 'directory', label: '目录', width: 180, readonly: true },
+        { key: 'difficultyClass', label: '难度', width: 120 },
+        { key: 'pageCount', label: '页数', width: 88, kind: 'number', align: 'right' },
+        { key: 'finalized', label: '定稿', width: 88, kind: 'boolean', align: 'center' },
+        { key: 'size', label: '大小', width: 110, readonly: true },
+        { key: 'status', label: '状态', width: 110, kind: 'status', readonly: true },
+        { key: 'error', label: '错误', width: 220, readonly: true },
+      ],
+      rows: queue.value.map((item) => ({
+        id: item.id,
+        file_name: item.file.name,
+        directory: item.uploadDirectoryName || selectedUploadDirectory.value?.name || '默认目录',
+        difficultyClass: item.difficultyClass || uploadDirectoryDifficulty(selectedUploadDirectory.value),
+        pageCount: item.pageCount,
+        finalized: item.finalized,
+        size: formatFileSize(item.file.size),
+        status: statusLabel(item.status),
+        error: item.error ?? '',
+      })),
+      validations: uploadSpreadsheetValidations.value,
+    },
+  ],
+}))
 
 function openFilePicker() {
   inputRef.value?.click()
@@ -365,6 +439,34 @@ function removeItem(id: string) {
   expandedItemIds.value = next
 }
 
+async function handleUploadSpreadsheetAction(payload: WorkbenchSpreadsheetActionPayload) {
+  if (payload.action.key === 'open_file_picker') {
+    openFilePicker()
+    return
+  }
+  if (payload.action.key === 'submit_upload_queue') {
+    if (isSimpleUser.value) {
+      await submitSimple()
+    } else {
+      await runAdminPrimaryAction()
+    }
+    return
+  }
+  if (payload.action.key !== 'apply_upload_queue') return
+  const rows = payload.sheets.find((sheet) => sheet.sheetId === 'upload_queue')?.rows ?? []
+  const rowByID = new Map(rows.map((row) => [String(row.id), row]))
+  for (const item of queue.value) {
+    const row = rowByID.get(item.id)
+    if (!row || item.status === 'uploading') continue
+    const pageCount = Number(row.pageCount)
+    item.difficultyClass = String(row.difficultyClass ?? item.difficultyClass).trim() || item.difficultyClass
+    item.pageCount = Number.isFinite(pageCount) && pageCount > 0 ? Math.floor(pageCount) : item.pageCount
+    item.finalized =
+      typeof row.finalized === 'boolean' ? row.finalized : ['true', '1', '是', '定稿', '已完成'].includes(String(row.finalized ?? '').trim())
+  }
+  notice.value = '已把表格修改应用到上传队列'
+}
+
 function toggleItemDetails(id: string) {
   const next = new Set(expandedItemIds.value)
   if (next.has(id)) next.delete(id)
@@ -440,6 +542,10 @@ onMounted(() => {
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
+        <button class="aw-secondary-button" type="button" @click="uploadSpreadsheetOpen = !uploadSpreadsheetOpen">
+          <Table2 :size="16" aria-hidden="true" />
+          {{ uploadSpreadsheetOpen ? '收起表格校对' : '表格校对' }}
+        </button>
         <span class="aw-action-stack">
           <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
             <FileUp :size="16" aria-hidden="true" />
@@ -519,6 +625,14 @@ onMounted(() => {
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
+
+    <SpreadsheetWorkbench
+      v-if="uploadSpreadsheetOpen"
+      :source="uploadSpreadsheetSource"
+      :height="460"
+      @close="uploadSpreadsheetOpen = false"
+      @action="handleUploadSpreadsheetAction"
+    />
 
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
