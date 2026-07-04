@@ -42,7 +42,7 @@ describe('resolveApiUserMessage', () => {
       },
     })
 
-    expect(message).toBe('该价目规则的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本')
+    expect(message).toBe('这条单价的生效时间与已有单价重叠，请调整生效日期或使用「替代」发布新版本')
   })
 
   it('does not leak unmapped English backend messages to users', () => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowDownAZ, ArrowUpAZ, Download, Eye, FileDown, Pencil, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDownAZ, ArrowUpAZ, Download, Eye, FileDown, Inbox, Pencil, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
 
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
@@ -24,6 +24,7 @@ const canManageDrive = computed(() => capabilities.value.has('asset.workbench.ma
 
 const pageSize = 50
 const exportLimit = 5000
+const skeletonRowCount = 8
 const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
   year: 'numeric',
@@ -91,7 +92,7 @@ function formatDateTime(value?: string) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return dateTimeFormatter.format(date)
+  return dateTimeFormatter.format(date).replace(/\//g, '-')
 }
 
 function formatSize(size?: number): string {
@@ -105,18 +106,37 @@ function fileDisplayName(file: DriveFileRow): string {
   return file.display_name || file.original_filename || `文件 ${file.id}`
 }
 
+function secondaryFilename(file: DriveFileRow): string {
+  const original = file.original_filename || ''
+  return original && original !== fileDisplayName(file) ? original : ''
+}
+
 function fileOwnerLabel(file: DriveFileRow): string {
   return file.owner_name || file.owner_username || (file.owner_user_id ? `用户 ${file.owner_user_id}` : '—')
 }
 
-function fileFormatLabel(file: DriveFileRow): string {
+function fileOwnerSecondary(file: DriveFileRow): string {
+  const secondary = file.owner_username || (file.owner_user_id ? `ID ${file.owner_user_id}` : '')
+  return secondary && secondary !== fileOwnerLabel(file) ? secondary : ''
+}
+
+function fileExtLabel(file: DriveFileRow): string {
   const rawType = file.file_type?.trim().replace(/^\./, '')
   const name = file.original_filename || file.display_name || ''
   const suffix = name.includes('.') ? name.split('.').pop()?.trim() : ''
   const ext = (rawType || suffix || '').replace(/^\./, '')
-  const extLabel = ext ? ext.toUpperCase() : ''
-  if (file.mime_type) return extLabel ? `${extLabel} · ${file.mime_type}` : file.mime_type
-  return extLabel || '—'
+  return ext ? ext.toUpperCase() : '—'
+}
+
+function fileMimeLabel(file: DriveFileRow): string {
+  return file.mime_type || ''
+}
+
+function fileFormatLabel(file: DriveFileRow): string {
+  const extLabel = fileExtLabel(file)
+  const mime = fileMimeLabel(file)
+  if (mime) return extLabel !== '—' ? `${extLabel} · ${mime}` : mime
+  return extLabel
 }
 
 function statusText(value?: string) {
@@ -135,6 +155,15 @@ function statusText(value?: string) {
   }
   const normalized = String(value || '').trim()
   return map[normalized] || normalized || '—'
+}
+
+function statusToneClass(value?: string) {
+  const normalized = String(value || '').trim()
+  if (['priced', 'passed', 'ready', 'settled'].includes(normalized)) return 'aw-chip--success'
+  if (['pending', 'unpriced', 'processing'].includes(normalized)) return 'aw-chip--warn'
+  if (['needs_fix', 'failed'].includes(normalized)) return 'aw-chip--danger'
+  if (normalized === 'in_batch') return 'aw-chip--info'
+  return 'aw-chip--neutral'
 }
 
 function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
@@ -252,7 +281,11 @@ function sortIcon(field: SortBy) {
 }
 
 function selectFile(file: DriveFileRow) {
-  selectedFile.value = file
+  selectedFile.value = selectedFile.value?.id === file.id ? null : file
+}
+
+function closeDetail() {
+  selectedFile.value = null
 }
 
 function toggleFile(file: DriveFileRow, checked: boolean) {
@@ -305,7 +338,7 @@ async function saveDisplayName(file: DriveFileRow) {
 }
 
 async function openFilePreview(file: DriveFileRow) {
-  selectFile(file)
+  selectedFile.value = file
   previewOpen.value = true
   previewTitle.value = fileDisplayName(file)
   previewMimeType.value = file.mime_type || ''
@@ -453,25 +486,25 @@ onBeforeUnmount(() => {
 <template>
   <section class="aw-upload-ledger aw-token-scope">
     <header class="aw-upload-ledger__hero">
-      <div>
+      <div class="aw-upload-ledger__hero-copy">
         <p class="aw-eyebrow">上传总览</p>
         <h2>全站上传台账</h2>
         <span>按创建人、创建日期、分类、作品名称和格式跟踪已上传作品。</span>
       </div>
-      <div class="aw-upload-ledger__summary" aria-label="当前页汇总">
+      <dl class="aw-upload-ledger__summary" aria-label="当前筛选汇总">
         <div>
-          <strong>{{ total }}</strong>
-          <span>匹配记录</span>
+          <dt>匹配记录</dt>
+          <dd>{{ total }}</dd>
         </div>
         <div>
-          <strong>{{ totalCount }}</strong>
-          <span>当前页数量</span>
+          <dt>本页数量</dt>
+          <dd>{{ totalCount }}</dd>
         </div>
         <div>
-          <strong>{{ formatMoney(totalAmount) }}</strong>
-          <span>当前页金额</span>
+          <dt>本页金额</dt>
+          <dd>{{ formatMoney(totalAmount) }}</dd>
         </div>
-      </div>
+      </dl>
     </header>
 
     <section class="aw-upload-ledger__toolbar" aria-label="上传记录筛选">
@@ -543,15 +576,29 @@ onBeforeUnmount(() => {
       <button class="aw-grid-button" type="button" @click="clearSelection">取消选择</button>
     </section>
 
-    <section class="aw-upload-ledger__content">
+    <section class="aw-upload-ledger__content" :class="{ 'has-detail': Boolean(selectedFile) }">
       <div class="aw-upload-ledger__table-wrap">
         <table class="aw-upload-ledger__table">
+          <colgroup>
+            <col class="aw-upload-ledger__col-check" />
+            <col class="aw-upload-ledger__col-thumb" />
+            <col class="aw-upload-ledger__col-owner" />
+            <col class="aw-upload-ledger__col-date" />
+            <col class="aw-upload-ledger__col-dir" />
+            <col class="aw-upload-ledger__col-name" />
+            <col class="aw-upload-ledger__col-format" />
+            <col class="aw-upload-ledger__col-count" />
+            <col class="aw-upload-ledger__col-amount" />
+            <col class="aw-upload-ledger__col-status" />
+            <col class="aw-upload-ledger__col-size" />
+            <col class="aw-upload-ledger__col-actions" />
+          </colgroup>
           <thead>
             <tr>
               <th class="aw-upload-ledger__check">
                 <input type="checkbox" :checked="allPageSelected" aria-label="选择当前页" @change="togglePageSelection(($event.target as HTMLInputElement).checked)" />
               </th>
-              <th>预览图</th>
+              <th>预览</th>
               <th>
                 <button type="button" @click="setSort('owner')">
                   创建人
@@ -560,7 +607,7 @@ onBeforeUnmount(() => {
               </th>
               <th>
                 <button type="button" @click="setSort('created_at')">
-                  创建日期
+                  创建时间
                   <component :is="sortIcon('created_at')" v-if="sortIcon('created_at')" :size="13" />
                 </button>
               </th>
@@ -582,17 +629,30 @@ onBeforeUnmount(() => {
                   <component :is="sortIcon('format')" v-if="sortIcon('format')" :size="13" />
                 </button>
               </th>
-              <th>数量</th>
-              <th>金额</th>
-              <th>操作</th>
+              <th class="aw-upload-ledger__num">数量</th>
+              <th class="aw-upload-ledger__num">金额</th>
+              <th>状态</th>
+              <th class="aw-upload-ledger__num">大小</th>
+              <th class="aw-upload-ledger__center">操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading">
-              <td colspan="10" class="aw-upload-ledger__empty">正在加载上传记录…</td>
-            </tr>
+            <template v-if="loading">
+              <tr v-for="i in skeletonRowCount" :key="`skeleton-${i}`" class="aw-upload-ledger__row-skeleton" aria-hidden="true">
+                <td class="aw-upload-ledger__check"><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--dot" /></td>
+                <td><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--thumb" /></td>
+                <td colspan="10"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
+              </tr>
+            </template>
             <tr v-else-if="files.length === 0">
-              <td colspan="10" class="aw-upload-ledger__empty">没有匹配的上传记录</td>
+              <td colspan="12">
+                <div class="aw-upload-ledger__empty">
+                  <Inbox :size="30" aria-hidden="true" />
+                  <strong>没有匹配的上传记录</strong>
+                  <p>试试调整关键词、创建人、分类或日期范围。</p>
+                  <button v-if="activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">清除全部筛选</button>
+                </div>
+              </td>
             </tr>
             <template v-else>
               <tr
@@ -600,6 +660,7 @@ onBeforeUnmount(() => {
                 :key="file.id"
                 :class="{ 'is-selected': selectedFile?.id === file.id }"
                 @click="selectFile(file)"
+                @dblclick="openFilePreview(file)"
               >
                 <td class="aw-upload-ledger__check">
                   <input
@@ -615,13 +676,13 @@ onBeforeUnmount(() => {
                     <DriveThumb :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" size="sm" />
                   </button>
                 </td>
-                <td>
-                  <strong>{{ fileOwnerLabel(file) }}</strong>
-                  <small>{{ file.owner_username || `ID ${file.owner_user_id}` }}</small>
+                <td class="aw-upload-ledger__owner">
+                  <strong :title="fileOwnerLabel(file)">{{ fileOwnerLabel(file) }}</strong>
+                  <small v-if="fileOwnerSecondary(file)" :title="fileOwnerSecondary(file)">{{ fileOwnerSecondary(file) }}</small>
                 </td>
-                <td>{{ formatDateTime(file.created_at) }}</td>
+                <td class="aw-upload-ledger__date">{{ formatDateTime(file.created_at) }}</td>
                 <td>
-                  <span class="aw-chip aw-chip--neutral">{{ file.upload_directory_name || '未分类' }}</span>
+                  <span class="aw-chip aw-chip--neutral" :title="file.upload_directory_name || '未分类'">{{ file.upload_directory_name || '未分类' }}</span>
                 </td>
                 <td class="aw-upload-ledger__name">
                   <form v-if="editingFileId === file.id" @submit.prevent="saveDisplayName(file)" @click.stop>
@@ -636,14 +697,21 @@ onBeforeUnmount(() => {
                   <button v-else type="button" @click.stop="startEditName(file)">
                     <span>
                       <strong :title="fileDisplayName(file)">{{ fileDisplayName(file) }}</strong>
-                      <small :title="file.original_filename">{{ file.original_filename }}</small>
+                      <small v-if="secondaryFilename(file)" :title="secondaryFilename(file)">{{ secondaryFilename(file) }}</small>
                     </span>
                     <Pencil :size="14" aria-hidden="true" />
                   </button>
                 </td>
-                <td>{{ fileFormatLabel(file) }}</td>
-                <td>{{ file.page_count || '—' }}</td>
-                <td>{{ formatMoney(file.gross_amount || 0) }}</td>
+                <td class="aw-upload-ledger__format">
+                  <strong>{{ fileExtLabel(file) }}</strong>
+                  <small v-if="fileMimeLabel(file)" :title="fileMimeLabel(file)">{{ fileMimeLabel(file) }}</small>
+                </td>
+                <td class="aw-upload-ledger__num">{{ file.page_count || '—' }}</td>
+                <td class="aw-upload-ledger__num">{{ formatMoney(file.gross_amount || 0) }}</td>
+                <td>
+                  <span class="aw-chip" :class="statusToneClass(file.pricing_status)">{{ statusText(file.pricing_status) }}</span>
+                </td>
+                <td class="aw-upload-ledger__num">{{ formatSize(file.file_size) }}</td>
                 <td>
                   <div class="aw-upload-ledger__row-actions">
                     <button type="button" aria-label="预览" @click.stop="openFilePreview(file)">
@@ -660,30 +728,34 @@ onBeforeUnmount(() => {
         </table>
       </div>
 
-      <aside class="aw-upload-ledger__detail" aria-label="当前作品详情">
-        <template v-if="selectedFile">
-          <div class="aw-upload-ledger__detail-thumb">
-            <DriveThumb :file-id="selectedFile.id" :filename="fileDisplayName(selectedFile)" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
-          </div>
-          <h3>{{ fileDisplayName(selectedFile) }}</h3>
-          <dl>
-            <template v-for="[label, value] in filePreviewRows(selectedFile)" :key="label">
-              <dt>{{ label }}</dt>
-              <dd>{{ value }}</dd>
-            </template>
-          </dl>
+      <aside v-if="selectedFile" class="aw-upload-ledger__detail" aria-label="当前作品详情">
+        <div class="aw-upload-ledger__detail-head">
+          <h3 :title="fileDisplayName(selectedFile)">{{ fileDisplayName(selectedFile) }}</h3>
+          <button type="button" class="aw-upload-ledger__detail-close" aria-label="关闭详情" @click="closeDetail">
+            <X :size="15" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="aw-upload-ledger__detail-thumb">
+          <DriveThumb :file-id="selectedFile.id" :filename="fileDisplayName(selectedFile)" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
+        </div>
+        <dl>
+          <template v-for="[label, value] in filePreviewRows(selectedFile)" :key="label">
+            <dt>{{ label }}</dt>
+            <dd :title="value">{{ value }}</dd>
+          </template>
+        </dl>
+        <div class="aw-upload-ledger__detail-actions">
           <button class="aw-primary-button" type="button" @click="openFilePreview(selectedFile)">打开预览</button>
-        </template>
-        <template v-else>
-          <FileDown :size="34" aria-hidden="true" />
-          <h3>选择一条上传记录</h3>
-          <p>右侧会显示上传人、时间、分类、格式、数量和计件金额。</p>
-        </template>
+          <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadFile(selectedFile)">
+            <Download :size="15" aria-hidden="true" />
+            下载
+          </button>
+        </div>
       </aside>
     </section>
 
     <footer class="aw-upload-ledger__pager">
-      <span>{{ filteredDirectoryLabel }} · 第 {{ page }} / {{ totalPages }} 页</span>
+      <span>{{ filteredDirectoryLabel }} · 共 {{ total }} 条 · 第 {{ page }} / {{ totalPages }} 页</span>
       <div>
         <button class="aw-grid-button" type="button" :disabled="page <= 1 || loading" @click="changePage(-1)">上一页</button>
         <button class="aw-grid-button" type="button" :disabled="page >= totalPages || loading" @click="changePage(1)">下一页</button>
