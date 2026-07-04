@@ -13,6 +13,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"workflow/domain"
 )
@@ -22,6 +24,8 @@ const (
 	archiveVirtualMaxUncompressedBytes int64 = 5 << 30
 	archiveVirtualMaxVisibleFileCount        = 20000
 	archiveVirtualMaxDepth                   = 16
+	archiveVirtualTempCacheTTL               = 10 * time.Minute
+	archiveVirtualMaxCachedArchives          = 8
 )
 
 type ArchiveBrowseResult struct {
@@ -55,6 +59,23 @@ type ArchiveEntryStream struct {
 	FileSize    int64
 	TempPath    string
 	ArchiveBody io.Closer
+	CacheLease  io.Closer
+}
+
+type archiveTempCacheEntry struct {
+	tmpPath   string
+	ready     chan struct{}
+	loading   bool
+	refCount  int
+	expiresAt time.Time
+	lastUsed  time.Time
+}
+
+type archiveTempCacheLease struct {
+	service *Service
+	key     string
+	path    string
+	once    sync.Once
 }
 
 func (s *Service) BrowseArchiveFile(ctx context.Context, actor domain.RequestActor, fileID int64, folderPath string) (*ArchiveBrowseResult, *domain.AppError) {
@@ -66,12 +87,12 @@ func (s *Service) BrowseArchiveFile(ctx context.Context, actor domain.RequestAct
 	if format != "zip" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该压缩包暂不支持在线打开，可下载后查看", map[string]interface{}{"archive_format": format})
 	}
-	tmpPath, err := s.copyArchiveObjectToTemp(ctx, file)
+	lease, err := s.cachedArchiveObjectTemp(ctx, file)
 	if err != nil {
 		return nil, archiveErrorToAppError(err)
 	}
-	defer os.Remove(tmpPath)
-	reader, err := zip.OpenReader(tmpPath)
+	defer lease.Close()
+	reader, err := zip.OpenReader(lease.Path())
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
 	}
@@ -91,13 +112,13 @@ func (s *Service) OpenArchiveEntry(ctx context.Context, actor domain.RequestActo
 	if err != nil || skip {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包路径无效", nil)
 	}
-	tmpPath, err := s.copyArchiveObjectToTemp(ctx, file)
+	lease, err := s.cachedArchiveObjectTemp(ctx, file)
 	if err != nil {
 		return nil, archiveErrorToAppError(err)
 	}
-	reader, err := zip.OpenReader(tmpPath)
+	reader, err := zip.OpenReader(lease.Path())
 	if err != nil {
-		_ = os.Remove(tmpPath)
+		_ = lease.Close()
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
 	}
 	for _, entry := range reader.File {
@@ -107,13 +128,13 @@ func (s *Service) OpenArchiveEntry(ctx context.Context, actor domain.RequestActo
 		}
 		if entry.UncompressedSize64 > uint64(archiveVirtualMaxUncompressedBytes) {
 			_ = reader.Close()
-			_ = os.Remove(tmpPath)
+			_ = lease.Close()
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包内文件过大，暂不支持在线打开", nil)
 		}
 		body, err := entry.Open()
 		if err != nil {
 			_ = reader.Close()
-			_ = os.Remove(tmpPath)
+			_ = lease.Close()
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, "压缩包内文件打开失败", err.Error())
 		}
 		return &ArchiveEntryStream{
@@ -121,12 +142,12 @@ func (s *Service) OpenArchiveEntry(ctx context.Context, actor domain.RequestActo
 			Filename:    path.Base(clean),
 			MimeType:    archiveEntryMimeType(clean),
 			FileSize:    int64(entry.UncompressedSize64),
-			TempPath:    tmpPath,
 			ArchiveBody: reader,
+			CacheLease:  lease,
 		}, nil
 	}
 	_ = reader.Close()
-	_ = os.Remove(tmpPath)
+	_ = lease.Close()
 	return nil, domain.NewAppError(domain.ErrCodeNotFound, "压缩包内未找到该文件", nil)
 }
 
@@ -271,6 +292,150 @@ func (s *Service) copyArchiveObjectToTemp(ctx context.Context, file *domain.Asse
 		return "", permanentArchiveVirtualErrorf("压缩包过大，暂不支持在线打开")
 	}
 	return tmpPath, nil
+}
+
+func archiveTempCacheKey(file *domain.AssetWorkbenchSubmissionFile) string {
+	if file == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%s:%d", file.ID, strings.TrimSpace(file.ObjectKey), file.FileSize)
+}
+
+func (s *Service) cachedArchiveObjectTemp(ctx context.Context, file *domain.AssetWorkbenchSubmissionFile) (*archiveTempCacheLease, error) {
+	key := archiveTempCacheKey(file)
+	if key == "" {
+		return nil, permanentArchiveVirtualErrorf("文件存储地址缺失")
+	}
+	for {
+		now := s.nowFn().UTC()
+		s.archiveCacheMu.Lock()
+		if s.archiveCache == nil {
+			s.archiveCache = map[string]*archiveTempCacheEntry{}
+		}
+		s.cleanupArchiveTempCacheLocked(now)
+		if entry := s.archiveCache[key]; entry != nil {
+			if entry.loading {
+				ready := entry.ready
+				s.archiveCacheMu.Unlock()
+				select {
+				case <-ready:
+					continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			if strings.TrimSpace(entry.tmpPath) != "" && (now.Before(entry.expiresAt) || entry.refCount > 0) {
+				entry.refCount++
+				entry.lastUsed = now
+				path := entry.tmpPath
+				s.archiveCacheMu.Unlock()
+				return &archiveTempCacheLease{service: s, key: key, path: path}, nil
+			}
+			if entry.refCount == 0 {
+				s.removeArchiveTempEntryLocked(key, entry)
+			}
+		}
+		entry := &archiveTempCacheEntry{loading: true, ready: make(chan struct{}), lastUsed: now}
+		s.archiveCache[key] = entry
+		s.archiveCacheMu.Unlock()
+
+		tmpPath, err := s.copyArchiveObjectToTemp(ctx, file)
+		s.archiveCacheMu.Lock()
+		current := s.archiveCache[key]
+		if current == entry {
+			entry.loading = false
+			entry.lastUsed = s.nowFn().UTC()
+			if err != nil {
+				delete(s.archiveCache, key)
+				close(entry.ready)
+				s.archiveCacheMu.Unlock()
+				return nil, err
+			}
+			entry.tmpPath = tmpPath
+			entry.refCount = 1
+			entry.expiresAt = entry.lastUsed.Add(archiveVirtualTempCacheTTL)
+			close(entry.ready)
+			s.cleanupArchiveTempCacheLocked(entry.lastUsed)
+			s.archiveCacheMu.Unlock()
+			return &archiveTempCacheLease{service: s, key: key, path: tmpPath}, nil
+		}
+		s.archiveCacheMu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		_ = os.Remove(tmpPath)
+	}
+}
+
+func (s *Service) cleanupArchiveTempCacheLocked(now time.Time) {
+	if len(s.archiveCache) == 0 {
+		return
+	}
+	for key, entry := range s.archiveCache {
+		if entry == nil {
+			delete(s.archiveCache, key)
+			continue
+		}
+		if entry.loading || entry.refCount > 0 {
+			continue
+		}
+		if !entry.expiresAt.IsZero() && !now.Before(entry.expiresAt) {
+			s.removeArchiveTempEntryLocked(key, entry)
+		}
+	}
+	if len(s.archiveCache) <= archiveVirtualMaxCachedArchives {
+		return
+	}
+	keys := make([]string, 0, len(s.archiveCache))
+	for key, entry := range s.archiveCache {
+		if entry != nil && !entry.loading && entry.refCount == 0 {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return s.archiveCache[keys[i]].lastUsed.Before(s.archiveCache[keys[j]].lastUsed)
+	})
+	for len(s.archiveCache) > archiveVirtualMaxCachedArchives && len(keys) > 0 {
+		key := keys[0]
+		keys = keys[1:]
+		if entry := s.archiveCache[key]; entry != nil && !entry.loading && entry.refCount == 0 {
+			s.removeArchiveTempEntryLocked(key, entry)
+		}
+	}
+}
+
+func (s *Service) removeArchiveTempEntryLocked(key string, entry *archiveTempCacheEntry) {
+	if entry != nil && strings.TrimSpace(entry.tmpPath) != "" {
+		_ = os.Remove(entry.tmpPath)
+	}
+	delete(s.archiveCache, key)
+}
+
+func (l *archiveTempCacheLease) Path() string {
+	if l == nil {
+		return ""
+	}
+	return l.path
+}
+
+func (l *archiveTempCacheLease) Close() error {
+	if l == nil || l.service == nil {
+		return nil
+	}
+	l.once.Do(func() {
+		now := l.service.nowFn().UTC()
+		l.service.archiveCacheMu.Lock()
+		if entry := l.service.archiveCache[l.key]; entry != nil {
+			if entry.refCount > 0 {
+				entry.refCount--
+			}
+			entry.lastUsed = now
+			entry.expiresAt = now.Add(archiveVirtualTempCacheTTL)
+		}
+		l.service.cleanupArchiveTempCacheLocked(now)
+		l.service.archiveCacheMu.Unlock()
+	})
+	return nil
 }
 
 func archiveFormatForFile(file *domain.AssetWorkbenchSubmissionFile) string {
@@ -419,6 +584,9 @@ func (s *ArchiveEntryStream) Close() error {
 	}
 	if s.ArchiveBody != nil {
 		_ = s.ArchiveBody.Close()
+	}
+	if s.CacheLease != nil {
+		_ = s.CacheLease.Close()
 	}
 	if strings.TrimSpace(s.TempPath) != "" {
 		_ = os.Remove(s.TempPath)

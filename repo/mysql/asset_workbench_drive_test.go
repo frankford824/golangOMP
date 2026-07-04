@@ -265,6 +265,51 @@ func TestBuildDriveSearchBaseUsesFullTextWhenPreferred(t *testing.T) {
 	}
 }
 
+func TestBuildDriveSearchBaseKeepsUploadOverviewFiltersOnFullTextPath(t *testing.T) {
+	ownerID := int64(7)
+	dirID := int64(33)
+	createdFrom := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	createdTo := time.Date(2026, 7, 3, 23, 59, 59, 0, time.UTC)
+	base, args := buildDriveSearchBase(repo.AssetWorkbenchDriveFilter{
+		OwnerUserID:       &ownerID,
+		UploadDirectoryID: &dirID,
+		Keyword:           "海报",
+		OwnerKeyword:      "张三",
+		CreatedFrom:       &createdFrom,
+		CreatedTo:         &createdTo,
+	}, true)
+
+	checks := []string{
+		"WHERE f.id IN (",
+		"f.owner_user_id = ?",
+		"f.upload_directory_id = ?",
+		"COALESCE(p.real_name, '') LIKE ?",
+		"f.created_at >= ?",
+		"f.created_at <= ?",
+		"MATCH(f.original_filename, f.display_name, f.relative_path, f.file_type, f.mime_type, f.upload_directory_name) AGAINST (? IN BOOLEAN MODE)",
+		"MATCH(i.order_no, i.template_name_snapshot, i.category_snapshot, i.difficulty_class) AGAINST (? IN BOOLEAN MODE)",
+		"MATCH(s.submission_no, s.notes) AGAINST (? IN BOOLEAN MODE)",
+	}
+	for _, check := range checks {
+		if !strings.Contains(base, check) {
+			t.Fatalf("drive search base missing %q:\n%s", check, base)
+		}
+	}
+	wantArgs := []interface{}{
+		ownerID, dirID, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
+		ownerID, dirID, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
+		ownerID, dirID, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
+	}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("args len = %d (%#v), want %d", len(args), args, len(wantArgs))
+	}
+	for i := range wantArgs {
+		if args[i] != wantArgs[i] {
+			t.Fatalf("args[%d] = %#v, want %#v; args=%#v", i, args[i], wantArgs[i], args)
+		}
+	}
+}
+
 func TestBuildDriveSearchBaseFallbackUsesContainsLike(t *testing.T) {
 	base, args := buildDriveSearchBase(repo.AssetWorkbenchDriveFilter{Keyword: "海报"}, false)
 

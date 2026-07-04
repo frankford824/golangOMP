@@ -1353,6 +1353,7 @@ type batchFileMutationRepo struct {
 	repo.AssetWorkbenchRepo
 	directories   map[int64]*domain.AssetWorkbenchUploadDirectory
 	files         map[int64]*domain.AssetWorkbenchSubmissionFile
+	items         map[int64]*domain.AssetWorkbenchSubmissionItem
 	blockedDelete map[int64]bool
 	failVoid      bool
 	updatedFiles  []*domain.AssetWorkbenchSubmissionFile
@@ -1432,6 +1433,14 @@ func (r *batchFileMutationRepo) DeleteSubmissionFile(_ context.Context, _ repo.T
 }
 
 func (r *batchFileMutationRepo) GetSubmissionItem(_ context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error) {
+	if r.items != nil {
+		item := r.items[itemID]
+		if item == nil {
+			return nil, sql.ErrNoRows
+		}
+		copyItem := *item
+		return &copyItem, nil
+	}
 	for _, file := range r.files {
 		if file != nil && file.SubmissionItemID == itemID {
 			return &domain.AssetWorkbenchSubmissionItem{
@@ -3083,6 +3092,50 @@ func TestBatchDeleteFilesRollsBackFileDeleteWhenItemReconcileFails(t *testing.T)
 	}
 	if len(workbenchRepo.deletedFiles) != 0 || len(workbenchRepo.refreshed) != 0 || len(workbenchRepo.events) != 0 {
 		t.Fatalf("write side effects should roll back: deleted=%+v refreshed=%+v events=%+v", workbenchRepo.deletedFiles, workbenchRepo.refreshed, workbenchRepo.events)
+	}
+}
+
+func TestBatchDeleteFilesRejectsSettlementLockedItem(t *testing.T) {
+	batchID := int64(7001)
+	workbenchRepo := &batchFileMutationRepo{
+		files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+			501: {ID: 501, SubmissionID: 9001, SubmissionItemID: 8001, OwnerUserID: 99, ObjectKey: "asset-workbench/uploads/a.psd"},
+		},
+		items: map[int64]*domain.AssetWorkbenchSubmissionItem{
+			8001: {
+				ID:                       8001,
+				SubmissionID:             9001,
+				PayeeUserID:              99,
+				OrderNo:                  "AWF",
+				DifficultyClass:          "A",
+				PageCount:                1,
+				ItemCount:                1,
+				BusinessMonth:            "2026-07",
+				SubmittedAt:              time.Date(2026, 7, 3, 8, 0, 0, 0, time.UTC),
+				SettlementStatus:         domain.AssetWorkbenchSettlementStatusInBatch,
+				CurrentSettlementBatchID: &batchID,
+				QCStatus:                 domain.AssetWorkbenchSubmissionStatusSubmitted,
+			},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	result, appErr := svc.BatchDeleteFiles(context.Background(), actor, BatchDeleteFilesParams{
+		FileIDs: []int64{501},
+		Reason:  "重复文件",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchDeleteFiles() appErr = %+v", appErr)
+	}
+	if len(result.Deleted) != 0 || len(result.Failures) != 1 || result.Failures[0].FileID != 501 {
+		t.Fatalf("result = %+v, want one settlement-lock failure and no deleted ids", result)
+	}
+	if workbenchRepo.files[501] == nil {
+		t.Fatalf("file 501 should remain when item is settlement locked")
+	}
+	if len(workbenchRepo.deletedFiles) != 0 || len(workbenchRepo.refreshed) != 0 || len(workbenchRepo.events) != 0 {
+		t.Fatalf("locked delete should not write side effects: deleted=%+v refreshed=%+v events=%+v", workbenchRepo.deletedFiles, workbenchRepo.refreshed, workbenchRepo.events)
 	}
 }
 

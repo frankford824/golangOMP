@@ -53,6 +53,8 @@ type Service struct {
 	systemPreviews  SystemAssetPreviewer
 	nowFn           func() time.Time
 	loc             *time.Location
+	archiveCacheMu  sync.Mutex
+	archiveCache    map[string]*archiveTempCacheEntry
 }
 
 type WorkbenchIdentityRegistrar interface {
@@ -3763,10 +3765,11 @@ func (s *Service) deleteSubmissionFile(ctx context.Context, actor domain.Request
 	if file.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return domain.NewAppError(domain.ErrCodePermissionDenied, "Submission file is not owned by current user.", nil)
 	}
-	item, err := s.repo.GetSubmissionItem(ctx, file.SubmissionItemID)
-	if err != nil {
-		return mapRepoReadError(err, "Submission item not found.", "Failed to load submission item after file delete.")
+	item, appErr := s.loadMutableSubmissionItem(ctx, file.SubmissionItemID)
+	if appErr != nil {
+		return appErr
 	}
+	var err error
 	activeFiles, err := s.repo.ListSubmissionFiles(ctx, item.ID)
 	if err != nil {
 		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to list remaining submission files.", err.Error())

@@ -290,7 +290,7 @@ func (r *assetWorkbenchRepo) DriveSearchFiles(ctx context.Context, filter repo.A
 	listArgs := append([]interface{}{}, args...)
 	listArgs = append(listArgs, pageSize, (page-1)*pageSize)
 	rows, err := r.db.db.QueryContext(ctx, `SELECT `+driveFileColumns()+` `+base+`
-	ORDER BY f.created_at DESC, f.id DESC
+	ORDER BY `+driveListFileOrderBy(filter, "")+`
 	LIMIT ? OFFSET ?`, listArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("drive search files: %w", err)
@@ -309,7 +309,11 @@ func (r *assetWorkbenchRepo) DriveSearchFiles(ctx context.Context, filter repo.A
 
 func buildDriveSearchBase(filter repo.AssetWorkbenchDriveFilter, preferFullText bool) (string, []interface{}) {
 	ownerSQL, ownerArgs := driveOwnerClause(filter)
+	dirSQL, dirArgs := driveDirectoryClause(filter)
 	args := append([]interface{}{}, ownerArgs...)
+	args = append(args, dirArgs...)
+	extraSQL, extraArgs := driveSearchExtraClauses(filter)
+	args = append(args, extraArgs...)
 	keyword := strings.TrimSpace(filter.Keyword)
 	keywordSQL := ""
 	if keyword != "" {
@@ -334,37 +338,70 @@ func buildDriveSearchBase(filter repo.AssetWorkbenchDriveFilter, preferFullText 
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
 	LEFT JOIN users u ON u.id = f.owner_user_id
 	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
-	WHERE f.deleted_at IS NULL` + ownerSQL + keywordSQL
+	WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + keywordSQL
 	return base, args
 }
 
 func buildDriveSearchFullTextIDQuery(filter repo.AssetWorkbenchDriveFilter, fullText string) (string, []interface{}) {
 	ownerSQL, ownerArgs := driveOwnerClause(filter)
+	dirSQL, dirArgs := driveDirectoryClause(filter)
+	extraSQL, extraArgs := driveSearchExtraClauses(filter)
 	queries := []string{
 		`SELECT f.id
 		FROM asset_workbench_submission_files f
 		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 		JOIN asset_workbench_submissions s ON s.id = f.submission_id
-		WHERE f.deleted_at IS NULL` + ownerSQL + ` AND ` + assetWorkbenchFileFullTextMatch,
+		LEFT JOIN users u ON u.id = f.owner_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+		WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + ` AND ` + assetWorkbenchFileFullTextMatch,
 		`SELECT f.id
 		FROM asset_workbench_submission_items i
 		JOIN asset_workbench_submission_files f ON f.submission_item_id = i.id
 		JOIN asset_workbench_submissions s ON s.id = f.submission_id
-		WHERE i.voided_at IS NULL AND f.deleted_at IS NULL` + ownerSQL + ` AND ` + assetWorkbenchItemFullTextMatch,
+		LEFT JOIN users u ON u.id = f.owner_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+		WHERE i.voided_at IS NULL AND f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + ` AND ` + assetWorkbenchItemFullTextMatch,
 		`SELECT f.id
 		FROM asset_workbench_submissions s
 		JOIN asset_workbench_submission_files f ON f.submission_id = s.id
 		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
-		WHERE f.deleted_at IS NULL` + ownerSQL + ` AND ` + assetWorkbenchSubmissionFullTextMatch,
+		LEFT JOIN users u ON u.id = f.owner_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+		WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + ` AND ` + assetWorkbenchSubmissionFullTextMatch,
 	}
-	args := make([]interface{}, 0, len(ownerArgs)*len(queries)+len(queries))
+	filterArgs := append([]interface{}{}, ownerArgs...)
+	filterArgs = append(filterArgs, dirArgs...)
+	filterArgs = append(filterArgs, extraArgs...)
+	args := make([]interface{}, 0, len(filterArgs)*len(queries)+len(queries))
 	for range queries {
-		args = append(args, ownerArgs...)
+		args = append(args, filterArgs...)
 		args = append(args, fullText)
 	}
 	return strings.Join(queries, `
 		UNION DISTINCT
 		`), args
+}
+
+func driveSearchExtraClauses(filter repo.AssetWorkbenchDriveFilter) (string, []interface{}) {
+	args := []interface{}{}
+	clauses := []string{}
+	if owner := strings.TrimSpace(filter.OwnerKeyword); owner != "" {
+		like := "%" + owner + "%"
+		clauses = append(clauses, `(COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ?)`)
+		args = append(args, like, like, like)
+	}
+	if filter.CreatedFrom != nil {
+		clauses = append(clauses, `f.created_at >= ?`)
+		args = append(args, *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		clauses = append(clauses, `f.created_at <= ?`)
+		args = append(args, *filter.CreatedTo)
+	}
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return " AND " + strings.Join(clauses, " AND "), args
 }
 
 func (r *assetWorkbenchRepo) DriveLocateFile(ctx context.Context, filter repo.AssetWorkbenchDriveFilter, fileID int64) (*domain.AssetWorkbenchDriveFile, error) {

@@ -82,7 +82,7 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 		return nil, err
 	}
 	page, pageSize = normalizeDrivePage(page, pageSize)
-	items, total, err := s.repo.DriveListFiles(ctx, repo.AssetWorkbenchDriveFilter{
+	filter := repo.AssetWorkbenchDriveFilter{
 		OwnerUserID:       s.driveOwnerFilter(actor),
 		UploadDirectoryID: directoryID,
 		Unassigned:        unassigned,
@@ -95,7 +95,15 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 		SortDir:           strings.TrimSpace(sortDir),
 		Page:              page,
 		PageSize:          pageSize,
-	})
+	}
+	var items []*domain.AssetWorkbenchDriveFile
+	var total int64
+	var err error
+	if filter.Keyword != "" {
+		items, total, err = s.repo.DriveSearchFiles(ctx, filter)
+	} else {
+		items, total, err = s.repo.DriveListFiles(ctx, filter)
+	}
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list drive files.", err.Error())
 	}
