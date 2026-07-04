@@ -120,23 +120,61 @@ function fileOwnerSecondary(file: DriveFileRow): string {
   return secondary && secondary !== fileOwnerLabel(file) ? secondary : ''
 }
 
-function fileExtLabel(file: DriveFileRow): string {
-  const rawType = file.file_type?.trim().replace(/^\./, '')
-  const name = file.original_filename || file.display_name || ''
-  const suffix = name.includes('.') ? name.split('.').pop()?.trim() : ''
-  const ext = (rawType || suffix || '').replace(/^\./, '')
-  return ext ? ext.toUpperCase() : '—'
+function filenameExt(value?: string): string {
+  const normalized = String(value || '').trim().replace(/\\/g, '/').split(/[?#]/)[0] || ''
+  const basename = normalized.split('/').pop() || normalized
+  const dot = basename.lastIndexOf('.')
+  if (dot <= 0 || dot === basename.length - 1) return ''
+  return basename.slice(dot + 1).trim().replace(/^\./, '')
 }
 
-function fileMimeLabel(file: DriveFileRow): string {
-  return file.mime_type || ''
+function fileExtLabel(file: DriveFileRow): string {
+  const extFromName = filenameExt(file.original_filename) || filenameExt(file.display_name)
+  const rawType = String(file.file_type || '').trim().replace(/^\./, '').toLowerCase()
+  const mime = String(file.mime_type || '').toLowerCase()
+  const genericTypes = new Set(['image', 'archive', 'design', 'pdf', 'video', 'audio', 'office', 'document', 'file'])
+  const ext = extFromName || (rawType && !genericTypes.has(rawType) ? rawType : '')
+  if (ext) return ext.toUpperCase()
+  if (mime.includes('zip')) return 'ZIP'
+  if (mime.includes('rar')) return 'RAR'
+  if (mime.includes('7z')) return '7Z'
+  if (mime === 'image/jpeg') return 'JPG'
+  if (mime === 'image/png') return 'PNG'
+  if (mime === 'image/webp') return 'WEBP'
+  if (mime === 'application/pdf') return 'PDF'
+  if (rawType === 'archive') return '压缩包'
+  if (rawType === 'image') return '图片'
+  if (rawType === 'design') return '设计'
+  if (rawType === 'video') return '视频'
+  if (rawType === 'office' || rawType === 'document') return '文档'
+  return '文件'
+}
+
+function fileFormatKind(file: DriveFileRow): string {
+  const ext = fileExtLabel(file).toLowerCase()
+  const rawType = String(file.file_type || '').toLowerCase()
+  const mime = String(file.mime_type || '').toLowerCase()
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext) || rawType === 'archive' || mime.includes('zip') || mime.includes('rar') || mime.includes('7z')) return '压缩包'
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tif', 'tiff'].includes(ext) || rawType === 'image' || mime.startsWith('image/')) return '图片'
+  if (['psd', 'ai', 'cdr', 'eps'].includes(ext) || rawType === 'design') return '设计源文件'
+  if (ext === 'pdf' || rawType === 'pdf' || mime === 'application/pdf') return 'PDF'
+  if (['mp4', 'webm', 'mov', 'm4v'].includes(ext) || rawType === 'video' || mime.startsWith('video/')) return '视频'
+  if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext) || rawType === 'office') return '办公文档'
+  return '文件'
 }
 
 function fileFormatLabel(file: DriveFileRow): string {
   const extLabel = fileExtLabel(file)
-  const mime = fileMimeLabel(file)
-  if (mime) return extLabel !== '—' ? `${extLabel} · ${mime}` : mime
-  return extLabel
+  const kind = fileFormatKind(file)
+  if (extLabel && extLabel !== kind) return `${extLabel} · ${kind}`
+  if (file.mime_type) return `${kind} · ${file.mime_type}`
+  return kind
+}
+
+function fileFormatSecondary(file: DriveFileRow): string {
+  const primary = fileExtLabel(file)
+  const kind = fileFormatKind(file)
+  return primary && primary !== kind ? kind : ''
 }
 
 function statusText(value?: string) {
@@ -703,8 +741,8 @@ onBeforeUnmount(() => {
                   </button>
                 </td>
                 <td class="aw-upload-ledger__format">
-                  <strong>{{ fileExtLabel(file) }}</strong>
-                  <small v-if="fileMimeLabel(file)" :title="fileMimeLabel(file)">{{ fileMimeLabel(file) }}</small>
+                  <strong :title="fileFormatLabel(file)">{{ fileExtLabel(file) }}</strong>
+                  <small v-if="fileFormatSecondary(file)" :title="file.mime_type || fileFormatSecondary(file)">{{ fileFormatSecondary(file) }}</small>
                 </td>
                 <td class="aw-upload-ledger__num">{{ file.page_count || '—' }}</td>
                 <td class="aw-upload-ledger__num">{{ formatMoney(file.gross_amount || 0) }}</td>

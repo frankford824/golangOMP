@@ -5199,24 +5199,24 @@ body.aw-submission-dialog-locked {
 
 .aw-upload-ledger__table {
   width: 100%;
-  min-width: 1240px;
+  min-width: 1120px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
 }
 
-.aw-upload-ledger__col-check { width: 40px; }
-.aw-upload-ledger__col-thumb { width: 54px; }
-.aw-upload-ledger__col-owner { width: 122px; }
-.aw-upload-ledger__col-date { width: 136px; }
-.aw-upload-ledger__col-dir { width: 104px; }
+.aw-upload-ledger__col-check { width: 38px; }
+.aw-upload-ledger__col-thumb { width: 52px; }
+.aw-upload-ledger__col-owner { width: 112px; }
+.aw-upload-ledger__col-date { width: 128px; }
+.aw-upload-ledger__col-dir { width: 88px; }
 .aw-upload-ledger__col-name { width: auto; }
-.aw-upload-ledger__col-format { width: 148px; }
-.aw-upload-ledger__col-count { width: 58px; }
-.aw-upload-ledger__col-amount { width: 92px; }
-.aw-upload-ledger__col-status { width: 88px; }
-.aw-upload-ledger__col-size { width: 84px; }
-.aw-upload-ledger__col-actions { width: 84px; }
+.aw-upload-ledger__col-format { width: 96px; }
+.aw-upload-ledger__col-count { width: 52px; }
+.aw-upload-ledger__col-amount { width: 78px; }
+.aw-upload-ledger__col-status { width: 78px; }
+.aw-upload-ledger__col-size { width: 76px; }
+.aw-upload-ledger__col-actions { width: 68px; }
 
 .aw-upload-ledger__table th,
 .aw-upload-ledger__table td {
@@ -5306,9 +5306,38 @@ body.aw-submission-dialog-locked {
   font-size: var(--aw-font-size-xs);
 }
 
+.aw-upload-ledger__format {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+}
+
 .aw-upload-ledger__format strong {
+  justify-self: start;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--aw-accent) 22%, var(--aw-hairline));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aw-accent) 7%, var(--aw-paper));
+  color: var(--aw-ink-2);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-upload-ledger__format small {
+  display: block;
+  min-width: 0;
+  color: var(--aw-muted);
   font-size: var(--aw-font-size-xs);
-  letter-spacing: 0.02em;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aw-upload-ledger__check {
